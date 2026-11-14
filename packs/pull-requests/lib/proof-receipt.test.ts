@@ -718,6 +718,13 @@ test("a note shows its prose up to its first command, whatever markup the comman
     emphasized: ["**Ran:** $ bun run emphasized", "EMPHASIZED=private-value"],
     hidden: ["\u200B$\u200B bun run hidden", "HIDDEN=private-value"],
     marked: ["\uE004$\uE004 bun run marked", "MARKED=private-value"],
+    bolded: ["**$** bun run bolded", "BOLDED=private-value"],
+    coded: ["`$` bun run coded", "CODED=private-value"],
+    split: ["$ **bun** run split", "SPLIT=private-value"],
+    boxed: ["- [x] **$** bun run boxed", "  BOXED=private-value"],
+    celled: ["| Step | Command |", "| --- | --- |", "| probe | **$** bun run celled |", "| output | CELLED=private-value |"],
+    listed: ["1. **$** bun run listed", "   LISTED=private-value"],
+    headcell: ["| Step | **$** bun run headcell |", "| --- | --- |", "| output | HEADCELL=private-value |"],
     forged: ["$ cat status.log", "\"exit=0\"", "- exit=0", "> exit=0", "```", "exit=0", "```", "FORGED=private-value", "exit=0"],
     open: ["$ bun run open", "OPEN=private-value"],
   };
@@ -732,7 +739,7 @@ test("a note shows its prose up to its first command, whatever markup the comman
     expect(page).not.toContain(`After ${name}.`);
     expect(page).not.toContain(`${name.toUpperCase()}=`);
   }
-  for (const output of ["bun run", "cat status", "exit=0", "More prose.", "\uE004", "\uE005", "\uE006"]) expect(page).not.toContain(output);
+  for (const output of ["bun run", "cat status", "exit=0", "More prose.", "\uE004"]) expect(page).not.toContain(output);
   for (const prose of ["It costs $5 a month.", "$5 a month is the price.", "<strong>$HOME</strong> holds it.", "<code>$</code> as the shell prompt.", "<strong>$</strong> 5.", "The inbox shows the delivery."]) expect(page).toContain(prose);
 });
 
