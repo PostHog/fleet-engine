@@ -348,6 +348,36 @@ describe("secret guard", () => {
     expect(performance.now() - started).toBeLessThan(1_000);
   });
 
+  const distinct = (count: number, value: (index: number) => string) => Array.from({ length: count }, (_, index) => value(index));
+  const serial = (index: number) => String(index).padStart(6, "0");
+
+  test.each([
+    ["GitHub tokens", (values: string[]) => values.join(" "), (index: number) => `gh${"p"}_${serial(index)}${body(30)}`],
+    ["cookie values in text that names a Metabase cookie", (values: string[]) => `${cookieKey} values: ${values.join(" ")}`, (index: number) => `${serial(index)}${body(30)}`],
+    ["cookie records", (values: string[]) => JSON.stringify(values.map((value) => ({ name: cookieKey, value }))), (index: number) => `${serial(index)}${body(30)}`],
+  ])("redacts output with many distinct %s quickly", (_, text, value) => {
+    const values = distinct(20_000, value);
+    const started = performance.now();
+    const output = JSON.stringify(guard("claude", toolEvent({ stdout: text(values) }))?.hookSpecificOutput);
+    expect(performance.now() - started).toBeLessThan(1_000);
+    expect(values.filter((secret) => output.includes(secret))).toEqual([]);
+  });
+
+  test("redacts both of two findings that partly overlap", () => {
+    const key = `-----BEGIN OPENSSH ${"PRIVATE"} KEY-----\n${body(70)}\n`;
+    const deployKey = `prod${":"}happy-otter-123|${body(30)}`;
+    const output = JSON.stringify(guard("claude", toolEvent({ stdout: `${deployKey}${key}` }))?.hookSpecificOutput);
+    expect(output).not.toContain(body(30));
+    expect(output).not.toContain(body(70));
+  });
+
+  test("redacts each copy of a found value", () => {
+    const value = `${serial(1)}${body(30)}`;
+    const output = JSON.stringify(guard("claude", toolEvent({ stdout: `${JSON.stringify([{ name: cookieKey, value }])} echo:${value}` }))?.hookSpecificOutput);
+    expect(output).not.toContain(value);
+    expect(output).toContain("echo:[redacted Metabase session cookie]");
+  });
+
   test("leaves clean tool output alone", () => {
     for (const provider of ["claude", "codex"] as const) expect(guard(provider, toolEvent("Exit code: 0\nOutput:\nHOME=/home/coder"))).toBeUndefined();
   });

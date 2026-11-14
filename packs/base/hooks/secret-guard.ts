@@ -159,16 +159,52 @@ export function secretKinds(value: unknown): string[] {
   return [...kinds];
 }
 
-const secretsIn = (text: string) =>
-  shapes.flatMap((shape) => ("pattern" in shape ? text.match(shape.pattern) ?? [] : shape.values(text)).map((value) => ({ kind: shape.kind, value })));
+type Finding = { kind: string; value: string; at?: number };
+type Span = { kind: string; at: number; end: number };
+const unplacedLimit = 64;
+
+const secretsIn = (text: string): Finding[] =>
+  shapes.flatMap((shape) =>
+    "pattern" in shape
+      ? Array.from(text.matchAll(shape.pattern), (match) => ({ kind: shape.kind, value: match[0], at: match.index }))
+      : shape.values(text).map((value) => ({ kind: shape.kind, value })),
+  );
+
+function spansOf(text: string, findings: Finding[]): { spans: Span[] } | { whole: string } {
+  const spans: Span[] = [];
+  const unplaced = new Map<string, string>();
+  for (const { kind, value, at } of findings)
+    if (at !== undefined) spans.push({ kind, at, end: at + value.length });
+    else if (!unplaced.has(value)) unplaced.set(value, kind);
+  if (unplaced.size > unplacedLimit) return { whole: [...unplaced.values()][0]! };
+  for (const [value, kind] of unplaced) {
+    if (!text.includes(value)) return { whole: kind };
+    for (let at = text.indexOf(value); at >= 0; at = text.indexOf(value, at + value.length)) spans.push({ kind, at, end: at + value.length });
+  }
+  return { spans };
+}
+
+function joined(spans: Span[]) {
+  const regions: Span[] = [];
+  for (const span of spans.sort((left, right) => left.at - right.at || right.end - left.end)) {
+    const last = regions.at(-1);
+    if (last && span.at < last.end) last.end = Math.max(last.end, span.end);
+    else regions.push({ ...span });
+  }
+  return regions;
+}
 
 export function replaceSecrets(text: string, replace: (kind: string, value: string) => string) {
-  const kinds = new Map<string, string>();
-  for (const { kind, value } of secretsIn(text)) if (!kinds.has(value)) kinds.set(value, kind);
-  const unreplaceable = [...kinds].find(([value]) => !text.includes(value));
-  if (unreplaceable) return replace(unreplaceable[1], text);
-  const longestFirst = [...kinds].sort(([left], [right]) => right.length - left.length);
-  const replaced = longestFirst.reduce((changed, [value, kind]) => changed.split(value).join(replace(kind, value)), text);
+  const found = spansOf(text, secretsIn(text));
+  if ("whole" in found) return replace(found.whole, text);
+  if (!found.spans.length) return text;
+  const parts: string[] = [];
+  let from = 0;
+  for (const { kind, at, end } of joined(found.spans)) {
+    parts.push(text.slice(from, at), replace(kind, text.slice(at, end)));
+    from = end;
+  }
+  const replaced = parts.join("") + text.slice(from);
   const left = secretsIn(replaced)[0];
   return left ? replace(left.kind, text) : replaced;
 }
