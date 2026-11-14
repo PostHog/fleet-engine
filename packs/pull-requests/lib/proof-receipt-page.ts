@@ -50,15 +50,19 @@ function codeSpan(children: string) {
   return `${fence}${pad}${text}${pad}${fence}`;
 }
 
+const tag = /<[^<>]*>/g;
 const leadOf = (line: string) => line.replace(/^(?:\[[xX]\]|\d+[.)]|[^\p{L}\p{N}$])+/u, "");
-const startsCommand = (text: string) => /^\$[^\p{L}\p{N}\s]*\s/u.test(leadOf(text));
+const startsCommand = (text: string) => /^\$[^\p{L}\p{N}\s]*\s/u.test(leadOf(text.replace(tag, "")));
 const marked = (text: string) => `${startsCommand(text) ? commandMark : ""}${text}`;
 
 function proseShape(count: (lines: number) => void) {
   let headerCells = 0;
   let runStart: string | undefined = "";
+  const closed = (inline: boolean) => { runStart = inline && runStart === "$" ? "$" : ""; };
   const text = (written: string) => {
     const text = unmarked(written);
+    if (/^<\/[^<>]*>$/.test(text)) closed(true);
+    if (/^<[^<>]*>$/.test(text)) return escaped(text);
     const lead = runStart === undefined ? undefined : `${runStart}${text}`.replace(/^[^\p{L}\p{N}$]*/u, "");
     const command = lead !== undefined && /^\$[^\p{L}\p{N}\s]*\s/u.test(lead);
     runStart = lead === "" ? "" : lead !== undefined && /^\$[^\p{L}\p{N}\s]*$/u.test(lead) ? "$" : undefined;
@@ -90,8 +94,9 @@ function proseShape(count: (lines: number) => void) {
     td: (children: string) => ` ${marked(children.replace(/\n/g, " "))} |`,
     code: (children: string) => { count(children.split("\n").filter((line) => /\S/.test(line)).length); return `${codeMark}\n\n`; },
   };
+  const inline = ["codespan", "strong", "emphasis", "strikethrough", "link", "image"];
   const closing = Object.entries(markup).map(([name, render]) => [name, (...args: Parameters<typeof render>) => {
-    runStart = "";
+    closed(inline.includes(name));
     return (render as (...args: Parameters<typeof render>) => string)(...args);
   }]);
   return { ...Object.fromEntries(closing) as typeof markup, text };
@@ -161,11 +166,13 @@ export async function gatherPage(home: string, head: ProofIdentity, input: PageI
     for (const kind of owed) if ((await entries(join(directory, commit, kind))).length) add(commit, kind, "saved");
   }
   const records: string[] = [];
+  const reusedAt: [string, number][] = [];
   for (const kind of owed) {
     for (const file of (await entries(join(directory, "reused", kind))).filter((name) => name.endsWith(".json")).sort()) {
-      const reuse = await readJson<{ from: string; reason: string } | undefined>(join(directory, "reused", kind, file), undefined);
+      const reuse = await readJson<{ from: string; reason: string; recordedAt?: string } | undefined>(join(directory, "reused", kind, file), undefined);
       if (!reuse) continue;
       const commit = file.slice(0, -5);
+      reusedAt.push([commit, Date.parse(reuse.recordedAt ?? "") || Infinity]);
       add(commit, kind, `reused from ${at(reuse.from)}`);
       records.push(`- ${at(commit)} ${kind} reused from ${at(reuse.from)}: ${plain(reuse.reason)}`);
     }
@@ -186,6 +193,7 @@ export async function gatherPage(home: string, head: ProofIdentity, input: PageI
   for (const commit of rows.keys()) seen(commit, await stat(join(directory, commit)).then((info) => info.mtimeMs, () => Infinity));
   for (const review of input.reviews) seen(review.commit, await stat(join(review.directory, "findings.md")).then((info) => info.mtimeMs, () => Infinity));
   for (const verdict of verdicts) seen(verdict.commit, Date.parse(verdict.judgedAt));
+  for (const [commit, time] of reusedAt) seen(commit, time);
   const commits = [...rows.values()].sort((a, b) => Number(a.commit === summary.commit) - Number(b.commit === summary.commit) || times.get(a.commit)! - times.get(b.commit)! || a.commit.localeCompare(b.commit));
   const notes: Page["notes"] = {};
   for (const kind of summary.kinds) {

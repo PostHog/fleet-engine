@@ -547,6 +547,25 @@ test("commits are listed in the order they were proved or reviewed, HEAD last", 
   expect(rows.map((line) => line.slice(3, 10))).toEqual([...reviewed, head].map(short));
 });
 
+test("a commit with only reused evidence is listed by when the reuse was recorded", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: template });
+  const ran = await pr.commit("feature.txt", "greet\n");
+  await reviewHead(pr);
+  await pr.fleet("require", "--kinds", "live-run");
+  writeFileSync(join(pr.repository, "run.log"), "delivered\n");
+  await pr.fleet("save", "--kind", "live-run", "--ran", "Sent a test email", "--result", "Delivered", "run.log");
+  const reused = await pr.commit("feature.txt", "greet them\n");
+  await pr.fleet("save", "--kind", "live-run", "--reuse-from", ran, "--reason", "Only the greeting text changed");
+  const reviewed = await pr.commit("feature.txt", "greet them all\n");
+  await reviewAgain(pr, 2);
+  const head = await pr.commit("feature.txt", "greet them all by name\n");
+  await pr.fleet("save", "--kind", "live-run", "--reuse-from", ran, "--reason", "Only the greeting text changed");
+  expect((await pr.fleet("receipt")).code).toBe(0);
+  const rows = readFileSync(join(pr.pullRequest, "display", "receipt.md"), "utf8").split("\n").filter((line) => /^\| `[0-9a-f]{7}` \|/.test(line));
+  expect(rows.map((line) => line.slice(3, 10))).toEqual([ran, reused, reviewed, head].map(short));
+});
+
 test("evidence reused and then carried across a base merge shows the lines and notes of the commit that ran it", async () => {
   const pr = await checkout();
   await pr.commit("feature.txt", "greet\n");
@@ -737,12 +756,18 @@ test("a note shows its prose up to its first command, whatever markup the comman
     htmlcell: ["<table><tr><td>Probe</td><td><b>$</b> bun run htmlcell</td></tr></table>", "", "HTMLCELL=private-value"],
     htmllegacy: ["<div>&#36 bun run htmllegacy</div>", "", "HTMLLEGACY=private-value"],
     htmlprose: ["<p>Costs $5.</p>", "", "HTMLPROSE=private-value"],
+    inlinetag: ["<b>$</b> bun run inlinetag", "INLINETAG=private-value"],
+    softtag: ["Then it ran:", "<b>$</b> bun run softtag", "SOFTTAG=private-value"],
+    inlinerun: ["<b>Ran:</b> $ bun run inlinerun", "INLINERUN=private-value"],
+    inlinelabel: ["<b>Ran:</b> <i>$</i> bun run inlinelabel", "INLINELABEL=private-value"],
+    wrappedlabel: ["**Ran:** _$_ bun run wrappedlabel", "WRAPPEDLABEL=private-value"],
+    inlinestep: ["| Step | Command |", "| --- | --- |", "| probe | <b>$</b> bun run inlinestep |", "| output | INLINESTEP=private-value |"],
     forged: ["$ cat status.log", "\"exit=0\"", "- exit=0", "> exit=0", "```", "exit=0", "```", "FORGED=private-value", "exit=0"],
     open: ["$ bun run open", "OPEN=private-value"],
   };
   await pr.fleet("save", "--kind", "live-run", "--ran", "Sent a test email", "--result", "Delivered",
     ...Object.entries(commands).map(([name, lines]) => file(`${name}.md`, [`Before ${name}.`, "", ...lines, "", `After ${name}.`, "", "More prose."].join("\n"))),
-    file("prices.md", "It costs $5 a month.\n\n$5 a month is the price.\n\n**$HOME** holds it.\n\nThe log uses `$` as the shell prompt.\n\nTotal: **$** 5.\n\n&#36;5 is the fee.\n\n$5&#32;is the fee too.\n\nPrice: \\$ 5 per month.\n\nThe shell prompt is &#36; on this machine.\n\nFees &amp; $ 5 per month.\n\nThe marker &#xE004; is text.\n\nThe code mark &#xE003; is text.\n\nA link [to &#xE004;](https://logs.example/&#xE004;) is text.\n\nThe inbox shows the delivery.\n"));
+    file("prices.md", "It costs $5 a month.\n\n$5 a month is the price.\n\n**$HOME** holds it.\n\nThe log uses `$` as the shell prompt.\n\nTotal: **$** 5.\n\n&#36;5 is the fee.\n\n$5&#32;is the fee too.\n\nPrice: \\$ 5 per month.\n\nThe shell prompt is &#36; on this machine.\n\nFees &amp; $ 5 per month.\n\nPaid <b>$</b> 5 a month.\n\nThe marker &#xE004; is text.\n\nThe code mark &#xE003; is text.\n\nA link [to &#xE004;](https://logs.example/&#xE004;) is text.\n\nThe inbox shows the delivery.\n"));
   expect((await pr.fleet("gate")).code).toBe(0);
   expect((await pr.fleet("receipt")).code).toBe(0);
   const page = Bun.markdown.html(pageOf(handler));
@@ -752,7 +777,7 @@ test("a note shows its prose up to its first command, whatever markup the comman
     expect(page).not.toContain(`${name.toUpperCase()}=`);
   }
   for (const output of ["bun run", "cat status", "exit=0", "More prose.", "\uE004"]) expect(page).not.toContain(output);
-  for (const prose of ["It costs $5 a month.", "$5 a month is the price.", "<strong>$HOME</strong> holds it.", "<code>$</code> as the shell prompt.", "<strong>$</strong> 5.", "$5 is the fee.", "$5 is the fee too.", "Price: $ 5 per month.", "The shell prompt is $ on this machine.", "Fees &amp; $ 5 per month.", "The marker \uFFFD is text.", "The code mark \uFFFD is text.", "is text.</p>\n<p>The inbox", "The inbox shows the delivery."]) expect(page).toContain(prose);
+  for (const prose of ["It costs $5 a month.", "$5 a month is the price.", "<strong>$HOME</strong> holds it.", "<code>$</code> as the shell prompt.", "<strong>$</strong> 5.", "$5 is the fee.", "$5 is the fee too.", "Price: $ 5 per month.", "The shell prompt is $ on this machine.", "Fees &amp; $ 5 per month.", "Paid &lt;b&gt;$&lt;/b&gt; 5 a month.", "The marker \uFFFD is text.", "The code mark \uFFFD is text.", "is text.</p>\n<p>The inbox", "The inbox shows the delivery."]) expect(page).toContain(prose);
 });
 
 test("code is left out of the page where the parser puts it, indented or fenced, whatever a line starts with, while prose that repeats a code line, nested lists and lazy lines stay", async () => {
