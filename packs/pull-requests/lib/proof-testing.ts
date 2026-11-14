@@ -1,11 +1,13 @@
 import { expect } from "bun:test";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gitEnv, template } from "../../../src/testing/git.ts";
 import { spawnAsync } from "../../../src/testing/spawn.ts";
 import { proofCommand, type ProofContext } from "./proof-cli.ts";
 import type { ThreadWord, ThreadWords } from "./proof-answers.ts";
+import { decisionCommand } from "./decision-cli.ts";
+import type { Ssh, SshResult } from "./decision-ledger.ts";
 
 const fixtures: string[] = [];
 export const cleanFixtures = () => fixtures.splice(0).forEach((path) => rmSync(path, { recursive: true, force: true }));
@@ -16,7 +18,7 @@ export function fixture(prefix: string) {
   return directory;
 }
 
-export const settings = { "pull-requests.freeReviews": 2, "pull-requests.reviewCeiling": 6, "pull-requests.reviewTimeoutMinutes": 20, "pull-requests.panelSlots": 3 };
+export const settings = { "pull-requests.receiptHeading": "Testing", "pull-requests.freeReviews": 2, "pull-requests.reviewCeiling": 6, "pull-requests.reviewTimeoutMinutes": 20, "pull-requests.panelSlots": 3 };
 export const lookup = { role: "lookup", work: "Find files", provider: "claude", model: "lookup-model", effort: "medium" };
 export const models = [lookup, { role: "review", work: "Review Claude's code", provider: "codex", model: "review-model", effort: "high" }, { role: "review-codex", work: "Review Codex's code", provider: "claude", model: "review-codex-model", effort: "high" }];
 
@@ -43,15 +45,33 @@ else
   case "$head" in "ref: "*) ref="${repository}/.git/\${head#ref: }"; if [ -f "$ref" ]; then read -r head < "$ref"; else head=$(git -C "${repository}" rev-parse HEAD); fi;; esac
 fi
 base=main; [ -f "${github}/base" ] && read -r base < "${github}/base"
+if [ -f "${github}/base-sha" ]; then read -r basesha < "${github}/base-sha"; else basesha=$(git -C "${repository}" rev-parse refs/remotes/origin/main 2>/dev/null); fi
+body='"Adds the greeting."'; [ -f "${github}/body" ] && body=$(cat "${github}/body")
 case "$*" in
+  "api "*"/pulls/"[0-9]*" --method PATCH --input "*)
+    [ -f "${github}/patch-error" ] && { cat "${github}/patch-error" >&2; exit 1; }
+    all="$*"; n=\${all##*/pulls/}; n=\${n%%[!0-9]*}; target="${github}/body"; [ -f "${github}/body-$n" ] && target="${github}/body-$n"
+    "${process.execPath}" -e 'const [input, target, mangle] = process.argv.slice(1); const fs = require("fs"); const body = JSON.parse(fs.readFileSync(input, "utf8")).body; fs.writeFileSync(target, JSON.stringify(fs.existsSync(mangle) ? body + fs.readFileSync(mangle, "utf8") : body));' "\${all##* }" "$target" "${github}/patch-mangle"
+    echo '{}'; exit 0;;
   "api "*"/pulls/"[0-9]*)
     [ -f "${github}/next-head" ] && mv "${github}/next-head" "${github}/head"
+    [ -f "${github}/while-reading" ] && { mv "${github}/while-reading" "${github}/while-reading.sh"; sh "${github}/while-reading.sh"; }
     draft=false; [ -f "${github}/draft" ] && draft=true
-    printf '{"number":42,"title":"Greet new members","body":"Adds the greeting.","draft":%s,"head":{"sha":"%s"},"base":{"ref":"%s","repo":{"default_branch":"main"}}}\\n' "$draft" "$head" "$base"; exit 0;;
+    all="$*"; n=\${all##*/pulls/}; n=\${n%%[!0-9]*}
+    [ -f "${github}/pull-error-$n" ] && { cat "${github}/pull-error-$n" >&2; exit 1; }
+    [ -f "${github}/body-$n" ] && body=$(cat "${github}/body-$n")
+    state=open; merged=null; [ -f "${github}/merged-$n" ] && { state=closed; merged='"2026-10-25T09:00:00Z"'; }; [ -f "${github}/closed-$n" ] && state=closed
+    printf '{"number":%s,"title":"Greet new members","body":%s,"draft":%s,"state":"%s","merged_at":%s,"head":{"sha":"%s"},"base":{"ref":"%s","sha":"%s","repo":{"default_branch":"main"}}}\\n' "$n" "$body" "$draft" "$state" "$merged" "$head" "$base" "$basesha"; exit 0;;
   "api "*"/rules/branches/"*)
     all="$*"; branch=\${all##*/rules/branches/}; page=\${all##*page=}; branch=\${branch%%\\?*}
     [ -f "${github}/rules-error-$branch" ] && { cat "${github}/rules-error-$branch" >&2; exit 1; }
     cat "${github}/rules-$branch-$page" 2>/dev/null || echo '[]'; exit 0;;
+  "api user")
+    printf '{"login":"%s"}\\n' "$(cat "${github}/user" 2>/dev/null || echo the-user)"; exit 0;;
+  "api "*"/issues/comments/"*)
+    all="$*"; id=\${all##*/issues/comments/}
+    [ -f "${github}/comment-$id" ] || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
+    cat "${github}/comment-$id"; exit 0;;
   "api "*"/branches/"*)
     all="$*"; branch=\${all##*/branches/}; branch=\${branch%% *}
     cat "${github}/branch-$branch" 2>/dev/null || echo '{"protected":false}'; exit 0;;
@@ -61,7 +81,7 @@ case "$*" in
     file="${github}/$kind-$sha"; [ -f "$file" ] || file="${github}/$kind-any"
     cat "$file" 2>/dev/null; exit 0;;
 esac
-printf '{"number":42,"url":"https://github.com/example/product/pull/42","baseRefName":"%s","headRefOid":"%s","title":"Greet new members","body":"Adds the greeting."}\\n' "$base" "$head"
+printf '{"number":42,"url":"https://github.com/example/product/pull/42","baseRefName":"%s","headRefOid":"%s","title":"Greet new members","body":%s}\\n' "$base" "$head" "$body"
 `, { mode: 0o755 });
   for (const model of ["claude", "codex"]) writeFileSync(join(bin, model), `#!/bin/sh\necho "the test ran the real ${model}" >&2\nexit 97\n`, { mode: 0o755 });
   const runs: Record<string, { status: string; conclusion: string | null }> = { pass: { status: "completed", conclusion: "success" }, fail: { status: "completed", conclusion: "failure" }, cancel: { status: "completed", conclusion: "cancelled" }, pending: { status: "in_progress", conclusion: null } };
@@ -73,7 +93,11 @@ printf '{"number":42,"url":"https://github.com/example/product/pull/42","baseRef
     else writeFileSync(join(github, `rules-${branch}-${page}`), JSON.stringify([...Array.from({ length: others }, () => ({ type: "deletion" })), ...(rules.length ? [{ type: "required_status_checks", parameters: { required_status_checks: rules } }] : [])]));
     if (classic) writeFileSync(join(github, `branch-${branch}`), JSON.stringify({ protected: true, protection: { required_status_checks: { enforcement_level: "everyone", contexts: classic, checks: classic.map((context) => ({ context, app_id: null })) } } }));
   };
-  const pullRequestState = ({ draft, base }: { draft?: boolean; base?: string }) => {
+  const pullRequestState = ({ draft, base, body, number, merged, closed, unreadable }: { draft?: boolean; base?: string; body?: string; number?: number; merged?: boolean; closed?: boolean; unreadable?: string }) => {
+    if (unreadable !== undefined) writeFileSync(join(github, `pull-error-${number ?? 42}`), unreadable);
+    if (body !== undefined) writeFileSync(join(github, number === undefined ? "body" : `body-${number}`), JSON.stringify(body));
+    if (merged) writeFileSync(join(github, `merged-${number ?? 42}`), "");
+    if (closed) writeFileSync(join(github, `closed-${number ?? 42}`), "");
     if (draft !== undefined) { if (draft) writeFileSync(join(github, "draft"), ""); else rmSync(join(github, "draft"), { force: true }); }
     if (base !== undefined) writeFileSync(join(github, "base"), base);
   };
@@ -82,6 +106,10 @@ printf '{"number":42,"url":"https://github.com/example/product/pull/42","baseRef
     if (commit) writeFileSync(join(github, "head"), commit); else rmSync(join(github, "head"), { force: true });
     if (next) writeFileSync(join(github, "next-head"), next);
   };
+  const whileGithubReadsPull = (script: string) => writeFileSync(join(github, "while-reading"), script);
+  const githubComment = (id: number, author: string, body: string, createdAt = "2026-10-25T11:00:00Z", on = 42) => writeFileSync(join(github, `comment-${id}`), JSON.stringify({ user: { login: author }, body, created_at: createdAt, issue_url: `https://api.github.com/repos/example/product/issues/${on}` }));
+  const githubBody = (number = 42) => JSON.parse(readFileSync(join(github, existsSync(join(github, `body-${number}`)) ? `body-${number}` : "body"), "utf8")) as string;
+  const githubFault = (fault: "patch-error" | "patch-mangle", text: string | undefined) => text === undefined ? rmSync(join(github, fault), { force: true }) : writeFileSync(join(github, fault), text);
   const githubCalls = () => readFileSync(join(github, "calls"), "utf8").trim().split("\n");
   ci([{ name: "test", bucket: "pass" }]);
   mkdirSync(join(home, ".agents/guides"), { recursive: true });
@@ -92,7 +120,7 @@ printf '{"number":42,"url":"https://github.com/example/product/pull/42","baseRef
   const env: Record<string, string | undefined> = {
     ...gitEnv, PATH: `${bin}:${process.env.PATH}`,
     CLAUDE_CODE_SESSION_ID: "session-under-test", CODEX_THREAD_ID: undefined, FLEET_SETTINGS: JSON.stringify(settings), FLEET_MODELS: JSON.stringify(models),
-    FLEET_PROOF_JUDGE: `cat >/dev/null; echo '${verdict()}'`, FLEET_PROOF_JUDGE_MODEL: "judge-under-test",
+    FLEET_PROOF_JUDGE: `cat >/dev/null; echo '${verdict()}'`, FLEET_PROOF_JUDGE_MODEL: "judge-under-test", T3CODE_THREAD_ID: "thread-1",
   };
   const git = async (...args: string[]) => {
     const result = await spawnAsync(["git", ...args], { cwd: repository, env });
@@ -121,13 +149,18 @@ printf '{"number":42,"url":"https://github.com/example/product/pull/42","baseRef
     return words;
   };
   const reader: { words?: ThreadWords } = { words: threadWords };
-  const panel: { lostWorkers: boolean; onPause?: () => Promise<void> } = { lostWorkers: false };
-  const fleetIn = async (cwd: string, ...args: string[]) => {
+  const hub: { ssh?: Ssh } = {};
+  const pendingCards = new Set<string>();
+  const panel: { lostWorkers: boolean; onPause?: () => Promise<void>; beforeWorker?: () => Promise<void> } = { lostWorkers: false };
+  const startTimes = new Map<number, string>();
+  const fleetAt = async (cwd: string, pid: number, args: string[]) => {
     const lines: string[] = [];
     const context: ProofContext = {
-      home, cwd, env, print: (line) => lines.push(line), now: () => clock.now, threadWords: reader.words,
+      home, cwd, env, pid, print: (line) => lines.push(line), now: () => clock.now, threadWords: reader.words, ssh: hub.ssh,
+      startTime: async (holder) => startTimes.get(holder) ?? "Sun Oct 25 11:00:00 2026",
       detach: async (worker) => {
-        if (panel.lostWorkers) return (await spawnAsync(["true"])).pid;
+        if (panel.lostWorkers) return exitedPid();
+        await panel.beforeWorker?.();
         await proofCommand([...worker], { ...context, print: () => {} });
         return process.pid;
       },
@@ -139,13 +172,23 @@ printf '{"number":42,"url":"https://github.com/example/product/pull/42","baseRef
     const code = await proofCommand(args, context);
     return { code, output: lines.join("\n") };
   };
+  const fleetIn = (cwd: string, ...args: string[]) => fleetAt(cwd, process.pid, args);
   const fleet = (...args: string[]) => fleetIn(repository, ...args);
+  const fleetAs = (pid: number, ...args: string[]) => fleetAt(repository, pid, args);
+  const decideIn = async (cwd: string, ...args: string[]) => {
+    const lines: string[] = [];
+    const code = await decisionCommand(args, { home, cwd, env, print: (line) => lines.push(line), now: () => clock.now, threadWords: reader.words, ssh: hub.ssh, pendingCard: async (thread) => pendingCards.has(thread) });
+    return { code, output: lines.join("\n") };
+  };
+  const decide = (...args: string[]) => decideIn(repository, ...args);
   const pullRequest = join(home, ".local/state/fleet/proof/example/product/42");
   await seedRepository(repository);
-  return { home, repository, pullRequest, env, git, commit, advanceBase, fleet, fleetIn, ci, statuses, required, pullRequestState, githubHead, githubCalls, clock, say, choose, chooseGap, reader, panel };
+  return { home, repository, pullRequest, env, git, commit, advanceBase, fleet, fleetIn, fleetAs, ci, statuses, required, pullRequestState, githubHead, githubCalls, githubBody, githubFault, githubComment, whileGithubReadsPull, clock, say, choose, chooseGap, reader, panel, hub, pendingCards, decide, decideIn, startTimes };
 }
 
 export type Checkout = Awaited<ReturnType<typeof checkout>>;
+
+export const exitedPid = async () => (await spawnAsync(["true"])).pid;
 
 export const panelGuide = `# QA swarm panel
 
@@ -205,7 +248,7 @@ export const clean = "FINDINGS:\n(none)\nCOVERED: feature.txt\n";
 export type Question = { verdict: "pass" | "fail"; reason: string; citations: string[] };
 export type Quality = { reason: string; citations: string[]; findings: { rating: "high" | "medium" | "low"; problem: string; citation: string }[] };
 
-export function verdict(changes: { proof?: Question; owed?: Question; review?: Question; quality?: Quality } = {}) {
+export function verdict(changes: { proof?: Question; owed?: Question; review?: Question; risk?: Question; quality?: Quality } = {}) {
   const pass = (reason: string): Question => ({ verdict: "pass", reason, citations: [] });
   return JSON.stringify({
     proof: pass("The evidence shows HEAD working"), owed: pass("The owed kinds fit the diff"), review: pass("Every finding is answered"),
@@ -229,15 +272,48 @@ export async function reviewHead(pr: Checkout) {
   expect((await pr.fleet("review-start", "--scope", "full")).code).toBe(0);
   writeFileSync(join(pr.repository, "findings.md"), "No findings.\n");
   expect((await pr.fleet("review-finish", "--round", "1", "--reviewer", "gpt-6.1-sol", "findings.md")).code).toBe(0);
+  markPanel(pr, "1");
   return pr.git("rev-parse", "HEAD");
 }
 
-export const decideRule = "Until 2026-11-26, decide review rounds, judge gaps, and post-deploy-watch gaps yourself.";
+export const markPanel = (pr: Checkout, round: string) => writeFileSync(join(pr.pullRequest, "reviews", round, "panel.json"), JSON.stringify({ lenses: [], changedFiles: [], cwd: pr.repository, readable: [] }));
 
-export function withDecideRule(pr: Checkout) {
-  const record = (kinds: string) => `\`fleet proof standing --kind ${kinds} --until 2026-11-26 --rule "${decideRule}"\``;
-  writeFileSync(join(pr.home, ".agents/AGENTS.md"), `# Agents\n\n## Skill settings\n\n- ${decideRule} Record it with ${record("review,judge,post-deploy-watch")}, ${record("review")}, or ${record("judge")}.\n`);
+export const ledgerDecisions = (pr: Checkout) => {
+  const path = join(pr.home, ".local/state/fleet/decisions.jsonl");
+  return existsSync(path) ? readFileSync(path, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line).decision).filter(Boolean) : [];
+};
+
+type Hub = "up" | "down" | "drops appends" | "loses the acknowledgement of appends" | "stalls on appends" | "stalls after it lands an append";
+const refused = { code: 255, stdout: "", stderr: "ssh: connect to host fleet-hub port 22: Connection refused\n" };
+
+export function hubAt(pr: Checkout, hub: Hub | boolean = "up") {
+  const remote = join(pr.home, "hub-home");
+  const hosts: string[] = [];
+  const state: { hub: Hub; afterAppend?: () => void } = { hub: hub === true ? "up" : hub === false ? "down" : hub };
+  let stalled = () => {};
+  const appendStalled = new Promise<void>((resolve) => { stalled = resolve; });
+  const stalls: ((result: SshResult) => void)[] = [];
+  const stall = () => { stalled(); return new Promise<SshResult>((resolve) => stalls.push(resolve)); };
+  const releaseAppends = () => stalls.splice(0).forEach((resolve) => resolve(refused));
+  pr.env.FLEET_SETTINGS = JSON.stringify({ ...settings, "hub.alias": "fleet-hub" });
+  pr.hub.ssh = async (host, command, stdin) => {
+    hosts.push(host);
+    if (state.hub === "down") return refused;
+    if (state.hub === "drops appends" && stdin !== undefined) return { code: 0, stdout: "", stderr: "" };
+    if (state.hub === "stalls on appends" && stdin !== undefined) return stall();
+    const child = Bun.spawn(["bash", "-c", command], { env: { HOME: remote, PATH: process.env.PATH }, stdin: stdin === undefined ? "ignore" : new Blob([stdin]), stdout: "pipe", stderr: "pipe" });
+    const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+    if (stdin !== undefined) state.afterAppend?.();
+    if (state.hub === "stalls after it lands an append" && stdin !== undefined) return stall();
+    if (state.hub === "loses the acknowledgement of appends" && stdin !== undefined) return refused;
+    return { code, stdout, stderr };
+  };
+  return { remote, hosts, state, appendStalled, releaseAppends };
 }
+
+export const acceptGap = (pr: Checkout, kind: string, ...more: string[]) => pr.decide("record", "--mark", "👤", "--class", "proof-gap", "--kind", kind, "--pr", "example/product#42", ...more);
+
+export const graded = (tier: string) => `## Merge risk\n\n<!-- merge-risk -->\n> [!NOTE]\n> 🔵 **Merge risk: low** · two-way door\n> - **Tier:** ${tier}\n<!-- /merge-risk -->\n`;
 
 export async function finishRound(pr: Checkout, round: string) {
   writeFileSync(join(pr.repository, "findings.md"), `Findings of ${round}.\n`);

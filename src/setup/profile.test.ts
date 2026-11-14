@@ -161,18 +161,18 @@ describe("fleet setup profile", () => {
     expect(existsSync(githubRepo(home, "nora/fleet-profile"))).toBe(false);
   });
 
-  test("with Memory on it refuses a public memory repo named by its GitHub URL, and keeps a private one as named", async () => {
+  test("with Memory on and a context repo it keeps memory in a private org context repo, and refuses a public one", async () => {
     const home = temp.make("home-");
-    await spawnGit(home, "init", "-q", "--bare", githubRepo(home, "nora/public-notes"));
-    const url = (name: string) => `git@github.com:nora/${name}.git`;
-    for (const named of [url("public-notes"), "https://GitHub.com:443/nora/public-notes/"]) {
-      const refused = await fleetSetup(home, ["--non-interactive", "--preset", "starter", "--add", "memory", "--plan", "claude", "--set", `memory.repo=${named}`], [], fakeMachine(home, {}, { publicRepos: ["nora/public-notes"] }));
-      expect({ named, code: refused.code, refused: refused.output.includes("fleet: nora/public-notes is not private") }).toEqual({ named, code: 1, refused: true });
-    }
-    const kept = await fleetSetup(home, ["--non-interactive", "--preset", "starter", "--add", "memory", "--plan", "claude", "--set", `memory.repo=${url("notes")}`]);
+    for (const repo of ["acme/context", "acme/open-context"]) await spawnGit(home, "init", "-q", "--bare", githubRepo(home, repo));
+    const run = (repo: string) => fleetSetup(home, ["--non-interactive", "--preset", "starter", "--add", "memory", "--plan", "claude", "--set", `context.repo=${repo}`], [], fakeMachine(home, {}, { publicRepos: ["acme/open-context"] }));
+    const refused = await run("acme/open-context");
+    expect({ code: refused.code, refused: refused.output.includes("fleet: acme/open-context is not private, and agents write notes about you there. Make it private, or name a private repo with --set context.repo=<owner/name>.") }).toEqual({ code: 1, refused: true });
+    expect(existsSync(githubRepo(home, "nora/fleet-profile"))).toBe(false);
+    const kept = await run("acme/context");
     expect(kept.code).toBe(0);
-    expect(kept.output).toContain("✓ Created the private repo nora/notes");
-    expect((await pushedAnswers(home)).settings).toEqual({ "memory.repo": url("notes") });
+    expect(kept.output).toContain("✓ Reusing your repo acme/context");
+    expect(existsSync(githubRepo(home, "nora/fleet-memory"))).toBe(false);
+    expect((await pushedAnswers(home)).settings).toEqual({ "context.repo": "acme/context" });
   });
 
   test("with Memory on and a GitHub scp form without a user it saves the owner/name the memory sync can read", async () => {

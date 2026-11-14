@@ -151,6 +151,40 @@ describe("resolve", () => {
     expect(plan({ devboxes: ["my-box"], workflows: { "quality-loop": true } }).jobs.map((job) => job.id)).toContain("quality-loop");
   });
 
+  test("takes unset settings from the context repo, keeps every setting the profile sets, and never points a path at the context checkout for another repo", () => {
+    const context = withPack({
+      schema: 1,
+      name: "ctx",
+      summary: "Context.",
+      settings: [
+        { key: "context.repo", question: "Which context repo?", type: "string", optional: true, ask: "never" },
+        { key: "context.path", question: "Which folder?", type: "string", default: "~/dev/context", ask: "never" },
+        { key: "ctx.repo", question: "Which repo?", type: "string", ask: "setup", fromContext: { value: "{repo}" } },
+        { key: "ctx.path", question: "Which folder?", type: "string", default: "~/dev/ctx", ask: "never", fromContext: { value: "{path}", unlessSet: "ctx.repo" } },
+        { key: "ctx.log", question: "Which log?", type: "string", default: "", ask: "never", fromContext: { value: "{path}/log.md" } },
+      ],
+    });
+    const values = (settings: Record<string, string>) => {
+      const { "ctx.repo": repo, "ctx.path": path, "ctx.log": log } = plan({ packs: ["ctx"], settings }, mac, [engine, context]).settings;
+      return { repo, path, log } as Record<string, unknown>;
+    };
+    expect(values({})).toEqual({ repo: undefined, path: "~/dev/ctx", log: "" });
+    expect(values({ "context.repo": "acme/context" })).toEqual({ repo: "acme/context", path: "~/dev/context", log: "~/dev/context/log.md" });
+    expect(values({ "context.repo": "acme/context", "context.path": "~/notes/" })).toEqual({ repo: "acme/context", path: "~/notes", log: "~/notes/log.md" });
+    expect(values({ "context.repo": "acme/context", "ctx.repo": "me/other" })).toEqual({ repo: "me/other", path: "~/dev/ctx", log: "~/dev/context/log.md" });
+    expect(values({ "context.repo": "acme/context", "ctx.path": "~/mine", "ctx.log": "~/mine/log.md" })).toEqual({ repo: "acme/context", path: "~/mine", log: "~/mine/log.md" });
+  });
+
+  test("asks for the context repo once instead of two repo questions it answers", () => {
+    const repoSetting = (pack: string) => ({ key: `${pack}.repo`, question: "Which repo?", type: "string" as const, ask: "setup" as const, fromContext: { value: "{repo}" } });
+    const one = withPack({ schema: 1, name: "one", summary: "One.", settings: [{ key: "context.repo", question: "Which context repo?", type: "string", optional: true, ask: "never" }, repoSetting("one")] });
+    const two = withPack({ schema: 1, name: "two", summary: "Two.", settings: [repoSetting("two")] });
+    const asked = (packs: string[], settings: Record<string, string> = {}) => plan({ packs, settings }, mac, [engine, one, two]).ask.map((setting) => `${setting.key}${setting.optional ? "?" : ""}`);
+    expect(asked(["one", "two"])).toEqual(["context.repo"]);
+    expect(asked(["one"])).toEqual(["one.repo"]);
+    expect(asked(["one", "two"], { "two.repo": "me/two" })).toEqual(["one.repo", "two.repo"]);
+  });
+
   test("leaves the settings of an inactive workflow out", () => {
     expect(plan().unanswered.map((setting) => setting.key)).not.toContain("orchestration.loopProject");
     expect(plan({ workflows: { "quality-loop": true } }, devbox).unanswered.map((setting) => setting.key)).toEqual(["orchestration.loopProject"]);
@@ -188,6 +222,53 @@ describe("resolve", () => {
     expect(states({ pong: false }).slice(3)).toEqual([["ping", false, "needs workflow pong"], ["pong", false, "turned off"]]);
   });
 
+  test("a workflow that yields stays off while a workflow it yields to is on, and comes back when that one is off or needs a workflow that is off", () => {
+    const flow = (id: string, fields: { requires?: string[]; yields?: string[] }) => ({ id, name: id, sentence: `${id}.`, default: true, ...fields });
+    const pair = withPack({ schema: 1, name: "pair", summary: "Pair.", workflows: [flow("direct", { yields: ["routed"] }), flow("after-direct", { requires: ["direct"] }), flow("routed", { requires: ["base-route"] }), flow("base-route", {})] });
+    const states = (workflows: Record<string, boolean>) => plan({ packs: ["pair"], workflows }, mac, [engine, pair]).workflows.filter((state) => state.pack === "pair").map(({ id, active, reason }) => [id, active, reason]);
+    expect(states({})).toEqual([["direct", false, "yields to workflow routed"], ["after-direct", false, "needs workflow direct"], ["routed", true, undefined], ["base-route", true, undefined]]);
+    expect(states({ routed: false }).slice(0, 2)).toEqual([["direct", true, undefined], ["after-direct", true, undefined]]);
+    expect(states({ "base-route": false }).slice(0, 3)).toEqual([["direct", true, undefined], ["after-direct", true, undefined], ["routed", false, "needs workflow base-route"]]);
+  });
+
+  test("settles a chain of yields: the first stays on when the one it yields to yields in turn", () => {
+    const flow = (id: string, yields: string[] = []) => ({ id, name: id, sentence: `${id}.`, default: true, yields });
+    const chain = withPack({ schema: 1, name: "chain", summary: "Chain.", workflows: [flow("a", ["b"]), flow("b", ["c"]), flow("c")] });
+    const states = (workflows: Record<string, boolean>) => plan({ packs: ["chain"], workflows }, mac, [engine, chain]).workflows.filter((state) => state.pack === "chain").map(({ id, active, reason }) => [id, active, reason]);
+    expect(states({})).toEqual([["a", true, undefined], ["b", false, "yields to workflow c"], ["c", true, undefined]]);
+    expect(states({ c: false })).toEqual([["a", false, "yields to workflow b"], ["b", true, undefined], ["c", false, "turned off"]]);
+  });
+
+  test("joins a pack's Codex rules that fit this machine into one file of the pack, only for a Codex plan", () => {
+    const flow = { id: "boxes", name: "Boxes", sentence: "Boxes.", default: false };
+    const rules = withPack({ schema: 1, name: "rules", summary: "Rules.", workflows: [flow], codexRules: [{ path: "all.rules" }, { path: "devbox.rules", roles: ["devbox"] }, { path: "boxes.rules", workflow: "boxes" }] }, { "all.rules": "# all\n", "devbox.rules": "# devbox", "boxes.rules": "# boxes\n" });
+    const target = ".codex/rules/fleet-rules.rules";
+    const rulesOf = (fields: Partial<Profile>, machine: MachineFile) => plan({ packs: ["rules"], ...fields }, machine, [engine, rules]).files.filter((item) => item.target.startsWith(".codex/rules/"));
+    expect(rulesOf({}, mac)).toEqual([{ target, content: "# all\n" }]);
+    expect(rulesOf({ workflows: { boxes: true } }, devbox)).toEqual([{ target, content: "# all\n# devbox\n# boxes\n" }]);
+    expect(rulesOf({ plan: "codex" }, mac)).toHaveLength(1);
+    expect(rulesOf({ plan: "claude" }, devbox)).toEqual([]);
+    const none = withPack({ schema: 1, name: "none", summary: "None.", workflows: [flow], codexRules: [{ path: "boxes.rules", workflow: "boxes" }] }, { "boxes.rules": "# boxes\n" });
+    expect(plan({ packs: ["none"] }, mac, [engine, none]).files.filter((item) => item.target.startsWith(".codex/rules/"))).toEqual([]);
+  });
+
+  test("drops an item while a workflow it gives way to is on, also one of another pack, and keeps it while that workflow is off or its pack is not on", () => {
+    const bridge = withPack({ schema: 1, name: "bridge", summary: "Bridge.", workflows: [{ id: "bridge", name: "Bridge", sentence: "Bridge.", default: false }] });
+    const native = withPack({ schema: 1, name: "native", summary: "Native.", config: [{ provider: "claude", key: "enabledPlugins.chat@market", value: true, unless: ["bridge"] }] });
+    const result = (fields: Partial<Profile>) => plan({ packs: ["bridge", "native"], ...fields }, mac, [engine, bridge, native]);
+    const chat = (fields: Partial<Profile>) => result(fields).config.filter((entry) => entry.pack === "native").map((entry) => entry.key);
+    expect(chat({})).toEqual(["enabledPlugins.chat@market"]);
+    expect(chat({ workflows: { bridge: true } })).toEqual([]);
+    expect(result({ workflows: { bridge: true } }).dropped).toContainEqual({ pack: "native", item: "config claude:enabledPlugins.chat@market", reason: "gives way to workflow bridge" });
+    expect(plan({ packs: ["native"] }, mac, [engine, bridge, native]).config.filter((entry) => entry.pack === "native")).toHaveLength(1);
+  });
+
+  test("refuses an item that gives way to a workflow no pack of any source declares, but not while a source that may declare it is unreachable", () => {
+    const native = withPack({ schema: 1, name: "native", summary: "Native.", config: [{ provider: "claude", key: "enabledPlugins.chat@market", value: true, unless: ["brigde"] }] });
+    expect(() => plan({ packs: ["native"] }, mac, [engine, native])).toThrow("native: config claude:enabledPlugins.chat@market gives way to workflow brigde, which no pack declares");
+    expect(plan({ packs: ["native"] }, mac, [engine, native, { ref: agentSkills.ref, error: "offline" }]).config.filter((entry) => entry.pack === "native")).toHaveLength(1);
+  });
+
   test("limits items by os and role", () => {
     expect(plan({ packs: ["posthog"] }).human.map((step) => step.id)).toEqual(["coder"]);
     expect(plan({ packs: ["posthog"] }, devbox).human).toEqual([]);
@@ -202,10 +283,21 @@ describe("resolve", () => {
     expect(() => plan({ packs: ["hub", "rival"] }, mac, [engine, clash])).toThrow("command box is shipped by both hub and rival");
   });
 
+  test("hands a profile's secret rows and a pack's secret providers to fleet secret", () => {
+    const rows = withPack({ schema: 1, name: "rows", summary: "Rows.", handlers: [{ seam: "secret-rows", path: "lib/rows.ts" }] }, { "lib/rows.ts": "export const rows = () => [];\n" });
+    const providers = withPack({ schema: 1, name: "keys", summary: "Keys.", handlers: [{ seam: "secret-providers", path: "lib/providers.ts" }] }, { "lib/providers.ts": "export const providers = {};\n" });
+    expect(plan({ packs: ["rows", "keys"] }, mac, [engine, rows, providers]).handlers).toEqual({
+      "secret-rows": { pack: "rows", path: join(rows.dir, "packs/rows/lib/rows.ts") },
+      "secret-providers": { pack: "keys", path: join(providers.dir, "packs/keys/lib/providers.ts") },
+    });
+  });
+
   test("collects the handlers of enabled packs by seam, and rejects two for one seam", () => {
     const bots = withPack({ schema: 1, name: "bots", summary: "Bots.", handlers: [{ seam: "review-bot", path: "lib/bot.ts" }] }, { "lib/bot.ts": "export {};\n" });
     expect(plan().handlers).toEqual({});
     expect(plan({ packs: ["bots"] }, mac, [engine, bots]).handlers).toEqual({ "review-bot": { pack: "bots", path: join(bots.dir, "packs/bots/lib/bot.ts") } });
+    const words = withPack({ schema: 1, name: "bots", summary: "Bots.", handlers: [{ seam: "pr-command", path: "lib/bot.ts", subcommands: ["queue-wait"] }] }, { "lib/bot.ts": "export {};\n" });
+    expect(plan({ packs: ["bots"] }, mac, [engine, words]).handlers).toEqual({ "pr-command": { pack: "bots", path: join(words.dir, "packs/bots/lib/bot.ts"), subcommands: ["queue-wait"] } });
     const linuxOnly = withPack({ schema: 1, name: "bots", summary: "Bots.", handlers: [{ seam: "review-bot", path: "lib/bot.ts", on: ["linux"] }] });
     expect(plan({ packs: ["bots"] }, mac, [engine, linuxOnly]).handlers).toEqual({});
     const rival = withPack({ schema: 1, name: "rival", summary: "Rival.", handlers: [{ seam: "review-bot", path: "lib/bot.ts" }] });

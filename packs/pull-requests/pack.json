@@ -65,6 +65,13 @@
       "optional": true
     },
     {
+      "key": "pull-requests.receiptHeading",
+      "question": "Under which heading of a PR body does fleet proof receipt write the proof receipt? Give the heading's words without the hashes.",
+      "type": "string",
+      "default": "Testing",
+      "ask": "never"
+    },
+    {
       "key": "pull-requests.freeReviews",
       "question": "How many review rounds may run before the review arbiter decides whether another round is worth it?",
       "type": "number",
@@ -76,6 +83,13 @@
       "question": "After how many review rounds does review stop for good?",
       "type": "number",
       "default": 6,
+      "ask": "never"
+    },
+    {
+      "key": "pull-requests.criticalPathFiles",
+      "question": "Which file lists the critical paths of each repository, as owner/name=path pairs separated by commas? A path is relative to your home folder. The judge fails a merge-risk Tier line that is not critical when the diff touches a path on the list.",
+      "type": "string",
+      "optional": true,
       "ask": "never"
     },
     {
@@ -155,6 +169,57 @@
       ],
       "sentence": "Say \"full send\" or \"stamp it\", and the agent takes a pull request to merged and rolled out.",
       "risk": "The agent merges without asking again once you say the words."
+    },
+    {
+      "id": "pr-owners",
+      "name": "PR owners",
+      "default": true,
+      "sentence": "A thread that still owns an open pull request cannot settle or archive itself until it hands the pull request over, and a box with such a thread is not released."
     }
-  ]
+  ],
+  "files": [
+    {
+      "path": "hooks/settle-guard.ts",
+      "target": ".config/fleet/hooks/PreToolUse/settle-guard.ts",
+      "workflow": "pr-owners"
+    }
+  ],
+  "subcommands": {
+    "pr": [
+      "help",
+      "review",
+      "stamp",
+      "forecast",
+      "blockers",
+      "bot-threads",
+      "size"
+    ],
+    "proof": [
+      "help",
+      "path",
+      "save",
+      "publish",
+      "require",
+      "review",
+      "show",
+      "panel-lens",
+      "respond",
+      "standing",
+      "gap",
+      "gate",
+      "miss",
+      "eval",
+      "review-start",
+      "review-finish"
+    ],
+    "decision": [
+      "help",
+      "record",
+      "list",
+      "void",
+      "reverse",
+      "lift",
+      "report"
+    ]
+  }
 }

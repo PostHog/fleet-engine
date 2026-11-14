@@ -74,6 +74,15 @@
         "devbox"
       ],
       "sentence": "Before memory runs out, earlyoom stops a runaway test or build, and T3's agent threads survive when the kernel kills a process inside them."
+    },
+    {
+      "id": "gh-stack",
+      "name": "gh stack",
+      "default": false,
+      "needs": [
+        "gh"
+      ],
+      "sentence": "Fleet installs GitHub's gh stack extension at a pinned version with a checked digest, and the push guard counts the branches a gh stack push sends."
     }
   ],
   "files": [
@@ -97,6 +106,11 @@
         "linux"
       ],
       "workflow": "oom-survival"
+    },
+    {
+      "path": "system/install-gh-stack.sh",
+      "target": ".local/share/fleet/guards/install-gh-stack.sh",
+      "workflow": "gh-stack"
     }
   ],
   "human": [
@@ -141,6 +155,20 @@
   ],
   "steps": [
     {
+      "id": "gh-stack",
+      "run": [
+        "sh",
+        "-c",
+        "sh \"$HOME/.local/share/fleet/guards/install-gh-stack.sh\""
+      ],
+      "check": [
+        "sh",
+        "-c",
+        "sh \"$HOME/.local/share/fleet/guards/install-gh-stack.sh\" --check"
+      ],
+      "workflow": "gh-stack"
+    },
+    {
       "id": "package-age",
       "run": [
         "fleet",
@@ -180,5 +208,10 @@
       ],
       "say": "This machine runs a systemd older than 253, which ignores OOMPolicy=continue on T3's agent scopes. An out-of-memory kill still stops the whole agent thread here. Upgrade the OS to get systemd 253 or newer."
     }
-  ]
+  ],
+  "subcommands": {
+    "guards": [
+      "allowlist"
+    ]
+  }
 }

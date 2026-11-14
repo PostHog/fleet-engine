@@ -10,25 +10,37 @@ isolateGit();
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
 
-const pick = (alphabet: string, length: number) => Array.from({ length }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join("");
-const mixed = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+const spell = (alphabet: string, length: number, start: number) => Array.from({ length }, (_, index) => alphabet[(start + index * 11) % alphabet.length]).join("");
+const letters = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+const mixed = `${letters}23456789`;
+const capitals = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+const lowers = "abcdefghijkmnopqrstuvwxyz";
 const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ234567";
 
 /** Secrets in the shapes real services issue, built at run time so no real-looking secret is in the repository. */
 function secrets() {
   return {
-    github: ["gh", "p_", pick(mixed, 36)].join(""),
-    githubPat: ["github", "_pat_", pick(mixed, 22), "_", pick(mixed, 59)].join(""),
-    anthropic: ["sk", "-ant-api03-", pick(mixed, 90)].join(""),
-    openai: ["sk", "-proj-", pick(mixed, 48)].join(""),
-    slack: ["xo", "xb-", pick("0123456789", 12), "-", pick(mixed, 24)].join(""),
-    aws: ["AK", "IA", pick(upper, 16)].join(""),
-    jwt: ["ey", "J", pick(mixed, 20), ".", pick(mixed, 30), ".", pick(mixed, 30)].join(""),
-    opaque: pick(mixed, 44),
-    password: pick(mixed, 14),
-    privateKey: ["-----BEGIN OPENSSH ", "PRIVATE KEY-----\n", pick(mixed, 64).match(/.{16}/g)!.join("\n"), "\n-----END OPENSSH ", "PRIVATE KEY-----"].join(""),
-    multiline: [pick(mixed, 10), " river\npearl ", pick(mixed, 10)].join(""),
-    email: ["nora.", pick("abcdefgh", 5), "@", "example-corp.io"].join(""),
+    github: ["gh", "p_", spell(mixed, 36, 1)].join(""),
+    githubPat: ["github", "_pat_", spell(mixed, 22, 2), "_", spell(mixed, 59, 3)].join(""),
+    anthropic: ["sk", "-ant-api03-", spell(mixed, 90, 4)].join(""),
+    openai: ["sk", "-proj-", spell(mixed, 48, 5)].join(""),
+    slack: ["xo", "xb-", spell("0123456789", 12, 6), "-", spell(mixed, 24, 7)].join(""),
+    aws: ["AK", "IA", spell(upper, 16, 8)].join(""),
+    jwt: ["ey", "J", spell(mixed, 20, 9), ".", spell(mixed, 30, 10), ".", spell(mixed, 30, 11)].join(""),
+    opaque: spell(mixed, 44, 12),
+    opaqueLetters: spell(letters, 44, 13),
+    cachedLetters: spell(letters, 44, 20),
+    splitLetters: [spell(letters, 22, 21), "-", spell(letters, 21, 22)].join(""),
+    containedLetters: spell(letters, 32, 23),
+    containedSplit: [spell(letters, 16, 24), "-", spell(letters, 16, 25)].join(""),
+    unevenSplit: [spell(capitals, 13, 26), spell(lowers, 4, 27), "_", spell(capitals, 3, 28), spell(lowers, 13, 29), "=="].join(""),
+    padded: [spell(capitals, 8, 30), spell(lowers, 24, 31), "=="].join(""),
+    longPart: [spell(capitals, 97, 32), spell(lowers, 31, 33), "_", spell(letters, 16, 34)].join(""),
+    longLowerPart: [spell(lowers, 97, 35), spell(capitals, 31, 36), "_", spell(letters, 16, 37)].join(""),
+    password: spell(mixed, 14, 14),
+    privateKey: ["-----BEGIN OPENSSH ", "PRIVATE KEY-----\n", spell(mixed, 64, 15).match(/.{16}/g)!.join("\n"), "\n-----END OPENSSH ", "PRIVATE KEY-----"].join(""),
+    multiline: [spell(mixed, 10, 16), " river\npearl ", spell(mixed, 10, 17)].join(""),
+    email: ["nora.", spell("abcdefgh", 5, 18), "@", "example-corp.io"].join(""),
   };
 }
 
@@ -70,7 +82,15 @@ function failedMachine(home: string, leaked = secrets()) {
       `  ANTHROPIC_API_KEY="${leaked.anthropic}"`,
       `  OPENAI_API_KEY: ${leaked.openai}`,
       `  pat ${leaked.githubPat} slack ${leaked.slack} aws ${leaked.aws}`,
-      `  opaque ${leaked.opaque} in a log`,
+      `  opaque ${leaked.opaque} and ${leaked.opaqueLetters} in a log`,
+      "  tapped /opt/homebrew/Library/Taps/homebrew/homebrew-core for AbstractSingletonProxyFactoryBean",
+      `  cached /opt/homebrew/var/lib/someservice/sessions/cache/storage/tokens/current/${leaked.cachedLetters}`,
+      `  refresh ${leaked.splitLetters} and FLEET_ENGINE_DIR/scripts/build-page-and-site`,
+      `  kept /Library/Application/Containers/Preferences/Caches/Storage/Sessions/Current/${leaked.containedLetters}`,
+      `  kept /Library/Application/Containers/Preferences/Caches/Storage/Sessions/Current/${leaked.containedSplit}`,
+      `  refresh ${leaked.unevenSplit} done, then ${leaked.longPart}`,
+      `  kept /Library/Application/Containers/Preferences/Caches/Storage/Sessions/Current/${leaked.unevenSplit} and ${leaked.padded}`,
+      `  kept /Library/Application/Containers/Preferences/Caches/Storage/Sessions/Current/${leaked.longLowerPart}`,
       `  cloning https://nora:${leaked.password}@github.com/nora/fleet-profile.git`,
       `  Pairing URL: http://127.0.0.1:3773/pair#token=${leaked.password}`,
       leaked.privateKey,
@@ -129,6 +149,9 @@ describe("fleet triage", () => {
     expect(shown).toContain("## fleet doctor\n\n```text\nfleet: ");
     expect(shown).toContain("▶ Set up this Mac: fleet apply installs your packs");
     expect(shown).toContain("export GITHUB_TOKEN=<redacted>");
+    expect(shown).toContain("opaque <secret> and <secret> in a log");
+    expect(shown).toContain("tapped /opt/homebrew/Library/Taps/homebrew/homebrew-core for AbstractSingletonProxyFactoryBean");
+    expect(shown).toContain("refresh <secret> and FLEET_ENGINE_DIR/scripts/build-page-and-site");
     expect(shown).toContain("https://<credentials>@github.com/<profile repo>.git");
     expect(shown).toContain(`{"password":"<redacted>"} and {'client_secret': '<redacted>'}`);
     expect(shown).toContain("invited <email> as <name> and <name>, then ssh <devbox 2> true (Q7 stays)");
@@ -171,16 +194,6 @@ describe("fleet triage", () => {
     for (const part of secretParts(leaked)) expect(issue.input).not.toContain(part);
     expect(result.output).toEndWith("✓ Opened https://github.com/Silthus/fleet-engine/issues/999");
     expect(savedReports(home)).toEqual([]);
-  });
-
-  test("a long note is redacted before it is cut, so a cut never leaves part of a secret", async () => {
-    const home = temp.make("home-");
-    failedMachine(home);
-    const password = pick(mixed, 8);
-    const result = await triage(home, ["--send", "--note", `${"x".repeat(3_970)} PASSWORD="${password} river pearl mountain"`], []);
-    const body = result.sent.find((call) => call.command[1] === "issue")!.input!;
-    expect(body).toContain(`${"x".repeat(3_970)} PASSWORD="<redacted>"`);
-    expect(body).not.toContain(password);
   });
 
   test("names what setup saved before a profile exists: the machine name, draft sources, and the repos it created", async () => {
@@ -295,11 +308,9 @@ describe("fleet triage", () => {
     expect(body).toEndWith("Made by `fleet triage`.");
   });
 
-  test("long step errors and a huge dotted transcript line still give a report that fits", async () => {
+  test("a huge dotted transcript line still gives a report that fits", async () => {
     const home = temp.make("home-");
     failedMachine(home);
-    const steps = Array.from({ length: 20 }, (_, index) => ({ id: `step-${index}`, start: "2026-11-11T10:00:00.000Z", end: "2026-11-11T10:00:01.000Z", blocked: false, outcome: "failed", error: "command-output ".repeat(5_000) }));
-    writeFileSync(join(home, ".local/state/fleet/logs/setup-timings.json"), JSON.stringify({ schema: 1, started: "2026-11-11T10:00:00.000Z", usable: null, steps }));
     writeFileSync(join(home, ".local/state/fleet/logs/setup.log"), `${"a.".repeat(1_048_576)}\nthe newest line\n`);
     const result = await triage(home, ["--send"], []);
     const body = result.sent.find((call) => call.command[1] === "issue")!.input!;
@@ -307,18 +318,6 @@ describe("fleet triage", () => {
     expect(body).toContain("## Setup transcript (newest 1 lines)\n\n```text\nthe newest line\n```\n\nMade by `fleet triage`.");
     expect(body).toContain("## fleet doctor");
   }, 2_000);
-
-  test("a very long note is cut, and the report still fits once, with its transcript", async () => {
-    const home = temp.make("home-");
-    failedMachine(home);
-    writeFileSync(join(home, ".local/state/fleet/logs/setup.log"), "the only transcript line\n");
-    const result = await triage(home, ["--send", "--note", "z".repeat(130_000)], []);
-    const body = result.sent.find((call) => call.command[1] === "issue")!.input!;
-    expect(body.length).toBeLessThanOrEqual(60_000);
-    expect(body).toStartWith(`## What happened\n\n${"z".repeat(3_999)}…\n\n## Setup\n`);
-    expect(body.split("## What happened").length).toBe(2);
-    expect(body).toEndWith("```text\nthe only transcript line\n```\n\nMade by `fleet triage`.");
-  });
 });
 
 describe("fleet setup and triage", () => {

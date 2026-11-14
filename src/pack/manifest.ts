@@ -1,7 +1,7 @@
 import { readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { recordPack } from "./register.ts";
-import { handlerSeams, needValues, type LoadedPack, type ModelRow, type PackManifest } from "./types.ts";
+import { handlerSeams, needValues, type LoadedPack, type ModelRow, type PackManifest, type Workflow } from "./types.ts";
 
 export class PackError extends Error {}
 
@@ -9,7 +9,7 @@ const settingTypes = ["string", "number", "boolean", "choice"];
 export const packName = /^[a-z][a-z0-9-]*$/;
 
 /** Settings the engine reads, which any pack may declare to set their default. */
-export const engineSettings = ["identity.signer"];
+export const engineSettings = ["identity.signer", "context.repo", "context.path"];
 
 export async function loadPacks(sourceDir: string): Promise<LoadedPack[]> {
   const root = join(sourceDir, "packs");
@@ -58,7 +58,7 @@ export function parseManifest(raw: unknown, where: string): PackManifest {
   if (typeof raw.name !== "string" || !packName.test(raw.name)) return fail("name must be lowercase words joined by dashes");
   if (raw.title !== undefined && !filled(raw.title)) return fail("title must be the name people read");
   if (typeof raw.summary !== "string" || raw.summary === "") return fail("summary must be one plain sentence");
-  for (const field of ["requires", "guides", "skills", "config", "settings", "workflows", "jobs", "human", "steps", "checks", "files", "t3ProjectScripts", "handlers", "served"]) {
+  for (const field of ["requires", "guides", "skills", "config", "settings", "workflows", "jobs", "human", "steps", "checks", "files", "codexRules", "t3ProjectScripts", "handlers", "served"]) {
     if (raw[field] !== undefined && !Array.isArray(raw[field])) fail(`${field} must be a list`);
   }
   checkShapes(raw, fail);
@@ -82,6 +82,7 @@ function scopeProblem(item: Record<string, unknown>) {
   if (item.oncePerFleet !== undefined && typeof item.oncePerFleet !== "boolean") return "oncePerFleet must be true or false";
   if (item.plans !== undefined && !isListOf(item.plans, plans)) return "plans must list claude, codex, or both";
   if (item.workflow !== undefined && typeof item.workflow !== "string") return "workflow must be an id";
+  if (item.unless !== undefined && !isStrings(item.unless)) return "unless must list workflow ids";
   return undefined;
 }
 
@@ -126,6 +127,7 @@ function checkShapes(raw: Record<string, unknown>, fail: (message: string) => ne
     if (problem) fail(`${label}: ${problem}`);
   };
   for (const field of ["requires", "skills"]) need(raw[field] === undefined || isStrings(raw[field]), `${field} must list names`);
+  need(raw.subcommands === undefined || (isRecord(raw.subcommands) && Object.values(raw.subcommands).every((words) => isStrings(words) && words.every((word) => /^[a-z][a-z-]{0,23}$/.test(word)))), "subcommands must map each command to its lowercase first words");
   need(raw.instructions === undefined || typeof raw.instructions === "string", "instructions must be a path");
   need(raw.profileOrg === undefined || (typeof raw.profileOrg === "string" && /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(raw.profileOrg)), "profileOrg must be a GitHub org name");
   each("guides", (item, label) => {
@@ -152,11 +154,14 @@ function checkShapes(raw: Record<string, unknown>, fail: (message: string) => ne
     const zones = item.defaultByTimeZone;
     need(zones === undefined || (isRecord(zones) && Object.values(zones).every(fits)), `${label}: defaultByTimeZone must map time-zone prefixes to values that fit type ${String(item.type)}`);
     need(zones === undefined || item.ask === "setup", `${label}: defaultByTimeZone needs ask setup, because only setup reads it`);
+    const context = item.fromContext;
+    need(context === undefined || (item.type === "string" && isRecord(context) && typeof context.value === "string" && (context.unlessSet === undefined || filled(context.unlessSet))), `${label}: fromContext needs type string, a value, and an optional unlessSet key`);
   });
   each("workflows", (item, label) => {
     need(typeof item.name === "string" && typeof item.sentence === "string", `${label}: needs a name and a sentence`);
     need(item.needs === undefined || isStrings(item.needs), `${label}: needs must list needs`);
     need(item.requires === undefined || isStrings(item.requires), `${label}: requires must list workflow ids`);
+    need(item.yields === undefined || isStrings(item.yields), `${label}: yields must list workflow ids`);
     need(item.settings === undefined || isStrings(item.settings), `${label}: settings must list keys`);
   });
   each("jobs", (item, label) => {
@@ -178,6 +183,10 @@ function checkShapes(raw: Record<string, unknown>, fail: (message: string) => ne
   });
   each("files", (item, label) => {
     need(typeof item.path === "string" && typeof item.target === "string", `${label}: needs a path and a target`);
+    filters(item, label);
+  });
+  each("codexRules", (item, label) => {
+    need(typeof item.path === "string", `${label}: needs a path`);
     filters(item, label);
   });
   checkModels(raw.models, fail);
@@ -215,6 +224,11 @@ function checkShapes(raw: Record<string, unknown>, fail: (message: string) => ne
   each("handlers", (item, label) => {
     need((handlerSeams as readonly unknown[]).includes(item.seam), `${label}: seam must be one of ${handlerSeams.join(", ")}`);
     need(filled(item.path), `${label}: needs a path`);
+    if (item.seam !== "pr-command") need(item.subcommands === undefined, `${label}: only a pr-command handler takes subcommands`);
+    else {
+      need(isStrings(item.subcommands) && item.subcommands.length > 0, `${label}: needs subcommands, the fleet pr words it runs`);
+      need((item.subcommands as string[]).every((word) => packName.test(word)), `${label}: each subcommand must be lowercase words joined by dashes`);
+    }
     filters(item, label);
   });
   each("checks", (item, label) => {
@@ -260,10 +274,11 @@ function checkWorkflows(manifest: PackManifest, fail: (message: string) => never
       if (!(needValues as readonly string[]).includes(need)) fail(`workflow ${workflow.id} has unknown need ${need}`);
     }
   }
-  const tied = { jobs: manifest.jobs, human: manifest.human, steps: manifest.steps, checks: manifest.checks, config: manifest.config, files: manifest.files, t3ProjectScripts: manifest.t3ProjectScripts, handlers: manifest.handlers, served: manifest.served };
+  checkYields(manifest.workflows ?? [], fail);
+  const tied = { jobs: manifest.jobs, human: manifest.human, steps: manifest.steps, checks: manifest.checks, config: manifest.config, files: manifest.files, codexRules: manifest.codexRules, t3ProjectScripts: manifest.t3ProjectScripts, handlers: manifest.handlers, served: manifest.served };
   for (const [field, items] of Object.entries(tied)) {
     for (const item of items ?? []) {
-      const label = "id" in item ? item.id : "key" in item ? item.key : "seam" in item ? item.seam : item.target;
+      const label = "id" in item ? item.id : "key" in item ? item.key : "seam" in item ? item.seam : "target" in item ? item.target : item.path;
       if (item.workflow !== undefined && !ids.has(item.workflow)) fail(`${field} ${label} names unknown workflow ${item.workflow}`);
     }
   }
@@ -273,6 +288,36 @@ function checkWorkflows(manifest: PackManifest, fail: (message: string) => never
   const seams = manifest.handlers?.map((handler) => handler.seam) ?? [];
   const twice = seams.find((seam, index) => seams.indexOf(seam) !== index);
   if (twice) fail(`handlers ${twice} is declared twice`);
+}
+
+/** A workflow yields only to a workflow of its own pack, so the engine can order yields before it resolves them. A cycle, or a yield to a workflow that needs the yielder, would turn both off. */
+function checkYields(workflows: Workflow[], fail: (message: string) => never) {
+  const ids = new Set(workflows.map((workflow) => workflow.id));
+  const requires = new Map(workflows.map((workflow) => [workflow.id, workflow.requires ?? []]));
+  const yields = new Map(workflows.map((workflow) => [workflow.id, workflow.yields ?? []]));
+  for (const workflow of workflows) {
+    for (const id of workflow.yields ?? []) {
+      if (id === workflow.id) fail(`workflow ${workflow.id} yields to itself`);
+      if (!ids.has(id)) fail(`workflow ${workflow.id} yields to unknown workflow ${id}`);
+      if (pathFrom(requires, id, workflow.id)) fail(`workflow ${workflow.id} yields to ${id}, which needs ${workflow.id}`);
+    }
+  }
+  for (const workflow of workflows) {
+    const cycle = pathFrom(yields, workflow.id, workflow.id);
+    if (cycle) fail(`workflows yield in a cycle: ${cycle.join(", ")}`);
+  }
+}
+
+/** The ids from one workflow to another along the edges, or undefined when there is no path. */
+function pathFrom(edges: Map<string, string[]>, from: string, to: string, path: string[] = [from], seen = new Set<string>()): string[] | undefined {
+  for (const next of edges.get(from) ?? []) {
+    if (next === to) return [...path, next];
+    if (seen.has(next)) continue;
+    seen.add(next);
+    const found = pathFrom(edges, next, to, [...path, next], seen);
+    if (found) return found;
+  }
+  return undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

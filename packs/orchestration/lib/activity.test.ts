@@ -130,7 +130,11 @@ test("a host reads one machine: a linked environment by label or id, or this one
   expect(local.map((report: { host: string; threads: { id: string }[] }) => [report.host, report.threads.map((thread) => thread.id)])).toEqual([["this-box", ["mcp:local-busy", "mcp:local-idle"]]]);
 
   await expect(activity(t3, "nowhere")).rejects.toThrow("No linked environment nowhere. Linked: devbox-2.");
-  await expect(activity(t3, "env-linked", "--thread", "mcp:linked-done", "--words")).rejects.toThrow("--words reads threads on this machine only");
+  const words = JSON.parse((await activity(t3, "env-linked", "--thread", "mcp:linked-done", "--words")).output);
+  expect(words).toEqual([{ host: "devbox-2", words: [
+    { thread: "mcp:linked-done", id: expect.any(String), text: "Old ask", answered: "", at: minutesAgo(200), source: "typed" },
+    { thread: "mcp:linked-done", id: expect.any(String), text: "Ship it", answered: "Done.", at: minutesAgo(80), source: "typed" },
+  ] }]);
 });
 
 test("a linked environment that cannot answer is named with its reason, and the command exits 1", async () => {
@@ -150,4 +154,22 @@ test("without a running T3 server, fleet activity says so and exits 1 at once", 
   expect(code).toBe(1);
   expect(stdout).toBe("");
   expect(stderr).toBe(`fleet: T3 is not running on this machine: no server-runtime.json in ${join(home, ".t3", "userdata")}. Start T3 Code, then try again.\n`);
+});
+
+test("a thread that awaits a shell command or waits on another thread is busy, and one with a plain background command is not", async () => {
+  const t3 = await stub({
+    shell: {
+      projects: [{ id: "project-local", title: "Local project", workspaceRoot: "/work/local" }],
+      threads: [
+        shellThread("mcp:awaits-shell", { status: "completed", pendingBackgroundTasks: [{ kind: "command", awaited: true }] }),
+        shellThread("mcp:waits-on-thread", { status: "completed", blockedOnThreadWait: true }),
+        shellThread("mcp:dev-server", { status: "completed", pendingBackgroundTasks: [{ kind: "command" }] }),
+      ],
+    },
+    archived: { projects: [], threads: [] },
+    links: [],
+  });
+  const { output } = await activity(t3);
+  const busy = output.split("\n").filter((line) => line.startsWith("  * ")).map((line) => line.split("Thread ").at(-1));
+  expect(busy.sort()).toEqual(["mcp:awaits-shell", "mcp:waits-on-thread"]);
 });

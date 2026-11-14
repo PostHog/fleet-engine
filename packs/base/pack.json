@@ -16,6 +16,11 @@
       "path": "t3.md"
     }
   ],
+  "codexRules": [
+    {
+      "path": "codex.rules"
+    }
+  ],
   "models": {
     "claude": [
       {
@@ -178,6 +183,37 @@
       ],
       "default": "ssh",
       "ask": "never"
+    },
+    {
+      "key": "context.repo",
+      "question": "Which GitHub repo, such as you/context, holds what your agents learn and record: memory, notes, maps, and logs? Share it with your team, but keep it private. Fleet takes the memory, library, map, and log settings from it unless you set them.",
+      "type": "string",
+      "optional": true,
+      "ask": "never"
+    },
+    {
+      "key": "context.path",
+      "question": "Which folder holds the checkout of your context repo?",
+      "type": "string",
+      "default": "~/dev/context",
+      "ask": "never"
+    },
+    {
+      "key": "base.usageHost",
+      "question": "Which analytics host receives Fleet's usage events? Give its capture URL, such as https://us.i.posthog.com.",
+      "type": "string"
+    },
+    {
+      "key": "base.usageProjectKey",
+      "question": "Which project key does that analytics host take the events with? A PostHog project key starts with phc_.",
+      "type": "string"
+    },
+    {
+      "key": "base.t3TimeZone",
+      "question": "Which time zone should T3 Code's service on Linux run in, so a scheduled task set to 03:00 runs at 03:00 there? Use an IANA name, such as Europe/Berlin. Leave it empty to keep the machine's zone.",
+      "type": "string",
+      "default": "",
+      "ask": "never"
     }
   ],
   "workflows": [
@@ -198,6 +234,12 @@
       "name": "Nightly updates",
       "default": true,
       "sentence": "Fleet, your profile, Claude Code, Codex, their plugins, and T3 Code update themselves every night. T3 Code waits until no agent turn runs. A failed update tries again each hour until 05:47 UTC."
+    },
+    {
+      "id": "source-refresh",
+      "name": "Fresh skills",
+      "default": true,
+      "sentence": "Every five minutes, Fleet asks each pack source that follows a branch, such as your skills repository, whether it moved. When it moved forward, Fleet updates the skills, guides, and instructions it brings. A source you edited, such as a changed skill, and a rewritten branch wait for you. Everything else waits for the nightly update."
     },
     {
       "id": "linked-machines",
@@ -222,6 +264,24 @@
         "devbox"
       ],
       "sentence": "Agents check free disk before big jobs and run builds and tests in a capped slot, so one job cannot fill or freeze a devbox."
+    },
+    {
+      "id": "usage-events",
+      "name": "Usage events",
+      "default": false,
+      "settings": [
+        "base.usageHost",
+        "base.usageProjectKey"
+      ],
+      "sentence": "Fleet counts how often you and your agents run its commands and recall memory, and sends the counts to your own analytics project every five minutes.",
+      "risk": "Command names, counts, and the machine name leave the machine for the analytics project you name. Arguments, prompts, file contents, and secrets never do."
+    },
+    {
+      "id": "format-on-edit",
+      "name": "Format on edit",
+      "default": false,
+      "sentence": "After Claude or Codex edits a file, the repository's own lint-staged formatters and fixers rewrite it, and the agent sees what they could not fix.",
+      "risk": "It runs after every edit in every repository, before you review the change, not only at commit. It runs only known formatters (Prettier, Biome, ESLint, Ruff, Black, gofmt, rustfmt and a few more) that the repository's lint-staged config names, from the repository's node_modules/.bin or your PATH. It never runs package runners such as bunx or npx, interpreters, shells, scripts, or Git. A formatter still loads the repository's own config, and some configs, such as eslint.config.js, are code."
     }
   ],
   "config": [
@@ -264,7 +324,7 @@
             {
               "type": "command",
               "command": "sh \"$HOME/.config/fleet/hooks/run.sh\" claude PostToolUse",
-              "timeout": 30
+              "timeout": 90
             }
           ]
         }
@@ -279,6 +339,21 @@
             {
               "type": "command",
               "command": "sh \"$HOME/.config/fleet/hooks/run.sh\" claude SessionStart",
+              "timeout": 30
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "provider": "claude",
+      "key": "hooks.Stop",
+      "value": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "sh \"$HOME/.config/fleet/hooks/run.sh\" claude Stop",
               "timeout": 30
             }
           ]
@@ -332,7 +407,7 @@
             {
               "type": "command",
               "command": "sh \"$HOME/.config/fleet/hooks/run.sh\" codex PostToolUse",
-              "timeout": 30
+              "timeout": 90
             }
           ]
         }
@@ -351,6 +426,25 @@
             {
               "type": "command",
               "command": "sh \"$HOME/.config/fleet/hooks/run.sh\" codex SessionStart",
+              "timeout": 30
+            }
+          ]
+        }
+      ],
+      "plans": [
+        "codex",
+        "both"
+      ]
+    },
+    {
+      "provider": "codex",
+      "key": "hooks.Stop",
+      "value": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "sh \"$HOME/.config/fleet/hooks/run.sh\" codex Stop",
               "timeout": 30
             }
           ]
@@ -539,6 +633,11 @@
       ]
     },
     {
+      "path": "hooks/format-on-edit.ts",
+      "target": ".config/fleet/hooks/PostToolUse/format-on-edit.ts",
+      "workflow": "format-on-edit"
+    },
+    {
       "path": "fleet-heavy.slice",
       "target": ".config/systemd/user/fleet-heavy.slice",
       "on": [
@@ -588,6 +687,17 @@
       "workflow": "nightly-updates"
     },
     {
+      "id": "source-refresh",
+      "command": [
+        "fleet",
+        "refresh"
+      ],
+      "schedule": {
+        "every": "5m"
+      },
+      "workflow": "source-refresh"
+    },
+    {
       "id": "worktree-prune",
       "command": [
         "fleet",
@@ -598,6 +708,18 @@
         "every": "5m"
       },
       "workflow": "worktree-cleanup"
+    },
+    {
+      "id": "usage-flush",
+      "command": [
+        "fleet",
+        "usage",
+        "flush"
+      ],
+      "schedule": {
+        "every": "5m"
+      },
+      "workflow": "usage-events"
     }
   ],
   "steps": [
@@ -692,5 +814,10 @@
         "linux"
       ]
     }
-  ]
+  ],
+  "subcommands": {
+    "usage": [
+      "flush"
+    ]
+  }
 }

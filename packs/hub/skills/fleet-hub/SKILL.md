@@ -102,7 +102,19 @@ the person's own subscriptions, never for someone else's.
   weekly quota resets first. A full or unreadable subscription gets priority
   0. It keeps fill-first routing, and session affinity keeps each session on
   one subscription. `fleet cli-proxy-balance --dry-run` prints the ranking and
-  changes nothing.
+  changes nothing. Unreadable usage does not fail the run. Its log lines name a
+  subscription by provider and short id, such as `Claude subscription
+  aaaabbbb`, never by its file name, which holds the account's email. The
+  short id is the first 8 characters of the subscription's Auth Index in the
+  management panel. When the Auth Index holds other characters than letters,
+  digits, `-` and `_`, the short id is the first 8 characters of the SHA-256
+  of the file name instead: `printf %s <file name> | sha256sum | cut -c1-8`
+  on the hub finds it. When the proxy says a subscription's login expired
+  (`invalid_grant`) while that subscription fails, the balancer's log line says
+  so, and `fleet cli-proxy doctor` warns with the same short id and its sign-in
+  command. The doctor counts only working
+  subscriptions toward the minimum and fails when too few work. Usage that is
+  unreadable for another reason has no such warning: it clears on a later run.
 - **Claude Code.** On the `claude` and `both` plans, on the hub and on each
   devbox, Fleet sets `env.ANTHROPIC_BASE_URL` to the proxy and `apiKeyHelper`
   to a command that reads the client key file. The key is never in the
@@ -121,5 +133,30 @@ the person's own subscriptions, never for someone else's.
   own sign-in, and the next apply changes nothing. `fleet apply` and
   `fleet doctor` name the failed check. The first apply after the proxy
   answers again sends the agent back to the proxy.
+- **The panel.** The Proxy panel workflow is off by default and needs
+  own-account balancing. With
+  `fleet packs --workflows proxy-panel=on`, `fleet cli-proxy install` adds
+  the pinned CLIProxyAPI management panel with quota history charts, drain
+  forecasts, and Reset weekly and Reset Fable buttons, and the quota-ledger
+  plugin that keeps `hub.proxyHistoryDays` of history (35 by default). Both
+  downloads must match their SHA-256. The balancer then records each
+  subscription's quota windows in the ledger on every run. The panel is at
+  `http://127.0.0.1:8317/management.html` on the hub, and on each devbox
+  through its tunnel; it is never behind the hub's HTTPS. Sign in with the
+  `MANAGEMENT_PASSWORD` in `~/.local/share/fleet-cli-proxy/management.env` on
+  the hub. A reset button spends a banked reset, which does not come back:
+  the first click arms it, and a second click within 5 seconds spends it.
+  Fleet owns `config.yaml`, so a panel edit to it lasts until the next
+  `fleet apply`. Turning the workflow off first restarts the proxy with the
+  panel closed, then removes the page and the pinned plugin and keeps the
+  history file. `fleet cli-proxy doctor` fails while a closed panel still
+  answers, when the page does not match its pin (CLIProxyAPI may have
+  fetched an unpinned one), and on any plugin Fleet did not install: with
+  plugins on, anyone with the management key can install others from
+  CLIProxyAPI's plugin store. Turning the panel off keeps those and names
+  them. Every tunnelled client reaches the proxy as 127.0.0.1, so 5 wrong
+  panel sign-ins from any devbox ban 127.0.0.1 from the management API for
+  30 minutes. That also stops the balancer and the doctor on the hub until
+  the ban ends.
 - **Stop on one machine.** `fleet cli-proxy disconnect` removes the settings
   and the key. Then run `claude` and enter `/login`.
