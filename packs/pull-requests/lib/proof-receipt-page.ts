@@ -55,10 +55,11 @@ const marked = (text: string) => `${startsCommand(text) ? commandMark : ""}${tex
 
 function proseShape(count: (lines: number) => void) {
   let headerCells = 0;
-  let afterDollar = false;
+  let runStart: string | undefined = "";
   const text = (text: string) => {
-    const command = startsCommand(text) || afterDollar && /^\s/.test(text);
-    afterDollar = /^\$[^\p{L}\p{N}\s]*$/u.test(leadOf(text));
+    const lead = runStart === undefined ? undefined : `${runStart}${text}`.replace(/^[^\p{L}\p{N}$]*/u, "");
+    const command = lead !== undefined && /^\$[^\p{L}\p{N}\s]*\s/u.test(lead);
+    runStart = lead === "" ? "" : lead !== undefined && /^\$[^\p{L}\p{N}\s]*$/u.test(lead) ? "$" : undefined;
     return `${command ? commandMark : ""}${escaped(text)}`;
   };
   const markup = {
@@ -88,7 +89,7 @@ function proseShape(count: (lines: number) => void) {
     code: (children: string) => { count(children.split("\n").filter((line) => /\S/.test(line)).length); return `${codeMark}\n\n`; },
   };
   const closing = Object.entries(markup).map(([name, render]) => [name, (...args: Parameters<typeof render>) => {
-    afterDollar = false;
+    runStart = "";
     return (render as (...args: Parameters<typeof render>) => string)(...args);
   }]);
   return { ...Object.fromEntries(closing) as typeof markup, text };
