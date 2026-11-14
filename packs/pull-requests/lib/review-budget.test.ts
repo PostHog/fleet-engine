@@ -129,6 +129,22 @@ test("at the budget a known answer settles a major the PR body lists by file:lin
   expect(held.output).toContain("known issues: round 1 answers findings 1 known, and an open blocker holds the merge");
 });
 
+test("a small PR keeps its panel read after a single read the author saved", async () => {
+  const pr = await checkout();
+  const read = await pr.commit("README.md", "Greet new members.\n");
+  await pr.fleet("require", "--none", "--reason", "docs only");
+  expect((await pr.fleet("review-start", "--scope", "full")).code).toBe(0);
+  writeFileSync(join(pr.repository, "findings.md"), "No findings.\n");
+  await pr.fleet("review-finish", "--round", "1", "--reviewer", "gpt-6.1-sol", "findings.md");
+  await pr.commit("README.md", "Greet every new member.\n");
+  expect((await pr.fleet("gate")).code).toBe(1);
+
+  fakeModel(pr, "REVIEWER", "FINDINGS:\n(none)\nCOVERED: README.md\n");
+  await pr.fleet("review", "--lens", "correctness", "--scope", "fixes", "--base", read);
+  expect((await pr.fleet("review", "--wait")).code).toBe(0);
+  expect((await pr.fleet("gate")).code).toBe(0);
+});
+
 test("a code PR under 50 authored lines gets the combined lens only at low merge risk", async () => {
   const lensesAt = async (grade: string) => {
     const pr = await checkout();

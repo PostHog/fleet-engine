@@ -578,7 +578,8 @@ async function reserveRound(options: Map<string, string>, head: ProofIdentity, c
   const { decision, ...permit } = await decisionOf(options, head, context);
   const small = isSmall(head, context);
   if (small && capturedBy === "fleet" && !panel && !decision && !await panelCommit(context.home, head)) throw new Error("A small PR gets one read, and it is the panel: run fleet proof review --lens <lens> ..., which runs the lenses as one combined lens");
-  const limits = small ? { ...permit.limits, ceiling: 1, small } : permit.limits;
+  const firstPanel = panel && !await panelCommit(context.home, head);
+  const limits = small && !firstPanel ? { ...permit.limits, ceiling: 1, small } : permit.limits;
   const reserved = await startReview(context.home, head, { scope, base, from, ...permit, limits, decision, phase: options.get("--phase"), cleanBaseMerge: cleanBaseMerge(head, context.run), quietCommit: quietCommitIn(context.run, () => baseRefs(head, context.run)), capturedBy, lock: async (directory) => lockNewRound(directory, await context.lock()) });
   return { ...reserved, scope, base, from, phase: options.get("--phase") };
 }
