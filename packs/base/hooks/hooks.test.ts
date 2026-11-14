@@ -377,6 +377,14 @@ describe("secret guard", () => {
     expect(output).toContain("Use [redacted");
   });
 
+  test.each([
+    ["padded", `  ${coderToken}  `],
+    ["coloured", `\x1b[32m${coderToken}\x1b[0m`],
+  ])("redacts a plain copy of a %s Coder token found on its own line", (_, line) => {
+    const output = JSON.stringify(guard("claude", toolEvent({ stdout: `${line}\nUse ${coderToken} to authenticate` }))?.hookSpecificOutput);
+    expect(output).not.toContain(coderToken);
+  });
+
   test("redacts copies of a found secret that overlap each other", () => {
     const token = `a${body(9)}-${body(21)}a`;
     const output = JSON.stringify(guard("claude", toolEvent({ stdout: `coder_session_token=${token}\nUse ${token}${token.slice(1)} to authenticate` }))?.hookSpecificOutput);
