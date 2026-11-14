@@ -377,6 +377,12 @@ describe("secret guard", () => {
     expect(output).toContain("Use [redacted");
   });
 
+  test("redacts copies of a found secret that overlap each other", () => {
+    const token = `a${body(9)}-${body(21)}a`;
+    const output = JSON.stringify(guard("claude", toolEvent({ stdout: `coder_session_token=${token}\nUse ${token}${token.slice(1)} to authenticate` }))?.hookSpecificOutput);
+    expect(output).not.toContain(token.slice(1));
+  });
+
   test("redacts each copy of a found value", () => {
     const value = `${serial(1)}${body(30)}`;
     const output = JSON.stringify(guard("claude", toolEvent({ stdout: `${JSON.stringify([{ name: cookieKey, value }])} echo:${value}` }))?.hookSpecificOutput);

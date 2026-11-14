@@ -173,7 +173,7 @@ function spansOf(text: string, findings: Finding[]): { spans: Span[] } | { whole
   const spans: Span[] = [];
   for (const [value, kind] of kinds) {
     if (!text.includes(value)) return { whole: kind };
-    for (let at = text.indexOf(value); at >= 0; at = text.indexOf(value, at + value.length)) spans.push({ kind, at, end: at + value.length });
+    for (let at = text.indexOf(value); at >= 0; at = text.indexOf(value, at + 1)) spans.push({ kind, at, end: at + value.length });
   }
   return { spans };
 }
