@@ -173,9 +173,34 @@ function spansOf(text: string, findings: Finding[]): { spans: Span[] } | { whole
   const spans: Span[] = [];
   for (const [value, kind] of kinds) {
     if (!text.includes(value)) return { whole: kind };
-    for (let at = text.indexOf(value); at >= 0; at = text.indexOf(value, at + 1)) spans.push({ kind, at, end: at + value.length });
+    for (const copy of copiesOf(text, value)) spans.push({ kind, ...copy });
   }
   return { spans };
+}
+
+function copiesOf(text: string, value: string) {
+  const borders = bordersOf(value);
+  const copies: Array<{ at: number; end: number }> = [];
+  for (let at = 0, length = 0; at < text.length; at++) {
+    while (length && text[at] !== value[length]) length = borders[length - 1]!;
+    if (text[at] === value[length]) length++;
+    if (length < value.length) continue;
+    const last = copies.at(-1);
+    if (last && at + 1 - value.length <= last.end) last.end = at + 1;
+    else copies.push({ at: at + 1 - value.length, end: at + 1 });
+    length = borders[length - 1]!;
+  }
+  return copies;
+}
+
+function bordersOf(value: string) {
+  const borders = [0];
+  for (let at = 1, length = 0; at < value.length; at++) {
+    while (length && value[at] !== value[length]) length = borders[length - 1]!;
+    if (value[at] === value[length]) length++;
+    borders.push(length);
+  }
+  return borders;
 }
 
 function joined(spans: Span[]) {

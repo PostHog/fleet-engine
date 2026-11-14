@@ -383,6 +383,14 @@ describe("secret guard", () => {
     expect(output).not.toContain(token.slice(1));
   });
 
+  test("redacts a long cookie value and its overlapping copies quickly", () => {
+    const value = "1".repeat(300_000);
+    const started = performance.now();
+    const output = JSON.stringify(guard("claude", toolEvent({ stdout: JSON.stringify([{ name: cookieKey, value }, { text: value + value }]) }))?.hookSpecificOutput);
+    expect(performance.now() - started).toBeLessThan(1_000);
+    expect(output).not.toContain("1".repeat(20));
+  });
+
   test("redacts each copy of a found value", () => {
     const value = `${serial(1)}${body(30)}`;
     const output = JSON.stringify(guard("claude", toolEvent({ stdout: `${JSON.stringify([{ name: cookieKey, value }])} echo:${value}` }))?.hookSpecificOutput);
