@@ -159,25 +159,19 @@ export function secretKinds(value: unknown): string[] {
   return [...kinds];
 }
 
-type Finding = { kind: string; value: string; at?: number };
+type Finding = { kind: string; value: string };
 type Span = { kind: string; at: number; end: number };
-const unplacedLimit = 64;
+const distinctLimit = 64;
 
 const secretsIn = (text: string): Finding[] =>
-  shapes.flatMap((shape) =>
-    "pattern" in shape
-      ? Array.from(text.matchAll(shape.pattern), (match) => ({ kind: shape.kind, value: match[0], at: match.index }))
-      : shape.values(text).map((value) => ({ kind: shape.kind, value })),
-  );
+  shapes.flatMap((shape) => ("pattern" in shape ? text.match(shape.pattern) ?? [] : shape.values(text)).map((value) => ({ kind: shape.kind, value })));
 
 function spansOf(text: string, findings: Finding[]): { spans: Span[] } | { whole: string } {
+  const kinds = new Map<string, string>();
+  for (const { kind, value } of findings) if (!kinds.has(value)) kinds.set(value, kind);
+  if (kinds.size > distinctLimit) return { whole: findings[0]!.kind };
   const spans: Span[] = [];
-  const unplaced = new Map<string, string>();
-  for (const { kind, value, at } of findings)
-    if (at !== undefined) spans.push({ kind, at, end: at + value.length });
-    else if (!unplaced.has(value)) unplaced.set(value, kind);
-  if (unplaced.size > unplacedLimit) return { whole: [...unplaced.values()][0]! };
-  for (const [value, kind] of unplaced) {
+  for (const [value, kind] of kinds) {
     if (!text.includes(value)) return { whole: kind };
     for (let at = text.indexOf(value); at >= 0; at = text.indexOf(value, at + value.length)) spans.push({ kind, at, end: at + value.length });
   }

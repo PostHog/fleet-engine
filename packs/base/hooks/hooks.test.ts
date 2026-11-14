@@ -371,6 +371,12 @@ describe("secret guard", () => {
     expect(output).not.toContain(body(70));
   });
 
+  test("redacts a copy of a found secret that its pattern alone would not find", () => {
+    const output = JSON.stringify(guard("claude", toolEvent({ stdout: `coder_session_token=${coderToken}\nUse ${coderToken} to authenticate` }))?.hookSpecificOutput);
+    expect(output).not.toContain(coderToken);
+    expect(output).toContain("Use [redacted");
+  });
+
   test("redacts each copy of a found value", () => {
     const value = `${serial(1)}${body(30)}`;
     const output = JSON.stringify(guard("claude", toolEvent({ stdout: `${JSON.stringify([{ name: cookieKey, value }])} echo:${value}` }))?.hookSpecificOutput);
