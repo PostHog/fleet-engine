@@ -55,8 +55,13 @@ const marked = (text: string) => `${startsCommand(text) ? commandMark : ""}${tex
 
 function proseShape(count: (lines: number) => void) {
   let headerCells = 0;
-  return {
-    text: (text: string) => marked(escaped(text)),
+  let afterDollar = false;
+  const text = (text: string) => {
+    const command = startsCommand(text) || afterDollar && /^\s/.test(text);
+    afterDollar = /^\$[^\p{L}\p{N}\s]*$/u.test(leadOf(text));
+    return `${command ? commandMark : ""}${escaped(text)}`;
+  };
+  const markup = {
     codespan: codeSpan,
     strong: (children: string) => `**${children}**`,
     emphasis: (children: string) => `_${children}_`,
@@ -82,6 +87,11 @@ function proseShape(count: (lines: number) => void) {
     td: (children: string) => ` ${marked(children.replace(/\n/g, " "))} |`,
     code: (children: string) => { count(children.split("\n").filter((line) => /\S/.test(line)).length); return `${codeMark}\n\n`; },
   };
+  const closing = Object.entries(markup).map(([name, render]) => [name, (...args: Parameters<typeof render>) => {
+    afterDollar = false;
+    return (render as (...args: Parameters<typeof render>) => string)(...args);
+  }]);
+  return { ...Object.fromEntries(closing) as typeof markup, text };
 }
 
 export function proseOf(text: string) {

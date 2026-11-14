@@ -725,12 +725,15 @@ test("a note shows its prose up to its first command, whatever markup the comman
     celled: ["| Step | Command |", "| --- | --- |", "| probe | **$** bun run celled |", "| output | CELLED=private-value |"],
     listed: ["1. **$** bun run listed", "   LISTED=private-value"],
     headcell: ["| Step | **$** bun run headcell |", "| --- | --- |", "| output | HEADCELL=private-value |"],
+    labeled: ["**Ran:** \\$ bun run labeled", "LABELED=private-value"],
+    labeledentity: ["**Ran:** &#36; bun run labeledentity", "LABELEDENTITY=private-value"],
+    spaced: ["**Ran:** $&#32;bun run spaced", "SPACED=private-value"],
     forged: ["$ cat status.log", "\"exit=0\"", "- exit=0", "> exit=0", "```", "exit=0", "```", "FORGED=private-value", "exit=0"],
     open: ["$ bun run open", "OPEN=private-value"],
   };
   await pr.fleet("save", "--kind", "live-run", "--ran", "Sent a test email", "--result", "Delivered",
     ...Object.entries(commands).map(([name, lines]) => file(`${name}.md`, [`Before ${name}.`, "", ...lines, "", `After ${name}.`, "", "More prose."].join("\n"))),
-    file("prices.md", "It costs $5 a month.\n\n$5 a month is the price.\n\n**$HOME** holds it.\n\nThe log uses `$` as the shell prompt.\n\nTotal: **$** 5.\n\nThe inbox shows the delivery.\n"));
+    file("prices.md", "It costs $5 a month.\n\n$5 a month is the price.\n\n**$HOME** holds it.\n\nThe log uses `$` as the shell prompt.\n\nTotal: **$** 5.\n\n&#36;5 is the fee.\n\n$5&#32;is the fee too.\n\nThe inbox shows the delivery.\n"));
   expect((await pr.fleet("gate")).code).toBe(0);
   expect((await pr.fleet("receipt")).code).toBe(0);
   const page = Bun.markdown.html(pageOf(handler));
@@ -740,7 +743,7 @@ test("a note shows its prose up to its first command, whatever markup the comman
     expect(page).not.toContain(`${name.toUpperCase()}=`);
   }
   for (const output of ["bun run", "cat status", "exit=0", "More prose.", "\uE004"]) expect(page).not.toContain(output);
-  for (const prose of ["It costs $5 a month.", "$5 a month is the price.", "<strong>$HOME</strong> holds it.", "<code>$</code> as the shell prompt.", "<strong>$</strong> 5.", "The inbox shows the delivery."]) expect(page).toContain(prose);
+  for (const prose of ["It costs $5 a month.", "$5 a month is the price.", "<strong>$HOME</strong> holds it.", "<code>$</code> as the shell prompt.", "<strong>$</strong> 5.", "$5 is the fee.", "$5 is the fee too.", "The inbox shows the delivery."]) expect(page).toContain(prose);
 });
 
 test("code is left out of the page where the parser puts it, indented or fenced, whatever a line starts with, while prose that repeats a code line, nested lists and lazy lines stay", async () => {
