@@ -34,6 +34,7 @@ const fenced = (text: string) => {
 
 const codeMark = "\uE003";
 const commandMark = "\uE004";
+const unmarked = (text: string) => text.replace(/[\uE003\uE004]/g, "\uFFFD");
 const indentedLists = 8;
 const escaped = (text: string) => text.replace(/[\\`*_[\]~|&]/g, "\\$&");
 const unescaped = (text: string) => text.replace(/\\(.)/g, "$1");
@@ -51,17 +52,13 @@ function codeSpan(children: string) {
 
 const leadOf = (line: string) => line.replace(/^(?:\[[xX]\]|\d+[.)]|[^\p{L}\p{N}$])+/u, "");
 const startsCommand = (text: string) => /^\$[^\p{L}\p{N}\s]*\s/u.test(leadOf(text));
-const tag = /<[^<>]*>/g;
-const blockTag = /<\/?(?:address|article|aside|blockquote|br|caption|dd|details|dialog|div|dl|dt|fieldset|figcaption|figure|footer|form|h[1-6]|header|hr|li|main|nav|ol|p|pre|section|summary|table|tbody|td|tfoot|th|thead|tr|ul)(?![\w-])[^<>]*>/gi;
-const decoded = (html: string) => html.replace(/&#0*36;|&#x0*24;|&dollar;/gi, "$").replace(/&[#\w]+;/g, " ");
-const startsRun = (text: string) => /^[^\p{L}\p{N}$]*\$[^\p{L}\p{N}\s]*\s/u.test(text);
-const holdsCommand = (html: string) => html.replace(blockTag, "\n").split("\n").some((line) => startsCommand(decoded(line.replace(tag, ""))) || line.split(tag).some((run) => startsRun(decoded(run))));
 const marked = (text: string) => `${startsCommand(text) ? commandMark : ""}${text}`;
 
 function proseShape(count: (lines: number) => void) {
   let headerCells = 0;
   let runStart: string | undefined = "";
-  const text = (text: string) => {
+  const text = (written: string) => {
+    const text = unmarked(written);
     const lead = runStart === undefined ? undefined : `${runStart}${text}`.replace(/^[^\p{L}\p{N}$]*/u, "");
     const command = lead !== undefined && /^\$[^\p{L}\p{N}\s]*\s/u.test(lead);
     runStart = lead === "" ? "" : lead !== undefined && /^\$[^\p{L}\p{N}\s]*$/u.test(lead) ? "$" : undefined;
@@ -75,7 +72,7 @@ function proseShape(count: (lines: number) => void) {
     link: (children: string, meta: { href: string }) => `[${children}](${destination(meta.href)})`,
     image: (children: string, meta: { src: string }) => `[${children || "image"}](${destination(meta.src)})`,
     paragraph: block,
-    html: (children: string) => holdsCommand(children) ? `${commandMark}\n\n` : "",
+    html: () => `${commandMark}\n\n`,
     heading: (children: string) => `**${children.trim()}**\n\n`,
     hr: () => "\\---\n\n",
     blockquote: (children: string) => `${children.trimEnd().split("\n").map((line) => line ? `> ${line}` : ">").join("\n")}\n\n`,
