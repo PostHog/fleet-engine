@@ -175,9 +175,9 @@ publishes a new page. Without a handler, fleet writes the page to display/receip
 prints its path, links nothing in the block, and records the PR itself as the receipt unless one is recorded. The
 page shows the proof of each commit in the order it was proved or reviewed, each review round with its lenses and
 findings, the judge verdicts, the gaps with their decisions, the screenshots, the lines and notes of each owed proof,
-the decisions, and what was not checked. A note shows its prose up to its first command, a line where a
-\$ starts the text in any Markdown container, and leaves out everything after it. Fenced and indented code is left
-out wherever it sits, HTML shows as text, and headings show as bold lines. When the handler's request is over ${receiptBudget}
+the decisions, and what was not checked. A note shows its prose up to its first command, a \$ that starts
+its line, table cell or text run, followed by a space, and leaves out everything after it. Fenced and indented code
+and HTML blocks are left out wherever they sit, and headings show as bold lines. When the handler's request is over ${receiptBudget}
 bytes, the page leaves out the raw lens answers, then the judge reasons, then note lines past the 40th, and says so.
 fleet refuses an empty body read, a body that changed between its read and the write,
 broken markers, a write that would change the merge-risk callout, and a body that reads back different. It warns about each proof without a line and each screenshot

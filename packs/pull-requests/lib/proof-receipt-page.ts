@@ -70,7 +70,7 @@ function proseShape(count: (lines: number) => void) {
     link: (children: string, meta: { href: string }) => `[${children}](${destination(meta.href)})`,
     image: (children: string, meta: { src: string }) => `[${children || "image"}](${destination(meta.src)})`,
     paragraph: block,
-    html: block,
+    html: () => "",
     heading: (children: string) => `**${children.trim()}**\n\n`,
     hr: () => "\\---\n\n",
     blockquote: (children: string) => `${children.trimEnd().split("\n").map((line) => line ? `> ${line}` : ">").join("\n")}\n\n`,

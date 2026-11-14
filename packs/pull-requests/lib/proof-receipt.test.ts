@@ -598,7 +598,7 @@ test("a page over the byte budget drops raw lens answers, then judge reasons, th
   expect(patches(lens.pr)).toBe(patched);
 });
 
-test("stored text stays text on the page: command output in lists and quotes is left out, tags show as text, and a backtick run cannot close its fence", async () => {
+test("stored text stays text on the page: command output in lists and quotes and raw HTML in notes are left out, tags in lens answers show as text, and a backtick run cannot close its fence", async () => {
   const { pr, handler, file } = await pagePr({ answer: lensAnswer("</td></tr></table><h1>FAKE PASS</h1>").replace("COVERED", "````\nCOVERED") });
   const note = ["Before the list.", "", "- The transcript:", "", "    ```sh", "    $ curl https://sandbox.example", "    TOKEN=private-value", "    ```", "",
     "> ~~~", "> $ bun run status", "> SECRET=quoted-value", "> ~~~", "", "> exit=0", "After the quote.", "", "1. ```sh", "   LISTED=list-value", "   ```", "After the listed fence.", "<details open><summary>ALL PASS</summary></details>", "",
@@ -612,9 +612,9 @@ test("stored text stays text on the page: command output in lists and quotes is 
   expect((await pr.fleet("receipt")).code).toBe(0);
   const page = pageOf(handler);
   expect([...page.matchAll(/^\| (\d) \| `[0-9a-f]{7}` \| [^|]+ \| 2026-10-25 (\d\d):00 UTC \|/gm)].map((match) => `${match[1]} ${match[2]}`)).toEqual(["1 12", "2 13", "3 14"]);
-  for (const kept of ["Before the list.", "After the quote.", "After the listed fence.", "**Mailbox check**", "**Result**", "&lt;/td>&lt;/tr>&lt;/table>&lt;h1>FAKE PASS&lt;/h1>", "&lt;details open>&lt;summary>ALL PASS&lt;/summary>&lt;/details>"]) expect(page).toContain(kept);
+  for (const kept of ["Before the list.", "After the quote.", "After the listed fence.", "**Mailbox check**", "**Result**", "&lt;/td>&lt;/tr>&lt;/table>&lt;h1>FAKE PASS&lt;/h1>"]) expect(page).toContain(kept);
   const shown = page.replace(/<details>\n<summary>Raw answer[\s\S]*?<\/details>/g, "");
-  for (const output of ["curl", "TOKEN=private-value", "LISTED=list-value", "bun run status", "SECRET=quoted-value", "exit=0", "<h1>", "<details open>", "INDENTED=code-value", "UNFENCED=output-value", "bun run check", "FENCED=probe-value", "bun run probe", "After the transcript.", "After the fenced transcript.", "# Mailbox check", "## Result"]) expect(shown).not.toContain(output);
+  for (const output of ["curl", "TOKEN=private-value", "LISTED=list-value", "bun run status", "SECRET=quoted-value", "exit=0", "<h1>", "<details open>", "INDENTED=code-value", "UNFENCED=output-value", "bun run check", "FENCED=probe-value", "bun run probe", "After the transcript.", "After the fenced transcript.", "# Mailbox check", "## Result", "ALL PASS"]) expect(shown).not.toContain(output);
   const raw = /<summary>Raw answer of the Correctness lens, by gpt-6\.1-sol<\/summary>\n\n(`+)text\n/.exec(page);
   expect(raw?.[1]).toBe("`````");
 });
@@ -765,5 +765,5 @@ test("code is left out of the page where the parser puts it, indented or fenced,
   for (const written of ["\\`\\`\\` opens a fence in Markdown.", "\\- lazy line stays."]) expect(shown).toContain(written);
   expect(page.slice(page.indexOf("Before the code."), page.indexOf("After the code."))).not.toMatch(/```|~~~/);
   for (const kept of ["Before the code.", "A quote.", "An item.", "Tabbed:", "| Step | Result |", "Outer item.", "Nested item stays.", "lazy line stays.", "A line after a carriage return stays.", "A table item.", "A task step.", "to the test inbox.", "The inbox shows the verification.", "After the fence.", "After the quoted fence.", "After the blank quoted fence.", "After the code."]) expect(page).toContain(kept);
-  for (const output of ["TOP=", "NUMBERED=", "QUOTED=", "ITEM=", "TABBED=", "TABLED=", "FIRST=", "CR_FIRST=", "CR_SECOND=", "TABLE_CODE=", "HEADED=", "MARKED=", "TASKED=", "DELIMITED=", "FENCED_LIST=", "FENCED_QUOTE=", "QUOTED_FENCE=", "QUOTED_BLANK=", "FORGED=", "BULK_", "$ stays as written", "$ HTML_ENTITY_OUT", "\uE003", "fleet proof run"]) expect(Bun.markdown.html(page)).not.toContain(output);
+  for (const output of ["TOP=", "NUMBERED=", "QUOTED=", "ITEM=", "TABBED=", "TABLED=", "FIRST=", "CR_FIRST=", "CR_SECOND=", "TABLE_CODE=", "HEADED=", "MARKED=", "TASKED=", "DELIMITED=", "FENCED_LIST=", "FENCED_QUOTE=", "QUOTED_FENCE=", "QUOTED_BLANK=", "FORGED=", "BULK_", "$ stays as written", "HTML_ENTITY_OUT", "\uE003", "fleet proof run"]) expect(Bun.markdown.html(page)).not.toContain(output);
 });
