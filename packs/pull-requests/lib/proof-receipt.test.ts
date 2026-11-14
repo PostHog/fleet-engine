@@ -723,7 +723,7 @@ test("a note shows its prose up to its first command, whatever markup the comman
   };
   await pr.fleet("save", "--kind", "live-run", "--ran", "Sent a test email", "--result", "Delivered",
     ...Object.entries(commands).map(([name, lines]) => file(`${name}.md`, [`Before ${name}.`, "", ...lines, "", `After ${name}.`, "", "More prose."].join("\n"))),
-    file("prices.md", "It costs $5 a month.\n\n$5 a month is the price.\n\n**$HOME** holds it.\n"));
+    file("prices.md", "It costs $5 a month.\n\n$5 a month is the price.\n\n**$HOME** holds it.\n\nThe log uses `$` as the shell prompt.\n\nTotal: **$** 5.\n\nThe inbox shows the delivery.\n"));
   expect((await pr.fleet("gate")).code).toBe(0);
   expect((await pr.fleet("receipt")).code).toBe(0);
   const page = Bun.markdown.html(pageOf(handler));
@@ -732,8 +732,8 @@ test("a note shows its prose up to its first command, whatever markup the comman
     expect(page).not.toContain(`After ${name}.`);
     expect(page).not.toContain(`${name.toUpperCase()}=`);
   }
-  for (const output of ["bun run", "cat status", "exit=0", "More prose.", "\uE004"]) expect(page).not.toContain(output);
-  for (const prose of ["It costs $5 a month.", "$5 a month is the price.", "<strong>$HOME</strong> holds it."]) expect(page).toContain(prose);
+  for (const output of ["bun run", "cat status", "exit=0", "More prose.", "\uE004", "\uE005", "\uE006"]) expect(page).not.toContain(output);
+  for (const prose of ["It costs $5 a month.", "$5 a month is the price.", "<strong>$HOME</strong> holds it.", "<code>$</code> as the shell prompt.", "<strong>$</strong> 5.", "The inbox shows the delivery."]) expect(page).toContain(prose);
 });
 
 test("code is left out of the page where the parser puts it, indented or fenced, whatever a line starts with, while prose that repeats a code line, nested lists and lazy lines stay", async () => {

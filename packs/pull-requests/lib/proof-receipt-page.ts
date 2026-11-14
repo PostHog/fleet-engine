@@ -34,6 +34,15 @@ const fenced = (text: string) => {
 
 const codeMark = "\uE003";
 const commandMark = "\uE004";
+const loneDollar = "\uE005";
+const loneDollarEnd = "\uE006";
+const marks = /[\uE004-\uE006]/g;
+
+function markCommand(text: string) {
+  if (/^[^\p{L}\p{N}$]*\$[^\p{L}\p{N}\s]*\s+\S/u.test(text)) return text.replace("$", `${commandMark}$`);
+  if (/^[^\p{L}\p{N}$]*\$[^\p{L}\p{N}\s]*$/u.test(text)) return `${text.replace("$", `${loneDollar}$`)}${loneDollarEnd}`;
+  return text;
+}
 const indentedLists = 8;
 const escaped = (text: string) => text.replace(/[\\`*_[\]~|&]/g, "\\$&");
 const unescaped = (text: string) => text.replace(/\\(.)/g, "$1");
@@ -54,7 +63,7 @@ const leadOf = (line: string) => line.replace(/^(?:[^\p{L}\p{N}$]|\d+[.)])+/u, "
 function proseShape(count: (lines: number) => void) {
   let headerCells = 0;
   return {
-    text: (text: string) => `${/^[^\p{L}\p{N}$]*\$/u.test(text) ? commandMark : ""}${escaped(text)}`,
+    text: (text: string) => markCommand(escaped(text)),
     codespan: codeSpan,
     strong: (children: string) => `**${children}**`,
     emphasis: (children: string) => `_${children}_`,
@@ -85,7 +94,7 @@ function proseShape(count: (lines: number) => void) {
 export function proseOf(text: string) {
   let left = 0;
   const lines = Bun.markdown.render(text, proseShape((lines) => { left += lines; })).split("\n");
-  const firstCommand = lines.findIndex((line) => /\uE004[^\p{L}\p{N}$]*\$(?![\p{L}\p{N}])/u.test(line));
+  const firstCommand = lines.findIndex((line) => line.includes(commandMark) || /\uE005\$[^\p{L}\p{N}\s]*\uE006\s+\S/u.test(line));
   const prose = firstCommand === -1 ? lines : lines.slice(0, firstCommand);
   for (const line of lines.slice(prose.length)) if (/\S/.test(line) && !line.includes(codeMark)) left++;
   const kept = prose.filter((line) => {
@@ -94,7 +103,7 @@ export function proseOf(text: string) {
     left++;
     return false;
   });
-  return { text: kept.join("\n").replaceAll(commandMark, "").replace(/\n{3,}/g, "\n\n").trim(), left };
+  return { text: kept.join("\n").replace(marks, "").replace(/\n{3,}/g, "\n\n").trim(), left };
 }
 
 const severities = ["blocker", "major", "minor", "nit", "high", "medium", "low"];
