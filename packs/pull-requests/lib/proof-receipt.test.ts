@@ -732,13 +732,14 @@ test("a note shows its prose up to its first command, whatever markup the comman
     htmlblock: ["<details>", "$ bun run htmlblock", "", "HTMLBLOCK=private-value", "</details>"],
     htmlentity: ["<div>", "&#36; bun run htmlentity", "", "HTMLENTITY=private-value"],
     htmlinline: ["<p>Ran: <code>$&nbsp;bun run htmlinline</code></p>", "", "HTMLINLINE=private-value"],
-    htmltag: ["<p>Ran: <b>$</b> bun run htmltag</p>", "", "HTMLTAG=private-value"],
+    htmltag: ["<p><b>$</b> bun run htmltag</p>", "", "HTMLTAG=private-value"],
+    htmlrun: ["<p><b>Ran:</b> $ bun run htmlrun</p>", "", "HTMLRUN=private-value"],
     forged: ["$ cat status.log", "\"exit=0\"", "- exit=0", "> exit=0", "```", "exit=0", "```", "FORGED=private-value", "exit=0"],
     open: ["$ bun run open", "OPEN=private-value"],
   };
   await pr.fleet("save", "--kind", "live-run", "--ran", "Sent a test email", "--result", "Delivered",
     ...Object.entries(commands).map(([name, lines]) => file(`${name}.md`, [`Before ${name}.`, "", ...lines, "", `After ${name}.`, "", "More prose."].join("\n"))),
-    file("prices.md", "It costs $5 a month.\n\n$5 a month is the price.\n\n**$HOME** holds it.\n\nThe log uses `$` as the shell prompt.\n\nTotal: **$** 5.\n\n&#36;5 is the fee.\n\n$5&#32;is the fee too.\n\nPrice: \\$ 5 per month.\n\nThe shell prompt is &#36; on this machine.\n\nFees &amp; $ 5 per month.\n\n<p>Costs $5.</p>\n\nAfter the HTML block.\n\nThe inbox shows the delivery.\n"));
+    file("prices.md", "It costs $5 a month.\n\n$5 a month is the price.\n\n**$HOME** holds it.\n\nThe log uses `$` as the shell prompt.\n\nTotal: **$** 5.\n\n&#36;5 is the fee.\n\n$5&#32;is the fee too.\n\nPrice: \\$ 5 per month.\n\nThe shell prompt is &#36; on this machine.\n\nFees &amp; $ 5 per month.\n\n<p>Costs $5.</p>\n\nAfter the HTML block.\n\n<p>The test costs $ 5 per run.</p>\n\n<p>Ran: <b>$</b> 5 per run.</p>\n\nThe message arrived in the inbox.\n\nThe inbox shows the delivery.\n"));
   expect((await pr.fleet("gate")).code).toBe(0);
   expect((await pr.fleet("receipt")).code).toBe(0);
   const page = Bun.markdown.html(pageOf(handler));
@@ -748,7 +749,7 @@ test("a note shows its prose up to its first command, whatever markup the comman
     expect(page).not.toContain(`${name.toUpperCase()}=`);
   }
   for (const output of ["bun run", "cat status", "exit=0", "More prose.", "\uE004"]) expect(page).not.toContain(output);
-  for (const prose of ["It costs $5 a month.", "$5 a month is the price.", "<strong>$HOME</strong> holds it.", "<code>$</code> as the shell prompt.", "<strong>$</strong> 5.", "$5 is the fee.", "$5 is the fee too.", "Price: $ 5 per month.", "The shell prompt is $ on this machine.", "Fees &amp; $ 5 per month.", "After the HTML block.", "The inbox shows the delivery."]) expect(page).toContain(prose);
+  for (const prose of ["It costs $5 a month.", "$5 a month is the price.", "<strong>$HOME</strong> holds it.", "<code>$</code> as the shell prompt.", "<strong>$</strong> 5.", "$5 is the fee.", "$5 is the fee too.", "Price: $ 5 per month.", "The shell prompt is $ on this machine.", "Fees &amp; $ 5 per month.", "After the HTML block.", "The message arrived in the inbox.", "The inbox shows the delivery."]) expect(page).toContain(prose);
 });
 
 test("code is left out of the page where the parser puts it, indented or fenced, whatever a line starts with, while prose that repeats a code line, nested lists and lazy lines stay", async () => {

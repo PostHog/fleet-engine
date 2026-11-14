@@ -51,7 +51,10 @@ function codeSpan(children: string) {
 
 const leadOf = (line: string) => line.replace(/^(?:\[[xX]\]|\d+[.)]|[^\p{L}\p{N}$])+/u, "");
 const startsCommand = (text: string) => /^\$[^\p{L}\p{N}\s]*\s/u.test(leadOf(text));
-const holdsCommand = (html: string) => /\$[^\p{L}\p{N}\s$]*\s/u.test(html.replace(/<[^<>]*>/g, "").replace(/&#0*36;|&#x0*24;|&dollar;/gi, "$").replace(/&[#\w]+;/g, " "));
+const tag = /<[^<>]*>/g;
+const decoded = (html: string) => html.replace(/&#0*36;|&#x0*24;|&dollar;/gi, "$").replace(/&[#\w]+;/g, " ");
+const startsRun = (text: string) => /^[^\p{L}\p{N}$]*\$[^\p{L}\p{N}\s]*\s/u.test(text);
+const holdsCommand = (html: string) => html.split("\n").some((line) => startsCommand(decoded(line.replace(tag, ""))) || line.split(tag).some((run) => startsRun(decoded(run))));
 const marked = (text: string) => `${startsCommand(text) ? commandMark : ""}${text}`;
 
 function proseShape(count: (lines: number) => void) {
