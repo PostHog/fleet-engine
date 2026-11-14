@@ -50,7 +50,8 @@ function codeSpan(children: string) {
   return `${fence}${pad}${text}${pad}${fence}`;
 }
 
-const tag = /<[^<>]*>/g;
+const tag = /<\/?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?\/?>/g;
+const wholeTag = new RegExp(`^${tag.source}$`);
 const leadOf = (line: string) => line.replace(/^(?:\[[xX]\]|\d+[.)]|[^\p{L}\p{N}$])+/u, "");
 const startsCommand = (text: string) => /^\$[^\p{L}\p{N}\s]*\s/u.test(leadOf(text.replace(tag, "")));
 const marked = (text: string) => `${startsCommand(text) ? commandMark : ""}${text}`;
@@ -61,8 +62,10 @@ function proseShape(count: (lines: number) => void) {
   const closed = (inline: boolean) => { runStart = inline && runStart === "$" ? "$" : ""; };
   const text = (written: string) => {
     const text = unmarked(written);
-    if (/^<\/[^<>]*>$/.test(text)) closed(true);
-    if (/^<[^<>]*>$/.test(text)) return escaped(text);
+    if (wholeTag.test(text)) {
+      if (text.startsWith("</")) closed(true);
+      return escaped(text);
+    }
     const lead = runStart === undefined ? undefined : `${runStart}${text}`.replace(/^[^\p{L}\p{N}$]*/u, "");
     const command = lead !== undefined && /^\$[^\p{L}\p{N}\s]*\s/u.test(lead);
     runStart = lead === "" ? "" : lead !== undefined && /^\$[^\p{L}\p{N}\s]*$/u.test(lead) ? "$" : undefined;
