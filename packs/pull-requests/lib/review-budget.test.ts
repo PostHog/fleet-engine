@@ -3,9 +3,17 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawnAsync } from "../../../src/testing/spawn.ts";
-import { checkout, cleanFixtures, fakeModel, finishRound, graded, markPanel, reviewHead, settings } from "./proof-testing.ts";
+import { checkout, cleanFixtures, fakeModel, finishRound, graded, settings, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
+
+async function panelReview(pr: Checkout) {
+  const changed = (await pr.git("diff", "--name-only", "refs/remotes/origin/main...HEAD")).split("\n").filter(Boolean);
+  fakeModel(pr, "REVIEWER", `FINDINGS:\n(none)\nCOVERED: ${changed.join(", ")}\n`);
+  await pr.fleet("review", "--lens", "correctness");
+  expect((await pr.fleet("review", "--wait")).code).toBe(0);
+  return pr.git("rev-parse", "HEAD");
+}
 
 const continueArbiter = (record = "/dev/null") => `cat > "${record}"; echo CONTINUE`;
 
@@ -14,9 +22,7 @@ test("minor and nit findings need no answer, while a blocker, a major, a finding
   pr.pullRequestState({ body: graded("non-critical", "medium") });
   const panel = await pr.commit("feature.txt", "new\n");
   await pr.fleet("require", "--none", "--reason", "docs only");
-  await pr.fleet("review-start", "--scope", "full");
-  writeFileSync(join(pr.repository, "findings.md"), [
-    "## Correctness",
+  fakeModel(pr, "REVIEWER", [
     "FINDINGS:",
     "- feature.txt:1 | major | Correctness | the greeting drops the name -> members see no name | greet by name | anchor: new",
     "- feature.txt:1 | minor | Design | a helper could go -> one more name | inline it | anchor: new",
@@ -27,8 +33,8 @@ test("minor and nit findings need no answer, while a blocker, a major, a finding
     "- feature.test.ts:3 asserts the call count of greet",
     "",
   ].join("\n"));
-  await pr.fleet("review-finish", "--round", "1", "--reviewer", "gpt-6.1-sol", "findings.md");
-  markPanel(pr, "1");
+  await pr.fleet("review", "--lens", "correctness");
+  await pr.fleet("review", "--wait");
 
   const gate = await pr.fleet("gate");
   expect(gate.code).toBe(1);
@@ -60,8 +66,8 @@ test("minor and nit findings need no answer, while a blocker, a major, a finding
 test("a blocker in the Known issues section of the PR body holds the merge, and a major there does not", async () => {
   const pr = await checkout();
   await pr.commit("feature.txt", "new\n");
-  await reviewHead(pr);
   await pr.fleet("require", "--none", "--reason", "docs only");
+  await panelReview(pr);
 
   pr.pullRequestState({ body: "Greets new members.\n\n## Known issues\n\n- major: feature.txt:1 the greeting is plain\n" });
   expect((await pr.fleet("gate")).code).toBe(0);
@@ -158,7 +164,7 @@ test("the last read reads every fix since the panel commit with the Correctness 
   pr.pullRequestState({ body: graded("non-critical", "medium") });
   const panel = await pr.commit("feature.txt", "greet\n");
   await pr.fleet("require", "--none", "--reason", "fixture");
-  await reviewHead(pr);
+  await panelReview(pr);
   const fixes = await pr.commit("feature.txt", "greet the member\n");
   await pr.fleet("review-start", "--scope", "fixes", "--base", panel);
   await finishRound(pr, "2");
@@ -206,7 +212,8 @@ test("a first final read from the panel commit reads with the Correctness lens t
 test("fleet proof miss records --introduced-by-fix on the case", async () => {
   const pr = await checkout();
   await pr.commit("feature.txt", "greet the new member\n");
-  await reviewHead(pr);
+  await pr.fleet("require", "--none", "--reason", "fixture");
+  await panelReview(pr);
 
   const recorded = await pr.fleet("miss", "--source", "human", "--finding", "The fix drops the member's name", "--introduced-by-fix");
   expect(JSON.parse(recorded.output)).toMatchObject({ introducedByFix: true });
@@ -221,7 +228,7 @@ test("a revert of a PR commit, or a commit that only deletes test files, keeps t
   await pr.commit("feature.txt", "greet\n");
   await pr.commit("feature.test.ts", "test(\"greets\", () => {});\n");
   await pr.fleet("require", "--none", "--reason", "fixture");
-  await reviewHead(pr);
+  await panelReview(pr);
 
   const fix = await pr.commit("feature.txt", "greet the member\n");
   expect((await pr.fleet("gate")).code).toBe(1);
@@ -264,7 +271,7 @@ test("deleting a test file that code imports needs a new review", async () => {
   await pr.commit("policy.test.ts", "export const policy = 1;\n");
   await pr.commit("app.ts", "import { policy } from \"./policy.test.ts\";\nexport const app = policy;\n");
   await pr.fleet("require", "--none", "--reason", "fixture");
-  await reviewHead(pr);
+  await panelReview(pr);
   await pr.git("rm", "-q", "policy.test.ts");
   await pr.git("commit", "-q", "-m", "drop the policy");
   expect((await pr.fleet("gate")).code).toBe(1);
@@ -276,7 +283,7 @@ test("a known answer waits for the budget of its own phase", async () => {
   pr.env.FLEET_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 2, "pull-requests.reviewCeiling": 2 });
   await pr.commit("feature.txt", "greet\n");
   await pr.fleet("require", "--none", "--reason", "fixture");
-  const panel = await reviewHead(pr);
+  const panel = await panelReview(pr);
   const read = await pr.commit("feature.txt", "greet the member\n");
   await pr.fleet("review-start", "--scope", "final", "--base", panel);
   writeFileSync(join(pr.repository, "findings.md"), "No findings.\n");
@@ -295,7 +302,7 @@ test("a revert carries only from a reviewed commit before the reverted one", asy
   pr.pullRequestState({ body: graded("non-critical", "medium") });
   await pr.commit("feature.txt", "greet\n");
   await pr.fleet("require", "--none", "--reason", "fixture");
-  const panel = await reviewHead(pr);
+  const panel = await panelReview(pr);
   const first = await pr.commit("feature.txt", "greet the member\n");
   const second = await pr.commit("feature.txt", "greet the new member\n");
   await pr.fleet("review-start", "--scope", "final", "--base", panel);
@@ -326,7 +333,7 @@ test("a review that another one overtakes while it weighs the budget backs out",
   pr.env.FLEET_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 2, "pull-requests.reviewCeiling": 3 });
   await pr.commit("feature.txt", "greet\n");
   await pr.fleet("require", "--none", "--reason", "fixture");
-  const panel = await reviewHead(pr);
+  const panel = await panelReview(pr);
   await pr.commit("feature.txt", "greet the member\n");
   await pr.fleet("review-start", "--scope", "fixes", "--base", panel);
   await finishRound(pr, "2");
