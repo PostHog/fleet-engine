@@ -51,6 +51,7 @@ function codeSpan(children: string) {
 
 const leadOf = (line: string) => line.replace(/^(?:\[[xX]\]|\d+[.)]|[^\p{L}\p{N}$])+/u, "");
 const startsCommand = (text: string) => /^\$[^\p{L}\p{N}\s]*\s/u.test(leadOf(text));
+const holdsCommand = (html: string) => /\$[^\p{L}\p{N}\s$]*\s/u.test(html.replace(/<[^<>]*>/g, "").replace(/&#0*36;|&#x0*24;|&dollar;/gi, "$").replace(/&[#\w]+;/g, " "));
 const marked = (text: string) => `${startsCommand(text) ? commandMark : ""}${text}`;
 
 function proseShape(count: (lines: number) => void) {
@@ -70,7 +71,7 @@ function proseShape(count: (lines: number) => void) {
     link: (children: string, meta: { href: string }) => `[${children}](${destination(meta.href)})`,
     image: (children: string, meta: { src: string }) => `[${children || "image"}](${destination(meta.src)})`,
     paragraph: block,
-    html: () => "",
+    html: (children: string) => holdsCommand(children) ? `${commandMark}\n\n` : "",
     heading: (children: string) => `**${children.trim()}**\n\n`,
     hr: () => "\\---\n\n",
     blockquote: (children: string) => `${children.trimEnd().split("\n").map((line) => line ? `> ${line}` : ">").join("\n")}\n\n`,
