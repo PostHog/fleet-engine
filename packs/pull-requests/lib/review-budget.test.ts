@@ -63,6 +63,18 @@ test("minor and nit findings need no answer, while a blocker, a major, a finding
   expect(prompt).not.toContain("asserts the call count");
 });
 
+test("TESTS items number after every finding, so a TESTS block between lenses moves no finding's number", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: graded("non-critical", "medium") });
+  await pr.commit("feature.txt", "new\n");
+  await pr.fleet("require", "--none", "--reason", "fixture");
+  fakeModel(pr, "REVIEWER", "FINDINGS:\n- feature.txt:1 | minor | the greeting reads plain | anchor: new\nCOVERED: feature.txt\nTESTS:\n- feature.test.ts:3 asserts the call count of greet\n");
+  await pr.fleet("review", "--lens", "correctness", "--lens", "design");
+  await pr.fleet("review", "--wait");
+  writeFileSync(join(pr.repository, "responses.md"), "1. rejected: noted.\n");
+  await expect(pr.fleet("respond", "--round", "1", "responses.md")).rejects.toThrow("Answer findings 3, 4 too");
+});
+
 test("a blocker in the Known issues section of the PR body holds the merge, and a major there does not", async () => {
   const pr = await checkout();
   await pr.commit("feature.txt", "new\n");

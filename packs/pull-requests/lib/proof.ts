@@ -462,13 +462,18 @@ function reviewedLines(findings: string) {
   const lines = findings.split("\n");
   const lensAnswer = lines.some((line) => findingsBlock.test(line));
   let inside = !lensAnswer;
-  return lines.flatMap((line) => {
-    if (findingsBlock.test(line)) { inside = true; return [line.replace(findingsBlock, "")]; }
-    if (testsBlock.test(line)) { inside = true; return []; }
-    if (/^COVERED\b/.test(line)) inside = false;
-    else if (!lensAnswer && /^#/.test(line)) inside = true;
-    return inside ? [line] : [];
-  });
+  let tests = false;
+  const kept: string[] = [];
+  const tested: string[] = [];
+  for (const line of lines) {
+    if (testsBlock.test(line)) { tests = true; inside = false; continue; }
+    if (findingsBlock.test(line)) { tests = false; inside = true; kept.push(line.replace(findingsBlock, "")); continue; }
+    if (/^COVERED\b/.test(line)) { tests = false; inside = false; }
+    else if (/^#/.test(line)) { tests = false; if (!lensAnswer) inside = true; }
+    if (tests) tested.push(line);
+    else if (inside) kept.push(line);
+  }
+  return tested.length ? [...kept, "", ...tested] : kept;
 }
 
 function ladderFindings(findings: string) {
