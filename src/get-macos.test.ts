@@ -66,7 +66,7 @@ describe("get.sh", () => {
 
   onLinuxHost.each([
     ["gh", { without: ["gh"] }, "https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_macOS_amd64.zip", "gh checksum mismatch."],
-    ["Bun", { without: ["bun"] }, "https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-darwin-x64.zip", "Bun checksum mismatch."],
+    ["Bun", { without: ["bun"] }, "https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-darwin-x64.zip", "Bun checksum mismatch."],
   ] as const)("on macOS downloads %s for the Mac's chip from its pinned release, and refuses a file that does not match the pinned checksum", (_tool, options, url, refusal) => {
     const box = sandbox("Darwin", { ...options, without: [...options.without], t3App: true });
     const result = getSh(box, ["--ref", "v0.1.0", "--install-only"]);
@@ -79,7 +79,7 @@ describe("get.sh", () => {
 
   onLinuxHost.each([
     ["gh", "https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_macOS_arm64.zip"],
-    ["bun", "https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-darwin-aarch64.zip"],
+    ["bun", "https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-darwin-aarch64.zip"],
   ])("on an Apple silicon Mac whose shell runs under Rosetta, downloads the arm64 %s", (tool, url) => {
     const box = sandbox("Darwin", { without: [tool], t3App: true });
     box.stub("sysctl", '[ "$*" = "-n sysctl.proc_translated" ] && echo 1');
