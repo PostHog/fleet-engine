@@ -16,9 +16,9 @@ type Block = { type?: string; text?: string; name?: string };
 type Step = { text: string } | { asked: true };
 
 export const questionToolReason = (person: string) => `Fleet blocked this stop: your last message asks ${person} a decision in prose. `
-  + "While a PR watch, a thread wait, or a Monitor is awaited, T3 keeps this thread under Working, so the question never reaches them. "
+  + "While its PR checks, a thread wait, or a Monitor run, or while it is snoozed, T3 keeps this thread out of their inbox, so the question may never reach them. "
   + "Ask it now with the question tool (AskUserQuestion in Claude, request_user_input in Codex): restate the decision in full, with options. "
-  + `A pending question brings the thread back to ${person} even while it watches. If you asked nothing, end the turn again.`;
+  + `A pending question brings the thread back to ${person} even while it watches or is snoozed. If you asked nothing, end the turn again.`;
 
 const questionTool = /(^|__)(AskUserQuestion|request_user_input)$/;
 
