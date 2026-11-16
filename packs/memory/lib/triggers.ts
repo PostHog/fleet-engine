@@ -79,6 +79,21 @@ const escape = (term: string) => term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 export const names = (term: string, text: string) => new RegExp(`(?<![\\w-])${escape(term)}(?![\\w-])`, "i").test(text);
 
+/**
+ * The names a tool goes by. A note names an MCP tool by its short name, but Claude calls `mcp__t3-code__t3_thread_send`,
+ * and a proxy that merges servers adds its upstream's name: `mcp__proxy-grafana-us__grafana-us-query_prometheus`.
+ * Whole-word matching misses both, so a term also matches the name without the `mcp__<server>__` prefix and without
+ * the end of the server name put before it.
+ */
+export function toolNames(tool: string): string[] {
+  const mcp = /^mcp__(.+?)__(.+)$/.exec(tool);
+  if (!mcp) return [tool];
+  const [, server, name] = mcp;
+  const parts = server.split("-");
+  const prefix = parts.map((_, index) => `${parts.slice(index).join("-")}-`).find((candidate) => name.startsWith(candidate));
+  return [tool, name, ...(prefix && name.length > prefix.length ? [name.slice(prefix.length)] : [])];
+}
+
 export function textsOf(value: unknown): string[] {
   if (typeof value === "string") return [value];
   if (value && typeof value === "object") return Object.values(value).flatMap(textsOf);
