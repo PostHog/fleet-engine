@@ -89,7 +89,28 @@ function parseFlags(args: string[], table: string) {
   return { flags, operands };
 }
 
-function parseGh(args: string[]): Gh {
+function commandWordAt(args: string[], from: number): number {
+  for (let index = from; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === "--") return -1;
+    if (!arg.startsWith("-")) {
+      if (arg) return index;
+    } else if (arg !== "-" && !arg.includes("=") && !/^-[^-]./.test(arg) && !["-h", "--help", "--version"].includes(arg)) index++;
+  }
+  return -1;
+}
+
+function inOrder(args: string[]): string[] {
+  if (!args[0]?.startsWith("-")) return args;
+  const groupAt = commandWordAt(args, 0);
+  if (groupAt < 0) return args;
+  const group = args[groupAt];
+  const actionAt = singleCommands.has(aliases[group] ?? group) ? -1 : commandWordAt(args, groupAt + 1);
+  return [group, ...(actionAt < 0 ? [] : [args[actionAt]]), ...args.filter((_, index) => index !== groupAt && index !== actionAt)];
+}
+
+function parseGh(given: string[]): Gh {
+  const args = inOrder(given);
   const [group = "", action = ""] = parseFlags(args, valuedFlags.other).operands.map((word) => aliases[word] ?? word);
   const table = valuedFlags[`${group} ${action}`] ?? valuedFlags[group] ?? valuedFlags.other;
   const { flags, operands } = parseFlags(args, table);

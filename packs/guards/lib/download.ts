@@ -181,7 +181,7 @@ function installedVersion(name: string, cwd: string | undefined): string | undef
 
 function hasVersion(spec: string, cwd: string | undefined): boolean {
   const range = npmRange(spec);
-  if (range === undefined) return true;
+  if (range === undefined) return spec === bareName(spec);
   const version = installedVersion(bareName(spec), cwd);
   return version !== undefined && Bun.semver.satisfies(version, range);
 }

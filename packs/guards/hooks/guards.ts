@@ -13,6 +13,7 @@ export type ToolCall = { tool_name?: string; tool_input?: Record<string, unknown
 export type Denial = { hookSpecificOutput: { hookEventName: "PreToolUse"; permissionDecision: "deny"; permissionDecisionReason: string } };
 
 const fallbackPerson = "the person who runs this machine";
+const shellTools = new Set(["Bash", "exec_command", "shell", "shell_command", "local_shell"]);
 
 type Settings = { person: string; owners: Set<string> | null; mainPushRepos: Set<string>; unreadable?: string };
 
@@ -47,7 +48,7 @@ const uncheckedReason = (error: unknown, person: string) => `Fleet blocked this 
 
 function check(call: ToolCall, { person, owners, mainPushRepos, unreadable }: Settings): string | undefined {
   if (isTaskStatus(call.tool_name)) return repeatsTaskStatus(call) ? repeatedStatusReason(person) : undefined;
-  if (call.tool_name !== "Bash") return undefined;
+  if (!shellTools.has(call.tool_name ?? "")) return undefined;
   if (unreadable) return unreadableReason(unreadable, person);
   const command = shellCommand(call.tool_input);
   const cwd = call.cwd ?? "/";
