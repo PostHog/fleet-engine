@@ -209,6 +209,11 @@ export async function analyze(run: string, io: AnalyzeIo): Promise<string> {
   return run;
 }
 
+function reachedLines(run: string): string[] {
+  const path = join(run, "collect.md");
+  return existsSync(path) ? readFileSync(path, "utf8").split("\n").filter((line) => line.startsWith("Reached: ")) : [];
+}
+
 function report(run: string, all: Array<{ file: string; item: Digest }>, cut: number, failed: string[]): string {
   const byKind = new Map<string, string[]>();
   const machines = new Set<string>();
@@ -230,6 +235,7 @@ function report(run: string, all: Array<{ file: string; item: Digest }>, cut: nu
   return [
     `# Dream findings ${basename(run)}`, "",
     `${analyzed} sessions analyzed from ${machines.size} machines (${[...machines].sort().join(", ")}).`,
+    ...reachedLines(run),
     unreached.length ? `Not reached: ${unreached.map((item) => `${item.machine} (${item.reason})`).join(", ")}.` : "",
     cut > 0 ? `${cut} sessions with the fewest messages were left out by --limit.` : "",
     failed.length ? `Analysts failed on:\n${failed.map((line) => `- ${line}`).join("\n")}` : "", "",

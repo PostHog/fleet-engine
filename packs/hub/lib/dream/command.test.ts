@@ -295,8 +295,9 @@ test("final finding 4: collect saves the machines it could not reach in the run,
   expect(await dreamCommand(["prepare"], dream)).toBe(0);
   expect(JSON.parse(readFileSync(join(run, "unreached.json"), "utf8"))).toEqual([{ machine: "devbox-2", reason: "exit 255" }, { machine: "box-b", reason: "exit 1" }]);
   const report = readFileSync(join(run, "findings.md"), "utf8");
-  expect(report.split("\n").slice(0, 4)).toEqual(["# Dream findings 2026-11-05", "", "1 sessions analyzed from 1 machines (devbox-1).", "Not reached: devbox-2 (exit 255), box-b (exit 1)."]);
-  expect(["findings.md", "unreached.json"].filter((file) => readFileSync(join(run, file), "utf8").includes("Secret42"))).toEqual([]);
+  expect(report.split("\n").slice(0, 5)).toEqual(["# Dream findings 2026-11-05", "", "1 sessions analyzed from 1 machines (devbox-1).", "Reached: hub-host (0 sessions), devbox-1 (1 sessions).", "Not reached: devbox-2 (exit 255), box-b (exit 1)."]);
+  expect(existsSync(join(run, "collected"))).toBe(false);
+  expect(["findings.md", "unreached.json", "collect.md"].filter((file) => readFileSync(join(run, file), "utf8").includes("Secret42"))).toEqual([]);
   const { io: again } = io(home, { onPeer: async () => ok(line(digest())), boxes: () => ({ running: async () => { throw new Error(errorText); }, ssh: async () => ok() }) });
   expect(await dreamCommand(["prepare"], again)).toBe(0);
   expect(JSON.parse(readFileSync(join(run, "unreached.json"), "utf8"))).toEqual([{ machine: "boxes", reason: "could not list them" }]);
@@ -337,4 +338,16 @@ test("recheck finding 4: findings.md and the run name only a fixed failure categ
 test("recheck finding 4: a Codex analyst with no answer file fails as a bad answer", async () => {
   const analyst = modelAnalyst(lookup("codex"), hubHome(), {}, async () => ({ code: 0, stdout: "" }));
   await expect(analyst(digest(), "# index", temp.make("fleet-dream-run-"))).rejects.toThrow("bad answer");
+});
+
+test("a collect killed part way asks only the machines it has not read yet in this run, and collect.md names every machine it reached", async () => {
+  const home = hubHome();
+  const run = join(home, ".local/state/fleet/dream/2026-11-05");
+  writeHome(home, { [".local/state/fleet/dream/2026-11-05/collected/devbox-1.jsonl"]: line(digest()) });
+  const { io: dream, peerCalls } = io(home, { onPeer: async (alias, command) => (peerCalls.push(`${alias}: ${command}`), ok(line(digest({ machine: alias, session: `s-${alias}` })))) });
+  expect(await dreamCommand(["collect"], dream)).toBe(0);
+  expect(peerCalls.map((call) => call.split(":")[0])).toEqual(["devbox-2"]);
+  expect(readdirSync(join(run, "digests")).sort()).toEqual(["devbox-1-claude-s-1-20261104110000.json", "devbox-2-claude-s-devbox-20261104110000.json"]);
+  expect(readFileSync(join(run, "collect.md"), "utf8")).toBe("# Dream collect 2026-11-05\n\nReached: hub-host (0 sessions), devbox-1 (1 sessions), devbox-2 (1 sessions).\nNot reached: none.\n");
+  expect(readdirSync(join(run, "collected")).sort()).toEqual(["devbox-1.jsonl", "devbox-2.jsonl"]);
 });
