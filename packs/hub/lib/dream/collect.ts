@@ -37,48 +37,67 @@ export function unseenPart(item: Digest, seen: Record<string, string>): Digest |
   return { ...item, entries };
 }
 
-async function gather(since: number, io: CollectIo) {
+type Reached = { machine: string; sessions: number };
+export const collectedDir = (run: string) => join(run, "collected");
+
+async function gather(since: number, run: string, io: CollectIo) {
   const remote = remoteFleet(`dream digest --since ${quote(new Date(since).toISOString())}`);
   const gathered = parseDigests(digestLines(io.home, io.self, since, io.now(), io.env), io.self, io.say);
+  const reached: Reached[] = [{ machine: io.self, sessions: gathered.length }];
   const failed: string[] = [];
   const unreached: Unreached[] = [];
-  for (const alias of io.peers) {
-    const answer = await io.onPeer(alias, remote);
-    if (answer.code === 0) gathered.push(...parseDigests(answer.stdout, alias, io.say));
-    else {
-      failed.push(`${alias} (exit ${answer.code}: ${answer.stderr.trim().split("\n").pop()})`);
-      unreached.push({ machine: alias, reason: `exit ${answer.code}` });
+  const ask = async (machine: string, call: () => Promise<Result>, failure: (answer: Result) => string) => {
+    const saved = join(collectedDir(run), `${machine}.jsonl`);
+    let text: string;
+    if (existsSync(saved)) {
+      text = readFileSync(saved, "utf8");
+      io.say(`Fleet dream: ${machine} was read earlier in this run.`);
+    } else {
+      const answer = await call();
+      if (answer.code !== 0) {
+        failed.push(failure(answer));
+        unreached.push({ machine, reason: `exit ${answer.code}` });
+        return;
+      }
+      writeFileSync(saved, answer.stdout, { mode: 0o600 });
+      text = answer.stdout;
     }
+    const found = parseDigests(text, machine, io.say);
+    gathered.push(...found);
+    reached.push({ machine, sessions: found.length });
+  };
+  for (const alias of io.peers) {
+    await ask(alias, () => io.onPeer(alias, remote), (answer) => `${alias} (exit ${answer.code}: ${answer.stderr.trim().split("\n").pop()})`);
   }
   try {
     const boxes = io.boxes();
     for (const box of (await boxes?.running()) ?? []) {
-      const answer = await boxes!.ssh(box, `bash -lc ${quote(remote)}`);
-      if (answer.code === 0) gathered.push(...parseDigests(answer.stdout, box, io.say));
-      else {
-        failed.push(`${box} (exit ${answer.code})`);
-        unreached.push({ machine: box, reason: `exit ${answer.code}` });
-      }
+      await ask(box, () => boxes!.ssh(box, `bash -lc ${quote(remote)}`), (answer) => `${box} (exit ${answer.code})`);
     }
   } catch (error) {
     failed.push(`boxes (${(error as Error).message})`);
     unreached.push({ machine: "boxes", reason: "could not list them" });
   }
-  return { gathered, failed, unreached };
+  return { gathered, reached, failed, unreached };
 }
 
+const reachedLine = (reached: Reached[]) => `Reached: ${reached.map((item) => `${item.machine} (${item.sessions} sessions)`).join(", ")}.`;
+const unreachedLine = (unreached: Unreached[]) => `Not reached: ${unreached.map((item) => `${item.machine} (${item.reason})`).join(", ")}.`;
+
 export async function collect(since: string, io: CollectIo): Promise<string> {
-  const { gathered, failed, unreached } = await gather(parseSince(since, io.now()), io);
   const state = stateDir(io.home, io.env);
+  const run = join(state, dateOf(io.now()));
+  mkdirSync(collectedDir(run), { recursive: true, mode: 0o700 });
+  const { gathered, reached, failed, unreached } = await gather(parseSince(since, io.now()), run, io);
   const seen = readSeen(state);
   const newest = new Map<string, Digest>();
   for (const item of gathered) {
     const key = `${item.provider}:${item.session}`;
     if ((newest.get(key)?.endedAt ?? "") <= item.endedAt) newest.set(key, item);
   }
-  const run = join(state, dateOf(io.now()));
   mkdirSync(join(run, "digests"), { recursive: true, mode: 0o700 });
   writeFileSync(unreachedPath(run), JSON.stringify(unreached), { mode: 0o600 });
+  writeFileSync(join(run, "collect.md"), [`# Dream collect ${dateOf(io.now())}`, "", reachedLine(reached), unreached.length ? unreachedLine(unreached) : "Not reached: none.", ""].join("\n"), { mode: 0o600 });
   const usagePath = join(state, "usage.json");
   const usage: Record<string, string> = existsSync(usagePath) ? JSON.parse(readFileSync(usagePath, "utf8")) : {};
   let kept = 0;
