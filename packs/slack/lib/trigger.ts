@@ -10,15 +10,20 @@ const retryFor = day;
 const keepFor = 31 * day;
 const quietFor = 30 * 60_000;
 const followFailures = 3;
+const wisprLookAfter = 30 * 60_000;
 export const followMinutes = 10;
 
 export type Owner = { name: string; slackUserId: string; emoji: string; captureEmoji?: string };
 export type Trigger = { kind: "message" | "reaction" | "capture"; channel: string; ts: string };
 type Message = { user?: string; text?: string; ts: string; thread_ts?: string; files?: Array<{ id?: string; title?: string; filetype?: string; permalink?: string }> };
-export type Captured = { path: string; title: string; url: string; updated: boolean };
-export type Capture = (input: { source: string; material: string }) => Promise<Captured>;
+export type Captured = { path: string; title: string; url: string; updated: boolean; text?: string; wispr?: string };
+export type Capture = (input: { source: string; material: string; startedAt: string }) => Promise<Captured>;
+export type Route = { host: string; id: string; title: string; message: string };
+export type Shared = { sent: (Route & { link?: string })[]; failed: { route: Route; error: string }[] };
+export type Share = (note: { title: string; url: string; text: string }, sentBefore: Route[]) => Promise<Shared>;
 type Pending = { trigger: Trigger; since: number; commandId: string; told?: true; claim?: Claim; reachedT3?: true };
-type Followed = { channel: string; threadTs: string; latestTs: string; failures: number };
+type Followed = { channel: string; threadTs: string; latestTs: string; failures: number; wisprLookAt?: number; shared?: Route[] };
+type WisprLook = "plan" | "keep" | "drop";
 type State = { handled: Record<string, number>; pending: Record<string, Pending>; followed: Record<string, Followed>; next?: number };
 export type Started = { threadId: string; url?: string; where: string };
 export type TriggerDeps = {
@@ -29,6 +34,7 @@ export type TriggerDeps = {
   slack: SlackApi;
   launch: Launch;
   capture?: Capture;
+  share?: Share;
 };
 
 const withoutSkinTone = (reaction: string) => reaction.split("::")[0];
@@ -153,24 +159,56 @@ async function saveToContext(trigger: Trigger, key: string, capture: Capture, de
   const emoji = deps.owner.captureEmoji!;
   const react = (method: "reactions.add" | "reactions.remove", name: string) =>
     deps.slack(method, { channel: trigger.channel, timestamp: trigger.ts, name }).catch((error) => deps.log(`${key}: ${method} :${name}: failed: ${error}`));
+  updateState(deps.statePath, (state) => void (state.pending[key] ??= { trigger, since: deps.now(), commandId: randomUUID() }));
   await react("reactions.add", ackEmoji);
   let thread: string | undefined;
   try {
     const first = (await deps.slack("conversations.replies", { channel: trigger.channel, ts: trigger.ts, limit: "1" })).messages?.[0] as Message | undefined;
     if (!first) throw new Error("the message is gone");
     thread = first.thread_ts;
-    const saved = await captureThread(trigger.channel, first.thread_ts ?? first.ts, capture, deps);
+    const threadTs = first.thread_ts ?? first.ts;
+    const saved = await captureThread(trigger.channel, threadTs, capture, deps, "plan");
+    updateState(deps.statePath, (state) => void delete state.pending[key]);
     await react("reactions.remove", ackEmoji);
     await react("reactions.remove", emoji);
-    return { thread, text: `:${emoji}: ${saved.updated ? "Updated" : "Added"} <${saved.url}|${slackText(saved.title)}> in your context library (\`${slackText(saved.path)}\`). It updates as the thread gets replies.` };
+    const wispr = saved.wispr === "pending" ? " Its Wispr notes are not ready yet, so it looks again in 30 minutes." : hasWispr(saved) ? " It includes the meeting's Wispr notes." : "";
+    const shared = await shareSaved(trigger.channel, threadTs, saved, deps);
+    return { thread, text: `:${emoji}: ${saved.updated ? "Updated" : "Added"} <${saved.url}|${slackText(saved.title)}> in your context library (\`${slackText(saved.path)}\`). It updates as the thread gets replies.${wispr}${shared ? `\n${shared}` : ""}` };
   } catch (error) {
     deps.log(`${key}: capture failed: ${(error as Error).message}`);
+    updateState(deps.statePath, (state) => void delete state.pending[key]);
     await react("reactions.remove", ackEmoji);
     return { thread, text: `:${emoji}: Could not save this to your context library: ${slackText((error as Error).message)}. React again to retry.` };
   }
 }
 
-async function captureThread(channel: string, threadTs: string, capture: Capture, deps: TriggerDeps): Promise<Captured> {
+const hasWispr = (saved: Captured) => !!saved.wispr && saved.wispr !== "pending" && saved.wispr !== "none";
+
+async function shareSaved(channel: string, threadTs: string, saved: Captured, deps: TriggerDeps): Promise<string> {
+  if (!deps.share || saved.text === undefined) return "";
+  const key = `${channel}:${threadTs}`;
+  try {
+    const before = readState(deps.statePath).followed[key]?.shared ?? [];
+    const shared = await deps.share({ title: saved.title, url: saved.url, text: saved.text }, before);
+    updateState(deps.statePath, (state) => {
+      const entry = state.followed[key];
+      if (entry) entry.shared = [...before, ...shared.sent.map(({ host, id, title, message }) => ({ host, id, title, message }))];
+    });
+    deps.log(`${key}: sent the note to ${shared.sent.length} threads${shared.failed.length ? `, ${shared.failed.length} sends failed` : ""}`);
+    return shareLine(shared);
+  } catch (error) {
+    deps.log(`${key}: sending the note failed: ${(error as Error).message}`);
+    return `Sending it to your open threads failed: ${slackText((error as Error).message)}.`;
+  }
+}
+
+export function shareLine(shared: Shared): string {
+  const names = shared.sent.map((route) => (route.link ? `<${route.link}|${slackText(route.title)}>` : `${slackText(route.title)} (${slackText(route.host)})`));
+  const failed = shared.failed.length ? ` Sending to ${shared.failed.map((item) => slackText(item.route.title)).join(", ")} failed.` : "";
+  return `${names.length ? `Sent the context to ${names.length} open ${names.length === 1 ? "thread" : "threads"}: ${names.join(", ")}.` : "No open thread needed it."}${failed}`;
+}
+
+async function captureThread(channel: string, threadTs: string, capture: Capture, deps: TriggerDeps, wisprLook: WisprLook): Promise<Captured> {
   const key = `${channel}:${threadTs}`;
   if (inFlight.has(`note:${key}`)) throw new Error("its note is already updating");
   inFlight.add(`note:${key}`);
@@ -182,10 +220,14 @@ async function captureThread(channel: string, threadTs: string, capture: Capture
       await formatThread(deps.slack, messages),
       ...(files.length ? ["", "Files in the thread (read each canvas with slack_read_canvas and its id):", ...files.map((file) => `- ${[file.id, file.filetype, file.title, file.permalink].filter(Boolean).join(" ")}`)] : []),
     ].join("\n");
-    const saved = await capture({ source: permalink, material });
+    const saved = await capture({ source: permalink, material, startedAt: new Date(Number(threadTs) * 1000).toISOString() });
     deps.log(`${key}: ${saved.updated ? "updated" : "saved"} ${saved.path}`);
     const latestTs = messages.reduce((latest, message) => (Number(message.ts) > Number(latest) ? message.ts : latest), threadTs);
-    updateState(deps.statePath, (state) => void (state.followed[key] = { channel, threadTs, latestTs, failures: 0 }));
+    updateState(deps.statePath, (state) => {
+      const was = state.followed[key];
+      const wisprLookAt = saved.wispr !== "pending" || wisprLook === "drop" ? undefined : wisprLook === "plan" ? deps.now() + wisprLookAfter : was?.wisprLookAt;
+      state.followed[key] = { channel, threadTs, latestTs, failures: 0, ...(wisprLookAt ? { wisprLookAt } : {}), ...(was?.shared ? { shared: was.shared } : {}) };
+    });
     return saved;
   } finally {
     inFlight.delete(`note:${key}`);
@@ -199,8 +241,12 @@ export async function syncFollowed(deps: TriggerDeps): Promise<void> {
   if (!capture || syncing) return;
   syncing = true;
   try {
-    for (const [key, { channel, threadTs, latestTs }] of Object.entries(readState(deps.statePath).followed)) {
+    for (const [key, { channel, threadTs, latestTs, wisprLookAt }] of Object.entries(readState(deps.statePath).followed)) {
       if (inFlight.has(`note:${key}`)) continue;
+      if (wisprLookAt && deps.now() >= wisprLookAt) {
+        await lookAgainForWispr(channel, threadTs, capture, deps);
+        continue;
+      }
       const page: Record<string, any> | undefined = await deps.slack("conversations.replies", { channel, ts: threadTs, oldest: latestTs, limit: "200" }).catch((error: Error) => {
         deps.log(`${key}: could not read the saved thread: ${error.message}`);
         return /thread_not_found|channel_not_found|not_in_channel|is_archived/.test(error.message) ? { gone: true, messages: [] } : undefined;
@@ -214,7 +260,8 @@ export async function syncFollowed(deps: TriggerDeps): Promise<void> {
       }
       if (newest <= Number(latestTs) || deps.now() - newest * 1000 < quietFor) continue;
       try {
-        await captureThread(channel, threadTs, capture, deps);
+        const saved = await captureThread(channel, threadTs, capture, deps, "keep");
+        if (wisprLookAt && hasWispr(saved)) await tellWispr(channel, threadTs, saved, deps);
       } catch (error) {
         deps.log(`${key}: note update failed: ${(error as Error).message}`);
         const failures = updateState(deps.statePath, (state) => {
@@ -233,6 +280,24 @@ export async function syncFollowed(deps: TriggerDeps): Promise<void> {
   } finally {
     syncing = false;
   }
+}
+
+async function lookAgainForWispr(channel: string, threadTs: string, capture: Capture, deps: TriggerDeps): Promise<void> {
+  const key = `${channel}:${threadTs}`;
+  try {
+    const saved = await captureThread(channel, threadTs, capture, deps, "drop");
+    if (hasWispr(saved)) await tellWispr(channel, threadTs, saved, deps);
+    else deps.log(`${key}: still no Wispr notes`);
+  } catch (error) {
+    deps.log(`${key}: the Wispr look failed: ${(error as Error).message}`);
+    updateState(deps.statePath, (state) => void delete state.followed[key]?.wisprLookAt);
+  }
+}
+
+async function tellWispr(channel: string, threadTs: string, saved: Captured, deps: TriggerDeps): Promise<void> {
+  const shared = await shareSaved(channel, threadTs, saved, deps);
+  await deps.slack("chat.postEphemeral", { channel, user: deps.owner.slackUserId, thread_ts: threadTs, text: `:${deps.owner.captureEmoji}: Added the meeting's Wispr notes to <${saved.url}|${slackText(saved.title)}>.${shared ? `\n${shared}` : ""}` })
+    .catch((error) => deps.log(`${channel}:${threadTs}: ephemeral reply failed: ${error}`));
 }
 
 async function exactMessage(slack: SlackApi, trigger: Trigger, threadTs: string): Promise<Message | undefined> {

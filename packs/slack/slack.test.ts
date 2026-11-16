@@ -295,20 +295,25 @@ describe("saving to the context library", () => {
     { user: ownerId, ts: "200.2", text: "load test first" },
   ];
   const handlers = JSON.stringify({ "slack-capture": "/opt/context/slack-capture.ts" });
-  const captured = { path: "notes/sprint-planning-2026-11-11.md", title: "Sprint <planning>", url: "https://notes.example.com/blob/main/notes/sprint-planning-2026-11-11.md", updated: false };
+  const captured = { path: "notes/sprint-planning-2026-11-11.md", title: "Sprint <planning>", url: "https://notes.example.com/blob/main/notes/sprint-planning-2026-11-11.md", updated: false, text: "# Sprint planning" };
 
   async function listening(answer: (input: string) => { code: number; stdout: string }, extra: Partial<SlackCommandDeps> = {}) {
     const slack = slackStub(thread);
     const home = await homeWithTokens();
     const stop = new AbortController();
-    const ran = processes((argv, input) => (argv.join(" ") === "bun /opt/context/slack-capture.ts" ? answer(input ?? "") : undefined));
+    const ran = processes((argv, input) => {
+      if (argv.join(" ") !== "bun /opt/context/slack-capture.ts") return undefined;
+      return "note" in JSON.parse(input ?? "{}") ? { code: 0, stdout: `${JSON.stringify(nobodyNeedsIt)}\n` } : answer(input ?? "");
+    });
     const deps = commandDeps(home, { env: { FLEET_SETTINGS: settings(), FLEET_HANDLERS: handlers }, slackBase: slack.base, stop: stop.signal, run: ran.run, ...extra });
     const running = listen(deps);
     await slack.connected();
     const end = async () => (stop.abort(), await running);
     return { slack, ran, deps, end };
   }
-  const captures = (ran: ReturnType<typeof processes>) => ran.calls.filter((call) => call.argv[0] === "bun").map((call) => JSON.parse(call.input!));
+  const nobodyNeedsIt = { sent: [], failed: [] };
+  const captures = (ran: ReturnType<typeof processes>) => ran.calls.filter((call) => call.argv[0] === "bun").map((call) => JSON.parse(call.input!)).filter((input) => "source" in input);
+  const sends = (ran: ReturnType<typeof processes>) => ran.calls.filter((call) => call.argv[0] === "bun").map((call) => JSON.parse(call.input!)).filter((input) => "note" in input);
   const reactionCalls = (slack: ReturnType<typeof slackStub>) => slack.calls.filter((call) => call.method.startsWith("reactions.")).map((call) => `${call.method} ${call.args.timestamp} ${call.args.name}`);
 
   test("the owner's :brain: hands the whole thread and its canvases to the context library, shows :eyes: while it runs, then clears both and says where the note went", async () => {
@@ -320,11 +325,13 @@ describe("saving to the context library", () => {
     expect(captures(ran)).toEqual([{
       source: "https://example.slack.com/archives/C1/p200.1",
       material: "Sam (200.1): Sprint planning notes in the canvas\nNora (200.2): load test first\n\nFiles in the thread (read each canvas with slack_read_canvas and its id):\n- F0CANVAS canvas Sprint plan",
+      startedAt: "1970-01-01T00:03:20.100Z",
     }]);
+    expect(sends(ran)).toEqual([{ note: { title: captured.title, url: captured.url, text: captured.text }, sentBefore: [] }]);
     expect(reactionCalls(slack)).toEqual(["reactions.add 200.2 eyes", "reactions.remove 200.2 eyes", "reactions.remove 200.2 brain"]);
     const told = slack.method("chat.postEphemeral")[0]!.args;
     expect(told).toMatchObject({ channel: "C1", user: ownerId, thread_ts: "200.1" });
-    expect(told.text).toBe(`:brain: Added <${captured.url}|Sprint &lt;planning&gt;> in your context library (\`${captured.path}\`). It updates as the thread gets replies.`);
+    expect(told.text).toBe(`:brain: Added <${captured.url}|Sprint &lt;planning&gt;> in your context library (\`${captured.path}\`). It updates as the thread gets replies.\nNo open thread needed it.`);
   });
 
   test("a failed capture keeps the :brain:, says why, and a second :brain: tries again and updates the note", async () => {
@@ -338,7 +345,7 @@ describe("saving to the context library", () => {
     expect(captures(ran)).toHaveLength(2);
     expect(slack.method("chat.postEphemeral").map((call) => call.args.text)).toEqual([
       ":brain: Could not save this to your context library: the push to main kept failing; nothing was saved. React again to retry.",
-      `:brain: Updated <${captured.url}|Sprint &lt;planning&gt;> in your context library (\`${captured.path}\`). It updates as the thread gets replies.`,
+      `:brain: Updated <${captured.url}|Sprint &lt;planning&gt;> in your context library (\`${captured.path}\`). It updates as the thread gets replies.\nNo open thread needed it.`,
     ]);
     expect(reactionCalls(slack)).toEqual(["reactions.add 200.1 eyes", "reactions.remove 200.1 eyes", "reactions.add 200.1 eyes", "reactions.remove 200.1 eyes", "reactions.remove 200.1 brain"]);
     expect(ran.calls.some((call) => call.argv[0] !== "bun" && call.argv[0] !== "git")).toBe(false);
@@ -407,6 +414,55 @@ describe("saving to the context library", () => {
     now += 31 * minute;
     await syncFollowed(deps);
     expect(sources).toHaveLength(6);
+  });
+
+  function savedThread(wispr: (string | undefined)[], clock: { now: number }) {
+    const path = statePath(temp.make("home-"));
+    const told: string[] = [];
+    const captures: (string | undefined)[] = [];
+    const sentBefore: number[] = [];
+    const deps: TriggerDeps = {
+      owner: { ...owner, captureEmoji: "brain" }, statePath: path, now: () => clock.now, log: () => {}, launch: async () => ({ failed: "no" }),
+      slack: async (method, args) => {
+        if (method === "chat.postEphemeral") told.push(args.text!);
+        if (method === "conversations.replies") return { messages: [{ user: ownerId, ts: "1794830407.564399", text: "A huddle started" }] };
+        if (method === "chat.getPermalink") return { permalink: "https://example.slack.com/archives/C1/p1794830407564399" };
+        return {};
+      },
+      capture: async (input) => (captures.push(input.startedAt), { ...captured, updated: captures.length > 1, wispr: wispr.shift() }),
+      share: async (_note, before) => (sentBefore.push(before.length), { sent: [{ host: "box-2", id: "t1", title: "Email: conductor", message: "m", link: "https://app.t3.codes/threads/env-2/t1" }], failed: [] }),
+    };
+    return { deps, told, captures, sentBefore, path };
+  }
+
+  test("a capture that a restart cut off runs again when the service starts, then sends the note to the threads that need it", async () => {
+    const { deps, told, captures, path } = savedThread(["none"], { now: 1_000 });
+    mkdirSync(join(path, ".."), { recursive: true });
+    writeFileSync(path, JSON.stringify({ handled: {}, followed: {}, pending: { "C1:1794830407.564399": { trigger: { kind: "capture", channel: "C1", ts: "1794830407.564399" }, since: 0, commandId: "c" } } }));
+    await retryPending(deps);
+    expect(captures).toEqual(["2026-11-16T12:00:07.564Z"]);
+    expect(told).toEqual([`:brain: Added <${captured.url}|Sprint &lt;planning&gt;> in your context library (\`${captured.path}\`). It updates as the thread gets replies.\nSent the context to 1 open thread: <https://app.t3.codes/threads/env-2/t1|Email: conductor>.`]);
+    expect(JSON.parse(readFileSync(path, "utf8")).pending).toEqual({});
+    await retryPending(deps);
+    expect(captures).toHaveLength(1);
+  });
+
+  test("a meeting whose Wispr notes are not ready gets one more look 30 minutes later, and only that look sends again, with what went out before", async () => {
+    const clock = { now: 1_794_830_700_000 };
+    const { deps, told, captures, sentBefore } = savedThread(["pending", "https://notes.example.com/shared/abc"], clock);
+    await handleTrigger({ kind: "capture", channel: "C1", ts: "1794830407.564399" }, deps);
+    expect(told[0]).toContain("Its Wispr notes are not ready yet, so it looks again in 30 minutes.");
+    clock.now += 29 * 60_000;
+    await syncFollowed(deps);
+    expect(captures).toHaveLength(1);
+    clock.now += 2 * 60_000;
+    await syncFollowed(deps);
+    expect(captures).toHaveLength(2);
+    expect(sentBefore).toEqual([0, 1]);
+    expect(told[1]).toBe(`:brain: Added the meeting's Wispr notes to <${captured.url}|Sprint &lt;planning&gt;>.\nSent the context to 1 open thread: <https://app.t3.codes/threads/env-2/t1|Email: conductor>.`);
+    clock.now += 60 * 60_000;
+    await syncFollowed(deps);
+    expect(captures).toHaveLength(2);
   });
 
   test("without the Context library pack, :brain: does nothing, and slack.captureEmoji picks another emoji", async () => {
