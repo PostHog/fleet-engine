@@ -6,7 +6,7 @@ import type { Secrets, Threads } from "../../../src/sdk/index.ts";
 import { launchHere, launchOnBox, launchOnNodes, spawnRun, type Launch, type LaunchRequest, type Run } from "./launch.ts";
 import { manifest, manifestLink, serve, slackApi, slackApiBase, slackApp, type Sleep } from "./slack.ts";
 import { Interrupted, secretReader, type ReadSecret } from "./secret.ts";
-import { followMinutes, handleTrigger, retryPending, syncFollowed, takeTurn, triggerOf, type Capture, type Owner, type TriggerDeps } from "./trigger.ts";
+import { followMinutes, handleTrigger, retryPending, syncFollowed, takeTurn, triggerOf, type Capture, type Owner, type Share, type Shared, type TriggerDeps } from "./trigger.ts";
 
 type Env = Record<string, string | undefined>;
 export type Every = (work: () => void, ms: number) => () => void;
@@ -97,22 +97,27 @@ export async function slackTrigger(args: string[], deps: SlackCommandDeps): Prom
   return setUpApp(owner, deps);
 }
 
-export function captureHandler(env: Env, run: Run): Capture | undefined {
+export function captureHandler(env: Env, run: Run): { capture: Capture; share: Share } | undefined {
   const handler = (JSON.parse(env.FLEET_HANDLERS || "{}") as Record<string, string>)["slack-capture"];
   if (!handler) return undefined;
-  return async (input) => {
-    const answer = await run(["bun", handler], JSON.stringify(input));
+  const ask = async (request: unknown, answered: (parsed: Record<string, unknown>) => boolean, what: string) => {
+    const answer = await run(["bun", handler], JSON.stringify(request));
     const last = answer.stdout.trim().split("\n").at(-1) ?? "";
     let parsed: Record<string, unknown> = {};
     try { parsed = JSON.parse(last) as Record<string, unknown>; } catch {}
-    if (typeof parsed.path !== "string") throw new Error(typeof parsed.failed === "string" ? parsed.failed : `the context library's capture ended with code ${answer.code}`);
-    return parsed as Awaited<ReturnType<Capture>>;
+    if (!answered(parsed)) throw new Error(typeof parsed.failed === "string" ? parsed.failed : `the context library's ${what} ended with code ${answer.code}`);
+    return parsed;
+  };
+  return {
+    capture: async (input) => (await ask(input, (parsed) => typeof parsed.path === "string", "capture")) as Awaited<ReturnType<Capture>>,
+    share: async (note, sentBefore) => (await ask({ note, sentBefore }, (parsed) => Array.isArray(parsed.sent) && Array.isArray(parsed.failed), "sending")) as Shared,
   };
 }
 
 export async function listen(deps: SlackCommandDeps): Promise<void> {
   const run = deps.run ?? spawnRun;
-  const capture = captureHandler(deps.env, run);
+  const handler = captureHandler(deps.env, run);
+  const capture = handler?.capture;
   const owner = { ...(await ownerOf(deps, run)), ...(capture ? { captureEmoji: emojiName(deps.slackCaptureEmoji?.() ?? "brain", "slack.captureEmoji") } : {}) };
   const now = deps.now ?? Date.now;
   const log = (line: string) => deps.print(`${new Date(now()).toISOString()} ${line}`);
@@ -120,7 +125,7 @@ export async function listen(deps: SlackCommandDeps): Promise<void> {
   const { appToken, userToken } = slackApp(saved);
   const replaced = new AbortController();
   const stop = deps.stop ? AbortSignal.any([deps.stop, replaced.signal]) : replaced.signal;
-  const trigger: TriggerDeps = { owner, now, log, slack: slackApi(userToken, deps.slackBase, deps.sleep), launch: launcher(deps, run), capture, statePath: triggerState(deps) };
+  const trigger: TriggerDeps = { owner, now, log, slack: slackApi(userToken, deps.slackBase, deps.sleep), launch: launcher(deps, run), capture, share: handler?.share, statePath: triggerState(deps) };
   const active = new Set<Promise<void>>();
   const track = (work: Promise<void>, failed: (error: unknown) => void) => {
     const tracked = work.catch(failed).finally(() => active.delete(tracked));
