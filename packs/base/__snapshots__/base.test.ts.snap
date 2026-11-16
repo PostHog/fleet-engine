@@ -31,6 +31,7 @@ Each guide binds like this file. Read it when its trigger fires.
 | Deep research on how code behaves, where a wrong answer misleads a decision | \`claude-opus-5-5\` | high |
 | Implementation, tests, fixes, and UI work | \`claude-opus-5-5\` | high |
 | Review, in a fresh session that did not write the code | \`claude-opus-5-5\` | high |
+| Incidents: a Slack message of yours that says /incident starts its thread on this model | \`claude-opus-5-5\` | high |
 "
 `;
 
@@ -65,6 +66,7 @@ Each guide binds like this file. Read it when its trigger fires.
 | Deep research on how code behaves, where a wrong answer misleads a decision | \`gpt-6.1-sol\` | high |
 | Implementation, tests, fixes, and UI work | \`gpt-6.1-sol\` | high |
 | Review, in a fresh session that did not write the code | \`gpt-6.1-sol\` | high |
+| Incidents: a Slack message of yours that says /incident starts its thread on this model | \`gpt-6.1-sol\` | high, ultrafast tier |
 "
 `;
 
@@ -100,5 +102,6 @@ Each guide binds like this file. Read it when its trigger fires.
 | Implementation, tests, fixes, and UI work | \`claude-opus-5-5\` | high |
 | Review of code Claude wrote | \`gpt-6.1-sol\` | high |
 | Review of code Codex wrote, and of skills and agent documents | \`claude-opus-5-5\` | high |
+| Incidents: a Slack message of yours that says /incident starts its thread on this model | \`gpt-6.1-sol\` | high, ultrafast tier |
 "
 `;

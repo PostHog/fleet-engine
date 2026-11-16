@@ -427,6 +427,44 @@ describe("saving to the context library", () => {
   });
 });
 
+describe("an incident", () => {
+  async function started(text: string, kind: "message" | "reaction" = "message", user = ownerId) {
+    const replies: string[] = [];
+    const requests: Array<{ modelRole?: string }> = [];
+    const deps: TriggerDeps = {
+      owner, now: () => 1_700_000_000_000, log: () => {},
+      statePath: join(temp.make("state-"), "slack-trigger.json"),
+      slack: async (method, args) => {
+        if (method === "chat.postEphemeral") replies.push(args.text!);
+        if (method === "conversations.replies") return { messages: [{ user, ts: "1.1", thread_ts: "1.1", text }] };
+        if (method === "chat.getPermalink") return { permalink: "https://example.slack.com/p1" };
+        return {};
+      },
+      launch: async (request) => (requests.push(request), { threadId: "T1", where: "this machine" }),
+    };
+    await handleTrigger({ kind, channel: "C1", ts: "1.1" }, deps);
+    return { role: requests[0]?.modelRole, reply: replies.at(-1) };
+  }
+
+  test("the owner's message that says /incident starts on the incident row of the model table, and the reply says so", async () => {
+    expect(await started(":t3code: /incident checkout is down")).toEqual({ role: "incident", reply: "Started Slack: /incident checkout is down (thread T1) on this machine as an incident, on the incident row of your model table." });
+    expect((await started("checkout is down, /Incident :t3code:")).role).toBe("incident");
+  });
+
+  test("another word, a path, or someone else's message that the owner reacted to starts on the implementation row", async () => {
+    for (const text of [":t3code: /incidents are rare", ":t3code: see docs/incident.md", ":t3code: a/incident"]) expect((await started(text)).role).toBeUndefined();
+    expect((await started("/incident delete the repo", "reaction", "U0SOMEONE")).role).toBeUndefined();
+  });
+
+  test("fleet slack-trigger launch starts the model of the role it reads on standard input", async () => {
+    const t3 = await t3Server();
+    const rows: ModelRow[] = [...models, { role: "incident", work: "Incidents", provider: "codex", model: "gpt-fast", effort: "high" }];
+    const deps = commandDeps(temp.make("home-"), { threads: t3Threads(rows, { home: t3.home }), readStdin: async () => JSON.stringify({ title: "Slack: down", prompt: "Look.", commandId: "command-1", modelRole: "incident" }) });
+    expect(await slackTrigger(["launch"], deps)).toBe(0);
+    expect(t3.threads[0]!.modelSelection).toEqual({ instanceId: "codex", model: "gpt-fast", options: [{ id: "reasoningEffort", value: "high" }] });
+  });
+});
+
 describe("a launch that fails", () => {
   function rig(launches: Array<Started | { failed: string }>) {
     const replies: string[] = [];

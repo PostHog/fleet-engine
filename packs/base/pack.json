@@ -57,6 +57,13 @@
         "provider": "claude",
         "model": "claude-opus-5-5",
         "effort": "high"
+      },
+      {
+        "role": "incident",
+        "work": "Incidents: a Slack message of yours that says /incident starts its thread on this model",
+        "provider": "claude",
+        "model": "claude-opus-5-5",
+        "effort": "high"
       }
     ],
     "codex": [
@@ -94,6 +101,14 @@
         "provider": "codex",
         "model": "gpt-6.1-sol",
         "effort": "high"
+      },
+      {
+        "role": "incident",
+        "work": "Incidents: a Slack message of yours that says /incident starts its thread on this model",
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "effort": "high",
+        "serviceTier": "ultrafast"
       }
     ],
     "both": [
@@ -138,6 +153,14 @@
         "provider": "claude",
         "model": "claude-opus-5-5",
         "effort": "high"
+      },
+      {
+        "role": "incident",
+        "work": "Incidents: a Slack message of yours that says /incident starts its thread on this model",
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "effort": "high",
+        "serviceTier": "ultrafast"
       }
     ]
   },

@@ -195,7 +195,7 @@ test("unreadable Codex usage is logged as unreadable and clears no cooldown", as
   expect(calls.filter((call) => call.path === "reset-quota")).toEqual([]);
 });
 
-test("balance tells an expired login apart from usage it could not read, ranks the rest, and exits 0, without printing the proxy's message", async () => {
+test("balance tells an expired login apart from usage it could not read, ranks the rest, and exits 0 even when the Codex catalog cannot refresh, without printing the proxy's message", async () => {
   const files = [
     { name: "a.json", provider: "claude", auth_index: "1", priority: 1 },
     { name: "expired.json", provider: "claude", auth_index: "2", priority: 0, status: "error", status_message: '{"error":"invalid_grant","error_description":"refresh token for alice expired"}' },
@@ -208,7 +208,8 @@ test("balance tells an expired login apart from usage it could not read, ranks t
   mkdirSync(join(home, ".local/share/fleet-cli-proxy"), { recursive: true });
   writeFileSync(join(home, ".local/share/fleet-cli-proxy/management.env"), `MANAGEMENT_PASSWORD=${managementKey}\n`);
   expect(await balanceCommand([], { home, fetch, now: () => now, ledger: false, log: (line) => lines.push(line) })).toBe(0);
-  expect(lines.filter((line) => !line.startsWith("Claude subscription 1:"))).toEqual([
+  expect(lines.filter((line) => line.startsWith("Codex catalog:")).at(-1)).toBe("Codex catalog: every source failed, so the proxy serves its built-in catalog");
+  expect(lines.filter((line) => !line.startsWith("Claude subscription 1:") && !line.startsWith("Codex catalog:"))).toEqual([
     "Claude subscription 2: priority 0, usage unreadable: its login expired. Sign it in again on the hub; fleet cli-proxy doctor names the command",
     "Claude subscription 3: priority 0, usage unreadable",
     "Claude subscription 4: priority 0, usage unreadable",
