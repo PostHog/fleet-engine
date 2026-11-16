@@ -127,8 +127,8 @@ export type CodexRules = Scope & { path: string };
 
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 
-/** One row of the model table: the model and effort agents use for one kind of work. */
-export type ModelRow = { role: string; work: string; provider: "claude" | "codex"; model: string; effort: Effort };
+/** One row of the model table: the model, effort, and service tier agents use for one kind of work. */
+export type ModelRow = { role: string; work: string; provider: "claude" | "codex"; model: string; effort: Effort; serviceTier?: string };
 
 export type GuideEntry = { guide: string; section?: string; path: string };
 

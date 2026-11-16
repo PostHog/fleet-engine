@@ -91,6 +91,15 @@ the person's own subscriptions, never for someone else's.
   client key is in `~/.config/fleet/cli-proxy.key` and the management key in
   `~/.local/share/fleet-cli-proxy/management.env`, both mode 600. Install
   keeps a file that Fleet did not write and stops at a linked path.
+- **The Codex catalog.** Codex and T3 offer only the service tiers that the
+  proxy's model catalog lists for a model. Upstream's catalog lists only
+  `priority`, but Codex accounts also serve `ultrafast` on GPT-6.1 Sol and
+  GPT-6 Astra. So the proxy reads its Codex catalog from
+  `~/.local/share/fleet-cli-proxy/codex-catalog.json` (`models.codex-catalog`
+  in its config): upstream's catalog with the `ultrafast` tier added. Install
+  writes it, each balancer run fetches it again when it is 3 hours old, and
+  `fleet cli-proxy catalog` fetches it now. A failed or empty fetch keeps the
+  last file. The doctor warns while the file is missing.
 - **Subscriptions.** The person adds each of their own Claude accounts on the
   hub, or their Codex accounts on the `codex` plan. `fleet cli-proxy doctor`
   prints the login command until the proxy holds `hub.proxyAccounts` of them

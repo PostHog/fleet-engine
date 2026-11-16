@@ -1,7 +1,7 @@
 type Env = Record<string, string | undefined>;
 
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
-export type ModelRow = { role: string; work: string; provider: "claude" | "codex"; model: string; effort: Effort };
+export type ModelRow = { role: string; work: string; provider: "claude" | "codex"; model: string; effort: Effort; serviceTier?: string };
 
 const efforts = ["low", "medium", "high", "xhigh", "max"];
 
@@ -21,7 +21,7 @@ export function modelFor(role: string, env: Env = Bun.env): ModelRow {
 function isRow(value: unknown): value is ModelRow {
   const row = value as Partial<ModelRow>;
   return typeof row?.role === "string" && typeof row.model === "string" && typeof row.work === "string"
-    && (row.provider === "claude" || row.provider === "codex") && efforts.includes(row.effort as string);
+    && (row.provider === "claude" || row.provider === "codex") && efforts.includes(row.effort as string) && (row.serviceTier === undefined || typeof row.serviceTier === "string");
 }
 
 export function modelSessionEnv(env: Record<string, string | undefined>) {

@@ -62,7 +62,15 @@ sends each event within a second, and no address is public.
 1. Slack sends every message and reaction in your channels. The trigger keeps
    only your own.
 2. It reads the whole Slack thread with your user token and starts a thread
-   with the model of the `implementation` row of your model table:
+   with the model of the `implementation` row of your model table. When your
+   own message says `/incident` as a word, it uses the `incident` row
+   instead: on the Codex and both plans, GPT-6.1 Sol at high effort on the
+   `ultrafast` service tier, which answers several times as fast. To change
+   it, add an `incident` row to `overrides.models` in your profile. When T3
+   does not offer the row's tier for the model, the thread starts on the
+   standard tier. Through the hub's proxy, T3 offers `ultrafast` once the
+   proxy serves Fleet's Codex catalog (`fleet cli-proxy catalog`). The thread
+   starts:
    - with `slack.nodes` set, on those nodes in turn, over SSH with
      `fleet slack-trigger launch`, in a scratch folder on the node's T3 Code;
    - otherwise, with the Boxes workflow of the Hub pack on, on the next box

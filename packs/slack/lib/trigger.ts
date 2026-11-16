@@ -46,6 +46,12 @@ export function triggerOf(event: Record<string, any>, owner: Owner): Trigger | u
   return undefined;
 }
 
+export const incidentRole = "incident";
+
+export function isIncident(message: Message, owner: Owner): boolean {
+  return message.user === owner.slackUserId && /(^|[^\w/])\/incident\b/i.test(message.text ?? "");
+}
+
 const inFlight = new Set<string>();
 
 export async function handleTrigger(trigger: Trigger, deps: TriggerDeps): Promise<void> {
@@ -92,11 +98,11 @@ export async function handleTrigger(trigger: Trigger, deps: TriggerDeps): Promis
       state.handled[key] = deps.now();
       delete state.pending[key];
     });
-    const { started, name, thread } = outcome;
+    const { started, name, thread, incident } = outcome;
     deps.log(`${key}: started ${started.threadId} on ${started.where}`);
     await deps.slack("reactions.add", { channel: trigger.channel, timestamp: trigger.ts, name: ackEmoji }).catch((error) => deps.log(`${key}: :${ackEmoji}: failed: ${error}`));
     const link = started.url ? `<${started.url}|${slackText(name)}>` : `${slackText(name)} (thread ${started.threadId})`;
-    await reply(trigger, key, thread, deps, `Started ${link} on ${slackText(started.where)}.`);
+    await reply(trigger, key, thread, deps, `Started ${link} on ${slackText(started.where)}${incident ? " as an incident, on the incident row of your model table" : ""}.`);
   } finally {
     inFlight.delete(key);
   }
@@ -122,7 +128,7 @@ async function forget(key: string, deps: TriggerDeps) {
   if (claim) await deps.launch.release?.(claim).catch((error) => deps.log(`${key}: could not release ${claim.box}: ${error}`));
 }
 
-type Outcome = { started: Started; name: string; thread?: string } | { failed: string; thread?: string; claim?: Claim; reachedT3?: true } | { gone: string };
+type Outcome = { started: Started; name: string; thread?: string; incident: boolean } | { failed: string; thread?: string; claim?: Claim; reachedT3?: true } | { gone: string };
 
 async function start(trigger: Trigger, key: string, { commandId, claim, reachedT3 }: Pending, deps: TriggerDeps): Promise<Outcome> {
   const first = (await deps.slack("conversations.replies", { channel: trigger.channel, ts: trigger.ts, limit: "1" })).messages?.[0] as Message | undefined;
@@ -138,8 +144,9 @@ async function start(trigger: Trigger, key: string, { commandId, claim, reachedT
     deps.slack("chat.getPermalink", { channel: trigger.channel, message_ts: trigger.ts }).then((result) => String(result.permalink)),
   ]);
   const name = title(message.text ?? "", deps.owner.emoji);
-  const launched = await deps.launch({ title: name, prompt: prompt(deps.owner, trigger, message.text ?? "", permalink, context), commandId, claim, replay: reachedT3 });
-  return "failed" in launched ? { failed: launched.failed, thread, claim: launched.claim, reachedT3: launched.reachedT3 } : { started: launched, name, thread };
+  const incident = isIncident(message, deps.owner);
+  const launched = await deps.launch({ title: name, prompt: prompt(deps.owner, trigger, message.text ?? "", permalink, context), commandId, claim, replay: reachedT3, ...(incident ? { modelRole: incidentRole } : {}) });
+  return "failed" in launched ? { failed: launched.failed, thread, claim: launched.claim, reachedT3: launched.reachedT3 } : { started: launched, name, thread, incident };
 }
 
 async function saveToContext(trigger: Trigger, key: string, capture: Capture, deps: TriggerDeps): Promise<{ thread?: string; text: string }> {

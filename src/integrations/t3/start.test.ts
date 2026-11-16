@@ -57,6 +57,24 @@ test("the model role starts the thread with that row's provider, model, and effo
   expect(stub.threads).toEqual([{ id: "thread-1", title: request.title, prompt: request.prompt, modelSelection: { instanceId: "codex", model: "gpt-small", options: [{ id: "reasoningEffort", value: "medium" }] } }]);
 });
 
+test("a row's service tier starts the thread on it when T3 offers it for the model, and on the standard tier otherwise", async () => {
+  const offered = (tiers: string[]) => ({ providers: [{ instanceId: "codex", models: [{ slug: "gpt-small", capabilities: { optionDescriptors: [{ id: "reasoningEffort" }, { id: "serviceTier", options: tiers.map((id) => ({ id })) }] } }] }] });
+  const rows: ModelRow[] = [{ role: "incident", work: "Incidents", provider: "codex", model: "gpt-small", effort: "high", serviceTier: "ultrafast" }];
+  for (const [config, options] of [
+    [offered(["priority", "ultrafast"]), [{ id: "reasoningEffort", value: "high" }, { id: "serviceTier", value: "ultrafast" }]],
+    [offered(["priority"]), [{ id: "reasoningEffort", value: "high" }]],
+    [undefined, [{ id: "reasoningEffort", value: "high" }]],
+  ] as const) {
+    const stub = await t3({ rpc(tag) {
+      if (tag === "projects.ensureScratch") return { projectId: "scratch-1" };
+      if (tag === "server.getConfig") return config;
+      if (tag === "orchestration.launchThread") return { threadId: "thread-1" };
+    } });
+    await t3Threads(rows, { home: stub.home }).start({ ...request, key: "k", modelRole: "incident" });
+    expect(stub.threads[0]!.modelSelection).toEqual({ instanceId: "codex", model: "gpt-small", options });
+  }
+});
+
 test("a role the model table lacks fails with a sentence that names it", async () => {
   const stub = await t3();
   await expect(t3Threads(models, { home: stub.home }).start({ ...request, key: "k", modelRole: "review" })).rejects.toThrow("The model table of your AI plan has no review row");

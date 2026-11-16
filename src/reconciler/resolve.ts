@@ -405,7 +405,7 @@ function modelTable(order: Candidate[], profile: Profile): ModelRow[] {
 }
 
 function renderModels(rows: ModelRow[]) {
-  const lines = rows.map((row) => `| ${row.work} | \`${row.model}\` | ${row.effort} |`);
+  const lines = rows.map((row) => `| ${row.work} | \`${row.model}\` | ${row.effort}${row.serviceTier ? `, ${row.serviceTier} tier` : ""} |`);
   return ["## Model selection", "", "| Work | Model | Effort |", "| --- | --- | --- |", ...lines].join("\n");
 }
 

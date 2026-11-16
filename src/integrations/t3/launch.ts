@@ -9,15 +9,26 @@ const launchTimeoutMs = 120_000;
 
 export class UnansweredLaunch extends Error {}
 
+type ProviderConfig = { providers?: Array<{ instanceId?: string; models?: Array<{ slug?: string; capabilities?: { optionDescriptors?: Array<{ id?: string; options?: Array<{ id?: string }> }> } }> }> };
+
+async function offeredTier(client: Pick<T3Client, "call">, instanceId: string, row: ModelRow): Promise<string | undefined> {
+  if (!row.serviceTier) return undefined;
+  const config = await client.call<ProviderConfig>("server.getConfig", {}).catch(() => undefined);
+  const model = config?.providers?.find((provider) => provider.instanceId === instanceId)?.models?.find((candidate) => candidate.slug === row.model);
+  const tiers = model?.capabilities?.optionDescriptors?.find((descriptor) => descriptor.id === "serviceTier")?.options?.map((option) => option.id) ?? [];
+  return tiers.includes(row.serviceTier) ? row.serviceTier : undefined;
+}
+
 export async function launchScratchThread(client: Pick<T3Client, "call">, launch: ThreadLaunch): Promise<string> {
   const { projectId } = await client.call<{ projectId: string }>("projects.ensureScratch", {});
   const instance = instances[launch.row.provider];
+  const tier = await offeredTier(client, instance.instanceId, launch.row);
   const { threadId } = await client.call<{ threadId: string }>("orchestration.launchThread", {
     commandId: launch.commandId ?? randomUUID(),
     projectId,
     title: launch.title,
     generateTitle: false,
-    modelSelection: { instanceId: instance.instanceId, model: launch.row.model, options: [{ id: instance.effort, value: launch.row.effort }] },
+    modelSelection: { instanceId: instance.instanceId, model: launch.row.model, options: [{ id: instance.effort, value: launch.row.effort }, ...(tier ? [{ id: "serviceTier", value: tier }] : [])] },
     runtimeMode: "full-access",
     interactionMode: "default",
     workspaceStrategy: { type: "root" },
