@@ -9,11 +9,10 @@ const longestAllowedPause = 10;
 const chunkSize = 64 * 1024;
 const unitSeconds: Record<string, number> = { "": 1, s: 1, m: 60, h: 3600, d: 86400 };
 
-export const sleepPollReason = (person: string) => "Fleet blocked this command: a `sleep` and then a check costs a model turn each time it repeats, "
-  + "and every turn reads the whole context again. Wait in one command that blocks until the event: "
-  + "`gh run watch <id> --exit-status`, `gh pr checks <number> --watch`, or `until <check>; do sleep 30; done` with a timeout. "
-  + "To monitor a pull request in T3 Code, call `watch_pull_request` and end the turn. Pauses of up to 10 seconds are allowed. "
-  + `If nothing can wait for this event in one call, stop and ask ${person}.`;
+export const sleepPollReason = (person: string) => "Fleet blocked this sleep over 10 s. Wait in one blocking call: `until <check>; do sleep 30; done`, "
+  + "`gh run watch <id> --exit-status`, `gh pr checks <number> --watch`, `t3_background_wait` for a background task in T3 Code, "
+  + "or `watch_pull_request` and end the turn for a pull request. A sleep and then a check costs a model turn per repeat, "
+  + `and each turn rereads the whole context. If nothing can wait for this event in one call, stop and ask ${person}.`;
 
 export const repeatedStatusReason = (person: string) => "Fleet blocked this call: you already checked this task since this thread last woke. "
   + "T3 wakes this thread when the task ends, so end the turn. "

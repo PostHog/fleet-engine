@@ -13,6 +13,8 @@ export type Command = {
   outputs: string[];
   bare: string[];
   inLoop: boolean;
+  tested: boolean;
+  after?: string;
   scope: Scope;
   chdir?: string;
 };
@@ -28,6 +30,7 @@ const operators = ["&&", "||", ";;", "|&", ";", "|", "&", "(", ")", "\n"];
 const keywords = new Set(["then", "do", "else", "elif", "if", "!", "{", "while", "until"]);
 const declarations = new Set(["export", "declare", "typeset", "readonly", "local"]);
 const loops = new Set(["for", "select", "while", "until"]);
+const tests = new Set(["if", "elif", "while", "until", "!"]);
 const assignment = /^([A-Za-z_]\w*)=(.*)$/s;
 const redirect = /^(\d+|&)?(>>|>\||>&|<&|<>|>|<)(?!\()/;
 const wrappers: Record<string, { valued: string[]; operands?: number; chdir?: string[] }> = {
@@ -394,13 +397,14 @@ export function parse(program: string, context: Context = { env: new Map(), inLo
   let loopDepth = 0;
   let scope: Scope = context.scope ?? {};
 
-  const finishCommand = () => {
+  const finishCommand = (after?: string) => {
     if (words.length === 0 && !stdin) return;
     const { kept, outputs } = withoutRedirects(words);
     const texts = kept.map((word) => word.text);
     const commandEnv = new Map(env);
     const assigned = new Map<string, string>();
     let chdir: string | undefined;
+    let tested = false;
     let index = 0;
     while (index < texts.length) {
       const text = texts[index];
@@ -411,6 +415,7 @@ export function parse(program: string, context: Context = { env: new Map(), inLo
         index++;
       } else if (keywords.has(text)) {
         if (loops.has(text)) loopDepth++;
+        if (tests.has(text)) tested = true;
         index++;
       } else if (wrappers[basename(text)]) {
         const wrapper = skipWrapper(texts, index, commandEnv);
@@ -431,12 +436,12 @@ export function parse(program: string, context: Context = { env: new Map(), inLo
     const leadingSubstitutions = kept.slice(0, index + 1).flatMap((word) => word.substitutions);
     const argSubstitutions = kept.slice(index + 1).map((word) => word.substitutions);
     const bare = kept.slice(index).map((word) => word.bare);
-    pipeline.push({ name, args, env: commandEnv, substitutions, leadingSubstitutions, argSubstitutions, stdin, outputs, bare, inLoop, scope, chdir });
+    pipeline.push({ name, args, env: commandEnv, substitutions, leadingSubstitutions, argSubstitutions, stdin, outputs, bare, inLoop, tested, ...(after && { after }), scope, chdir });
     words = [];
     stdin = undefined;
   };
-  const finishPipeline = () => {
-    finishCommand();
+  const finishPipeline = (after?: string) => {
+    finishCommand(after);
     if (pipeline.length > 0) pipelines.push(pipeline);
     pipeline = [];
   };
@@ -448,14 +453,16 @@ export function parse(program: string, context: Context = { env: new Map(), inLo
     } else if ("word" in token) words.push(token.word);
     else if ("herestring" in token) hereString = true;
     else if ("heredoc" in token) stdin = { body: token.heredoc.body, substitutions: [...(stdin?.substitutions ?? []), ...token.heredoc.substitutions] };
-    else if (token.operator === "|" || token.operator === "|&") finishCommand();
+    else if (token.operator === "|" || token.operator === "|&") finishCommand("|");
     else {
-      finishPipeline();
+      finishPipeline(token.operator === "(" || token.operator === ")" ? undefined : token.operator);
       if (token.operator === "(") scope = { parent: scope };
       if (token.operator === ")") scope = scope.parent ?? scope;
     }
   }
   finishPipeline();
+  const last = pipelines.at(-1)?.at(-1);
+  if (last?.after === ";" || last?.after === "\n") delete last.after;
   return pipelines;
 }
 

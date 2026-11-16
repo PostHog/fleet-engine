@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { type Hook, printing, runHook } from "../../base/lib/hook.ts";
 import { installedOwners } from "../lib/allowlist.ts";
 import { downloadRisk } from "../lib/download.ts";
+import { exitMaskRisk } from "../lib/exit-mask.ts";
 import { ghRisk, ownerList } from "../lib/gh.ts";
 import { gitRisk, repoList } from "../lib/git.ts";
 import { killRisk } from "../lib/kill.ts";
@@ -51,7 +52,7 @@ function check(call: ToolCall, { person, owners, mainPushRepos, unreadable }: Se
   const command = shellCommand(call.tool_input);
   const cwd = call.cwd ?? "/";
   return downloadRisk(command, cwd, person) ?? ghRisk(command, owners, person, process.env.GH_REPO) ?? killRisk(command, person)
-    ?? gitRisk(command, cwd, person, mainPushRepos) ?? (isSleepPoll(command) ? sleepPollReason(person) : undefined);
+    ?? gitRisk(command, cwd, person, mainPushRepos) ?? exitMaskRisk(command, person) ?? (isSleepPoll(command) ? sleepPollReason(person) : undefined);
 }
 
 /** The refusal for a tool call that a shell guard stops, naming the person the settings give. A call the guards cannot
