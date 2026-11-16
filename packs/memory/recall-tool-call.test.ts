@@ -44,6 +44,16 @@ describe("memory recall on a tool call", () => {
     expect((await fire(home, "claude", "PreToolUse", { session_id: "s1", cwd: home, ...bash("grep -r 'fleet proof' ~/.agents/memory") })).context).toBe("");
   });
 
+  test("names an MCP tool by its short name, with or without the server prefix a proxy adds", async () => {
+    const tools = "---\ntriggers: [t3_thread_send, query_prometheus]\n---\n\nSends are per box.\n";
+    const home = await machineWithMemory({ ...notes, "tools.md": tools });
+    const call = (session: string, tool_name: string) => fire(home, "claude", "PreToolUse", { session_id: session, cwd: home, tool_name, tool_input: {} });
+    expect((await call("s1", "mcp__t3-code__t3_thread_send")).context).toContain("Sends are per box.");
+    expect((await call("s2", "mcp__proxy-grafana-us__grafana-us-query_prometheus")).context).toContain("Sends are per box.");
+    expect((await call("s3", "mcp__proxy-grafana-us__grafana-us-query_prometheus_histogram")).context).toBe("");
+    expect((await call("s4", "mcp__t3-code__t3_thread_send_attachments")).context).toBe("");
+  });
+
   test("shows a repo's note only in a session that works in that repo", async () => {
     const home = await machineWithMemory(notes);
     const elsewhere = join(home, "elsewhere");

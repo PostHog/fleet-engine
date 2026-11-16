@@ -4,7 +4,7 @@ import { track } from "../../../src/usage/usage.ts";
 import { runHook } from "../../base/lib/hook.ts";
 import { claimNote, clip, contextHook, type HookInput, logShown, memoryRoot, repoOf } from "../lib/notes.ts";
 import { testsRuleFor } from "../lib/tests-rule.ts";
-import { names, readTriggers, stripFrontmatter, textsOf } from "../lib/triggers.ts";
+import { names, readTriggers, stripFrontmatter, textsOf, toolNames } from "../lib/triggers.ts";
 
 const notesPerCall = 2;
 const noteLimit = 3000;
@@ -22,11 +22,12 @@ async function triggeredNotes(input: HookInput, home: string, session: string): 
   if (!existsSync(root)) return undefined;
   const texts = [input.tool_name ?? "", ...textsOf(input.tool_input)];
   if (texts.some((text) => text.includes(".agents/memory"))) return undefined;
+  const tools = new Set(toolNames(input.tool_name ?? "").map((name) => name.toLowerCase()));
   let repo: string | undefined | null = null;
   const hits: Array<{ note: string; term: string; text: string }> = [];
   for (const trigger of readTriggers(home)) {
     if (hits.length === notesPerCall) break;
-    const term = trigger.terms.find((candidate) => texts.some((text) => names(candidate, text)));
+    const term = trigger.terms.find((candidate) => tools.has(candidate.toLowerCase()) || texts.some((text) => names(candidate, text)));
     if (!term) continue;
     const scope = /^projects\/([^/]+)\//.exec(trigger.note)?.[1];
     if (scope && scope !== (repo ??= await repoOf(input.cwd ?? process.cwd()))) continue;
