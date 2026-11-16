@@ -4,6 +4,7 @@ import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path";
 import { type Hook, printing, runHook } from "../../base/lib/hook.ts";
 import { findThread, matchThread, questionCard, type ShellThread, t3CliRunner, t3UserData, withT3Session } from "../../base/lib/t3/index.ts";
+import { backgroundReason, closesWaiting, unwaitedBackgroundTasks } from "../lib/background-stop.ts";
 import { proofStop, type ProofStopEvent, type ProofStopOptions } from "../lib/proof-stop.ts";
 import { asksForDecision, personName } from "../lib/prose-question.ts";
 
@@ -172,10 +173,19 @@ const liveShell = (home: string): ReadShell => () =>
 
 export type StopDeps = Partial<Pick<ProofStopOptions, "threadId" | "git" | "processes" | "deadline">> & { topLevel?: IsTopLevel };
 
+export async function guardBackground(event: StopEvent & ProofStopEvent, home: string, threadId: string | undefined): Promise<StopBlock | undefined> {
+  if (event.stop_hook_active || !threadId || !event.transcript_path || !event.background_tasks?.length) return undefined;
+  if (closesWaiting(await finalMessage(event))) return undefined;
+  const ids = unwaitedBackgroundTasks(currentTurn(await readFile(event.transcript_path, "utf8")), event.background_tasks);
+  return ids.length ? { decision: "block", reason: backgroundReason(ids, personName(home)) } : undefined;
+}
+
 async function guardStopAndProof(event: StopEvent & ProofStopEvent, home: string, shell: ReadShell, deps: StopDeps) {
   const threadId = "threadId" in deps ? deps.threadId : process.env.T3CODE_THREAD_ID;
   const prose = await guardStop(event, home, threadId, deps.topLevel).catch(() => undefined);
   if (prose || existsSync(join(home, killSwitch))) return prose;
+  const background = await guardBackground(event, home, threadId).catch(() => undefined);
+  if (background) return background;
   return proofStop({ ...event, last_assistant_message: await finalMessage(event) }, { home, shell, ...deps, threadId });
 }
 

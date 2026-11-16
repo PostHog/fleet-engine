@@ -7,7 +7,7 @@ import { devbox, engineSource, resolveEngine, skillSources } from "../../../src/
 import { dispatch } from "../../base/hooks/run.ts";
 import { asksForDecision } from "../lib/prose-question.ts";
 import type { ShellThread } from "../../base/lib/t3/index.ts";
-import { guardSend, guardStop, hook, hookWith, type IsTopLevel, type SendEvent, type SendGuardOptions, type StopEvent } from "./ask-guard.ts";
+import { guardBackground, guardSend, guardStop, hook, hookWith, type IsTopLevel, type SendEvent, type SendGuardOptions, type StopEvent } from "./ask-guard.ts";
 
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
@@ -308,5 +308,39 @@ describe("the send guard", () => {
     const routed = hookWith(() => t3(waiting));
     const result = await dispatch(dirname(target), "codex", JSON.stringify(send({ mode: "steer" })), async (_path, provider, input) => routed(provider, async () => input, where));
     expect(JSON.parse(result.stdout).hookSpecificOutput).toMatchObject({ permissionDecision: "deny", permissionDecisionReason: expect.stringContaining('mode: "queue"') });
+  });
+});
+
+describe("the background work guard", () => {
+  const started = (id: string) => [
+    { type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: `toolu_${id}`, name: "Bash", input: { command: "bun run check", run_in_background: true } }] } },
+    { type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: `toolu_${id}`, content: `Command running in background with ID: ${id}. Output is being written to: /tmp/tasks/${id}.output.` }] }, toolUseResult: { backgroundTaskId: id } },
+  ];
+  const waitOn = (...taskIds: string[]) => ({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "toolu_wait", name: "mcp__t3-code__t3_background_wait", input: { taskIds } }] } });
+  const running = (id: string, type = "shell") => ({ id, type, status: "running" });
+  const background = (lines: object[], inFlight: object[], extra: object = {}, threadId = "lane") =>
+    guardBackground({ transcript_path: transcript(claudePrompt("Run the gate"), ...lines), background_tasks: inFlight, ...extra }, home("Robin"), threadId || undefined);
+
+  test("sends back a turn that leaves its background shell task running with nothing waiting on it", async () => {
+    const blocked = await background([...started("bgate1"), claudeSays("Done.")], [running("bgate1")]);
+    expect(blocked?.reason).toContain('t3_background_wait with taskIds ["bgate1"]');
+    expect(blocked?.reason).toContain("ask Robin");
+  });
+
+  test("names only the task nothing waits on", async () => {
+    const blocked = await background([...started("bgate1"), ...started("btest2"), waitOn("btest2"), claudeSays("Done.")], [running("bgate1"), running("btest2")]);
+    expect(blocked?.reason).toContain('taskIds ["bgate1"]');
+  });
+
+  test.each([
+    ["the task ended", [...started("bgate1"), claudeSays("Done.")], [], {}, "lane"],
+    ["a wait names it", [...started("bgate1"), waitOn("bgate1"), claudeSays("Done.")], [running("bgate1")], {}, "lane"],
+    ["an earlier turn started it", [...started("bold1"), claudePrompt("Next"), claudeSays("Done.")], [running("bold1")], {}, "lane"],
+    ["only a subagent runs", [claudeSays("Done.")], [running("a1", "subagent")], {}, "lane"],
+    ["the turn closes waiting", [...started("bgate1"), claudeSays("Gate runs.\n\n⏳ **Waiting on** the gate")], [running("bgate1")], {}, "lane"],
+    ["the stop was sent back once", [...started("bgate1"), claudeSays("Done.")], [running("bgate1")], { stop_hook_active: true }, "lane"],
+    ["the session is outside T3", [...started("bgate1"), claudeSays("Done.")], [running("bgate1")], {}, ""],
+  ] as const)("lets the stop through when %s", async (_, lines, inFlight, extra, threadId) => {
+    expect(await background([...lines], [...inFlight], extra, threadId)).toBeUndefined();
   });
 });
