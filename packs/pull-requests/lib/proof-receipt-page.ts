@@ -229,7 +229,7 @@ function noteText(note: Note, cut: boolean) {
 }
 
 const kindHeadings: Record<ProofKind, string> = {
-  "live-run": "Live run", "ui-walk": "UI walk", "prod-shape": "Production shape", "cross-version": "Cross-version", "shadow-diff": "Shadow diff", "post-deploy-watch": "Post-deploy watch",
+  "live-run": "Live run", "ui-walk": "UI walk", "prod-shape": "Production shape", "cross-version": "Cross-version", "shadow-diff": "Shadow diff", "post-deploy-watch": "Post-deploy watch", "dev-observed": "Dev result",
 };
 
 function kindPart(page: Page, proof: KindProof, cut: boolean) {

@@ -98,6 +98,7 @@ function proofRow(pr: Row, decisions: DecisionState[]) {
     ...summary.kinds.flatMap((kind) =>
       kind.state === "missing" ? [`${kind.kind}: missing`]
       : kind.state === "pending" ? [`${kind.kind}: pending until the PR lands`]
+      : kind.state === "waiting" ? [`${kind.kind}: waiting on the dev result of ${kind.dev}`]
       : kind.state === "gap" ? [deferredGap(kind.kind, kind.gap)] : []),
     ...summary.review.panelGap ? [deferredGap("panel", summary.review.panelGap)] : [],
     ...summary.ci.gap ? [deferredGap("ci", summary.ci.gap)] : [],
