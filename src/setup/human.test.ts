@@ -261,7 +261,7 @@ describe("fleet setup sign-ins", () => {
     expect(probes.length).toBeGreaterThan(1);
     for (const probe of probes) {
       expect(probe.command.slice(0, 7)).toEqual(["codex", "exec", "--ephemeral", "--sandbox", "read-only", "--ignore-user-config", "--skip-git-repo-check"]);
-      expect(probe.command).toContain("gpt-6.1-sol");
+      expect(probe.command).toContain("gpt-6.2-sol");
       expect(probe.timeoutMs).toBe(20000);
       expect(probe.cwd!.startsWith(home)).toBe(false);
       expect(existsSync(probe.cwd!)).toBe(false);

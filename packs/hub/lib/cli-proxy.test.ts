@@ -28,7 +28,7 @@ function codexRouted(home: string, config: Record<string, unknown> = { ...mine, 
   writeFileSync(codexFile(home), stringify(config));
 }
 
-type Proxy = { catalog?: unknown; strategy?: string; credentials?: Array<{ name?: string; auth_index?: string; provider: string; disabled?: boolean; status?: string; unavailable?: boolean; status_message?: string }>; models?: string[]; down?: boolean };
+type Proxy = { catalog?: unknown; registry?: unknown; strategy?: string; credentials?: Array<{ name?: string; auth_index?: string; provider: string; disabled?: boolean; status?: string; unavailable?: boolean; status_message?: string }>; models?: string[]; down?: boolean };
 
 function fakeProxy(proxy: Proxy = {}) {
   const requests: Array<{ path: string; method: string; auth: string }> = [];
@@ -37,6 +37,7 @@ function fakeProxy(proxy: Proxy = {}) {
     const auth = new Headers(init?.headers).get("authorization") ?? "";
     requests.push({ path: url.pathname, method: init?.method ?? "GET", auth });
     if (proxy.catalog !== undefined && url.pathname.endsWith("/codex_client_models.json")) return Response.json(proxy.catalog);
+    if (proxy.registry !== undefined && url.pathname.endsWith("/models.json")) return Response.json(proxy.registry);
     if (proxy.down || url.origin !== proxyUrl) throw new TypeError("connection refused");
     if (url.pathname === "/v1/models") return auth === `Bearer ${clientKey}` ? Response.json({ data: (proxy.models ?? ["claude-sonnet-5-5"]).map((id) => ({ id })) }) : new Response("no", { status: 401 });
     if (url.pathname === "/v0/management/routing/strategy") return Response.json({ strategy: proxy.strategy ?? "fill-first" });
@@ -125,23 +126,26 @@ test("install presents a current Claude Code version upstream, so new Claude mod
   expect(older.calls).toContain("systemctl --user restart fleet-cli-proxy.service");
 });
 
-test("install points the proxy at its own Codex catalog with the ultrafast tier, and moves a hub on the earlier config to it", async () => {
+test("install points the proxy at its own Codex catalog with the ultrafast tier and at its routing registry, and moves a hub on the earlier config to them", async () => {
   const upstream = { models: [{ slug: "gpt-6.1-sol", service_tiers: [{ id: "priority" }] }] };
-  const { machine, home } = hubMachine({}, { catalog: upstream });
+  const { machine, home } = hubMachine({}, { catalog: upstream, registry: { "codex-pro": [{ id: "gpt-6.1-sol" }] } });
   expect(await cliProxy("install", machine)).toBe(0);
   const configPath = join(dataDir(home), "config.yaml");
   const catalogPath = join(dataDir(home), "codex-catalog.json");
-  const block = `models:\n  codex-catalog: "${catalogPath}"\n`;
+  const registryPath = join(dataDir(home), "models-catalog.json");
+  const block = `models:\n  codex-catalog: "${catalogPath}"\n  catalog: "${registryPath}"\n`;
   expect(readFileSync(configPath, "utf8")).toContain(block);
-  expect((Bun.YAML.parse(readFileSync(configPath, "utf8")) as Record<string, Record<string, string>>).models).toEqual({ "codex-catalog": catalogPath });
-  expect(readJson(catalogPath).models[0].service_tiers.map((tier: { id: string }) => tier.id)).toEqual(["priority", "ultrafast"]);
+  expect((Bun.YAML.parse(readFileSync(configPath, "utf8")) as Record<string, Record<string, string>>).models).toEqual({ "codex-catalog": catalogPath, catalog: registryPath });
+  expect(readJson(catalogPath).models.map((model: { slug: string }) => model.slug)).toEqual(["gpt-6.2-sol", "gpt-6.1-sol"]);
+  expect(readJson(catalogPath).models[1].service_tiers.map((tier: { id: string }) => tier.id)).toEqual(["priority", "ultrafast"]);
+  expect(readJson(registryPath)["codex-pro"].map((model: { id: string }) => model.id)).toEqual(["gpt-6.2-sol", "gpt-6.1-sol"]);
 
-  writeFileSync(configPath, readFileSync(configPath, "utf8").replace(block, ""));
+  writeFileSync(configPath, readFileSync(configPath, "utf8").replace(`  catalog: "${registryPath}"\n`, ""));
   const earlier = hubMachine({ home }, { down: true });
   expect(await cliProxy("install", earlier.machine)).toBe(0);
   expect(readFileSync(configPath, "utf8")).toContain(block);
   expect(earlier.calls).toContain("systemctl --user restart fleet-cli-proxy.service");
-  expect(readJson(catalogPath).models[0].slug).toBe("gpt-6.1-sol");
+  expect(readJson(catalogPath).models[1].slug).toBe("gpt-6.1-sol");
 });
 
 test("install stops at a release whose checksum differs, before it writes a unit", async () => {
@@ -195,7 +199,7 @@ test("the doctor names the login command while the proxy holds too few subscript
 });
 
 test("the doctor passes but warns about each subscription whose login expired, by a short id and never its email, and names the sign-in command for its provider", async () => {
-  const { machine, home } = hubMachine({}, { catalog: { models: [{ slug: "gpt-6.1-sol" }] } });
+  const { machine, home } = hubMachine({}, { catalog: { models: [{ slug: "gpt-6.1-sol" }] }, registry: { "codex-pro": [{ id: "gpt-6.1-sol" }] } });
   await cliProxy("install", machine);
   const expired = '{"error":"invalid_grant","error_description":"refresh token for alice expired"}';
   const credentials = [

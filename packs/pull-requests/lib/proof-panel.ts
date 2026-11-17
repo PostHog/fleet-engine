@@ -4,14 +4,14 @@ import { link, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "nod
 import { basename, dirname, join } from "node:path";
 import { anchorCheck } from "./finding-anchors.ts";
 import { readJson, roundId, storeCapturedFindings, writeJson, type ProofIdentity } from "./proof.ts";
-import { askModel, familyOf, isQuotaExhausted, quotaExitCode, reviewerRow, sameFamilyRow, type Family } from "./proof-models.ts";
+import { askModel, familyOf, isQuotaExhausted, quotaExitCode, reviewerRow, sameFamilyRow, securityRow, type Family } from "./proof-models.ts";
 import type { ModelRow } from "../../base/lib/models.ts";
 import { capped, diffCap, reviewedDiff } from "./proof-review.ts";
 
-export type PanelGuide = { brief: string; lenses: Map<string, { title: string; text: string }>; freshEyes: Set<string>; contextFree: Set<string> };
-export type Lens = { name: string; title: string; family: Family; row: ModelRow; text: string; knowledge: string; context: boolean };
+export type PanelGuide = { brief: string; lenses: Map<string, { title: string; text: string }>; freshEyes: Set<string>; security: Set<string>; contextFree: Set<string> };
+export type Lens = { name: string; title: string; family: Family; row: ModelRow; security: boolean; text: string; knowledge: string; context: boolean };
 export type BriefInput = { title: string; body: string; base: string; from: string; commit: string; diff: string; diffFile: string; note: string; settled: string; owed: string; rubric: string };
-export type Cast = { family: Family; model: string; row: ModelRow };
+export type Cast = { family: Family; model: string; row: ModelRow; security?: true };
 export type Plan = { lenses: ({ name: string; title: string } & Cast)[]; changedFiles: string[]; from?: string; cwd: string; readable: string[] };
 type LensStatus = { state: "queued" | "running" | "done" | "failed"; attempts: number; startedAt?: string; finishedAt?: string; cause?: string };
 export type StartTime = (pid: number) => Promise<string | undefined>;
@@ -54,6 +54,7 @@ function parseGuide(text: string, path: string): PanelGuide {
   const brief = /```md\n([\s\S]*?)\n```/.exec(section(text, "## Brief") ?? "")?.[1];
   const lenses = section(text, "## Lenses");
   const freshEyes = /\*\*Fresh-eyes lane\*\*:.*?It runs (.+?)(?:, with |\. )/.exec(oneLine(text))?.[1];
+  const security = /\*\*Security lane\*\*:.*?It runs (.+?)(?:, |\. )/.exec(oneLine(text))?.[1];
   if (!brief || !lenses || !freshEyes) throw new Error(`${path} lacks the Brief, the Lenses, or the Fresh-eyes lane that fleet reads`);
   const contextFree = /Context \(every lens except (.+?)\):/.exec(oneLine(brief))?.[1];
   return {
@@ -63,6 +64,7 @@ function parseGuide(text: string, path: string): PanelGuide {
       return [slug(title), { title: title.trim(), text: body.join("\n").trim() }];
     })),
     freshEyes: new Set(lensNames(freshEyes)),
+    security: new Set(security ? lensNames(security) : []),
     contextFree: new Set(contextFree ? lensNames(contextFree) : []),
   };
 }
@@ -79,9 +81,10 @@ export function resolveLens(guide: PanelGuide, argument: string, author: Family,
     throw new Error(`Unknown lens ${name}. PANEL.md has ${offered}; a Team perspective needs --knowledge ${name}=<file>`);
   }
   const same = side ? side === "same" : guide.freshEyes.has(name);
-  const row = same ? sameFamilyRow(author, env) : reviewerRow(author, env);
+  const security = side || !guide.security.has(name) ? undefined : securityRow(env);
+  const row = security ?? (same ? sameFamilyRow(author, env) : reviewerRow(author, env));
   return {
-    name, title: known?.title ?? name, family: familyOf(row), row,
+    name, title: known?.title ?? name, family: familyOf(row), row, security: security !== undefined,
     text: known?.text ?? extra.join("\n\n"), knowledge: known ? extra.join("\n\n") : "", context: !guide.contextFree.has(name),
   };
 }
@@ -162,7 +165,7 @@ export async function requeueFailed(directory: string, casts: Map<string, Cast>,
   const failed: string[] = [];
   for (const lens of plan.lenses) {
     if ((await readStatus(directory, lens.name)).state !== "failed") continue;
-    Object.assign(lens, casts.get(lens.name));
+    Object.assign(lens, { security: undefined }, casts.get(lens.name));
     await writeFile(lensFile(directory, lens.name, ".prompt.md"), fresh.briefs.get(lens.name)!, { mode: 0o600 });
     await writeStatus(directory, lens.name, { state: "queued", attempts: 0 });
     await rm(pidFile(directory, lens.name), { force: true });
@@ -212,7 +215,7 @@ async function othersFinished(directory: string, io: PanelIO) {
 async function askLens(directory: string, plan: Plan, lens: Plan["lenses"][number], io: PanelIO, slot: Slot) {
   const brief = await readFile(lensFile(directory, lens.name, ".prompt.md"), "utf8");
   const prompt = lens.name === sweep ? `${brief}\n${await otherFindings(directory, plan)}` : brief;
-  const answer = await askModel("reviewer", lens.row, { prompt, cwd: plan.cwd, readable: plan.readable, started: slot.recordReviewer }, io.env, io.limit);
+  const answer = await askModel("reviewer", lens.row, { prompt, cwd: plan.cwd, readable: plan.readable, started: slot.recordReviewer }, io.env, io.limit, lens.security === true);
   if (!answer.ok) return answer.cause;
   await writeFile(lensFile(directory, lens.name, ".md"), answer.text + "\n", { mode: 0o600 });
   return laneProblem(answer.text, plan.changedFiles);

@@ -209,7 +209,7 @@ test("balance tells an expired login apart from usage it could not read, ranks t
   writeFileSync(join(home, ".local/share/fleet-cli-proxy/management.env"), `MANAGEMENT_PASSWORD=${managementKey}\n`);
   expect(await balanceCommand([], { home, fetch, now: () => now, ledger: false, log: (line) => lines.push(line) })).toBe(0);
   expect(lines.filter((line) => line.startsWith("Codex catalog:")).at(-1)).toBe("Codex catalog: every source failed, so the proxy serves its built-in catalog");
-  expect(lines.filter((line) => !line.startsWith("Claude subscription 1:") && !line.startsWith("Codex catalog:"))).toEqual([
+  expect(lines.filter((line) => !line.startsWith("Claude subscription 1:") && !line.startsWith("Codex catalog:") && !line.startsWith("Model registry:"))).toEqual([
     "Claude subscription 2: priority 0, usage unreadable: its login expired. Sign it in again on the hub; fleet cli-proxy doctor names the command",
     "Claude subscription 3: priority 0, usage unreadable",
     "Claude subscription 4: priority 0, usage unreadable",

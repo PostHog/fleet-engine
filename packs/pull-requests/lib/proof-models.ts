@@ -29,6 +29,13 @@ export function sameFamilyRow(author: Family, env: Record<string, string | undef
   return reviewers.find((row) => familyOf(row) === author) ?? reviewerRow(author, env);
 }
 
+export function securityRow(env: Record<string, string | undefined>): ModelRow | undefined {
+  const row = modelTable(env).find((candidate) => candidate.role === "security");
+  const model = env.FLEET_PROOF_SECURITY_MODEL;
+  if (!model) return row;
+  return { ...(row ?? { role: "security", work: "Deep security review", effort: "xhigh" }), provider: model.startsWith("claude") ? "claude" : "codex", model };
+}
+
 export type ModelAnswer = { ok: true; text: string; model: string } | { ok: false; cause: string; model: string };
 export type ModelRequest = { prompt: string; cwd: string; readable?: string[]; images?: string[]; schema?: object; started?: (pid: number) => Promise<void> };
 export type Role = "arbiter" | "reviewer" | "judge" | "eval-judge";
@@ -36,15 +43,15 @@ export type Role = "arbiter" | "reviewer" | "judge" | "eval-judge";
 const prefixes: Record<Role, string> = { arbiter: "FLEET_REVIEW_ARBITER", reviewer: "FLEET_PROOF_REVIEWER", judge: "FLEET_PROOF_JUDGE", "eval-judge": "FLEET_PROOF_EVAL_JUDGE" };
 const prefixOf = (role: Role) => prefixes[role];
 
-export function modelLabel(role: Role, row: ModelRow, env: Record<string, string | undefined>) {
+export function modelLabel(role: Role, row: ModelRow, env: Record<string, string | undefined>, pinned = false) {
   const replacement = env[prefixOf(role)];
-  return env[`${prefixOf(role)}_MODEL`] || (replacement ? `command: ${replacement}` : row.model);
+  return (!pinned && env[`${prefixOf(role)}_MODEL`]) || (replacement ? `command: ${replacement}` : row.model);
 }
 
-export async function askModel(role: Role, row: ModelRow, request: ModelRequest, env: Record<string, string | undefined>, limit: number): Promise<ModelAnswer> {
+export async function askModel(role: Role, row: ModelRow, request: ModelRequest, env: Record<string, string | undefined>, limit: number, pinned = false): Promise<ModelAnswer> {
   const prefix = prefixOf(role);
   const replacement = env[prefix];
-  const model = modelLabel(role, row, env);
+  const model = modelLabel(role, row, env, pinned);
   const timeout = Number(env[`${prefix}_TIMEOUT_MS`]) || limit;
   const scratch = await mkdtemp(join(tmpdir(), "fleet-proof-model-"));
   try {
