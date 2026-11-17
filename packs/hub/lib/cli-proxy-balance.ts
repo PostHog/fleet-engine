@@ -23,6 +23,7 @@ export const proxyUrl = "http://127.0.0.1:8317";
 export const proxyDir = (home: string) => join(home, ".local/share/fleet-cli-proxy");
 export const managementFile = (home: string) => join(proxyDir(home), "management.env");
 export const codexCatalogPath = (home: string) => join(proxyDir(home), "codex-catalog.json");
+export const modelRegistryPath = (home: string) => join(proxyDir(home), "models-catalog.json");
 export const managementPattern = /^MANAGEMENT_PASSWORD=([0-9a-f]{64})\n$/;
 const usageUrl = "https://api.anthropic.com/api/oauth/usage";
 const codexUsageUrl = "https://chatgpt.com/backend-api/wham/usage";
@@ -224,7 +225,7 @@ export async function balanceCommand(args: string[], deps: BalanceDeps): Promise
   requireHubRole(deps.home, "cli-proxy-balance");
   const managementKey = await readManagementKey(deps.home);
   if (args.some((arg) => arg !== "--dry-run")) throw new Error("Usage: fleet cli-proxy-balance [--dry-run]");
-  if (!args.includes("--dry-run")) await refreshCodexCatalog({ path: codexCatalogPath(deps.home), fetch: deps.fetch, now: deps.now, log: deps.log }).catch((error) => deps.log(`Codex catalog: ${(error as Error).message}`));
+  if (!args.includes("--dry-run")) await refreshCodexCatalog({ path: codexCatalogPath(deps.home), registryPath: modelRegistryPath(deps.home), fetch: deps.fetch, now: deps.now, log: deps.log }).catch((error) => deps.log(`Codex catalog: ${(error as Error).message}`));
   await balance({ fetch: deps.fetch, managementKey, now: deps.now(), dryRun: args.includes("--dry-run"), ledger: deps.ledger, log: deps.log });
   return 0;
 }

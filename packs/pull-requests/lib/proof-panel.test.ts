@@ -1,9 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { cleanFixtures, settings, checkout, clean, verdict, fakeModel, recordingModel, fixture, stalledOnQuota, panelGuide, acceptGap, hubAt, exitedPid, reviewHead, type Checkout } from "./proof-testing.ts";
+import { cleanFixtures, settings, checkout, clean, verdict, fakeModel, recordingModel, fixture, stalledOnQuota, panelGuide, acceptGap, hubAt, exitedPid, reviewHead, models, type Checkout } from "./proof-testing.ts";
 import { askModel } from "./proof-models.ts";
-import { processStart, withSlot, type PanelIO } from "./proof-panel.ts";
+import { processStart, readPlan, withSlot, type PanelIO } from "./proof-panel.ts";
 
 afterEach(cleanFixtures);
 
@@ -811,4 +811,30 @@ test("rerunning a failed lens rebuilds its brief and runs it in the checkout of 
   expect((await pr.fleet("review", "--wait")).code).toBe(0);
   expect(reviewer.prompts().at(-1)).toContain("A greeting once leaked a member's email.");
   expect(readFileSync(cwds, "utf8").trim().split("\n").at(-1)).toBe(realpathSync(other));
+});
+
+test("a Security lane lens runs on the security row of the model table at its effort, whoever wrote the PR, and :same moves it to the author's reviewer", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.txt", "greet\n");
+  await pr.fleet("require", "--none", "--reason", "docs only");
+  pr.env.FLEET_MODELS = JSON.stringify([...models, { role: "security", work: "Deep security review", provider: "codex", model: "security-model", effort: "xhigh" }]);
+  pr.env.FLEET_PROOF_REVIEWER_MODEL = "candidate-model";
+  const codex = recordingModel(pr, "codex", "Looks fine to me.");
+
+  await pr.fleet("review", "--lens", "security", "--lens", "correctness");
+  expect(new Set(codex.calls().map((call) => call.split(" -s ")[0]))).toEqual(new Set(['exec -m security-model -c model_reasoning_effort="xhigh"', 'exec -m candidate-model -c model_reasoning_effort="high"']));
+  const directory = join(pr.pullRequest, "reviews/1");
+  expect((await readPlan(directory))!.lenses.map(({ name, family, model, security }) => ({ name, family, model, security }))).toEqual([
+    { name: "security", family: "gpt", model: "security-model", security: true },
+    { name: "correctness", family: "gpt", model: "candidate-model", security: undefined },
+  ]);
+  expect((await pr.fleet("review", "--wait")).code).toBe(1);
+
+  const claude = recordingModel(pr, "claude", clean);
+  recordingModel(pr, "codex", clean);
+  await pr.fleet("review", "--lens", "security:same", "--lens", "correctness");
+  expect(claude.calls()).toEqual([expect.stringMatching(/^-p --model candidate-model --effort high /)]);
+  const security = (await readPlan(directory))!.lenses[0]!;
+  expect([security.family, security.model, security.security]).toEqual(["claude", "candidate-model", undefined]);
+  expect((await pr.fleet("review", "--wait")).code).toBe(0);
 });

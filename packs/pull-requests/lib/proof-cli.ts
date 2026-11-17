@@ -243,7 +243,10 @@ FLEET_PROOF_QUOTA_GRACE_MS changes the 5 minutes; 0 stops the run at once.
 
 With --lens, the round is a qa-swarm panel: one reviewer per lens, each with the Brief of the qa-swarm PANEL.md in
 ~/.agents/skills/qa-swarm, filled by fleet, and the lens's hunting grounds. A lens runs on the family of its PANEL.md
-lane: the fresh-eyes lane on the author's family, the others on the reviewer above. :same or :other picks the family.
+lane: the fresh-eyes lane on the author's family, the others on the reviewer above. A Security lane lens runs on the
+security row of the model table, at its effort, whoever wrote the PR; FLEET_PROOF_SECURITY_MODEL replaces its model,
+and without either it runs on the reviewer above. :same or :other picks the family, and moves a Security lane lens
+to that family's reviewer.
 --knowledge adds the repo's review material for a lens, and gives the text of a Team perspective that PANEL.md does
 not list. fleet starts the lenses in the background and returns at once; at most pull-requests.panelSlots reviewers
 run at once on this machine, and the rest wait. Each raw answer is kept in lenses/<name>.md. A lens that ends without
@@ -487,7 +490,7 @@ ${overrideHelp}`,
 printed. --reviewer names the model that wrote them; the gate prints it. The findings file must not be empty; write
 "No findings." when the reviewer found none. When the round's decision is not recorded yet, review-finish records it
 first and needs the hub; a round whose decision is recorded finishes without it.`,
-    examples: ["fleet proof review-finish --round 1 --reviewer gpt-6.1-sol findings.md", "fleet proof review-finish --round final-1 --reviewer claude-opus-5-5 findings.md"],
+    examples: ["fleet proof review-finish --round 1 --reviewer gpt-6.2-sol findings.md", "fleet proof review-finish --round final-1 --reviewer claude-opus-5-5 findings.md"],
     options: ["--round", "--findings", "--reviewer"],
     run: async ({ options, files }, identity, context) => {
       const findings = options.has("--findings") ? [options.get("--findings")!, ...files] : files;
@@ -675,7 +678,7 @@ async function runPanel({ options, lists }: Parsed, head: ProofIdentity, context
   return 0;
 }
 
-const castOf = ({ family, row }: Lens, env: Record<string, string | undefined>) => ({ family, row, model: modelLabel("reviewer", row, env) });
+const castOf = ({ family, row, security }: Lens, env: Record<string, string | undefined>) => ({ family, row, model: modelLabel("reviewer", row, env, security), ...(security ? { security: true as const } : {}) });
 
 async function reservePanel(options: Map<string, string>, head: ProofIdentity, lenses: Lens[], guide: PanelGuide, context: CommandContext) {
   const rubric = await readRubric(context.home);

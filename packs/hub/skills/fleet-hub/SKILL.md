@@ -93,13 +93,26 @@ the person's own subscriptions, never for someone else's.
   keeps a file that Fleet did not write and stops at a linked path.
 - **The Codex catalog.** Codex and T3 offer only the service tiers that the
   proxy's model catalog lists for a model. Upstream's catalog lists only
-  `priority`, but Codex accounts also serve `ultrafast` on GPT-6.1 Sol and
-  GPT-6 Astra. So the proxy reads its Codex catalog from
-  `~/.local/share/fleet-cli-proxy/codex-catalog.json` (`models.codex-catalog`
-  in its config): upstream's catalog with the `ultrafast` tier added. Install
-  writes it, each balancer run fetches it again when it is 3 hours old, and
-  `fleet cli-proxy catalog` fetches it now. A failed or empty fetch keeps the
-  last file. The doctor warns while the file is missing.
+  `priority`, but Codex accounts also serve `ultrafast` on GPT-6.2 Sol,
+  GPT-6.2 Astra, GPT-6.1 Sol and GPT-6 Astra. So the proxy reads its Codex
+  catalog from `~/.local/share/fleet-cli-proxy/codex-catalog.json`
+  (`models.codex-catalog` in its config): upstream's catalog with the
+  `ultrafast` tier added. Install writes it, each balancer run fetches it
+  again when it is 3 hours old, and `fleet cli-proxy catalog` fetches it now.
+  A failed or empty fetch keeps the last file. The doctor warns while the file
+  is missing.
+- **The model registry.** The proxy routes by a second file, upstream's
+  `models.json`, with one model list per Codex plan (`codex-pro`,
+  `codex-team`, and so on). It sends a model only to subscriptions whose plan
+  lists it. Fleet writes it to
+  `~/.local/share/fleet-cli-proxy/models-catalog.json` (`models.catalog` in
+  the config) on the same schedule as the catalog. When Codex accounts serve
+  a new model before upstream lists it, `earlyModels` in
+  `packs/hub/lib/codex-catalog.ts` adds it to both files as a copy of the
+  model it succeeds, in the registry only for the plans it names: GPT-6.2 Sol
+  copies GPT-6.1 Sol, and GPT-6.2 Astra copies GPT-6 Astra, both for
+  `codex-pro`, because a Business seat refuses them. Upstream's own entry
+  replaces the copy once it appears.
 - **Subscriptions.** The person adds each of their own Claude accounts on the
   hub, or their Codex accounts on the `codex` plan. `fleet cli-proxy doctor`
   prints the login command until the proxy holds `hub.proxyAccounts` of them
