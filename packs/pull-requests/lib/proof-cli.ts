@@ -2,7 +2,7 @@ import { closeSync, existsSync, openSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { askGap, authorOf, finishReview, startGateRun, ledgerRoot, listStanding, proofDirectory, readJson, readOwed, recordGap, recordGapCommand, recordStanding, requireChoice, requireNone, requireProofs, requireReservation, respondToReview, reuseProof, reviewDirectory, reviewOfCommit, reviewRecords, roundId, roundQuestion, runOption, saveProof, startReview, stopOption, storeCapturedFindings, unfinishedReview, writeJson, markRecorded, readReservation, recordReceipt, roundDirectories, unrecordedElsewhere, type Arbiter, type Reservation, type CapturedBy, type ProofIdentity } from "./proof.ts";
+import { askGap, authorOf, finishReview, startGateRun, ledgerRoot, listStanding, proofDirectory, readJson, readOwed, recordGap, recordGapCommand, recordStanding, requireChoice, requireNone, devPr, requireProofs, requireReservation, respondToReview, reuseProof, reviewDirectory, reviewOfCommit, reviewRecords, roundId, roundQuestion, runOption, saveProof, startReview, stopOption, storeCapturedFindings, unfinishedReview, writeJson, markRecorded, readReservation, recordReceipt, roundDirectories, unrecordedElsewhere, type Arbiter, type Reservation, type CapturedBy, type ProofIdentity } from "./proof.ts";
 import { AnswerTaken, appendOnce, decideAlone, hearUser, ledgerHolds, ledgerOf } from "./decision-cli.ts";
 import { HubUnreachable, refText, type Decision, type Ssh } from "./decision-ledger.ts";
 import { readComment, runIn } from "./pr-ci.ts";
@@ -201,20 +201,26 @@ decision report link the receipt.`,
     },
   },
   require: {
-    usage: "require (--kinds <kind,kind> | --none --reason <why>) [--author claude|gpt]",
+    usage: "require (--kinds <kind,kind> | --after-dev <owner/name#number> | --none --reason <why>) [--author claude|gpt]",
     summary: `Record the proof kinds the PR owes. Repeated calls add kinds. A PR that owes none records --none with the
 reason. The gate fails until one of them is recorded. The first call also records the model family that wrote the
 PR, from the Claude Code or Codex session that runs it; pass --author only outside such a session. fleet proof review
 and the judge pick their model from it: the review row of the model table for a PR that Claude wrote, and the
-review-codex row for one that Codex wrote when the table has one. The recorded family does not change.`,
-    examples: ["fleet proof require --kinds live-run,ui-walk", "fleet proof require --none --reason 'Docs only'"],
-    options: ["--kinds", "--reason", "--author"], flags: ["--none"],
+review-codex row for one that Codex wrote when the table has one. The recorded family does not change.
+A prod PR that waits on an observed result in dev, when infrastructure goes to dev first, names its dev PR with
+--after-dev. That adds the kind dev-observed and records the dev PR once. The gate then reads the dev PR on GitHub
+and prints "waiting on the dev result of <dev PR>" until the dev PR has merged and evidence of dev-observed was saved
+after that merge, such as with fleet proof run --kind dev-observed -- <command>. The judge then gets that evidence
+with the merge time and the time it was saved.`,
+    examples: ["fleet proof require --kinds live-run,ui-walk", "fleet proof require --none --reason 'Docs only'", "fleet proof require --kinds prod-shape,post-deploy-watch --after-dev owner/charts#123"],
+    options: ["--kinds", "--reason", "--author", "--after-dev"], flags: ["--none"],
     run: async ({ options, flags }, identity, { print, home, env }) => {
-      if (flags.has("--none") === options.has("--kinds")) throw usageError("require", "Pass either --kinds or --none");
+      if (flags.has("--none") === (options.has("--kinds") || options.has("--after-dev"))) throw usageError("require", "Pass --kinds, --after-dev, or --none");
       const author = resolveAuthor(options.get("--author"), env);
       if (flags.has("--none")) { print(`none: ${(await requireNone(home, identity(), required(options, "--reason", "require"), author)).none!.reason}`); return 0; }
-      const kinds = required(options, "--kinds", "require").split(",").map((value) => value.trim());
-      print((await requireProofs(home, identity(), kinds, author)).join(","));
+      const kinds = (options.get("--kinds") ?? "").split(",").map((value) => value.trim()).filter(Boolean);
+      const afterDev = options.has("--after-dev") ? devPr(options.get("--after-dev")!) : undefined;
+      print((await requireProofs(home, identity(), kinds, author, afterDev)).join(","));
       return 0;
     },
   },
@@ -869,7 +875,7 @@ const identityHelp = `Every command works on the PR of the current branch and it
 or --commit to choose others. --commit and --base take any commit Git resolves here, such as a short SHA.`;
 const runIdentityHelp = `run works on the PR of the current branch. Pass --repo owner/name and --pr number to choose another. It
 reads HEAD from Git and takes no --commit.`;
-const kindsHelp = "Kinds: live-run, ui-walk, prod-shape, cross-version, shadow-diff, post-deploy-watch. A gap also takes ci, judge, and panel. A standing rule takes none of review, judge and post-deploy-watch.";
+const kindsHelp = "Kinds: live-run, ui-walk, prod-shape, cross-version, shadow-diff, post-deploy-watch, dev-observed (owed through require --after-dev). A gap also takes ci, judge, and panel. A standing rule takes none of review, judge and post-deploy-watch.";
 
 function overview() {
   const lines = Object.values(subcommands).filter((command) => !command.hidden).map((command) => `  fleet proof ${command.usage}`);

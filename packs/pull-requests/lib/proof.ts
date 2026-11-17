@@ -483,7 +483,7 @@ export function answeredFindings(findings: string, responses: string) {
 const unanswered = (findings: string, responses: string) =>
   answeredFindings(findings, responses).findings.flatMap((finding, index) => finding.answer ? [] : [index + 1]);
 
-export const proofKinds = ["live-run", "ui-walk", "prod-shape", "cross-version", "shadow-diff", "post-deploy-watch"] as const;
+export const proofKinds = ["live-run", "ui-walk", "prod-shape", "cross-version", "shadow-diff", "post-deploy-watch", "dev-observed"] as const;
 export type ProofKind = (typeof proofKinds)[number];
 const gapKinds = [...proofKinds, "ci", "judge", "panel"] as const;
 export type GapKind = (typeof gapKinds)[number];
@@ -510,7 +510,17 @@ export async function writeJson(path: string, value: unknown) {
   await rename(temporary, path);
 }
 
-export type Owed = { kinds: ProofKind[]; none?: { reason: string; recordedAt: string }; author?: Family };
+/** The dev PR whose observed result a prod PR waits on, when infrastructure goes to dev first. */
+export type DevPr = { repository: string; pr: number };
+export type Owed = { kinds: ProofKind[]; none?: { reason: string; recordedAt: string }; author?: Family; afterDev?: DevPr };
+
+export function devPr(value: string): DevPr {
+  const match = /^([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#([1-9][0-9]*)$/.exec(value.trim());
+  if (!match) throw new Error(`--after-dev takes the dev PR as <owner/name>#<number>, not ${value}`);
+  return { repository: match[1]!, pr: Number(match[2]) };
+}
+
+export const devText = (dev: DevPr) => `${dev.repository}#${dev.pr}`;
 const requiredPath = (home: string, identity: ProofIdentity) => join(pullRequestDirectory(home, identity), "required.json");
 
 export async function readOwed(home: string, identity: ProofIdentity): Promise<Owed | undefined> {
@@ -525,12 +535,17 @@ function settleAuthor(recorded: Owed | undefined, author: Family | undefined): F
   return settled;
 }
 
-export async function requireProofs(home: string, identity: ProofIdentity, kinds: string[], author?: Family) {
+/** afterDev names the dev PR whose observed result the PR waits on, and adds dev-observed. It is recorded once. */
+export async function requireProofs(home: string, identity: ProofIdentity, kinds: string[], author?: Family, afterDev?: DevPr) {
   const recorded = await readOwed(home, identity);
+  if (afterDev && recorded?.afterDev && devText(afterDev).toLowerCase() !== devText(recorded.afterDev).toLowerCase()) throw new Error(`The PR already waits on dev PR ${devText(recorded.afterDev)}. The dev PR does not change`);
+  const dev = recorded?.afterDev ?? afterDev;
   const owed = new Set(recorded?.kinds ?? []);
   for (const kind of kinds) owed.add(proofKind(kind));
+  if (dev) owed.add("dev-observed");
+  if (owed.has("dev-observed") && !dev) throw new Error("dev-observed needs --after-dev <owner/name>#<number>: the dev PR whose observed result this PR waits on");
   const sorted = proofKinds.filter((kind) => owed.has(kind));
-  await writeJson(requiredPath(home, identity), { kinds: sorted, author: settleAuthor(recorded, author) } satisfies Owed);
+  await writeJson(requiredPath(home, identity), { kinds: sorted, author: settleAuthor(recorded, author), ...dev ? { afterDev: dev } : {} } satisfies Owed);
   return sorted;
 }
 
@@ -754,6 +769,7 @@ type Status = { problem: "missing" | "gap" | undefined; line: string; covered?: 
 
 export type KindProof = { kind: ProofKind; line: string } & (
   | { state: "pending" }
+  | { state: "waiting"; dev: string; reason: string }
   | { state: "ran"; commit: string; directory: string }
   | { state: "reused"; from: string; reason: string; directory: string }
   | { state: "carried"; from: string; origin?: string; merges: number; directory: string }
@@ -764,6 +780,7 @@ type KindState = KindProof extends infer P ? P extends KindProof ? Omit<P, "kind
 function kindLine(kind: ProofKind, proof: KindState) {
   switch (proof.state) {
     case "pending": return `${kind}: pending until the PR lands`;
+    case "waiting": return `${kind}: waiting on the dev result of ${proof.dev}: ${proof.reason}`;
     case "ran": return `${kind}: evidence at HEAD in ${proof.directory}`;
     case "reused": return `${kind}: evidence reused from ${short(proof.from)}: ${proof.reason}`;
     case "carried": return `${kind}: evidence of ${short(proof.from)} carried across ${proof.merges} clean merge(s) of the base`;
@@ -778,12 +795,13 @@ const evidenceDirectory = (home: string, identity: ProofIdentity, kind: ProofKin
 const evidenceState = (identity: ProofIdentity, proof: Proved, directory: string): KindState =>
   proof.reuse ? { state: "reused", from: proof.reuse.from, reason: proof.reuse.reason, directory } : { state: "ran", commit: identity.commit, directory };
 
-type KindStatus = Pick<Status, "problem" | "condition" | "lapsed"> & { proof: KindProof; evidence?: string };
+type KindStatus = Pick<Status, "problem" | "condition" | "lapsed"> & { proof: KindProof; evidence?: string; dev?: DevResult };
 
 const kindStatusOf = (kind: ProofKind, problem: Status["problem"], state: KindState, evidence?: string): KindStatus =>
   ({ problem, proof: { kind, line: kindLine(kind, state), ...state } as KindProof, evidence });
 
-async function kindStatus(weigh: Weigh, kind: ProofKind, landed: boolean, cleanBaseMerge: CleanBaseMerge): Promise<KindStatus> {
+async function kindStatus(weigh: Weigh, kind: ProofKind, landed: boolean, cleanBaseMerge: CleanBaseMerge, dev?: DevState): Promise<KindStatus> {
+  if (kind === "dev-observed") return devObservedStatus(weigh, cleanBaseMerge, dev);
   const { home, identity, decisions } = weigh;
   const status = (problem: Status["problem"], state: KindState, evidence?: string) => kindStatusOf(kind, problem, state, evidence);
   if (kind === "post-deploy-watch" && !landed) return status(undefined, { state: "pending" });
@@ -804,6 +822,52 @@ async function kindStatus(weigh: Weigh, kind: ProofKind, landed: boolean, cleanB
   if (gap) return { ...status(acceptance ? undefined : "gap", gapState()), ...countedGap(weighed) };
   const newest = [...proved].sort(([, a], [, b]) => (a.time < b.time ? 1 : -1))[0]?.[0];
   return { ...status("missing", newest ? { state: "missing", newest } : { state: "missing" }), ...lapseOf(weighed) };
+}
+
+/** The dev PR as GitHub shows it: mergedAt once it merged. */
+export type DevPull = { mergedAt?: string; mergeCommit?: string };
+type DevState = DevPull & { ref: DevPr; error?: string };
+/** The dev result in the proof summary, once dev-observed evidence saved after the dev merge counts. */
+export type DevResult = { pr: string; mergedAt: string; mergeCommit?: string; savedAt: string; line: string };
+
+const nanosOf = (iso: string) => BigInt(Date.parse(iso)) * 1_000_000n;
+const isoOf = (nanos: bigint) => new Date(Number(nanos / 1_000_000n)).toISOString();
+
+/**
+ * dev-observed counts only evidence saved after the dev PR merged: an observation before the merge saw the old dev.
+ * Until then the kind waits on the dev result, and a gap stands in as for any kind.
+ */
+async function devObservedStatus(weigh: Weigh, cleanBaseMerge: CleanBaseMerge, dev: DevState | undefined): Promise<KindStatus> {
+  const { home, identity, decisions } = weigh;
+  const kind = "dev-observed";
+  const status = (problem: Status["problem"], state: KindState, evidence?: string) => kindStatusOf(kind, problem, state, evidence);
+  const gap = await readJson<Gap | undefined>(gapPath(home, identity, kind), undefined);
+  const weighed = await gapAcceptance(weigh, gap, kind);
+  const acceptance = weighed.acceptance;
+  const gapState = (): KindState => ({ state: "gap", accepted: acceptance !== undefined, gap: gapProof(gap, weighed, decisions) });
+  if (acceptance?.by === "the user") return { ...status(undefined, gapState()), ...countedGap(weighed) };
+  const proved = await provedCommits(home, identity, kind);
+  const head = proved.get(identity.commit);
+  const carried = head ? undefined : reviewedThroughMerges(identity.commit, new Set(proved.keys()), cleanBaseMerge);
+  const found = head ?? (carried && proved.get(carried.from));
+  const directory = found && evidenceDirectory(home, identity, kind, found);
+  const saved = directory ? await newestFile(directory) : undefined;
+  if (dev?.mergedAt && found && directory && saved !== undefined && saved >= nanosOf(dev.mergedAt)) {
+    const result: DevResult = {
+      pr: devText(dev.ref), mergedAt: dev.mergedAt, ...dev.mergeCommit ? { mergeCommit: dev.mergeCommit } : {}, savedAt: isoOf(saved),
+      line: `dev result: ${devText(dev.ref)} merged at ${dev.mergedAt}${dev.mergeCommit ? ` as ${short(dev.mergeCommit)}` : ""}; the dev-observed evidence was saved at ${isoOf(saved)}, after the merge`,
+    };
+    const state: KindState = head ? evidenceState(identity, head, directory) : { state: "carried", from: carried!.from, origin: found.reuse?.from ?? carried!.from, merges: carried!.merges.length, directory };
+    return { ...status(undefined, state, directory), dev: result };
+  }
+  if (gap) return { ...status(acceptance ? undefined : "gap", gapState()), ...countedGap(weighed) };
+  const merged = dev?.mergedAt && `the dev PR merged at ${dev.mergedAt}${dev.mergeCommit ? ` as ${short(dev.mergeCommit)}` : ""}`;
+  const reason = !dev ? "no dev PR is recorded; run fleet proof require --after-dev <owner/name>#<number>"
+    : dev.error ? `cannot read the dev PR (${dev.error})`
+    : !merged ? "the dev PR is not merged yet"
+    : saved !== undefined ? `${merged}, after the newest dev-observed evidence, saved at ${isoOf(saved)}. Observe dev again and save the result with fleet proof run --kind dev-observed -- <command>`
+    : `${merged}. Observe dev and save the result with fleet proof run --kind dev-observed -- <command>`;
+  return { ...status("missing", { state: "waiting", dev: dev ? devText(dev.ref) : "an unrecorded dev PR", reason }), ...lapseOf(weighed) };
 }
 
 type FinishedReview = { name: string; commit: string; reviewer?: string; finishedAt: bigint; panel: boolean };
@@ -930,12 +994,15 @@ function headStatus(identity: ProofIdentity, before: PushedHead, after: PushedHe
   return { problem: undefined, line: `head: ${short(identity.commit)} is the PR's head on GitHub` };
 }
 
-export type GateOptions = { ci: () => CiResult; pushedHead: () => PushedHead; ledger: Ledger; landed?: boolean; cleanBaseMerge?: CleanBaseMerge; quietCommit?: QuietCommit; now?: Date };
+/** devPull reads the dev PR that a prod PR waits on (fleet proof require --after-dev). */
+export type GateOptions = { ci: () => CiResult; pushedHead: () => PushedHead; ledger: Ledger; landed?: boolean; cleanBaseMerge?: CleanBaseMerge; quietCommit?: QuietCommit; now?: Date; devPull?: (dev: DevPr) => DevPull | Promise<DevPull> };
 
 export type ProofSummary = {
   repository: string; pr: number; commit: string; tier: Tier; code: number;
   owed: { state: "unrecorded" | "none" | "owed"; kinds: ProofKind[]; reason?: string; line?: string };
   kinds: KindProof[];
+  /** The dev PR's merge and when its observed result was saved, once dev-observed evidence counts. */
+  dev?: DevResult;
   review: { state: "covered" | "missing" | "gap"; covered?: string; panelGap?: GapProof; unanswered: string[]; line: string };
   head: { state: "pushed" | "missing"; line: string };
   ci: { state: CiResult["state"]; detail: string; checks?: string[]; gap?: GapProof; line: string };
@@ -954,7 +1021,7 @@ export const summaryGaps = (summary: ProofSummary): { kind: string; gap: GapProo
 ];
 
 export const summaryLines = (summary: CheckedSummary) => [
-  ...summary.owed.line ? [summary.owed.line] : [], ...summary.kinds.map((kind) => kind.line), summary.review.line, ...summary.review.unanswered,
+  ...summary.owed.line ? [summary.owed.line] : [], ...summary.kinds.map((kind) => kind.line), ...summary.dev ? [summary.dev.line] : [], summary.review.line, ...summary.review.unanswered,
   summary.head.line, summary.ci.line, ...summary.lapsedLine ? [summary.lapsedLine] : [],
 ];
 
@@ -965,13 +1032,22 @@ const owedPart = (owed: Owed | undefined): CheckedSummary["owed"] =>
 
 const lapsedLine = (ids: string[]) => ids.length ? `lapsed: ${ids.map((id) => `🤖 decision ${id}`).join(", ")} no longer count${ids.length === 1 ? "s" : ""}; ask the user, or decide again once the reason is gone` : undefined;
 
-export async function proofGate(home: string, identity: ProofIdentity, { ci, pushedHead, ledger, landed = false, cleanBaseMerge = () => undefined, quietCommit = () => undefined, now = new Date() }: GateOptions) {
+async function readDev(dev: DevPr | undefined, devPull: GateOptions["devPull"]): Promise<DevState | undefined> {
+  if (!dev) return undefined;
+  if (!devPull) return { ref: dev, error: "no GitHub reader here" };
+  try { return { ref: dev, ...await devPull(dev) }; }
+  catch (error) { return { ref: dev, error: (error as Error).message.trim().split("\n")[0] || "unknown error" }; }
+}
+
+export async function proofGate(home: string, identity: ProofIdentity, { ci, pushedHead, ledger, landed = false, cleanBaseMerge = () => undefined, quietCommit = () => undefined, now = new Date(), devPull }: GateOptions) {
   const before = pushedHead();
   const tier = "error" in before || before.body === undefined ? "ungraded" : tierOf(before.body);
   const decisions = await readDecisions(ledger);
   const weigh: Weigh = { home, identity, now, decisions, tier };
   const owed = await readOwed(home, identity);
-  const kinds = await Promise.all((owed?.kinds ?? []).map((kind) => kindStatus(weigh, kind, landed, cleanBaseMerge)));
+  const dev = owed?.kinds.includes("dev-observed") ? await readDev(owed.afterDev, devPull) : undefined;
+  const kinds = await Promise.all((owed?.kinds ?? []).map((kind) => kindStatus(weigh, kind, landed, cleanBaseMerge, dev)));
+  const devResult = kinds.find((kind) => kind.dev)?.dev;
   const review = await reviewStatus(weigh, cleanBaseMerge, quietCommit);
   const responses = await responseStatuses(home, identity);
   const ciResult = ci();
@@ -986,7 +1062,7 @@ export async function proofGate(home: string, identity: ProofIdentity, { ci, pus
   const voided = (Array.isArray(decisions) ? decisions : []).filter((decision) => decision.voided && covers(decision, identity)).map((decision) => decision.id);
   const receipt = await receiptOf(home, identity);
   const proofSummary: CheckedSummary = {
-    repository: identity.repository, pr: identity.pr, commit: identity.commit, tier, code, owed: owedPart(owed), kinds: kinds.map((kind) => kind.proof),
+    repository: identity.repository, pr: identity.pr, commit: identity.commit, tier, code, owed: owedPart(owed), kinds: kinds.map((kind) => kind.proof), ...devResult ? { dev: devResult } : {},
     review: { state: review.problem ?? "covered", ...review.covered ? { covered: review.covered } : {}, ...review.panelGap ? { panelGap: review.panelGap } : {}, unanswered: responses.map((response) => response.line), line: review.line },
     head: { state: head.problem ? "missing" : "pushed", line: head.line },
     ci: { state: ciResult.state, detail: ciResult.detail, ...ciResult.checks ? { checks: ciResult.checks } : {}, ...checks.gap ? { gap: checks.gap } : {}, line: checks.line },

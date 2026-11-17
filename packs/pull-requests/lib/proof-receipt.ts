@@ -96,6 +96,7 @@ function kindRow(kind: KindProof, input: ReceiptInput, warnings: string[]) {
   if (!from) {
     if (kind.state === "gap") return row([kind.kind, "not run", `gap, ${kind.accepted ? "accepted" : "not accepted"}`, ""]);
     if (kind.state === "pending") return row([kind.kind, "not yet", "pending until the PR lands", ""]);
+    if (kind.state === "waiting") return row([kind.kind, "not yet", "waiting on the dev result", ""]);
     return row([kind.kind, "no evidence", "missing", ""]);
   }
   const lines = input.display.lines[from.commit]?.[kind.kind];
