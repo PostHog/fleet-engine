@@ -52,8 +52,8 @@ test("a prod PR waits on the dev result until the dev PR merged and its observat
   expect(observed.lines).toContain("dev result: example/charts#11 merged at 2026-11-17T09:00:00Z as ddddddd; the dev-observed evidence was saved at 2026-11-17T09:30:00.000Z, after the merge");
 
   const { prompt } = await judgePrompt({
-    cwd: pr.home, from: "f".repeat(40), commit: prod.commit, diff: "", ci: observed.ci, owed: observed.owed!, ledger: observed.lines,
-    evidence: observed.evidence, reviews: [], rubric: "", references: [], body: "", riskRubric: "",
+    cwd: pr.home, from: "f".repeat(40), commit: prod.commit, diff: "", crossFamily: true, ci: observed.ci, owed: observed.owed!, ledger: observed.lines,
+    evidence: observed.evidence, reviews: [], rubric: "", references: [],
   });
   expect(prompt).toContain("dev result: example/charts#11 merged at 2026-11-17T09:00:00Z");
   expect(prompt).toContain("polled 3 jobs, 0 retries");
