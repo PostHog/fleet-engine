@@ -7,14 +7,14 @@ import { devbox, engineSource, resolveEngine, skillSources } from "../../../src/
 import { dispatch } from "../../base/hooks/run.ts";
 import { asksForDecision } from "../lib/prose-question.ts";
 import type { ShellThread } from "../../base/lib/t3/index.ts";
-import { guardBackground, guardSend, guardStop, hook, hookWith, type IsTopLevel, type SendEvent, type SendGuardOptions, type StopEvent } from "./ask-guard.ts";
+import { guardBackground, guardSend, guardStop, hiddenIn, hook, hookWith, type IsHidden, type SendEvent, type SendGuardOptions, type StopEvent } from "./ask-guard.ts";
 
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
 let engine: AvailableSource;
 beforeAll(async () => (engine = await engineSource()));
 
-const topLevel: IsTopLevel = async (threadId) => threadId === "top";
+const topLevel: IsHidden = async (threadId) => threadId === "top";
 const claudePrompt = (text: string) => ({ type: "user", message: { role: "user", content: text } });
 const claudeSays = (text: string) => ({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text }] } });
 const claudeAsks = { type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "AskUserQuestion", input: {} }] } };
@@ -150,6 +150,55 @@ describe("the ask guard", () => {
     } finally {
       if (saved !== undefined) process.env.T3CODE_THREAD_ID = saved;
     }
+  });
+});
+
+describe("the hidden thread check", () => {
+  const asker = "mcp:rfc-1";
+  const question = "Here is the draft.\n\n1. Should I keep the hard cut on the homepage?";
+  const delegated = { kind: "delegated_task", childThreadId: "thread:delegated-task:1" };
+  const watched = (watch: Record<string, unknown>, state = "open") =>
+    ({ pullRequests: [{ repository: "o/r", number: 7, url: "https://github.com/o/r/pull/7", snapshot: { state }, watch: { headSha: "abc", ...watch } }] });
+  const check = (thread: Partial<ShellThread>, message = question, event: object = {}) => {
+    const threads = [{ id: asker, title: "RFC", projectId: "p", status: "running", ...thread }] as ShellThread[];
+    return guardStop({ transcript_path: transcript(claudePrompt("Draft it"), claudeSays(message)), ...event }, home("Robin"), "rfc-1", hiddenIn(async () => ({ threads })));
+  };
+
+  test("lets a prose question through when the thread lands in the person's inbox after the turn", async () => {
+    expect(await check({})).toBeUndefined();
+    expect(await check({ pendingBackgroundTasks: [{ kind: "command" }] })).toBeUndefined();
+    expect(await check(watched({ passed: true, failedChecks: [] }))).toBeUndefined();
+    expect(await check(watched({ passed: false, failedChecks: [] }, "merged"))).toBeUndefined();
+    expect(await check({ snoozedUntil: "2020-01-01T00:00:00Z" })).toBeUndefined();
+    expect(await check({ pendingBackgroundTasks: [delegated], lineage: { parentThreadId: "mcp:parent" } })).toBeUndefined();
+  });
+
+  test.each([
+    ["snoozed", { snoozedUntil: "2999-01-01T00:00:00Z" }],
+    ["waiting on a delegated task", { pendingBackgroundTasks: [delegated] }],
+    ["waiting on an awaited monitor", { pendingBackgroundTasks: [{ kind: "monitor", awaited: true }] }],
+    ["in a thread wait", { blockedOnThreadWait: true }],
+    ["watching PR checks that still run", watched({ passed: false, failedChecks: [] })],
+    ["watching a run that waits on an approval", watched({ passed: true, failedChecks: [], awaitingApproval: ["deploy"] })],
+  ])("blocks a prose question while the thread is %s", async (_, thread) => {
+    expect(await check(thread as Partial<ShellThread>)).toMatchObject({ decision: "block" });
+  });
+
+  test("blocks a prose question that closes on a park line, or while Claude runs a background agent", async () => {
+    expect(await check({}, "Should I merge it?\n\n⏳ **Waiting on** the reviewer")).toMatchObject({ decision: "block" });
+    expect(await check({}, question, { background_tasks: [{ id: "a1", type: "local_agent", status: "running" }] })).toMatchObject({ decision: "block" });
+    expect(await check({}, question, { background_tasks: [{ id: "s1", type: "shell", status: "running" }] })).toBeUndefined();
+  });
+
+  test("tells a blocked agent that cannot ask on a card to write its complete reply again", async () => {
+    const blocked = await check({ pendingBackgroundTasks: [delegated] });
+    expect(blocked?.reason).toContain("complete reply again");
+    expect(blocked?.reason).toContain("shows only the last message");
+  });
+
+  test("lets the stop through when T3 cannot be read", async () => {
+    const path = transcript(claudePrompt("Draft it"), claudeSays(question));
+    expect(await guardStop({ transcript_path: path }, home("Robin"), "rfc-1", hiddenIn(async () => { throw new Error("T3 down"); }))).toBeUndefined();
   });
 });
 
