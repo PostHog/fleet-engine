@@ -23,7 +23,7 @@ const models: ModelRow[] = [
   { role: "lookup", work: "Lookups", provider: "claude", model: "claude-small", effort: "medium" },
 ];
 
-type Mail = { id: string; thread_id: string; from_: string; subject: string; at: number; sent?: true; archived?: true };
+type Mail = { id: string; thread_id: string; from_: string; subject: string; at: number; sent?: true; archived?: true; body?: string };
 
 function gateway() {
   const mailbox: Mail[] = [];
@@ -68,7 +68,7 @@ function tool(mailbox: Mail[], name: string, args: Record<string, any>): Record<
   }
   if (name === "gmail-read_email_thread") {
     const messages = mailbox.filter((mail) => mail.thread_id === args.thread_id);
-    return { messages: messages.map((mail) => ({ id: mail.id, label_ids: mail.sent ? ["SENT"] : ["INBOX"], internal_date: String(mail.at) })) };
+    return { messages: messages.map((mail) => ({ id: mail.id, label_ids: mail.sent ? ["SENT"] : ["INBOX"], internal_date: String(mail.at), ...(mail.body && { payload: { mime_type: "multipart/alternative", parts: [{ mime_type: "text/plain", body: { content: mail.body } }] } }) })) };
   }
   return { error: `Tool not found: ${name}` };
 }
@@ -135,6 +135,20 @@ test("the first check only arms the watch, and a reply that arrives later in a c
   expect(await check()).toBe(true);
   expect(t3.launches).toHaveLength(1);
   expect(t3.delivered).toEqual([]);
+});
+
+test("the thread's prompt quotes each reply word for word, without the older messages the reply quotes below it", async () => {
+  const { mail, t3, later, received, conversation, check } = await setup();
+  await conversation();
+  mail.mailbox.at(-1)!.body = "Hello,\r\nyes, Tuesday works.\r\n\r\nAda\r\n\r\nOn Tue, Nov 17, 2026 at 12:06 PM Me <me@example.com>\r\nwrote:\r\n\r\n> Does Tuesday work?";
+  await check();
+  expect(t3.launches[0]!.prompt).toContain("  > Hello,  \n  > yes, Tuesday works.  \n  >\n  > Ada  \n  > [Earlier messages");
+  expect(t3.launches[0]!.prompt).not.toContain("Does Tuesday work?");
+  later(2 * minute);
+  received("m3", "conv-1");
+  mail.mailbox.at(-1)!.body = "Hallo,\n\nbis Dienstag.\n\n________________________________\nFrom: Me";
+  await check();
+  expect(t3.delivered[0]!.text).toContain("  > Hallo,  \n  >\n  > bis Dienstag.  \n  > [Earlier messages");
 });
 
 test("a later reply in the same conversation goes to that thread, and mail in a conversation you never wrote in starts nothing", async () => {
