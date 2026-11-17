@@ -176,7 +176,11 @@ function isConvexProject(cwd: string): boolean {
 }
 
 function shapeClaudeLaunch(args: string[], env: NodeJS.ProcessEnv, cwd: string): ClaudeLaunch {
-  const shapedEnv = env.CLAUDE_CODE_ENTRYPOINT === "t3-code" ? { ...env, CLAUDE_CODE_ENTRYPOINT: "sdk-ts" } : env;
+  // Behind a proxy, Claude Code reads as an API-key client and picks 5-minute caches, so every idle over 5 minutes
+  // (CI waits, PR wakes) re-writes the whole context. T3 threads live for hours: pin the main conversation to 1 hour.
+  const shapedEnv = env.CLAUDE_CODE_ENTRYPOINT === "t3-code"
+    ? { ...env, CLAUDE_CODE_ENTRYPOINT: "sdk-ts", CLAUDE_CODE_PROMPT_CACHE_TTL: env.CLAUDE_CODE_PROMPT_CACHE_TTL ?? "1h" }
+    : env;
   const thread = env.T3CODE_THREAD_ID;
   if (!thread) return { args, env: shapedEnv };
   let shaped = args;

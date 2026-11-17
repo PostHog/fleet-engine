@@ -153,7 +153,7 @@ async function t3With(providerInstances: Record<string, Instance>) {
 describe("how the wrapper starts Claude for T3", () => {
   function recordingClaude(dir: string) {
     const path = join(dir, "claude");
-    writeFileSync(path, `#!/bin/sh\nprintf '%s\\n' "$CLAUDE_CODE_ENTRYPOINT" > "${dir}/entrypoint"\nprintf '%s\\n' "$@" > "${dir}/argv"\nexit 0\n`);
+    writeFileSync(path, `#!/bin/sh\nprintf '%s\\n' "$CLAUDE_CODE_ENTRYPOINT" > "${dir}/entrypoint"\nprintf '%s\\n' "$CLAUDE_CODE_PROMPT_CACHE_TTL" > "${dir}/ttl"\nprintf '%s\\n' "$@" > "${dir}/argv"\nexit 0\n`);
     chmodSync(path, 0o755);
     return path;
   }
@@ -169,6 +169,7 @@ describe("how the wrapper starts Claude for T3", () => {
     const settingsAt = argv.indexOf("--settings");
     return {
       entrypoint: readFileSync(join(dir, "entrypoint"), "utf8").trim(),
+      ttl: readFileSync(join(dir, "ttl"), "utf8").trim(),
       argv,
       settings: settingsAt >= 0 && argv[settingsAt + 1]!.startsWith("{") ? JSON.parse(argv[settingsAt + 1]!) as Record<string, unknown> : undefined,
     };
@@ -180,6 +181,11 @@ describe("how the wrapper starts Claude for T3", () => {
   test("starts Claude with the SDK's native entrypoint in place of t3-code, so the proxy passes requests through", async () => {
     expect((await launch(["-p", "go"], { CLAUDE_CODE_ENTRYPOINT: "t3-code" })).entrypoint).toBe("sdk-ts");
     expect((await launch(["-p", "go"], { CLAUDE_CODE_ENTRYPOINT: "cli" })).entrypoint).toBe("cli");
+  });
+
+  test("pins T3 threads to 1-hour prompt caches; other launches keep Claude's own choice", async () => {
+    expect((await launch(["-p", "go"], { CLAUDE_CODE_ENTRYPOINT: "t3-code" })).ttl).toBe("1h");
+    expect((await launch(["-p", "go"], { CLAUDE_CODE_ENTRYPOINT: "cli" })).ttl).toBe("");
   });
 
   test("starts a thread an agent launched without the tools only people use", async () => {
