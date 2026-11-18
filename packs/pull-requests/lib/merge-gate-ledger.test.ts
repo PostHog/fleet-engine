@@ -12,7 +12,7 @@ const ledgerFile = (home: string) => join(home, ".local/state/fleet/decisions.js
 const events = (home: string): Record<string, unknown>[] =>
   existsSync(ledgerFile(home)) ? readFileSync(ledgerFile(home), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
 
-test("each gate result lands in the decision ledger at HEAD, so a later failure supersedes an earlier pass", async () => {
+test("each gate result, a failure and a pass, lands in the decision ledger at HEAD", async () => {
   const pr = await checkout();
   await pr.commit("feature.txt", "new\n");
   await reviewHead(pr);
