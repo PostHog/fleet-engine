@@ -381,7 +381,7 @@ test("without a replacement command, the arbiter runs the lookup row of the mode
   }
   const claude = recordingModel(pr, "claude", "CONTINUE");
   expect((await pr.fleet("review-start", "--scope", "fixes", "--base", head)).code).toBe(0);
-  expect(claude.calls()).toEqual([expect.stringMatching(/^-p --model lookup-model --effort medium .*--no-session-persistence$/)]);
+  expect(claude.calls()).toEqual([expect.stringMatching(/^-p --model lookup-model --effort medium --setting-sources  --strict-mcp-config .* --no-session-persistence --output-format json --tools  --permission-mode dontAsk$/)]);
   expect(claude.prompt()).toContain("# round 2\n\nFindings of 2.");
   expect(JSON.parse(readFileSync(join(pr.pullRequest, "reviews/3/round.json"), "utf8"))).toMatchObject({ arbiter: { verdict: "continue", model: "lookup-model" } });
 
@@ -389,7 +389,7 @@ test("without a replacement command, the arbiter runs the lookup row of the mode
   pr.env.FLEET_MODELS = JSON.stringify([{ ...lookup, provider: "codex", effort: "low" }]);
   const codex = recordingModel(pr, "codex", "ESCALATE: Round 3 undoes round 2.");
   await expect(pr.fleet("review-start", "--scope", "fixes", "--base", head)).rejects.toThrow("The arbiter escalates: Round 3 undoes round 2");
-  expect(codex.calls()).toEqual([expect.stringMatching(/^exec -m lookup-model -c model_reasoning_effort="low" -s read-only --ephemeral -C \S+ -o \S+ -$/)]);
+  expect(codex.calls()).toEqual([expect.stringMatching(/^exec --json -m lookup-model -c model_reasoning_effort="low" -s read-only --ephemeral -C \S+ -o \S+ -$/)]);
 
   pr.env.FLEET_MODELS = JSON.stringify([]);
   await expect(pr.fleet("review-start", "--scope", "fixes", "--base", head)).rejects.toThrow("no lookup row");

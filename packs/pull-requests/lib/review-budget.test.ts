@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawnAsync } from "../../../src/testing/spawn.ts";
-import { checkout, cleanFixtures, fakeModel, finishRound, fixture, graded, models, recordingModel, settings, type Checkout } from "./proof-testing.ts";
+import { checkout, cleanFixtures, fakeModel, finishRound, fixture, graded, markPanel, models, recordingModel, settings, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
 
@@ -17,12 +17,21 @@ async function panelReview(pr: Checkout) {
 
 const continueArbiter = (record = "/dev/null") => `cat > "${record}"; echo CONTINUE`;
 
+async function savedPanel(pr: Checkout, findings: string) {
+  await pr.fleet("review-start", "--scope", "full");
+  writeFileSync(join(pr.repository, "findings.md"), findings);
+  await pr.fleet("review-finish", "--round", "1", "--reviewer", "gpt-6.1-sol", "findings.md");
+  markPanel(pr, "1");
+}
+
+const lensNames = (output: string) => JSON.parse(output.split("\n")[0]!).lenses.map(({ name }: { name: string }) => name);
+
 test("minor and nit findings need no answer, while a blocker, a major, a finding without severity, or a TESTS item does, and the arbiter reads only blockers and majors", async () => {
   const pr = await checkout();
   pr.pullRequestState({ body: graded("non-critical", "medium") });
   const panel = await pr.commit("feature.txt", "new\n");
   await pr.fleet("require", "--none", "--reason", "docs only");
-  fakeModel(pr, "REVIEWER", [
+  await savedPanel(pr, [
     "FINDINGS:",
     "- feature.txt:1 | major | Correctness | the greeting drops the name -> members see no name | greet by name | anchor: new",
     "- feature.txt:1 | minor | Design | a helper could go -> one more name | inline it | anchor: new",
@@ -33,8 +42,6 @@ test("minor and nit findings need no answer, while a blocker, a major, a finding
     "- feature.test.ts:3 asserts the call count of greet",
     "",
   ].join("\n"));
-  await pr.fleet("review", "--lens", "correctness");
-  await pr.fleet("review", "--wait");
 
   const gate = await pr.fleet("gate");
   expect(gate.code).toBe(1);
@@ -72,7 +79,7 @@ test("TESTS items number after every finding, so a TESTS block between lenses mo
   await pr.fleet("review", "--lens", "correctness", "--lens", "design");
   await pr.fleet("review", "--wait");
   writeFileSync(join(pr.repository, "responses.md"), "1. rejected: noted.\n");
-  await expect(pr.fleet("respond", "--round", "1", "responses.md")).rejects.toThrow("Answer findings 3, 4 too");
+  await expect(pr.fleet("respond", "--round", "1", "responses.md")).rejects.toThrow("Answer findings 5, 6, 7, 8 too");
 });
 
 test("a blocker in the Known issues section of the PR body holds the merge, and a major there does not", async () => {
@@ -91,36 +98,106 @@ test("a blocker in the Known issues section of the PR body holds the merge, and 
   expect(JSON.parse((await pr.fleet("gate", "--json")).output)).toMatchObject({ held: "known issues: an open blocker holds the merge: - blocker: feature.txt:1 the greeting drops the name" });
 });
 
-test("a docs-only PR, or one under 50 authored lines with low merge risk, gets one combined lens, one read, and no final read", async () => {
+test("a test-only diff at low merge risk gets the Read tier: one combined Correctness and Risk lens on the other family, then one final read of its fixes", async () => {
   const pr = await checkout();
-  await pr.commit("README.md", "Greet new members.\n");
-  await pr.fleet("require", "--none", "--reason", "docs only");
-  const reviewer = fakeModel(pr, "REVIEWER", "FINDINGS:\n(none)\nCOVERED: README.md\n");
-  await expect(pr.fleet("review")).rejects.toThrow("A small PR gets one read, and it is the panel");
+  pr.pullRequestState({ body: graded("non-critical", "low") });
+  await pr.commit("feature.test.ts", Array.from({ length: 80 }, (_, line) => `test("greets ${line}", () => {});`).join("\n") + "\n");
+  await pr.fleet("require", "--none", "--reason", "fixture");
+  const reviewer = fakeModel(pr, "REVIEWER", "FINDINGS:\n(none)\nCOVERED: feature.test.ts\n");
 
-  const started = await pr.fleet("review", "--lens", "correctness", "--lens", "design");
-  expect(JSON.parse(started.output.split("\n")[0]!).lenses).toEqual([{ name: "combined", family: expect.any(String) }]);
+  const started = await pr.fleet("review");
+  expect(JSON.parse(started.output.split("\n")[0]!)).toMatchObject({ tier: { name: "read" }, lenses: [{ name: "combined", family: "gpt" }] });
+  expect(started.output).toContain("review tier: read: merge-risk grade low, 0 authored production lines");
   expect((await pr.fleet("review", "--wait")).code).toBe(0);
   const [brief, ...others] = reviewer.prompts();
   expect(others).toEqual([]);
   expect(brief).toContain("Trace one concrete input through each new branch.");
-  expect(brief).toContain("Find the code judo move.");
+  expect(brief).toContain("Weigh the blast radius of each changed path.");
+  expect((await pr.fleet("show")).output).toContain("review tier: read: merge-risk grade low, 0 authored production lines");
   const reviewed = await pr.git("rev-parse", "HEAD");
 
-  await pr.commit("README.md", "Greet every new member.\n");
-  await expect(pr.fleet("review", "--scope", "final", "--base", reviewed)).rejects.toThrow("A small PR gets one read and no final read.");
-  const gate = await pr.fleet("gate");
-  expect(gate.code).toBe(0);
-  expect(gate.output).toContain("review: one read of a small PR in round 1; its fixes get no final read");
+  await pr.commit("helper.ts", "export const name = \"member\";\n");
+  expect((await pr.fleet("gate")).code).toBe(1);
+  reviewer.answer("No findings.");
+  expect((await pr.fleet("review", "--scope", "final", "--base", reviewed)).code).toBe(0);
+  expect((await pr.fleet("gate")).code).toBe(0);
+  const read = await pr.git("rev-parse", "HEAD");
+  await pr.commit("helper.ts", "export const name = \"new member\";\n");
+  await expect(pr.fleet("review", "--scope", "final", "--base", read)).rejects.toThrow("The review budget of 2 reviews is spent.");
+});
+
+test("a 120-line diff at low merge risk gets the Pair tier: correctness and risk on the other family and fresh eyes on the author's", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: graded("non-critical", "low") });
+  await pr.commit("feature.ts", Array.from({ length: 120 }, (_, line) => `export const greet${line} = (name: string) => name;`).join("\n") + "\n");
+  await pr.fleet("require", "--none", "--reason", "fixture");
+  fakeModel(pr, "REVIEWER", "FINDINGS:\n(none)\nCOVERED: feature.ts\n");
+
+  const started = await pr.fleet("review");
+  expect(JSON.parse(started.output.split("\n")[0]!)).toMatchObject({
+    tier: { name: "pair", why: "merge-risk grade low, 120 authored production lines" },
+    lenses: [{ name: "correctness", family: "gpt" }, { name: "risk", family: "gpt" }, { name: "fresh-eyes", family: "claude" }],
+  });
+  expect((await pr.fleet("review", "--wait")).code).toBe(0);
+  expect((await pr.fleet("gate")).output).toContain("review: HEAD reviewed in round 1");
+});
+
+test("a high merge-risk diff gets the Panel tier without sweep or the author's Team perspective, and --lens adds to it", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: graded("critical (b)", "high") });
+  await pr.commit("feature.ts", "export const greet = (name: string) => name;\n");
+  await pr.fleet("require", "--none", "--reason", "fixture");
+  fakeModel(pr, "REVIEWER", "FINDINGS:\n(none)\nCOVERED: feature.ts\n");
+
+  const started = await pr.fleet("review", "--lens", "security");
+  expect(lensNames(started.output)).toEqual(["security", "fresh-eyes", "correctness", "risk", "design", "anti-overengineering"]);
+  expect(started.output).toContain("review tier: panel: merge-risk grade high");
+});
+
+test("a merge-risk callout whose grade fleet cannot read gets the Pair tier, and a PR without a callout gets the Read tier", async () => {
+  const tierAt = async (body: string) => {
+    const pr = await checkout();
+    pr.pullRequestState({ body });
+    await pr.commit("feature.ts", "export const greet = (name: string) => name;\n");
+    await pr.fleet("require", "--none", "--reason", "fixture");
+    fakeModel(pr, "REVIEWER", "FINDINGS:\n(none)\nCOVERED: feature.ts\n");
+    return JSON.parse((await pr.fleet("review")).output.split("\n")[0]!).tier.name;
+  };
+  expect(await tierAt("Greets new members.\n\n<!-- merge-risk -->\n> **Merge risk: unclear**\n<!-- /merge-risk -->\n")).toBe("pair");
+  expect(await tierAt("Greets new members.")).toBe("read");
+});
+
+test("each reviewer runs without the user's harness, and its token use lands in lenses/<lens>.json and round.json, while a reviewer without usage still counts", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.txt", "greet\n");
+  await pr.fleet("require", "--none", "--reason", "fixture");
+  const bin = pr.env.PATH!.split(":")[0]!;
+  const calls = join(pr.home, "model-calls");
+  const answer = "FINDINGS:\\n(none)\\nCOVERED: feature.txt\\n";
+  writeFileSync(join(bin, "claude"), `#!/bin/sh\necho "$*" >> "${calls}"\ncat >/dev/null\nprintf '%s\\n' '{"type":"result","is_error":false,"result":"${answer}","usage":{"input_tokens":12,"cache_read_input_tokens":3,"cache_creation_input_tokens":40,"output_tokens":7},"total_cost_usd":0.25}'\n`, { mode: 0o755 });
+  writeFileSync(join(bin, "codex"), `#!/bin/sh\necho "$*" >> "${calls}"\ncat >/dev/null\nfor arg in "$@"; do [ "$previous" = "-o" ] && printf '${answer}' > "$arg"; previous="$arg"; done\necho '{"type":"thread.started"}'\necho '{"type":"turn.completed","usage":{"input_tokens":30,"cached_input_tokens":20,"output_tokens":5}}'\n`, { mode: 0o755 });
+
+  await pr.fleet("review");
+  expect((await pr.fleet("review", "--wait")).code).toBe(0);
+  const lens = (name: string) => JSON.parse(readFileSync(join(pr.pullRequest, "reviews/1/lenses", `${name}.json`), "utf8"));
+  expect(lens("fresh-eyes").usage).toEqual({ input: 12, cacheRead: 3, cacheWrite: 40, output: 7, costUsd: 0.25 });
+  expect(lens("correctness").usage).toEqual({ input: 30, cacheRead: 20, output: 5 });
+  const claudeCall = readFileSync(calls, "utf8").split("\n").find((line) => line.startsWith("-p "))!;
+  for (const flag of ["--setting-sources  ", "--strict-mcp-config", "--no-session-persistence", "--output-format json"]) expect(claudeCall).toContain(flag);
+
+  const reviewed = await pr.git("rev-parse", "HEAD");
+  await pr.commit("feature.txt", "greet the member\n");
+  writeFileSync(join(bin, "codex"), `#!/bin/sh\ncat >/dev/null\nfor arg in "$@"; do [ "$previous" = "-o" ] && echo 'No findings.' > "$arg"; previous="$arg"; done\n`, { mode: 0o755 });
+  expect((await pr.fleet("review", "--scope", "final", "--base", reviewed)).code).toBe(0);
+  expect(JSON.parse(readFileSync(join(pr.pullRequest, "reviews/final-1/round.json"), "utf8")).usage).toBeUndefined();
 });
 
 test("at the budget a known answer settles a major the PR body lists by file:line, and a known blocker holds the merge", async () => {
   const pr = await checkout();
+  pr.env.FLEET_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 1, "pull-requests.reviewCeiling": 1 });
   await pr.commit("README.md", "Greet new members.\n");
   await pr.fleet("require", "--none", "--reason", "docs only");
-  fakeModel(pr, "REVIEWER", "FINDINGS:\n- README.md:1 | blocker | Correctness | the page names no member -> members see nothing | name them | anchor: Greet new members.\n- README.md:1 | major | Correctness | the page is terse -> members skim it | expand it | anchor: Greet new members.\nCOVERED: README.md\n");
-  await pr.fleet("review", "--lens", "correctness");
-  await pr.fleet("review", "--wait");
+  await savedPanel(pr, "FINDINGS:\n- README.md:1 | blocker | Correctness | the page names no member -> members see nothing | name them | anchor: Greet new members.\n- README.md:1 | major | Correctness | the page is terse -> members skim it | expand it | anchor: Greet new members.\nCOVERED: README.md\n");
 
   writeFileSync(join(pr.repository, "responses.md"), "1. rejected: the fixture names nobody.\n2. known: listed under Known issues.\n");
   await pr.fleet("respond", "--round", "1", "responses.md");
@@ -141,8 +218,9 @@ test("at the budget a known answer settles a major the PR body lists by file:lin
   expect(held.output).toContain("known issues: round 1 answers findings 1 known, and an open blocker holds the merge");
 });
 
-test("a small PR's combined lens reads with the Security lane's model when a Security lens is asked", async () => {
+test("a Read tier PR's combined lens reads with the Security lane's model when a Security lens is asked", async () => {
   const pr = await checkout();
+  pr.pullRequestState({ body: "Greets new members." });
   await pr.commit("README.md", "Greet new members.\n");
   await pr.fleet("require", "--none", "--reason", "docs only");
   pr.env.FLEET_MODELS = JSON.stringify([...models, { role: "security", work: "Deep security review", provider: "codex", model: "security-model", effort: "xhigh" }]);
@@ -151,11 +229,12 @@ test("a small PR's combined lens reads with the Security lane's model when a Sec
 
   await pr.fleet("review", "--lens", "correctness", "--lens", "security");
   expect((await pr.fleet("review", "--wait")).code).toBe(0);
-  expect(codex.calls().map((call) => call.split(" -s ")[0])).toEqual(['exec -m security-model -c model_reasoning_effort="xhigh"']);
+  expect(codex.calls().map((call) => call.split(" -s ")[0])).toEqual(['exec --json -m security-model -c model_reasoning_effort="xhigh"']);
 });
 
 test("a docs-only PR gets the combined lens in a checkout that has not fetched its base branch yet", async () => {
   const pr = await checkout();
+  pr.pullRequestState({ body: "Greets new members." });
   await pr.commit("README.md", "Greet new members.\n");
   await pr.fleet("require", "--none", "--reason", "docs only");
   const remote = join(fixture("fleet-proof-remote-"), "github.com/example/product.git");
@@ -166,12 +245,12 @@ test("a docs-only PR gets the combined lens in a checkout that has not fetched i
   await pr.git("update-ref", "-d", "refs/remotes/origin/main");
   fakeModel(pr, "REVIEWER", "FINDINGS:\n(none)\nCOVERED: README.md\n");
 
-  const started = await pr.fleet("review", "--lens", "correctness", "--lens", "design");
-  expect(JSON.parse(started.output.split("\n")[0]!).lenses).toEqual([{ name: "combined", family: expect.any(String) }]);
+  expect(lensNames((await pr.fleet("review")).output)).toEqual(["combined"]);
 });
 
-test("a small PR keeps its panel read after a single read the author saved", async () => {
+test("a Read tier PR keeps its panel read after a single read the author saved", async () => {
   const pr = await checkout();
+  pr.pullRequestState({ body: "Greets new members." });
   const read = await pr.commit("README.md", "Greet new members.\n");
   await pr.fleet("require", "--none", "--reason", "docs only");
   expect((await pr.fleet("review-start", "--scope", "full")).code).toBe(0);
@@ -186,33 +265,20 @@ test("a small PR keeps its panel read after a single read the author saved", asy
   expect((await pr.fleet("gate")).code).toBe(0);
 });
 
-test("a code PR under 50 authored lines gets the combined lens only at low merge risk", async () => {
-  const lensesAt = async (grade: string) => {
-    const pr = await checkout();
-    pr.pullRequestState({ body: graded("non-critical", grade) });
-    await pr.commit("feature.ts", "export const greet = (name: string) => `hi ${name}`;\n");
-    await pr.fleet("require", "--none", "--reason", "fixture");
-    fakeModel(pr, "REVIEWER", "FINDINGS:\n(none)\nCOVERED: feature.ts\n");
-    const started = await pr.fleet("review", "--lens", "correctness", "--lens", "design");
-    return JSON.parse(started.output.split("\n")[0]!).lenses.map(({ name }: { name: string }) => name);
-  };
-  expect(await lensesAt("low")).toEqual(["combined"]);
-  expect(await lensesAt("medium")).toEqual(["correctness", "design"]);
-});
-
 test("an unfinished panel reruns with its own lenses after the merge risk changes", async () => {
   const pr = await checkout();
   pr.pullRequestState({ body: graded("non-critical", "low") });
   await pr.commit("feature.ts", "export const greet = (name: string) => `hi ${name}`;\n");
   await pr.fleet("require", "--none", "--reason", "fixture");
   const reviewer = fakeModel(pr, "REVIEWER", "Looks fine to me.");
-  await pr.fleet("review", "--lens", "correctness", "--lens", "design");
+  await pr.fleet("review");
   expect((await pr.fleet("review", "--wait")).code).toBe(1);
 
-  pr.pullRequestState({ body: graded("non-critical", "medium") });
+  pr.pullRequestState({ body: graded("non-critical", "high") });
   reviewer.answer("FINDINGS:\n(none)\nCOVERED: feature.ts\n");
-  const rerun = await pr.fleet("review", "--lens", "correctness", "--lens", "design");
-  expect(JSON.parse(rerun.output.split("\n")[0]!).lenses.map(({ name }: { name: string }) => name)).toEqual(["combined"]);
+  const rerun = await pr.fleet("review");
+  expect(lensNames(rerun.output)).toEqual(["combined"]);
+  expect(rerun.output).toContain("review tier: read: merge-risk grade low");
   expect((await pr.fleet("review", "--wait")).code).toBe(0);
 });
 
@@ -234,21 +300,6 @@ test("the last read reads every fix since the panel commit with the Correctness 
   expect(prompt).toContain(`Review the change ${panel}..${head}`);
   expect(prompt).toContain("This is the last read: the diff holds every fix since the panel. Read it with the Correctness lens:\n\nTrace one concrete input through each new branch.");
   expect(prompt).toContain("-greet\n+greet the new member");
-});
-
-test("the gate reports HEAD unreviewed when GitHub fails while it weighs the PR's size", async () => {
-  const pr = await checkout();
-  pr.pullRequestState({ body: graded("non-critical", "low") });
-  await pr.commit("feature.txt", "greet\n");
-  await pr.fleet("require", "--none", "--reason", "fixture");
-  fakeModel(pr, "REVIEWER", "FINDINGS:\n(none)\nCOVERED: feature.txt\n");
-  await pr.fleet("review", "--lens", "correctness");
-  expect((await pr.fleet("review", "--wait")).code).toBe(0);
-  await pr.commit("feature.txt", "greet the member\n");
-  pr.whileGithubReadsPull(`printf '%s' 'echo "HTTP 502" > "$(dirname "$0")/pull-error-42"' > "$(dirname "$0")/while-reading"`);
-  const gate = await pr.fleet("gate");
-  expect(gate.code).toBe(1);
-  expect(gate.output).toContain("review: HEAD not reviewed");
 });
 
 test("a first final read from the panel commit reads with the Correctness lens too", async () => {

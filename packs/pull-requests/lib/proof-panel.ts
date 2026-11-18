@@ -4,16 +4,17 @@ import { link, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "nod
 import { basename, dirname, join } from "node:path";
 import { anchorCheck } from "./finding-anchors.ts";
 import { readJson, roundId, storeCapturedFindings, writeJson, type ProofIdentity } from "./proof.ts";
-import { askModel, familyOf, isQuotaExhausted, quotaExitCode, reviewerRow, sameFamilyRow, securityRow, type Family } from "./proof-models.ts";
+import { askModel, familyOf, isQuotaExhausted, quotaExitCode, reviewerRow, sameFamilyRow, securityRow, type Family, type Usage } from "./proof-models.ts";
 import type { ModelRow } from "../../base/lib/models.ts";
 import { capped, diffCap, reviewedDiff } from "./proof-review.ts";
+import type { ReviewTier } from "./proof-checkout.ts";
 
 export type PanelGuide = { brief: string; lenses: Map<string, { title: string; text: string }>; freshEyes: Set<string>; security: Set<string>; contextFree: Set<string> };
 export type Lens = { name: string; title: string; family: Family; row: ModelRow; security: boolean; text: string; knowledge: string; context: boolean };
 export type BriefInput = { title: string; body: string; base: string; from: string; commit: string; diff: string; diffFile: string; note: string; settled: string; owed: string; rubric: string };
 export type Cast = { family: Family; model: string; row: ModelRow; security?: true };
-export type Plan = { lenses: ({ name: string; title: string } & Cast)[]; changedFiles: string[]; from?: string; cwd: string; readable: string[] };
-type LensStatus = { state: "queued" | "running" | "done" | "failed"; attempts: number; startedAt?: string; finishedAt?: string; cause?: string };
+export type Plan = { lenses: ({ name: string; title: string } & Cast)[]; changedFiles: string[]; from?: string; cwd: string; readable: string[]; tier?: ReviewTier; arguments?: string[] };
+type LensStatus = { state: "queued" | "running" | "done" | "failed"; attempts: number; startedAt?: string; finishedAt?: string; cause?: string; usage?: Usage };
 export type StartTime = (pid: number) => Promise<string | undefined>;
 export type LockOwner = { pid: number; now: () => Date; startTime: StartTime };
 export type PanelIO = LockOwner & { env: Record<string, string | undefined>; pause: () => Promise<void>; slots: string; slotCount: number; limit: number };
@@ -200,7 +201,7 @@ export async function runLens(directory: string, name: string, io: PanelIO) {
     let cause = status.cause ?? "no attempt ran";
     while (status.attempts < attemptsPerLens) {
       await save({ state: "running", attempts: status.attempts + 1, startedAt: status.startedAt ?? io.now().toISOString() });
-      const problem = await askLens(directory, plan, lens, io, slot).catch((error: Error) => error.message);
+      const problem = await askLens(directory, plan, lens, io, slot, (usage) => save({ usage })).catch((error: Error) => error.message);
       if (problem === undefined) {
         await save({ state: "done", finishedAt: io.now().toISOString(), cause: undefined });
         return void await finishPanel(directory);
@@ -221,11 +222,12 @@ async function othersFinished(directory: string, io: PanelIO) {
   }
 }
 
-async function askLens(directory: string, plan: Plan, lens: Plan["lenses"][number], io: PanelIO, slot: Slot) {
+async function askLens(directory: string, plan: Plan, lens: Plan["lenses"][number], io: PanelIO, slot: Slot, record: (usage: Usage) => Promise<unknown>) {
   const brief = await readFile(lensFile(directory, lens.name, ".prompt.md"), "utf8");
   const prompt = lens.name === sweep ? `${brief}\n${await otherFindings(directory, plan)}` : brief;
   const answer = await askModel("reviewer", lens.row, { prompt, cwd: plan.cwd, readable: plan.readable, started: slot.recordReviewer }, io.env, io.limit, lens.security === true);
   if (!answer.ok) return answer.cause;
+  if (answer.usage) await record(answer.usage);
   await writeFile(lensFile(directory, lens.name, ".md"), answer.text + "\n", { mode: 0o600 });
   return laneProblem(answer.text, plan.changedFiles);
 }

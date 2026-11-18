@@ -3,7 +3,7 @@ import { access, link, mkdir, readFile, readdir, rename, rm, stat, writeFile } f
 import { basename, dirname, extname, join } from "node:path";
 import { normalized, type HeardAnswer } from "./proof-answers.ts";
 import { agentRefusal, agentsAcceptance, covers, fold, keptOwed, panelRefusal, tierOf, usersAcceptance, type Decision, type DecisionState, type Ledger, type Mark, type PrRef, type Tier } from "./decision-ledger.ts";
-import type { Family } from "./proof-models.ts";
+import type { Family, Usage } from "./proof-models.ts";
 import { quietReason, type DeltaKind, type QuietStep } from "./proof-delta.ts";
 
 export type ProofIdentity = { repository: string; pr: number; commit: string };
@@ -177,11 +177,11 @@ export function parseVerdict(output: string, model: string): ArbiterVerdict {
   return { verdict: "unavailable", reason: `unparseable answer: ${line.slice(0, 200)}`, model };
 }
 
-export type ReviewLimits = { free: number; ceiling: number; small?: boolean };
+export type ReviewLimits = { free: number; ceiling: number };
 
 export const atCeiling = `fleet proof asks nothing more. For each open blocker or major, revert the fix that brought it in, or list it in a "## Known issues" section of the PR body, one "- <blocker|major>: <file:line> <finding>" item each, and answer its finding "<n>. known: <why>". A blocker or major that the last read found in the fixes since the panel is reverted, never listed. An open blocker holds the merge; the user's merge word accepts the rest. Only the user's --override runs another review`;
 
-const budgetSpent = ({ ceiling, small }: ReviewLimits) => `${small ? "A small PR gets one read and no final read." : `The review budget of ${ceiling} reviews is spent.`} ${atCeiling}`;
+const budgetSpent = ({ ceiling }: ReviewLimits) => `The review budget of ${ceiling} reviews is spent. ${atCeiling}`;
 
 async function permitReview(home: string, identity: ProofIdentity, due: boolean, ceiling: string | undefined, decision: DecisionMark | undefined, { arbiter }: Permit) {
   if (decision?.mark === "👤") return undefined;
@@ -405,11 +405,11 @@ export async function finishReview(home: string, identity: ProofIdentity, round:
   return directory;
 }
 
-export async function storeCapturedFindings(directory: string, identity: ProofIdentity, round: RoundId, answer: string, reviewer: string) {
-  await storeFindings(directory, identity, round, Buffer.from(answer.trim() + "\n"), reviewer, "fleet");
+export async function storeCapturedFindings(directory: string, identity: ProofIdentity, round: RoundId, answer: string, reviewer: string, usage?: Usage) {
+  await storeFindings(directory, identity, round, Buffer.from(answer.trim() + "\n"), reviewer, "fleet", usage);
 }
 
-async function storeFindings(directory: string, identity: ProofIdentity, round: RoundId, bytes: Buffer, reviewer: string, capturedBy: CapturedBy) {
+async function storeFindings(directory: string, identity: ProofIdentity, round: RoundId, bytes: Buffer, reviewer: string, capturedBy: CapturedBy, usage?: Usage) {
   const reservation = await readJson<Reservation | undefined>(join(directory, "round.json"), undefined);
   if (!reservation) throw new Error(`Review round ${round} is not reserved. Reserve it with review-start first`);
   if (reservation.commit !== identity.commit) throw new Error(`Round ${round} reviews ${reservation.commit}. Pass --commit ${short(reservation.commit)}, or reserve a round for this commit`);
@@ -424,7 +424,7 @@ async function storeFindings(directory: string, identity: ProofIdentity, round: 
       if (!(await sameContent(destination, bytes))) throw new Error(`Round ${round} already has other findings in ${destination}`);
     } finally { await rm(temporary, { force: true }); }
   }
-  await writeJson(join(directory, "round.json"), { ...await readReservation(directory) ?? reservation, reviewer, capturedBy });
+  await writeJson(join(directory, "round.json"), { ...await readReservation(directory) ?? reservation, reviewer, capturedBy, ...usage ? { usage } : {} });
 }
 
 export async function respondToReview(home: string, identity: ProofIdentity, round: RoundId, responses: string, ceiling: number) {
@@ -1000,18 +1000,13 @@ async function carryForward(home: string, identity: ProofIdentity, reviewed: Set
   return carried;
 }
 
-const panelHint = "Run the qa-swarm panel with fleet proof review --lens <lens> --lens <lens> ..., or, for a PR that the user's rules exempt from the swarm, record fleet proof gap --kind panel --reason <the exception>";
+const panelHint = "Run fleet proof review, which runs the lenses of the PR's review tier, or, for a PR that the user's rules exempt from the swarm, record fleet proof gap --kind panel --reason <the exception>";
 
-async function reviewStatus(weigh: Weigh, cleanBaseMerge: CleanBaseMerge, quietCommit: QuietCommit, small: () => boolean): Promise<Status & { panelGap?: GapProof }> {
+async function reviewStatus(weigh: Weigh, cleanBaseMerge: CleanBaseMerge, quietCommit: QuietCommit): Promise<Status & { panelGap?: GapProof }> {
   const { home, identity, decisions } = weigh;
   const all = await finishedReviews(home, identity);
   const firstPanel = all.find((review) => review.panel);
-  if (firstPanel) {
-    const head = await headReview(home, identity, all.filter((review) => review.finishedAt >= firstPanel.finishedAt), cleanBaseMerge, quietCommit);
-    if (!head.problem || !small()) return head;
-    const covered = `one read of a small PR in ${reviewLabel(firstPanel.name)}`;
-    return { problem: undefined, line: `review: ${covered}; its fixes get no final read`, covered };
-  }
+  if (firstPanel) return headReview(home, identity, all.filter((review) => review.finishedAt >= firstPanel.finishedAt), cleanBaseMerge, quietCommit);
   const gap = await readJson<Gap | undefined>(gapPath(home, identity, "panel"), undefined);
   const weighed = await gapAcceptance(weigh, gap, "panel");
   const acceptance = weighed.acceptance;
@@ -1080,7 +1075,7 @@ function headStatus(identity: ProofIdentity, before: PushedHead, after: PushedHe
 }
 
 /** devPull reads the dev PR that a prod PR waits on (fleet proof require --after-dev). */
-export type GateOptions = { ci: () => CiResult; pushedHead: () => PushedHead; ledger: Ledger; landed?: boolean; cleanBaseMerge?: CleanBaseMerge; quietCommit?: QuietCommit; small?: (body: string) => boolean; now?: Date; devPull?: (dev: DevPr) => DevPull | Promise<DevPull> };
+export type GateOptions = { ci: () => CiResult; pushedHead: () => PushedHead; ledger: Ledger; landed?: boolean; cleanBaseMerge?: CleanBaseMerge; quietCommit?: QuietCommit; now?: Date; devPull?: (dev: DevPr) => DevPull | Promise<DevPull> };
 
 const knownIssues = (body: string) => (/^#+\s*Known issues\b.*$([\s\S]*?)(?=^#|(?![\s\S]))/im.exec(body)?.[1] ?? "").split("\n").filter((line) => /^\s*[-*]\s+\S/.test(line)).map((line) => line.trim());
 const knownBlocker = (body: string) => knownIssues(body).find((line) => /^[-*]\s+\**blocker\b/i.test(line));
@@ -1132,7 +1127,7 @@ async function readDev(dev: DevPr | undefined, devPull: GateOptions["devPull"]):
   catch (error) { return { ref: dev, error: (error as Error).message.trim().split("\n")[0] || "unknown error" }; }
 }
 
-export async function proofGate(home: string, identity: ProofIdentity, { ci, pushedHead, ledger, landed = false, cleanBaseMerge = () => undefined, quietCommit = () => undefined, small = () => false, now = new Date(), devPull }: GateOptions) {
+export async function proofGate(home: string, identity: ProofIdentity, { ci, pushedHead, ledger, landed = false, cleanBaseMerge = () => undefined, quietCommit = () => undefined, now = new Date(), devPull }: GateOptions) {
   const before = pushedHead();
   const tier = "error" in before || before.body === undefined ? "ungraded" : tierOf(before.body);
   const decisions = await readDecisions(ledger);
@@ -1141,7 +1136,7 @@ export async function proofGate(home: string, identity: ProofIdentity, { ci, pus
   const dev = owed?.kinds.includes("dev-observed") ? await readDev(owed.afterDev, devPull) : undefined;
   const kinds = await Promise.all((owed?.kinds ?? []).map((kind) => kindStatus(weigh, kind, landed, cleanBaseMerge, dev)));
   const devResult = kinds.find((kind) => kind.dev)?.dev;
-  const review = await reviewStatus(weigh, cleanBaseMerge, quietCommit, () => "body" in before && before.body !== undefined && small(before.body));
+  const review = await reviewStatus(weigh, cleanBaseMerge, quietCommit);
   const responses = await responseStatuses(home, identity, landed || !("body" in before) ? undefined : before.body ?? "");
   const ciResult = ci();
   const head = headStatus(identity, before, pushedHead());

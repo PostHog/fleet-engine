@@ -46,7 +46,7 @@ else
 fi
 base=main; [ -f "${github}/base" ] && read -r base < "${github}/base"
 if [ -f "${github}/base-sha" ]; then read -r basesha < "${github}/base-sha"; else basesha=$(git -C "${repository}" rev-parse refs/remotes/origin/main 2>/dev/null); fi
-body='"Adds the greeting."'; [ -f "${github}/body" ] && body=$(cat "${github}/body")
+body='"Adds the greeting. Merge risk: medium."'; [ -f "${github}/body" ] && body=$(cat "${github}/body")
 case "$*" in
   "api "*"/pulls/"[0-9]*" --method PATCH --input "*)
     [ -f "${github}/patch-error" ] && { cat "${github}/patch-error" >&2; exit 1; }
@@ -232,9 +232,17 @@ Read it as a senior engineer who sees it for the first time.
 
 Trace one concrete input through each new branch.
 
+### Risk
+
+Weigh the blast radius of each changed path.
+
 ### Design
 
 Find the code judo move.
+
+### Anti-Overengineering
+
+Name the code the change does not need.
 
 ### Team
 

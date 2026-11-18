@@ -7,6 +7,8 @@ import { processStart, readPlan, withSlot, type PanelIO } from "./proof-panel.ts
 
 afterEach(cleanFixtures);
 
+const pairLenses = 3;
+
 test("fleet proof review --lens runs each PANEL.md lens on its lane's family, and the judge weighs their joined answers as findings captured by fleet", async () => {
   const pr = await checkout();
   await pr.commit("feature.txt", "greet the new member\n");
@@ -16,7 +18,7 @@ test("fleet proof review --lens runs each PANEL.md lens on its lane's family, an
   await expect(pr.fleet("review", "--lens", "team")).rejects.toThrow("--knowledge <perspective>=<file");
 
   const started = await pr.fleet("review", "--lens", "fresh-eyes", "--lens", "correctness", "--lens", "design:same", "--knowledge", "correctness=incidents.md");
-  expect(JSON.parse(started.output.split("\n")[0]!)).toMatchObject({ round: 1, lenses: [{ name: "fresh-eyes", family: "claude" }, { name: "correctness", family: "gpt" }, { name: "design", family: "claude" }] });
+  expect(JSON.parse(started.output.split("\n")[0]!)).toMatchObject({ round: 1, lenses: [{ name: "fresh-eyes", family: "claude" }, { name: "correctness", family: "gpt" }, { name: "design", family: "claude" }, { name: "risk", family: "gpt" }] });
   const [freshEyes, correctness, design] = reviewer.prompts();
   for (const prompt of [freshEyes, correctness, design]) for (const part of ["Goal: Greet new members", "+greet the new member", "- Keep things simple."]) expect(prompt).toContain(part);
   expect(freshEyes).toContain("Lens: Fresh eyes\n\nRead it as a senior engineer");
@@ -65,17 +67,16 @@ test("a lens without a FINDINGS block or a full COVERED list runs once more, the
   const reviewer = fakeModel(pr, "REVIEWER", "Looks fine to me.");
 
   await pr.fleet("review", "--lens", "correctness", "--lens", "design");
-  expect(reviewer.prompts()).toHaveLength(4);
+  expect(reviewer.prompts()).toHaveLength((pairLenses + 1) * 2);
   const failed = await pr.fleet("review", "--wait");
   expect(failed.code).toBe(1);
   expect(failed.output).toContain("correctness: failed by gpt");
   expect(failed.output).toContain("no FINDINGS block (after 2 attempts)");
   expect((await pr.fleet("gate")).code).toBe(1);
-  await expect(pr.fleet("review", "--lens", "correctness")).rejects.toThrow("Pass the same --lens set");
-  await expect(pr.fleet("review")).rejects.toThrow("unfinished panel");
+  await expect(pr.fleet("review", "--lens", "sweep")).rejects.toThrow("The unfinished round runs the lenses correctness, design, risk, fresh-eyes");
 
   reviewer.answer("FINDINGS:\n(none)\nCOVERED: other.txt\n");
-  await pr.fleet("review", "--lens", "design", "--lens", "correctness");
+  await pr.fleet("review");
   expect((await pr.fleet("show")).output).toContain("COVERED misses feature.txt (after 2 attempts)");
 
   reviewer.answer(clean);
@@ -93,7 +94,7 @@ test("a lens stuck on spent quota fails at once without a second attempt, and --
   pr.env.FLEET_PROOF_REVIEWER = `echo attempt >> "${attempts}"; ${stalledOnQuota("exceeded retry limit, last status: 429 Too Many Requests")}`;
 
   await pr.fleet("review", "--lens", "correctness");
-  expect(readFileSync(attempts, "utf8")).toBe("attempt\n");
+  expect(readFileSync(attempts, "utf8")).toBe("attempt\n".repeat(pairLenses));
   const failed = await pr.fleet("review", "--wait");
   expect(failed.code).toBe(4);
   expect(failed.output).toContain('correctness: failed by gpt (command: echo attempt');
@@ -136,6 +137,7 @@ test("a lens reads the whole diff from the round directory and REVIEW.md from th
   await pr.advanceBase("REVIEW.md", "Flag every unchecked webhook signature.\n");
   await pr.fleet("require", "--none", "--reason", "docs only");
   const claude = recordingModel(pr, "claude", "FINDINGS:\n- feature.txt:1 | high | the greeting names no member\nCOVERED: feature.txt");
+  recordingModel(pr, "codex", clean);
 
   await pr.fleet("review", "--lens", "fresh-eyes");
   const round = join(pr.pullRequest, "reviews/1");
@@ -402,7 +404,7 @@ test("a heading inside a lens's FINDINGS block hides none of its findings", asyn
   expect((await pr.fleet("review", "--wait")).code).toBe(0);
   fakeModel(pr, "JUDGE", verdict());
   const gate = await pr.fleet("gate");
-  expect(gate.output).toContain("review: round 1 has unanswered findings 1, 2;");
+  expect(gate.output).toContain("review: round 1 has unanswered findings 1, 2, 3, 4, 5, 6;");
   expect(gate.code).toBe(1);
 });
 
@@ -429,7 +431,7 @@ test("the gate needs a finished --lens panel round: a single reviewer never cove
   await authorRound(single, "--scope", "full");
   const refused = await single.fleet("gate");
   expect(refused.code).toBe(1);
-  expect(refused.output).toContain("review: no finished panel round on the PR; 1 single-reviewer review(s) do not count. Run the qa-swarm panel with fleet proof review --lens");
+  expect(refused.output).toContain("review: no finished panel round on the PR; 1 single-reviewer review(s) do not count. Run fleet proof review, which runs the lenses of the PR's review tier");
   const before = await single.git("rev-parse", "HEAD");
   await single.commit("feature.txt", "greet the member\n");
   fakeModel(single, "REVIEWER", clean);
@@ -604,7 +606,7 @@ test("a retry that takes over the round of a command whose process is gone recor
   hub.releaseAppends();
   expect((await first).code).toBe(0);
   expect((await pr.fleet("review", "--wait")).code).toBe(0);
-  expect(reviewer.prompts()).toHaveLength(1);
+  expect(reviewer.prompts()).toHaveLength(pairLenses);
   await expectCountedPanel(pr);
 });
 
@@ -622,7 +624,7 @@ test("two retries at once after the first command's process is gone record one d
   hub.releaseAppends();
   expect((await first).code).toBe(0);
   expect((await pr.fleet("review", "--wait")).code).toBe(0);
-  expect(reviewer.prompts()).toHaveLength(1);
+  expect(reviewer.prompts()).toHaveLength(pairLenses);
   await expectCountedPanel(pr);
 });
 
@@ -637,7 +639,7 @@ test("when the first command publishes a panel that a retry already published, i
   hub.releaseAppends();
   const late = await first;
   expect(late.code).toBe(0);
-  expect(reviewer.prompts()).toHaveLength(1);
+  expect(reviewer.prompts()).toHaveLength(pairLenses);
   expect((await pr.fleet("review", "--wait")).code).toBe(0);
   await expectCountedPanel(pr);
 });
@@ -653,7 +655,7 @@ for (const resume of [overrideReview, ["review", "--wait"], ["review", "--wait",
 
     await pr.fleet(...resume);
     expect((await pr.fleet("review", "--wait")).code).toBe(0);
-    expect(reviewer.prompts()).toHaveLength(1);
+    expect(reviewer.prompts()).toHaveLength(pairLenses);
     await expectCountedPanel(pr);
   });
 }
@@ -686,7 +688,7 @@ test("two --wait commands at once on a staged panel start each lens once, and bo
   const waits = [pr.fleet("review", "--wait"), pr.fleet("review", "--wait")];
   pr.panel.onPause = async () => { open(); await Promise.race(waits); };
   const ends = await Promise.all(waits);
-  expect(reviewer.prompts()).toHaveLength(1);
+  expect(reviewer.prompts()).toHaveLength(pairLenses);
   expect(ends.map(({ code }) => code)).toEqual([0, 0]);
   for (const { output } of ends) expect(output).toContain("FINDINGS:\n(none)");
   await expectCountedPanel(pr);
@@ -703,7 +705,7 @@ test("--wait on a panel whose command still holds the round keeps polling until 
   const waited = await pr.fleet("review", "--wait");
   expect(waited.code).toBe(0);
   expect(waited.output).toContain("FINDINGS:\n(none)");
-  expect(reviewer.prompts()).toHaveLength(1);
+  expect(reviewer.prompts()).toHaveLength(pairLenses);
   await expectCountedPanel(pr);
 });
 
@@ -724,7 +726,7 @@ test("--wait on a panel whose command still writes its briefs keeps polling unti
   const waited = await pr.fleet("review", "--wait");
   expect(waited.code).toBe(0);
   expect(waited.output).toContain("FINDINGS:\n(none)");
-  expect(reviewer.prompts()).toHaveLength(1);
+  expect(reviewer.prompts()).toHaveLength(pairLenses);
   await expectCountedPanel(pr);
 });
 
@@ -781,7 +783,7 @@ test("a late single-reviewer command, after a retry finished its round, prints t
   const reviewer = fakeModel(pr, "REVIEWER", "No findings, the greeting is right.");
   const hub = hubAt(pr, "stalls on appends");
   pr.choose("Run one more round");
-  const single = ["review", "--override", `2026-10-25 "Run one more round"`];
+  const single = ["review", "--single", "--override", `2026-10-25 "Run one more round"`];
   const late = pr.fleetAs(await exitedPid(), ...single);
   await hub.appendStalled;
   hub.state.hub = "up";
@@ -811,7 +813,7 @@ test("rerunning a failed lens rebuilds its brief and runs it in the checkout of 
   reviewer.answer(clean);
   await pr.fleetIn(other, "review", "--lens", "correctness", "--knowledge", "correctness=incidents.md");
   expect((await pr.fleet("review", "--wait")).code).toBe(0);
-  expect(reviewer.prompts().at(-1)).toContain("A greeting once leaked a member's email.");
+  expect(reviewer.prompts().filter((prompt) => prompt.includes("A greeting once leaked a member's email."))).toHaveLength(1);
   expect(readFileSync(cwds, "utf8").trim().split("\n").at(-1)).toBe(realpathSync(other));
 });
 
@@ -824,18 +826,20 @@ test("a Security lane lens runs on the security row of the model table at its ef
   const codex = recordingModel(pr, "codex", "Looks fine to me.");
 
   await pr.fleet("review", "--lens", "security", "--lens", "correctness");
-  expect(new Set(codex.calls().map((call) => call.split(" -s ")[0]))).toEqual(new Set(['exec -m security-model -c model_reasoning_effort="xhigh"', 'exec -m candidate-model -c model_reasoning_effort="high"']));
+  expect(new Set(codex.calls().map((call) => call.split(" -s ")[0]))).toEqual(new Set(['exec --json -m security-model -c model_reasoning_effort="xhigh"', 'exec --json -m candidate-model -c model_reasoning_effort="high"']));
   const directory = join(pr.pullRequest, "reviews/1");
   expect((await readPlan(directory))!.lenses.map(({ name, family, model, security }) => ({ name, family, model, security }))).toEqual([
     { name: "security", family: "gpt", model: "security-model", security: true },
     { name: "correctness", family: "gpt", model: "candidate-model", security: undefined },
+    { name: "risk", family: "gpt", model: "candidate-model", security: undefined },
+    { name: "fresh-eyes", family: "claude", model: "candidate-model", security: undefined },
   ]);
   expect((await pr.fleet("review", "--wait")).code).toBe(1);
 
   const claude = recordingModel(pr, "claude", clean);
   recordingModel(pr, "codex", clean);
   await pr.fleet("review", "--lens", "security:same", "--lens", "correctness");
-  expect(claude.calls()).toEqual([expect.stringMatching(/^-p --model candidate-model --effort high /)]);
+  expect(claude.calls()).toEqual([expect.stringMatching(/^-p --model candidate-model --effort high /), expect.stringMatching(/^-p --model candidate-model --effort high /)]);
   const security = (await readPlan(directory))!.lenses[0]!;
   expect([security.family, security.model, security.security]).toEqual(["claude", "candidate-model", undefined]);
   expect((await pr.fleet("review", "--wait")).code).toBe(0);

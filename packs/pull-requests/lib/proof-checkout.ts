@@ -53,21 +53,44 @@ export function diffOf(from: string, to: string, run: Run) {
 
 const docsFile = /\.(md|mdx|markdown|rst)$/i;
 const lockFile = /(^|\/)([^/]+\.lockb?|package-lock\.json|pnpm-lock\.yaml|go\.sum)$/;
-const smallLines = 50;
+const generatedFile = /(^|\/)(__generated__|generated)\/|\.(generated|gen|min)\.[a-z]+$|\.pb\.go$|_pb2\.pyi?$/;
+const readLines = 50;
+const authored = (path: string) => !isTestFile(path) && ![docsFile, lockFile, generatedFile].some((pattern) => pattern.test(path));
 
-const mergeRiskOf = (body: string) => /Merge risk:\**\s*(low|medium|high)\b/i.exec(riskCalloutOf(body) ?? "")?.[1]?.toLowerCase();
+export type TierName = "read" | "pair" | "panel";
+export type ReviewTier = { name: TierName; why: string };
 
-export function smallPr(identity: ProofIdentity, run: Run, body: string) {
+export const tierLenses: Record<TierName, string[]> = {
+  read: ["correctness:other", "risk:other"],
+  pair: ["correctness:other", "risk:other", "fresh-eyes:same"],
+  panel: ["fresh-eyes", "correctness", "risk", "design", "anti-overengineering"],
+};
+
+export const tierCeiling = (tier: ReviewTier, ceiling: number) => tier.name === "read" ? Math.min(2, ceiling) : ceiling;
+
+function gradeOf(body: string | undefined) {
+  if (body === undefined) return "unreadable";
+  const grade = /Merge risk:\**\s*(low|medium|high)\b/i.exec(riskCalloutOf(body) ?? body)?.[1]?.toLowerCase();
+  return grade ?? (/merge[- ]risk/i.test(body) ? "unreadable" : "none");
+}
+
+function productionLines(identity: ProofIdentity, run: Run) {
   const stat = run(["git", "diff", "--numstat", "-z", "--no-renames", "--no-relative", mergeBase(identity, run), identity.commit]);
-  if (stat.code !== 0) return false;
-  const files = stat.stdout.split("\0").filter(Boolean).map((entry) => {
+  if (stat.code !== 0) return undefined;
+  return stat.stdout.split("\0").filter(Boolean).map((entry) => {
     const [added = "", deleted = "", path = ""] = entry.split("\t");
     return { lines: Number(added) + Number(deleted), path };
-  });
-  if (!files.length) return false;
-  if (files.every(({ path }) => docsFile.test(path))) return true;
-  const authored = files.filter(({ path }) => !isTestFile(path) && !lockFile.test(path)).reduce((sum, { lines }) => sum + lines, 0);
-  return authored < smallLines && mergeRiskOf(body) === "low";
+  }).filter(({ path }) => authored(path)).reduce((sum, { lines }) => sum + lines, 0);
+}
+
+export function reviewTier(identity: ProofIdentity, run: Run, body: string | undefined): ReviewTier {
+  const grade = gradeOf(body);
+  if (grade === "high") return { name: "panel", why: "merge-risk grade high" };
+  let lines: number | undefined;
+  try { lines = productionLines(identity, run); } catch { lines = undefined; }
+  const size = lines === undefined || Number.isNaN(lines) ? "size unknown" : `${lines} authored production lines`;
+  const read = ["low", "none"].includes(grade) && lines !== undefined && lines < readLines;
+  return { name: read ? "read" : "pair", why: `merge-risk grade ${grade}, ${size}` };
 }
 
 export function pullRequestDetails(identity: ProofIdentity, run: Run) {

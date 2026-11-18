@@ -1,3 +1,6 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
 type Env = Record<string, string | undefined>;
 
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
@@ -27,4 +30,10 @@ function isRow(value: unknown): value is ModelRow {
 export function modelSessionEnv(env: Record<string, string | undefined>) {
   const { T3CODE_THREAD_ID: _lane, ...rest } = env;
   return rest;
+}
+
+export function leanClaudeEnv(home: string, env: Env): Env {
+  const path = join(home, ".claude/settings.json");
+  const settings = existsSync(path) ? ((JSON.parse(readFileSync(path, "utf8")) as { env?: Env }).env ?? {}) : {};
+  return { ...env, ...settings, CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" };
 }

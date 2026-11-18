@@ -421,10 +421,10 @@ function panelRound({ answer, minutes = 4.5 }: { answer?: string; minutes?: numb
     const start = pr.clock.now.getTime();
     let reads = 0;
     Object.defineProperty(pr.clock, "now", { get: () => new Date(start + reads++ * minutes * 60_000), configurable: true });
-    await pr.fleet("review", "--lens", "correctness", "--lens", "fresh-eyes");
+    await pr.fleet("review");
     expect((await pr.fleet("review", "--wait")).code).toBe(0);
     Object.defineProperty(pr.clock, "now", { value: new Date(start), writable: true, configurable: true, enumerable: true });
-    writeFileSync(join(pr.repository, "responses.md"), "1. fixed: one retry\n2. rejected: the domain term\n");
+    writeFileSync(join(pr.repository, "responses.md"), "1. fixed: one retry\n2. rejected: the domain term\n3. rejected: the same retry\n");
     expect((await pr.fleet("respond", "--round", "1", "responses.md")).code).toBe(0);
   };
 }

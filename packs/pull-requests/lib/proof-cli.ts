@@ -20,7 +20,7 @@ import { publisherSeam } from "./proof-receipt-publisher.ts";
 import { reviewPrompt } from "./proof-review.ts";
 import { leftOutNote, reviewRange } from "./proof-range.ts";
 import { quietCommitIn } from "./proof-delta.ts";
-import { baseRefs, baseTip, cleanBaseMerge, mergeBase, pullRequestDetails, remotesOf, smallPr, topLevel } from "./proof-checkout.ts";
+import { baseRefs, baseTip, cleanBaseMerge, mergeBase, pullRequestDetails, remotesOf, reviewTier, tierCeiling, tierLenses, topLevel, type ReviewTier } from "./proof-checkout.ts";
 import { arbiterOf, finalGate, reviewLimit, type FinalGate } from "./proof-gate.ts";
 import { anchorCheck } from "./finding-anchors.ts";
 import { reviewRules } from "./review-rules.ts";
@@ -70,7 +70,7 @@ started later, or when its lock file stays empty for a minute.
 The settings pull-requests.freeReviews and pull-requests.reviewCeiling set how many reviews run before the arbiter weighs
 one more and where the loop stops: the panel rounds and the final reads of the review phase count together, and the
 final reads of the babysit phase count apart. The default budget is the panel, the fixes read, and the last read. A
-small PR, docs only or under 50 authored lines with a low merge-risk grade, gets one read. The arbiter is the lookup model of your
+PR of the Read tier gets its one read and one final read of its fixes. The arbiter is the lookup model of your
 AI plan; FLEET_REVIEW_ARBITER replaces its command.`;
 
 const subcommands: Record<string, Subcommand> = {
@@ -227,8 +227,16 @@ with the merge time and the time it was saved.`,
     },
   },
   review: {
-    usage: "review [--lens <name>[:same|:other]]... [--knowledge <lens>=<file>]... [--scope full|fixes|final] [--base <reviewed-sha>] [--phase review|babysit] [--override <dated quote> [--thread <id>] | --agent <reason>] | review --wait [--round <number|final>]",
-    summary: `Reserve a review round and run the reviewer yourself, read-only, from the model table of your AI plan: the review
+    usage: "review [--lens <name>[:same|:other]]... [--knowledge <lens>=<file>]... [--scope full|fixes|final] [--base <reviewed-sha>] [--phase review|babysit] [--single] [--override <dated quote> [--thread <id>] | --agent <reason>] | review --wait [--round <number|final>]",
+    summary: `Without --lens, --scope full runs the panel of the PR's review tier, which fleet picks from the merge-risk grade
+of the PR description and the authored production lines of the diff: lines outside tests, docs, lockfiles, and
+generated files. Read: grade low or no grade, and under 50 authored lines; one combined Correctness and Risk lens on the
+other family, and at most one final read of its fixes. Pair: any other grade but high, or a grade fleet cannot read;
+the lenses correctness:other, risk:other, and fresh-eyes:same. Panel: grade high; the lenses fresh-eyes, correctness,
+risk, design, and anti-overengineering. --lens adds lenses to the tier's set, such as security, ui, systems, or a
+Team perspective; it never removes one. The output and fleet proof show name the tier and why. An unfinished panel
+runs again with the lenses it started with when you pass no --lens.
+--single, --scope fixes, and --scope final reserve a review round and run one reviewer yourself, read-only, from the model table of your AI plan: the review
 row for a PR that Claude wrote, and the review-codex row for a PR that Codex wrote when the table has one, else the
 review row. On the both plan that reviewer is the family that did not write the PR; on a single plan it is a fresh
 session of that provider. fleet builds the prompt from the diff, the PR title and description, and the coding
@@ -258,8 +266,9 @@ run at once on this machine, and the rest wait. Each raw answer is kept in lense
 a FINDINGS block or a COVERED list of every changed file runs once more, and a lens stopped by spent quota does not;
 when it fails again, the round stays unfinished with the cause, and the same review --lens command reruns the failed
 lenses; :same or :other moves a failed lens to the family that is up when the other has an outage. When every lens
-is done, fleet joins the answers under one heading per lens as the round's findings. On a small PR the lenses run as
-one combined lens.
+is done, fleet joins the answers under one heading per lens as the round's findings. On a PR of the Read tier the
+lenses run as one combined lens. Each reviewer runs without the user's settings, hooks, memory, and MCP servers, and
+fleet keeps its token use as usage in lenses/<name>.json, or in round.json for one reviewer.
 A final read, --scope final, reads every fix from the commit of the first panel round to HEAD with the Correctness
 lens of PANEL.md.
 --wait waits up to 9 minutes for the panel of the unfinished round, the latest round, or --round, and prints each
@@ -267,11 +276,11 @@ lens. Exit 0 when the round is finished, with its findings; 1 when a lens failed
 --wait again; 4 when a lens stopped on spent quota. It restarts a lens whose worker died, and waits while another
 fleet proof command works on the round.
 ${overrideHelp}`,
-    examples: ["fleet proof review", "fleet proof review --scope fixes --base 1a2b3c4", "fleet proof review --lens fresh-eyes --lens correctness --lens design --knowledge correctness=incidents.md", "fleet proof review --wait"],
-    options: ["--scope", "--base", "--phase", "--override", "--thread", "--agent", "--standing", "--round"], repeatable: ["--lens", "--knowledge"], flags: ["--wait"],
+    examples: ["fleet proof review", "fleet proof review --lens security", "fleet proof review --scope final --base 1a2b3c4", "fleet proof review --lens team-billing --knowledge team-billing=perspective.md", "fleet proof review --wait"],
+    options: ["--scope", "--base", "--phase", "--override", "--thread", "--agent", "--standing", "--round"], repeatable: ["--lens", "--knowledge"], flags: ["--wait", "--single"],
     run: async (parsed, identity, context) => {
       if (parsed.flags.has("--wait")) return waitForReview(parsed.options, identity(), context);
-      if (parsed.lists.has("--lens")) return runPanel(parsed, identity(), context);
+      if (await panelRequested(parsed, identity(), context)) return runPanel(parsed, identity(), context);
       return runReview(parsed.options, identity(), context);
     },
   },
@@ -311,7 +320,7 @@ each answer against HEAD.`,
       const { print, home, cwd } = context;
       if (files.length !== 1) throw usageError("respond", "Pass one responses file");
       const head = identity();
-      const ceiling = isSmall(head, context) ? 1 : numberSetting("pull-requests.reviewCeiling", context.env);
+      const ceiling = tierCeiling(tierOf(head, context), numberSetting("pull-requests.reviewCeiling", context.env));
       print(await respondToReview(home, head, roundId(required(options, "--round", "respond")), resolve(cwd, files[0]!), ceiling));
       return 0;
     },
@@ -374,8 +383,8 @@ requires any, every check counts. On a draft, a required check named "<workflow>
 as withheld from drafts when its workflow reported other checks on the commit and all of them passed. CI is unknown
 when GitHub does not answer for the rulesets or branch protection. A clean merge of the PR's base carries the review and the evidence of
 its other parent forward. The review needs a finished --lens panel round on the PR, and HEAD read by a panel round or
-by a review that finished after one, such as a final read; single-reviewer rounds alone never count. On a small PR the
-panel's one read covers its fixes too. Only blocker and major findings, findings without a severity, and the items of
+by a review that finished after one, such as a final read; single-reviewer rounds alone never count. The first round
+of each review tier counts as the panel. Only blocker and major findings, findings without a severity, and the items of
 a TESTS block need an answer: minor and nit findings are noted. An accepted
 panel gap (gap --kind panel) stands in for the panel. The review also carries across quiet commits: a git revert of
 an earlier commit of the PR, and single-parent commits that only change, add, or delete test files, named *.test.*, *.spec.*, *_test.go, *_test.py or test_*.py, or snapshots in __snapshots__, as regular
@@ -579,7 +588,7 @@ async function askReviewer(reserved: SingleRound, head: ProofIdentity, author: F
   }
   if (!answer.ok) throw new Error(`The reviewer ${answer.model} gave no findings (${answer.cause}). ${label} stays reserved; run fleet proof review again to retry it`);
   const anchors = anchorCheck(answer.text, diff, await reviewRecords(home, head));
-  await storeCapturedFindings(reserved.directory, head, roundId(reserved.id), answer.text, answer.model);
+  await storeCapturedFindings(reserved.directory, head, roundId(reserved.id), answer.text, answer.model, answer.usage);
   if (anchors) await writeFile(join(reserved.directory, "anchors.md"), anchors + "\n", { mode: 0o600 });
   print(JSON.stringify({ round: reserved.round, id: reserved.id, directory: reserved.directory, reviewer: answer.model }));
   print(answer.text.trim());
@@ -600,10 +609,10 @@ async function reserveRound(options: Map<string, string>, head: ProofIdentity, c
   const lastRead = scope === "final" && (options.get("--phase") ?? "review") === "review";
   const from = lastRead ? await panelCommit(context.home, head) ?? base : rangeStart(scope, base, head, context.run);
   const { decision, ...permit } = await decisionOf(options, head, context);
-  const small = isSmall(head, context);
-  if (small && capturedBy === "fleet" && !panel && !decision && !await panelCommit(context.home, head)) throw new Error("A small PR gets one read, and it is the panel: run fleet proof review --lens <lens> ..., which runs the lenses as one combined lens");
+  const tier = tierOf(head, context);
+  if (tier.name === "read" && capturedBy === "fleet" && !panel && !decision && !await panelCommit(context.home, head)) throw new Error("A PR of the Read tier gets one read, and it is the panel: run fleet proof review, which runs its combined lens");
   const firstPanel = panel && !await panelCommit(context.home, head);
-  const limits = small && !firstPanel ? { ...permit.limits, ceiling: 1, small } : permit.limits;
+  const limits = firstPanel ? permit.limits : { ...permit.limits, ceiling: tierCeiling(tier, permit.limits.ceiling) };
   const reserved = await startReview(context.home, head, { scope, base, from, ...permit, limits, decision, phase: options.get("--phase"), cleanBaseMerge: cleanBaseMerge(head, context.run), quietCommit: quietCommitIn(context.run, () => baseRefs(head, context.run)), capturedBy, lock: async (directory) => lockNewRound(directory, await context.lock()) });
   return { ...reserved, scope, base, from, phase: options.get("--phase") };
 }
@@ -665,7 +674,27 @@ async function recordRound(directory: string, context: CommandContext) {
 
 const rangeStart = (scope: string, base: string | undefined, head: ProofIdentity, run: Run) => scope === "full" ? mergeBase(head, run) : base;
 
-const isSmall = (head: ProofIdentity, { run }: CommandContext) => { try { return smallPr(head, run, pullRequestDetails(head, run).body); } catch { return false; } };
+function tierOf(head: ProofIdentity, { run }: CommandContext): ReviewTier {
+  let body: string | undefined;
+  try { body = pullRequestDetails(head, run).body; } catch { body = undefined; }
+  return reviewTier(head, run, body);
+}
+
+async function panelRequested({ lists, options, flags }: Parsed, head: ProofIdentity, context: CommandContext) {
+  if (lists.has("--lens")) return true;
+  const pending = await unfinishedReview(context.home, head, "fleet");
+  if (pending) return Boolean(await readPlan(pending.directory) ?? await stagedPlan(pending.directory));
+  return !flags.has("--single") && (options.get("--scope") ?? "full") === "full";
+}
+
+const lensName = (argument: string) => argument.split(":")[0]!;
+
+function withLenses(base: string[], added: string[]) {
+  const chosen = new Map(added.map((argument) => [lensName(argument), argument]));
+  for (const argument of base) if (!chosen.has(lensName(argument))) chosen.set(lensName(argument), argument);
+  const lenses = [...chosen.values()];
+  return [...lenses.filter((argument) => lensName(argument) !== "sweep"), ...lenses.filter((argument) => lensName(argument) === "sweep")];
+}
 
 const waitPolls = 108;
 const pollInterval = 5_000;
@@ -697,28 +726,32 @@ async function runPanel({ options, lists }: Parsed, head: ProofIdentity, context
   const author = await authorOf(home, head);
   const guide = await readPanelGuide(home);
   const knowledge = await knowledgeOf(lists.get("--knowledge") ?? [], context.cwd);
-  const requested = lists.get("--lens")!.map((argument) => resolveLens(guide, argument, author, knowledge, env));
   const pending = await unfinishedReview(context.home, head, "fleet");
   const planned = pending && (await readPlan(pending.directory) ?? await stagedPlan(pending.directory));
-  const small = planned ? planned.lenses.map(({ name }) => name).join() === "combined" : isSmall(head, context);
-  const lenses = small ? [combinedLens(requested, author)] : requested;
+  const tier = planned ? planned.tier : tierOf(head, context);
+  const chosen = planned?.arguments ?? ((options.get("--scope") ?? "full") === "full" && tier ? tierLenses[tier.name] : []);
+  const lensArguments = withLenses(chosen, lists.get("--lens") ?? []);
+  const requested = lensArguments.map((argument) => resolveLens(guide, argument, author, knowledge, env));
+  const combined = planned ? planned.lenses.map(({ name }) => name).join() === "combined" : tier?.name === "read";
+  const lenses = combined ? [combinedLens(requested, author)] : requested;
   if (pending) requireSameRequest(pending, options, context.run);
-  const directory = pending ? await rerunPanel(pending, options, head, lenses, guide, context) : await reservePanel(options, head, lenses, guide, context);
+  const directory = pending ? await rerunPanel(pending, options, head, lenses, guide, context) : await reservePanel(options, head, lenses, guide, context, { tier, arguments: lensArguments });
   const round = (await readJson<{ round: number | "final" }>(join(directory, "round.json"), { round: 0 })).round;
-  print(JSON.stringify({ round, directory, lenses: lenses.map(({ name, family }) => ({ name, family })) }));
+  print(JSON.stringify({ round, directory, ...tier ? { tier } : {}, lenses: lenses.map(({ name, family }) => ({ name, family })) }));
+  if (tier) print(tierLine(tier));
   print("The lenses run in the background. Run fleet proof review --wait for the findings, and fleet proof show to see each lens.");
   return 0;
 }
 
 const castOf = ({ family, row, security }: Lens, env: Record<string, string | undefined>) => ({ family, row, model: modelLabel("reviewer", row, env, security), ...(security ? { security: true as const } : {}) });
 
-async function reservePanel(options: Map<string, string>, head: ProofIdentity, lenses: Lens[], guide: PanelGuide, context: CommandContext) {
+async function reservePanel(options: Map<string, string>, head: ProofIdentity, lenses: Lens[], guide: PanelGuide, context: CommandContext, chosen: Pick<Plan, "tier" | "arguments">) {
   const rubric = await readRubric(context.home);
   const reserved = await reserveFleetReview(options, head, context, true);
   return roundStep(reserved.directory, context, async () => {
     try {
       const { plan, briefs } = await panelBriefs(reserved, head, lenses, guide, rubric, context);
-      await stagePanel(reserved.directory, plan, briefs);
+      await stagePanel(reserved.directory, { ...plan, ...chosen }, briefs);
     } catch (error) {
       await rm(reserved.directory, { recursive: true, force: true });
       throw error;
@@ -765,7 +798,7 @@ async function rerunPanel(pending: { directory: string; reservation: { scope: st
   const plan = await readPlan(directory) ?? await stagedPlan(directory);
   if (!plan) throw new Error(`${directory} is reserved for one reviewer. Run fleet proof review without --lens to retry it`);
   const planned = plan.lenses.map((lens) => lens.name);
-  if (lenses.map((lens) => lens.name).sort().join() !== [...planned].sort().join()) throw new Error(`The unfinished round runs the lenses ${planned.join(", ")}. Pass the same --lens set to rerun its failed lenses`);
+  if (lenses.map((lens) => lens.name).sort().join() !== [...planned].sort().join()) throw new Error(`The unfinished round runs the lenses ${planned.join(", ")}. Run fleet proof review without --lens to rerun its failed lenses; --lens <name>:same or :other moves one of them to that family`);
   return roundStep(directory, context, async () => {
     await takeOverride(directory, options, head, context);
     await recordRound(directory, context);
@@ -874,8 +907,12 @@ async function roundLines(directory: string, { now }: CommandContext) {
   const anchors = join(directory, "anchors.md");
   const standing = round.standing ? [`accepted by the standing rule until ${round.standing.until}: ${round.standing.reason}`] : [];
   if (round.decision) standing.push(`decided by ${round.decision.mark} decision ${round.decision.id}`);
-  return [header, ...(existsSync(anchors) ? [`anchor check by fleet: ${anchors}`] : []), ...standing, ...(await readPlan(directory) ? await panelLines(directory, now?.() ?? new Date()) : [])];
+  const plan = await readPlan(directory);
+  const panel = plan ? [...plan.tier ? [tierLine(plan.tier)] : [], ...await panelLines(directory, now?.() ?? new Date())] : [];
+  return [header, ...(existsSync(anchors) ? [`anchor check by fleet: ${anchors}`] : []), ...standing, ...panel];
 }
+
+const tierLine = ({ name, why }: ReviewTier) => `review tier: ${name}: ${why}`;
 
 function roundOption(options: Map<string, string>) {
   const round = options.get("--round");
