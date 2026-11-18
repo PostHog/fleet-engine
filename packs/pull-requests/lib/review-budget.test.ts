@@ -1,9 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawnAsync } from "../../../src/testing/spawn.ts";
-import { checkout, cleanFixtures, fakeModel, finishRound, graded, settings, type Checkout } from "./proof-testing.ts";
+import { checkout, cleanFixtures, fakeModel, finishRound, fixture, graded, models, recordingModel, settings, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
 
@@ -139,6 +139,35 @@ test("at the budget a known answer settles a major the PR body lists by file:lin
   const held = await pr.fleet("gate");
   expect(held.code).toBe(1);
   expect(held.output).toContain("known issues: round 1 answers findings 1 known, and an open blocker holds the merge");
+});
+
+test("a small PR's combined lens reads with the Security lane's model when a Security lens is asked", async () => {
+  const pr = await checkout();
+  await pr.commit("README.md", "Greet new members.\n");
+  await pr.fleet("require", "--none", "--reason", "docs only");
+  pr.env.FLEET_MODELS = JSON.stringify([...models, { role: "security", work: "Deep security review", provider: "codex", model: "security-model", effort: "xhigh" }]);
+  pr.env.FLEET_PROOF_REVIEWER_MODEL = "candidate-model";
+  const codex = recordingModel(pr, "codex", "FINDINGS:\n(none)\nCOVERED: README.md\n");
+
+  await pr.fleet("review", "--lens", "correctness", "--lens", "security");
+  expect((await pr.fleet("review", "--wait")).code).toBe(0);
+  expect(codex.calls().map((call) => call.split(" -s ")[0])).toEqual(['exec -m security-model -c model_reasoning_effort="xhigh"']);
+});
+
+test("a docs-only PR gets the combined lens in a checkout that has not fetched its base branch yet", async () => {
+  const pr = await checkout();
+  await pr.commit("README.md", "Greet new members.\n");
+  await pr.fleet("require", "--none", "--reason", "docs only");
+  const remote = join(fixture("fleet-proof-remote-"), "github.com/example/product.git");
+  mkdirSync(remote, { recursive: true });
+  await pr.git("init", "-q", "--bare", remote);
+  await pr.git("push", "-q", remote, "refs/remotes/origin/main:refs/heads/main");
+  await pr.git("remote", "set-url", "origin", remote);
+  await pr.git("update-ref", "-d", "refs/remotes/origin/main");
+  fakeModel(pr, "REVIEWER", "FINDINGS:\n(none)\nCOVERED: README.md\n");
+
+  const started = await pr.fleet("review", "--lens", "correctness", "--lens", "design");
+  expect(JSON.parse(started.output.split("\n")[0]!).lenses).toEqual([{ name: "combined", family: expect.any(String) }]);
 });
 
 test("a small PR keeps its panel read after a single read the author saved", async () => {

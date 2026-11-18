@@ -58,9 +58,8 @@ const smallLines = 50;
 const mergeRiskOf = (body: string) => /Merge risk:\**\s*(low|medium|high)\b/i.exec(riskCalloutOf(body) ?? "")?.[1]?.toLowerCase();
 
 export function smallPr(identity: ProofIdentity, run: Run, body: string) {
-  const from = baseRefs(identity, run).map((ref) => run(["git", "merge-base", ref, identity.commit])).find((result) => result.code === 0)?.stdout.trim();
-  const stat = from ? run(["git", "diff", "--numstat", "-z", "--no-renames", "--no-relative", from, identity.commit]) : undefined;
-  if (stat?.code !== 0) return false;
+  const stat = run(["git", "diff", "--numstat", "-z", "--no-renames", "--no-relative", mergeBase(identity, run), identity.commit]);
+  if (stat.code !== 0) return false;
   const files = stat.stdout.split("\0").filter(Boolean).map((entry) => {
     const [added = "", deleted = "", path = ""] = entry.split("\t");
     return { lines: Number(added) + Number(deleted), path };
