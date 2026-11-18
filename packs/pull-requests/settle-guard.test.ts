@@ -381,9 +381,11 @@ describe("the organize guard on another machine", () => {
     }
   });
 
-  test("refuses a snooze when neither the peer's Fleet nor T3 answers, since nothing can show the thread is not pinned", async () => {
+  test("refuses a snooze when neither the peer's Fleet nor T3 answers, or T3 does not list the thread, since nothing can show it is not pinned", async () => {
     const check = { ...deps(undefined), settleCheck: peer({ code: 255, stdout: "" }).settleCheck };
     expect(reasonOf(await guardSettle(remote("snooze"), peerHome(), check))).toBe("Fleet blocked this snooze: T3 did not answer; retry, or snooze in the T3 UI.");
+    const missing = { ...deps([thread("mcp:other")]), settleCheck: peer({ code: 255, stdout: "" }).settleCheck };
+    expect(reasonOf(await guardSettle(remote("snooze"), peerHome(), missing))).toContain("T3 did not list thread mcp:lane");
   });
 
   test("reads the machine's threads through T3 when no peer has its environment, or when it is this machine", async () => {

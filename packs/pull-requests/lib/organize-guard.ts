@@ -67,6 +67,7 @@ export type SettleDeps = {
 
 const fallbackPerson = "the person who runs this machine";
 const noAnswer = (action: string) => `Fleet blocked this ${action}: T3 did not answer; retry, or ${action} in the T3 UI.`;
+const unlisted = (action: string, id: string) => `Fleet blocked this ${action}: T3 did not list thread ${id}, so Fleet cannot see whether it is pinned; retry, or ${action} in the T3 UI.`;
 const deny = (reason: string) => ({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } });
 
 export function personName(home: string): string {
@@ -83,7 +84,9 @@ export async function organizeRefusal(action: string, id: string, home: string, 
   const threads = await deps.threads(home, machine).catch(() => undefined);
   if (!threads) return action === "snooze" && failOpen ? undefined : noAnswer(action);
   const person = personName(home);
-  if (action !== "archive" && matchThread(threads, id, (thread) => thread.id)?.pinnedAt) {
+  const target = matchThread(threads, id, (thread) => thread.id);
+  if (!target && !failOpen && action !== "archive") return unlisted(action, id);
+  if (action !== "archive" && target?.pinnedAt) {
     const { marks, parking } = closingSettings(home);
     return pinnedReason(person, parking && marks.snooze);
   }

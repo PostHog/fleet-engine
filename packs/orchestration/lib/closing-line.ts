@@ -11,7 +11,7 @@ export type ParkT3 = { shell: () => Promise<{ threads: ShellThread[] }>; dispatc
 export type ParkEvent = { stop_hook_active?: boolean; last_assistant_message?: string };
 export type ParkOptions = {
   home: string; threadId?: string; t3: ParkT3; processes: ProcessTable;
-  settleAfterRun: (threadId: string, runId: string, since: Date) => void; now?: () => Date; deadline?: () => Promise<void>;
+  settleAfterRun: (threadId: string, runId: string, since: Date) => void; now?: () => Date; stoppedAt?: Date; deadline?: () => Promise<void>;
 };
 export type ParkBlock = { decision: "block"; reason: string };
 
@@ -103,7 +103,7 @@ async function check(event: ParkEvent, options: ParkOptions, live: () => boolean
   }
   if (park === "check") {
     if (!hasScheduledCheck(home, thread.id, now)) return block(noCheckReason(marks));
-    if (thread.activeRunId && live()) options.settleAfterRun(thread.id, thread.activeRunId, now);
+    if (thread.activeRunId && live()) options.settleAfterRun(thread.id, thread.activeRunId, options.stoppedAt ?? now);
   }
   return undefined;
 }
@@ -138,14 +138,15 @@ export async function settleWhenRunEnds(t3: ParkT3, { threadId, runId, since, st
     const { threads } = await t3.shell();
     const thread = threads.find((item) => item.id === threadId);
     if (!thread || thread.settledAt || thread.pinnedAt || thread.latestRunId !== runId || thread.pendingRuntimeRequest || unsuccessful.includes(thread.status)) return false;
+    if (thread.snoozedUntil && Date.parse(thread.snoozedUntil) > since.getTime()) return false;
     if (thread.pullRequests?.some(({ watch }) => watch?.startedAt && Date.parse(watch.startedAt) >= since.getTime())) return false;
     if (clock.now() > giveUp) return false;
     const ended = thread.activeRunId !== runId && thread.status === "completed";
+    if (ended && !(await parks(threads, thread))) return false;
     if (ended && confirmed) {
       await t3.dispatch({ type: "thread.settle", commandId: `fleet:closing-line:settle:${runId}`, threadId, expectedLatestRunId: runId });
       return true;
     }
-    if (ended && !(await parks(threads, thread))) return false;
     confirmed = ended;
     if (!ended) await clock.sleep(clock.pollMs ?? 2_000);
   }

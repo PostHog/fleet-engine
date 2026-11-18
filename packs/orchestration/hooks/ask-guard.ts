@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
@@ -208,8 +208,10 @@ export function hookT3(home: string, ttl = "1m"): HookT3 {
   };
 }
 
-export function spawnSettle(threadId: string, runId: string, since: Date): void {
-  spawn(process.execPath, [import.meta.path, "settle-after", threadId, runId, since.toISOString()], { detached: true, stdio: "ignore" }).unref();
+export function spawnSettle(threadId: string, runId: string, since: Date): ChildProcess {
+  const child = spawn(process.execPath, [import.meta.path, "settle-after", threadId, runId, since.toISOString()], { detached: true, stdio: "ignore" });
+  child.unref();
+  return child;
 }
 
 export async function settleAfter(home: string, threadId: string, runId: string, since: Date): Promise<boolean> {
@@ -246,7 +248,7 @@ async function guardStopAndProof(event: StopEvent & ProofStopEvent, home: string
   if (proof || !deps.park || elapsed() >= parkStartsWithinMs) return proof;
   return parkStop(last, {
     home, threadId, t3: deps.park, processes: deps.processes ?? realProcesses,
-    settleAfterRun: deps.settleAfterRun ?? spawnSettle, now: () => stoppedAt,
+    settleAfterRun: deps.settleAfterRun ?? spawnSettle, now: deps.now, stoppedAt,
   });
 }
 

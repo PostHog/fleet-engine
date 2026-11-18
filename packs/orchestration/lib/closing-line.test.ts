@@ -202,14 +202,22 @@ describe("closing-line parking", () => {
     expect([off.settledAt, killed.settledAt]).toEqual([null, null]);
   });
 
-  test("the settle reads the thread again after its last checks, and leaves it alone when a pin or a PR watch arrived meanwhile", async () => {
-    const watched = { pullRequests: [{ repository: "acme/app", number: 9, url: "https://github.com/acme/app/pull/9", snapshot: { state: "merged" }, watch: { startedAt: "2026-11-14T12:01:00.000Z" } }] };
-    for (const change of [{ pinnedAt: "2026-11-14T12:01:00.000Z" }, watched]) {
+  test("the settle reads the thread again after its last checks, and leaves it alone when a pin, a PR watch, a snooze or an open PR it owns alone arrived meanwhile", async () => {
+    const changes: Partial<ShellThread>[] = [
+      { pinnedAt: "2026-11-14T12:01:00.000Z" },
+      { pullRequests: [{ repository: "acme/app", number: 9, url: "https://github.com/acme/app/pull/9", snapshot: { state: "merged" }, watch: { startedAt: "2026-11-14T12:01:00.000Z" } }] },
+      { snoozedUntil: "2026-11-15T08:00:00.000Z" },
+      { pullRequests: [{ repository: "acme/app", number: 8, url: "https://github.com/acme/app/pull/8", snapshot: { state: "open" } }] },
+    ];
+    const settleOnce = async (change: Partial<ShellThread>) => {
       const server = t3Server({ status: "completed", activeRunId: null });
-      const checksThenChanges = async () => (Object.assign(server.threads[0]!, change), true);
-      await settleWhenRunEnds(server.t3, { threadId, runId, since: now, stillParks: checksThenChanges }, { now: () => 0, sleep: async () => {} });
-      expect([server.threads[0]!.settledAt, server.received]).toEqual([null, []]);
-    }
+      let reads = 0;
+      const changing = { shell: async () => (++reads === 2 && Object.assign(server.threads[0]!, change), { threads: server.threads }), dispatch: server.t3.dispatch };
+      await settleWhenRunEnds(changing, { threadId, runId, since: now, stillParks: stillParks(homeWith(checkSoon), () => now) }, { now: () => 0, sleep: async () => {} });
+      return server.threads[0]!.settledAt;
+    };
+    for (const change of changes) expect(await settleOnce(change)).toBeNull();
+    expect(await settleOnce({})).toBe(now.toISOString());
   });
 
   test("the longest mark wins when one set mark starts another", async () => {

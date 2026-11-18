@@ -485,13 +485,25 @@ describe("the closing line in the installed Stop hook", () => {
     expect([await settleThrough(false), await settleThrough(true)]).toEqual(["settled", null]);
   });
 
+  test("checks a snooze time against the clock when it parks, not the time the stop began", async () => {
+    const sent: Record<string, unknown>[] = [];
+    const threads = [{ id: lane, title: "Lane", projectId: "p", status: "running", activeRunId: "run-1" }] as ShellThread[];
+    let reads = 0;
+    const routed = hookWith(() => async () => ({ threads }), {
+      threadId: lane, processes: tree, elapsed: () => 0, now: () => new Date(reads++ === 0 ? "2026-11-14T11:59:59Z" : "2026-11-14T12:00:01Z"),
+      park: { shell: async () => ({ threads }), dispatch: async (command) => { sent.push(command); } }, settleAfterRun: () => {},
+    });
+    const closing = "Done.\n\n💤 This thread **snoozes until 14th Nov 12:00**";
+    const result = await routed("claude", async () => JSON.stringify({ transcript_path: transcript(claudePrompt("Fix it"), claudeSays(closing)), last_assistant_message: closing }), parking());
+    expect([JSON.parse(result.stdout).reason, sent]).toEqual([expect.stringContaining("Fleet read no future time in UTC"), []]);
+  });
+
   test("the hook's settle-after process settles the thread once T3 shows its run complete", async () => {
-    let settled: (command: Record<string, unknown>) => void = () => {};
-    const received = new Promise<Record<string, unknown>>((resolve) => { settled = resolve; });
+    const received: Record<string, unknown>[] = [];
     const lead = { id: lane, title: "Lane", projectId: "p", status: "completed", activeRunId: null, latestRunId: "run-7", settledAt: null, pendingRuntimeRequest: null, pullRequests: [] };
     const stub = await startT3Stub({
       shell: { projects: [], threads: [lead] } as never,
-      rpc: (tag, payload) => (tag === "orchestration.dispatchCommand" ? (settled(payload as Record<string, unknown>), { sequence: 1 }) : undefined),
+      rpc: (tag, payload) => (tag === "orchestration.dispatchCommand" ? (received.push(payload as Record<string, unknown>), { sequence: 1 }) : undefined),
     });
     try {
       mkdirSync(join(stub.home, ".local/state/fleet"), { recursive: true });
@@ -502,12 +514,15 @@ describe("the closing line in the installed Stop hook", () => {
       db.close();
       const realHome = process.env.HOME;
       process.env.HOME = stub.home;
-      try {
-        spawnSettle(lane, "run-7", new Date(Date.now() - 60_000));
-      } finally {
-        process.env.HOME = realHome;
-      }
-      expect(await received).toMatchObject({ type: "thread.settle", threadId: lane, expectedLatestRunId: "run-7" });
+      const child = (() => {
+        try {
+          return spawnSettle(lane, "run-7", new Date(Date.now() - 60_000));
+        } finally {
+          process.env.HOME = realHome;
+        }
+      })();
+      await new Promise((resolve) => child.once("exit", resolve));
+      expect(received).toEqual([expect.objectContaining({ type: "thread.settle", threadId: lane, expectedLatestRunId: "run-7" })]);
     } finally {
       await stub.stop();
     }
