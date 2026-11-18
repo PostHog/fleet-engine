@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { matchThread, type ShellThread, t3UserData } from "../../base/lib/t3/index.ts";
+import { closingSettings } from "../../orchestration/lib/closing-marks.ts";
 import { runGh } from "./gh.ts";
 import { isOrganize, pinnedReason, prState, readHandovers, readT3Threads, settleRefusal, settleTarget } from "./pr-owners.ts";
 
@@ -14,9 +15,6 @@ const threadPattern = /^[a-zA-Z0-9][a-zA-Z0-9:._%-]{0,511}$/;
 const sshLimitMs = 10_000;
 
 export const settleCheckUsage = "Usage: fleet pr settle-check --action <settle|snooze|archive> --thread <thread id>";
-
-export const cannotCheckReason = (action: string, threadId: string, why: string, person: string) =>
-  `Fleet blocked this ${action}: it could not check thread ${threadId} on its machine (${why}). Send that thread a message asking it to ${action} itself, or leave it to ${person}.`;
 
 const realSsh: Ssh = async (alias, command) => {
   const child = Bun.spawn(["ssh", "-o", "BatchMode=yes", "-o", "ForwardAgent=no", "-o", "ConnectTimeout=5", alias, command], { stdin: "ignore", stdout: "pipe", stderr: "ignore", timeout: sshLimitMs });
@@ -44,12 +42,14 @@ export const settleCheckOver = (ssh: Ssh = realSsh): SettleCheck => async (home,
   const alias = await peerOf(home, environmentId);
   if (!alias) return undefined;
   if (!threadPattern.test(threadId) || !["settle", "snooze", "archive"].includes(action)) throw new Error("the thread id or action has a form Fleet does not send");
-  const answer = await ssh(alias, `bash -lc 'sh "$HOME/.local/share/fleet/engine/fleet" pr settle-check --action ${action} --thread ${threadId}'`);
+  const answer = await ssh(alias, `PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH" sh "$HOME/.local/share/fleet/engine/fleet" pr settle-check --action ${action} --thread ${threadId}`);
   if (answer.code !== 0) throw new Error(`${alias} did not answer: fleet pr settle-check exited ${answer.code}`);
   const parsed = (() => { try { return JSON.parse(answer.stdout.trim().split("\n").at(-1) ?? "") as unknown; } catch { return undefined; } })();
   if (typeof parsed !== "object" || parsed === null || !("refusal" in parsed)) throw new Error(`${alias} sent no settle-check answer`);
   const { refusal } = parsed as { refusal: unknown };
-  return typeof refusal === "string" ? { refusal } : {};
+  if (refusal === null) return {};
+  if (typeof refusal === "string" && refusal.trim()) return { refusal };
+  throw new Error(`${alias} sent a settle-check answer Fleet cannot read`);
 };
 
 export function parseSettleCheck(args: string[]): { action: string; threadId: string } {
@@ -66,7 +66,7 @@ export type SettleDeps = {
 };
 
 const fallbackPerson = "the person who runs this machine";
-const noAnswer = "Fleet blocked this settle: T3 did not answer; retry, or settle in the T3 UI.";
+const noAnswer = (action: string) => `Fleet blocked this ${action}: T3 did not answer; retry, or ${action} in the T3 UI.`;
 const deny = (reason: string) => ({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } });
 
 export function personName(home: string): string {
@@ -79,11 +79,14 @@ export function personName(home: string): string {
   }
 }
 
-export async function organizeRefusal(action: string, id: string, home: string, deps: SettleDeps, machine?: string): Promise<string | undefined> {
+export async function organizeRefusal(action: string, id: string, home: string, deps: SettleDeps, machine?: string, failOpen = true): Promise<string | undefined> {
   const threads = await deps.threads(home, machine).catch(() => undefined);
-  if (!threads) return action === "snooze" ? undefined : noAnswer;
+  if (!threads) return action === "snooze" && failOpen ? undefined : noAnswer(action);
   const person = personName(home);
-  if (action !== "archive" && matchThread(threads, id, (thread) => thread.id)?.pinnedAt) return pinnedReason(person);
+  if (action !== "archive" && matchThread(threads, id, (thread) => thread.id)?.pinnedAt) {
+    const { marks, parking } = closingSettings(home);
+    return pinnedReason(person, parking && marks.snooze);
+  }
   if (action === "snooze") return undefined;
   return settleRefusal(id, { threads, handovers: () => readHandovers(home), prState: deps.prState }, person);
 }
@@ -96,8 +99,7 @@ export async function guardSettle(call: ToolCall, home: string, deps: SettleDeps
   const action = String(input.action);
   const machine = typeof input.environmentId === "string" && input.environmentId ? input.environmentId : undefined;
   if (machine && deps.settleCheck) {
-    const remote = await deps.settleCheck(home, machine, action, id).catch((error: Error) => ({ failed: error.message.split("\n")[0] ?? "" }));
-    if (remote && "failed" in remote) return deny(cannotCheckReason(action, id, remote.failed, personName(home)));
+    const remote = await deps.settleCheck(home, machine, action, id).catch(() => undefined);
     if (remote) return remote.refusal ? deny(remote.refusal) : undefined;
   }
   const reason = await organizeRefusal(action, id, home, deps, machine);

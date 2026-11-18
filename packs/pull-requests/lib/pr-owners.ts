@@ -110,8 +110,10 @@ export const isOrganize = (name = "") => /^mcp__t3[-_]code__t3_thread_organize$/
 
 export const guardedActions = ["settle", "snooze", "archive"];
 
-export const pinnedReason = (person: string) => `Fleet blocked this call: ${person} pinned this thread to keep it in view, so leave it open. `
-  + `Only a snooze ${person} asks for in the thread applies: end the turn on the snooze closing line with the time.`;
+export const pinnedReason = (person: string, snoozeMark?: string) => `Fleet blocked this call: ${person} pinned this thread to keep it in view, so leave it open. `
+  + (snoozeMark
+    ? `Only a snooze ${person} asks for in the thread applies: end the turn on a line that starts with ${snoozeMark} and names the wake time.`
+    : `Only ${person} snoozes it, in T3.`);
 
 export function settleTarget(input: Record<string, unknown>, self: string | undefined): string | undefined {
   if (!guardedActions.includes(String(input.action))) return undefined;
@@ -139,6 +141,7 @@ function asShellThreads(linked: LinkedThread[]): ShellThread[] {
   return linked.map((thread) => ({
     id: thread.threadId, title: thread.title, projectId: thread.projectId, status: thread.status,
     ...(thread.settled ? { settledAt: thread.updatedAt || "settled" } : {}),
+    ...(thread.pinned ? { pinnedAt: thread.updatedAt || "pinned" } : {}),
     ...(thread.parentThreadId ? { lineage: { parentThreadId: thread.parentThreadId, rootThreadId: rootOfLinked(thread), relationshipToParent: thread.relationshipToParent ?? null } } : {}),
     pullRequests: (thread.pullRequests ?? []).map((pr) => ({ repository: pr.repository, number: pr.number, url: pr.url, ...(pr.state ? { snapshot: { state: pr.state } } : {}) })),
   }));

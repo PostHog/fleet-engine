@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { type Hook, printing, runHook } from "../../base/lib/hook.ts";
 import { matchThread, questionCard, type ShellThread, t3CliRunner, t3UserData, type T3HttpClient, withT3Session } from "../../base/lib/t3/index.ts";
 import { backgroundReason, unwaitedBackgroundTasks } from "../lib/background-stop.ts";
-import { parkStop, type ParkT3, realSettleClock, settleWhenRunEnds } from "../lib/closing-line.ts";
+import { parkStop, type ParkT3, realSettleClock, settleWhenRunEnds, stillParks } from "../lib/closing-line.ts";
 import { closesOn, closingSettings } from "../lib/closing-marks.ts";
 import { checksRun, claudeTaskRuns, proofStop, realProcesses, waits, type ProofStopEvent, type ProofStopOptions } from "../lib/proof-stop.ts";
 import { asksForDecision, personName } from "../lib/prose-question.ts";
@@ -208,21 +208,21 @@ export function hookT3(home: string, ttl = "1m"): HookT3 {
   };
 }
 
-export function spawnSettle(threadId: string, runId: string): void {
-  spawn(process.execPath, [import.meta.path, "settle-after", threadId, runId], { detached: true, stdio: "ignore" }).unref();
+export function spawnSettle(threadId: string, runId: string, since: Date): void {
+  spawn(process.execPath, [import.meta.path, "settle-after", threadId, runId, since.toISOString()], { detached: true, stdio: "ignore" }).unref();
 }
 
-export async function settleAfter(home: string, threadId: string, runId: string): Promise<boolean> {
+export async function settleAfter(home: string, threadId: string, runId: string, since: Date): Promise<boolean> {
   const t3 = hookT3(home, "15m");
   try {
-    return await settleWhenRunEnds({ shell: t3.freshShell, dispatch: t3.dispatch }, threadId, runId, realSettleClock).catch(() => false);
+    return await settleWhenRunEnds({ shell: t3.freshShell, dispatch: t3.dispatch }, { threadId, runId, since, stillParks: stillParks(home) }, realSettleClock).catch(() => false);
   } finally {
     await t3.close();
   }
 }
 
 export type StopDeps = Partial<Pick<ProofStopOptions, "threadId" | "git" | "processes" | "deadline">> & {
-  hidden?: IsHidden; dispatch?: ParkT3["dispatch"]; settleAfterRun?: (threadId: string, runId: string) => void; now?: () => Date; elapsed?: () => number;
+  hidden?: IsHidden; park?: ParkT3; settleAfterRun?: (threadId: string, runId: string, since: Date) => void; now?: () => Date; elapsed?: () => number;
 };
 
 export async function guardBackground(event: StopEvent & ProofStopEvent, home: string, threadId: string | undefined): Promise<StopBlock | undefined> {
@@ -242,9 +242,9 @@ async function guardStopAndProof(event: StopEvent & ProofStopEvent, home: string
   if (background) return background;
   const last = { ...event, last_assistant_message: await finalMessage(event) };
   const proof = await proofStop(last, { home, shell, ...deps, threadId });
-  if (proof || !deps.dispatch || elapsed() >= parkStartsWithinMs) return proof;
+  if (proof || !deps.park || elapsed() >= parkStartsWithinMs) return proof;
   return parkStop(last, {
-    home, threadId, t3: { shell, dispatch: deps.dispatch }, processes: deps.processes ?? realProcesses,
+    home, threadId, t3: deps.park, processes: deps.processes ?? realProcesses,
     settleAfterRun: deps.settleAfterRun ?? spawnSettle, now: deps.now,
   });
 }
@@ -262,14 +262,14 @@ export const hookWith = (shell: (home: string) => ReadShell, stop: StopDeps = {}
 export const hook: Hook = async (provider, readInput, home) => {
   const t3 = hookT3(home);
   try {
-    return await hookWith(() => t3.shell, { dispatch: t3.dispatch })(provider, readInput, home);
+    return await hookWith(() => t3.shell, { park: { shell: t3.freshShell, dispatch: t3.dispatch } })(provider, readInput, home);
   } finally {
     await t3.close();
   }
 };
 
 if (import.meta.main) {
-  const [mode, threadId, runId] = process.argv.slice(2);
-  if (mode === "settle-after" && threadId && runId) await settleAfter(process.env.HOME ?? homedir(), threadId, runId);
+  const [mode, threadId, runId, since] = process.argv.slice(2);
+  if (mode === "settle-after" && threadId && runId && since && !Number.isNaN(Date.parse(since))) await settleAfter(process.env.HOME ?? homedir(), threadId, runId, new Date(since));
   else await runHook(hook, { exitOnAnswer: true });
 }

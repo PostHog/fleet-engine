@@ -147,7 +147,12 @@ when the hook runs in a nested model session. A thread the person pinned
 stays in view: only the snooze mark parks it, and the detached settle skips a
 thread pinned before its run ends. The settle also skips a run that did not
 complete, a run that another run follows, a pending request, a PR watch that
-started after the stop, and a run still going after 10 minutes.
+started after the stop, and a run still going after 10 minutes. Right before
+it settles, it checks again that the scheduled check is still on and that the
+thread does not own an open PR alone.
+
+After the hook sends a stop back once, it does not send it back again. It
+still parks the thread when the corrected closing line allows it.
 
 The prose check, the background check and the proof check read the same
 marks. Parking starts only while the hook has run for less than 6 seconds, and

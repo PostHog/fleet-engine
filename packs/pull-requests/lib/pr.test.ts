@@ -404,6 +404,11 @@ test("help lists the pack's subcommands after the engine's and exits 0 whatever 
   }
 });
 
+test("settle-check refuses an action it cannot check, so the machine that asks never reads silence as a yes", () => {
+  const result = sandbox().run("settle-check", "--action", "snooze", "--thread", "mcp:lane");
+  expect([result.code, JSON.parse(result.out)]).toEqual([0, { refusal: "Fleet blocked this snooze: T3 did not answer; retry, or snooze in the T3 UI." }]);
+});
+
 test("without a pack, a bare fleet pr shows the engine's usage", () => {
   const box = sandbox();
   const result = box.run();

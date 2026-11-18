@@ -57,7 +57,7 @@ export async function prCommand(args: string[], home: string, env: Env = Bun.env
   if (!engineSubcommands.includes(word)) throw new Error(`Usage: fleet pr <subcommand>, one of ${[...engineSubcommands, ...(pack?.words ?? [])].join(", ")}. Run fleet pr --help for each one's flags.`);
   if (word === "settle-check") {
     const { action, threadId } = parseSettleCheck(args.slice(1));
-    return console.log(JSON.stringify({ refusal: (await organizeRefusal(action, threadId, home, liveDeps())) ?? null })), 0;
+    return console.log(JSON.stringify({ refusal: (await organizeRefusal(action, threadId, home, liveDeps(), undefined, false)) ?? null })), 0;
   }
   if (word === "handover") return console.log(JSON.stringify(await recordHandover(args.slice(1), home, env.T3CODE_THREAD_ID, now))), 0;
   if (args[0] === "review" || args[0] === "stamp" || args[0] === "forecast") return askReviewBot(parseReviewBotArgs(args[0], args.slice(1)));

@@ -295,6 +295,15 @@ describe("the installed settle guard", () => {
     expect(JSON.parse(unread.stdout).hookSpecificOutput.permissionDecisionReason).toBe("Fleet blocked this settle: T3 did not answer; retry, or settle in the T3 UI.");
   });
 
+  test("on a linked machine, refuses to settle or snooze a thread pinned there", async () => {
+    const home = await machines([linkedThread("mcp:kept", [], { pinned: true }), linkedThread("mcp:loose", [])]);
+    for (const action of ["settle", "snooze"]) {
+      const refused = await run(home, organize({ action, threadId: "mcp:kept", environmentId: "env-there" }));
+      expect(JSON.parse(refused.stdout).hookSpecificOutput.permissionDecisionReason).toContain("pinned this thread to keep it in view");
+      expect(await run(home, organize({ action, threadId: "mcp:loose", environmentId: "env-there" }))).toEqual({ stdout: "", stderr: "", code: 0 });
+    }
+  });
+
   test("on a linked machine, a fork owns its PRs while the thread it forked from stays open", async () => {
     const home = await machines([linkedThread("mcp:source", []), linkedThread("mcp:fork", [1], { parentThreadId: "mcp:source", relationshipToParent: "fork" })]);
     const refused = await run(home, organize({ action: "settle", threadId: "mcp:fork", environmentId: "env-there" }));
@@ -317,6 +326,13 @@ describe("the organize guard on a pinned thread", () => {
     const home = homeWith();
     expect(await guardSettle(organize({ action: "archive", threadId: "mcp:lane" }), home, deps([thread("mcp:lane", pinned)]))).toBeUndefined();
     expect(await guardSettle(organize({ action: "snooze", threadId: "mcp:lane" }), home, deps([thread("mcp:lane", { pullRequests: [pr(1)] })]))).toBeUndefined();
+  });
+
+  test("names the snooze closing line only while parking runs, and sends the agent to the person otherwise", async () => {
+    const lane = deps([thread("mcp:lane", pinned)]);
+    const off = reasonOf(await guardSettle(organize({ action: "snooze", threadId: "mcp:lane" }), homeWith({ "guards.person": "Robin" }), lane));
+    const on = reasonOf(await guardSettle(organize({ action: "snooze", threadId: "mcp:lane" }), homeWith({ "guards.person": "Robin", "orchestration.waitSnoozeDays": 3, "orchestration.snoozeMark": "SNOOZE" }), lane));
+    expect([off, on]).toEqual([expect.stringContaining("Only Robin snoozes it, in T3."), expect.stringContaining("a line that starts with SNOOZE and names the wake time")]);
   });
 
   test("lets a snooze through when T3 does not answer, and still refuses a settle then", async () => {
@@ -345,8 +361,7 @@ describe("the organize guard on another machine", () => {
     const ask = peer({ code: 0, stdout: `${JSON.stringify({ refusal: "Fleet blocked this settle: the thread owns open PR(s) x." })}\n` });
     const check = { ...deps([thread("mcp:lane")]), settleCheck: ask.settleCheck };
     expect(reasonOf(await guardSettle(remote("settle"), peerHome(), check))).toBe("Fleet blocked this settle: the thread owns open PR(s) x.");
-    expect(ask.calls).toEqual([{ alias: "devbox-2", command: `bash -lc 'sh "$HOME/.local/share/fleet/engine/fleet" pr settle-check --action settle --thread mcp:lane'` }]);
-    expect(check.machines).toEqual([]);
+    expect(ask.calls).toEqual([{ alias: "devbox-2", command: `PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH" sh "$HOME/.local/share/fleet/engine/fleet" pr settle-check --action settle --thread mcp:lane` }]);
   });
 
   test("lets the call through when the peer's Fleet finds nothing to refuse", async () => {
@@ -354,12 +369,15 @@ describe("the organize guard on another machine", () => {
     expect(await guardSettle(remote("snooze"), peerHome(), check)).toBeUndefined();
   });
 
-  test("denies the call when the peer does not answer, or answers with something else", async () => {
-    for (const answer of [{ code: 255, stdout: "" }, { code: 0, stdout: "Unknown command settle-check\n" }]) {
-      const check = { ...deps([thread("mcp:lane")]), settleCheck: peer(answer).settleCheck };
-      const reason = reasonOf(await guardSettle(remote("settle"), peerHome(), check));
-      expect(reason).toContain("could not check thread mcp:lane on its machine (devbox-2");
-      expect(reason).toContain("or leave it to Robin");
+  test("reads the machine's threads through T3 when the peer's Fleet does not answer, is older, or answers with something else", async () => {
+    const answers = [{ code: 255, stdout: "" }, { code: 1, stdout: "fleet pr: Usage: fleet pr <subcommand>\n" }, { code: 0, stdout: "Unknown command settle-check\n" }, { code: 0, stdout: '{"refusal":false}\n' }, { code: 0, stdout: '{"refusal":" "}\n' }];
+    for (const answer of answers) {
+      const owning = { ...deps([thread("mcp:lane", { pullRequests: [pr(1)] })]), settleCheck: peer(answer).settleCheck };
+      expect(reasonOf(await guardSettle(remote("settle"), peerHome(), owning))).toContain("open PR(s) https://github.com/acme/app/pull/1, and");
+      const pinned = { ...deps([thread("mcp:lane", { pinnedAt: "2026-11-13T15:13:00.339Z" })]), settleCheck: peer(answer).settleCheck };
+      expect(reasonOf(await guardSettle(remote("snooze"), peerHome(), pinned))).toContain("Robin pinned this thread");
+      const free = { ...deps([thread("mcp:lane")]), settleCheck: peer(answer).settleCheck };
+      expect(await guardSettle(remote("settle"), peerHome(), free)).toBeUndefined();
     }
   });
 
@@ -368,15 +386,14 @@ describe("the organize guard on another machine", () => {
       const ask = peer({ code: 0, stdout: '{"refusal":null}\n' });
       const check = { ...deps([thread("mcp:lane", { pullRequests: [pr(2)] })]), settleCheck: ask.settleCheck };
       expect(reasonOf(await guardSettle(remote("settle", environmentId), home, check))).toContain("pull/2,");
-      expect([ask.calls, check.machines]).toEqual([[], [environmentId]]);
+      expect(ask.calls).toEqual([]);
     }
   });
 
   test("never sends a thread id that a shell could read as more than one word", async () => {
     const ask = peer({ code: 0, stdout: '{"refusal":null}\n' });
     const check = { ...deps([]), settleCheck: ask.settleCheck };
-    const reason = reasonOf(await guardSettle(organize({ action: "settle", threadId: "mcp:x'; rm -rf ~; '", environmentId: "env-peer" }), peerHome(), check));
-    expect(reason).toContain("could not check thread");
+    await guardSettle(organize({ action: "settle", threadId: "mcp:x'; rm -rf ~; '", environmentId: "env-peer" }), peerHome(), check);
     expect(ask.calls).toEqual([]);
   });
 

@@ -9,7 +9,7 @@ export type ParkT3 = { shell: () => Promise<{ threads: ShellThread[] }>; dispatc
 export type ParkEvent = { stop_hook_active?: boolean; last_assistant_message?: string };
 export type ParkOptions = {
   home: string; threadId?: string; t3: ParkT3; processes: ProcessTable;
-  settleAfterRun: (threadId: string, runId: string) => void; now?: () => Date; deadline?: () => Promise<void>;
+  settleAfterRun: (threadId: string, runId: string, since: Date) => void; now?: () => Date; deadline?: () => Promise<void>;
 };
 export type ParkBlock = { decision: "block"; reason: string };
 
@@ -69,16 +69,20 @@ export const ownsOpenReason = (urls: string[], person: string, marks: Marks) => 
 
 const isSnoozed = (thread: ShellThread, now: Date) => Boolean(thread.snoozedUntil && Date.parse(thread.snoozedUntil) > now.getTime());
 
-const snooze = (t3: ParkT3, threadId: string, until: Date) =>
-  t3.dispatch({ type: "thread.snooze", commandId: `fleet:closing-line:${crypto.randomUUID()}`, threadId, snoozedUntil: until.toISOString() });
+const snoozeCommand = (threadId: string, until: Date) =>
+  ({ type: "thread.snooze", commandId: `fleet:closing-line:${crypto.randomUUID()}`, threadId, snoozedUntil: until.toISOString() });
 
-async function check(event: ParkEvent, options: ParkOptions): Promise<ParkBlock | undefined> {
+const ownedHere = async (home: string, threads: ShellThread[], id: string) => unhandedLinks(threads, id, await readHandovers(home));
+
+async function check(event: ParkEvent, options: ParkOptions, live: () => boolean): Promise<ParkBlock | undefined> {
   const { home, threadId } = options;
-  if (event.stop_hook_active || !threadId) return undefined;
+  if (!threadId) return undefined;
   const { marks, parking } = closingSettings(home);
   const message = event.last_assistant_message ?? "";
   const park = closingPark(message, marks);
   if (!parking || !park) return undefined;
+  const block = (reason: string): ParkBlock | undefined => (event.stop_hook_active ? undefined : { decision: "block", reason });
+  const dispatch = async (command: Record<string, unknown>) => { if (live()) await options.t3.dispatch(command); };
   if (nestedSession(await options.processes.table(), options.processes.pid)) return undefined;
   const { threads } = await options.t3.shell();
   const thread = matchThread(threads, threadId, (item) => item.id);
@@ -86,48 +90,57 @@ async function check(event: ParkEvent, options: ParkOptions): Promise<ParkBlock 
   const now = options.now?.() ?? new Date();
   if (isSnoozed(thread, now) || (thread.pinnedAt && park !== "snooze")) return undefined;
   if (park === "done" || park === "check") {
-    const owned = unhandedLinks(threads, thread.id, await readHandovers(home));
-    if (owned.length) return { decision: "block", reason: ownsOpenReason(owned, personName(home), marks) };
+    const owned = await ownedHere(home, threads, thread.id);
+    if (owned.length) return block(ownsOpenReason(owned, personName(home), marks));
   }
-  if (park === "wait") await snooze(options.t3, thread.id, new Date(now.getTime() + parking.waitSnoozeDays * dayMs));
+  if (park === "wait") await dispatch(snoozeCommand(thread.id, new Date(now.getTime() + parking.waitSnoozeDays * dayMs)));
   if (park === "snooze") {
     const until = snoozeTime(closingLine(message), now, parking.timeZone);
-    if (!until) return { decision: "block", reason: snoozeTimeReason(parking.timeZone) };
-    await snooze(options.t3, thread.id, until);
+    if (!until) return block(snoozeTimeReason(parking.timeZone));
+    await dispatch(snoozeCommand(thread.id, until));
   }
   if (park === "check") {
-    if (!hasScheduledCheck(home, thread.id, now)) return { decision: "block", reason: noCheckReason(marks) };
-    if (thread.activeRunId) options.settleAfterRun(thread.id, thread.activeRunId);
+    if (!hasScheduledCheck(home, thread.id, now)) return block(noCheckReason(marks));
+    if (thread.activeRunId && live()) options.settleAfterRun(thread.id, thread.activeRunId, now);
   }
   return undefined;
 }
 
 export async function parkStop(event: ParkEvent, options: ParkOptions): Promise<ParkBlock | undefined> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let late = false;
   const deadline = options.deadline?.() ?? new Promise<void>((resolve) => { timer = setTimeout(resolve, parkDeadlineMs); });
   try {
-    return await Promise.race([check(event, options).catch(() => undefined), deadline.then(() => undefined)]);
+    return await Promise.race([check(event, options, () => !late).catch(() => undefined), deadline.then(() => { late = true; return undefined; })]);
   } finally {
     clearTimeout(timer);
   }
+}
+
+export function stillParks(home: string, now = () => new Date()) {
+  return async (threads: ShellThread[], thread: ShellThread) =>
+    hasScheduledCheck(home, thread.id, now()) && (await ownedHere(home, threads, thread.id)).length === 0;
 }
 
 export type SettleClock = { now: () => number; sleep: (ms: number) => Promise<void>; pollMs?: number; timeoutMs?: number };
 
 export const realSettleClock: SettleClock = { now: Date.now, sleep: (ms) => Bun.sleep(ms) };
 
-export async function settleWhenRunEnds(t3: ParkT3, threadId: string, runId: string, clock: SettleClock = realSettleClock): Promise<boolean> {
-  const requestedAt = clock.now();
-  const giveUp = requestedAt + (clock.timeoutMs ?? 10 * 60_000);
+export type SettleRequest = { threadId: string; runId: string; since: Date; stillParks: (threads: ShellThread[], thread: ShellThread) => Promise<boolean> };
+
+export async function settleWhenRunEnds(t3: ParkT3, { threadId, runId, since, stillParks: parks }: SettleRequest, clock: SettleClock = realSettleClock): Promise<boolean> {
+  const giveUp = clock.now() + (clock.timeoutMs ?? 10 * 60_000);
   for (;;) {
-    const thread = (await t3.shell()).threads.find((item) => item.id === threadId);
+    const { threads } = await t3.shell();
+    const thread = threads.find((item) => item.id === threadId);
     if (!thread || thread.settledAt || thread.pinnedAt || thread.latestRunId !== runId || thread.pendingRuntimeRequest || unsuccessful.includes(thread.status)) return false;
-    if (thread.pullRequests?.some(({ watch }) => watch?.startedAt && Date.parse(watch.startedAt) >= requestedAt)) return false;
+    if (thread.pullRequests?.some(({ watch }) => watch?.startedAt && Date.parse(watch.startedAt) >= since.getTime())) return false;
+    if (clock.now() > giveUp) return false;
     if (thread.activeRunId !== runId && thread.status === "completed") {
+      if (!(await parks(threads, thread))) return false;
       await t3.dispatch({ type: "thread.settle", commandId: `fleet:closing-line:settle:${runId}`, threadId, expectedLatestRunId: runId });
       return true;
     }
-    if (clock.now() >= giveUp) return false;
     await clock.sleep(clock.pollMs ?? 2_000);
   }
 }

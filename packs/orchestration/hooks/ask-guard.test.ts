@@ -392,6 +392,14 @@ describe("the background work guard", () => {
   ] as const)("lets the stop through when %s", async (_, lines, inFlight, extra, threadId) => {
     expect(await background([...lines], [...inFlight], extra, threadId)).toBeUndefined();
   });
+
+  test("names the wait mark a profile sets, and lets a turn that closes on it through", async () => {
+    const where = home("Robin");
+    writeFileSync(join(where, ".local/state/fleet/settings.json"), JSON.stringify({ "guards.person": "Robin", "orchestration.waitMark": "WAIT:" }));
+    const check = (lines: object[]) => guardBackground({ transcript_path: transcript(claudePrompt("Run the gate"), ...lines), background_tasks: [running("bgate1")] }, where, "lane");
+    expect((await check([...started("bgate1"), claudeSays("Done.")]))?.reason).toContain("end on a line that starts with WAIT:.");
+    expect(await check([...started("bgate1"), claudeSays("Gate runs.\n\nWAIT: the gate")])).toBeUndefined();
+  });
 });
 
 describe("the closing line in the installed Stop hook", () => {
@@ -408,7 +416,7 @@ describe("the closing line in the installed Stop hook", () => {
     const threads = [{ id: lane, title: "Lane", projectId: "p", status: "running", activeRunId: "run-1" }] as ShellThread[];
     const routed = hookWith(() => async () => ({ threads }), {
       threadId: lane, processes: tree, now: () => new Date("2026-11-14T12:00:00Z"), elapsed: extra.elapsed ?? (() => 0),
-      dispatch: async (command) => { sent.push(command); }, settleAfterRun: () => {},
+      park: { shell: async () => ({ threads }), dispatch: async (command) => { sent.push(command); } }, settleAfterRun: () => {},
     });
     const path = transcript(claudePrompt("Fix it"), claudeSays(message));
     const result = await routed("claude", async () => JSON.stringify({ transcript_path: path, last_assistant_message: message }), where);

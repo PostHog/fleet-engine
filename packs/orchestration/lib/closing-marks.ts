@@ -37,8 +37,11 @@ export const closingLine = (message: string) => message.split("\n").map((line) =
 
 export function closingPark(message: string, marks: Marks): Park | undefined {
   const line = plain(closingLine(message));
-  return parks.find((park) => line.startsWith(plain(marks[park])));
+  return [...parks].sort((one, other) => plain(marks[other]).length - plain(marks[one]).length).find((park) => line.startsWith(plain(marks[park])));
 }
 
-export const closesOn = (message: string, marks: Marks, among: Park[]) => among.includes(closingPark(message, marks) as Park);
+export function closesOn(message: string, marks: Marks, among: Park[]): boolean {
+  const park = closingPark(message, marks);
+  return park !== undefined && among.includes(park);
+}
 
