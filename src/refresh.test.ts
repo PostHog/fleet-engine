@@ -38,7 +38,7 @@ async function machine(ref = "main") {
   const repo = await teamRepo();
   const home = temp.make("home-");
   const profile = temp.make("profile-");
-  writeFileSync(join(profile, "fleet.json"), JSON.stringify({ schema: 1, engine: { repo: "Silthus/fleet-engine", ref: "main", channel: "track" }, sources: [{ name: "team", repo, ref }], packs: ["team"], plan: "both", settings: {}, workflows: {} }));
+  writeFileSync(join(profile, "fleet.json"), JSON.stringify({ schema: 1, engine: { repo: "PostHog/fleet-engine", ref: "main", channel: "track" }, sources: [{ name: "team", repo, ref }], packs: ["team"], plan: "both", settings: {}, workflows: {} }));
   const steps: string[][] = [];
   const lines: string[] = [];
   const clock = { at: Date.UTC(2026, 0, 1), naps: [] as number[], onSleep: () => {}, now: () => clock.at, sleep: async (ms: number) => (clock.naps.push(ms), clock.onSleep()) };

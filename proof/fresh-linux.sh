@@ -267,7 +267,7 @@ serve_local_get_sh() {
 for arg do
   shift
   case "\$arg" in
-    https://raw.githubusercontent.com/Silthus/fleet-engine/*/get.sh) echo "\$arg" >>"$work/$user-get-sh-fetches"; arg="file://$work/get.sh" ;;
+    https://raw.githubusercontent.com/PostHog/fleet-engine/*/get.sh) echo "\$arg" >>"$work/$user-get-sh-fetches"; arg="file://$work/get.sh" ;;
   esac
   set -- "\$@" "\$arg"
 done
@@ -275,7 +275,7 @@ exec "$real_curl" "\$@"
 EOF
   chmod 755 "$work/$user-curl"
   as_user "$user" install -m 755 "$work/$user-curl" "$home/.proof/bin/curl"
-  note "installed a curl at ~/.proof/bin/curl that serves Silthus/fleet-engine's raw get.sh from $work/get.sh"
+  note "installed a curl at ~/.proof/bin/curl that serves PostHog/fleet-engine's raw get.sh from $work/get.sh"
 }
 
 home_files() {
@@ -524,7 +524,7 @@ if [ -n "$source_engine" ]; then
   url="file://$work/get.sh"
   note "local mode: get.sh and the engine come from a local copy at $commit (ref $ref)"
 else
-  url="https://raw.githubusercontent.com/Silthus/fleet-engine/$ref/get.sh"
+  url="https://raw.githubusercontent.com/PostHog/fleet-engine/$ref/get.sh"
   note "public mode: get.sh and the engine come from $url"
 fi
 get_args=

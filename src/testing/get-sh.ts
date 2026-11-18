@@ -101,7 +101,7 @@ esac`);
 
   function profile() {
     const dir = temp.make("profile-");
-    writeFileSync(join(dir, "fleet.json"), JSON.stringify({ schema: 1, engine: { repo: "Silthus/fleet-engine", ref: "v0.1.0", channel: "release" }, sources: [], packs: [], plan: "both", settings: {}, workflows: {} }, null, 2));
+    writeFileSync(join(dir, "fleet.json"), JSON.stringify({ schema: 1, engine: { repo: "PostHog/fleet-engine", ref: "v0.1.0", channel: "release" }, sources: [], packs: [], plan: "both", settings: {}, workflows: {} }, null, 2));
     return dir;
   }
 

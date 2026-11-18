@@ -23,7 +23,7 @@ const packs: PackManifest[] = [
 
 const profile: ProfileFile = {
   schema: 1,
-  engine: { repo: "Silthus/fleet-engine", ref: "v0.1.0", channel: "release" },
+  engine: { repo: "PostHog/fleet-engine", ref: "v0.1.0", channel: "release" },
   sources: [],
   packs: ["orchestration"],
   plan: "both",
