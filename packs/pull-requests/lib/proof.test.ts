@@ -299,7 +299,7 @@ test("a standing rule from the user's guides accepts its kind's gaps until its d
   expect((await pr.fleet("gate")).code).toBe(3);
 
   writeFileSync(join(pr.home, ".agents/guides/standing-rules.md"), "# Standing rules\n");
-  expect(await standingFor(pr.home, "prod-shape", new Date("2026-11-01T23:00:00Z"))).toBeUndefined();
+  expect(await standingFor(pr.home, "prod-shape", new Date("2026-11-01T23:00:00Z"), "example/product")).toBeUndefined();
 });
 
 test("an agent answers an arbiter escalation itself with --agent on a graded PR, and the round keeps the escalation and its 🤖 decision", async () => {
@@ -500,12 +500,43 @@ test("a standing rule the user narrows keeps only the kinds and the date its cur
   const guide = (kinds: string, until: string) => writeFileSync(join(pr.home, ".agents/guides/standing-rules.md"), `- ${rule} \`fleet proof standing --kind ${kinds} --until ${until}\n  --rule "${rule}"\`\n`);
   guide("prod-shape,cross-version", "2026-11-26");
   expect((await pr.fleet("standing", "--kind", "prod-shape,cross-version", "--until", "2026-11-26", "--rule", rule)).code).toBe(0);
-  expect(await standingFor(pr.home, "cross-version", new Date("2026-11-10T12:00:00Z"))).toMatchObject({ until: "2026-11-26" });
+  expect(await standingFor(pr.home, "cross-version", new Date("2026-11-10T12:00:00Z"), "example/product")).toMatchObject({ until: "2026-11-26" });
 
   guide("prod-shape", "2026-11-05");
-  expect(await standingFor(pr.home, "cross-version", new Date("2026-11-04T12:00:00Z"))).toBeUndefined();
-  expect(await standingFor(pr.home, "prod-shape", new Date("2026-11-04T12:00:00Z"))).toMatchObject({ kind: "prod-shape" });
-  expect(await standingFor(pr.home, "prod-shape", new Date("2026-11-10T12:00:00Z"))).toBeUndefined();
+  expect(await standingFor(pr.home, "cross-version", new Date("2026-11-04T12:00:00Z"), "example/product")).toBeUndefined();
+  expect(await standingFor(pr.home, "prod-shape", new Date("2026-11-04T12:00:00Z"), "example/product")).toMatchObject({ kind: "prod-shape" });
+  expect(await standingFor(pr.home, "prod-shape", new Date("2026-11-10T12:00:00Z"), "example/product")).toBeUndefined();
+});
+
+test("a scoped standing rule accepts only in its repositories, and only while the user's command gives it that scope", async () => {
+  const pr = await checkout();
+  const rule = "Until 2026-11-26, in example/product, accept a live-run gap that only a billable run from main can prove.";
+  const guide = (scope: string) => writeFileSync(join(pr.home, ".agents/guides/standing-rules.md"), `- \`fleet proof standing --kind live-run --until 2026-11-26 ${scope}--rule "${rule}"\`\n`);
+  guide("--repositories example/product ");
+  for (const scope of [[], ["--repositories", "example/other"], ["--repositories", "someone/product"], ["--repositories", "example/product,example/other"]]) {
+    await expect(pr.fleet("standing", "--kind", "live-run", "--until", "2026-11-26", ...scope, "--rule", rule)).rejects.toThrow("word for word");
+  }
+  expect((await pr.fleet("standing", "--kind", "live-run", "--until", "2026-11-26", "--repositories", "example/product", "--rule", rule)).code).toBe(0);
+  const at = new Date("2026-11-18T12:00:00Z");
+  expect(await standingFor(pr.home, "live-run", at, "example/product")).toMatchObject({ repositories: ["example/product"] });
+  expect(await standingFor(pr.home, "live-run", at, "Example/PRODUCT")).toBeDefined();
+  for (const other of ["example/other", "someone/product", "example/product-fork"]) expect(await standingFor(pr.home, "live-run", at, other)).toBeUndefined();
+
+  await pr.commit("feature.txt", "new\n");
+  await reviewHead(pr);
+  await pr.fleet("require", "--kinds", "live-run");
+  await pr.fleet("gap", "--kind", "live-run", "--reason", "only a billable run from main proves it");
+  expect((await pr.fleet("gate")).output).toContain("accepted by standing rule until 2026-11-26 for example/product");
+
+  const path = join(pr.home, ".local/state/fleet/proof/standing.json");
+  const recorded = readFileSync(path, "utf8");
+  writeFileSync(path, JSON.stringify(JSON.parse(recorded).map(({ repositories: _, ...rest }: Record<string, unknown>) => rest)));
+  for (const repository of ["example/product", "example/other"]) expect(await standingFor(pr.home, "live-run", at, repository)).toBeUndefined();
+  writeFileSync(path, recorded);
+  guide("--repositories example/other ");
+  expect(await standingFor(pr.home, "live-run", at, "example/product")).toBeUndefined();
+  guide("");
+  expect(await standingFor(pr.home, "live-run", at, "example/product")).toBeUndefined();
 });
 
 test("reuse of reused evidence points at the commit that holds the files", async () => {
