@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Decision, LedgerEvent } from "../pull-requests/lib/decision-ledger.ts";
 import { tempDirs } from "../../src/testing/git.ts";
@@ -441,6 +441,8 @@ describe("the hook against GitHub, faked at the gh boundary, and real checkouts,
     await newer({ code: 1, reason: "CI is red" });
     await older({ code: 0, reason: "pass" });
     expect(await hook("gh pr merge 9 --repo example/product")).toContain("has not passed");
+    appendFileSync(join(hook.home, ".local/state/fleet/decisions.jsonl"), JSON.stringify({ ...pass("example/product", 9, head), at: "2026-11-16T08:15:00Z" }) + "\n");
+    expect(await hook("gh pr merge 9 --repo example/product")).toBeUndefined();
     const later = await startGateRun(hook.home, identity, new Date("2026-11-16T08:20:00Z"));
     await later({ code: 0, reason: "pass" });
     expect(await hook("gh pr merge 9 --repo example/product")).toBeUndefined();

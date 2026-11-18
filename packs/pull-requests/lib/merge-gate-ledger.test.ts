@@ -98,3 +98,15 @@ test("a gate run that throws after a pass at the same head is shared, so another
     expect((await mergeThere())?.hookSpecificOutput.permissionDecisionReason).toContain("has not passed at the head of example/product#42");
   } finally { rmSync(other, { recursive: true, force: true }); }
 });
+
+test("a gate result in the ledger carries the time its run started, the order the gate runs on this machine keep", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.txt", "new\n");
+  await reviewHead(pr);
+  await pr.fleet("require", "--none", "--reason", "docs only");
+  const start = pr.clock.now.getTime();
+  let reads = 0;
+  Object.defineProperty(pr.clock, "now", { get: () => new Date(start + 60_000 * reads++), configurable: true });
+  expect((await pr.fleet("gate")).code).toBe(0);
+  expect(events(pr.home).filter((event) => event.type === "gate").at(-1)).toMatchObject({ passed: true, at: new Date(start).toISOString() });
+});
