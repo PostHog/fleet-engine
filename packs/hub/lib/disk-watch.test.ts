@@ -23,9 +23,9 @@ function watch(free: Record<string, number[]>, fields: Partial<DiskWatchOptions>
   const options: DiskWatchOptions = {
     boxes: Object.keys(free), statePath: join(temp.make("disk-watch-"), "state.json"), now: () => now, log: (line) => lines.push(line),
     sweepBelowGigabytes: 15, alertBelowGigabytes: 10,
-    read: async (box) => (reads[box]!.length > 1 ? reads[box]!.shift()! : reads[box]![0]!) * gigabyte,
+    read: async (box) => ({ bytes: (reads[box]!.length > 1 ? reads[box]!.shift()! : reads[box]![0]!) * gigabyte, inodes: 0.5 }),
     sweep: async (box) => (swept.push(box), Array.from({ length: 50 }, (_, index) => `line ${index + 1}`).join("\n")),
-    alert: async (box, bytes, report) => (alerts.push(`${box} ${(bytes / gigabyte).toFixed(1)} ${report.split("\n")[0]}`), true),
+    alert: async (box, free, report) => (alerts.push(`${box} ${(free.bytes / gigabyte).toFixed(1)} ${report.split("\n")[0]}`), true),
     ...fields,
   };
   return { options, lines, swept, alerts, advance: (ms: number) => void (now += ms) };
@@ -36,8 +36,8 @@ test("a box with room needs nothing, a low box is swept, and only a box still un
   await watchDisks(run.options);
   expect(run.swept.sort()).toEqual(["box-2", "box-3"]);
   expect(run.alerts).toEqual(["box-3 6.0 line 11"]);
-  expect(run.lines).toContain("box-1: 40.0G free");
-  expect(run.lines).toContain("box-2: 30.0G free after the sweep");
+  expect(run.lines).toContain("box-1: 40.0G free, 50% of inodes free");
+  expect(run.lines).toContain("box-2: 30.0G free, 50% of inodes free after the sweep");
   expect(run.lines).toContain("box-3: alerted");
 });
 
@@ -47,7 +47,7 @@ test("a box is swept at most once an hour and alerted at most once a day, and cl
   run.advance(hour / 2);
   await watchDisks(run.options);
   expect(run.swept).toEqual(["box-3"]);
-  expect(run.lines.slice(-2)).toEqual(["box-3: 6.0G free; swept already", "box-3: alerted already"]);
+  expect(run.lines.slice(-2)).toEqual(["box-3: 6.0G free, 50% of inodes free; swept already", "box-3: alerted already"]);
   run.advance(hour);
   await watchDisks(run.options);
   expect([run.swept.length, run.alerts.length]).toEqual([2, 1]);
@@ -55,7 +55,7 @@ test("a box is swept at most once an hour and alerted at most once a day, and cl
   await watchDisks(run.options);
   expect(run.alerts.length).toBe(2);
   const high = watch({ "box-3": [6] }, { statePath: run.options.statePath, now: run.options.now });
-  high.options.read = async () => 40 * gigabyte;
+  high.options.read = async () => ({ bytes: 40 * gigabyte, inodes: 0.5 });
   await watchDisks(high.options);
   expect(JSON.parse(readFileSync(run.options.statePath, "utf8"))).toEqual({});
 });
@@ -101,7 +101,7 @@ test("a box that does not answer is logged, and a dry run sweeps, alerts, and sa
   run.options.read = async (box) => (box === "box-gone" ? null : read(box));
   await watchDisks(run.options);
   expect([run.swept, run.alerts]).toEqual([[], []]);
-  expect(run.lines.sort()).toEqual(["box-1: 6.0G free; would sweep", "box-1: would alert", "box-gone: unreachable"]);
+  expect(run.lines.sort()).toEqual(["box-1: 6.0G free, 50% of inodes free; would sweep", "box-1: would alert", "box-gone: unreachable"]);
   expect(existsSync(run.options.statePath)).toBe(false);
 });
 
@@ -140,7 +140,7 @@ function stubs(dir: string) {
   script("ssh", `echo "ssh $*" >> "${dir}/calls.log"
 host=$5
 case "$6" in
-  *"df -Pk"*) printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\n/dev/root 100 50 %s 50%% /\\n' "$(cat "${dir}/free-$host")"; case "$6" in *hostname*) echo "machine-$host" ;; esac ;;
+  *"df -Pk"*) printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\n/dev/root 100 50 %s 50%% /\\n' "$(cat "${dir}/free-$host")"; printf 'Filesystem Inodes IUsed IFree IUse%% Mounted on\\n/dev/root 1000 %s %s 1%% /\\n' "$(cat "${dir}/iused-$host" 2>/dev/null || echo 10)" "$(cat "${dir}/ifree-$host" 2>/dev/null || echo 990)"; case "$6" in *hostname*) echo "machine-$host" ;; esac ;;
   *disk-sweep*) printf 'swept %s\n30.0G /home/%s/.cache\n' "$host" "$host"; cp "${dir}/after-$host" "${dir}/free-$host" ;;
 esac`);
   script("t3", `echo "t3 $*" >> "${dir}/calls.log"\ncat > "${dir}/prompt.txt"`);
@@ -163,7 +163,7 @@ async function hubHere(devboxes: Record<string, [number, number]>) {
     FLEET_MODELS: JSON.stringify([{ role: "lookup", work: "Lookups", provider: "claude", model: "small-model", effort: "medium" }]),
   };
   const lines: string[] = [];
-  const context = { home, env, self: "hub-host", now: () => start, log: (line: string) => lines.push(line), localFree: () => 40 * gigabyte };
+  const context = { home, env, self: "hub-host", now: () => start, log: (line: string) => lines.push(line), localFree: () => 40 * gigabyte, localInodes: () => 0.5 };
   const calls = () => (existsSync(join(bin, "calls.log")) ? readFileSync(join(bin, "calls.log"), "utf8").trim().split("\n") : []);
   return { home, bin, context, lines, calls };
 }
@@ -173,12 +173,12 @@ test("on the hub, fleet disk-watch reads each devbox over SSH, sweeps it with th
   expect(await diskWatchCommand([], hub.context)).toBe(0);
   const calls = hub.calls();
   expect(calls).toContain(`ssh -o BatchMode=yes -o ConnectTimeout=10 box-1 bash -lc ${quote(remoteFleet("disk-sweep --floor 15 --alert-floor 10"))} 2>&1`);
-  expect(calls.filter((call) => call.startsWith("t3 "))).toEqual([`t3 project add ${join(hub.home, "notes")}`, "t3 thread start --title box-2: 4.0G free --provider claudeAgent --model small-model /tmp/notes -".replace("/tmp/notes", join(hub.home, "notes"))]);
+  expect(calls.filter((call) => call.startsWith("t3 "))).toEqual([`t3 project add ${join(hub.home, "notes")}`, "t3 thread start --title box-2: 4.0G free, 99% of inodes free --provider claudeAgent --model small-model /tmp/notes -".replace("/tmp/notes", join(hub.home, "notes"))]);
   const prompt = readFileSync(join(hub.bin, "prompt.txt"), "utf8");
-  expect(prompt).toContain("box-2 has 4.0G free, below 10G");
+  expect(prompt).toContain("box-2 has 4.0G free, 99% of inodes free, below 10G");
   expect(prompt).toContain("swept box-2\n30.0G /home/box-2/.cache");
   expect(prompt).toContain("the largest folders the report names");
-  expect(prompt).toContain(`ssh box-2 ${quote(`bash -lc ${quote(`df -h ~; ${remoteFleet("prune --dry-run --no-fetch --min-idle-hours 1")}`)}`)}`);
+  expect(prompt).toContain(`ssh box-2 ${quote(`bash -lc ${quote(`df -h ~; df -i ~; ${remoteFleet("prune --dry-run --no-fetch --min-idle-hours 1")}`)}`)}`);
   expect(calls.some((call) => call.startsWith("local"))).toBe(false);
 });
 
@@ -193,7 +193,7 @@ test("a devbox sweep runs in a login shell, so the engine launcher finds the Bun
   chmodSync(join(remote, ".bun/bin/bun"), 0o755);
   writeFileSync(join(hub.bin, "ssh"), `#!/bin/sh
 case "$6" in
-  *"df -Pk"*) printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\n/dev/root 100 50 %s 50%% /\\n' "$(cat "${hub.bin}/free-$5")" ;;
+  *"df -Pk"*) printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\n/dev/root 100 50 %s 50%% /\\nFilesystem Inodes IUsed IFree IUse%% Mounted on\\n/dev/root 1000 10 990 1%% /\\n' "$(cat "${hub.bin}/free-$5")" ;;
   *) env -i HOME="${remote}" PATH=/usr/bin:/bin /bin/sh -c "$6"; code=$?; cp "${hub.bin}/after-$5" "${hub.bin}/free-$5"; exit $code ;;
 esac
 `);
@@ -206,7 +206,7 @@ test("the hub sweeps its own disk with its own launcher, without SSH", async () 
   const hub = await hubHere({});
   hub.context.localFree = () => 8 * gigabyte;
   expect(await diskWatchCommand([], hub.context)).toBe(0);
-  expect(hub.calls()).toEqual(["local disk-sweep --floor 15 --alert-floor 10", `t3 project add ${join(hub.home, "notes")}`, "t3 thread start --title my-hub: 8.0G free --provider claudeAgent --model small-model " + join(hub.home, "notes") + " -"]);
+  expect(hub.calls()).toEqual(["local disk-sweep --floor 15 --alert-floor 10", `t3 project add ${join(hub.home, "notes")}`, "t3 thread start --title my-hub: 8.0G free, 50% of inodes free --provider claudeAgent --model small-model " + join(hub.home, "notes") + " -"]);
 });
 
 test("a second disk watch while one runs does nothing, so the same machine is not alerted twice, and the next one after it ends runs", async () => {
@@ -225,4 +225,15 @@ test("fleet disk-watch runs only on the hub and takes only --dry-run", async () 
   writeHome(hub.home, { ".config/fleet/machine.json": JSON.stringify({ schema: 1, role: "devbox" }) });
   await expect(diskWatchCommand([], hub.context)).rejects.toThrow("fleet disk-watch runs only on the hub. This machine's role is devbox.");
   await expect(diskWatchCommand(["--now"], hub.context)).rejects.toThrow("Usage: fleet disk-watch [--dry-run]");
+});
+
+test("a devbox out of inodes with bytes to spare is swept, and alerts while it stays under 5% of free inodes", async () => {
+  const hub = await hubHere({ "box-7": [14, 14] });
+  writeFileSync(join(hub.bin, "iused-box-7"), "1000");
+  writeFileSync(join(hub.bin, "ifree-box-7"), "0");
+  expect(await diskWatchCommand([], hub.context)).toBe(0);
+  expect(hub.calls()).toContain(`ssh -o BatchMode=yes -o ConnectTimeout=10 box-7 bash -lc ${quote(remoteFleet("disk-sweep --floor 15 --alert-floor 10"))} 2>&1`);
+  expect(hub.calls().filter((call) => call.startsWith("t3 thread"))).toHaveLength(1);
+  expect(readFileSync(join(hub.bin, "prompt.txt"), "utf8")).toContain("box-7 has 14.0G free, 0% of inodes free, below 10G or 5% of inodes");
+  expect(hub.lines).toContain("box-7: 14.0G free, 0% of inodes free; sweeping");
 });

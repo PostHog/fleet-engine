@@ -673,7 +673,8 @@ export async function refuseInstructionQuote(home: string, text: string) {
 export const retiredStandingKinds = ["review", "judge", "post-deploy-watch"];
 const standingKinds = gapKinds.filter((kind) => !retiredStandingKinds.includes(kind));
 export type StandingKind = GapKind;
-type Standing = { kind: StandingKind; until: string; rule: string; recordedAt: string };
+/** repositories, when set, are the only repositories whose PRs the rule covers, as owner/name. */
+type Standing = { kind: StandingKind; until: string; rule: string; recordedAt: string; repositories?: string[] };
 const standingPath = (home: string) => join(ledgerRoot(home), "standing.json");
 
 function standingKind(value: string): StandingKind {
@@ -682,34 +683,49 @@ function standingKind(value: string): StandingKind {
   return value as StandingKind;
 }
 
-export async function recordStanding(home: string, kinds: string, until: string, rule: string) {
+/** GitHub names a repository without regard to case: a scope compares owner/name in lower case. */
+const scopeKey = (repositories: string[] | undefined) => repositories?.map((repository) => repository.toLowerCase()).sort().join(",") ?? "";
+
+/**
+ * A standing rule is recorded with the command the user's instructions give for it. repositories, from --repositories,
+ * limits it to the PRs of those repositories; the scope is part of the command their instructions must hold.
+ */
+export async function recordStanding(home: string, kinds: string, until: string, rule: string, repositories?: string) {
   const covered = kinds.split(",").map((kind) => standingKind(kind.trim()));
   if (!/^\d{4}-\d{2}-\d{2}$/.test(until) || Number.isNaN(Date.parse(until))) throw new Error("--until needs a date such as 2026-11-02");
-  const command = `fleet proof standing --kind ${kinds} --until ${until} --rule "${rule}"`;
+  const scope = repositories === undefined ? undefined : repositories.split(",");
+  if (scope && !scope.every((repository) => /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository))) throw new Error("--repositories needs owner/name repositories separated by commas, such as owner/name");
+  const command = `fleet proof standing --kind ${kinds} --until ${until} ${repositories ? `--repositories ${repositories} ` : ""}--rule "${rule}"`;
   if (normalized(rule).length < minimumRule || !normalized(await agentInstructions(home)).includes(normalized(command))) {
-    throw new Error(`The user's instructions in ~/.agents/AGENTS.md or ~/.agents/guides must hold this command word for word: ${command}. Only their own instructions set a standing rule, its kinds, and its date`);
+    throw new Error(`The user's instructions in ~/.agents/AGENTS.md or ~/.agents/guides must hold this command word for word: ${command}. Only their own instructions set a standing rule, its kinds, its repositories, and its date`);
   }
   const recordedAt = new Date().toISOString();
-  const recorded = covered.map((kind): Standing => ({ kind, until, rule, recordedAt }));
-  const others = (await listStanding(home)).filter((record) => !covered.includes(record.kind));
+  const recorded = covered.map((kind): Standing => ({ kind, until, rule, recordedAt, ...scope ? { repositories: scope } : {} }));
+  const others = (await listStanding(home)).filter((record) => !covered.includes(record.kind) || scopeKey(record.repositories) !== scopeKey(scope));
   await writeJson(standingPath(home), [...others, ...recorded]);
   return recorded;
 }
 
 export const listStanding = (home: string) => readJson<Standing[]>(standingPath(home), []);
 
-export async function standingFor(home: string, kind: StandingKind, now: Date) {
+/**
+ * The live standing rule of a kind for a PR of repository: a record whose kind, rule, and scope a current command in
+ * the user's instructions still names, before both dates. A scoped rule covers only its repositories; a rule without
+ * a scope covers every repository.
+ */
+export async function standingFor(home: string, kind: StandingKind, now: Date, repository: string) {
   if (!standingKinds.includes(kind)) return undefined;
-  const standing = (await listStanding(home)).find((record) => record.kind === kind);
-  if (!standing) return undefined;
   const today = now.toISOString().slice(0, 10);
-  const current = standingCommands(await agentInstructions(home)).filter((command) => command.kinds.includes(kind) && normalized(command.rule) === normalized(standing.rule));
-  return current.some((command) => today < command.until && today < standing.until) ? standing : undefined;
+  const commands = standingCommands(await agentInstructions(home));
+  const live = (standing: Standing) => standing.kind === kind && today < standing.until
+    && (!standing.repositories || standing.repositories.some((covered) => covered.toLowerCase() === repository.toLowerCase()))
+    && commands.some((command) => command.kinds.includes(kind) && normalized(command.rule) === normalized(standing.rule) && scopeKey(command.repositories) === scopeKey(standing.repositories) && today < command.until);
+  return (await listStanding(home)).find(live);
 }
 
 function standingCommands(instructions: string) {
-  const commands = instructions.replace(/\s+/g, " ").matchAll(/fleet proof standing --kind ([a-z,-]+) --until (\d{4}-\d{2}-\d{2}) --rule ["“]([^"”]*)["”]/g);
-  return [...commands].map(([, kinds, until, rule]) => ({ kinds: kinds!.split(","), until: until!, rule: rule! }));
+  const commands = instructions.replace(/\s+/g, " ").matchAll(/fleet proof standing --kind ([a-z,-]+) --until (\d{4}-\d{2}-\d{2}) (?:--repositories (\S+) )?--rule ["“]([^"”]*)["”]/g);
+  return [...commands].map(([, kinds, until, repositories, rule]) => ({ kinds: kinds!.split(","), until: until!, repositories: repositories?.split(","), rule: rule! }));
 }
 
 export async function judgeGap(home: string, identity: ProofIdentity, now: Date, decisions: Decisions, tier: Tier) {
@@ -761,8 +777,10 @@ async function gapAcceptance(weigh: Weigh, gap: Gap | undefined, kind: GapKind):
     : refusal ?? (kind === "ci" && ci?.state !== "none" ? `CI on HEAD is ${ci?.state ?? "unknown"}` : undefined));
   if (agent && !lapse) return accepted(agent, "agent");
   const lapsed = agent && lapse ? { id: agent.id, reason: lapse } : undefined;
-  const standing = kept || !Array.isArray(decisions) ? undefined : await standingFor(home, kind, now);
-  return standing ? { acceptance: { by: "standing rule", line: `accepted by standing rule until ${standing.until}` } } : { lapsed };
+  const standing = kept || !Array.isArray(decisions) ? undefined : await standingFor(home, kind, now, identity.repository);
+  if (!standing) return { lapsed };
+  const scoped = standing.repositories ? { condition: { id: `standing rule ${kind} until ${standing.until}`, kind, condition: standing.rule } } : {};
+  return { acceptance: { by: "standing rule", line: `accepted by standing rule until ${standing.until}${standing.repositories ? ` for ${standing.repositories.join(", ")}` : ""}` }, ...scoped };
 }
 
 const lapseOf = ({ lapsed }: Weighed) => lapsed && { lapsed: lapsed.id };

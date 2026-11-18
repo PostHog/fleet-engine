@@ -57,12 +57,25 @@ export async function askModel(role: Role, row: ModelRow, request: ModelRequest,
   try {
     const output = join(scratch, "answer.txt");
     const command = replacement ? ["sh", "-c", replacement] : await modelCommand({ ...row, model }, request, scratch, output);
-    const answer = await spawnWithLimit(command, request, env, { timeout, grace: graceOf(env.FLEET_PROOF_QUOTA_GRACE_MS) });
+    const limits = { timeout, grace: graceOf(env.FLEET_PROOF_QUOTA_GRACE_MS) };
+    let answer = await spawnWithLimit(command, request, env, limits);
+    if (answer.transient) {
+      await Bun.sleep(retryDelayOf(env.FLEET_PROOF_RETRY_DELAY_MS));
+      answer = await spawnWithLimit(command, request, env, limits);
+      if (answer.transient) return { ok: false, cause: `${answer.cause} (after a retry)`, model };
+    }
     if (answer.cause !== undefined) return { ok: false, cause: answer.cause, model };
     const answersOnStdout = Boolean(replacement) || row.provider === "claude";
     const text = answersOnStdout ? answer.stdout : await readFile(output, "utf8").catch(() => "");
     return text.trim() ? { ok: true, text: text.trim(), model } : { ok: false, cause: "empty answer", model };
   } finally { await rm(scratch, { recursive: true, force: true }); }
+}
+
+const retryDelayMs = 30_000;
+
+function retryDelayOf(value: string | undefined) {
+  const delay = value?.trim() ? Number(value) : Number.NaN;
+  return Number.isFinite(delay) && delay >= 0 ? delay : retryDelayMs;
 }
 
 function graceOf(value: string | undefined) {
@@ -81,7 +94,7 @@ async function modelCommand(row: ModelRow, request: ModelRequest, scratch: strin
     ...(schema ? ["--output-schema", schema] : []), ...(request.images ?? []).flatMap((image) => ["-i", image]), "-"];
 }
 
-type Spawned = { stdout: string; cause?: undefined } | { stdout?: undefined; cause: string };
+type Spawned = { stdout: string; cause?: undefined; transient?: undefined } | { stdout?: undefined; cause: string; transient?: boolean };
 type Limits = { timeout: number; grace: number };
 
 export const quotaExhausted = "quota exhausted";
@@ -100,7 +113,10 @@ async function spawnWithLimit(command: string[], request: ModelRequest, env: Rec
     if (stalled) return { cause: `${quotaExhausted}: no progress after "${stalled}"` };
     if (child.signalCode) return { cause: `stopped by ${child.signalCode} at the ${Math.round(timeout / 1000)} s limit` };
     if (code !== 0 && watch.waiting()) return { cause: `${quotaExhausted}: exit ${code} after "${watch.waiting()}"` };
-    if (code !== 0) return { cause: `exit ${code}${stderr.trim() ? `: ${stderr.trim().split("\n").at(-1)!.slice(0, 200)}` : ""}` };
+    if (code !== 0) {
+      const last = stderr.split("\n").map((line) => line.trim()).filter(Boolean).slice(-3).map((line) => line.slice(0, 200)).join(" | ");
+      return { cause: `exit ${code}${last ? `: ${last}` : ""}`, transient: true };
+    }
     return { stdout };
   } catch (error) {
     if (child) { stopGroup(child.pid); await child.exited; }

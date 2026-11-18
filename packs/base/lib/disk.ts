@@ -13,6 +13,9 @@ export const startFloorVariable = "FLEET_START_MIN_FREE_GB";
 export const freeMapFile = "disk-free.json";
 
 export type DiskStatus = { critical: boolean; message: string };
+export type Space = { bytes: number; inodes: number };
+
+export const inodeFloorShare = 0.1;
 export type FreeMap = { checkedAt: string; boxes: Record<string, number>; hosts?: Record<string, string> };
 export type StartPlace = { here: string; names: string[]; freeMap: () => FreeMap | undefined; now: number };
 
@@ -23,17 +26,30 @@ export function freeBytes(path: string): number {
   return stats.bavail * stats.bsize;
 }
 
+export function freeInodeShare(path: string): number {
+  const stats = statfsSync(nearestExisting(path));
+  return stats.files > 0 ? stats.ffree / stats.files : 1;
+}
+
+export const freeSpace = (path: string): Space => ({ bytes: freeBytes(path), inodes: freeInodeShare(path) });
+
 function nearestExisting(path: string): string {
   return existsSync(path) || dirname(path) === path ? path : nearestExisting(dirname(path));
 }
 
 const shown = (free: number) => `${(free / gigabyte).toFixed(1)}G free`;
+export const shownInodes = (share: number) => `${Math.floor(share * 100)}% of inodes free`;
 
-export function diskStatus(free: number, floorGigabytes: number): DiskStatus {
-  if (free >= floorGigabytes * gigabyte) return { critical: false, message: `Disk: ${shown(free)}.` };
+export function diskStatus(space: Space, floorGigabytes: number): DiskStatus {
+  const free = `${shown(space.bytes)}, ${shownInodes(space.inodes)}`;
+  const short = [
+    ...(space.bytes < floorGigabytes * gigabyte ? [`below ${floorGigabytes}G`] : []),
+    ...(space.inodes < inodeFloorShare ? [`inodes below ${inodeFloorShare * 100}%`] : []),
+  ];
+  if (!short.length) return { critical: false, message: `Disk: ${free}.` };
   return {
     critical: true,
-    message: `Disk is critical: ${shown(free)}, below ${floorGigabytes}G. Do not start worktree lanes or heavy jobs here. fleet prune frees space every few minutes.`,
+    message: `Disk is critical: ${free}, ${short.join(" and ")}. Do not start worktree lanes or heavy jobs here. fleet prune frees space every few minutes, and fleet disk-sweep lists the folders with the most files.`,
   };
 }
 
@@ -52,7 +68,13 @@ function startFloor(args: string[], env: Env): number {
   return variable === undefined || variable === "" ? numberSetting("base.startFloorGigabytes", env) : gigabytes(variable, startFloorVariable);
 }
 
-export function startDecision(free: number, floor: number, place: StartPlace): DiskStatus {
+export function startDecision(free: number, floor: number, place: StartPlace, inodes = 1): DiskStatus {
+  if (inodes < inodeFloorShare) {
+    return {
+      critical: true,
+      message: `Fleet starts no new thread or scheduled run on ${place.here}: ${shownInodes(inodes)}, below ${inodeFloorShare * 100}%. Without inodes every new file fails with ENOSPC, though bytes remain. Run fleet disk-sweep to list the folders with the most files.`,
+    };
+  }
   if (free >= floor * gigabyte) return { critical: false, message: `Disk: ${shown(free)}, above the ${floor}G floor for new threads.` };
   const map = place.freeMap();
   const fresh = map && place.now - Date.parse(map.checkedAt) < hour ? map : undefined;
@@ -73,17 +95,17 @@ export function startDecision(free: number, floor: number, place: StartPlace): D
   };
 }
 
-export function startRoom(home: string, env: Env, free: (path: string) => number = freeBytes): () => DiskStatus {
-  return () => startDecision(free(home), startFloor([], env), { ...thisMachine(home, hostname(), env), freeMap: () => readFreeMap(home, env), now: Date.now() });
+export function startRoom(home: string, env: Env, free: (path: string) => number = freeBytes, inodes: (path: string) => number = freeInodeShare): () => DiskStatus {
+  return () => startDecision(free(home), startFloor([], env), { ...thisMachine(home, hostname(), env), freeMap: () => readFreeMap(home, env), now: Date.now() }, inodes(home));
 }
 
-export function diskCommand(args: string[], free: number, floorGigabytes: number, place?: StartPlace, env: Env = Bun.env): number {
-  if (args[0] === "--start" && place) return startCommand(args.slice(1), free, place, env);
+export function diskCommand(args: string[], space: Space, floorGigabytes: number, place?: StartPlace, env: Env = Bun.env): number {
+  if (args[0] === "--start" && place) return startCommand(args.slice(1), space, place, env);
   if (args.length) {
     console.error(usage);
     return 2;
   }
-  const status = diskStatus(free, floorGigabytes);
+  const status = diskStatus(space, floorGigabytes);
   if (status.critical) {
     console.error(status.message);
     return 1;
@@ -92,7 +114,7 @@ export function diskCommand(args: string[], free: number, floorGigabytes: number
   return 0;
 }
 
-function startCommand(args: string[], free: number, place: StartPlace, env: Env): number {
+function startCommand(args: string[], space: Space, place: StartPlace, env: Env): number {
   let floor: number;
   try {
     floor = startFloor(args, env);
@@ -101,7 +123,7 @@ function startCommand(args: string[], free: number, place: StartPlace, env: Env)
     console.error(error.message);
     return 2;
   }
-  const decision = startDecision(free, floor, place);
+  const decision = startDecision(space.bytes, floor, place, space.inodes);
   if (decision.critical) {
     console.error(decision.message);
     return 75;

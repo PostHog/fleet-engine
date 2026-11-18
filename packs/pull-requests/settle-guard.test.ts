@@ -54,8 +54,9 @@ describe("the settle guard", () => {
       const denial = await guardSettle(organize({ action }, name), home, deps([thread("mcp:me", { pullRequests: [pr(1)] })]));
       expect(denial?.hookSpecificOutput).toMatchObject({ hookEventName: "PreToolUse", permissionDecision: "deny" });
       expect(reasonOf(denial)).toBe("Fleet blocked this settle: the thread owns open PR(s) https://github.com/acme/app/pull/1, and no other open thread links them. "
-        + "Hand each over first: the thread that takes it over links it with link_pull_request, or record the handover with "
-        + "`fleet pr handover --pr <PR URL> --to <thread id>`, which counts while the thread it names stays open. Or close or merge the PR. Robin can still settle the thread in T3.");
+        + "If Robin parked them, snooze the thread until the park date instead. If they wait on someone else, snooze it until they move. "
+        + "Or hand each over first: the thread that takes it over links it with link_pull_request, and "
+        + "`fleet pr handover --pr <PR URL> --to <thread id>` counts only while the thread it names stays open and links the PR. Or close or merge the PR.");
     }
   });
 
@@ -152,31 +153,32 @@ describe("the settle guard", () => {
     }
   }
 
-  test("lets a thread settle once each open PR is handed over to an open thread, and the handover records lower-case URLs privately", async () => {
+  test("holds a PR handed over to an open thread until that thread links it, and the handover records lower-case URLs privately", async () => {
     const home = homeWith();
-    const threads = [thread("mcp:me", { pullRequests: [pr(12), pr(13)] }), thread("mcp:next")];
+    const me = thread("mcp:me", { pullRequests: [pr(12), pr(13)] });
     expect(await handover(home, "mcp:me", "https://github.com/Acme/App/pull/12", "mcp:next")).toBe(0);
     expect(readFileSync(handoverPath(home), "utf8")).toBe(`${JSON.stringify({ pr: "https://github.com/acme/app/pull/12", from: "mcp:me", to: "mcp:next", at: "2026-11-12T10:00:00.000Z" })}\n`);
     expect(statSync(handoverPath(home)).mode & 0o777).toBe(0o600);
     expect(statSync(join(home, ".local/state/fleet")).mode & 0o777).toBe(0o700);
-    const reason = reasonOf(await guardSettle(organize({ action: "settle" }), home, deps(threads)));
-    expect(reason).toContain("open PR(s) https://github.com/acme/app/pull/13, and");
+    expect(reasonOf(await guardSettle(organize({ action: "settle" }), home, deps([me, thread("mcp:next")])))).toContain("open PR(s) https://github.com/acme/app/pull/12, https://github.com/acme/app/pull/13, and");
+    expect(reasonOf(await guardSettle(organize({ action: "settle" }), home, deps([me, thread("mcp:next", { pullRequests: [pr(12)] })])))).toContain("open PR(s) https://github.com/acme/app/pull/13, and");
     writeFileSync(handoverPath(home), `not json\n${JSON.stringify({ to: "x" })}\n${readFileSync(handoverPath(home), "utf8")}${JSON.stringify({ pr: "https://github.com/acme/app/pull/13", from: "me", to: "next", at: "x" })}\n`);
-    expect(await guardSettle(organize({ action: "settle" }), home, deps(threads))).toBeUndefined();
+    expect(await guardSettle(organize({ action: "settle" }), home, deps([me, thread("mcp:next", { pullRequests: [pr(12), pr(13)] })]))).toBeUndefined();
   });
 
-  test("holds the second settle of a handover chain until that thread hands the PR on", async () => {
+  test("holds the second settle of a handover chain until that thread hands the PR on to a thread that links it", async () => {
     const home = homeWith();
     const x = "https://github.com/acme/app/pull/20";
-    const chain = () => [
+    const chain = (cLinks: boolean) => [
       thread("mcp:a", { settledAt: "2026-11-12T10:05:00Z", pullRequests: [pr(20)] }),
       thread("mcp:b", { pullRequests: [pr(20)] }),
-      thread("mcp:c"),
+      thread("mcp:c", cLinks ? { pullRequests: [pr(20)] } : {}),
     ];
     await handover(home, "mcp:a", x, "mcp:b");
-    expect(reasonOf(await guardSettle(organize({ action: "settle", threadId: "mcp:b" }), home, deps(chain())))).toContain("open PR(s) https://github.com/acme/app/pull/20, and");
+    expect(reasonOf(await guardSettle(organize({ action: "settle", threadId: "mcp:b" }), home, deps(chain(false))))).toContain("open PR(s) https://github.com/acme/app/pull/20, and");
     await handover(home, "mcp:b", x, "mcp:c");
-    expect(await guardSettle(organize({ action: "settle", threadId: "mcp:b" }), home, deps(chain()))).toBeUndefined();
+    expect(reasonOf(await guardSettle(organize({ action: "settle", threadId: "mcp:b" }), home, deps(chain(false))))).toContain("open PR(s) https://github.com/acme/app/pull/20, and");
+    expect(await guardSettle(organize({ action: "settle", threadId: "mcp:b" }), home, deps(chain(true)))).toBeUndefined();
   });
 
   test.each([
@@ -199,11 +201,11 @@ describe("the settle guard", () => {
     expect(reasonOf(await guardSettle(organize({ action: "settle" }), homeWith(), deps(undefined)))).toBe("Fleet blocked this settle: T3 did not answer; retry, or settle in the T3 UI.");
     expect(reasonOf(await guardSettle(organize({ action: "settle" }), homeWith(), { ...deps([]), threads: async () => { throw new Error("gone"); } }))).toContain("T3 did not answer");
     for (const settings of [undefined, { "guards.person": "  " }, { "guards.person": 3 }]) {
-      expect(reasonOf(await guardSettle(organize({ action: "settle" }), homeWith(settings), deps([thread("mcp:me", { pullRequests: [pr(1)] })])))).toEndWith("the person who runs this machine can still settle the thread in T3.");
+      expect(reasonOf(await guardSettle(organize({ action: "settle" }), homeWith(settings), deps([thread("mcp:me", { pullRequests: [pr(1)] })])))).toContain("If the person who runs this machine parked them, snooze the thread");
     }
     const broken = homeWith({});
     writeFileSync(join(broken, ".local/state/fleet/settings.json"), "{");
-    expect(reasonOf(await guardSettle(organize({ action: "settle" }), broken, deps([thread("mcp:me", { pullRequests: [pr(1)] })])))).toEndWith("the person who runs this machine can still settle the thread in T3.");
+    expect(reasonOf(await guardSettle(organize({ action: "settle" }), broken, deps([thread("mcp:me", { pullRequests: [pr(1)] })])))).toContain("If the person who runs this machine parked them, snooze the thread");
   });
 
   test("handover refuses anything but a GitHub PR URL and a thread id, and writes nothing", async () => {

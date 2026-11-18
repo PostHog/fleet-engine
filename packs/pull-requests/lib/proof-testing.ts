@@ -120,7 +120,7 @@ printf '{"number":42,"url":"https://github.com/example/product/pull/42","baseRef
   const env: Record<string, string | undefined> = {
     ...gitEnv, PATH: `${bin}:${process.env.PATH}`,
     CLAUDE_CODE_SESSION_ID: "session-under-test", CODEX_THREAD_ID: undefined, FLEET_SETTINGS: JSON.stringify(settings), FLEET_MODELS: JSON.stringify(models),
-    FLEET_PROOF_JUDGE: `cat >/dev/null; echo '${verdict()}'`, FLEET_PROOF_JUDGE_MODEL: "judge-under-test", T3CODE_THREAD_ID: "thread-1",
+    FLEET_PROOF_JUDGE: `cat >/dev/null; echo '${verdict()}'`, FLEET_PROOF_JUDGE_MODEL: "judge-under-test", T3CODE_THREAD_ID: "thread-1", FLEET_PROOF_RETRY_DELAY_MS: "0",
   };
   const git = async (...args: string[]) => {
     const result = await spawnAsync(["git", ...args], { cwd: repository, env });
@@ -333,7 +333,9 @@ export function recordingModel(pr: Checkout, provider: "claude" | "codex", answe
   return { calls: () => readFileSync(calls, "utf8").trim().split("\n"), prompt: () => readFileSync(`${calls}-prompt`, "utf8") };
 }
 
-export const stalledOnQuota = (first = "ERROR: Reconnecting... 1/5", second = first.replace("1/5", "2/5")) =>
+const reconnectAfter429 = "ERROR: Reconnecting... 1/5 (stream disconnected before completion: 429 Too Many Requests)";
+
+export const stalledOnQuota = (first = reconnectAfter429, second = first === reconnectAfter429 ? "ERROR: Reconnecting... 2/5" : first) =>
   `cat >/dev/null; printf 'codex\\nreading the diff\\n%s\\n%s\\n' '${first}' '${second}' >&2; exec tail -f /dev/null`;
 
 export const blanks = (stream: 1 | 2) => `head -c 200000 /dev/zero | tr '\\0' ' ' >&${stream}`;
