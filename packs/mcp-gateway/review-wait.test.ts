@@ -126,6 +126,11 @@ async function t3() {
         return { thread: { ...thread, archived: false, pendingRequestCount: tail.pendingRequestCount, branch: null, worktreePath: null }, items: tail.items, nextPosition: null, hasMore: false };
       }
       if (name === "t3_project_list") return { projects: [], nextCursor: null };
+      if (name === "t3_thread_send" && args.environmentId === undefined) {
+        delivered.push({ threadId: args.threadId as string, text: args.message as string });
+        if (faults.dispatch) throw new Error("T3's answer was lost");
+        return { threadId: args.threadId, messageId: "m-local", delivery: "queued" };
+      }
       if (name === "t3_thread_send") {
         if (!linked.some((thread) => thread.threadId === args.threadId)) throw new ToolRefusal("thread_not_found", "no such thread");
         linkedSends.push({ environmentId: args.environmentId, threadId: args.threadId, message: args.message });
@@ -138,9 +143,7 @@ async function t3() {
         const id = `alert-${++launched}`;
         return { threadId: id };
       }
-      if (tag === "orchestration.dispatchCommand") return delivered.push({ threadId: payload.threadId, text: payload.text }), {};
     },
-    loseAnswer: (tag) => faults.dispatch && tag === "orchestration.dispatchCommand",
   });
   stops.push(() => stub.stop());
   const link = (environmentId: string, label: string) => links.push({ environmentId, label, urls: [], access: "full", linkedAt: "", expiresAt: "", lastReachedAt: null, lastError: null, status: "reachable" });
