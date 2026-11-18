@@ -3,13 +3,13 @@
 # ref, installs its packages, puts fleet on the login PATH, then runs
 # fleet setup, or fleet apply when --profile names a profile.
 #
-#   curl -fsSL https://raw.githubusercontent.com/Silthus/fleet-engine/main/get.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/PostHog/fleet-engine/main/get.sh | sh
 #   sh get.sh [--ref <ref>] [--profile <dir> | --install-only] [-- <flags for fleet>]
 #
 # Running it again picks up where it stopped: every step skips what is done.
 set -eu
 
-engine_repo=${FLEET_ENGINE_REPO:-https://github.com/Silthus/fleet-engine.git}
+engine_repo=${FLEET_ENGINE_REPO:-https://github.com/PostHog/fleet-engine.git}
 engine_dir=${FLEET_ENGINE_DIR:-$HOME/.local/share/fleet/engine}
 ref=${FLEET_ENGINE_REF:-main}
 profile=

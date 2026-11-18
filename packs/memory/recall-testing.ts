@@ -44,7 +44,7 @@ async function applyMemoryPack(prepared: ReturnType<typeof tempDirs>, settings: 
   const home = prepared.make("home-");
   const profile = join(home, "profile");
   mkdirSync(profile);
-  writeFileSync(join(profile, "fleet.json"), JSON.stringify({ schema: 1, engine: { repo: "Silthus/fleet-engine", ref: "main", channel: "track" }, sources: [], packs: ["memory"], plan: "both", settings, workflows: {} }));
+  writeFileSync(join(profile, "fleet.json"), JSON.stringify({ schema: 1, engine: { repo: "PostHog/fleet-engine", ref: "main", channel: "track" }, sources: [], packs: ["memory"], plan: "both", settings, workflows: {} }));
   mkdirSync(join(home, ".bun/bin"), { recursive: true });
   symlinkSync(process.execPath, join(home, ".bun/bin/bun"));
   return { home, code: await fleet(["apply", "--profile", profile], home) };

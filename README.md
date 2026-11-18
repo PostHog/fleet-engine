@@ -19,10 +19,10 @@ same setup.
    access**, sign in, and turn on **T3 Connect**. It links your Mac to your
    devboxes and your phone.
 3. **Paste this prompt** into a new thread in T3 Code on your Mac, or
-   [open it in T3 Code](https://app.t3.codes/new?prompt=Set%20up%20Fleet%20on%20this%20Mac%20with%20me.%20Read%20https%3A%2F%2Fraw.githubusercontent.com%2FSilthus%2Ffleet-engine%2Fmain%2FSETUP.md%20and%20follow%20it%20step%20by%20step.):
+   [open it in T3 Code](https://app.t3.codes/new?prompt=Set%20up%20Fleet%20on%20this%20Mac%20with%20me.%20Read%20https%3A%2F%2Fraw.githubusercontent.com%2FPostHog%2Ffleet-engine%2Fmain%2FSETUP.md%20and%20follow%20it%20step%20by%20step.):
 
    ```text
-   Set up Fleet on this Mac with me. Read https://raw.githubusercontent.com/Silthus/fleet-engine/main/SETUP.md and follow it step by step.
+   Set up Fleet on this Mac with me. Read https://raw.githubusercontent.com/PostHog/fleet-engine/main/SETUP.md and follow it step by step.
    ```
 
 From here the agent leads. It asks what you know and what you want, explains
@@ -31,13 +31,13 @@ sign-ins.
 
 ## See what it does
 
-Open [the Fleet site](https://silthus.github.io/fleet-engine/) to choose where
+Open [the Fleet site](https://posthog.github.io/fleet-engine/) to choose where
 Fleet runs: on your Mac only, or on your Mac plus a hub and a node. Switch the
 Pull requests, Orchestration, and Communication packs on or off. The site
 builds the prompt above with your picks in it, so the agent skips those
 questions.
 
-The [Packs page](https://silthus.github.io/fleet-engine/packs/) shows every
+The [Packs page](https://posthog.github.io/fleet-engine/packs/) shows every
 pack, and each pack has its own page. Select packs there, and copy one prompt
 that adds them to a Fleet you already run.
 
@@ -58,7 +58,7 @@ Run this as your login user, not with `sudo`, on macOS or on Linux (x64 or
 arm64):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Silthus/fleet-engine/main/get.sh | sh
+curl -fsSL https://raw.githubusercontent.com/PostHog/fleet-engine/main/get.sh | sh
 ```
 
 Read [`get.sh`](get.sh) first if you want to know what runs. It:

@@ -23,7 +23,7 @@ function profileTemplate(settings: Record<string, unknown>) {
     await spawnGit(home, "init", "-q", "--bare", "-b", "main", remote);
     const dir = join(home, "profile");
     await spawnGit(home, "clone", "-q", remote, dir);
-    const profile = { schema: 1, engine: { repo: "Silthus/fleet-engine", ref: "main", channel: "track" }, sources: defaultSources, packs: ["pull-requests"], plan: "both", settings, workflows: {} };
+    const profile = { schema: 1, engine: { repo: "PostHog/fleet-engine", ref: "main", channel: "track" }, sources: defaultSources, packs: ["pull-requests"], plan: "both", settings, workflows: {} };
     writeFileSync(join(dir, "fleet.json"), JSON.stringify(profile, null, 2) + "\n");
     await spawnGit(dir, "add", "fleet.json");
     await spawnGit(dir, "commit", "-q", "-m", "Start");
@@ -207,7 +207,7 @@ describe("fleet settings and fleet set", () => {
     const team: AvailableSource = { ref: { name: "team", repo: "team/packs", ref: "main" }, dir: "/team", packs: [{ manifest: { schema: 1, name: "team", summary: "Team rules.", settings: [signer] }, dir: "/team/packs/team" }] };
     const plan = resolveEngine([engine, team], { packs: ["team"] });
     const lines: string[] = [];
-    const profile = { schema: 1, engine: { repo: "Silthus/fleet-engine", ref: "main", channel: "track" }, sources: [team.ref], packs: ["team"], plan: "both", settings: {}, workflows: {} } satisfies ProfileFile;
+    const profile = { schema: 1, engine: { repo: "PostHog/fleet-engine", ref: "main", channel: "track" }, sources: [team.ref], packs: ["team"], plan: "both", settings: {}, workflows: {} } satisfies ProfileFile;
     const code = settingsCommand([], { profile, plan, packs: [...engine.packs, ...team.packs], print: (line) => lines.push(line) });
     expect(code).toBe(0);
     expect(lines.filter((line) => line.includes("identity.signer ="))).toEqual(["  identity.signer = 1password (default)"]);
@@ -221,7 +221,7 @@ describe("fleet settings and fleet set", () => {
     const plan = resolveEngine([engine, team], { packs: ["team"] });
     expect(plan.settings["identity.signer"]).toBeUndefined();
     const lines: string[] = [];
-    const profile = { schema: 1, engine: { repo: "Silthus/fleet-engine", ref: "main", channel: "track" }, sources: [team.ref], packs: ["team"], plan: "both", settings: {}, workflows: {} } satisfies ProfileFile;
+    const profile = { schema: 1, engine: { repo: "PostHog/fleet-engine", ref: "main", channel: "track" }, sources: [team.ref], packs: ["team"], plan: "both", settings: {}, workflows: {} } satisfies ProfileFile;
     settingsCommand([], { profile, plan, packs: [...engine.packs, ...team.packs], print: (line) => lines.push(line) });
     expect(lines.filter((line) => line.includes("identity.signer ="))).toEqual(["  identity.signer = not set"]);
   });
