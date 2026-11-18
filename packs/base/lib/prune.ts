@@ -130,14 +130,16 @@ function hasTable(db: Database, name: string): boolean {
   return Boolean(db.query("select 1 from sqlite_master where type = 'table' and name = ?").get(name));
 }
 
-function scheduledRun(db: Database): string {
-  return hasTable(db, "scheduled_tasks") ? "(select min(s.next_run_at) from scheduled_tasks s where s.thread_id = t.thread_id and s.enabled = 1)" : "null";
+function scheduledRuns(db: Database): string {
+  return hasTable(db, "scheduled_tasks")
+    ? "left join (select thread_id, min(next_run_at) next_run from scheduled_tasks where enabled = 1 and next_run_at is not null group by thread_id) s on s.thread_id = t.thread_id"
+    : "left join (select null thread_id, null next_run) s on 0";
 }
 
 function orchestrationRows(db: Database): StateRow[] {
   return db.query(`select json_extract(t.payload_json, '$.worktreePath') path, t.archived_at archived, t.deleted_at deleted, t.created_at created,
       json_extract(t.payload_json, '$.settledOverride') override, json_extract(t.payload_json, '$.settledAt') settled,
-      json_extract(t.payload_json, '$.lineage.relationshipToParent') relation, ${scheduledRun(db)} scheduled,
+      json_extract(t.payload_json, '$.lineage.relationshipToParent') relation, s.next_run scheduled,
       (select json_extract(p.value, '$.repository') || '#' || json_extract(p.value, '$.number') from json_each(t.payload_json, '$.pullRequests') p
         where json_extract(p.value, '$.watch') is not null limit 1) watched,
       (select max(m.created_at) from orchestration_v2_projection_messages m where m.thread_id = t.thread_id and m.role = 'user') messaged,
@@ -145,7 +147,7 @@ function orchestrationRows(db: Database): StateRow[] {
       (select r.status from orchestration_v2_projection_runs r where r.thread_id = t.thread_id
         order by case r.status when 'running' then 0 when 'starting' then 1 when 'preparing' then 2 when 'queued' then 3 else 4 end, r.ordinal desc limit 1) status,
       (select max(coalesce(r.completed_at, r.requested_at)) from orchestration_v2_projection_runs r where r.thread_id = t.thread_id) turned
-    from orchestration_v2_projection_threads t where json_extract(t.payload_json, '$.worktreePath') is not null`).all() as StateRow[];
+    from orchestration_v2_projection_threads t ${scheduledRuns(db)} where json_extract(t.payload_json, '$.worktreePath') is not null`).all() as StateRow[];
 }
 
 function legacyRows(db: Database): StateRow[] {
@@ -176,7 +178,7 @@ export function readState(statePath: string): T3State {
       };
       const key = resolve(row.path);
       shared.set(key, [...shared.get(key) ?? [], thread]);
-      if (!closedAs(thread) && row.relation !== "subagent") led.add(key);
+      if (!closedAs(thread) && (row.relation !== "subagent" || thread.wake)) led.add(key);
     }
     for (const [key, threads] of shared) state.threads.set(key, { ...worktreeThread(threads), openLead: led.has(key) });
     if (hasTable(db, "projection_projects")) state.projects = (db.query("select workspace_root root from projection_projects where deleted_at is null").all() as Array<{ root: string }>).map((row) => resolve(row.root));
@@ -349,10 +351,16 @@ function evict(kept: Facts[], target: NonNullable<PruneOptions["evict"]>, option
     for (const facts of candidates) options.log(`would evict while below ${target.targetGigabytes}G free: ${facts.path} (${reason(facts)})`);
     return [];
   }
+  const deferred = new Set<string>();
   for (const facts of candidates) {
     if (target.free() >= target.targetGigabytes * gigabyte) break;
     const current = refresh(facts.path);
     if (!evictable(current, options)) continue;
+    if (woken(current) > woken(facts) && !deferred.has(facts.path)) {
+      deferred.add(facts.path);
+      candidates.push(current);
+      continue;
+    }
     const verdict = removeIfDecided(current, { path: current.path, remove: true, reason: reason(current) }, options);
     options.log(`${verdict.remove ? "evicted" : "kept"}: ${facts.path} (${verdict.reason})`);
     if (verdict.remove) evicted.push(verdict);
@@ -373,13 +381,13 @@ export function prune(options: PruneOptions): Verdict[] {
   const root = resolve(options.worktreeRoot);
   for (const path of listCandidates(root, state.projects, options.repos)) {
     const managed = path.startsWith(`${root}/`);
-    const facts = gather(path, state, managed, { running: processDirectories(), seen }, branches, options);
+    const facts = gather(path, readState(options.statePath), managed, { running: processDirectories(), seen }, branches, options);
     const verdict = removeIfDecided(facts, decide(facts, options), options);
     if (!verdict.remove) kept.set(path, facts);
     verdicts.push(verdict);
     options.log(`${verdict.remove ? (options.dryRun ? "would remove" : "removed") : "kept"}: ${path} (${verdict.reason})`);
   }
-  const refresh = (path: string) => gather(path, state, path.startsWith(`${root}/`), { running: processDirectories(), seen }, branches, { ...options, fetch: false });
+  const refresh = (path: string) => gather(path, readState(options.statePath), path.startsWith(`${root}/`), { running: processDirectories(), seen }, branches, { ...options, fetch: false });
   if (options.evict) for (const verdict of evict([...kept.values()], options.evict, options, refresh)) verdicts[verdicts.findIndex((item) => item.path === verdict.path)] = verdict;
   for (const common of branches.keys()) if (!options.dryRun) run(["git", "-C", common, "worktree", "prune"]);
   options.log(`Done: ${verdicts.filter((verdict) => verdict.remove).length} removed, ${verdicts.filter((verdict) => !verdict.remove).length} kept. ${describeFree(options.worktreeRoot)}`);
