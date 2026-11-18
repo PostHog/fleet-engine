@@ -112,7 +112,6 @@ const realSchema = [
     webhook_token text, webhook_secret text, last_run_webhook_delivery_id text, thread_mode text not null default 'new_thread')`,
 ];
 
-/** A T3 state database with the live T3 schema. A thread's ID defaults to its worktree path, and its creation to 2026-09-20. */
 function t3State(path: string, threads: StateThread[], schedules: Schedule[] = []): string {
   const db = new Database(path);
   for (const table of realSchema) db.run(table);
@@ -129,6 +128,15 @@ function t3State(path: string, threads: StateThread[], schedules: Schedule[] = [
   db.close();
   for (const task of schedules) schedule(path, task);
   return path;
+}
+
+function endWatches(statePath: string, threadId: string): void {
+  const db = new Database(statePath);
+  const row = db.query("select payload_json payload from orchestration_v2_projection_threads where thread_id = ?").get(threadId) as { payload: string };
+  const payload = JSON.parse(row.payload);
+  payload.pullRequests = payload.pullRequests.map(({ watch, ...entry }: { watch: object }) => ({ ...entry, watch: null, endedWatch: watch }));
+  db.run("update orchestration_v2_projection_threads set payload_json = ? where thread_id = ?", [JSON.stringify(payload), threadId]);
+  db.close();
 }
 
 function schedule(statePath: string, task: Schedule): void {
@@ -289,6 +297,35 @@ onLinux("a prune pass reads the T3 state again for each worktree, so a run sched
   const verdicts = pass(base, root, statePath, { log });
 
   expect(verdicts.find((verdict) => verdict.path === late)).toMatchObject({ remove: false, reason: "its T3 thread has a scheduled run at 2026-11-16T08:15:00.000Z" });
+});
+
+onLinux("a prune pass reads the T3 state after a worktree's own checks, so a run scheduled while they run keeps it", async () => {
+  const { base, root, paths: [settled] } = await landedWorktrees("settled");
+  await writeFile(join(settled, "app.ts"), "b\n");
+  await commit(settled, "work");
+  const statePath = t3State(join(base, "statev2.sqlite"), [{ id: "settled", worktreePath: settled, settledAt }]);
+
+  const verdicts = pass(base, root, statePath, { mergedPullRequest: () => (schedule(statePath, scheduledFor("settled")[0]), false) });
+
+  expect(verdicts.find((verdict) => verdict.path === settled)).toMatchObject({ remove: false, reason: "its T3 thread has a scheduled run at 2026-11-16T08:15:00.000Z" });
+  expect(await readdir(join(root, "repo"))).toEqual(["settled"]);
+});
+
+onLinux("under disk pressure, a worktree whose watch ends during the pass is evicted before one that still has a wake", async () => {
+  const { base, root, paths: [older, newer] } = await landedWorktrees("older", "newer");
+  const later = Date.now() + 48 * 3600_000;
+  recordSightings(join(base, "sightings.json"), [newer], later - 2 * 3600_000);
+  const statePath = t3State(join(base, "statev2.sqlite"), [
+    { id: "older", worktreePath: older, settledAt, pullRequests: [watching(1)] }, { id: "newer", worktreePath: newer, settledAt, pullRequests: [watching(2)] },
+  ]);
+  const lines: string[] = [];
+  let calls = 0;
+  const free = () => (calls++ === 0 ? (endWatches(statePath, "newer"), 0) : Number.POSITIVE_INFINITY);
+
+  pass(base, root, statePath, { ...pressured(later, lines), dryRun: false, evict: { targetGigabytes: 1, free } });
+
+  expect(lines.filter((line) => line.startsWith("evicted")).map((line) => line.split(": ")[1].split(" (")[0])).toEqual([newer]);
+  expect(await readdir(join(root, "repo"))).toEqual(["older"]);
 });
 
 onLinux("under disk pressure, a worktree whose thread gets a wake during the pass is evicted after every other one", async () => {

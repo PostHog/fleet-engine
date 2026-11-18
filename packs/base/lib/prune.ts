@@ -177,7 +177,9 @@ export function readState(statePath: string): T3State {
         activeAt: Math.max(...[row.created, row.messaged, row.turned].map((value) => Date.parse(value ?? "") || 0)), openLead: false,
       };
       const key = resolve(row.path);
-      shared.set(key, [...shared.get(key) ?? [], thread]);
+      const sharing = shared.get(key);
+      if (sharing) sharing.push(thread);
+      else shared.set(key, [thread]);
       if (!closedAs(thread) && (row.relation !== "subagent" || thread.wake)) led.add(key);
     }
     for (const [key, threads] of shared) state.threads.set(key, { ...worktreeThread(threads), openLead: led.has(key) });
@@ -281,12 +283,18 @@ export function listCandidates(worktreeRoot: string, projects: string[], repos: 
 
 type Processes = { running: string[]; seen: Sightings };
 
-function gather(path: string, state: T3State, managed: boolean, processes: Processes, branches: Map<string, string | null>, options: PruneOptions): Facts {
+function gather(path: string, load: () => T3State, managed: boolean, processes: Processes, branches: Map<string, string | null>, options: PruneOptions): Facts {
+  const facts = inspect(path, processes, branches, options);
+  const state = load();
   const thread = state.threads.get(path) ?? null;
+  return { ...facts, thread, stateUnknown: managed && !state.ok, lastActivity: Math.max(facts.lastActivity, thread?.activeAt ?? 0) };
+}
+
+function inspect(path: string, processes: Processes, branches: Map<string, string | null>, options: PruneOptions): Facts {
   const base: Facts = {
     path, kind: "orphan", dirty: false, disposable: false, branch: null, unreferenced: 0, landed: false, defaultBranch: null, prMerged: false,
-    inUse: inside(path, processes.running), lastActivity: Math.max(mtime(path), thread?.activeAt ?? 0, lastSeenInside(path, processes.seen)),
-    thread, stateUnknown: managed && !state.ok,
+    inUse: inside(path, processes.running), lastActivity: Math.max(mtime(path), lastSeenInside(path, processes.seen)),
+    thread: null, stateUnknown: false,
     agent: /\/\.claude\/worktrees\/agent-[^/]+$/.test(path),
   };
   const gitDir = git(path, "rev-parse", "--path-format=absolute", "--git-dir");
@@ -351,16 +359,14 @@ function evict(kept: Facts[], target: NonNullable<PruneOptions["evict"]>, option
     for (const facts of candidates) options.log(`would evict while below ${target.targetGigabytes}G free: ${facts.path} (${reason(facts)})`);
     return [];
   }
-  const deferred = new Set<string>();
-  for (const facts of candidates) {
+  while (candidates.length) {
     if (target.free() >= target.targetGigabytes * gigabyte) break;
+    const threads = readState(options.statePath).threads;
+    const wakeNow = (facts: Facts) => Number(Boolean(threads.get(facts.path)?.wake));
+    candidates.sort((a, b) => wakeNow(a) - wakeNow(b) || a.lastActivity - b.lastActivity);
+    const facts = candidates.shift()!;
     const current = refresh(facts.path);
     if (!evictable(current, options)) continue;
-    if (woken(current) > woken(facts) && !deferred.has(facts.path)) {
-      deferred.add(facts.path);
-      candidates.push(current);
-      continue;
-    }
     const verdict = removeIfDecided(current, { path: current.path, remove: true, reason: reason(current) }, options);
     options.log(`${verdict.remove ? "evicted" : "kept"}: ${facts.path} (${verdict.reason})`);
     if (verdict.remove) evicted.push(verdict);
@@ -381,13 +387,13 @@ export function prune(options: PruneOptions): Verdict[] {
   const root = resolve(options.worktreeRoot);
   for (const path of listCandidates(root, state.projects, options.repos)) {
     const managed = path.startsWith(`${root}/`);
-    const facts = gather(path, readState(options.statePath), managed, { running: processDirectories(), seen }, branches, options);
+    const facts = gather(path, () => readState(options.statePath), managed, { running: processDirectories(), seen }, branches, options);
     const verdict = removeIfDecided(facts, decide(facts, options), options);
     if (!verdict.remove) kept.set(path, facts);
     verdicts.push(verdict);
     options.log(`${verdict.remove ? (options.dryRun ? "would remove" : "removed") : "kept"}: ${path} (${verdict.reason})`);
   }
-  const refresh = (path: string) => gather(path, readState(options.statePath), path.startsWith(`${root}/`), { running: processDirectories(), seen }, branches, { ...options, fetch: false });
+  const refresh = (path: string) => gather(path, () => readState(options.statePath), path.startsWith(`${root}/`), { running: processDirectories(), seen }, branches, { ...options, fetch: false });
   if (options.evict) for (const verdict of evict([...kept.values()], options.evict, options, refresh)) verdicts[verdicts.findIndex((item) => item.path === verdict.path)] = verdict;
   for (const common of branches.keys()) if (!options.dryRun) run(["git", "-C", common, "worktree", "prune"]);
   options.log(`Done: ${verdicts.filter((verdict) => verdict.remove).length} removed, ${verdicts.filter((verdict) => !verdict.remove).length} kept. ${describeFree(options.worktreeRoot)}`);
