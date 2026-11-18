@@ -24,6 +24,8 @@ type Word = { text: string; raw: string; bare: string; substitutions: string[] }
 type Heredoc = { delimiter: string; literal: boolean; stripTabs: boolean; body: string; substitutions: string[] };
 type Token = { word: Word } | { operator: string } | { heredoc: Heredoc } | { herestring: true };
 
+export const shellTools = new Set(["Bash", "exec_command", "shell", "shell_command", "local_shell"]);
+
 export const shells = new Set(["sh", "bash", "zsh", "dash", "ksh", "fish"]);
 const maxDepth = 8;
 const operators = ["&&", "||", ";;", "|&", ";", "|", "&", "(", ")", "\n"];

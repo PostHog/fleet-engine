@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { askGap, authorOf, finishReview, startGateRun, ledgerRoot, listStanding, proofDirectory, readJson, readOwed, recordGap, recordGapCommand, recordStanding, requireChoice, requireNone, devPr, requireProofs, requireReservation, respondToReview, reuseProof, reviewDirectory, reviewOfCommit, reviewRecords, roundId, roundQuestion, runOption, saveProof, startReview, stopOption, storeCapturedFindings, unfinishedReview, writeJson, markRecorded, readReservation, recordReceipt, roundDirectories, unrecordedElsewhere, type Arbiter, type Reservation, type CapturedBy, type ProofIdentity } from "./proof.ts";
 import { AnswerTaken, appendOnce, decideAlone, hearUser, ledgerHolds, ledgerOf } from "./decision-cli.ts";
-import { HubUnreachable, refText, type Decision, type Ssh } from "./decision-ledger.ts";
+import { HubUnreachable, refText, thisMachine, type Decision, type Ssh } from "./decision-ledger.ts";
 import { readComment, runIn } from "./pr-ci.ts";
 import { askModel, family, familyOf, isQuotaExhausted, modelLabel, quotaExitCode, readRubric, reviewerRow, sessionFamily, skillReferences, type Family } from "./proof-models.ts";
 import { runProof, type RunIO } from "./proof-run.ts";
@@ -406,8 +406,9 @@ receipt link once one is recorded. The gate's lines and fleet decision report co
         throw error;
       }
       await record({ code: gate.code, reason: gate.reason });
+      const shared = gate.code === 0 ? await shareGatePass(head, context) : undefined;
       if (flags.has("--json")) print(JSON.stringify(gate.summary));
-      else for (const line of [...gate.lines, gate.verdict]) print(line);
+      else for (const line of [...gate.lines, ...shared ? [shared] : [], gate.verdict]) print(line);
       return gate.code;
     },
   },
@@ -969,4 +970,13 @@ export async function proofCommand(args: string[], context: ProofContext): Promi
   let identity: ProofIdentity | undefined;
   let lock: Promise<RoundLock> | undefined;
   return command.run(parsed, () => identity ??= resolveIdentity(parsed.options, run), { ...context, run, lock: () => lock ??= roundLock(lockOwner(context)) });
+}
+
+async function shareGatePass(head: ProofIdentity, context: ProofContext): Promise<string> {
+  try {
+    await ledgerOf(context).append({ type: "gate", repository: head.repository, pr: head.pr, commit: head.commit, machine: thisMachine(context.env), at: (context.now?.() ?? new Date()).toISOString() });
+    return "merge gate: pass recorded in the decision ledger";
+  } catch (error) {
+    return `merge gate: pass recorded on this machine only (${String((error as Error).message ?? error).split("\n")[0]}); an enqueue from another machine is refused until the gate passes there`;
+  }
 }

@@ -4,7 +4,7 @@ import { laneSecretLines } from "../../hub/lib/secret-lane-source.ts";
 import { readPullRequest, runIn } from "./pr-ci.ts";
 import { gapKind, refuseInstructionQuote, usedAnswer } from "./proof.ts";
 import {
-  agentRefusal, answerUse, askClasses, brakeDays, brakeOf, covers, decisionLine, fold, hubLedger, HubUnreachable, isUsers, liftCounted, live, messageKey, namesKind, namesPr, panelRefusal, prRef, refText, thisMachine, tierOf,
+  agentRefusal, answerUse, askClasses, gateOverride, brakeDays, brakeOf, covers, decisionLine, fold, hubLedger, HubUnreachable, isUsers, liftCounted, live, messageKey, namesKind, namesPr, panelRefusal, prRef, refText, thisMachine, tierOf,
   type AnswerUse, type AskClass, type Decision, type DecisionState, type Env, type Ledger, type LedgerEvent, type Lift, type PrRef, type Reversal, type Ssh, type UsersMark,
 } from "./decision-ledger.ts";
 
@@ -36,6 +36,9 @@ choice must start with "Accept", or be "Yes" to a question that starts with "Acc
 keeps them owed whatever an agent decides. A decision of the user's takes the time they answered: record a gap with
 fleet proof gap before you ask, since a judge gap counts only answers given after it was recorded. --condition names
 what must stay true at HEAD; the judge checks it. Classes: ${askClasses.join(", ")}.
+With --class merge --kind ${gateOverride} and --condition '<full head sha>: <incident and why>', the user's 👤 answer
+lets the merge gate pass that one PR at that head without a fleet proof gate pass; a push leaves it behind. Only 👤
+records it. Each option other than --pr and --kind is taken once.
 record with 🤖 records the agent's own decision with the option it rejected. Fleet reads each PR's Tier line in its
 merge-risk callout at HEAD: it refuses an ungraded PR, and on a critical PR anything but process (review and status
 asks, judge and post-deploy-watch gaps). It never takes a panel gap: ${panelRefusal}. The gate never counts a 🤖 ci
@@ -89,6 +92,7 @@ function parse(args: string[], valued: string[], repeatable: string[], flagNames
     const value = args.shift();
     if (value === undefined || value.startsWith("--")) throw new Error(`${arg} needs a value. Run fleet decision --help`);
     if (repeatable.includes(arg)) parsed.lists.set(arg, [...parsed.lists.get(arg) ?? [], value]);
+    else if (parsed.options.has(arg)) throw new Error(`${arg} given twice. Pass it once. Run fleet decision --help`);
     else parsed.options.set(arg, value);
   }
   return parsed;
@@ -128,9 +132,22 @@ const scopeOf = ({ prs, kinds, condition }: Scope): Decision["scope"] => ({ prs:
 
 function checkScope({ class: decisionClass, prs, kinds }: Scope) {
   if (!prs.length) throw new Error("--pr is required. Run fleet decision --help");
+  if (decisionClass === "merge" && kinds?.length) {
+    if (kinds.some((kind) => kind !== gateOverride)) throw new Error(`A merge decision takes only --kind ${gateOverride}`);
+    return;
+  }
   if (decisionClass === "proof-gap" && !kinds?.length) throw new Error("A proof-gap decision needs --kind with each gap kind it decides");
   if (decisionClass !== "proof-gap" && kinds?.length) throw new Error("--kind and --keep-owed belong to --class proof-gap");
   kinds?.forEach(gapKind);
+}
+
+const overrideCondition = /^[0-9a-f]{40}: \S.{9,}$/s;
+
+function checkOverride({ class: decisionClass, prs, kinds, condition }: Scope, mark: string) {
+  if (decisionClass !== "merge" || !kinds?.includes(gateOverride)) return;
+  if (mark !== "👤") throw new Error("A gate override is the user's own answer on a question card: record it with --mark 👤. An agent never overrides the merge gate");
+  if (prs.length !== 1) throw new Error("A gate override covers one PR at one head: pass one --pr");
+  if (!condition || !overrideCondition.test(condition)) throw new Error("A gate override needs --condition '<full 40-character head sha>: <the incident and why it cannot wait for the gate>'");
 }
 
 const quotes = (text: string) => [...text.matchAll(/["“]([^"”]*)["”]/g)].map((match) => normalized(match[1]!)).filter(Boolean);
@@ -272,6 +289,7 @@ async function record(parsed: Parsed, context: DecisionContext, ledger: Ledger) 
   const scope: Scope = { class: askClass(required(parsed, "--class")), prs: prsOf(parsed), kinds: parsed.lists.get("--kind"), condition: parsed.options.get("--condition") };
   const keepOwed = parsed.flags.has("--keep-owed");
   if (keepOwed && scope.class !== "proof-gap") throw new Error("--kind and --keep-owed belong to --class proof-gap");
+  checkOverride(scope, mark);
   let decision: Decision;
   if (mark === "🤖") {
     if (parsed.options.has("--words") || parsed.options.has("--message") || keepOwed) throw new Error("--words, --message and --keep-owed are the user's: an agent decision takes --question, --answer, --rejected and --reason");
