@@ -5,9 +5,9 @@ export const isQuotaError = (text: string) => quotaText.test(text);
 const modelCliLine = /^\s*(?:error:?\s*)?(?:reconnecting\.\.\.\s*\d+\/\d+|exceeded retry limit|stream (?:error|disconnected)|api error:|all credentials for model)/i;
 const reconnecting = /reconnecting\.\.\./i;
 
-export function quotaLine(line: string) {
+export function quotaLine(line: string, afterQuota = false) {
   if (!modelCliLine.test(line)) return undefined;
-  return reconnecting.test(line) || isQuotaError(line) ? line.replace(/\s+/g, " ").trim().slice(0, 200) : undefined;
+  return isQuotaError(line) || (afterQuota && reconnecting.test(line)) ? line.replace(/\s+/g, " ").trim().slice(0, 200) : undefined;
 }
 
 export const quotaGraceMs = 5 * 60_000;
@@ -21,7 +21,7 @@ export function quotaWatch(graceMs: number, exhausted: (line: string) => void) {
   const progress = () => { waiting = undefined; stop(); };
   const complete = (line: string, from: object, canStall: boolean) => {
     if (!line.trim()) return;
-    const quota = quotaLine(line);
+    const quota = quotaLine(line, waiting !== undefined);
     if (quota === undefined) { streak = 0; movedSinceQuota.clear(); return progress(); }
     if ([...movedSinceQuota].some((stream) => stream !== from)) streak = 0;
     movedSinceQuota.clear();
@@ -39,7 +39,7 @@ export function quotaWatch(graceMs: number, exhausted: (line: string) => void) {
         for (const line of lines) complete(line, self, true);
         if ((lines.length ? partial : chunk).trim()) { movedSinceQuota.add(self); progress(); }
       },
-      end() { if (quotaLine(partial)) complete(partial, self, false); partial = ""; },
+      end() { if (quotaLine(partial, waiting !== undefined)) complete(partial, self, false); partial = ""; },
     };
   };
   return { stream, waiting: () => waiting, stop };

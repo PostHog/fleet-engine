@@ -236,10 +236,13 @@ review-start. When the reviewer gives no answer, the round stays reserved and th
 commit retries it. The setting pull-requests.reviewTimeoutMinutes limits the reviewer. FLEET_PROOF_REVIEWER replaces
 its command, and FLEET_PROOF_REVIEWER_MODEL its model.
 Spent quota stops a reviewer or judge early. When its CLI prints two quota lines in a row, such as
-"Reconnecting... 1/5" and "Reconnecting... 2/5", "exceeded retry limit, last status: 429", or "All credentials for
-model <model> are cooling down", and then prints nothing else for 5 minutes, fleet stops it. A run that fails right
-after one such line counts too. The cause starts with "quota exhausted", and fleet proof review exits 4.
-FLEET_PROOF_QUOTA_GRACE_MS changes the 5 minutes; 0 stops the run at once.
+"exceeded retry limit, last status: 429", "All credentials for model <model> are cooling down", or "Reconnecting...
+2/5" after one of those, and then prints nothing else for 5 minutes, fleet stops it. A lone "Reconnecting... 1/5" is
+no quota line: Codex reconnects on any dropped stream, such as a proxy restart. A run that fails right after a quota
+line counts too. The cause starts with "quota exhausted", and fleet proof review exits 4.
+FLEET_PROOF_QUOTA_GRACE_MS changes the 5 minutes; 0 stops the run at once. Any other failed exit keeps the last lines
+of its stderr and runs once more after 30 seconds, so a restarted proxy can load its credentials;
+FLEET_PROOF_RETRY_DELAY_MS changes the wait.
 
 With --lens, the round is a qa-swarm panel: one reviewer per lens, each with the Brief of the qa-swarm PANEL.md in
 ~/.agents/skills/qa-swarm, filled by fleet, and the lens's hunting grounds. A lens runs on the family of its PANEL.md
