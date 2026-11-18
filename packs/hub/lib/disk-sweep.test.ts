@@ -21,7 +21,7 @@ function sweep(fields: Partial<DiskSweepOptions> = {}, freed: Record<string, num
   const ran: string[] = [];
   let free = 4 * gigabyte;
   const options: DiskSweepOptions = {
-    home, dryRun: false, floorGigabytes: 15, alertGigabytes: 10, free: () => free,
+    home, dryRun: false, floorGigabytes: 15, alertGigabytes: 10, free: () => free, inodes: () => 0.5,
     cleaners: sweepCleaners(home, {}),
     installed: () => true,
     run: async (argv) => {
@@ -87,13 +87,13 @@ test("a failing or hanging cleaner is logged, and the next one runs", async () =
   expect(await diskSweep(run.options)).toBe(0);
   expect(run.ran.slice(0, -1)).toEqual([`sh ${launcher} prune`, `trim ${bootLog} 100M 20M`, "pnpm store prune", "uv cache prune", "go clean -cache"]);
   expect(run.logged).toEqual([
-    "Sweep: 4.0G free, floor 15G.",
-    "fleet prune: done. 4.0G free.",
-    "trim the T3 boot log: done. 4.0G free.",
-    "pnpm store prune stopped at its 10 minute limit. 4.0G free.",
-    "uv cache prune failed with exit 1: error: cache is locked. 4.0G free.",
-    "go clean -cache: done. 4.0G free.",
-    "Still 4.0G free, below the 10G alert floor. Nothing else is removed.",
+    "Sweep: 4.0G free, 50% of inodes free, floor 15G.",
+    "fleet prune: done. 4.0G free, 50% of inodes free.",
+    "trim the T3 boot log: done. 4.0G free, 50% of inodes free.",
+    "pnpm store prune stopped at its 10 minute limit. 4.0G free, 50% of inodes free.",
+    "uv cache prune failed with exit 1: error: cache is locked. 4.0G free, 50% of inodes free.",
+    "go clean -cache: done. 4.0G free, 50% of inodes free.",
+    "Still 4.0G free, 50% of inodes free, below the 10G alert floor. Nothing else is removed.",
   ]);
 });
 
@@ -101,7 +101,7 @@ test("the sweep stops once free space is back above the floor", async () => {
   const run = sweep({}, { fleet: 6, pnpm: 6 });
   expect(await diskSweep(run.options)).toBe(0);
   expect(run.ran).toEqual([`sh ${launcher} prune`, `trim ${bootLog} 100M 20M`, "pnpm store prune"]);
-  expect(run.logged.slice(-2)).toEqual(["pnpm store prune: done. 16.0G free.", "16.0G free, above the 15G floor, so the sweep stops."]);
+  expect(run.logged.slice(-2)).toEqual(["pnpm store prune: done. 16.0G free, 50% of inodes free.", "16.0G free, 50% of inodes free, above the 15G and 10% inode floors, so the sweep stops."]);
   expect(run.printed).toEqual([]);
   const roomy = sweep({ free: () => 40 * gigabyte });
   await diskSweep(roomy.options);
@@ -131,7 +131,7 @@ test("a dry run lists the cleaners it would run, and runs none", async () => {
   expect(await diskSweep(run.options)).toBe(0);
   expect([run.ran, run.printed]).toEqual([[], []]);
   expect(run.logged).toEqual([
-    "Sweep (dry run): 4.0G free, floor 15G.",
+    "Sweep (dry run): 4.0G free, 50% of inodes free, floor 15G.",
     "Would run fleet prune.",
     "Would run trim the T3 boot log.",
     "Would run pnpm store prune.",
@@ -182,4 +182,15 @@ test("the Disk watch risk text names each removal the sweep can make, and each o
   ]) expect(removes).toContain(removal);
   for (const untouched of ["Nix garbage", "Cargo build output", "uv cache folder", "old T3 versions", "Docker", "Bun's cache"]) expect(never).toContain(untouched);
   expect(risk).toContain("It deletes no other file.");
+});
+
+test("a disk out of inodes with bytes to spare runs every cleaner, and below 5% the report lists the folders with the most files", async () => {
+  const files = `26000000\t${home}\n9000000\t${home}/dev\n6000000\t${home}/dev/app-export\n2000000\t${home}/.cache\n`;
+  const run = sweep({
+    free: () => 14 * gigabyte, inodes: () => 0,
+    run: async (argv) => { if (argv[0] !== "du") return done; return argv[1] === "--inodes" ? { code: 0, stdout: files, stderr: "" } : { code: 0, stdout: duOutput, stderr: "" }; },
+  });
+  expect(await diskSweep(run.options)).toBe(0);
+  expect(run.logged.at(-1)).toBe("Still 14.0G free, 0% of inodes free, below the 5% inode alert floor. Nothing else is removed.");
+  expect(run.printed).toEqual([`The folders under $HOME with the most files, for you to decide:\n9000000 ${home}/dev\n6000000 ${home}/dev/app-export\n2000000 ${home}/.cache`]);
 });
