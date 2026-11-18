@@ -26,6 +26,7 @@ describe("review-request allow rules", () => {
     "gh pr edit 1506 --repo example/product --add-reviewer a-reviewer,example/core",
     "gh pr edit https://github.com/example/product/pull/1506 --add-reviewer a-reviewer",
     "cd /x && timeout 30 gh pr edit 1506 -R example/product --add-reviewer a-reviewer",
+    "gh pr edit 1506 --add-reviewer a-reviewer > /dev/null",
   ])("lets a bare reviewer request through: %s", (command) => {
     expect(refusal(command)).toBeUndefined();
   });
@@ -40,6 +41,8 @@ describe("review-request allow rules", () => {
     "gh pr edit 1 --add-reviewer a --base main",
     "gh pr edit 1 2 --add-reviewer a",
     "gh pr edit 1 --add-reviewer 'a;b'",
+    "gh pr edit 1 --add-reviewer a > packs/guards/hooks/guards.ts",
+    "gh api -X POST repos/example/product/pulls/1/requested_reviewers -f reviewers[]=a >> notes.md",
   ])("refuses a command the rule would approve that does more: %s", (command) => {
     expect(refusal(command)).toContain("does more than request reviewers");
   });
@@ -91,6 +94,7 @@ describe("Trunk comment allow rules", () => {
     "gh api repos/example/product/issues/1/comments -f body='/trunk merge' -F body=@notes.md",
     "gh api repos/example/product/issues/1/comments -f body='/trunk merge' --input notes.json",
     "gh api repos/example/product/issues/1/comments -f body='/trunk merge' -H 'X-Other: 1'",
+    "gh pr comment 1 --body '/trunk merge' > notes.md",
   ])("refuses a command the rule would approve that does more: %s", (command) => {
     const reason = refusal(command);
     expect(reason).toContain("does more than post one bare Trunk command");

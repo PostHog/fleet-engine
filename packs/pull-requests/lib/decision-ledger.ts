@@ -19,15 +19,16 @@ export type Decision = {
 };
 export type Reversal = { type: "reverse"; id: string; words: string; thread?: string; message?: string; comment?: string; machine: string; at: string };
 export type Lift = { type: "lift"; class: AskClass; words: string; thread: string; message: string; machine: string; at: string };
-export type GatePass = { type: "gate"; repository: string; pr: number; commit: string; machine: string; at: string };
+export type GateResult = { type: "gate"; repository: string; pr: number; commit: string; passed: boolean; machine: string; at: string };
 export type LedgerEvent =
   | { type: "decide"; decision: Decision }
   | { type: "void"; id: string; reason: string; at: string }
   | Reversal
   | Lift
-  | GatePass;
+  | GateResult;
 
 export const gateOverride = "gate-override";
+export const overrideChoice = "Override the gate";
 
 export { HubUnreachable, type Env, type Ssh, type SshResult };
 
@@ -43,7 +44,7 @@ const isRef = (value: string) => refPattern.test(value);
 const isFilled = (value: unknown): value is string => isText(value) && value.trim() !== "";
 const isTime = (value: unknown): value is string => isText(value) && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/.test(value) && Number.isFinite(Date.parse(value));
 
-type RawEvent = { type?: unknown; repository?: unknown; pr?: unknown; commit?: unknown; machine?: unknown; id?: unknown; class?: unknown; reason?: unknown; words?: unknown; at?: unknown; thread?: unknown; message?: unknown; comment?: unknown; decision?: Partial<Record<keyof Decision, unknown>> } | null;
+type RawEvent = { type?: unknown; repository?: unknown; pr?: unknown; commit?: unknown; passed?: unknown; machine?: unknown; id?: unknown; class?: unknown; reason?: unknown; words?: unknown; at?: unknown; thread?: unknown; message?: unknown; comment?: unknown; decision?: Partial<Record<keyof Decision, unknown>> } | null;
 const inThread = (event: NonNullable<RawEvent>) => isFilled(event.words) && isTime(event.at) && isFilled(event.thread) && isFilled(event.message);
 const heardEvent = (event: NonNullable<RawEvent>) => inThread(event) || (isFilled(event.words) && isTime(event.at) && isFilled(event.comment));
 
@@ -54,7 +55,7 @@ function validEvent(value: unknown): value is LedgerEvent {
   if (event?.type === "lift") return (askClasses as readonly unknown[]).includes(event.class) && inThread(event);
   if (event?.type === "gate") {
     return isText(event.repository) && /^[\w.-]+\/[\w.-]+$/.test(event.repository) && Number.isInteger(event.pr) && (event.pr as number) > 0
-      && isText(event.commit) && /^[0-9a-f]{40}$/.test(event.commit) && isFilled(event.machine) && isTime(event.at);
+      && isText(event.commit) && /^[0-9a-f]{40}$/.test(event.commit) && typeof event.passed === "boolean" && isFilled(event.machine) && isTime(event.at);
   }
   const decision = event?.type === "decide" ? event.decision : undefined;
   if (!decision || !isText(decision.id) || !isText(decision.at) || !isText(decision.question) || !isText(decision.answer)) return false;

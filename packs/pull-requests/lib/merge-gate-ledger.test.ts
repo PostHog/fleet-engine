@@ -10,28 +10,30 @@ const ledgerFile = (home: string) => join(home, ".local/state/fleet/decisions.js
 const events = (home: string): Record<string, unknown>[] =>
   existsSync(ledgerFile(home)) ? readFileSync(ledgerFile(home), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
 
-test("a gate pass lands in the decision ledger at HEAD, and a failed gate leaves none", async () => {
+test("each gate result lands in the decision ledger at HEAD, so a later failure supersedes an earlier pass", async () => {
   const pr = await checkout();
   await pr.commit("feature.txt", "new\n");
   await reviewHead(pr);
+  const head = await pr.git("rev-parse", "HEAD");
   const failed = await pr.fleet("gate");
   expect(failed.code).toBe(1);
-  expect(events(pr.home).filter((event) => event.type === "gate")).toEqual([]);
+  expect(failed.output).not.toContain("merge gate:");
+  expect(events(pr.home).filter((event) => event.type === "gate")).toEqual([expect.objectContaining({ commit: head, passed: false })]);
 
   await pr.fleet("require", "--none", "--reason", "docs only");
   const passed = await pr.fleet("gate");
   expect(passed.code).toBe(0);
   expect(passed.output).toContain("merge gate: pass recorded in the decision ledger");
   expect(passed.output.split("\n").at(-1)).toStartWith("gate: pass");
-  const head = await pr.git("rev-parse", "HEAD");
-  expect(events(pr.home).filter((event) => event.type === "gate")).toEqual([expect.objectContaining({ type: "gate", repository: "example/product", pr: 42, commit: head })]);
+  expect(events(pr.home).filter((event) => event.type === "gate").at(-1)).toEqual(expect.objectContaining({ type: "gate", repository: "example/product", pr: 42, commit: head, passed: true }));
 });
 
 test("the ledger keeps a well-formed gate pass, drops a malformed one, and decisions ignore both", async () => {
   const home = join(await checkout().then((pr) => pr.home), "ledger");
   mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
-  const pass = { type: "gate", repository: "example/product", pr: 42, commit: "a".repeat(40), machine: "box", at: "2026-11-16T08:00:00Z" };
-  const broken = [{ ...pass, commit: "abc123" }, { ...pass, pr: 0 }, { ...pass, repository: "nobody" }, { ...pass, machine: "" }];
+  const pass = { type: "gate", repository: "example/product", pr: 42, commit: "a".repeat(40), passed: true, machine: "box", at: "2026-11-16T08:00:00Z" };
+  const { passed: _, ...unsure } = pass;
+  const broken = [{ ...pass, commit: "abc123" }, { ...pass, pr: 0 }, { ...pass, repository: "nobody" }, { ...pass, machine: "" }, { ...pass, passed: "yes" }, unsure];
   writeFileSync(ledgerFile(home), [pass, ...broken].map((event) => JSON.stringify(event)).join("\n") + "\n");
   const read: LedgerEvent[] = await localLedger(home).read();
   expect(read).toEqual([pass as LedgerEvent]);
@@ -57,6 +59,12 @@ test("a gate override is the user's 👤 answer for one PR at one full head, wit
   await expect(override("--mark", "👤", "--condition", "abc123: incident fix now")).rejects.toThrow("full 40-character head sha");
   await expect(override("--mark", "👤", "--pr", "example/product#41", "--condition", `${head}: incident fix now`)).rejects.toThrow("one --pr");
   await expect(pr.decide("record", "--mark", "👤", "--class", "merge", "--kind", "ci", "--pr", "example/product#42")).rejects.toThrow("only --kind gate-override");
+  expect(ledgerDecisions(pr)).toEqual([]);
+
+  pr.choose("Keep the gate closed", `Merge example/product#42 at ${head} without a gate pass (gate-override)? The incident cannot wait.`);
+  await expect(override("--mark", "👤", "--condition", `${head}: incident fix, the judge is down`)).rejects.toThrow('not "Override the gate"');
+  pr.choose("Override the gate", `Merge example/product#42 at ${"b".repeat(40)} without a gate pass (gate-override)? The incident cannot wait.`);
+  await expect(override("--mark", "👤", "--condition", `${head}: incident fix, the judge is down`)).rejects.toThrow(`does not name the head ${head}`);
   expect(ledgerDecisions(pr)).toEqual([]);
 
   pr.choose("Override the gate", `Merge example/product#42 at ${head} without a gate pass (gate-override)? The incident cannot wait.`);

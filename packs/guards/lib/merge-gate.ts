@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { fold, gateOverride, hubLedger, type DecisionState, type Env, type LedgerEvent } from "../../pull-requests/lib/decision-ledger.ts";
+import { fold, gateOverride, overrideChoice, hubLedger, type DecisionState, type Env, type LedgerEvent } from "../../pull-requests/lib/decision-ledger.ts";
 import { lastGateRun } from "../../pull-requests/lib/proof.ts";
 import { endpointOf, ghGroups, inOrder, parseGh, values, type Gh } from "./gh.ts";
 import { githubSlug } from "./git.ts";
@@ -17,8 +17,8 @@ const restMerge = /\/repos\/[^/\s]+\/[^/\s]+\/pulls\/\d+\/merge\b/i;
 
 const oneShape = "`gh pr comment <number> --repo <owner>/<repo> --body '/trunk merge'`";
 export const cliReason = `Fleet blocked this command: an agent enters the Trunk merge queue only with ${oneShape}, which the merge gate checks. Use that form.`;
-export const graphqlReason = `Fleet blocked this call: a GraphQL merge, auto-merge, enqueue, or comment that posts \`/trunk merge\` skips the merge gate. Enqueue with ${oneShape}, or merge with \`gh pr merge <number> --repo <owner>/<repo>\`.`;
-export const rawReason = `Fleet blocked this command: it merges a PR or posts \`/trunk merge\` straight to the GitHub API, which skips the merge gate. Enqueue with ${oneShape}.`;
+export const graphqlReason = `Fleet blocked this call: a GraphQL merge, auto-merge, enqueue, or comment that posts \`/trunk merge\` skips the merge gate, and a query read from piped input or an unreadable file may be one. Enqueue with ${oneShape}, or merge with \`gh pr merge <number> --repo <owner>/<repo>\`.`;
+export const rawReason = `Fleet blocked this command: it merges a PR or posts \`/trunk merge\` straight to the GitHub API, or sends GitHub a payload the merge gate cannot read, which skips the merge gate. Enqueue with ${oneShape}.`;
 export const otherEndpointReason = `Fleet blocked this call: it writes \`/trunk merge\` somewhere other than a new PR comment, such as an edited comment or a review. Enqueue with ${oneShape}.`;
 export const splitStringReason = "Fleet blocked this command: `env -S` runs a command line that the merge gate cannot read. Write the gh, trunk, or curl command out as its own words.";
 export const shellAliasReason = "Fleet blocked this command: it runs a gh alias that the merge gate cannot read, a shell alias or one with arguments. Write the gh command out.";
@@ -37,7 +37,7 @@ export const isExempt = (repository: string, exempt: string[]) => {
 
 export type IntentIO = {
   readText: (path: string) => string | undefined;
-  originOf: (cwd: string) => string | undefined;
+  checkoutRepo: (cwd: string) => string | undefined;
   ghRepo?: string;
   aliases?: () => Record<string, string>;
 };
@@ -55,11 +55,27 @@ export function ghAliases(config = join(process.env.GH_CONFIG_DIR ?? join(homedi
   return aliases;
 }
 
+/** The repository gh picks in a checkout from its remotes: the one `gh repo set-default` resolved, or the only GitHub remote. More than one without a default is no answer, so the PR must be named with its repository. */
+export function ghBaseRepo(remoteConfig: string): string | undefined {
+  const remotes = new Map<string, { url?: string; resolved?: string }>();
+  for (const line of remoteConfig.split("\n")) {
+    const entry = line.match(/^remote\.(.+)\.(url|gh-resolved) (.+)$/);
+    if (!entry) continue;
+    const remote = remotes.get(entry[1]!) ?? {};
+    if (entry[2] === "url") remote.url = entry[3]!.trim(); else remote.resolved = entry[3]!.trim();
+    remotes.set(entry[1]!, remote);
+  }
+  const resolved = [...remotes.values()].find((remote) => remote.resolved);
+  if (resolved) return resolved.resolved === "base" ? githubSlug(resolved.url ?? "") : repoSlug.test(resolved.resolved!) ? resolved.resolved : undefined;
+  const slugs = new Set([...remotes.values()].flatMap((remote) => githubSlug(remote.url ?? "") ?? []).map((slug) => slug.toLowerCase()));
+  return slugs.size === 1 ? [...remotes.values()].map((remote) => githubSlug(remote.url ?? "")).find(Boolean) : undefined;
+}
+
 export const realIntentIO: IntentIO = {
   readText: (path) => { try { return readFileSync(path, "utf8"); } catch { return undefined; } },
-  originOf: (cwd) => {
-    const child = Bun.spawnSync(["git", "-C", cwd, "remote", "get-url", "origin"], { stdout: "pipe", stderr: "ignore" });
-    return child.exitCode === 0 ? githubSlug(child.stdout.toString().trim()) : undefined;
+  checkoutRepo: (cwd) => {
+    const child = Bun.spawnSync(["git", "-C", cwd, "config", "--get-regexp", "^remote\\..*\\.(url|gh-resolved)$"], { stdout: "pipe", stderr: "ignore" });
+    return child.exitCode === 0 ? ghBaseRepo(child.stdout.toString()) : undefined;
   },
   ghRepo: process.env.GH_REPO,
   aliases: () => ghAliases(),
@@ -81,7 +97,7 @@ function repositoryOf(gh: Gh, found: Command, cwd: string | undefined, io: Inten
   const flagged = values(gh, "-R", "--repo").at(-1);
   const named = flagged ?? found.env.get("GH_REPO") ?? io.ghRepo;
   if (named) return repoSlug.test(named) ? named : named.match(/github\.com\/([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/)?.[1];
-  return cwd ? io.originOf(resolve(cwd, found.chdir ?? ".")) : undefined;
+  return cwd ? io.checkoutRepo(resolve(cwd, found.chdir ?? ".")) : undefined;
 }
 
 function sentTexts(found: Command, cwd: string | undefined, io: IntentIO, inline: string[], files: string[]) {
@@ -97,22 +113,33 @@ function jsonStrings(text: string): string[] {
   try { return strings(JSON.parse(text)); } catch { return []; }
 }
 
+const builtAtRunTime = /[$`]/;
 const sendsEnqueue = ({ texts, unread }: { texts: string[]; unread: boolean }, raw: string) =>
-  texts.some((text) => enqueueLine.test(text)) || (unread && mentionsEnqueue.test(raw));
+  texts.some((text) => enqueueLine.test(text)) || ((unread || texts.some((text) => builtAtRunTime.test(text))) && mentionsEnqueue.test(raw));
 
 const httpWrites = (args: string[]) => args.some((arg, index) =>
   (/^(?:-X|--request)$/.test(arg) && !/^(?:GET|HEAD)$/i.test(args[index + 1] ?? "")) || /^-X(?!GET|HEAD)\w+/i.test(arg) || /^--request=(?!GET|HEAD)/i.test(arg)
   || /^(?:-d|--data(?:-\w+)?|--json|-F|--form|-T|--upload-file)(?:=|$)/.test(arg) || /^(?:PUT|POST|PATCH)$/i.test(arg));
 
-const ghArguments = ({ name, args }: Command) =>
-  name === "gh" ? args : name === "xargs" && args.includes("gh") ? args.slice(args.indexOf("gh") + 1) : undefined;
+const payloadFiles = (args: string[]) => args.flatMap((arg, index) => {
+  const attached = arg.match(/^(?:--data(?:-\w+)?|--json|--form|-F|-d)=?(.+)$/)?.[1] ?? arg.match(/^-T(.+)$/)?.[1];
+  const value = /^(?:-d|--data(?:-\w+)?|--json|-F|--form)$/.test(arg) ? args[index + 1] : attached;
+  if (/^(?:-T|--upload-file)$/.test(arg)) return args[index + 1] ?? [];
+  if (attached !== undefined && arg.startsWith("-T")) return attached;
+  return value?.match(/^(?:[^=@]*=)?[@<](.+)$/)?.[1] ?? [];
+});
+
+function ghArguments({ name, args }: Command) {
+  if (name === "gh") return args;
+  return name === "xargs" && args.includes("gh") ? args.slice(args.indexOf("gh") + 1) : undefined;
+}
 
 function expandAlias(args: string[], io: IntentIO): string[] | undefined {
   const [first = "", ...rest] = args;
   if (ghGroups.has(first) || first.startsWith("-")) return args;
   const alias = io.aliases?.()[first];
   if (alias === undefined) return args;
-  if (alias.startsWith("!") || /\$\d|\$@/.test(alias)) return undefined;
+  if (alias.startsWith("!") || /\$\d|\$@|['"\\]/.test(alias)) return undefined;
   return [...alias.split(/\s+/).filter(Boolean), ...rest];
 }
 
@@ -120,9 +147,11 @@ function commandIntent(found: Command, raw: string, cwd: string | undefined, io:
   const name = basename(found.name);
   if (name === "trunk" && found.args.includes("merge")) return { targets: [], refusal: cliReason };
   if (["curl", "wget", "http", "https", "xh"].includes(name)) {
-    const sent = [...found.args, found.stdin?.body ?? ""].join("\n");
+    const payloads = payloadFiles(found.args).map((path) => path === "-" ? found.stdin?.body : io.readText(resolve(cwd ?? ".", found.chdir ?? ".", path)));
+    const sent = [...found.args, found.stdin?.body ?? "", ...payloads.filter((text) => text !== undefined)].join("\n");
     const writes = name === "curl" || name === "wget" ? httpWrites(found.args) || found.args.some((arg) => /^-[a-zA-Z]*[XdFT]/.test(arg)) : true;
-    return writes && (mentionsEnqueue.test(sent) || graphqlMerge.test(sent) || restMerge.test(sent)) ? { targets: [], refusal: rawReason } : { targets: [] };
+    const opaque = payloads.includes(undefined) && /github/i.test(raw);
+    return writes && (opaque || mentionsEnqueue.test(sent) || graphqlMerge.test(sent) || restMerge.test(sent)) ? { targets: [], refusal: rawReason } : { targets: [] };
   }
   const written = ghArguments(found);
   if (!written) return { targets: [] };
@@ -149,7 +178,7 @@ function commandIntent(found: Command, raw: string, cwd: string | undefined, io:
   const sent = sentTexts(found, cwd, io, inline, values(gh, "--input"));
   const enqueues = sendsEnqueue(sent, raw);
   let endpoint = endpointOf(gh).replace(/[?#].*$/s, "").replace(/\/$/, "");
-  if (endpoint === "graphql") return sent.texts.some((text) => mentionsEnqueue.test(text) || graphqlMerge.test(text)) || mentionsEnqueue.test(raw) ? { targets: [], refusal: graphqlReason } : { targets: [] };
+  if (endpoint === "graphql") return sent.piped || sent.unread || sent.texts.some((text) => mentionsEnqueue.test(text) || graphqlMerge.test(text)) || mentionsEnqueue.test(raw) ? { targets: [], refusal: graphqlReason } : { targets: [] };
   if (/\{owner\}|\{repo\}|:owner|:repo/.test(endpoint)) {
     const [owner, repo] = (repositoryOf(gh, found, cwd, io) ?? "/").split("/");
     endpoint = endpoint.replace(/\{owner\}|:owner/, owner ?? "").replace(/\{repo\}|:repo/, repo ?? "");
@@ -226,7 +255,8 @@ export type Pull = { head: string; base: string; defaultBranch: string; open: bo
 export type GateIO = {
   pull: (repository: string, pr: number) => Promise<Pull | undefined>;
   pullFor: (repository: string, branch: string) => Promise<number | undefined>;
-  localPass: (repository: string, pr: number, commit: string) => Promise<boolean>;
+  isIssue: (repository: string, number: number) => Promise<boolean>;
+  localGate: (repository: string, pr: number, commit: string) => Promise<boolean | undefined>;
   ledger: () => Promise<LedgerEvent[]>;
 };
 
@@ -243,7 +273,7 @@ async function layersOf(target: MergeTarget, io: GateIO): Promise<Layer[]> {
     seen.add(pr);
     const pull = await io.pull(target.repository, pr);
     if (!pull) {
-      if (seen.size === 1 && target.via.includes("comment")) return [];
+      if (seen.size === 1 && target.via.includes("comment") && await io.isIssue(target.repository, pr)) return [];
       throw new Error(`cannot read ${target.repository}#${pr} on GitHub`);
     }
     if (pull.open) layers.push({ repository: target.repository, pr, head: pull.head });
@@ -254,15 +284,19 @@ async function layersOf(target: MergeTarget, io: GateIO): Promise<Layer[]> {
 
 const sameRepo = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
-function passIn(events: LedgerEvent[], decisions: DecisionState[], layer: Layer): boolean {
-  const passed = events.some((event) => event.type === "gate" && sameRepo(event.repository, layer.repository) && event.pr === layer.pr && event.commit === layer.head);
-  return passed || decisions.some((decision) => !decision.voided && !decision.reversed && decision.mark === "👤" && decision.class === "merge"
+function lastGateResult(events: LedgerEvent[], layer: Layer): boolean | undefined {
+  const results = events.flatMap((event) => event.type === "gate" && sameRepo(event.repository, layer.repository) && event.pr === layer.pr && event.commit === layer.head ? [event] : []);
+  return results.toSorted((a, b) => Date.parse(a.at) - Date.parse(b.at)).at(-1)?.passed;
+}
+
+function overrideIn(decisions: DecisionState[], layer: Layer): boolean {
+  return decisions.some((decision) => !decision.voided && !decision.reversed && decision.mark === "👤" && decision.class === "merge"
     && decision.scope.kinds?.includes(gateOverride) && decision.scope.condition?.startsWith(`${layer.head}:`)
     && decision.scope.prs.some((ref) => sameRepo(ref.replace(/#\d+$/, ""), layer.repository) && ref.endsWith(`#${layer.pr}`)));
 }
 
 const gateCommand = ({ repository, pr, head }: Layer) => `fleet proof gate --repo ${repository} --pr ${pr} --commit ${head}`;
-const overrideHint = (person: string) => `For an incident fix that cannot wait for the gate, ask ${person} with the question tool, naming the PR and its head, and record the answer `
+const overrideHint = (person: string) => `For an incident fix that cannot wait for the gate, ask ${person} with the question tool, naming the PR and its full head sha, with the options "${overrideChoice}" and "Keep the gate closed", and record the answer `
   + `with \`fleet decision record --mark 👤 --class merge --kind ${gateOverride} --pr <owner/repo#n> --condition '<full head sha>: <incident and why>'\`.`;
 
 /** Why the call may not go out, or undefined when every open layer of every target passed the gate at its head. */
@@ -275,11 +309,13 @@ export async function mergeGateRisk(intent: MergeIntent, io: GateIO, person: str
   try {
     for (const target of intent.targets) {
       for (const layer of await layersOf(target, io)) {
-        if (await io.localPass(layer.repository, layer.pr, layer.head)) continue;
         if (events === undefined && hubError === undefined) {
           try { events = await io.ledger(); decisions = fold(events); } catch (error) { hubError = (error as Error).message; }
         }
-        if (events && passIn(events, decisions, layer)) continue;
+        if (overrideIn(decisions, layer)) continue;
+        const local = await io.localGate(layer.repository, layer.pr, layer.head);
+        const shared = events && lastGateResult(events, layer);
+        if (local !== false && shared !== false && (local || shared)) continue;
         const top = layer.pr === target.pr ? "" : ` (a lower layer of ${target.repository}#${target.pr})`;
         missing.push(`${layer.repository}#${layer.pr}${top} at ${layer.head.slice(0, 12)}: run \`${gateCommand(layer)}\``);
       }
@@ -289,25 +325,23 @@ export async function mergeGateRisk(intent: MergeIntent, io: GateIO, person: str
   }
   if (!missing.length) return undefined;
   const hub = hubError ? ` The decision ledger could not be read (${hubError}), so only this machine's gate records counted.` : "";
-  return `Fleet blocked this merge: \`fleet proof gate\` has not passed at the head of ${missing.join("; ")}. A missing proof store, a failed gate, or a pass at an older head does not count.${hub} `
+  return `Fleet blocked this merge: \`fleet proof gate\` has not passed at the head of ${missing.join("; ")}. A missing proof store, a pass at an older head, or a pass that a later failed run at the same head replaced does not count.${hub} `
     + `Run the gate on each head until it exits 0, then enqueue again. ${overrideHint(person)}`;
 }
 
 export const mergeGateDeadlineMs = 20_000;
+const after = (ms: number) => new Promise<void>((done) => { setTimeout(done, ms).unref(); });
 const deadlineReason = "Fleet blocked this merge: the merge gate could not read GitHub and the decision ledger in time. Try again; a merge needs a `fleet proof gate` pass at each PR's head.";
 
 /** The check's answer, or a refusal when it fails or runs past the deadline: the hook must answer before its host's timeout lets the call through. */
-export async function beforeDeadline(check: () => Promise<string | undefined>, ms = mergeGateDeadlineMs): Promise<string | undefined> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<string>((done) => { timer = setTimeout(() => done(deadlineReason), ms); });
-  try { return await Promise.race([check(), late]); }
+export async function beforeDeadline(check: () => Promise<string | undefined>, deadline: Promise<void> = after(mergeGateDeadlineMs)): Promise<string | undefined> {
+  try { return await Promise.race([check(), deadline.then(() => deadlineReason)]); }
   catch (error) { return `Fleet blocked this merge: the merge gate failed (${(error as Error).message}).`; }
-  finally { clearTimeout(timer); }
 }
 
 export function realGateIO(home: string, env: Env): GateIO {
   const api = async (path: string) => {
-    const child = Bun.spawn(["gh", "api", "-i", path], { stdout: "pipe", stderr: "pipe", timeout: 8_000, env: { ...process.env, GH_PAGER: "cat" } });
+    const child = Bun.spawn(["gh", "api", "-i", path], { stdout: "pipe", stderr: "pipe", timeout: 8_000, env: { ...process.env, ...env, GH_PAGER: "cat" } });
     const [stdout, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
     const status = Number(stdout.match(/^HTTP\/[\d.]+ (\d{3})/)?.[1] ?? 0);
     if (status === 404) return undefined;
@@ -320,10 +354,21 @@ export function realGateIO(home: string, env: Env): GateIO {
       return pull && { head: pull.head.sha, base: pull.base.ref, defaultBranch: pull.base.repo.default_branch, open: pull.state === "open" };
     },
     pullFor: async (repository, branch) => {
-      const pulls = await api(`repos/${repository}/pulls?state=all&sort=created&direction=desc&per_page=1&head=${repository.split("/")[0]}:${encodeURIComponent(branch)}`) as { number: number }[] | undefined;
-      return pulls?.[0]?.number;
+      const head = `head=${repository.split("/")[0]}:${encodeURIComponent(branch)}`;
+      const open = await api(`repos/${repository}/pulls?state=open&per_page=2&${head}`) as { number: number }[] | undefined;
+      if (open && open.length > 1) throw new Error(`more than one open PR in ${repository} has the head branch ${branch}`);
+      if (open?.[0]) return open[0].number;
+      const closed = await api(`repos/${repository}/pulls?state=closed&sort=created&direction=desc&per_page=1&${head}`) as { number: number }[] | undefined;
+      return closed?.[0]?.number;
     },
-    localPass: async (repository, pr, commit) => (await lastGateRun(home, { repository, pr, commit }).catch(() => undefined))?.code === 0,
+    isIssue: async (repository, number) => {
+      const issue = await api(`repos/${repository}/issues/${number}`) as { pull_request?: unknown } | undefined;
+      return issue !== undefined && issue.pull_request === undefined;
+    },
+    localGate: async (repository, pr, commit) => {
+      const run = await lastGateRun(home, { repository, pr, commit }).catch(() => ({ code: 1 }));
+      return run && run.code === 0;
+    },
     ledger: () => hubLedger(home, env).read(),
   };
 }

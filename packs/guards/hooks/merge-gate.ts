@@ -5,7 +5,7 @@ import type { Env } from "../../pull-requests/lib/decision-ledger.ts";
 import { beforeDeadline, exemptList, mergeGateRisk, mergeIntent, realGateIO, realIntentIO, type GateIO, type IntentIO, type ToolCall } from "../lib/merge-gate.ts";
 
 export type Denial = { hookSpecificOutput: { hookEventName: "PreToolUse"; permissionDecision: "deny"; permissionDecisionReason: string } };
-export type Where = { home: string; env: Env; gate?: GateIO; github?: Pick<GateIO, "pull" | "pullFor">; intent?: IntentIO; deadlineMs?: number };
+export type Where = { home: string; env: Env; gate?: GateIO; github?: Pick<GateIO, "pull" | "pullFor">; intent?: IntentIO; deadline?: Promise<void> };
 
 const fallbackPerson = "the person who runs this machine";
 const deny = (reason: string): Denial => ({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } });
@@ -39,7 +39,7 @@ export async function mergeGate(call: ToolCall, where: Where): Promise<Denial | 
   if (!settings) return deny(`Fleet blocked this merge: the merge gate could not read its settings (${problem}), so it cannot tell which repositories skip the gate. Fix that file.`);
   const env = { ...where.env, FLEET_SETTINGS: where.env.FLEET_SETTINGS ?? settings.text };
   const io = where.gate ?? { ...realGateIO(where.home, env), ...where.github };
-  const refusal = await beforeDeadline(() => mergeGateRisk(intent, io, settings.person), where.deadlineMs);
+  const refusal = await beforeDeadline(() => mergeGateRisk(intent, io, settings.person), where.deadline);
   return refusal ? deny(refusal) : undefined;
 }
 
@@ -52,4 +52,4 @@ async function answer(input: string, home: string): Promise<Denial | undefined> 
 
 export const hook: Hook = async (_provider, readInput, home) => printing(await answer(await readInput(), home));
 
-if (import.meta.main) await runHook(hook);
+if (import.meta.main) await runHook(hook, { exitOnAnswer: true });

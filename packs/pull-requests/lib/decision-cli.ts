@@ -4,7 +4,7 @@ import { laneSecretLines } from "../../hub/lib/secret-lane-source.ts";
 import { readPullRequest, runIn } from "./pr-ci.ts";
 import { gapKind, refuseInstructionQuote, usedAnswer } from "./proof.ts";
 import {
-  agentRefusal, answerUse, askClasses, gateOverride, brakeDays, brakeOf, covers, decisionLine, fold, hubLedger, HubUnreachable, isUsers, liftCounted, live, messageKey, namesKind, namesPr, panelRefusal, prRef, refText, thisMachine, tierOf,
+  agentRefusal, answerUse, askClasses, gateOverride, overrideChoice, brakeDays, brakeOf, covers, decisionLine, fold, hubLedger, HubUnreachable, isUsers, liftCounted, live, messageKey, namesKind, namesPr, panelRefusal, prRef, refText, thisMachine, tierOf,
   type AnswerUse, type AskClass, type Decision, type DecisionState, type Env, type Ledger, type LedgerEvent, type Lift, type PrRef, type Reversal, type Ssh, type UsersMark,
 } from "./decision-ledger.ts";
 
@@ -142,6 +142,15 @@ function checkScope({ class: decisionClass, prs, kinds }: Scope) {
 }
 
 const overrideCondition = /^[0-9a-f]{40}: \S.{9,}$/s;
+
+function fitsOverride({ class: decisionClass, kinds, condition }: Scope): ((heard: HeardAnswer) => void) | undefined {
+  if (decisionClass !== "merge" || !kinds?.includes(gateOverride)) return undefined;
+  const head = condition!.slice(0, 40);
+  return (heard) => {
+    if (!heard.answered.includes(head)) throw new Error(`The question the user answered does not name the head ${head}. A gate override covers only the head its question named; ask them again with the full head sha. The question: ${heard.answered}`);
+    if (![overrideChoice, `${overrideChoice} (Recommended)`].map(normalized).includes(normalized(heard.words))) throw new Error(`The user chose "${heard.words}", not "${overrideChoice}". The merge gate stays closed`);
+  };
+}
 
 function checkOverride({ class: decisionClass, prs, kinds, condition }: Scope, mark: string) {
   if (decisionClass !== "merge" || !kinds?.includes(gateOverride)) return;
@@ -296,7 +305,7 @@ async function record(parsed: Parsed, context: DecisionContext, ledger: Ledger) 
     decision = await decideAlone({ ...scope, question: required(parsed, "--question"), answer: required(parsed, "--answer"), rejected: required(parsed, "--rejected"), reason: required(parsed, "--reason"), thread: parsed.options.get("--thread"), link: parsed.options.get("--link") }, context, ledger);
   } else if (mark === "👤" || mark === "👍") {
     for (const option of ["--question", "--answer", "--rejected", "--reason", "--link"]) if (parsed.options.has(option)) throw new Error(`${option} belongs to the agent's own decision. The user's decision takes its question and answer from T3`);
-    decision = await hearUser({ ...scope, mark, keepOwed, thread: parsed.options.get("--thread"), words: parsed.options.get("--words"), message: parsed.options.get("--message") }, context, ledger);
+    decision = await hearUser({ ...scope, mark, keepOwed, thread: parsed.options.get("--thread"), words: parsed.options.get("--words"), message: parsed.options.get("--message"), fits: fitsOverride(scope) }, context, ledger);
   } else throw new Error("--mark takes 👤 (the user's own answer), 👍 (they accepted the recommended default) or 🤖 (the agent's own decision)");
   await appendDecision(ledger, decision);
   context.print(decisionLine(decision));
