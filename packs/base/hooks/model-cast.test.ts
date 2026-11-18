@@ -66,9 +66,13 @@ describe("name a model", () => {
   });
 
   test("keeps every row when a profile's work text spans lines or holds a pipe", async () => {
-    const agentsMd = renderedInstructions([{ role: "lookup", work: "Lookups:\nfind files | logs", provider: "claude", model: "claude-haiku-5-5", effort: "medium" }]);
+    const agentsMd = renderedInstructions([
+      { role: "lookup", work: "Lookups:\nfind files | logs\rand more", provider: "claude", model: "claude-haiku-5-5", effort: "medium" },
+      { role: "implementation", work: "Build", provider: "codex", model: "gpt-6.2-sol", effort: "high", serviceTier: "fast\npriority" },
+    ]);
     const result = await nameAModel("claude", agentCall({}), homeWith(agentsMd));
-    expect(result.stderr).toContain("| Lookups: find files \\| logs | `claude-haiku-5-5` | medium |");
+    expect(result.stderr).toContain("| Lookups: find files \\| logs and more | `claude-haiku-5-5` | medium |");
+    expect(result.stderr).toContain("| Build | `gpt-6.2-sol` | high, fast priority tier |");
     expect(result.stderr).toContain("| Review of code Claude wrote | `gpt-6.2-sol` | high |");
   });
 
@@ -97,6 +101,10 @@ describe("cast the reviewer", () => {
     "Review 9303a8e6889d82b058c5e7b71302fe1eb4027380",
     "Review requests.ts in this branch",
     "Review src/send.ts",
+    "Review src/review.ts",
+    "Review beefedb",
+    "Please do the code review for PR #12.",
+    "Please review this. It's PR #12.",
     "Review 2aa78e",
     "Review PR #12. Do not review PR #13.",
     "Review the diff and answer the review comments.",
@@ -117,6 +125,8 @@ describe("cast the reviewer", () => {
 
   test.each([
     "Fix the failing test",
+    "Fix src/review.ts",
+    "Do not review PR #12. I'll ask for a review later.",
     "What did the review say?",
     "Address the review comments on PR #123",
     "Address the review comments.",
