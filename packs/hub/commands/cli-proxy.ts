@@ -15,7 +15,7 @@ const archives: Record<string, [string, string]> = {
   arm64: ["linux_aarch64", "07b792e0d2eedb46fcb6c9d1eda913b4c53413076a03199346a85a573fd00de7"],
 };
 
-const pageVersion = "1.27.3-fleet.1";
+const pageVersion = "1.27.3-fleet.2";
 const pluginVersion = "0.1.0";
 const plugins: Record<string, [string, string]> = {
   x64: ["linux_amd64", "ed9247c71eae7571b8cbd6b088a78ab6c5fe6508670e9602a40dfdbecc0167ee"],
@@ -31,7 +31,7 @@ function panel(historyDays: number): Panel {
   const [asset, sha256] = plugins[process.arch] ?? ["unsupported", ""];
   return {
     historyDays,
-    page: { version: pageVersion, url: `https://github.com/Silthus/Cli-Proxy-API-Management-Center/releases/download/v${pageVersion}/management.html`, sha256: "a34316ca54bda5b8ef55dadb0ca0f51fc48a84dfc5ad038d4f0aef312ea2ae4d" },
+    page: { version: pageVersion, url: `https://github.com/Silthus/Cli-Proxy-API-Management-Center/releases/download/v${pageVersion}/management.html`, sha256: "fb012eb52c320708d9df62a3b911b21d754ce36e56eb01e9e4bc698e7db08863" },
     plugin: { version: pluginVersion, url: `https://github.com/Silthus/cliproxy-quota-ledger/releases/download/v${pluginVersion}/quota-ledger_${pluginVersion}_${asset}.so`, sha256 },
   };
 }
