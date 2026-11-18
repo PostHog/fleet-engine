@@ -284,7 +284,9 @@ onLinux("a prune pass reads the T3 state again for each worktree, so a run sched
   await commit(early, "work");
   const statePath = t3State(join(base, "statev2.sqlite"), [{ id: "early", worktreePath: early }, { id: "late", worktreePath: late, settledAt }]);
 
-  const verdicts = pass(base, root, statePath, { mergedPullRequest: () => (schedule(statePath, scheduledFor("late")[0]), false) });
+  const log = (line: string) => { if (line.startsWith(`kept: ${early} `)) schedule(statePath, scheduledFor("late")[0]); };
+
+  const verdicts = pass(base, root, statePath, { log });
 
   expect(verdicts.find((verdict) => verdict.path === late)).toMatchObject({ remove: false, reason: "its T3 thread has a scheduled run at 2026-11-16T08:15:00.000Z" });
 });
