@@ -404,8 +404,12 @@ function modelTable(order: Candidate[], profile: Profile): ModelRow[] {
   return rows;
 }
 
+function tableCell(text: string) {
+  return text.replace(/\s*[\r\n]+\s*/g, " ").replaceAll("|", "\\|");
+}
+
 function renderModels(rows: ModelRow[]) {
-  const lines = rows.map((row) => `| ${row.work} | \`${row.model}\` | ${row.effort}${row.serviceTier ? `, ${row.serviceTier} tier` : ""} |`);
+  const lines = rows.map((row) => `| ${tableCell(row.work)} | \`${tableCell(row.model)}\` | ${tableCell(`${row.effort}${row.serviceTier ? `, ${row.serviceTier} tier` : ""}`)} |`);
   return ["## Model selection", "", "| Work | Model | Effort |", "| --- | --- | --- |", ...lines].join("\n");
 }
 

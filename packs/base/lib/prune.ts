@@ -24,7 +24,7 @@ export type Facts = {
   agent: boolean;
 };
 
-export type Thread = { status: string | null; archived: boolean; deleted: boolean; settled: boolean; pending: boolean; activeAt: number; openLead: boolean };
+export type Thread = { status: string | null; archived: boolean; deleted: boolean; settled: boolean; wake: string | null; pending: boolean; activeAt: number; openLead: boolean };
 export type Verdict = { path: string; remove: boolean; reason: string };
 export type PruneOptions = {
   worktreeRoot: string; statePath: string; now: number;
@@ -38,6 +38,7 @@ export type PruneOptions = {
   evict?: { targetGigabytes: number; free: () => number };
   sightingsPath: string;
   mergedPullRequest: (branch: string, worktree: string) => boolean;
+  makeWritable?: (path: string) => void;
 };
 
 const busyStatuses = new Set(["running", "starting", "preparing", "queued"]);
@@ -69,7 +70,7 @@ export function decide(facts: Facts, options: IdleLimits & Pick<PruneOptions, "a
   if (idle < idleWindow(facts, options)) return keep(`no T3 thread or agent owns it; active ${idle.toFixed(1)}h ago`);
   if (facts.dirty && !(closed && facts.disposable)) return keep("uncommitted changes");
   if (facts.unreferenced > 0) return keep(`${facts.unreferenced} commits exist only in this worktree`);
-  if (facts.thread?.openLead) return keep("its T3 thread is open");
+  if (facts.thread?.openLead) return keep(`its T3 thread ${facts.thread.wake ?? "is open"}`);
   if (facts.landed) return remove(`all commits are on ${facts.defaultBranch}`);
   if (facts.prMerged) return remove(`pull request for ${facts.branch} is merged`);
   if (closed) return remove(`T3 thread is ${closed}; commits stay on ${facts.branch ?? "other refs"}`);
@@ -107,7 +108,7 @@ function uncommitted(path: string): { dirty: boolean; disposable: boolean } {
 }
 
 function closedAs(thread: Thread): string | null {
-  return thread.deleted ? "deleted" : thread.archived ? "archived" : thread.settled ? "settled" : null;
+  return thread.deleted ? "deleted" : thread.archived ? "archived" : thread.settled && !thread.wake ? "settled" : null;
 }
 
 function run(command: string[], cwd?: string, timeout = 60_000): { ok: boolean; out: string } {
@@ -123,30 +124,38 @@ export type T3State = { ok: boolean; threads: Map<string, Thread>; projects: str
 
 type StateRow = {
   path: string; archived: string | null; deleted: string | null; created: string; override: string | null; settled: string | null; messaged: string | null; pending: number; status: string | null; turned: string | null;
-  relation: string | null;
+  relation: string | null; scheduled: string | null; watched: string | null;
 };
 
 function hasTable(db: Database, name: string): boolean {
   return Boolean(db.query("select 1 from sqlite_master where type = 'table' and name = ?").get(name));
 }
 
+function scheduledRuns(db: Database): string {
+  return hasTable(db, "scheduled_tasks")
+    ? "left join (select thread_id, min(next_run_at) next_run from scheduled_tasks where enabled = 1 and next_run_at is not null group by thread_id) s on s.thread_id = t.thread_id"
+    : "left join (select null thread_id, null next_run) s on 0";
+}
+
 function orchestrationRows(db: Database): StateRow[] {
   return db.query(`select json_extract(t.payload_json, '$.worktreePath') path, t.archived_at archived, t.deleted_at deleted, t.created_at created,
       json_extract(t.payload_json, '$.settledOverride') override, json_extract(t.payload_json, '$.settledAt') settled,
-      json_extract(t.payload_json, '$.lineage.relationshipToParent') relation,
+      json_extract(t.payload_json, '$.lineage.relationshipToParent') relation, s.next_run scheduled,
+      (select json_extract(p.value, '$.repository') || '#' || json_extract(p.value, '$.number') from json_each(t.payload_json, '$.pullRequests') p
+        where json_extract(p.value, '$.watch') is not null limit 1) watched,
       (select max(m.created_at) from orchestration_v2_projection_messages m where m.thread_id = t.thread_id and m.role = 'user') messaged,
       (select count(*) from orchestration_v2_projection_runtime_requests q where q.thread_id = t.thread_id and q.resolved_at is null) pending,
       (select r.status from orchestration_v2_projection_runs r where r.thread_id = t.thread_id
         order by case r.status when 'running' then 0 when 'starting' then 1 when 'preparing' then 2 when 'queued' then 3 else 4 end, r.ordinal desc limit 1) status,
       (select max(coalesce(r.completed_at, r.requested_at)) from orchestration_v2_projection_runs r where r.thread_id = t.thread_id) turned
-    from orchestration_v2_projection_threads t where json_extract(t.payload_json, '$.worktreePath') is not null`).all() as StateRow[];
+    from orchestration_v2_projection_threads t ${scheduledRuns(db)} where json_extract(t.payload_json, '$.worktreePath') is not null`).all() as StateRow[];
 }
 
 function legacyRows(db: Database): StateRow[] {
   const columns = new Set((db.query("pragma table_info(projection_threads)").all() as Array<{ name: string }>).map((column) => column.name));
   const settle = columns.has("settled_override") ? "t.settled_override override, t.settled_at settled" : "null override, null settled";
   return db.query(`select t.worktree_path path, t.archived_at archived, t.deleted_at deleted, t.created_at created,
-      ${settle}, null relation,
+      ${settle}, null relation, null scheduled, null watched,
       t.latest_user_message_at messaged, t.pending_approval_count + t.pending_user_input_count pending, s.status status,
       (select max(coalesce(completed_at, started_at, requested_at)) from projection_turns u where u.thread_id = t.thread_id) turned
     from projection_threads t left join projection_thread_sessions s using (thread_id) where t.worktree_path is not null`).all() as StateRow[];
@@ -159,25 +168,39 @@ export function readState(statePath: string): T3State {
   try {
     db = new Database(statePath, { readonly: true });
     const rows = hasTable(db, "orchestration_v2_projection_threads") ? orchestrationRows(db) : legacyRows(db);
+    const shared = new Map<string, Thread[]>();
     const led = new Set<string>();
     for (const row of rows) {
       const thread: Thread = {
         status: row.status, archived: Boolean(row.archived), deleted: Boolean(row.deleted), pending: row.pending > 0,
         settled: row.override !== "active" && (row.override === "settled" || row.settled !== null),
+        wake: row.scheduled ? `has a scheduled run at ${row.scheduled}` : row.watched ? `watches ${row.watched}` : null,
         activeAt: Math.max(...[row.created, row.messaged, row.turned].map((value) => Date.parse(value ?? "") || 0)), openLead: false,
       };
       const key = resolve(row.path);
-      const previous = state.threads.get(key);
-      const open = (item: Thread) => !closedAs(item);
-      if (!previous || (open(thread) && !open(previous)) || (open(thread) === open(previous) && thread.activeAt > previous.activeAt)) state.threads.set(key, thread);
-      if (open(thread) && row.relation !== "subagent") led.add(key);
+      const sharing = shared.get(key);
+      if (sharing) sharing.push(thread);
+      else shared.set(key, [thread]);
+      if (!closedAs(thread) && (row.relation !== "subagent" || thread.wake)) led.add(key);
     }
-    for (const [key, thread] of state.threads) thread.openLead = led.has(key);
+    for (const [key, threads] of shared) state.threads.set(key, { ...worktreeThread(threads), openLead: led.has(key) });
     if (hasTable(db, "projection_projects")) state.projects = (db.query("select workspace_root root from projection_projects where deleted_at is null").all() as Array<{ root: string }>).map((row) => resolve(row.root));
   } catch {
     return { ok: false, threads: new Map(), projects: [] };
   } finally { db?.close(); }
   return state;
+}
+
+function worktreeThread(threads: Thread[]): Thread {
+  const open = threads.filter((thread) => !closedAs(thread));
+  const latest = (open.length ? open : threads).reduce((chosen, thread) => thread.activeAt > chosen.activeAt ? thread : chosen);
+  return {
+    ...latest,
+    status: threads.find((thread) => thread.status && busyStatuses.has(thread.status))?.status ?? latest.status,
+    pending: threads.some((thread) => thread.pending),
+    activeAt: Math.max(...threads.map((thread) => thread.activeAt)),
+    wake: open.find((thread) => thread.wake)?.wake ?? null,
+  };
 }
 
 function processDirectories(): string[] {
@@ -261,12 +284,18 @@ export function listCandidates(worktreeRoot: string, projects: string[], repos: 
 
 type Processes = { running: string[]; seen: Sightings };
 
-function gather(path: string, state: T3State, managed: boolean, processes: Processes, branches: Map<string, string | null>, options: PruneOptions): Facts {
-  const thread = state.threads.get(path) ?? null;
+type WithState = (facts: Facts, state: T3State) => Facts;
+
+function withState(facts: Facts, state: T3State, managed: boolean): Facts {
+  const thread = state.threads.get(facts.path) ?? null;
+  return { ...facts, thread, stateUnknown: managed && !state.ok, lastActivity: Math.max(facts.lastActivity, thread?.activeAt ?? 0) };
+}
+
+function inspect(path: string, processes: Processes, branches: Map<string, string | null>, options: PruneOptions): Facts {
   const base: Facts = {
     path, kind: "orphan", dirty: false, disposable: false, branch: null, unreferenced: 0, landed: false, defaultBranch: null, prMerged: false,
-    inUse: inside(path, processes.running), lastActivity: Math.max(mtime(path), thread?.activeAt ?? 0, lastSeenInside(path, processes.seen)),
-    thread, stateUnknown: managed && !state.ok,
+    inUse: inside(path, processes.running), lastActivity: Math.max(mtime(path), lastSeenInside(path, processes.seen)),
+    thread: null, stateUnknown: false,
     agent: /\/\.claude\/worktrees\/agent-[^/]+$/.test(path),
   };
   const gitDir = git(path, "rev-parse", "--path-format=absolute", "--git-dir");
@@ -297,43 +326,51 @@ function gather(path: string, state: T3State, managed: boolean, processes: Proce
   return facts;
 }
 
-function removeDirectory(facts: Facts): { ok: boolean; error?: string } {
-  run(["find", facts.path, "-xdev", "-type", "d", "!", "-perm", "-u+w", "-exec", "chmod", "u+w", "{}", "+"], undefined, 600_000);
-  if (facts.kind === "worktree") {
-    const common = dirname(git(facts.path, "rev-parse", "--path-format=absolute", "--git-common-dir").out);
-    const force = facts.dirty;
-    if (force && !uncommitted(facts.path).disposable) return { ok: false, error: "new uncommitted changes" };
-    const removed = Bun.spawnSync(["git", "-C", common, "worktree", "remove", ...(force ? ["--force"] : []), facts.path], { stderr: "pipe", timeout: 600_000 });
-    if (removed.exitCode !== 0) return { ok: false, error: removed.stderr.toString().trim() };
-    return { ok: true };
-  }
-  const removed = run(removeTreeCommand(facts.path), undefined, 600_000);
-  return removed.ok ? { ok: true } : { ok: false, error: "rm failed" };
-}
+const makeWritable = (path: string) => { run(["find", path, "-xdev", "-type", "d", "!", "-perm", "-u+w", "-exec", "chmod", "u+w", "{}", "+"], undefined, 600_000); };
 
-function removeIfDecided(facts: Facts, verdict: Verdict, options: PruneOptions): Verdict {
+function removeIfDecided(facts: Facts, verdict: Verdict, options: PruneOptions, decideNow: (state: T3State) => Verdict): Verdict {
   if (!verdict.remove || options.dryRun) return verdict;
+  const failed = (error: string) => ({ ...verdict, remove: false, reason: `removal failed: ${error}` });
   if (inside(facts.path, processDirectories())) return { ...verdict, remove: false, reason: "a process started inside it" };
-  const result = removeDirectory(facts);
-  return result.ok ? verdict : { ...verdict, remove: false, reason: `removal failed: ${result.error}` };
+  (options.makeWritable ?? makeWritable)(facts.path);
+  if (facts.kind === "worktree" && facts.dirty && !uncommitted(facts.path).disposable) return failed("new uncommitted changes");
+  const decided = decideNow(readState(options.statePath));
+  if (!decided.remove) return decided;
+  if (facts.kind !== "worktree") return run(removeTreeCommand(facts.path), undefined, 600_000).ok ? decided : failed("rm failed");
+  const common = dirname(git(facts.path, "rev-parse", "--path-format=absolute", "--git-common-dir").out);
+  const removed = Bun.spawnSync(["git", "-C", common, "worktree", "remove", ...(facts.dirty ? ["--force"] : []), facts.path], { stderr: "pipe", timeout: 600_000 });
+  return removed.exitCode === 0 ? decided : failed(removed.stderr.toString().trim());
 }
 
 const device = (path: string) => { try { return statSync(path).dev; } catch { return -1; } };
 
-function evict(kept: Facts[], target: NonNullable<PruneOptions["evict"]>, options: PruneOptions, refresh: (path: string) => Facts): Verdict[] {
+function evict(kept: Facts[], target: NonNullable<PruneOptions["evict"]>, options: PruneOptions, refresh: (path: string) => Facts, current: WithState): Verdict[] {
   const evicted: Verdict[] = [];
   const pressured = device(options.worktreeRoot);
-  const candidates = kept.filter((facts) => evictable(facts, options) && device(facts.path) === pressured).sort((a, b) => a.lastActivity - b.lastActivity);
+  const woken = (facts: Facts) => Number(Boolean(facts.thread?.wake));
+  const candidates = kept.filter((facts) => evictable(facts, options) && device(facts.path) === pressured)
+    .sort((a, b) => woken(a) - woken(b) || a.lastActivity - b.lastActivity);
   const reason = (facts: Facts) => `disk is low; idle ${((options.now - facts.lastActivity) / hour).toFixed(1)}h; commits stay on ${facts.branch ?? "other refs"}`;
   if (options.dryRun) {
     for (const facts of candidates) options.log(`would evict while below ${target.targetGigabytes}G free: ${facts.path} (${reason(facts)})`);
     return [];
   }
-  for (const facts of candidates) {
+  while (candidates.length) {
     if (target.free() >= target.targetGigabytes * gigabyte) break;
-    const current = refresh(facts.path);
-    if (!evictable(current, options)) continue;
-    const verdict = removeIfDecided(current, { path: current.path, remove: true, reason: reason(current) }, options);
+    const threads = readState(options.statePath).threads;
+    const wakeNow = (facts: Facts) => Number(Boolean(threads.get(facts.path)?.wake));
+    candidates.sort((a, b) => wakeNow(a) - wakeNow(b) || a.lastActivity - b.lastActivity);
+    const facts = candidates.shift()!;
+    const checked = refresh(facts.path);
+    if (!evictable(checked, options)) continue;
+    let outranked = false;
+    const verdict = removeIfDecided(checked, { path: checked.path, remove: true, reason: reason(checked) }, options, (state) => {
+      const latest = current(checked, state);
+      if (!evictable(latest, options)) return { path: latest.path, remove: false, reason: "its T3 thread became active" };
+      outranked = Boolean(latest.thread?.wake) && candidates.some((other) => !state.threads.get(other.path)?.wake);
+      return { path: latest.path, remove: !outranked, reason: outranked ? `its T3 thread ${latest.thread?.wake}` : reason(latest) };
+    });
+    if (outranked) { candidates.push(facts); continue; }
     options.log(`${verdict.remove ? "evicted" : "kept"}: ${facts.path} (${verdict.reason})`);
     if (verdict.remove) evicted.push(verdict);
   }
@@ -351,16 +388,16 @@ export function prune(options: PruneOptions): Verdict[] {
   options.log(`Prune ${options.dryRun ? "preview" : "pass"}, idle ${options.minIdleHours}h: ${describeFree(options.worktreeRoot)}`);
   if (!state.ok) options.log(`Cannot read ${options.statePath}. Keeping every T3 worktree${options.evict ? " except clean ones the disk pressure evicts" : ""}.`);
   const root = resolve(options.worktreeRoot);
+  const current: WithState = (facts, latest) => withState(facts, latest, facts.path.startsWith(`${root}/`));
   for (const path of listCandidates(root, state.projects, options.repos)) {
-    const managed = path.startsWith(`${root}/`);
-    const facts = gather(path, state, managed, { running: processDirectories(), seen }, branches, options);
-    const verdict = removeIfDecided(facts, decide(facts, options), options);
+    const facts = current(inspect(path, { running: processDirectories(), seen }, branches, options), readState(options.statePath));
+    const verdict = removeIfDecided(facts, decide(facts, options), options, (latest) => decide(current(facts, latest), options));
     if (!verdict.remove) kept.set(path, facts);
     verdicts.push(verdict);
     options.log(`${verdict.remove ? (options.dryRun ? "would remove" : "removed") : "kept"}: ${path} (${verdict.reason})`);
   }
-  const refresh = (path: string) => gather(path, state, path.startsWith(`${root}/`), { running: processDirectories(), seen }, branches, { ...options, fetch: false });
-  if (options.evict) for (const verdict of evict([...kept.values()], options.evict, options, refresh)) verdicts[verdicts.findIndex((item) => item.path === verdict.path)] = verdict;
+  const refresh = (path: string) => current(inspect(path, { running: processDirectories(), seen }, branches, { ...options, fetch: false }), readState(options.statePath));
+  if (options.evict) for (const verdict of evict([...kept.values()], options.evict, options, refresh, current)) verdicts[verdicts.findIndex((item) => item.path === verdict.path)] = verdict;
   for (const common of branches.keys()) if (!options.dryRun) run(["git", "-C", common, "worktree", "prune"]);
   options.log(`Done: ${verdicts.filter((verdict) => verdict.remove).length} removed, ${verdicts.filter((verdict) => !verdict.remove).length} kept. ${describeFree(options.worktreeRoot)}`);
   return verdicts;

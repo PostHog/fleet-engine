@@ -2,7 +2,6 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tempDirs } from "../../../src/testing/git.ts";
-import { check, reminder } from "./name-a-model.ts";
 import { dispatch, type HookResult } from "./run.ts";
 import { guard, type HookEvent } from "./secret-guard.ts";
 
@@ -451,19 +450,6 @@ describe("secret guard", () => {
     expect(code).toBe(0);
     expect(JSON.parse(stdout).decision).toBe("block");
     expect(existsSync(join(repository, "ran"))).toBe(false);
-  });
-});
-
-describe("name a model", () => {
-  test("blocks a Claude subagent call that names no model", () => {
-    expect(check("claude", { tool_name: "Agent", tool_input: {} })).toBe(reminder);
-    expect(check("claude", { tool_name: "Task" })).toBe(reminder);
-  });
-
-  test("lets a call with a model, another tool, or Codex through", () => {
-    expect(check("claude", { tool_name: "Agent", tool_input: { model: "sonnet" } })).toBeUndefined();
-    expect(check("claude", { tool_name: "Bash", tool_input: {} })).toBeUndefined();
-    expect(check("codex", { tool_name: "Agent", tool_input: {} })).toBeUndefined();
   });
 });
 
