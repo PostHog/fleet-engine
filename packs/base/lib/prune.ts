@@ -24,7 +24,7 @@ export type Facts = {
   agent: boolean;
 };
 
-export type Thread = { status: string | null; archived: boolean; deleted: boolean; settled: boolean; pending: boolean; activeAt: number; openLead: boolean };
+export type Thread = { status: string | null; archived: boolean; deleted: boolean; settled: boolean; wake: string | null; pending: boolean; activeAt: number; openLead: boolean };
 export type Verdict = { path: string; remove: boolean; reason: string };
 export type PruneOptions = {
   worktreeRoot: string; statePath: string; now: number;
@@ -69,7 +69,7 @@ export function decide(facts: Facts, options: IdleLimits & Pick<PruneOptions, "a
   if (idle < idleWindow(facts, options)) return keep(`no T3 thread or agent owns it; active ${idle.toFixed(1)}h ago`);
   if (facts.dirty && !(closed && facts.disposable)) return keep("uncommitted changes");
   if (facts.unreferenced > 0) return keep(`${facts.unreferenced} commits exist only in this worktree`);
-  if (facts.thread?.openLead) return keep("its T3 thread is open");
+  if (facts.thread?.openLead) return keep(`its T3 thread ${facts.thread.wake ?? "is open"}`);
   if (facts.landed) return remove(`all commits are on ${facts.defaultBranch}`);
   if (facts.prMerged) return remove(`pull request for ${facts.branch} is merged`);
   if (closed) return remove(`T3 thread is ${closed}; commits stay on ${facts.branch ?? "other refs"}`);
@@ -107,7 +107,7 @@ function uncommitted(path: string): { dirty: boolean; disposable: boolean } {
 }
 
 function closedAs(thread: Thread): string | null {
-  return thread.deleted ? "deleted" : thread.archived ? "archived" : thread.settled ? "settled" : null;
+  return thread.deleted ? "deleted" : thread.archived ? "archived" : thread.settled && !thread.wake ? "settled" : null;
 }
 
 function run(command: string[], cwd?: string, timeout = 60_000): { ok: boolean; out: string } {
@@ -123,17 +123,23 @@ export type T3State = { ok: boolean; threads: Map<string, Thread>; projects: str
 
 type StateRow = {
   path: string; archived: string | null; deleted: string | null; created: string; override: string | null; settled: string | null; messaged: string | null; pending: number; status: string | null; turned: string | null;
-  relation: string | null;
+  relation: string | null; scheduled: string | null; watched: string | null;
 };
 
 function hasTable(db: Database, name: string): boolean {
   return Boolean(db.query("select 1 from sqlite_master where type = 'table' and name = ?").get(name));
 }
 
+function scheduledRun(db: Database): string {
+  return hasTable(db, "scheduled_tasks") ? "(select min(s.next_run_at) from scheduled_tasks s where s.thread_id = t.thread_id and s.enabled = 1)" : "null";
+}
+
 function orchestrationRows(db: Database): StateRow[] {
   return db.query(`select json_extract(t.payload_json, '$.worktreePath') path, t.archived_at archived, t.deleted_at deleted, t.created_at created,
       json_extract(t.payload_json, '$.settledOverride') override, json_extract(t.payload_json, '$.settledAt') settled,
-      json_extract(t.payload_json, '$.lineage.relationshipToParent') relation,
+      json_extract(t.payload_json, '$.lineage.relationshipToParent') relation, ${scheduledRun(db)} scheduled,
+      (select json_extract(p.value, '$.repository') || '#' || json_extract(p.value, '$.number') from json_each(t.payload_json, '$.pullRequests') p
+        where json_extract(p.value, '$.watch') is not null limit 1) watched,
       (select max(m.created_at) from orchestration_v2_projection_messages m where m.thread_id = t.thread_id and m.role = 'user') messaged,
       (select count(*) from orchestration_v2_projection_runtime_requests q where q.thread_id = t.thread_id and q.resolved_at is null) pending,
       (select r.status from orchestration_v2_projection_runs r where r.thread_id = t.thread_id
@@ -146,7 +152,7 @@ function legacyRows(db: Database): StateRow[] {
   const columns = new Set((db.query("pragma table_info(projection_threads)").all() as Array<{ name: string }>).map((column) => column.name));
   const settle = columns.has("settled_override") ? "t.settled_override override, t.settled_at settled" : "null override, null settled";
   return db.query(`select t.worktree_path path, t.archived_at archived, t.deleted_at deleted, t.created_at created,
-      ${settle}, null relation,
+      ${settle}, null relation, null scheduled, null watched,
       t.latest_user_message_at messaged, t.pending_approval_count + t.pending_user_input_count pending, s.status status,
       (select max(coalesce(completed_at, started_at, requested_at)) from projection_turns u where u.thread_id = t.thread_id) turned
     from projection_threads t left join projection_thread_sessions s using (thread_id) where t.worktree_path is not null`).all() as StateRow[];
@@ -159,25 +165,37 @@ export function readState(statePath: string): T3State {
   try {
     db = new Database(statePath, { readonly: true });
     const rows = hasTable(db, "orchestration_v2_projection_threads") ? orchestrationRows(db) : legacyRows(db);
+    const shared = new Map<string, Thread[]>();
     const led = new Set<string>();
     for (const row of rows) {
       const thread: Thread = {
         status: row.status, archived: Boolean(row.archived), deleted: Boolean(row.deleted), pending: row.pending > 0,
         settled: row.override !== "active" && (row.override === "settled" || row.settled !== null),
+        wake: row.scheduled ? `has a scheduled run at ${row.scheduled}` : row.watched ? `watches ${row.watched}` : null,
         activeAt: Math.max(...[row.created, row.messaged, row.turned].map((value) => Date.parse(value ?? "") || 0)), openLead: false,
       };
       const key = resolve(row.path);
-      const previous = state.threads.get(key);
-      const open = (item: Thread) => !closedAs(item);
-      if (!previous || (open(thread) && !open(previous)) || (open(thread) === open(previous) && thread.activeAt > previous.activeAt)) state.threads.set(key, thread);
-      if (open(thread) && row.relation !== "subagent") led.add(key);
+      shared.set(key, [...shared.get(key) ?? [], thread]);
+      if (!closedAs(thread) && row.relation !== "subagent") led.add(key);
     }
-    for (const [key, thread] of state.threads) thread.openLead = led.has(key);
+    for (const [key, threads] of shared) state.threads.set(key, { ...worktreeThread(threads), openLead: led.has(key) });
     if (hasTable(db, "projection_projects")) state.projects = (db.query("select workspace_root root from projection_projects where deleted_at is null").all() as Array<{ root: string }>).map((row) => resolve(row.root));
   } catch {
     return { ok: false, threads: new Map(), projects: [] };
   } finally { db?.close(); }
   return state;
+}
+
+function worktreeThread(threads: Thread[]): Thread {
+  const open = threads.filter((thread) => !closedAs(thread));
+  const latest = (open.length ? open : threads).reduce((chosen, thread) => thread.activeAt > chosen.activeAt ? thread : chosen);
+  return {
+    ...latest,
+    status: threads.find((thread) => thread.status && busyStatuses.has(thread.status))?.status ?? latest.status,
+    pending: threads.some((thread) => thread.pending),
+    activeAt: Math.max(...threads.map((thread) => thread.activeAt)),
+    wake: open.find((thread) => thread.wake)?.wake ?? null,
+  };
 }
 
 function processDirectories(): string[] {
@@ -323,7 +341,9 @@ const device = (path: string) => { try { return statSync(path).dev; } catch { re
 function evict(kept: Facts[], target: NonNullable<PruneOptions["evict"]>, options: PruneOptions, refresh: (path: string) => Facts): Verdict[] {
   const evicted: Verdict[] = [];
   const pressured = device(options.worktreeRoot);
-  const candidates = kept.filter((facts) => evictable(facts, options) && device(facts.path) === pressured).sort((a, b) => a.lastActivity - b.lastActivity);
+  const woken = (facts: Facts) => Number(Boolean(facts.thread?.wake));
+  const candidates = kept.filter((facts) => evictable(facts, options) && device(facts.path) === pressured)
+    .sort((a, b) => woken(a) - woken(b) || a.lastActivity - b.lastActivity);
   const reason = (facts: Facts) => `disk is low; idle ${((options.now - facts.lastActivity) / hour).toFixed(1)}h; commits stay on ${facts.branch ?? "other refs"}`;
   if (options.dryRun) {
     for (const facts of candidates) options.log(`would evict while below ${target.targetGigabytes}G free: ${facts.path} (${reason(facts)})`);
