@@ -272,8 +272,8 @@ describe("the Codex rules", () => {
     expect(lstatSync(path).isSymbolicLink()).toBe(false);
     const text = readFileSync(path, "utf8");
     expect(text).toContain('prefix_rule(pattern = [["hedge", "fleet"], ["heavy", "proof", "providers", "activity", "disk", "frontier", "doctor"]], decision = "allow")');
-    expect(text).toContain('prefix_rule(pattern = ["hedge", "apply", "--dry-run"], decision = "allow")');
-    expect(text).toContain('prefix_rule(pattern = ["hedge", "thread", ["find", "read", "list"]], decision = "allow")');
+    expect(text).toContain('prefix_rule(pattern = [["hedge", "fleet"], "apply", "--dry-run"], decision = "allow")');
+    expect(text).toContain('prefix_rule(pattern = [["hedge", "fleet"], "thread", ["find", "read", "list"]], decision = "allow")');
     expect(text).not.toMatch(/availability|"plan"|dev\/hedge|HEDGE_HOME|worktree-box/);
   });
 

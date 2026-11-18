@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tempDirs } from "../../../src/testing/git.ts";
 import { agentPlist, hubTunnel, tunnelLabel, type MacTunnel } from "./hub-tunnel.ts";
 import { fakeRun, modeOf } from "./run-testing.ts";
@@ -259,4 +259,21 @@ test("left reports a launch agent Hedge wrote or one that is loaded, and nothing
   expect(existsSync(agent(home))).toBe(false);
   expect(await hubTunnel("left", deps)).toBe(1);
   expect(await hubTunnel("left", mac({ loaded: true }).deps)).toBe(0);
+});
+
+test("install stops and deletes the agent that Hedge wrote before the rename, and keeps one it did not write", async () => {
+  const { deps, home, launchd } = mac();
+  const legacy = join(home, "Library/LaunchAgents/com.fleet.hub-tunnel.plist");
+  mkdirSync(dirname(legacy), { recursive: true });
+  writeFileSync(legacy, agentPlist("/opt/bin/coder", "my-hub", [3317, 60002], "/old.log").replace("Managed by Hedge", "Managed by Fleet"));
+  expect(await hubTunnel("install", deps)).toBe(0);
+  expect(existsSync(legacy)).toBe(false);
+  expect(launchd.running).toBe(readFileSync(agent(home), "utf8"));
+
+  const other = mac();
+  const theirs = join(other.home, "Library/LaunchAgents/com.fleet.hub-tunnel.plist");
+  mkdirSync(dirname(theirs), { recursive: true });
+  writeFileSync(theirs, "<plist>someone else's</plist>\n");
+  expect(await hubTunnel("install", other.deps)).toBe(0);
+  expect(readFileSync(theirs, "utf8")).toBe("<plist>someone else's</plist>\n");
 });

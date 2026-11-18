@@ -217,6 +217,15 @@ describe("the OOM survival workflow", () => {
     expect(box.service().runningConfig).toContain("-m 10,7");
   });
 
+  test("replaces a config that Hedge wrote before the rename, when its marker still said Fleet", () => {
+    const box = machine();
+    box.install();
+    box.writeConfig(`# Managed by Fleet's Guards pack. Delete this line to keep your own settings.\nEARLYOOM_ARGS="-m 20"\n`);
+    box.start();
+    expect(box.run().code).toBe(0);
+    expect(box.service().runningConfig).toContain("-m 10,7");
+  });
+
   test("never takes a config it cannot tell from the package's default, and its check fails until a person decides", () => {
     for (const missing of ["no-conffiles", "no-md5sum"]) {
       const box = machine();

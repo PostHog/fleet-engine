@@ -148,6 +148,13 @@ test("peer install writes the config with mode 600, includes it first in the per
   expect([modeOf(statSync(join(home, ".ssh/config"))), modeOf(statSync(join(home, ".ssh/hedge-peers.conf")))]).toEqual(["600", "600"]);
 });
 
+test("peer install takes over the peer file that Hedge wrote before the rename, whose marker still said Fleet", async () => {
+  const home = temp.make("hedge-peers-");
+  writeHome(home, { ".ssh/hedge-peers.conf": "# Managed by Fleet peer access.\nHost old-hub\n" });
+  expect(await installPeerConfig(home, ["my-hub"], true)).toEqual(["my-hub"]);
+  expect(readFileSync(join(home, ".ssh/hedge-peers.conf"), "utf8")).toBe(peerConfig(["my-hub"]));
+});
+
 test("peer plan writes nothing, and install keeps a linked SSH config and a peer file Hedge did not write", async () => {
   const home = temp.make("hedge-peers-");
   expect(await installPeerConfig(home, ["box-1"], false)).toEqual(["box-1"]);

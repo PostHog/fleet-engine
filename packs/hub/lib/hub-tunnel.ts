@@ -1,6 +1,6 @@
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
-import { changedFiles, readOwned, requireInstalled, writeFiles, type Managed } from "./managed.ts";
+import { changedFiles, ownedBy, readIfThere, readOwned, requireInstalled, writeFiles, type Managed } from "./managed.ts";
 import { gatewayPort, localGatewayUrl, readGatewayClient, saveGatewayClient, type Fetch } from "../../mcp-gateway/lib/client.ts";
 import type { Run } from "../../mcp-gateway/lib/hub.ts";
 import { relayPortOf } from "./run.ts";
@@ -103,7 +103,19 @@ const agentLoaded = async (mac: MacTunnel) => (await mac.run(["launchctl", "prin
 
 const agentPath = (mac: Pick<MacTunnel, "home">) => join(mac.home, "Library/LaunchAgents", `${tunnelLabel}.plist`);
 
+const legacyLabel = "com.fleet.hub-tunnel";
+
+/** Stops and deletes the agent that Hedge wrote before the rename, so it does not hold the ports beside the new one. */
+async function removeLegacyAgent(mac: MacTunnel) {
+  const path = join(mac.home, "Library/LaunchAgents", `${legacyLabel}.plist`);
+  const content = await readIfThere(path);
+  if (content === undefined || !ownedBy(content, marker)) return;
+  await mac.run(["launchctl", "bootout", `gui/${mac.uid}/${legacyLabel}`]);
+  await rm(path, { force: true });
+}
+
 async function removeAgent(mac: MacTunnel) {
+  await removeLegacyAgent(mac);
   const agent = agentPath(mac);
   await readOwned(mac.home, agent, marker, "hub tunnel");
   if (await agentLoaded(mac)) await mac.run(["launchctl", "bootout", agentTarget(mac)]);
@@ -119,6 +131,7 @@ async function withoutTunnel(mode: MacTunnelMode, mac: MacTunnel) {
 }
 
 async function install(mac: MacTunnel, ports: number[], agent: string, domain: string, loaded: () => Promise<boolean>) {
+  await removeLegacyAgent(mac);
   const changed = await changedFiles(mac.home, [wantedAgent(mac, ports, agent)], marker, "hub tunnel");
   if (changed.length) {
     if (await loaded()) await mac.run(["launchctl", "bootout", agentTarget(mac)]);

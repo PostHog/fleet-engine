@@ -2,6 +2,7 @@
 set -eu
 config=${HEDGE_SYSTEM_ROOT:-}/etc/default/earlyoom
 marker="# Managed by Hedge's Guards pack. Delete this line to keep your own settings."
+legacy_marker="# Managed by Fleet's Guards pack. Delete this line to keep your own settings."
 prefer='^(node|MainThread|python3?|pytest|esbuild|chrome.*|jest|vitest|tsc|tsgo|turbo)$'
 avoid='^(t3|node-MainThread|claude|codex|agentapi|sshd|dockerd|containerd.*|postgres|redis-server|tmux|systemd.*)$'
 desired=$(printf '%s\nEARLYOOM_ARGS="-m 10,7 -s 100,100 --prefer %s --avoid %s"' "$marker" "$prefer" "$avoid")
@@ -10,7 +11,7 @@ installed() { dpkg-query -W -f='${Status}' earlyoom 2>/dev/null | grep -q 'insta
 package_default() { dpkg-query -W -f='${Conffiles}\n' earlyoom 2>/dev/null | awk '$1 == "/etc/default/earlyoom" { print $2 }'; }
 config_state() {
   [ -e "$config" ] || { echo absent; return; }
-  [ "$(head -n 1 "$config")" = "$marker" ] && { echo hedge; return; }
+  { [ "$(head -n 1 "$config")" = "$marker" ] || [ "$(head -n 1 "$config")" = "$legacy_marker" ]; } && { echo hedge; return; }
   default=$(package_default)
   sum=$(md5sum < "$config" 2>/dev/null) || sum=
   sum=${sum%% *}
