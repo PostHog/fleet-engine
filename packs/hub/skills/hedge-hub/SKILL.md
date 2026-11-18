@@ -122,7 +122,11 @@ the person's own subscriptions, never for someone else's.
 - **The balancer.** Every 5 minutes, `hedge cli-proxy-balance` reads the weekly
   usage of each subscription and gives the highest priority to the one whose
   weekly quota resets first. A full or unreadable subscription gets priority
-  0. It keeps fill-first routing, and session affinity keeps each session on
+  0. A Claude subscription with extra usage turned on (a Team seat) would
+  bill past its windows, so the balancer turns it off while any window is
+  full and on again when all have capacity. It lists the ones it turned off
+  in `~/.local/state/hedge/cli-proxy-paused.json`, so a subscription turned
+  off by hand stays off. It keeps fill-first routing, and session affinity keeps each session on
   one subscription. `hedge cli-proxy-balance --dry-run` prints the ranking and
   changes nothing. Unreadable usage does not fail the run. Its log lines name a
   subscription by provider and short id, such as `Claude subscription

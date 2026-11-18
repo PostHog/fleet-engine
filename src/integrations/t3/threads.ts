@@ -71,16 +71,10 @@ export async function readThread(client: T3Client, value: string): Promise<unkno
 
 export type SentMessage = { threadId: string; messageId: string; delivery: "queued" | "started" };
 
-export async function sendMessage(client: T3Client, thread: ShellThread, text: string): Promise<SentMessage> {
+export async function sendMessage(client: Pick<T3HttpClient, "callTool">, thread: ShellThread, text: string): Promise<SentMessage> {
   if (thread.archivedAt) throw new Error(`Thread ${thread.id} is archived. Unarchive it before you send it a message.`);
-  const messageId = `hedge-thread-send:${randomUUID()}`;
-  const delivery = thread.activeRunId ? "queued" : "started";
-  await client.call("orchestration.dispatchCommand", {
-    type: "message.dispatch", commandId: messageId, messageId, threadId: thread.id, text, attachments: [],
-    dispatchMode: { type: delivery === "queued" ? "queue_after_active" : "start_immediately" },
-    createdBy: "agent", creationSource: "server",
-  });
-  return { threadId: thread.id, messageId, delivery };
+  const sent = await client.callTool<SentMessage>("t3_thread_send", { threadId: thread.id, message: text, mode: "queue", clientRequestId: `hedge-thread-send:${randomUUID()}` });
+  return { threadId: sent.threadId, messageId: sent.messageId, delivery: sent.delivery };
 }
 
 export function lastActivityAt(thread: ShellThread): string {

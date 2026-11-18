@@ -1,17 +1,20 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { requireHubRole } from "./hub-job.ts";
+import { requireHubRole, stateDir, writeStateFile } from "./hub-job.ts";
 import type { Fetch } from "../../mcp-gateway/lib/client.ts";
 import { refreshCodexCatalog } from "./codex-catalog.ts";
 
 export type UsageWindow = { id?: string; utilization: number; resetsAt?: number };
-export type Usage = { fiveHour?: UsageWindow; sevenDay?: UsageWindow; scoped: UsageWindow[] };
+/** `extraUsage` is true when the account keeps answering past its windows and bills the overage. */
+export type Usage = { fiveHour?: UsageWindow; sevenDay?: UsageWindow; scoped: UsageWindow[]; extraUsage?: boolean };
 export type Provider = "claude" | "codex";
-export type Credential = { name: string; authIndex: string; provider: Provider; priority: number; usage?: Usage; quotaCooldown: boolean; blocked: string | false; loginExpired?: true };
-export type Balance = { fetch: Fetch; managementKey: string; now: number; dryRun: boolean; ledger?: boolean; log(line: string): void };
+export type Credential = { name: string; authIndex: string; provider: Provider; priority: number; usage?: Usage; quotaCooldown: boolean; blocked: string | false; loginExpired?: true; paused?: true };
+/** `pausedPath` lists the subscriptions the balancer turned off, so it turns on only those again. */
+export type Balance = { fetch: Fetch; managementKey: string; now: number; dryRun: boolean; ledger?: boolean; pausedPath?: string; log(line: string): void };
 export type LedgerSample = { at: number; auth: string; provider: Provider; window: string; remaining: number; resets_at?: number };
-export type BalanceDeps = { home: string; fetch: Fetch; now(): number; ledger: boolean; log(line: string): void };
+export type BalanceDeps = { home: string; env?: Record<string, string | undefined>; fetch: Fetch; now(): number; ledger: boolean; log(line: string): void };
 
 type AuthFile = { name: string; provider?: string; disabled?: boolean; priority?: number; auth_index?: string; unavailable?: boolean; status?: string; status_message?: string; cooldowns?: { reason?: string }[]; id_token?: { chatgpt_account_id?: unknown } };
 type RawWindow = { utilization?: number | null; resets_at?: string | null } | null | undefined;
@@ -65,6 +68,26 @@ export function priorities(credentials: Credential[]): Map<string, number> {
   }));
 }
 
+/**
+ * A Claude subscription with extra usage keeps answering after its windows are full and bills
+ * the overage. Turn it off while any window is full and on again when every window has capacity.
+ */
+export function pauseChanges(credentials: Credential[]): { pause: Credential[]; resume: Credential[] } {
+  const claude = credentials.filter((credential) => credential.provider === "claude");
+  return {
+    pause: claude.filter((credential) => !credential.paused && credential.usage?.extraUsage && quotaStatus(credential) === "exhausted"),
+    resume: claude.filter((credential) => credential.paused && hasCapacity(credential)),
+  };
+}
+
+function readPaused(path: string | undefined): Set<string> {
+  if (!path) return new Set();
+  try {
+    const names = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    return new Set(Array.isArray(names) ? names.filter((name): name is string => typeof name === "string") : []);
+  } catch { return new Set(); }
+}
+
 export async function balance(options: Balance): Promise<void> {
   const call = (path: string, init?: RequestInit) => management(options.fetch, options.managementKey, path, init);
   const current = ((await call("routing/strategy")) as { strategy?: string }).strategy;
@@ -73,18 +96,31 @@ export async function balance(options: Balance): Promise<void> {
     if (!options.dryRun) await call("routing/strategy", { method: "PUT", body: JSON.stringify({ value: strategy }) });
   }
   const { files } = (await call("auth-files")) as { files: AuthFile[] };
-  const enabled = files.filter((file) => (file.provider === "claude" || file.provider === "codex") && !file.disabled && file.auth_index);
-  const credentials = await Promise.all(enabled.map(async (file): Promise<Credential> => {
+  const pausedBefore = readPaused(options.pausedPath);
+  const enabled = files.filter((file) => (file.provider === "claude" || file.provider === "codex") && file.auth_index && (!file.disabled || (file.provider === "claude" && pausedBefore.has(file.name))));
+  const all = await Promise.all(enabled.map(async (file): Promise<Credential> => {
     const provider = file.provider as Provider;
     const usage = provider === "codex" ? await readCodexUsage(call, file.auth_index!, codexAccount(file)) : await readUsage(call, file.auth_index!);
-    return { name: file.name, authIndex: file.auth_index!, provider, priority: file.priority ?? 0, quotaCooldown: quotaCooldown(file), blocked: blocked(file), usage, ...(loginExpired(file) ? { loginExpired: true as const } : {}) };
+    return { name: file.name, authIndex: file.auth_index!, provider, priority: file.priority ?? 0, quotaCooldown: quotaCooldown(file), blocked: blocked(file), usage, ...(loginExpired(file) ? { loginExpired: true as const } : {}), ...(file.disabled ? { paused: true as const } : {}) };
   }));
+  const { pause, resume } = options.pausedPath ? pauseChanges(all) : { pause: [], resume: [] };
+  for (const credential of pause) options.log(`${label(credential)}: paused, a window is full and it bills extra usage past it`);
+  for (const credential of resume) options.log(`${label(credential)}: resumed, every window has capacity again`);
+  const credentials = all.filter((credential) => (!credential.paused || resume.includes(credential)) && !pause.includes(credential));
+  if (!options.dryRun && options.pausedPath) {
+    // Turn the proxy's subscription off or on, then record it. A failed record leaves one off,
+    // never on, and the next run drops names that are no longer off.
+    for (const credential of [...pause, ...resume]) await call("auth-files/status", { method: "PATCH", body: JSON.stringify({ name: credential.name, disabled: pause.includes(credential) }) });
+    const paused = all.filter((credential) => !credentials.includes(credential)).map((credential) => credential.name).sort();
+    if (pause.length || resume.length || paused.length !== pausedBefore.size) writeStateFile(options.pausedPath, paused);
+  }
   const claude = credentials.filter((credential) => credential.provider === "claude");
   if (!credentials.length) options.log("The proxy holds no enabled Claude or Codex subscription.");
   const planned = new Map([...credentials.map((credential) => [credential.name, credential.priority] as const), ...priorities(claude)]);
   const changed = claude.filter((credential) => planned.get(credential.name) !== credential.priority);
   if (options.dryRun || changed.length || credentials.some((credential) => !credential.usage)) {
     for (const credential of credentials) options.log(describe(credential, planned.get(credential.name)!, options.now));
+    for (const credential of all.filter((item) => !credentials.includes(item) && !pause.includes(item))) options.log(describe(credential, undefined, options.now));
   }
   for (const credential of credentials) {
     if (credential.blocked) options.log(`${label(credential)}: blocked (${credential.blocked}). The proxy skips it ${until(credential.blocked)}.`);
@@ -95,7 +131,7 @@ export async function balance(options: Balance): Promise<void> {
     await call("reset-quota", { method: "POST", body: JSON.stringify({ auth_index: credential.authIndex }) });
     options.log(`${label(credential)}: cleared quota cooldown after live usage confirmed capacity`);
   }
-  const samples = options.ledger ? ledgerSamples(credentials, options.now) : [];
+  const samples = options.ledger ? ledgerSamples(all, options.now) : [];
   if (samples.length) await call("quota-ledger/samples", { method: "POST", body: JSON.stringify({ samples }) }).catch((error: Error) => options.log(`quota history not recorded: ${error.message}`));
 }
 
@@ -183,16 +219,16 @@ async function readUsage(call: Call, authIndex: string): Promise<Usage | undefin
     const header = { Authorization: "Bearer $TOKEN$", "Content-Type": "application/json", "anthropic-beta": "oauth-2025-04-20" };
     const response = (await call("api-call", { method: "POST", body: JSON.stringify({ auth_index: authIndex, method: "GET", url: usageUrl, header }) })) as { status_code: number; body: string };
     if (response.status_code !== 200) return undefined;
-    const usage = JSON.parse(response.body) as Record<string, RawWindow>;
+    const usage = JSON.parse(response.body) as Record<string, RawWindow> & { extra_usage?: { is_enabled?: unknown } | null };
     const scoped: UsageWindow[] = [];
     for (const [key, raw] of Object.entries(usage)) {
       if (!key.startsWith("seven_day_") || key === "seven_day_breakdown" || raw == null) continue;
-      const window = usageWindow(raw);
+      const window = usageWindow(raw as RawWindow);
       if (!window) return undefined;
       scoped.push({ ...window, id: key.replaceAll("_", "-") });
     }
     const named = (window: UsageWindow | undefined, id: string) => window && { ...window, id };
-    return { fiveHour: named(usageWindow(usage.five_hour), "five-hour"), sevenDay: named(usageWindow(usage.seven_day), "seven-day"), scoped };
+    return { fiveHour: named(usageWindow(usage.five_hour), "five-hour"), sevenDay: named(usageWindow(usage.seven_day), "seven-day"), scoped, extraUsage: usage.extra_usage?.is_enabled === true };
   } catch { return undefined; }
 }
 
@@ -202,8 +238,8 @@ function usageWindow(raw: RawWindow): UsageWindow | undefined {
   return { utilization: raw.utilization, ...(Number.isNaN(resetsAt) ? {} : { resetsAt }) };
 }
 
-function describe(credential: Credential, priority: number, now: number): string {
-  const change = credential.priority === priority ? `priority ${priority}` : `priority ${credential.priority} -> ${priority}`;
+function describe(credential: Credential, priority: number | undefined, now: number): string {
+  const change = priority === undefined ? "paused" : credential.priority === priority ? `priority ${priority}` : `priority ${credential.priority} -> ${priority}`;
   if (!credential.usage) return `${label(credential)}: ${change}, usage unreadable${credential.loginExpired ? ": its login expired. Sign it in again on the hub; hedge cli-proxy doctor names the command" : ""}`;
   const window = (span: string, value?: UsageWindow) => (value ? `${span} ${value.utilization}% resets in ${value.resetsAt === undefined ? "unknown" : duration(value.resetsAt - now)}` : `${span} unknown`);
   return `${label(credential)}: ${change}, ${window("7d", credential.usage.sevenDay)}, ${window("5h", credential.usage.fiveHour)}`;
@@ -226,6 +262,7 @@ export async function balanceCommand(args: string[], deps: BalanceDeps): Promise
   const managementKey = await readManagementKey(deps.home);
   if (args.some((arg) => arg !== "--dry-run")) throw new Error("Usage: hedge cli-proxy-balance [--dry-run]");
   if (!args.includes("--dry-run")) await refreshCodexCatalog({ path: codexCatalogPath(deps.home), registryPath: modelRegistryPath(deps.home), fetch: deps.fetch, now: deps.now, log: deps.log }).catch((error) => deps.log(`Codex catalog: ${(error as Error).message}`));
-  await balance({ fetch: deps.fetch, managementKey, now: deps.now(), dryRun: args.includes("--dry-run"), ledger: deps.ledger, log: deps.log });
+  const pausedPath = join(stateDir(deps.home, deps.env ?? process.env), "cli-proxy-paused.json");
+  await balance({ fetch: deps.fetch, managementKey, now: deps.now(), dryRun: args.includes("--dry-run"), ledger: deps.ledger, pausedPath, log: deps.log });
   return 0;
 }
