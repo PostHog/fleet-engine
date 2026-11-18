@@ -81,10 +81,14 @@ function handedOverBy(handovers: Handover[], threads: ShellThread[], id: string)
   }).map(({ pr }) => key(pr)));
 }
 
+export function unhandedLinks(threads: ShellThread[], id: string, handovers: Handover[]): string[] {
+  const handed = handedOverBy(handovers, threads, id);
+  return ownedLinks(threads, id).filter((url) => !handed.has(key(url)));
+}
+
 export async function settleRefusal(id: string, deps: OwnerDeps, person: string): Promise<string | undefined> {
-  const handovers = handedOverBy(await deps.handovers(), deps.threads, id);
   const open: string[] = [];
-  for (const url of ownedLinks(deps.threads, id).filter((url) => !handovers.has(key(url)))) {
+  for (const url of unhandedLinks(deps.threads, id, await deps.handovers())) {
     const state = await deps.prState(url).catch((error: Error) => `unknown (${error.message.split("\n")[0]})`);
     if (!["closed", "merged"].includes(state)) open.push(state === "open" ? url : `${url} (state ${state})`);
   }
@@ -104,8 +108,15 @@ export async function prState(gh: Gh, url: string): Promise<string> {
 
 export const isOrganize = (name = "") => /^mcp__t3[-_]code__t3_thread_organize$/.test(name);
 
+export const guardedActions = ["settle", "snooze", "archive"];
+
+export const pinnedReason = (person: string, snoozeMark?: string) => `Fleet blocked this call: ${person} pinned this thread to keep it in view, so leave it open. `
+  + (snoozeMark
+    ? `Only a snooze ${person} asks for in the thread applies: end the turn on a line that starts with ${snoozeMark} and names the wake time.`
+    : `Only ${person} snoozes it, in T3.`);
+
 export function settleTarget(input: Record<string, unknown>, self: string | undefined): string | undefined {
-  if (!["settle", "archive"].includes(String(input.action))) return undefined;
+  if (!guardedActions.includes(String(input.action))) return undefined;
   return typeof input.threadId === "string" && input.threadId ? input.threadId : self;
 }
 
@@ -130,6 +141,7 @@ function asShellThreads(linked: LinkedThread[]): ShellThread[] {
   return linked.map((thread) => ({
     id: thread.threadId, title: thread.title, projectId: thread.projectId, status: thread.status,
     ...(thread.settled ? { settledAt: thread.updatedAt || "settled" } : {}),
+    ...(thread.pinned ? { pinnedAt: thread.updatedAt || "pinned" } : {}),
     ...(thread.parentThreadId ? { lineage: { parentThreadId: thread.parentThreadId, rootThreadId: rootOfLinked(thread), relationshipToParent: thread.relationshipToParent ?? null } } : {}),
     pullRequests: (thread.pullRequests ?? []).map((pr) => ({ repository: pr.repository, number: pr.number, url: pr.url, ...(pr.state ? { snapshot: { state: pr.state } } : {}) })),
   }));

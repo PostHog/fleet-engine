@@ -376,7 +376,7 @@ test("a typo or a bare fleet pr shows the engine's usage and never reaches the p
     const result = box.run(...args);
     expect(result.code).toBe(1);
     expect(result.err).toStartWith("fleet pr: Usage: fleet pr <subcommand>");
-    expect(result.err).toContain("bot-threads, blockers, review, stamp, forecast, handover, size, queue-wait");
+    expect(result.err).toContain("bot-threads, blockers, review, stamp, forecast, handover, settle-check, size, queue-wait");
   }
   expect(box.packArgs()).toBeUndefined();
 });
@@ -404,11 +404,16 @@ test("help lists the pack's subcommands after the engine's and exits 0 whatever 
   }
 });
 
+test("settle-check refuses an action it cannot check, so the machine that asks never reads silence as a yes", () => {
+  const result = sandbox().run("settle-check", "--action", "snooze", "--thread", "mcp:lane");
+  expect([result.code, JSON.parse(result.out)]).toEqual([0, { refusal: "Fleet blocked this snooze: T3 did not answer; retry, or snooze in the T3 UI." }]);
+});
+
 test("without a pack, a bare fleet pr shows the engine's usage", () => {
   const box = sandbox();
   const result = box.run();
   expect(result.code).toBe(1);
-  expect(result.err).toBe("fleet pr: Usage: fleet pr <subcommand>, one of bot-threads, blockers, review, stamp, forecast, handover, size. Run fleet pr --help for each one's flags.");
+  expect(result.err).toBe("fleet pr: Usage: fleet pr <subcommand>, one of bot-threads, blockers, review, stamp, forecast, handover, settle-check, size. Run fleet pr --help for each one's flags.");
 });
 
 test("forecast refuses review and stamp flags, and says there is nothing to forecast without a review bot", async () => {
