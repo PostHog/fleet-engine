@@ -14,7 +14,7 @@ const spellOutReason = (owner: string) => `Fleet blocked this command: the repos
 const commandReason = (word: string) => `Fleet blocked this command: the gh command word \`${word}\` is not spelled out, so the guard cannot tell what it runs. `
   + "A shell variable, substitution, or pattern can stand for any command. Write gh, its command group, and its action as plain text.";
 
-type Gh = { group: string; action: string; operands: string[]; flags: Map<string, string[]> };
+export type Gh = { group: string; action: string; operands: string[]; flags: Map<string, string[]> };
 
 const valuedFlags: Record<string, string> = {
   other: "-b --body -t --title -B --base -H --head -F --body-file -l --label -a --assignee -m --milestone -r --reviewer --json -q --jq --template -L --limit "
@@ -100,7 +100,7 @@ function commandWordAt(args: string[], from: number): number {
   return -1;
 }
 
-function inOrder(args: string[]): string[] {
+export function inOrder(args: string[]): string[] {
   if (!args[0]?.startsWith("-")) return args;
   const groupAt = commandWordAt(args, 0);
   if (groupAt < 0) return args;
@@ -109,7 +109,7 @@ function inOrder(args: string[]): string[] {
   return [group, ...(actionAt < 0 ? [] : [args[actionAt]]), ...args.filter((_, index) => index !== groupAt && index !== actionAt)];
 }
 
-function parseGh(given: string[]): Gh {
+export function parseGh(given: string[]): Gh {
   const args = inOrder(given);
   const [group = "", action = ""] = parseFlags(args, valuedFlags.other).operands.map((word) => aliases[word] ?? word);
   const table = valuedFlags[`${group} ${action}`] ?? valuedFlags[group] ?? valuedFlags.other;
@@ -118,13 +118,13 @@ function parseGh(given: string[]): Gh {
   return { group: aliases[first] ?? first, action: aliases[second] ?? second, operands: rest, flags };
 }
 
-const values = (gh: Gh, ...names: string[]) => names.flatMap((name) => gh.flags.get(name) ?? []);
+export const values = (gh: Gh, ...names: string[]) => names.flatMap((name) => gh.flags.get(name) ?? []);
 const isOn = (gh: Gh, ...names: string[]) => values(gh, ...names).some((value) => value.toLowerCase() !== "false");
 const repoOwner = (value: string) => {
   const segments = value.replace(/^[a-z+]+:\/\//i, "").replace(/^git@[^:]+:/, "").split("/").filter(Boolean);
   return (segments.length >= 3 ? segments[1] : segments[0]) ?? "";
 };
-const endpointOf = (gh: Gh) => gh.action.replace(/^https?:\/\/[^/]+\/(?:api\/v3\/)?/i, "").replace(/^\//, "");
+export const endpointOf = (gh: Gh) => gh.action.replace(/^https?:\/\/[^/]+\/(?:api\/v3\/)?/i, "").replace(/^\//, "");
 
 function apiFields(gh: Gh): [string, string][] {
   const fields = values(gh, "-f", "--raw-field", "-F", "--field").map((field) => field.match(/^([^=]*)=(.*)$/s));
@@ -243,7 +243,106 @@ function ownerRisk(owner: string, allowed: ReadonlySet<string>, person: string):
 const brace = /\{[^{}]*(?:,|\.\.)[^{}]*\}/;
 const pattern = new RegExp(`[*?[]|${brace.source}`);
 const singleCommands = new Set(["api", "browse", "status"]);
-const ghGroups = new Set(["agent-task", "alias", "api", "at", "attestation", "auth", "browse", "cache", "co", "codespace", "config", "cs", "extension", "ext", "gist", "gpg-key", "issue", "label", "org", "pr", "project", "release", "repo", "rs", "ruleset", "run", "search", "secret", "skill", "ssh-key", "status", "variable", "workflow"]);
+export const ghGroups = new Set(["agent-task", "alias", "api", "at", "attestation", "auth", "browse", "cache", "co", "codespace", "config", "cs", "extension", "ext", "gist", "gpg-key", "issue", "label", "org", "pr", "project", "release", "repo", "rs", "ruleset", "run", "search", "secret", "skill", "ssh-key", "status", "variable", "workflow"]);
+
+const reviewerRules = ["Bash(gh api -X POST repos/*/pulls/*/requested_reviewers *)", "Bash(gh pr edit * --add-reviewer *)"];
+const trunkRules = ["Bash(gh pr comment * --body *trunk *)", "Bash(gh api *repos/*/issues/*/comments -f body=*trunk *)"];
+const trunkBodies = ["/trunk merge", "/trunk cancel"];
+
+const ruleMatcher = (rule: string) =>
+  new RegExp(`^${rule.slice("Bash(".length, -1).split("*").map((text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[\\s\\S]*")}$`);
+
+const reviewersEndpoint = /^repos\/[\w.-]+\/[\w.-]+\/pulls\/\d+\/requested_reviewers$/;
+const reviewerField = /^(?:team_)?reviewers\[\]=[\w.-]+$/;
+const prTarget = /^(?:\d+|https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+)$/;
+const repoValue = /^[\w.-]+\/[\w.-]+$/;
+const editValues: Record<string, RegExp> = { "--add-reviewer": /^[\w.@/-]+(?:,[\w.@/-]+)*$/, "--repo": repoValue, "-R": repoValue };
+const commentsEndpoint = /^repos\/[\w.-]+\/[\w.-]+\/issues\/\d+\/comments$/;
+
+function onlyRequestsReviewers(args: string[]): boolean {
+  if (args[0] === "api") {
+    const [, flag, method, endpoint, ...fields] = args;
+    return flag === "-X" && method === "POST" && reviewersEndpoint.test(endpoint ?? "") && fields.length > 0
+      && fields.every((field, index) => index % 2 === 0 ? field === "-f" && index + 1 < fields.length : reviewerField.test(field));
+  }
+  if (args[0] !== "pr" || args[1] !== "edit") return false;
+  let targets = 0;
+  let reviewers = 0;
+  for (let index = 2; index < args.length; index++) {
+    const arg = args[index];
+    const equals = arg.startsWith("--") ? arg.indexOf("=") : -1;
+    const flag = equals > 0 ? arg.slice(0, equals) : arg;
+    const shape = editValues[flag];
+    if (shape) {
+      const value = equals > 0 ? arg.slice(equals + 1) : args[++index];
+      if (value === undefined || !shape.test(value)) return false;
+      if (flag === "--add-reviewer") reviewers++;
+    } else if (prTarget.test(arg)) targets++;
+    else return false;
+  }
+  return targets === 1 && reviewers > 0;
+}
+
+function onlyPostsTrunkCommand(args: string[]): boolean {
+  if (args[0] === "api") {
+    const rest = args[1] === "-X" && args[2] === "POST" ? args.slice(3) : args.slice(1);
+    const [endpoint, flag, field, ...extra] = rest;
+    return extra.length === 0 && commentsEndpoint.test(endpoint ?? "") && flag === "-f" && trunkBodies.some((body) => field === `body=${body}`);
+  }
+  if (args[0] !== "pr" || args[1] !== "comment") return false;
+  let targets = 0;
+  let bodies = 0;
+  for (let index = 2; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === "--body") {
+      if (!trunkBodies.includes(args[++index] ?? "")) return false;
+      bodies++;
+    } else if (arg === "--repo" || arg === "-R") {
+      if (!repoValue.test(args[++index] ?? "")) return false;
+    } else if (prTarget.test(arg)) targets++;
+    else return false;
+  }
+  return targets === 1 && bodies === 1;
+}
+
+const reviewerReason = "Fleet blocked this command: it matches an allow rule for review requests, which skips the auto-mode "
+  + "review, but it does more than request reviewers. Run the review request alone, in one of these shapes, and the rest "
+  + "as its own call: `gh pr edit <number> [--repo <owner>/<repo>] --add-reviewer <login>[,<login>]` or "
+  + "`gh api -X POST repos/<owner>/<repo>/pulls/<number>/requested_reviewers -f 'reviewers[]=<login>'` "
+  + "(`team_reviewers[]=<slug>` for a team).";
+const trunkReason = (person: string) => "Fleet blocked this command: it matches an allow rule for Trunk merge-queue commands, which skips the "
+  + "auto-mode review, but it does more than post one bare Trunk command on one PR. Post it alone, in one of these shapes, "
+  + "and run the rest as its own call: `gh pr comment <number> [--repo <owner>/<repo>] --body '/trunk merge'` or "
+  + "`gh api repos/<owner>/<repo>/issues/<number>/comments -f body='/trunk merge'` (`/trunk cancel` to leave the queue). "
+  + `Entering the queue still needs ${person}'s merge word in this conversation.`;
+
+type Narrowing = { matches: RegExp; allows: (args: string[]) => boolean; reason: (person: string) => string };
+const narrowings = new Map<string, Narrowing>([
+  ...reviewerRules.map((rule): [string, Narrowing] => [rule, { matches: ruleMatcher(rule), allows: onlyRequestsReviewers, reason: () => reviewerReason }]),
+  ...trunkRules.map((rule): [string, Narrowing] => [rule, { matches: ruleMatcher(rule), allows: onlyPostsTrunkCommand, reason: trunkReason }]),
+]);
+
+/** The Claude allow rules the gh guard can narrow, in guards.allow-rules. */
+export const narrowedRules = [...narrowings.keys()];
+
+/** Parses guards.allow-rules, one Claude allow rule per line. It throws on a rule the gh guard cannot narrow, so no listed rule goes unguarded. */
+export function allowRuleList(value: unknown): Set<string> {
+  if (value !== undefined && value !== null && typeof value !== "string") throw new Error("guards.allow-rules is not text");
+  const rules = typeof value === "string" ? value.split("\n").map((rule) => rule.trim()).filter(Boolean) : [];
+  const unknown = rules.find((rule) => !narrowings.has(rule));
+  if (unknown) throw new Error(`guards.allow-rules lists ${unknown}, which the gh guard cannot narrow. It narrows only ${narrowedRules.join(", ")}`);
+  return new Set(rules);
+}
+
+function allowRuleRisk(args: string[], writes: string[], rules: ReadonlySet<string>, person: string): string | undefined {
+  const command = ["gh", ...args].join(" ");
+  const writesFiles = writes.some((target) => target !== "/dev/null");
+  for (const rule of rules) {
+    const narrowing = narrowings.get(rule);
+    if (narrowing?.matches.test(command) && (writesFiles || !narrowing.allows(args))) return narrowing.reason(person);
+  }
+  return undefined;
+}
 
 /** Parses guards.owners, a list of GitHub owners separated by commas or spaces. No list means no owner rule. */
 export function ownerList(value: unknown): Set<string> | null {
@@ -252,9 +351,10 @@ export function ownerList(value: unknown): Set<string> | null {
 }
 
 /** Refuses gh commands that sign in, show or widen the token, change account keys, run extensions, delete or publish
- * code, or name a repository whose owner is not allowed. `inheritedRepo` is the GH_REPO the agent's shell inherits. */
-export function ghRisk(command: string, allowed: ReadonlySet<string> | null, person: string, inheritedRepo?: string): string | undefined {
-  for (const { name, args, env, bare } of commandsIn(command)) {
+ * code, name a repository whose owner is not allowed, or do more than an allow rule in `allowRules` is for.
+ * `inheritedRepo` is the GH_REPO the agent's shell inherits. */
+export function ghRisk(command: string, allowed: ReadonlySet<string> | null, person: string, inheritedRepo?: string, allowRules: ReadonlySet<string> = new Set()): string | undefined {
+  for (const { name, args, env, bare, writes } of commandsIn(command)) {
     if ((/[$`]/.test(name) || pattern.test(bare[0] ?? "")) && ghGroups.has(parseGh(args).group)) return commandReason(name);
     const ghArgs = name === "gh" ? args : name === "xargs" && args.includes("gh") ? args.slice(args.indexOf("gh") + 1) : undefined;
     if (!ghArgs) continue;
@@ -263,6 +363,8 @@ export function ghRisk(command: string, allowed: ReadonlySet<string> | null, per
     const gh = parseGh(ghArgs);
     const hidden = [gh.group, ...(singleCommands.has(gh.group) || !ghGroups.has(gh.group) ? [] : [gh.action])].find((word) => /[$`*?[{]/.test(word));
     if (hidden) return commandReason(hidden);
+    const narrowed = allowRuleRisk(ghArgs, writes, allowRules, person);
+    if (narrowed) return narrowed;
     if (values(gh, "--help").some((value) => !/^(?:0|f|false)$/i.test(value))) continue;
     const risk = exposure(gh, person);
     if (risk) return risk;

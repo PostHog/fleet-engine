@@ -4,31 +4,31 @@ import { type Hook, printing, runHook } from "../../base/lib/hook.ts";
 import { installedOwners } from "../lib/allowlist.ts";
 import { downloadRisk } from "../lib/download.ts";
 import { exitMaskRisk } from "../lib/exit-mask.ts";
-import { ghRisk, ownerList } from "../lib/gh.ts";
+import { allowRuleList, ghRisk, ownerList } from "../lib/gh.ts";
 import { gitRisk, repoList } from "../lib/git.ts";
 import { killRisk } from "../lib/kill.ts";
+import { shellTools } from "../lib/shell-words.ts";
 import { isSleepPoll, isTaskStatus, repeatedStatusReason, repeatsTaskStatus, sleepPollReason } from "../lib/wait.ts";
 
 export type ToolCall = { tool_name?: string; tool_input?: Record<string, unknown>; cwd?: string; tool_use_id?: string; transcript_path?: string };
 export type Denial = { hookSpecificOutput: { hookEventName: "PreToolUse"; permissionDecision: "deny"; permissionDecisionReason: string } };
 
 const fallbackPerson = "the person who runs this machine";
-const shellTools = new Set(["Bash", "exec_command", "shell", "shell_command", "local_shell"]);
 
-type Settings = { person: string; owners: Set<string> | null; mainPushRepos: Set<string>; unreadable?: string };
+type Settings = { person: string; owners: Set<string> | null; mainPushRepos: Set<string>; allowRules: Set<string>; unreadable?: string };
 
 function guardSettings(home: string): Settings {
   const file = join(home, ".local/state/fleet/settings.json");
-  if (!existsSync(file)) return { person: fallbackPerson, owners: null, mainPushRepos: new Set() };
+  if (!existsSync(file)) return { person: fallbackPerson, owners: null, mainPushRepos: new Set(), allowRules: new Set() };
   try {
     const settings: unknown = JSON.parse(readFileSync(file, "utf8"));
     if (typeof settings !== "object" || settings === null || Array.isArray(settings)) throw new Error("it is not a JSON object");
-    const { "guards.person": person, "guards.owners": owners, "guards.main-push-repos": mainPushRepos } = settings as Record<string, unknown>;
+    const { "guards.person": person, "guards.owners": owners, "guards.main-push-repos": mainPushRepos, "guards.allow-rules": allowRules } = settings as Record<string, unknown>;
     if (owners !== undefined && owners !== null && typeof owners !== "string") throw new Error("guards.owners is not text");
     if (mainPushRepos !== undefined && mainPushRepos !== null && typeof mainPushRepos !== "string") throw new Error("guards.main-push-repos is not text");
-    return { person: typeof person === "string" && person.trim() ? person.trim() : fallbackPerson, owners: ownerList(owners), mainPushRepos: repoList(mainPushRepos) };
+    return { person: typeof person === "string" && person.trim() ? person.trim() : fallbackPerson, owners: ownerList(owners), mainPushRepos: repoList(mainPushRepos), allowRules: allowRuleList(allowRules) };
   } catch (error) {
-    return { person: fallbackPerson, owners: null, mainPushRepos: new Set(), unreadable: `${file} (${error instanceof Error ? error.message : String(error)})` };
+    return { person: fallbackPerson, owners: null, mainPushRepos: new Set(), allowRules: new Set(), unreadable: `${file} (${error instanceof Error ? error.message : String(error)})` };
   }
 }
 
@@ -46,13 +46,13 @@ const unreadableReason = (problem: string, person: string) => `Fleet blocked thi
 const uncheckedReason = (error: unknown, person: string) => `Fleet blocked this call: the shell guards could not check it (${error instanceof Error ? error.message : String(error)}). `
   + `Split it into simpler commands, or stop and ask ${person}.`;
 
-function check(call: ToolCall, { person, owners, mainPushRepos, unreadable }: Settings): string | undefined {
+function check(call: ToolCall, { person, owners, mainPushRepos, allowRules, unreadable }: Settings): string | undefined {
   if (isTaskStatus(call.tool_name)) return repeatsTaskStatus(call) ? repeatedStatusReason(person) : undefined;
   if (!shellTools.has(call.tool_name ?? "")) return undefined;
   if (unreadable) return unreadableReason(unreadable, person);
   const command = shellCommand(call.tool_input);
   const cwd = call.cwd ?? "/";
-  return downloadRisk(command, cwd, person) ?? ghRisk(command, owners, person, process.env.GH_REPO) ?? killRisk(command, person)
+  return downloadRisk(command, cwd, person) ?? ghRisk(command, owners, person, process.env.GH_REPO, allowRules) ?? killRisk(command, person)
     ?? gitRisk(command, cwd, person, mainPushRepos) ?? exitMaskRisk(command, person) ?? (isSleepPoll(command) ? sleepPollReason(person) : undefined);
 }
 

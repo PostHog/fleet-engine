@@ -28,6 +28,20 @@
       "ask": "never"
     },
     {
+      "key": "guards.allow-rules",
+      "question": "Which Claude allow rules that skip the auto-mode review does this machine add for gh, one per line? The shell guards refuse each command such a rule matches that does more than the rule is for.",
+      "type": "string",
+      "optional": true,
+      "ask": "never"
+    },
+    {
+      "key": "guards.merge-gate-exempt",
+      "question": "Which GitHub repositories may agents merge without a fleet proof gate pass, as owner/name or owner/* separated by commas?",
+      "type": "string",
+      "optional": true,
+      "ask": "never"
+    },
+    {
       "key": "guards.signers",
       "question": "Which SSH public keys may sign the Git allowlist, one per line?",
       "type": "string",
@@ -43,7 +57,21 @@
       "sentence": "Agents cannot pipe network code into a shell, run a package the project lacks, change how Git maps URLs, use gh outside your GitHub owners, poll in a loop of turns, hide the exit status of a push, commit, merge or gate behind a pipe, kill their own shell with pkill -f, skip Git hooks, force-push without a lease, or push to main of a repository that takes pull requests.",
       "settings": [
         "guards.owners",
-        "guards.main-push-repos"
+        "guards.main-push-repos",
+        "guards.allow-rules"
+      ]
+    },
+    {
+      "id": "merge-gate",
+      "name": "Merge gate",
+      "default": false,
+      "needs": [
+        "gh"
+      ],
+      "sentence": "An agent's Trunk enqueue or merge of a pull request waits until fleet proof gate passed at the head of each open layer of its stack, or you overrode the gate for that head.",
+      "risk": "An enqueue or merge waits up to 15 seconds while the gate reads GitHub and the decision ledger, and it is refused when either cannot be read. Repositories in guards.merge-gate-exempt skip the gate.",
+      "settings": [
+        "guards.merge-gate-exempt"
       ]
     },
     {
@@ -90,6 +118,11 @@
       "path": "hooks/guards.ts",
       "target": ".config/fleet/hooks/PreToolUse/guards.ts",
       "workflow": "shell-guards"
+    },
+    {
+      "path": "hooks/merge-gate.ts",
+      "target": ".config/fleet/hooks/PreToolUse/merge-gate.ts",
+      "workflow": "merge-gate"
     },
     {
       "path": "system/t3-agent-scope-oom.conf",

@@ -25,6 +25,20 @@ they turn one on. Ask with your question tool, in one call:
   or `master` of any other GitHub repository, unless its `AGENTS.md` says to
   push there. Add `--set guards.main-push-repos=<repos>`.
 
+`merge-gate` makes an agent's Trunk enqueue or merge wait for a
+`fleet proof gate` pass at the head of each open layer of the PR's stack, or
+for the person's gate override at that head. Turn it on only when the person
+proves PRs with the Pull requests pack: add `--workflows merge-gate=on`.
+Repositories that merge without the gate, such as their own tooling, go in
+`--set guards.merge-gate-exempt=<owner/name or owner/*, ...>`.
+
+When the person adds Claude allow rules that let agents request reviewers or
+post `/trunk merge` without the auto-mode review, list the same rules, one per
+line, in `guards.allow-rules`. The shell guards then refuse each command such a
+rule matches that does more than request reviewers or post one bare Trunk
+command. The guards refuse every shell call while that list names a rule they
+cannot narrow.
+
 `gh-stack` installs GitHub's `gh stack` extension at a pinned version and
 checks its digest. The shell guards refuse every other gh extension, and count
 the branches a `gh stack push` sends toward the burst limit. Turn it on only
