@@ -220,6 +220,38 @@ describe("closing-line parking", () => {
     expect(await settleOnce({})).toBe(now.toISOString());
   });
 
+  test("the settle reads the thread and its check after it reads the handovers, so a check turned off or a snooze set meanwhile leaves the thread alone", async () => {
+    const settleOnce = async (change: (home: string, thread: ShellThread) => void) => {
+      const server = t3Server({ status: "completed", activeRunId: null });
+      const home = homeWith(checkSoon);
+      let reads = 0;
+      const handovers = async () => {
+        if (++reads === 2) change(home, server.threads[0]!);
+        return [];
+      };
+      await settleWhenRunEnds(server.t3, { threadId, runId, since: now, stillParks: stillParks(home, () => now, handovers) }, { now: () => 0, sleep: async () => {} });
+      return server.threads[0]!.settledAt;
+    };
+    const checkOff = (home: string) => {
+      const db = new Database(join(home, ".t3/userdata/statev2.sqlite"));
+      db.run("update scheduled_tasks set enabled = 0");
+      db.close();
+    };
+    expect(await settleOnce(checkOff)).toBeNull();
+    expect(await settleOnce((_home, thread) => { thread.snoozedUntil = "2026-11-15T08:00:00.000Z"; })).toBeNull();
+    expect(await settleOnce(() => {})).toBe(now.toISOString());
+  });
+
+  test("a timed snooze reads the clock after it reads T3, so a time that passed meanwhile is not sent", async () => {
+    const home = homeWith([], { ...parkingOn, "orchestration.timeZone": "UTC" });
+    const server = t3Server();
+    let clock = new Date("2026-11-14T11:59:59.000Z");
+    const slow = { ...server.t3, shell: async () => { clock = new Date("2026-11-14T12:00:01.000Z"); return server.t3.shell(); } };
+    const answer = await stop("💤 This thread **snoozes until 14th Nov 12:00**", server, { home, t3: slow, now: () => clock });
+    expect(answer?.decision).toBe("block");
+    expect(server.received).toEqual([]);
+  });
+
   test("the longest mark wins when one set mark starts another", async () => {
     const home = homeWith([], { ...parkingOn, "orchestration.timeZone": "UTC", "orchestration.waitMark": "WAIT", "orchestration.snoozeMark": "WAIT UNTIL" });
     const timed = t3Server();
