@@ -3,22 +3,25 @@ import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type Hook, printing, runHook } from "../../base/lib/hook.ts";
-import { findThread, matchThread, questionCard, type ShellThread, t3CliRunner, t3UserData, withT3Session } from "../../base/lib/t3/index.ts";
-import { proofStop, type ProofStopEvent, type ProofStopOptions } from "../lib/proof-stop.ts";
+import { matchThread, questionCard, type ShellThread, t3CliRunner, t3UserData, withT3Session } from "../../base/lib/t3/index.ts";
+import { backgroundReason, closesWaiting, unwaitedBackgroundTasks } from "../lib/background-stop.ts";
+import { checksRun, claudeTaskRuns, proofStop, waits, type ProofStopEvent, type ProofStopOptions } from "../lib/proof-stop.ts";
 import { asksForDecision, personName } from "../lib/prose-question.ts";
 
 export type StopEvent = { transcript_path?: string; stop_hook_active?: boolean; last_assistant_message?: string };
 export type StopBlock = { decision: "block"; reason: string };
-export type IsTopLevel = (threadId: string | undefined, home: string) => Promise<boolean>;
+export type IsHidden = (threadId: string | undefined, home: string, event: ProofStopEvent, message: string) => Promise<boolean>;
 
 type Line = { type?: string; isMeta?: boolean; message?: { role?: string; content?: unknown }; payload?: { type?: string; role?: string; name?: string; content?: unknown } };
 type Block = { type?: string; text?: string; name?: string };
 type Step = { text: string } | { asked: true };
 
-export const questionToolReason = (person: string) => `Fleet blocked this stop: your last message asks ${person} a decision in prose. `
-  + "While a PR watch, a thread wait, or a Monitor is awaited, T3 keeps this thread under Working, so the question never reaches them. "
+export const questionToolReason = (person: string) => `Fleet blocked this stop: your last message asks ${person} a decision in prose, `
+  + "and this thread stays out of their inbox after the turn: it is snoozed, waits on a task, Monitor or thread wait, watches PR checks, or closes on ⏳, 💤 or 🔕. "
   + "Ask it now with the question tool (AskUserQuestion in Claude, request_user_input in Codex): restate the decision in full, with options. "
-  + `A pending question brings the thread back to ${person} even while it watches. If you asked nothing, end the turn again.`;
+  + `A pending question brings the thread back to ${person}. `
+  + `If you cannot ask on a card, because a skill asks in prose or ${person} turned down the card, end the turn with your complete reply again, word for word: `
+  + "T3 shows only the last message, so a pointer such as \"see my previous message\" hides your reply. If you asked nothing, end the turn again.";
 
 const questionTool = /(^|__)(AskUserQuestion|request_user_input)$/;
 
@@ -72,17 +75,25 @@ export function currentTurn(transcript: string): string[] {
   return lines;
 }
 
-const isTopLevelT3Thread: IsTopLevel = async (threadId, home) => {
+const awaitsChecks = ({ snapshot, watch }: NonNullable<ShellThread["pullRequests"]>[number]) =>
+  Boolean(watch) && !["merged", "closed"].includes(snapshot?.state?.toLowerCase() ?? "open") && (checksRun(watch!) || Boolean(watch!.awaitingApproval?.length));
+
+const closesOnPark = (message: string) => /^(⏳|💤|🔕)/u.test(message.split("\n").map((line) => line.trim()).filter(Boolean).at(-1) ?? "");
+
+export const hiddenIn = (shell: ReadShell, now = Date.now): IsHidden => async (threadId, _home, event, message) => {
   if (!threadId) return false;
   try {
-    const thread = await withT3Session((client) => findThread(client, threadId), { home });
-    return Boolean(thread && !thread.lineage?.parentThreadId);
+    const { threads } = await shell();
+    const thread = matchThread(threads, threadId, (item) => item.id);
+    if (!thread || thread.lineage?.parentThreadId) return false;
+    return (Boolean(thread.snoozedUntil) && Date.parse(thread.snoozedUntil!) > now()) || closesOnPark(message) || claudeTaskRuns(event)
+      || waits(threads, thread) || (thread.pullRequests ?? []).some(awaitsChecks);
   } catch {
     return false;
   }
 };
 
-export async function guardStop(event: StopEvent, home: string, threadId = process.env.T3CODE_THREAD_ID, topLevel: IsTopLevel = isTopLevelT3Thread): Promise<StopBlock | undefined> {
+export async function guardStop(event: StopEvent & ProofStopEvent, home: string, threadId = process.env.T3CODE_THREAD_ID, hidden: IsHidden = hiddenIn(liveShell(home))): Promise<StopBlock | undefined> {
   if (event.stop_hook_active || !event.transcript_path) return undefined;
   let turn: string[];
   try {
@@ -92,7 +103,7 @@ export async function guardStop(event: StopEvent, home: string, threadId = proce
   }
   const { last, asked } = askedAfterLastMessage(turn, event.last_assistant_message);
   if (asked || !last || !asksForDecision(last)) return undefined;
-  if (!(await topLevel(threadId, home))) return undefined;
+  if (!(await hidden(threadId, home, event, last))) return undefined;
   return { decision: "block", reason: questionToolReason(personName(home)) };
 }
 
@@ -170,12 +181,21 @@ const t3CallMs = 3_000;
 const liveShell = (home: string): ReadShell => () =>
   withT3Session((client) => client.getShell<{ threads: ShellThread[] }>(), { home, ttl: "1m", timeoutMs: t3CallMs, runCli: t3CliRunner({ timeoutMs: t3CallMs }) });
 
-export type StopDeps = Partial<Pick<ProofStopOptions, "threadId" | "git" | "processes" | "deadline">> & { topLevel?: IsTopLevel };
+export type StopDeps = Partial<Pick<ProofStopOptions, "threadId" | "git" | "processes" | "deadline">> & { hidden?: IsHidden };
+
+export async function guardBackground(event: StopEvent & ProofStopEvent, home: string, threadId: string | undefined): Promise<StopBlock | undefined> {
+  if (event.stop_hook_active || !threadId || !event.transcript_path || !event.background_tasks?.length) return undefined;
+  if (closesWaiting(await finalMessage(event))) return undefined;
+  const ids = unwaitedBackgroundTasks(currentTurn(await readFile(event.transcript_path, "utf8")), event.background_tasks);
+  return ids.length ? { decision: "block", reason: backgroundReason(ids, personName(home)) } : undefined;
+}
 
 async function guardStopAndProof(event: StopEvent & ProofStopEvent, home: string, shell: ReadShell, deps: StopDeps) {
   const threadId = "threadId" in deps ? deps.threadId : process.env.T3CODE_THREAD_ID;
-  const prose = await guardStop(event, home, threadId, deps.topLevel).catch(() => undefined);
+  const prose = await guardStop(event, home, threadId, deps.hidden ?? hiddenIn(shell)).catch(() => undefined);
   if (prose || existsSync(join(home, killSwitch))) return prose;
+  const background = await guardBackground(event, home, threadId).catch(() => undefined);
+  if (background) return background;
   return proofStop({ ...event, last_assistant_message: await finalMessage(event) }, { home, shell, ...deps, threadId });
 }
 

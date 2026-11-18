@@ -253,7 +253,8 @@ function checkModels(models: unknown, fail: (message: string) => never) {
 }
 
 export function isModelRow(row: unknown): row is ModelRow {
-  return isRecord(row) && ["role", "work", "model"].every((key) => typeof row[key] === "string") && (row.provider === "claude" || row.provider === "codex") && efforts.includes(row.effort as string);
+  return isRecord(row) && ["role", "work", "model"].every((key) => typeof row[key] === "string") && (row.provider === "claude" || row.provider === "codex") && efforts.includes(row.effort as string)
+    && (row.serviceTier === undefined || (typeof row.serviceTier === "string" && row.serviceTier !== ""));
 }
 
 function checkSettings(manifest: PackManifest, fail: (message: string) => never) {

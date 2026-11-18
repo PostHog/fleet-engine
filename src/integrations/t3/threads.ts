@@ -14,7 +14,7 @@ export type ShellThread = {
   blockedOnThreadWait?: boolean; delegatedFrom?: { environmentId?: string; threadId?: string } | null;
   createdAt?: string; latestUserMessageAt?: string | null; latestRunRequestedAt?: string | null;
   latestRunStartedAt?: string | null; latestRunCompletedAt?: string | null;
-  archivedAt?: string | null; deletedAt?: string | null; settledAt?: string | null; snoozedUntil?: string | null; worktreePath?: string | null;
+  archivedAt?: string | null; deletedAt?: string | null; settledAt?: string | null; snoozedUntil?: string | null; snoozedAt?: string | null; worktreePath?: string | null;
   modelSelection?: { model: string }; lastError?: string | null;
   pendingRuntimeRequest?: unknown; latestVisibleMessage?: { updatedAt: string; text: string } | null;
   branch?: string | null; latestUserAuthoredMessageAt?: string | null;

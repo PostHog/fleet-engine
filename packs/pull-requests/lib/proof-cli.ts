@@ -2,7 +2,7 @@ import { closeSync, existsSync, openSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { askGap, authorOf, finishReview, startGateRun, ledgerRoot, listStanding, panelCommit, proofDirectory, readJson, readOwed, recordGap, recordGapCommand, recordStanding, requireChoice, requireNone, requireProofs, requireReservation, respondToReview, reuseProof, reviewDirectory, reviewOfCommit, reviewRecords, roundId, roundQuestion, runOption, saveProof, startReview, stopOption, storeCapturedFindings, unfinishedReview, writeJson, markRecorded, readReservation, recordReceipt, roundDirectories, unrecordedElsewhere, type Arbiter, type Reservation, type CapturedBy, type ProofIdentity } from "./proof.ts";
+import { askGap, authorOf, finishReview, startGateRun, ledgerRoot, listStanding, panelCommit, proofDirectory, readJson, readOwed, recordGap, recordGapCommand, recordStanding, requireChoice, requireNone, devPr, requireProofs, requireReservation, respondToReview, reuseProof, reviewDirectory, reviewOfCommit, reviewRecords, roundId, roundQuestion, runOption, saveProof, startReview, stopOption, storeCapturedFindings, unfinishedReview, writeJson, markRecorded, readReservation, recordReceipt, roundDirectories, unrecordedElsewhere, type Arbiter, type Reservation, type CapturedBy, type ProofIdentity } from "./proof.ts";
 import { AnswerTaken, appendOnce, decideAlone, hearUser, ledgerHolds, ledgerOf } from "./decision-cli.ts";
 import { HubUnreachable, refText, type Decision, type Ssh } from "./decision-ledger.ts";
 import { readComment, runIn } from "./pr-ci.ts";
@@ -15,6 +15,7 @@ import { githubRequest, publishProof, type GitHub } from "./proof-publish.ts";
 import { displayLine, recordCaption, recordLines } from "./proof-display.ts";
 import { prodShapeResult, receiptClose, receiptOpen } from "./proof-receipt.ts";
 import { runReceipt } from "./proof-receipt-command.ts";
+import { receiptBudget } from "./proof-receipt-page.ts";
 import { publisherSeam } from "./proof-receipt-publisher.ts";
 import { reviewPrompt } from "./proof-review.ts";
 import { leftOutNote, reviewRange } from "./proof-range.ts";
@@ -159,7 +160,8 @@ again after you change the repository's access.`,
     summary: `Write the PR's public-safe proof receipt into its body, and publish the full receipt when a pack offers a
 publisher. The block sits at the end of the section under the heading the setting pull-requests.receiptHeading names,
 or with that heading at the end of the body. Only a # heading that GitHub shows at the top level of the body starts
-or ends that section, never an underlined one. When the setting changes, the next run moves the block. It holds a row per owed proof (what ran, the result, the commit or the commit it
+or ends that section, never an underlined one. When the setting changes, the next run moves the block,
+unless taking it out would join the lists or code blocks around it: then it stays and takes the new heading. It holds a row per owed proof (what ran, the result, the commit or the commit it
 was reused from), a review row, a judge row, what was not checked, and each gap with who accepted it. It reads the
 proof summary the gate saved at HEAD and the decision ledger, never a proof's pass or fail itself. The block sits
 between ${receiptOpen} head=<sha> hash=<hex> --> and ${receiptClose}; the rest of the body stays as it is, and the
@@ -171,10 +173,19 @@ it; move such detail into an evidence note. The prod-shape result always reads "
 ${publisherSeam} handler publishes the full receipt: it reads {repository, pr, title, page, previous: {id, url}} as
 JSON on stdin and prints {id, url}, or {failed}, as its last line; the block then links the URL, and the next run
 on this machine passes it back as previous. A machine that did not publish it sends no previous, so the handler
-publishes a new page. fleet refuses an empty body read, a body that changed between its read and the write,
+publishes a new page. Without a handler, fleet writes the page to display/receipt.md in the PR's proof store,
+prints its path, links nothing in the block, and records the PR itself as the receipt unless one is recorded. The
+page shows the proof of each commit in the order it was proved or reviewed, each review round with its lenses and
+findings, the judge verdicts, the gaps with their decisions, the screenshots, the lines and notes of each owed proof,
+the decisions, and what was not checked. A note shows its prose up to its first command, a \$ that starts
+its line, table cell or text run, followed by a space, whatever markup or inline HTML tags wrap it, and leaves out
+everything after it. Fenced and indented code
+and HTML blocks are left out wherever they sit, and headings show as bold lines. When the handler's request is over ${receiptBudget}
+bytes, the page leaves out the raw lens answers, then the judge reasons, then note lines past the 40th, and says so.
+fleet refuses an empty body read, a body that changed between its read and the write,
 broken markers, a write that would change the merge-risk callout, and a body that reads back different. It warns about each proof without a line and each screenshot
 without a caption or a published URL. Exit 0 when the receipt is current or written; 1 when publishing or GitHub
-fails; 2 when the guard refuses a field; 3 when the hub ledger cannot be reached. --comment records a comment you
+fails, or the page is still over the budget; 2 when the guard refuses a field; 3 when the hub ledger cannot be reached. --comment records a comment you
 posted on the PR as its receipt instead: GitHub must show the comment on this PR. fleet proof gate --json and fleet
 decision report link the receipt.`,
     examples: ["fleet proof receipt --not-checked 'Safari' --not-checked 'the mobile layout'", "fleet proof receipt", "fleet proof receipt --comment https://github.com/owner/name/pull/7#issuecomment-1"],
@@ -192,20 +203,26 @@ decision report link the receipt.`,
     },
   },
   require: {
-    usage: "require (--kinds <kind,kind> | --none --reason <why>) [--author claude|gpt]",
+    usage: "require (--kinds <kind,kind> | --after-dev <owner/name#number> | --none --reason <why>) [--author claude|gpt]",
     summary: `Record the proof kinds the PR owes. Repeated calls add kinds. A PR that owes none records --none with the
 reason. The gate fails until one of them is recorded. The first call also records the model family that wrote the
 PR, from the Claude Code or Codex session that runs it; pass --author only outside such a session. fleet proof review
 and the judge pick their model from it: the review row of the model table for a PR that Claude wrote, and the
-review-codex row for one that Codex wrote when the table has one. The recorded family does not change.`,
-    examples: ["fleet proof require --kinds live-run,ui-walk", "fleet proof require --none --reason 'Docs only'"],
-    options: ["--kinds", "--reason", "--author"], flags: ["--none"],
+review-codex row for one that Codex wrote when the table has one. The recorded family does not change.
+A prod PR that waits on an observed result in dev, when infrastructure goes to dev first, names its dev PR with
+--after-dev. That adds the kind dev-observed and records the dev PR once. The gate then reads the dev PR on GitHub
+and prints "waiting on the dev result of <dev PR>" until the dev PR has merged and evidence of dev-observed was saved
+after that merge, such as with fleet proof run --kind dev-observed -- <command>. The judge then gets that evidence
+with the merge time and the time it was saved.`,
+    examples: ["fleet proof require --kinds live-run,ui-walk", "fleet proof require --none --reason 'Docs only'", "fleet proof require --kinds prod-shape,post-deploy-watch --after-dev owner/charts#123"],
+    options: ["--kinds", "--reason", "--author", "--after-dev"], flags: ["--none"],
     run: async ({ options, flags }, identity, { print, home, env }) => {
-      if (flags.has("--none") === options.has("--kinds")) throw usageError("require", "Pass either --kinds or --none");
+      if (flags.has("--none") === (options.has("--kinds") || options.has("--after-dev"))) throw usageError("require", "Pass --kinds, --after-dev, or --none");
       const author = resolveAuthor(options.get("--author"), env);
       if (flags.has("--none")) { print(`none: ${(await requireNone(home, identity(), required(options, "--reason", "require"), author)).none!.reason}`); return 0; }
-      const kinds = required(options, "--kinds", "require").split(",").map((value) => value.trim());
-      print((await requireProofs(home, identity(), kinds, author)).join(","));
+      const kinds = (options.get("--kinds") ?? "").split(",").map((value) => value.trim()).filter(Boolean);
+      const afterDev = options.has("--after-dev") ? devPr(options.get("--after-dev")!) : undefined;
+      print((await requireProofs(home, identity(), kinds, author, afterDev)).join(","));
       return 0;
     },
   },
@@ -228,7 +245,10 @@ FLEET_PROOF_QUOTA_GRACE_MS changes the 5 minutes; 0 stops the run at once.
 
 With --lens, the round is a qa-swarm panel: one reviewer per lens, each with the Brief of the qa-swarm PANEL.md in
 ~/.agents/skills/qa-swarm, filled by fleet, and the lens's hunting grounds. A lens runs on the family of its PANEL.md
-lane: the fresh-eyes lane on the author's family, the others on the reviewer above. :same or :other picks the family.
+lane: the fresh-eyes lane on the author's family, the others on the reviewer above. A Security lane lens runs on the
+security row of the model table, at its effort, whoever wrote the PR; FLEET_PROOF_SECURITY_MODEL replaces its model,
+and without either it runs on the reviewer above. :same or :other picks the family, and moves a Security lane lens
+to that family's reviewer.
 --knowledge adds the repo's review material for a lens, and gives the text of a Team perspective that PANEL.md does
 not list. fleet starts the lenses in the background and returns at once; at most pull-requests.panelSlots reviewers
 run at once on this machine, and the rest wait. Each raw answer is kept in lenses/<name>.md. A lens that ends without
@@ -486,7 +506,7 @@ ${overrideHelp}`,
 printed. --reviewer names the model that wrote them; the gate prints it. The findings file must not be empty; write
 "No findings." when the reviewer found none. When the round's decision is not recorded yet, review-finish records it
 first and needs the hub; a round whose decision is recorded finishes without it.`,
-    examples: ["fleet proof review-finish --round 1 --reviewer gpt-6.1-sol findings.md", "fleet proof review-finish --round final-1 --reviewer claude-opus-5-5 findings.md"],
+    examples: ["fleet proof review-finish --round 1 --reviewer gpt-6.2-sol findings.md", "fleet proof review-finish --round final-1 --reviewer claude-opus-5-5 findings.md"],
     options: ["--round", "--findings", "--reviewer"],
     run: async ({ options, files }, identity, context) => {
       const findings = options.has("--findings") ? [options.get("--findings")!, ...files] : files;
@@ -686,7 +706,7 @@ async function runPanel({ options, lists }: Parsed, head: ProofIdentity, context
   return 0;
 }
 
-const castOf = ({ family, row }: Lens, env: Record<string, string | undefined>) => ({ family, row, model: modelLabel("reviewer", row, env) });
+const castOf = ({ family, row, security }: Lens, env: Record<string, string | undefined>) => ({ family, row, model: modelLabel("reviewer", row, env, security), ...(security ? { security: true as const } : {}) });
 
 async function reservePanel(options: Map<string, string>, head: ProofIdentity, lenses: Lens[], guide: PanelGuide, context: CommandContext) {
   const rubric = await readRubric(context.home);
@@ -886,7 +906,7 @@ const identityHelp = `Every command works on the PR of the current branch and it
 or --commit to choose others. --commit and --base take any commit Git resolves here, such as a short SHA.`;
 const runIdentityHelp = `run works on the PR of the current branch. Pass --repo owner/name and --pr number to choose another. It
 reads HEAD from Git and takes no --commit.`;
-const kindsHelp = "Kinds: live-run, ui-walk, prod-shape, cross-version, shadow-diff, post-deploy-watch. A gap also takes ci, judge, and panel. A standing rule takes none of review, judge and post-deploy-watch.";
+const kindsHelp = "Kinds: live-run, ui-walk, prod-shape, cross-version, shadow-diff, post-deploy-watch, dev-observed (owed through require --after-dev). A gap also takes ci, judge, and panel. A standing rule takes none of review, judge and post-deploy-watch.";
 
 function overview() {
   const lines = Object.values(subcommands).filter((command) => !command.hidden).map((command) => `  fleet proof ${command.usage}`);

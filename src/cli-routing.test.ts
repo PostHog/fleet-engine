@@ -66,7 +66,7 @@ describe("fleet routing", () => {
     writeFileSync(join(engine, "packs/tools/commands/hello.ts"), `await Bun.write(Bun.env.HOME + "/hello.txt", Bun.env.FLEET_MODELS ?? "none");\n`);
     expect((await fleet(["hello"], home, engine)).code).toBe(0);
     const models = JSON.parse(readFileSync(join(home, "hello.txt"), "utf8"));
-    expect(models.map((row: { role: string }) => row.role)).toEqual(["lookup", "survey", "research", "implementation", "review", "review-codex"]);
+    expect(models.map((row: { role: string }) => row.role)).toEqual(["lookup", "survey", "research", "implementation", "review", "review-codex", "security", "incident"]);
     expect(models.find((row: { role: string }) => row.role === "review")).toMatchObject({ provider: "codex" });
   });
 

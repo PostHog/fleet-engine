@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Env, Result } from "../coder.ts";
 import { quote, readRole, remoteFleet } from "../machine.ts";
@@ -7,7 +7,7 @@ import { audit, type Checker } from "./audit.ts";
 import { budget, homeCheckouts, memoryRootIn } from "./budget.ts";
 import { publish } from "./publish.ts";
 import { searchSessions } from "./search.ts";
-import { collect, dateOf, type DreamBoxes } from "./collect.ts";
+import { collect, collectedDir, dateOf, type DreamBoxes } from "./collect.ts";
 import { digestLines, dreamIsOn, dreamPromptStart, dreamSessionsKey, localDigests, memoryCheckout, parseSince, redactDigest, sessionKeepDays, stateDir } from "./digest.ts";
 import { scorecardText } from "./scorecard.ts";
 
@@ -70,6 +70,7 @@ async function prepareRun(args: string[], io: DreamIo): Promise<string> {
   } catch (error) {
     io.say(`Fleet dream: audit failed: ${(error as Error).message}`);
   }
+  rmSync(collectedDir(run), { recursive: true, force: true });
   return run;
 }
 

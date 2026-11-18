@@ -31,6 +31,8 @@ Each guide binds like this file. Read it when its trigger fires.
 | Deep research on how code behaves, where a wrong answer misleads a decision | \`claude-opus-5-5\` | high |
 | Implementation, tests, fixes, and UI work | \`claude-opus-5-5\` | high |
 | Review, in a fresh session that did not write the code | \`claude-opus-5-5\` | high |
+| Deep security review: exploit chains in a change that touches authentication, permissions, secrets, sandboxes, or machine access; the qa-swarm Security lens | \`claude-opus-5-5\` | xhigh |
+| Incidents: a Slack message of yours that says /incident starts its thread on this model | \`claude-opus-5-5\` | high |
 "
 `;
 
@@ -60,11 +62,13 @@ Each guide binds like this file. Read it when its trigger fires.
 
 | Work | Model | Effort |
 | --- | --- | --- |
-| Lookups: find files, take an inventory, extract from logs | \`gpt-6.1-sol\` | low |
-| Surveys: read docs, the web, or one area of the code and summarize | \`gpt-6.1-sol\` | medium |
-| Deep research on how code behaves, where a wrong answer misleads a decision | \`gpt-6.1-sol\` | high |
-| Implementation, tests, fixes, and UI work | \`gpt-6.1-sol\` | high |
-| Review, in a fresh session that did not write the code | \`gpt-6.1-sol\` | high |
+| Lookups: find files, take an inventory, extract from logs | \`gpt-6.2-sol\` | low |
+| Surveys: read docs, the web, or one area of the code and summarize | \`gpt-6.2-sol\` | medium |
+| Deep research on how code behaves, where a wrong answer misleads a decision | \`gpt-6.2-sol\` | high |
+| Implementation, tests, fixes, and UI work | \`gpt-6.2-sol\` | high |
+| Review, in a fresh session that did not write the code | \`gpt-6.2-sol\` | high |
+| Deep security review: exploit chains in a change that touches authentication, permissions, secrets, sandboxes, or machine access; the qa-swarm Security lens | \`gpt-6.2-astra\` | xhigh |
+| Incidents: a Slack message of yours that says /incident starts its thread on this model | \`gpt-6.2-sol\` | high, ultrafast tier |
 "
 `;
 
@@ -96,9 +100,11 @@ Each guide binds like this file. Read it when its trigger fires.
 | --- | --- | --- |
 | Lookups: find files, take an inventory, extract from logs | \`claude-haiku-5-5\` | medium |
 | Surveys: read docs, the web, or one area of the code and summarize | \`claude-sonnet-5-5\` | high |
-| Deep research on how code behaves, where a wrong answer misleads a decision | \`gpt-6.1-sol\` | high |
+| Deep research on how code behaves, where a wrong answer misleads a decision | \`gpt-6.2-sol\` | high |
 | Implementation, tests, fixes, and UI work | \`claude-opus-5-5\` | high |
-| Review of code Claude wrote | \`gpt-6.1-sol\` | high |
+| Review of code Claude wrote | \`gpt-6.2-sol\` | high |
 | Review of code Codex wrote, and of skills and agent documents | \`claude-opus-5-5\` | high |
+| Deep security review: exploit chains in a change that touches authentication, permissions, secrets, sandboxes, or machine access; the qa-swarm Security lens | \`gpt-6.2-astra\` | xhigh |
+| Incidents: a Slack message of yours that says /incident starts its thread on this model | \`gpt-6.2-sol\` | high, ultrafast tier |
 "
 `;

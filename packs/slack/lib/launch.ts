@@ -9,7 +9,7 @@ export type Claim = { box: string; environmentId?: string };
 /** noRoom: the machine refused before it asked T3, because its disk is below the start floor. */
 export type Failed = { failed: string; claim?: Claim; reachedT3?: true; noRoom?: true };
 export type Timer = (fire: () => void, ms: number) => { cancel(): void };
-export type LaunchRequest = { title: string; prompt: string; commandId: string; claim?: Claim; replay?: boolean };
+export type LaunchRequest = { title: string; prompt: string; commandId: string; claim?: Claim; replay?: boolean; modelRole?: string };
 export type Launch = ((request: LaunchRequest) => Promise<Started | Failed>) & { release?: (claim: Claim) => Promise<void> };
 
 const realTimer: Timer = (fire, ms) => {
@@ -39,11 +39,11 @@ const lastLine = (text: string) => text.trim().split("\n").at(-1)?.trim() ?? "";
 const why = (result: { code: number; stderr: string; stdout: string }) => lastLine(result.stderr) || lastLine(result.stdout) || `exit ${result.code}`;
 
 export function launchHere(threads: Threads, room: () => DiskStatus): Launch {
-  return async ({ title, prompt, commandId, replay }) => {
+  return async ({ title, prompt, commandId, replay, modelRole = "implementation" }) => {
     const disk = replay ? undefined : room();
     if (disk?.critical) return { failed: disk.message.replaceAll("\n", " "), noRoom: true };
     try {
-      const { id, url } = await threads.start({ key: commandId, title, prompt, modelRole: "implementation" });
+      const { id, url } = await threads.start({ key: commandId, title, prompt, modelRole });
       return { threadId: id, url, where: "this machine" };
     } catch (error) {
       return error instanceof UnansweredLaunch ? { failed: error.message, reachedT3: true } : { failed: (error as Error).message };

@@ -75,7 +75,7 @@ function settingsFor(existing: string | undefined, baseUrl: string) {
 function environmentFor(existing: string | undefined, baseUrl: string) {
   const values = new Map((existing ?? "").split("\n").filter((line) => line.includes("=")).map((line) => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)] as const));
   for (const name of ["JWT_SECRET", "ADMIN_PASSWORD"]) if (!values.get(name)) values.set(name, secret());
-  for (const [name, value] of Object.entries({ MCPHUB_SETTING_PATH: "/app/data/mcp_settings.json", BASE_PATH: "/mcphub", INSTALL_BASE_URL: baseUrl, NODE_ENV: "production" })) values.set(name, value);
+  for (const [name, value] of Object.entries({ MCPHUB_SETTING_PATH: "/app/data/mcp_settings.json", BASE_PATH: "/mcphub", INSTALL_BASE_URL: baseUrl, NODE_ENV: "production", MCP_RATE_LIMIT_MAX: "6000" })) values.set(name, value);
   return [...values].map(([name, value]) => `${name}=${value}\n`).join("");
 }
 

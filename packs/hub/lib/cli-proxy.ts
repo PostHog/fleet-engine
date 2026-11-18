@@ -4,17 +4,18 @@ import { chmod, copyFile, lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, 
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { parse, stringify } from "smol-toml";
-import { loginExpired, management, managementFile, managementPattern, proxyDir, proxyUrl, readManagementKey, shortId } from "./cli-proxy-balance.ts";
+import { codexCatalogPath, loginExpired, modelRegistryPath, management, managementFile, managementPattern, proxyDir, proxyUrl, readManagementKey, shortId } from "./cli-proxy-balance.ts";
 import { requireHubRole } from "./hub-job.ts";
 import { quote, readRole, remoteFleet } from "./machine.ts";
 import { changedFiles, ownedFiles, readIfThere, removeUnits, requireInstalled, writeFiles, type Managed } from "./managed.ts";
 import { refuseLinks, writePrivateFile, type Fetch } from "../../mcp-gateway/lib/client.ts";
 import type { Run } from "../../mcp-gateway/lib/hub.ts";
 import { isKeptForBoxes } from "../../../src/hub/names.ts";
+import { refreshCodexCatalog } from "./codex-catalog.ts";
 import { must, proxyPort } from "./run.ts";
 
 export { proxyPort, proxyUrl };
-export type ProxyMode = "plan" | "install" | "doctor" | "connect" | "disconnect" | "check" | "remove" | "left";
+export type ProxyMode = "plan" | "install" | "doctor" | "catalog" | "connect" | "disconnect" | "check" | "remove" | "left";
 export type Release = { version: string; url: string; sha256: string };
 export type Panel = { page: Release; plugin: Release; historyDays: number };
 export type AiPlan = "claude" | "codex" | "both";
@@ -37,7 +38,7 @@ const claudeCodeVersion = "2.1.322";
 function layout(home: string) {
   const dir = proxyDir(home);
   return { dir, binary: join(dir, "cli-proxy-api"), config: join(dir, "config.yaml"), auth: join(dir, "auth"), management: managementFile(home), unit: join(home, ".config/systemd/user", service), key: keyPath(home), restart: join(dir, "restart-pending"),
-    page: join(dir, "static/management.html"), plugins: join(dir, "plugins"), plugin: join(dir, "plugins/quota-ledger.so"), ledger: join(dir, "quota-ledger/samples.jsonl") };
+    page: join(dir, "static/management.html"), plugins: join(dir, "plugins"), plugin: join(dir, "plugins/quota-ledger.so"), ledger: join(dir, "quota-ledger/samples.jsonl"), catalog: codexCatalogPath(home), registry: modelRegistryPath(home) };
 }
 type Layout = ReturnType<typeof layout>;
 const loginCommand = (paths: Layout, agent: Agent) => `${paths.binary} -config ${paths.config} -${agent}-login -no-browser`;
@@ -62,7 +63,7 @@ function wanted(paths: Layout, key: string, panel: Panel | undefined): Managed[]
     marker, `host: "127.0.0.1"`, `port: ${proxyPort}`, "tls:", "  enable: false", "remote-management:", "  allow-remote: false", `  secret-key: ""`, ...shown.control,
     `auth-dir: "${paths.auth}"`, "api-keys:", `  - "${key}"`, "debug: false", "commercial-mode: true", "logging-to-file: false", "usage-statistics-enabled: true", "request-retry: 3",
     "quota-exceeded:", "  switch-project: true", "  switch-preview-model: true", "routing:", `  strategy: "fill-first"`, "  session-affinity: true", `  session-affinity-ttl: "1h"`,
-    "claude-header-defaults:", `  user-agent: "claude-cli/${claudeCodeVersion} (external, cli)"`, ...shown.plugins, "",
+    "claude-header-defaults:", `  user-agent: "claude-cli/${claudeCodeVersion} (external, cli)"`, "models:", `  codex-catalog: "${paths.catalog}"`, `  catalog: "${paths.registry}"`, ...shown.plugins, "",
   ].join("\n");
   const unit = [
     marker, "[Unit]", "Description=Fleet CLI proxy for your own subscriptions", "After=network-online.target", "Wants=network-online.target", "", "[Service]",
@@ -157,7 +158,7 @@ async function foreignPlugins(paths: Layout): Promise<string[]> {
 }
 
 async function refuseLinkedLayout(home: string, paths: Layout): Promise<void> {
-  for (const path of [paths.auth, paths.binary, paths.config, paths.management, paths.restart, paths.unit, paths.key, paths.page, paths.plugin, paths.ledger]) await refuseLinks(home, path, `${what} path`);
+  for (const path of [paths.auth, paths.binary, paths.config, paths.management, paths.restart, paths.unit, paths.key, paths.page, paths.plugin, paths.ledger, paths.catalog, paths.registry]) await refuseLinks(home, path, `${what} path`);
 }
 
 async function install(machine: ProxyMachine, paths: Layout): Promise<void> {
@@ -176,6 +177,7 @@ async function install(machine: ProxyMachine, paths: Layout): Promise<void> {
   if (machine.panel) await ensurePanel(machine, paths, machine.panel);
   if (!savedClient) await writePrivateFile(paths.key, `${key}\n`);
   if (!savedManagement) await writePrivateFile(paths.management, `MANAGEMENT_PASSWORD=${managementKey}\n`);
+  await writeCatalog(machine, paths, false);
   await writeFiles(changed);
   await must(machine.run, ["sudo", "-n", "loginctl", "enable-linger", machine.user]);
   const systemctl = (...args: string[]) => must(machine.run, ["systemctl", "--user", ...args]);
@@ -184,6 +186,18 @@ async function install(machine: ProxyMachine, paths: Layout): Promise<void> {
   await rm(paths.restart, { force: true });
   await systemctl("enable", "--now", service);
   if (!machine.panel) await closePanel(machine, paths);
+}
+
+async function writeCatalog(machine: ProxyMachine, paths: Layout, force: boolean): Promise<void> {
+  await refreshCodexCatalog({ path: paths.catalog, registryPath: paths.registry, fetch: machine.fetch, now: machine.now, log: machine.print, force });
+  if (!existsSync(paths.catalog)) machine.print(`CLI proxy: Warning: Fleet could not write ${paths.catalog}, so Codex does not offer the ultrafast tier. fleet cli-proxy-balance tries again every 5 minutes.`);
+  if (!existsSync(paths.registry)) machine.print(`CLI proxy: Warning: Fleet could not write ${paths.registry}, so the proxy does not route the models upstream does not list yet. fleet cli-proxy-balance tries again every 5 minutes.`);
+}
+
+async function catalog(machine: ProxyMachine, paths: Layout): Promise<number> {
+  for (const path of [paths.catalog, paths.registry]) await refuseLinks(machine.home, path, `${what} path`);
+  await writeCatalog(machine, paths, true);
+  return existsSync(paths.catalog) && existsSync(paths.registry) ? 0 : 1;
 }
 
 async function doctor(machine: ProxyMachine, paths: Layout): Promise<void> {
@@ -220,6 +234,8 @@ async function doctor(machine: ProxyMachine, paths: Layout): Promise<void> {
     const provider = file.provider as Agent;
     machine.print(`CLI proxy: Warning: the ${subscription[provider]} subscription ${shortId(file)} cannot refresh its login, so the proxy cannot use it and the balancer cannot read its usage. Sign it in again with: ${loginCommand(paths, provider)}. Or disable it in the management panel.`);
   }
+  if (!existsSync(paths.catalog)) machine.print(`CLI proxy: Warning: ${paths.catalog} is missing, so Codex does not offer the ultrafast tier. Run fleet cli-proxy catalog.`);
+  if (!existsSync(paths.registry)) machine.print(`CLI proxy: Warning: ${paths.registry} is missing, so the proxy does not route the models upstream does not list yet. Run fleet cli-proxy catalog.`);
   if (machine.panel) machine.print(`Open the management panel at ${panelUrl} on the hub, or on a devbox through its tunnel, and sign in with the MANAGEMENT_PASSWORD in ${paths.management}.`);
   for (const devbox of machine.devboxes.filter((name) => !isKeptForBoxes(name))) machine.print(`Connect ${devbox}: ssh ${devbox} ${quote(remoteFleet("cli-proxy connect"))} < ~/.config/fleet/cli-proxy.key`);
 }
@@ -435,6 +451,8 @@ async function plan(machine: ProxyMachine, paths: Layout): Promise<void> {
   machine.print("CLI proxy plan (no changes):");
   if (!(await binaryReady(machine, paths))) machine.print(`  Install CLIProxyAPI ${machine.release.version} at ${paths.binary}.`);
   machine.print(`  Run it at ${proxyUrl}, loopback only, with fill-first routing and session affinity, as ${service}.`);
+  machine.print(`  Serve Codex upstream's model catalog with the ultrafast tier added, from ${paths.catalog}.`);
+  machine.print(`  Route by upstream's model registry with the models it does not list yet added, from ${paths.registry}.`);
   machine.print(`  Keep the client key in ${paths.key} and the management key in ${paths.management}, both mode 600.`);
   machine.print(machine.panel
     ? `  Serve the management panel ${machine.panel.page.version} at ${panelUrl}, loopback only, with ${machine.panel.historyDays} days of quota history from the quota-ledger plugin ${machine.panel.plugin.version}.`
@@ -447,7 +465,8 @@ async function plan(machine: ProxyMachine, paths: Layout): Promise<void> {
 export async function cliProxy(mode: ProxyMode, machine: ProxyMachine, agent: Agent = "claude"): Promise<number> {
   if (machine.uid === 0) throw new Error("Run fleet cli-proxy as the person who runs Claude Code, not root.");
   const paths = layout(machine.home);
-  if (mode === "install" || mode === "doctor") requireHubRole(machine.home, `cli-proxy ${mode}`);
+  if (mode === "install" || mode === "doctor" || mode === "catalog") requireHubRole(machine.home, `cli-proxy ${mode}`);
+  if (mode === "catalog") return catalog(machine, paths);
   if (mode === "plan") await plan(machine, paths);
   if (mode === "install") await install(machine, paths);
   if (mode === "doctor") await doctor(machine, paths);

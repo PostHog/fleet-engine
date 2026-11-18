@@ -61,7 +61,7 @@ function nestedSession(table: string, pid: number): boolean {
   return false;
 }
 
-const checksRun = (watch: PullRequestWatch) => watch.checksPending ?? (!watch.passed && !watch.failedChecks?.length);
+export const checksRun = (watch: PullRequestWatch) => watch.checksPending ?? (!watch.passed && !watch.failedChecks?.length);
 const awaitsCi = ({ watch, head }: Layer) => Boolean(watch)
   && (watch!.headSha !== head || checksRun(watch!) || Boolean(watch!.awaitingApproval?.length));
 
@@ -134,8 +134,9 @@ async function detachedStep(layers: Layer[], git: GitIn, worktreePath: string | 
   };
 }
 
-const waitsInClaude = (event: ProofStopEvent) =>
-  Boolean(event.background_tasks?.some((task) => ["running", "pending"].includes(task.status ?? "") && task.type !== "shell") || event.session_crons?.length);
+export const claudeTaskRuns = (event: ProofStopEvent) =>
+  Boolean(event.background_tasks?.some((task) => ["running", "pending"].includes(task.status ?? "") && task.type !== "shell"));
+const waitsInClaude = (event: ProofStopEvent) => claudeTaskRuns(event) || Boolean(event.session_crons?.length);
 
 const runningStatuses = ["preparing", "queued", "starting", "running", "waiting"];
 const holdsCompletion = (task: ShellTask) => task.awaited === true || !["command", "monitor"].includes(task.kind);
@@ -148,7 +149,7 @@ function waitsOnSubagent(threads: ShellThread[], parent: ShellThread, depth = 0)
       || awaitsWork(child) || waitsOnSubagent(threads, child, depth + 1)));
 }
 
-const waits = (threads: ShellThread[], thread: ShellThread) => awaitsWork(thread) || waitsOnSubagent(threads, thread);
+export const waits = (threads: ShellThread[], thread: ShellThread) => awaitsWork(thread) || waitsOnSubagent(threads, thread);
 
 export async function proofStop(event: ProofStopEvent, options: ProofStopOptions): Promise<ProofStopBlock | undefined> {
   let timer: ReturnType<typeof setTimeout> | undefined;

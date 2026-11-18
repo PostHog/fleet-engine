@@ -1,22 +1,26 @@
 import { readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { homedir, hostname } from "node:os";
+import { isAbsolute, join, relative } from "node:path";
 import { runCommand } from "../../base/lib/command.ts";
 import { modelFor } from "../../base/lib/models.ts";
 import { redactSecrets } from "../../base/hooks/secret-guard.ts";
 import { capture, captureAgent, type Agent } from "../lib/capture.ts";
-import { cacheFile, librarySettings, writePointer } from "../lib/config.ts";
+import { cacheFile, docUrl, librarySettings, writePointer } from "../lib/config.ts";
 import { runGit, type Git } from "../lib/git.ts";
-import { catalogName, readLibrary, related, renderCatalog, search, topicReport } from "../lib/library.ts";
+import { catalogName, parseDoc, readLibrary, related, renderCatalog, search, topicReport } from "../lib/library.ts";
+import { routerAgent, share, t3ShareDeps, type ShareDeps, type Shared, type SharedNote } from "../lib/share.ts";
 import { syncLibrary } from "../lib/sync.ts";
 import { upstreamCommand } from "../lib/upstream.ts";
 
 type Env = Record<string, string | undefined>;
-export type ContextDeps = { env: Env; home: string; print: (line: string) => void; git: Git; agent: () => Agent; today: () => string };
+export type ContextDeps = { env: Env; home: string; print: (line: string) => void; git: Git; agent: () => Agent; today: () => string; share: (owner: string) => ShareDeps };
 
 export const usage = `usage:
   fleet context search <word>... [--all]   Rank the library's documents; --all adds superseded ones
-  fleet context add <url> [--note <why>]    Save a Slack thread, canvas, Google Doc, meeting, or page as a note
+  fleet context add <url> [--share] [--note <why>]
+                                            Save a Slack thread, canvas, Google Doc, meeting, or page as a note;
+                                            --share also sends its context to the open threads that need it
+  fleet context share <note> [--dry-run]    Send a saved note's context to the open threads that need it
   fleet context related <prompt>            Show what the prompt hook would show for this prompt
   fleet context catalog                     Rewrite CATALOG.md in the library checkout
   fleet context topics                      List topics with three or more documents and whether their hub is stale
@@ -45,12 +49,24 @@ export async function contextCommand(args: string[], deps: ContextDeps): Promise
     return 0;
   }
   if (mode === "add" && rest.length) {
-    const noteAt = rest.indexOf("--note");
-    const source = rest[0]!;
-    if (!/^https:\/\//.test(source) || (noteAt >= 0 && noteAt !== 1) || (noteAt < 0 && rest.length !== 1) || rest.length === 2) return deps.print(usage), 2;
-    const saved = await capture({ source, via: "cli", note: noteAt >= 0 ? rest.slice(noteAt + 1).join(" ") : undefined }, { home: deps.home, library, agent: deps.agent(), git: deps.git, today: deps.today });
+    const sharing = rest[1] === "--share";
+    const words = sharing ? [rest[0]!, ...rest.slice(2)] : rest;
+    const noteAt = words.indexOf("--note");
+    const source = words[0]!;
+    if (!/^https:\/\//.test(source) || (noteAt >= 0 && noteAt !== 1) || (noteAt < 0 && words.length !== 1) || words.length === 2) return deps.print(usage), 2;
+    const saved = await capture({ source, via: "cli", note: noteAt >= 0 ? words.slice(noteAt + 1).join(" ") : undefined }, { home: deps.home, library, agent: deps.agent(), git: deps.git, today: deps.today });
     deps.print(`${saved.updated ? "Updated" : "Saved"} ${saved.title}: ${join(root, saved.path)}\n${saved.url}`);
-    return 0;
+    if (!sharing) return 0;
+    return printShared(await share({ title: saved.title, url: saved.url, text: saved.text }, deps.share(library.owner)), false, deps.print);
+  }
+  if (mode === "share" && (rest.length === 1 || (rest.length === 2 && rest[1] === "--dry-run"))) {
+    const dryRun = rest.length === 2;
+    const path = isAbsolute(rest[0]!) ? rest[0]! : join(root, rest[0]!);
+    const doc = relative(root, path);
+    if (doc.startsWith("..") || isAbsolute(doc)) return deps.print(`${path} is not in the context library at ${root}.`), 2;
+    const text = readFileSync(path, "utf8");
+    const note: SharedNote = { title: parseDoc(doc, text).title, url: docUrl(library, doc), text };
+    return printShared(await share(note, deps.share(library.owner), [], dryRun), dryRun, deps.print);
   }
   if (mode === "related" && rest.length) {
     for (const doc of related(docs(), rest.join(" "))) deps.print(`${join(root, doc.path)}: ${doc.title}`);
@@ -72,6 +88,13 @@ export async function contextCommand(args: string[], deps: ContextDeps): Promise
   return 2;
 }
 
+function printShared(shared: Shared, dryRun: boolean, print: (line: string) => void): number {
+  if (!shared.sent.length && !shared.failed.length) print("No open thread needs this note.");
+  for (const route of shared.sent) print(`${dryRun ? "Would send to" : "Sent to"} ${route.title} (${route.host} ${route.id})${route.link ? `\n  ${route.link}` : ""}\n  ${route.message.replaceAll("\n", "\n  ")}`);
+  for (const { route, error } of shared.failed) print(`Failed to send to ${route.title} (${route.host} ${route.id}): ${error}`);
+  return shared.failed.length ? 1 : 0;
+}
+
 if (import.meta.main) {
   await runCommand(
     () => contextCommand(process.argv.slice(2), {
@@ -81,6 +104,7 @@ if (import.meta.main) {
       git: runGit,
       agent: () => captureAgent(modelFor("survey")),
       today: () => new Date().toISOString().slice(0, 10),
+      share: (owner) => t3ShareDeps({ owner, host: hostname(), route: routerAgent(modelFor("survey")), skip: Bun.env.T3CODE_THREAD_ID ? [Bun.env.T3CODE_THREAD_ID] : [] }),
     }),
     "fleet context",
   );

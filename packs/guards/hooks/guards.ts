@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { type Hook, printing, runHook } from "../../base/lib/hook.ts";
 import { installedOwners } from "../lib/allowlist.ts";
 import { downloadRisk } from "../lib/download.ts";
+import { exitMaskRisk } from "../lib/exit-mask.ts";
 import { ghRisk, ownerList } from "../lib/gh.ts";
 import { gitRisk, repoList } from "../lib/git.ts";
 import { killRisk } from "../lib/kill.ts";
@@ -12,6 +13,7 @@ export type ToolCall = { tool_name?: string; tool_input?: Record<string, unknown
 export type Denial = { hookSpecificOutput: { hookEventName: "PreToolUse"; permissionDecision: "deny"; permissionDecisionReason: string } };
 
 const fallbackPerson = "the person who runs this machine";
+const shellTools = new Set(["Bash", "exec_command", "shell", "shell_command", "local_shell"]);
 
 type Settings = { person: string; owners: Set<string> | null; mainPushRepos: Set<string>; unreadable?: string };
 
@@ -46,12 +48,12 @@ const uncheckedReason = (error: unknown, person: string) => `Fleet blocked this 
 
 function check(call: ToolCall, { person, owners, mainPushRepos, unreadable }: Settings): string | undefined {
   if (isTaskStatus(call.tool_name)) return repeatsTaskStatus(call) ? repeatedStatusReason(person) : undefined;
-  if (call.tool_name !== "Bash") return undefined;
+  if (!shellTools.has(call.tool_name ?? "")) return undefined;
   if (unreadable) return unreadableReason(unreadable, person);
   const command = shellCommand(call.tool_input);
   const cwd = call.cwd ?? "/";
   return downloadRisk(command, cwd, person) ?? ghRisk(command, owners, person, process.env.GH_REPO) ?? killRisk(command, person)
-    ?? gitRisk(command, cwd, person, mainPushRepos) ?? (isSleepPoll(command) ? sleepPollReason(person) : undefined);
+    ?? gitRisk(command, cwd, person, mainPushRepos) ?? exitMaskRisk(command, person) ?? (isSleepPoll(command) ? sleepPollReason(person) : undefined);
 }
 
 /** The refusal for a tool call that a shell guard stops, naming the person the settings give. A call the guards cannot

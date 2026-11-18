@@ -196,6 +196,8 @@ export const panelGuide = `# QA swarm panel
   Systems.
 - **Fresh-eyes lane**: the author's family. It runs Fresh eyes and UI, with UI
   cast by the policy.
+- **Security lane**: the policy's Deep security review model. It runs Security,
+  and only on a diff in a security area.
 
 ## Brief
 
@@ -237,6 +239,10 @@ Find the code judo move.
 ### Team
 
 One lens per perspective of the owners.
+
+### Security
+
+Hunt for exploit chains.
 
 ### Sweep
 

@@ -25,4 +25,20 @@ message saves its thread as a note. The reaction shows `:eyes:` while it runs
 and goes away once the note is saved. After that, the note updates by itself
 when the thread gets new replies and then stays quiet for 30 minutes. A
 thread with no reply for a month stops updating; a second `:brain:` updates the
-note at once and follows the thread again.
+note at once and follows the thread again. A capture that a restart of the
+service cuts off runs again when the service starts.
+
+The capture also looks for a Wispr Flow meeting held within an hour of the
+thread's start, such as the recording of a huddle, and folds its decisions and
+action items into the same note. When the meeting's Wispr notes are not ready
+yet, it looks once more 30 minutes later.
+
+After the note is saved, Fleet sends its context to the open T3 threads that
+need it, on every linked machine. A router agent without tools, on the survey
+row of the model table, reads the note and the list of open top-level threads,
+picks at most 8, a conductor before its lanes, and writes each a message with
+only the facts it needs. Fleet frames each message as information, not
+instructions. The ephemeral reply links each thread that got it. Later replies
+only update the note; Wispr notes that arrive late go out once more, with only
+what is new. `fleet context share <note> [--dry-run]` and
+`fleet context add <url> --share` do the same by hand.

@@ -273,7 +273,7 @@ describe("the Stop proof check lets the stop pass", () => {
 describe("the installed Stop hook", () => {
   test("runs the proof check after the prose guard, which wins when the last message asks in prose", async () => {
     const { home, checkout, thread } = await lane();
-    const routed = hookWith(() => async () => ({ threads: [thread()] }), { threadId: "lane", topLevel: async () => true, git: gitWithTestConfig, processes: loneLane });
+    const routed = hookWith(() => async () => ({ threads: [thread()] }), { threadId: "lane", hidden: async () => true, git: gitWithTestConfig, processes: loneLane });
     const transcript = join(temp.make("transcript-"), "session.jsonl");
     writeFileSync(transcript, `${JSON.stringify({ type: "user", message: { role: "user", content: "Ship it" } })}\n`);
     const stopOn = async (message: string) => JSON.parse((await routed("claude", async () => JSON.stringify({ transcript_path: transcript, cwd: checkout, last_assistant_message: message }), home)).stdout).reason as string;
@@ -285,7 +285,7 @@ describe("the installed Stop hook", () => {
     const { home, checkout, thread } = await lane();
     mkdirSync(join(home, ".config/fleet"), { recursive: true });
     writeFileSync(join(home, killSwitch), "");
-    const routed = hookWith(() => async () => ({ threads: [thread()] }), { threadId: "lane", topLevel: async () => true, git: gitWithTestConfig, processes: loneLane });
+    const routed = hookWith(() => async () => ({ threads: [thread()] }), { threadId: "lane", hidden: async () => true, git: gitWithTestConfig, processes: loneLane });
     const transcript = join(temp.make("transcript-"), "session.jsonl");
     writeFileSync(transcript, `${JSON.stringify({ type: "user", message: { role: "user", content: "Ship it" } })}\n`);
     const stopOn = (message: string) => routed("codex", async () => JSON.stringify({ transcript_path: transcript, cwd: checkout, last_assistant_message: message }), home);
@@ -295,7 +295,7 @@ describe("the installed Stop hook", () => {
 
   test("reads the final message from a Codex transcript when the event names none, so a NEEDS_HUMAN: park passes", async () => {
     const { home, checkout, thread } = await lane();
-    const routed = hookWith(() => async () => ({ threads: [thread()] }), { threadId: "lane", topLevel: async () => true, git: gitWithTestConfig, processes: loneLane });
+    const routed = hookWith(() => async () => ({ threads: [thread()] }), { threadId: "lane", hidden: async () => true, git: gitWithTestConfig, processes: loneLane });
     const transcript = join(temp.make("transcript-"), "session.jsonl");
     const lines = [
       { type: "event_msg", payload: { type: "user_message", message: "Ship it" } },
@@ -322,7 +322,7 @@ describe("the Stop hook process", () => {
       "const gitStarted = new Promise<void>((resolve) => { started = resolve; });",
       `const thread = { id: "mcp:lane", title: "Lane", projectId: "p", status: "idle", pullRequests: [] };`,
       "await runHook(hookWith(() => async () => ({ threads: [thread] }), {",
-      `  threadId: "lane", topLevel: async () => true, processes: { pid: 30, table: async () => "30 1 bun\\n" },`,
+      `  threadId: "lane", hidden: async () => true, processes: { pid: 30, table: async () => "30 1 bun\\n" },`,
       `  deadline: () => gitStarted.then(() => Bun.file(${JSON.stringify(ready)}).text()).then(() => {}),`,
       "  git: (cwd, args, signal) => { const result = realGit(cwd, args, signal); started(); return result; },",
       "}), { exitOnAnswer: true });",
