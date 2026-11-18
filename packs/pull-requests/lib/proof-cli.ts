@@ -2,7 +2,7 @@ import { closeSync, existsSync, openSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { askGap, authorOf, finishReview, startGateRun, ledgerRoot, listStanding, panelCommit, proofDirectory, readJson, readOwed, recordGap, recordGapCommand, recordStanding, requireChoice, requireNone, devPr, requireProofs, requireReservation, respondToReview, reuseProof, reviewDirectory, reviewOfCommit, reviewRecords, roundId, roundQuestion, runOption, saveProof, startReview, stopOption, storeCapturedFindings, unfinishedReview, writeJson, markRecorded, readReservation, recordReceipt, roundDirectories, unrecordedElsewhere, type Arbiter, type Reservation, type CapturedBy, type ProofIdentity } from "./proof.ts";
+import { standingExtraReviews, askGap, authorOf, finishReview, startGateRun, ledgerRoot, listStanding, panelCommit, proofDirectory, readJson, readOwed, recordGap, recordGapCommand, recordStanding, requireChoice, requireNone, devPr, requireProofs, requireReservation, respondToReview, reuseProof, reviewDirectory, reviewOfCommit, reviewRecords, roundId, roundQuestion, runOption, saveProof, startReview, stopOption, storeCapturedFindings, unfinishedReview, writeJson, markRecorded, readReservation, recordReceipt, roundDirectories, unrecordedElsewhere, type Arbiter, type Reservation, type CapturedBy, type ProofIdentity } from "./proof.ts";
 import { AnswerTaken, appendOnce, decideAlone, hearUser, ledgerHolds, ledgerOf } from "./decision-cli.ts";
 import { HubUnreachable, refText, thisMachine, type Decision, type Ssh } from "./decision-ledger.ts";
 import { readComment, runIn } from "./pr-ci.ts";
@@ -51,7 +51,9 @@ here". Only their choice of "Run one more round" there counts, quoted with the d
 one (T3CODE_THREAD_ID). A typed message, a refusal, or a general rule, such as "ship everything autonomously", does
 not answer a round. The question names the PR, and an answer to the question of another PR does not count. The
 answer lands in the decision ledger as a 👤 review decision; one answer records one decision and starts one round.
---agent takes your own reason for a round that the arbiter escalates; it never passes the review budget. It lands in the ledger
+--agent takes your own reason for a round that the arbiter escalates. It passes the review budget only under a standing
+review rule (fleet proof standing --kind review) for the PR's repository, for at most ${standingExtraReviews} extra reviews of the PR;
+each such decision's answer names the rule and the extra review. It lands in the ledger
 as a 🤖 review decision, refused on a PR whose merge-risk callout has no Tier line at HEAD. --standing is its old
 name. The round keeps the decision and the arbiter's verdict. List decisions with fleet decision list.
 A round starts only once its decision is in the ledger. A round that holds a decision stays reserved until the
@@ -329,12 +331,13 @@ each answer against HEAD.`,
     usage: "standing [--kind <kind,kind> --until <date> [--repositories <owner/name,owner/name>] --rule <rule>]",
     summary: `Record a standing rule: the user's rule in ~/.agents/guides/standing-rules.md that decides for them until a
 date. For a gap kind, it accepts every gap of that kind. With --repositories, it accepts only the gaps of PRs in those
-repositories, and the judge reads the rule as the condition of each gap it accepts. Kinds review, judge and post-deploy-watch are retired: decide
-a review round with fleet proof review --agent, and those gaps with fleet decision record. The user's instructions,
+repositories, and the judge reads the rule as the condition of each gap it accepts. Kind review needs --repositories:
+in those repositories it lets your --agent decision run up to ${standingExtraReviews} reviews of a PR past the review budget. Kinds judge
+and post-deploy-watch are retired: decide those gaps with fleet decision record. The user's instructions,
 ~/.agents/AGENTS.md or a file in ~/.agents/guides, must hold the whole command word for word, in this option order, so
 only the user sets the rule, its kinds, its repositories, and its date. The rule lapses on the date or when it leaves their instructions. Without options,
 list the standing rules.`,
-    examples: ["fleet proof standing --kind prod-shape --until 2026-11-02 --rule '<the rule, word for word>'", "fleet proof standing --kind live-run --until 2026-11-26 --repositories owner/name --rule '<the rule, word for word>'", "fleet proof standing"],
+    examples: ["fleet proof standing --kind prod-shape --until 2026-11-02 --rule '<the rule, word for word>'", "fleet proof standing --kind live-run --until 2026-11-26 --repositories owner/name --rule '<the rule, word for word>'", "fleet proof standing --kind review --until 2026-12-02 --repositories owner/name --rule '<the rule, word for word>'", "fleet proof standing"],
     options: ["--kind", "--until", "--repositories", "--rule"],
     run: async ({ options }, _, { print, home }) => {
       if (!options.size) { for (const standing of await listStanding(home)) print(JSON.stringify(standing)); return 0; }
@@ -616,7 +619,7 @@ async function reserveRound(options: Map<string, string>, head: ProofIdentity, c
   if (tier.name === "read" && capturedBy === "fleet" && !panel && !decision && !await panelCommit(context.home, head)) throw new Error("A PR of the Read tier gets one read, and it is the panel: run fleet proof review, which runs its combined lens");
   const firstPanel = panel && !await panelCommit(context.home, head);
   const limits = firstPanel ? permit.limits : { ...permit.limits, ceiling: tierCeiling(tier, permit.limits.ceiling) };
-  const reserved = await startReview(context.home, head, { scope, base, from, ...permit, limits, decision, phase: options.get("--phase"), cleanBaseMerge: cleanBaseMerge(head, context.run), quietCommit: quietCommitIn(context.run, () => baseRefs(head, context.run)), capturedBy, lock: async (directory) => lockNewRound(directory, await context.lock()) });
+  const reserved = await startReview(context.home, head, { scope, base, from, ...permit, limits, decision, now: context.now?.(), phase: options.get("--phase"), cleanBaseMerge: cleanBaseMerge(head, context.run), quietCommit: quietCommitIn(context.run, () => baseRefs(head, context.run)), capturedBy, lock: async (directory) => lockNewRound(directory, await context.lock()) });
   return { ...reserved, scope, base, from, phase: options.get("--phase") };
 }
 
@@ -951,7 +954,7 @@ const identityHelp = `Every command works on the PR of the current branch and it
 or --commit to choose others. --commit and --base take any commit Git resolves here, such as a short SHA.`;
 const runIdentityHelp = `run works on the PR of the current branch. Pass --repo owner/name and --pr number to choose another. It
 reads HEAD from Git and takes no --commit.`;
-const kindsHelp = "Kinds: live-run, ui-walk, prod-shape, cross-version, shadow-diff, post-deploy-watch, dev-observed (owed through require --after-dev). A gap also takes ci, judge, and panel. A standing rule takes none of review, judge and post-deploy-watch.";
+const kindsHelp = "Kinds: live-run, ui-walk, prod-shape, cross-version, shadow-diff, post-deploy-watch, dev-observed (owed through require --after-dev). A gap also takes ci, judge, and panel. A standing rule also takes review, and none of judge and post-deploy-watch.";
 
 function overview() {
   const lines = Object.values(subcommands).filter((command) => !command.hidden).map((command) => `  fleet proof ${command.usage}`);

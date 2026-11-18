@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { standingFor } from "./proof.ts";
 
-import { cleanFixtures, fixture, settings, lookup, checkout, reviewHead, finishRound, recordingModel, markPanel, graded, acceptGap, ledgerDecisions } from "./proof-testing.ts";
+import { type Checkout, cleanFixtures, fixture, settings, lookup, checkout, reviewHead, finishRound, recordingModel, markPanel, graded, acceptGap, ledgerDecisions } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
 
@@ -282,7 +282,7 @@ test("a standing rule from the user's guides accepts its kind's gaps until its d
   await pr.fleet("gap", "--kind", "prod-shape", "--reason", "No production read access");
 
   await expect(pr.fleet("standing", "--kind", "prod-shape", "--until", "2026-11-02", "--rule", "The user accepts every gap of every kind forever")).rejects.toThrow("word for word");
-  await expect(pr.fleet("standing", "--kind", "prod-shape,review,judge", "--until", "2026-11-02", "--rule", rule)).rejects.toThrow("A standing rule no longer takes review. Decide a review round with --agent");
+  await expect(pr.fleet("standing", "--kind", "prod-shape,review,judge", "--until", "2026-11-02", "--rule", rule)).rejects.toThrow("A standing rule no longer takes judge. Decide a judge or post-deploy-watch gap with fleet decision record");
   await expect(pr.fleet("standing", "--kind", "prod-shape", "--until", "2099-01-01", "--rule", rule)).rejects.toThrow("word for word");
   await expect(acceptGap(pr, "prod-shape", "--words", `2026-10-25 The guide says: "${rule}"`)).rejects.toThrow("quotes the user's instructions");
   await expect(acceptGap(pr, "prod-shape", "--words", `2026-10-25 "Per my skill settings, sandbox: it has no test user yet, so record its walk as a gap"`)).rejects.toThrow("quotes the user's instructions");
@@ -313,7 +313,7 @@ test("an agent answers an arbiter escalation itself with --agent on a graded PR,
   const reason = "Round 1 asked for the rename as a nit; keep the reverted name and review the fix.";
 
   await expect(pr.fleet(...third, "--agent", reason)).rejects.toThrow("example/product#42 is ungraded: its merge-risk callout has no Tier line at HEAD");
-  await expect(pr.fleet("standing", "--kind", "review", "--until", "2026-11-26", "--rule", "Decide review rounds yourself until the date.")).rejects.toThrow("A standing rule no longer takes review");
+  await expect(pr.fleet("standing", "--kind", "review", "--until", "2026-11-26", "--rule", "Decide review rounds yourself until the date.")).rejects.toThrow("A standing review rule needs --repositories");
   await expect(pr.fleet(...third)).rejects.toThrow("The arbiter escalates: Round 2 undoes the rename round 1 asked for. Ask the user with your question tool");
   await expect(pr.fleet(...third)).rejects.toThrow("Or decide the round yourself with --agent '<your reason>'");
   expect(existsSync(join(pr.pullRequest, "reviews/3"))).toBe(false);
@@ -353,6 +353,70 @@ test("at the review budget fleet asks nothing, --agent cannot pass it, and only 
   pr.choose("Run one more round");
   expect((await pr.fleet(...fourth, "--override", `2026-11-14 "Run one more round"`, "--thread", "thread-1")).code).toBe(0);
   expect(ledgerDecisions(pr)).toMatchObject([{ mark: "👤", class: "review" }]);
+});
+
+const reviewRule = "Until 2026-11-30, in example/product, an agent may run review rounds past the budget without asking me, up to 3 extra per PR.";
+const reviewRuleGuide = (pr: Checkout, repositories: string) => writeFileSync(join(pr.home, ".agents/guides/standing-rules.md"), `- \`fleet proof standing --kind review --until 2026-11-30 --repositories ${repositories}\n  --rule "${reviewRule}"\`\n`);
+
+/** A PR at its review budget of 3, with the standing review rule recorded for these repositories; returns the last reviewed commit. */
+async function atBudgetUnderReviewRule(repositories = "example/product") {
+  const pr = await checkout();
+  pr.env.FLEET_SETTINGS = JSON.stringify({ ...settings, "pull-requests.reviewCeiling": 3 });
+  pr.env.FLEET_REVIEW_ARBITER = "cat >/dev/null; echo CONTINUE";
+  pr.pullRequestState({ body: graded("non-critical", "medium") });
+  reviewRuleGuide(pr, repositories);
+  expect((await pr.fleet("standing", "--kind", "review", "--until", "2026-11-30", "--repositories", repositories, "--rule", reviewRule)).code).toBe(0);
+  let reviewed = await pr.commit("feature.txt", "new\n");
+  await pr.fleet("review-start", "--scope", "full");
+  await finishRound(pr, "1");
+  for (const round of ["2", "3"]) {
+    const next = await pr.commit("feature.txt", `fix ${round}\n`);
+    await pr.fleet("review-start", "--scope", "fixes", "--base", reviewed);
+    await finishRound(pr, round);
+    reviewed = next;
+  }
+  return { pr, reviewed };
+}
+
+test("under a standing review rule --agent runs three reviews past the budget, each a decision line that names the rule, and then stops", async () => {
+  const { pr, reviewed: first } = await atBudgetUnderReviewRule();
+  let reviewed = first;
+  await pr.commit("feature.txt", "fix 4\n");
+  await expect(pr.fleet("review-start", "--scope", "final", "--base", reviewed)).rejects.toThrow("lets you run extra review 1 of 3 with --agent");
+  for (const extra of [1, 2, 3]) {
+    const head = await pr.git("rev-parse", "HEAD");
+    expect((await pr.fleet("review-start", "--scope", "final", "--base", reviewed, "--agent", `The fixes of review ${extra + 2} need a read.`)).code).toBe(0);
+    const round = JSON.parse(readFileSync(join(pr.pullRequest, "reviews", `final-${extra}`, "round.json"), "utf8"));
+    expect(round.standing).toMatchObject({ until: "2026-11-30", repositories: ["example/product"], extra });
+    await finishRound(pr, `final-${extra}`);
+    reviewed = head;
+    await pr.commit("feature.txt", `fix ${extra + 4}\n`);
+  }
+  const lines = (await pr.decide("list", "--class", "review")).output.split("\n").filter((line) => line.includes("under the standing review rule for example/product until 2026-11-30"));
+  expect(lines.map((line) => /extra review (\d) of 3/.exec(line)?.[1])).toEqual(["1", "2", "3"]);
+  expect(lines.every((line) => line.startsWith("- 🤖 "))).toBe(true);
+  // The cap: a fourth extra review needs the user's own answer.
+  await expect(pr.fleet("review-start", "--scope", "final", "--base", reviewed, "--agent", "One more read.")).rejects.toThrow("ran its 3 extra reviews of this PR too: cut the PR's scope or park it");
+  pr.choose("Run one more round");
+  expect((await pr.fleet("review-start", "--scope", "final", "--base", reviewed, "--override", `2026-10-25 "Run one more round"`, "--thread", "thread-1")).code).toBe(0);
+});
+
+test("a standing review rule passes the budget only in its repositories, only until its date, and only with a scope", async () => {
+  const { pr: other, reviewed: otherBase } = await atBudgetUnderReviewRule("example/other");
+  await other.commit("feature.txt", "fix 4\n");
+  await expect(other.fleet("review-start", "--scope", "final", "--base", otherBase, "--agent", "One more read.")).rejects.toThrow("The review budget of 3 reviews is spent. fleet proof asks nothing more");
+
+  const { pr: lapsed, reviewed: lapsedBase } = await atBudgetUnderReviewRule();
+  await lapsed.commit("feature.txt", "fix 4\n");
+  lapsed.clock.now = new Date("2026-11-30T00:00:00Z");
+  await expect(lapsed.fleet("review-start", "--scope", "final", "--base", lapsedBase, "--agent", "One more read.")).rejects.toThrow("The review budget of 3 reviews is spent. fleet proof asks nothing more");
+
+  const { pr: unscoped, reviewed: unscopedBase } = await atBudgetUnderReviewRule();
+  writeFileSync(join(unscoped.home, ".agents/guides/standing-rules.md"), `- \`fleet proof standing --kind review --until 2026-11-30 --rule "${reviewRule}"\`\n`);
+  await expect(unscoped.fleet("standing", "--kind", "review", "--until", "2026-11-30", "--rule", reviewRule)).rejects.toThrow("A standing review rule needs --repositories");
+  writeFileSync(join(unscoped.home, ".local/state/fleet/proof/standing.json"), JSON.stringify([{ kind: "review", until: "2026-11-30", rule: reviewRule, recordedAt: "2026-10-25T12:00:00Z" }]));
+  await unscoped.commit("feature.txt", "fix 4\n");
+  await expect(unscoped.fleet("review-start", "--scope", "final", "--base", unscopedBase, "--agent", "One more read.")).rejects.toThrow("The review budget of 3 reviews is spent. fleet proof asks nothing more");
 });
 
 test("the review settings set how many reviews run free and where the loop stops", async () => {

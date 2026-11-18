@@ -203,6 +203,33 @@ export const atCeiling = `fleet proof asks nothing more. For each open blocker o
 
 const budgetSpent = ({ ceiling }: ReviewLimits) => `The review budget of ${ceiling} reviews is spent. ${atCeiling}`;
 
+/**
+ * Past the budget, a standing review rule for the PR's repository lets the agent's own 🤖 decision run this many more
+ * reviews of one PR, across both phases. Then the loop stops for good: the PR's scope is cut or it parks, and only the
+ * user's --override runs another review.
+ */
+export const standingExtraReviews = 3;
+
+/** The standing review rule a round past the budget ran under: its date, its repositories, and which extra review it was. */
+type RoundStanding = { until: string; repositories: string[]; extra: number; reason: string };
+
+/**
+ * What the budget leaves for a review past it: the user's --override passes alone, the agent's --agent passes under a
+ * live standing review rule for the PR's repository until the PR spent its extra reviews, and anything else stops.
+ */
+async function pastBudget(home: string, identity: ProofIdentity, reviews: string, started: string[], limits: ReviewLimits, decision: DecisionMark | undefined, now: Date): Promise<{ stop?: string; standing?: RoundStanding }> {
+  if (decision?.mark === "👤") return {};
+  const spent = budgetSpent(limits);
+  const rule = await standingFor(home, "review", now, identity.repository);
+  if (!rule?.repositories) return { stop: spent };
+  const rounds = await Promise.all(started.map((name) => readJson<{ standing?: object }>(join(reviews, name, "round.json"), {})));
+  const used = rounds.filter((round) => round.standing).length;
+  if (used >= standingExtraReviews) return { stop: `${spent}. The standing review rule until ${rule.until} ran its ${standingExtraReviews} extra reviews of this PR too: cut the PR's scope or park it` };
+  const extra = used + 1;
+  if (!decision) return { stop: `${spent}. The standing review rule for ${rule.repositories.join(", ")} until ${rule.until} lets you run extra review ${extra} of ${standingExtraReviews} with --agent '<your reason>'` };
+  return { standing: { until: rule.until, repositories: rule.repositories, extra, reason: `extra review ${extra} of ${standingExtraReviews} past the review budget` } };
+}
+
 async function permitReview(home: string, identity: ProofIdentity, due: boolean, ceiling: string | undefined, decision: DecisionMark | undefined, { arbiter }: Permit) {
   if (decision?.mark === "👤") return undefined;
   if (ceiling) throw new Error(ceiling);
@@ -222,11 +249,15 @@ function askUser(identity: ProofIdentity, stop: string) {
 
 export type CapturedBy = "fleet" | "author";
 export type DecisionMark = Pick<Decision, "mark" | "id">;
-export type ReviewRequest = { scope: string; base?: string; from?: string; decision?: Decision; phase?: string; arbiter: Arbiter; limits: ReviewLimits; cleanBaseMerge?: CleanBaseMerge; quietCommit?: QuietCommit; capturedBy?: CapturedBy; lock?: LockRound };
+export type ReviewRequest = { scope: string; base?: string; from?: string; decision?: Decision; phase?: string; arbiter: Arbiter; limits: ReviewLimits; cleanBaseMerge?: CleanBaseMerge; quietCommit?: QuietCommit; capturedBy?: CapturedBy; lock?: LockRound; now?: Date };
 export type Reserved = { round: number | "final"; id: string; directory: string };
-type Permit = { arbiter: Arbiter; limits: ReviewLimits };
+type Permit = { arbiter: Arbiter; limits: ReviewLimits; now: Date };
 
-const reserveDecided = (reviews: string, name: string, record: object, decision: Decision | undefined, lock: LockRound | undefined) => reserve(reviews, name, { ...record, ...decision ? { decision } : {} }, lock);
+/** A round past the budget under a standing review rule keeps the rule, and its decision's answer names it, so the decision line shows it. */
+function reserveDecided(reviews: string, name: string, record: object, decision: Decision | undefined, lock: LockRound | undefined, standing?: RoundStanding) {
+  const noted = decision && standing ? { ...decision, answer: `${decision.answer} (under the standing review rule for ${standing.repositories.join(", ")} until ${standing.until}: ${standing.reason})` } : decision;
+  return reserve(reviews, name, { ...record, ...noted ? { decision: noted } : {}, ...standing ? { standing } : {} }, lock);
+}
 
 async function startFinalRead(home: string, identity: ProofIdentity, base: string | undefined, decision: Decision | undefined, phase: FinalReadPhase, permit: Permit, cleanBaseMerge: CleanBaseMerge, quietCommit: QuietCommit, capturedBy: CapturedBy, from: string | undefined, lock: LockRound | undefined): Promise<Reserved> {
   if (base === undefined) throw new Error("A final read needs --base with the latest reviewed commit");
@@ -243,12 +274,12 @@ async function startFinalRead(home: string, identity: ProofIdentity, base: strin
     if (!coversReview(base, latest.commit, cleanBaseMerge)) throw new Error(`Final read base must be the latest reviewed commit ${latest.commit}, or a clean base merge the gate carried it to`);
     const spent = await reviewsSpent(reviews, started, phase);
     const { free, ceiling } = permit.limits;
-    const stop = spent >= ceiling ? budgetSpent(permit.limits) : undefined;
-    const verdict = await permitReview(home, identity, spent >= free, stop, decision, permit);
+    const past = spent >= ceiling ? await pastBudget(home, identity, reviews, started, permit.limits, decision, permit.now) : {};
+    const verdict = await permitReview(home, identity, spent >= free, past.stop, decision, permit);
     let read = 1;
     while (started.includes(finalReadPrefix + read)) read++;
     const name = finalReadPrefix + read;
-    if (await reserveDecided(reviews, name, { ...identity, round: "final", read, scope: "final", base, from, phase, arbiter: verdict, capturedBy }, decision, lock)) return await reservedAlone(reviews, started, name, { round: "final", id: name, directory: join(reviews, name) });
+    if (await reserveDecided(reviews, name, { ...identity, round: "final", read, scope: "final", base, from, phase, arbiter: verdict, capturedBy }, decision, lock, past.standing)) return await reservedAlone(reviews, started, name, { round: "final", id: name, directory: join(reviews, name) });
   }
   throw new Error("Final read limit exceeded");
 }
@@ -269,7 +300,7 @@ const coversReview = (base: string, reviewed: string, cleanBaseMerge: CleanBaseM
 export async function startReview(home: string, identity: ProofIdentity, request: ReviewRequest): Promise<Reserved> {
   const { scope, base, phase, decision, cleanBaseMerge = () => undefined, quietCommit = () => undefined, capturedBy = "author", lock } = request;
   const from = request.from ?? base;
-  const permit = { arbiter: request.arbiter, limits: request.limits };
+  const permit = { arbiter: request.arbiter, limits: request.limits, now: request.now ?? new Date() };
   if (!["full", "fixes", "final"].includes(scope)) throw new Error("Review scope must be full, fixes, or final");
   if (phase !== undefined && scope !== "final") throw new Error("--phase applies only to final reads");
   if (base !== undefined && !sha.test(base)) throw new Error("Review base needs a full commit SHA");
@@ -292,9 +323,9 @@ async function startRound(home: string, identity: ProofIdentity, reviews: string
     const started = await reviewNames(reviews);
     const spent = await reviewsSpent(reviews, started, "review");
     const { free, ceiling } = permit.limits;
-    const stop = spent >= ceiling ? budgetSpent(permit.limits) : undefined;
-    const verdict = await permitReview(home, identity, spent >= free, stop, decision, permit);
-    if (await reserveDecided(reviews, String(round), { ...identity, round, scope, base, from, arbiter: verdict, capturedBy }, decision, lock)) return await reservedAlone(reviews, started, String(round), { round, id: String(round), directory });
+    const past = spent >= ceiling ? await pastBudget(home, identity, reviews, started, permit.limits, decision, permit.now) : {};
+    const verdict = await permitReview(home, identity, spent >= free, past.stop, decision, permit);
+    if (await reserveDecided(reviews, String(round), { ...identity, round, scope, base, from, arbiter: verdict, capturedBy }, decision, lock, past.standing)) return await reservedAlone(reviews, started, String(round), { round, id: String(round), directory });
   }
   throw new Error("Review limit exceeded");
 }
@@ -699,15 +730,19 @@ export async function refuseInstructionQuote(home: string, text: string) {
   }
 }
 
-export const retiredStandingKinds = ["review", "judge", "post-deploy-watch"];
-const standingKinds = gapKinds.filter((kind) => !retiredStandingKinds.includes(kind));
-export type StandingKind = GapKind;
+/**
+ * A standing rule accepts the gaps of a kind, or with kind review lets the agent's 🤖 decision run reviews past the
+ * budget in the rule's repositories (pastBudget). Agents decide judge and post-deploy-watch gaps with a 🤖 decision.
+ */
+export const retiredStandingKinds = ["judge", "post-deploy-watch"];
+const standingKinds: readonly string[] = [...gapKinds.filter((kind) => !retiredStandingKinds.includes(kind)), "review"];
+export type StandingKind = GapKind | "review";
 /** repositories, when set, are the only repositories whose PRs the rule covers, as owner/name. */
 type Standing = { kind: StandingKind; until: string; rule: string; recordedAt: string; repositories?: string[] };
 const standingPath = (home: string) => join(ledgerRoot(home), "standing.json");
 
 function standingKind(value: string): StandingKind {
-  if (retiredStandingKinds.includes(value)) throw new Error(`A standing rule no longer takes ${value}. Decide a review round with --agent '<your reason>', and a ${retiredStandingKinds.slice(1).join(" or ")} gap with fleet decision record --mark 🤖: both land in the decision ledger`);
+  if (retiredStandingKinds.includes(value)) throw new Error(`A standing rule no longer takes ${value}. Decide a ${retiredStandingKinds.join(" or ")} gap with fleet decision record --mark 🤖: it lands in the decision ledger`);
   if (!(standingKinds as readonly string[]).includes(value)) throw new Error(`Unknown standing kind ${value}. Use one of ${standingKinds.join(", ")}`);
   return value as StandingKind;
 }
@@ -724,6 +759,7 @@ export async function recordStanding(home: string, kinds: string, until: string,
   if (!/^\d{4}-\d{2}-\d{2}$/.test(until) || Number.isNaN(Date.parse(until))) throw new Error("--until needs a date such as 2026-11-02");
   const scope = repositories === undefined ? undefined : repositories.split(",");
   if (scope && !scope.every((repository) => /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository))) throw new Error("--repositories needs owner/name repositories separated by commas, such as owner/name");
+  if (covered.includes("review") && !scope) throw new Error("A standing review rule needs --repositories: it runs reviews past the budget only in the repositories the user names");
   const command = `fleet proof standing --kind ${kinds} --until ${until} ${repositories ? `--repositories ${repositories} ` : ""}--rule "${rule}"`;
   if (normalized(rule).length < minimumRule || !normalized(await agentInstructions(home)).includes(normalized(command))) {
     throw new Error(`The user's instructions in ~/.agents/AGENTS.md or ~/.agents/guides must hold this command word for word: ${command}. Only their own instructions set a standing rule, its kinds, its repositories, and its date`);
@@ -746,7 +782,8 @@ export async function standingFor(home: string, kind: StandingKind, now: Date, r
   if (!standingKinds.includes(kind)) return undefined;
   const today = now.toISOString().slice(0, 10);
   const commands = standingCommands(await agentInstructions(home));
-  const live = (standing: Standing) => standing.kind === kind && today < standing.until
+  // A review rule always names its repositories: one without them runs no review past the budget anywhere.
+  const live = (standing: Standing) => standing.kind === kind && today < standing.until && (kind !== "review" || standing.repositories !== undefined)
     && (!standing.repositories || standing.repositories.some((covered) => covered.toLowerCase() === repository.toLowerCase()))
     && commands.some((command) => command.kinds.includes(kind) && normalized(command.rule) === normalized(standing.rule) && scopeKey(command.repositories) === scopeKey(standing.repositories) && today < command.until);
   return (await listStanding(home)).find(live);
