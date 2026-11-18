@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readdir, rm, symlink, utimes, writeFile } from "node:fs
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { spawnAsync } from "../../../src/testing/spawn.ts";
-import { type AutoOptions, type CacheHost, cwdsFromLsof, decide, evictable, onlyDisposable, prune, pruneOptions, readSightings, readState, reclaimCaches, reclaimT3Versions, recordSightings, removeTreeCommand, t3StatePath, type Facts } from "./prune.ts";
+import { type AutoOptions, type CacheHost, cwdsFromLsof, decide, evictable, onlyDisposable, prune, pruneOptions, type PruneOptions, readSightings, readState, reclaimCaches, reclaimT3Versions, recordSightings, removeTreeCommand, t3StatePath, type Facts, type Verdict } from "./prune.ts";
 
 const onLinux = test.skipIf(process.platform !== "linux");
 const noMergedPullRequests = () => false;
@@ -26,7 +26,7 @@ test("removes an idle, clean worktree whose commits landed", () => {
 });
 
 test("keeps work that is active, dirty, unmerged, or held only by the worktree", () => {
-  const thread = { status: "stopped", archived: false, deleted: false, settled: false, pending: false, activeAt: 0, openLead: false };
+  const thread = { status: "stopped", archived: false, deleted: false, settled: false, wake: null, pending: false, activeAt: 0, openLead: false };
   const cases: Array<[Partial<Facts>, string]> = [
     [{ kind: "main" }, "primary checkout"],
     [{ inUse: true }, "a process runs inside it"],
@@ -44,7 +44,7 @@ test("keeps work that is active, dirty, unmerged, or held only by the worktree",
 });
 
 test("keeps a landed or merged worktree while an open thread that is not a subagent uses it, and removes it otherwise", () => {
-  const open = { status: "completed", archived: false, deleted: false, settled: false, pending: false, activeAt: 0, openLead: true };
+  const open = { status: "completed", archived: false, deleted: false, settled: false, wake: null, pending: false, activeAt: 0, openLead: true };
   const reason = "its T3 thread is open";
   expect(decide({ ...idle, branch: null, thread: open }, limits)).toEqual({ path: idle.path, remove: false, reason });
   expect(decide({ ...idle, landed: false, prMerged: true, thread: open }, limits)).toEqual({ path: idle.path, remove: false, reason });
@@ -53,7 +53,7 @@ test("keeps a landed or merged worktree while an open thread that is not a subag
 });
 
 test("removes a worktree of a closed thread whose only changes are ones tools make, and keeps it while the thread is open", () => {
-  const settled = { status: "completed", archived: false, deleted: false, settled: true, pending: false, activeAt: 0, openLead: false };
+  const settled = { status: "completed", archived: false, deleted: false, settled: true, wake: null, pending: false, activeAt: 0, openLead: false };
   const touched = { ...idle, landed: false, dirty: true, disposable: true };
   expect(decide({ ...touched, thread: settled }, limits)).toMatchObject({ remove: true, reason: "T3 thread is settled; commits stay on feature; drops lockfile and tool output changes" });
   expect(decide({ ...touched, thread: { ...settled, settled: false } }, limits).reason).toBe("uncommitted changes");
@@ -89,16 +89,63 @@ async function repository(): Promise<{ base: string; repo: string; root: string 
   return { base, repo, root: join(base, "worktrees") };
 }
 
-/** A T3 state database with one thread per worktree, created on 2026-09-20. */
-function t3State(path: string, threads: Array<{ worktreePath: string; settledAt?: string }>): string {
+type StateThread = {
+  id?: string; createdAt?: string; archivedAt?: string; deletedAt?: string; worktreePath: string; settledAt?: string;
+  lineage?: { parentThreadId: string; relationshipToParent: string }; pullRequests?: object[]; running?: boolean; asking?: boolean;
+};
+type Schedule = { threadId: string; enabled: boolean; nextRunAt: string | null };
+
+const realSchema = [
+  `create table orchestration_v2_projection_threads (thread_id text primary key, project_id text not null, title text not null, default_provider text not null,
+    runtime_mode text not null, interaction_mode text not null, active_provider_thread_id text, created_at text not null, updated_at text not null,
+    archived_at text, deleted_at text, payload_json text not null, provider_instance_id text)`,
+  `create table orchestration_v2_projection_runs (run_id text primary key, thread_id text not null, ordinal integer not null, provider text not null,
+    provider_thread_id text, status text not null, requested_at text not null, completed_at text, payload_json text not null, provider_instance_id text)`,
+  `create table orchestration_v2_projection_messages (message_id text primary key, thread_id text not null, run_id text, node_id text, role text not null,
+    streaming integer not null, created_at text not null, updated_at text not null, payload_json text not null, search_text text)`,
+  `create table orchestration_v2_projection_runtime_requests (runtime_request_id text primary key, thread_id text not null, node_id text not null,
+    provider_turn_id text, kind text not null, status text not null, created_at text not null, resolved_at text, payload_json text not null)`,
+  `create table scheduled_tasks (task_id text primary key, title text not null, prompt text not null, enabled integer not null, schedule_json text not null,
+    project_id text not null, thread_id text, workspace_strategy_json text not null, model_selection_json text not null, runtime_mode text not null,
+    interaction_mode text not null, created_by text not null, creation_source text not null, created_at text not null, updated_at text not null,
+    next_run_at text, last_run_at text, last_run_status text not null, last_run_error text, run_count integer not null,
+    webhook_token text, webhook_secret text, last_run_webhook_delivery_id text, thread_mode text not null default 'new_thread')`,
+];
+
+function t3State(path: string, threads: StateThread[], schedules: Schedule[] = []): string {
   const db = new Database(path);
-  db.run("create table orchestration_v2_projection_threads (thread_id text, created_at text, archived_at text, deleted_at text, payload_json text)");
-  db.run("create table orchestration_v2_projection_runs (run_id text, thread_id text, ordinal integer, status text, requested_at text, completed_at text)");
-  db.run("create table orchestration_v2_projection_messages (message_id text, thread_id text, role text, created_at text)");
-  db.run("create table orchestration_v2_projection_runtime_requests (runtime_request_id text, thread_id text, created_at text, resolved_at text)");
-  for (const thread of threads) db.run("insert into orchestration_v2_projection_threads values (?, '2026-09-20T00:00:00Z', null, null, ?)", [thread.worktreePath, JSON.stringify(thread)]);
+  for (const table of realSchema) db.run(table);
+  for (const thread of threads) {
+    const id = thread.id ?? thread.worktreePath;
+    const created = thread.createdAt ?? "2026-09-20T00:00:00Z";
+    db.run(`insert into orchestration_v2_projection_threads (thread_id, project_id, title, default_provider, runtime_mode, interaction_mode, created_at, updated_at, archived_at, deleted_at, payload_json)
+      values (?, 'project', 'title', 'claude', 'full-access', 'default', ?, ?, ?, ?, ?)`, [id, created, created, thread.archivedAt ?? null, thread.deletedAt ?? null, JSON.stringify(thread)]);
+    if (thread.running) db.run(`insert into orchestration_v2_projection_runs (run_id, thread_id, ordinal, provider, status, requested_at, payload_json)
+      values (?, ?, 1, 'claude', 'running', ?, '{}')`, [`run-${id}`, id, created]);
+    if (thread.asking) db.run(`insert into orchestration_v2_projection_runtime_requests (runtime_request_id, thread_id, node_id, kind, status, created_at, payload_json)
+      values (?, ?, 'node', 'user-input', 'pending', ?, '{}')`, [`request-${id}`, id, created]);
+  }
   db.close();
+  for (const task of schedules) schedule(path, task);
   return path;
+}
+
+function endWatches(statePath: string, threadId: string): void {
+  const db = new Database(statePath);
+  const row = db.query("select payload_json payload from orchestration_v2_projection_threads where thread_id = ?").get(threadId) as { payload: string };
+  const payload = JSON.parse(row.payload);
+  payload.pullRequests = payload.pullRequests.map(({ watch, ...entry }: { watch: object }) => ({ ...entry, watch: null, endedWatch: watch }));
+  db.run("update orchestration_v2_projection_threads set payload_json = ? where thread_id = ?", [JSON.stringify(payload), threadId]);
+  db.close();
+}
+
+function schedule(statePath: string, task: Schedule): void {
+  const db = new Database(statePath);
+  db.run(`insert into scheduled_tasks (task_id, title, prompt, enabled, schedule_json, project_id, thread_id,
+      workspace_strategy_json, model_selection_json, runtime_mode, interaction_mode, created_by, creation_source, created_at, updated_at, next_run_at, last_run_status, run_count, thread_mode)
+    values (?, 'check', 'check', ?, '{}', 'project', ?, '{}', '{}', 'full-access', 'default', 'agent', 'mcp', '2026-09-20T00:00:00Z', '2026-09-20T00:00:00Z', ?, 'never', 0, 'existing_thread')`,
+    [crypto.randomUUID(), task.enabled ? 1 : 0, task.threadId, task.nextRunAt]);
+  db.close();
 }
 
 onLinux("a prune pass removes a settled worktree that has only tool changes and keeps one with a real edit", async () => {
@@ -126,6 +173,270 @@ onLinux("a prune pass removes a settled worktree that has only tool changes and 
   expect(await readdir(shared)).toEqual(["kept"]);
 });
 
+const watching = (number: number) => ({ host: "github.com", repository: "acme/app", number, watch: { startedAt: "2026-09-21T00:00:00Z" } });
+const ended = (number: number) => ({ host: "github.com", repository: "acme/app", number, watch: null, endedWatch: { startedAt: "2026-09-21T00:00:00Z" } });
+const settledAt = "2026-09-21T00:00:00Z";
+const evicted = (lines: string[]) => lines.filter((line) => line.startsWith("would evict")).map((line) => line.split(": ")[1].split(" (")[0]);
+const scheduledFor = (...threadIds: string[]) => threadIds.map((threadId) => ({ threadId, enabled: true, nextRunAt: "2026-11-16T08:15:00.000Z" }));
+
+async function landedWorktrees(...names: string[]) {
+  const { base, repo, root } = await repository();
+  const paths = names.map((name) => join(root, "repo", name));
+  for (const path of paths) await sh(repo, "git", "worktree", "add", "-q", "-b", basename(path), path);
+  return { base, root, paths };
+}
+
+function pass(base: string, root: string, statePath: string, change: Partial<PruneOptions> = {}): Verdict[] {
+  return prune({
+    worktreeRoot: root, statePath, now: Date.now() + 48 * 3600_000, repos: [], minIdleHours: 6, unownedIdleHours: 24, agentIdleHours: 24,
+    dryRun: false, fetch: false, log: () => {}, sightingsPath: join(base, "sightings.json"), mergedPullRequest: noMergedPullRequests, ...change,
+  });
+}
+
+const pressured = (later: number, lines: string[]): Partial<PruneOptions> => ({
+  now: later, minIdleHours: 1, unownedIdleHours: 6, agentIdleHours: 6, dryRun: true, log: (line) => lines.push(line), evict: { targetGigabytes: 1, free: () => 0 },
+});
+
+onLinux("fleet prune on a home keeps the landed worktree of an open top-level thread and removes the one of a finished subagent", async () => {
+  const home = await mkdtemp(join(tmpdir(), "fleet-prune-home-"));
+  temporary.push(home);
+  const repo = join(home, "repo");
+  await mkdir(repo);
+  await sh(repo, "git", "init", "-q", "-b", "main");
+  await writeFile(join(repo, "app.ts"), "a\n");
+  await sh(repo, "git", "add", ".");
+  await commit(repo, "init");
+  await sh(repo, "git", "update-ref", "refs/remotes/origin/main", "HEAD");
+  const root = join(home, ".t3/worktrees/repo");
+  const [lead, subagent, fork, woken] = ["lead", "subagent", "fork", "woken"].map((name) => join(root, name));
+  const old = new Date(Date.now() - 48 * 3600_000);
+  for (const path of [lead, subagent, fork, woken]) {
+    await sh(repo, "git", "worktree", "add", "-q", "-b", basename(path), path);
+    const gitDir = join(repo, ".git/worktrees", basename(path));
+    for (const touched of [path, join(gitDir, "HEAD"), join(gitDir, "logs/HEAD")]) await utimes(touched, old, old);
+  }
+  await mkdir(join(home, ".t3/userdata"), { recursive: true });
+  t3State(join(home, ".t3/userdata/statev2.sqlite"), [
+    { id: "lead", worktreePath: lead },
+    { id: "subagent", worktreePath: subagent, lineage: { parentThreadId: "lead", relationshipToParent: "subagent" } },
+    { id: "fork", worktreePath: fork, lineage: { parentThreadId: "lead", relationshipToParent: "fork" } },
+    { id: "woken", worktreePath: woken, settledAt, pullRequests: [ended(1), watching(2)] },
+  ]);
+
+  const run = await spawnAsync(["bun", join(import.meta.dir, "../commands/prune.ts"), "--no-fetch"], {
+    env: { HOME: home, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0", XDG_STATE_HOME: join(home, ".local/state"), PATH: Bun.env.PATH, FLEET_SETTINGS: JSON.stringify({ "base.diskFloorGigabytes": 0 }) },
+  });
+
+  expect(run.stderr).toBe("");
+  expect(run.exitCode).toBe(0);
+  expect(run.stdout).toContain(`kept: ${lead} (its T3 thread is open)`);
+  expect(run.stdout).toContain(`kept: ${fork} (its T3 thread is open)`);
+  expect(run.stdout).toContain(`kept: ${woken} (its T3 thread watches acme/app#2)`);
+  expect(run.stdout).toContain(`removed: ${subagent} (all commits are on origin/main)`);
+  expect((await readdir(root)).sort()).toEqual(["fork", "lead", "woken"]);
+});
+
+onLinux("a prune pass keeps the landed worktree of a settled thread while an enabled scheduled task bound to it has a next run", async () => {
+  const { base, root, paths: [scheduled, disabled, ran, plain] } = await landedWorktrees("scheduled", "disabled", "ran", "plain");
+  const statePath = t3State(join(base, "statev2.sqlite"), [scheduled, disabled, ran, plain].map((worktreePath) => ({ worktreePath, settledAt })), [
+    { threadId: scheduled, enabled: true, nextRunAt: "2026-11-16T08:15:00.000Z" },
+    { threadId: disabled, enabled: false, nextRunAt: "2026-11-16T08:15:00.000Z" },
+    { threadId: ran, enabled: true, nextRunAt: null },
+  ]);
+
+  const verdicts = pass(base, root, statePath);
+
+  expect(verdicts.find((verdict) => verdict.path === scheduled)).toMatchObject({ remove: false, reason: "its T3 thread has a scheduled run at 2026-11-16T08:15:00.000Z" });
+  expect(await readdir(join(root, "repo"))).toEqual(["scheduled"]);
+});
+
+onLinux("a prune pass keeps the landed worktree of a settled thread while it watches a pull request, and removes it once every watch ended", async () => {
+  const { base, root, paths: [watched, unwatched] } = await landedWorktrees("watched", "unwatched");
+  const statePath = t3State(join(base, "statev2.sqlite"), [
+    { worktreePath: watched, settledAt, pullRequests: [ended(1), watching(2)] }, { worktreePath: unwatched, settledAt, pullRequests: [ended(3)] },
+  ]);
+
+  const verdicts = pass(base, root, statePath);
+
+  expect(verdicts.find((verdict) => verdict.path === watched)).toMatchObject({ remove: false, reason: "its T3 thread watches acme/app#2" });
+  expect(await readdir(join(root, "repo"))).toEqual(["watched"]);
+});
+
+onLinux("under disk pressure, a prune pass evicts the worktree of a thread that a wake needs only after every other one", async () => {
+  const { base, root, paths: [woken, open] } = await landedWorktrees("woken", "open");
+  const later = Date.now() + 48 * 3600_000;
+  recordSightings(join(base, "sightings.json"), [open], later - 2 * 3600_000);
+  const lines: string[] = [];
+
+  pass(base, root, t3State(join(base, "statev2.sqlite"), [{ worktreePath: woken, settledAt, pullRequests: [watching(1)] }, { worktreePath: open }]), pressured(later, lines));
+
+  expect(evicted(lines)).toEqual([open, woken]);
+});
+
+onLinux("a prune pass keeps the landed worktree of a subagent thread while a scheduled task bound to it has a next run", async () => {
+  const { base, root, paths: [woken, finished] } = await landedWorktrees("woken", "finished");
+  const lineage = { parentThreadId: "lead", relationshipToParent: "subagent" };
+  const statePath = t3State(join(base, "statev2.sqlite"), [
+    { id: "woken", worktreePath: woken, settledAt, lineage }, { id: "finished", worktreePath: finished, settledAt, lineage },
+  ], scheduledFor("woken"));
+
+  const verdicts = pass(base, root, statePath);
+
+  expect(verdicts.find((verdict) => verdict.path === woken)).toMatchObject({ remove: false, reason: "its T3 thread has a scheduled run at 2026-11-16T08:15:00.000Z" });
+  expect(await readdir(join(root, "repo"))).toEqual(["woken"]);
+});
+
+onLinux("a prune pass reads the T3 state again for each worktree, so a run scheduled during the pass keeps its worktree", async () => {
+  const { base, root, paths: [early, late] } = await landedWorktrees("early", "late");
+  await writeFile(join(early, "app.ts"), "b\n");
+  await commit(early, "work");
+  const statePath = t3State(join(base, "statev2.sqlite"), [{ id: "early", worktreePath: early }, { id: "late", worktreePath: late, settledAt }]);
+
+  const log = (line: string) => { if (line.startsWith(`kept: ${early} `)) schedule(statePath, scheduledFor("late")[0]); };
+
+  const verdicts = pass(base, root, statePath, { log });
+
+  expect(verdicts.find((verdict) => verdict.path === late)).toMatchObject({ remove: false, reason: "its T3 thread has a scheduled run at 2026-11-16T08:15:00.000Z" });
+});
+
+onLinux("a prune pass reads the T3 state after a worktree's own checks, so a run scheduled while they run keeps it", async () => {
+  const { base, root, paths: [settled] } = await landedWorktrees("settled");
+  await writeFile(join(settled, "app.ts"), "b\n");
+  await commit(settled, "work");
+  const statePath = t3State(join(base, "statev2.sqlite"), [{ id: "settled", worktreePath: settled, settledAt }]);
+
+  const verdicts = pass(base, root, statePath, { mergedPullRequest: () => (schedule(statePath, scheduledFor("settled")[0]), false) });
+
+  expect(verdicts.find((verdict) => verdict.path === settled)).toMatchObject({ remove: false, reason: "its T3 thread has a scheduled run at 2026-11-16T08:15:00.000Z" });
+  expect(await readdir(join(root, "repo"))).toEqual(["settled"]);
+});
+
+onLinux("under disk pressure, a worktree whose watch ends during the pass is evicted before one that still has a wake", async () => {
+  const { base, root, paths: [older, newer] } = await landedWorktrees("older", "newer");
+  const later = Date.now() + 48 * 3600_000;
+  recordSightings(join(base, "sightings.json"), [newer], later - 2 * 3600_000);
+  const statePath = t3State(join(base, "statev2.sqlite"), [
+    { id: "older", worktreePath: older, settledAt, pullRequests: [watching(1)] }, { id: "newer", worktreePath: newer, settledAt, pullRequests: [watching(2)] },
+  ]);
+  const lines: string[] = [];
+  let calls = 0;
+  const free = () => (calls++ === 0 ? (endWatches(statePath, "newer"), 0) : Number.POSITIVE_INFINITY);
+
+  pass(base, root, statePath, { ...pressured(later, lines), dryRun: false, evict: { targetGigabytes: 1, free } });
+
+  expect(lines.filter((line) => line.startsWith("evicted")).map((line) => line.split(": ")[1].split(" (")[0])).toEqual([newer]);
+  expect(await readdir(join(root, "repo"))).toEqual(["older"]);
+});
+
+onLinux("under disk pressure, a worktree whose thread gets a wake during the pass is evicted after every other one", async () => {
+  const { base, root, paths: [older, newer] } = await landedWorktrees("older", "newer");
+  const later = Date.now() + 48 * 3600_000;
+  recordSightings(join(base, "sightings.json"), [newer], later - 2 * 3600_000);
+  const statePath = t3State(join(base, "statev2.sqlite"), [{ id: "older", worktreePath: older }, { id: "newer", worktreePath: newer }]);
+  const lines: string[] = [];
+  let scheduled = false;
+  const free = () => (scheduled ||= (schedule(statePath, scheduledFor("older")[0]), true), 0);
+
+  pass(base, root, statePath, { ...pressured(later, lines), dryRun: false, evict: { targetGigabytes: 1, free } });
+
+  expect(lines.filter((line) => line.startsWith("evicted")).map((line) => line.split(": ")[1].split(" (")[0])).toEqual([newer, older]);
+});
+
+onLinux("a prune pass reads the T3 state again right before it removes a worktree, so a run scheduled while it prepares the removal keeps it", async () => {
+  const { base, root, paths: [settled] } = await landedWorktrees("settled");
+  const statePath = t3State(join(base, "statev2.sqlite"), [{ id: "settled", worktreePath: settled, settledAt }]);
+
+  const verdicts = pass(base, root, statePath, { makeWritable: () => schedule(statePath, scheduledFor("settled")[0]) });
+
+  expect(verdicts.find((verdict) => verdict.path === settled)).toMatchObject({ remove: false, reason: "its T3 thread has a scheduled run at 2026-11-16T08:15:00.000Z" });
+  expect(await readdir(join(root, "repo"))).toEqual(["settled"]);
+});
+
+onLinux("under disk pressure, a worktree whose thread gets a wake during its own checks is kept while one without a wake can go instead", async () => {
+  const { base, root, paths: [older, newer] } = await landedWorktrees("older", "newer");
+  for (const path of [older, newer]) {
+    await writeFile(join(path, "app.ts"), `${basename(path)}\n`);
+    await commit(path, "work");
+  }
+  const later = Date.now() + 48 * 3600_000;
+  recordSightings(join(base, "sightings.json"), [newer], later - 2 * 3600_000);
+  const statePath = t3State(join(base, "statev2.sqlite"), [{ id: "older", worktreePath: older }, { id: "newer", worktreePath: newer }]);
+  const lines: string[] = [];
+  const checked: string[] = [];
+  const mergedPullRequest = (branch: string) => {
+    checked.push(branch);
+    if (branch === "older" && checked.filter((name) => name === "older").length === 2) schedule(statePath, scheduledFor("older")[0]);
+    return false;
+  };
+  const free = () => (lines.some((line) => line.startsWith("evicted")) ? Number.POSITIVE_INFINITY : 0);
+
+  pass(base, root, statePath, { ...pressured(later, lines), dryRun: false, mergedPullRequest, evict: { targetGigabytes: 1, free } });
+
+  expect(lines.filter((line) => line.startsWith("evicted")).map((line) => line.split(": ")[1].split(" (")[0])).toEqual([newer]);
+  expect(await readdir(join(root, "repo"))).toEqual(["older"]);
+});
+
+onLinux("a worktree that several threads share counts the latest activity of any of them", async () => {
+  const { base, root, paths: [recent] } = await landedWorktrees("recent");
+  const later = Date.now() + 48 * 3600_000;
+  const statePath = t3State(join(base, "statev2.sqlite"), [
+    { id: "scheduled", worktreePath: recent, settledAt }, { id: "lately", worktreePath: recent, settledAt, createdAt: new Date(later - 30 * 60_000).toISOString() },
+  ], scheduledFor("scheduled"));
+  const lines: string[] = [];
+
+  const verdicts = pass(base, root, statePath, pressured(later, lines));
+
+  expect(verdicts.find((verdict) => verdict.path === recent)?.reason).toBe("active 0.5h ago");
+  expect(evicted(lines)).toEqual([]);
+});
+
+onLinux("a worktree that several threads share counts a running session or a pending answer of any of them", async () => {
+  const { base, root, paths: [busy, asking] } = await landedWorktrees("busy", "asking");
+  const later = Date.now() + 48 * 3600_000;
+  const newer = new Date(later - 5 * 3600_000).toISOString();
+  const statePath = t3State(join(base, "statev2.sqlite"), [
+    { id: "running", worktreePath: busy, running: true }, { id: "busy-scheduled", worktreePath: busy, settledAt, createdAt: newer },
+    { id: "asking", worktreePath: asking, asking: true }, { id: "asking-scheduled", worktreePath: asking, settledAt, createdAt: newer },
+  ], scheduledFor("busy-scheduled", "asking-scheduled"));
+  const lines: string[] = [];
+
+  const verdicts = pass(base, root, statePath, pressured(later, lines));
+
+  expect(verdicts.map(({ path, reason }) => ({ path, reason }))).toEqual([
+    { path: asking, reason: "T3 thread waits for an answer" }, { path: busy, reason: "T3 session is running" },
+  ]);
+  expect(evicted(lines)).toEqual([]);
+});
+
+onLinux("a worktree that several threads share counts the wake of any open one", async () => {
+  const { base, root, paths: [shared, plain] } = await landedWorktrees("shared", "plain");
+  const later = Date.now() + 48 * 3600_000;
+  recordSightings(join(base, "sightings.json"), [plain], later - 2 * 3600_000);
+  const statePath = t3State(join(base, "statev2.sqlite"), [
+    { id: "watcher", worktreePath: shared, settledAt, pullRequests: [watching(1)] }, { id: "newer", worktreePath: shared, createdAt: new Date(later - 3 * 3600_000).toISOString() },
+    { worktreePath: plain },
+  ]);
+  const lines: string[] = [];
+
+  pass(base, root, statePath, pressured(later, lines));
+
+  expect(evicted(lines)).toEqual([plain, shared]);
+});
+
+onLinux("the wake of an archived or deleted thread does not keep a worktree it shares with a settled thread", async () => {
+  const { base, root, paths: [archived, deleted] } = await landedWorktrees("archived", "deleted");
+  for (const path of [archived, deleted]) await writeFile(join(path, "pnpm-lock.yaml"), "b\n");
+  const newer = "2026-09-22T00:00:00Z";
+  const statePath = t3State(join(base, "statev2.sqlite"), [
+    { id: "archived", worktreePath: archived, archivedAt: settledAt }, { id: "archived-peer", worktreePath: archived, settledAt, createdAt: newer },
+    { id: "deleted", worktreePath: deleted, deletedAt: settledAt }, { id: "deleted-peer", worktreePath: deleted, settledAt, createdAt: newer },
+  ], scheduledFor("archived", "deleted"));
+
+  pass(base, root, statePath);
+
+  expect(await readdir(join(root, "repo"))).toEqual([]);
+});
+
 test("removes an idle agent worktree with unmerged commits on a branch, and keeps unreadable T3 state", () => {
   const agent = { ...idle, path: "/r/.claude/worktrees/agent-a1", agent: true, landed: false };
   expect(decide(agent, limits)).toMatchObject({ remove: true, reason: "agent worktree idle 48.0h; commits stay on feature" });
@@ -135,7 +446,7 @@ test("removes an idle agent worktree with unmerged commits on a branch, and keep
 });
 
 test("under disk pressure, evicts a clean worktree whose commits a ref keeps, even with an open thread or unreadable state", () => {
-  const open = { status: "completed", archived: false, deleted: false, settled: false, pending: false, activeAt: 0, openLead: true };
+  const open = { status: "completed", archived: false, deleted: false, settled: false, wake: null, pending: false, activeAt: 0, openLead: true };
   const pressure = { ...limits, minIdleHours: 1 };
   const unmerged = { ...idle, landed: false, thread: open };
   expect(evictable(unmerged, pressure)).toBe(true);
@@ -153,7 +464,7 @@ test("under disk pressure, keeps a worktree that no thread or agent owns for the
   expect(evictable(detached, pressure)).toBe(false);
   expect(decide({ ...detached, landed: true }, pressure).reason).toBe("no T3 thread or agent owns it; active 3.0h ago");
   expect(evictable({ ...detached, lastActivity: now - 7 * 3600_000 }, pressure)).toBe(true);
-  const open = { status: "completed", archived: false, deleted: false, settled: false, pending: false, activeAt: 0, openLead: true };
+  const open = { status: "completed", archived: false, deleted: false, settled: false, wake: null, pending: false, activeAt: 0, openLead: true };
   expect(evictable({ ...detached, thread: open }, pressure)).toBe(true);
 });
 
