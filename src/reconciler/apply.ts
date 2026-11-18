@@ -7,6 +7,7 @@ import type { Action, CatalogEntry, Finding, HumanStep, Owned, PackCheck, Plan, 
 import { engineCommand } from "./engine-command.ts";
 import { changeLedger, ledgerKey, readLedger, undoVariable, type Ledger, type LedgerStep } from "./ledger.ts";
 import { hublessReason } from "./resolve.ts";
+import { withLegacyNames } from "../legacy.ts";
 
 export type AdapterContext = { home: string; dryRun: boolean; adopt: string[]; adoptFrom?: string[] };
 export type AdapterResult = { actions: Action[]; findings: Finding[]; blocked?: boolean };
@@ -372,7 +373,7 @@ const undoRunner = (run: Runner, step: LedgerStep): Runner => (command) => run(c
 function spawnRunner(home: string, profileDir: string | undefined): Runner {
   return async (command, env = {}) => {
     try {
-      return await Bun.spawn(command, { stdout: "ignore", stderr: "ignore", env: { ...Bun.env, HOME: home, ...(profileDir ? { HEDGE_PROFILE_DIR: profileDir } : {}), ...env } }).exited;
+      return await Bun.spawn(command, { stdout: "ignore", stderr: "ignore", env: withLegacyNames({ ...Bun.env, HOME: home, ...(profileDir ? { HEDGE_PROFILE_DIR: profileDir } : {}), ...env }) }).exited;
     } catch {
       return 127;
     }

@@ -6,6 +6,7 @@ import { heldLimit, lineRedactor, secretCommand, type SecretContext } from "./se
 import { providersSeam, rowsSeam } from "./secret-rows.ts";
 import { eventLogPath, secretFilesDir, type CheckResult } from "./secret-store.ts";
 import { text, made, sendKey, otherKey, euKey, foreignKey, loginEmail, loginPassword, values, testRows, newHome, hedge, run, login, removeHomes } from "./secret-testing.ts";
+import { remoteLauncher } from "../../../src/hub/ssh.ts";
 
 afterEach(removeHomes);
 
@@ -14,7 +15,7 @@ test("a devbox puts a key through the hub over SSH stdin and runs a command with
   const file = machine.secretFile(machine.devHome, `${sendKey}\n`);
   expect(await machine.dev("put", "send-us", "--file", file)).toBe(0);
   expect(existsSync(file)).toBe(false);
-  expect(machine.commands[0]).toContain("hedge\" secret hub");
+  expect(machine.commands[0]).toContain(`${remoteLauncher} secret hub`);
 
   const result = await run(machine.dev, machine.printed, ["send-us"], `[ "$EXAMPLE_API_KEY" = "${sendKey}" ] && echo delivered`);
   expect(result.code).toBe(0);

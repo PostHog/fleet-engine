@@ -677,8 +677,8 @@ The real machines run the private Fleet, not the engine.
   not in its profile. Its profile names it as the hub (D2) once step 2
   brings `hedge hub here`.
 - **The engine is the only Hedge in that home.** The machine is created
-  without the private dotfiles installer, because both Fleets write
-  `~/.config/hedge` and name the unit `hedge-slack-trigger.service`.
+  without the private dotfiles installer, because both used to write
+  `~/.config/fleet` and name the unit `fleet-slack-trigger.service`.
 - **The private Slack trigger stays as it is.** The slice uses a second
   Slack app in a separate developer sandbox workspace, because the same
   workspace would show it the same reactions. The real trigger moves in
@@ -718,7 +718,7 @@ the profile. A generic integration interface, a second provider, and
 Engine forward drivers for `coder ssh -R` and `coder port-forward`. A
 discovery daemon, and any delivery of the service catalog. A timer that
 changes the proxy route between applies. A `guards` pack and the private
-Hedge's monitors. Plugins for Codex, and hooks or MCP entries in a plugin.
+Fleet's monitors. Plugins for Codex, and hooks or MCP entries in a plugin.
 Turning a pack off for one node, an engine API, a second hub, version
 ranges between packs, secrets in the keychain, and removing `pack.json`.
 

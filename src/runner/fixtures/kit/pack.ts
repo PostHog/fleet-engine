@@ -16,6 +16,7 @@ export default {
         if (mode === "show") return ctx.print((await ctx.secrets.read(rest[0]!)) ?? "no secret"), 0;
         if (mode === "fail") throw new Error("kit failed");
         if (mode === "env") return ctx.print(`${process.env.HOME} ${process.env.HEDGE_ENGINE_DIR} ${process.env.HEDGE_SETTINGS}`), 0;
+        if (mode === "legacy-env") return ctx.print(`${process.env.FLEET_ENGINE_DIR} ${process.env.FLEET_SETTINGS}`), 0;
         if (mode === "start") {
           const thread = await ctx.threads.start({ key: rest[0]!, title: "Kit", prompt: "Say hello.", modelRole: "implementation" });
           return ctx.print(thread.url ?? thread.id), 0;

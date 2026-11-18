@@ -8,8 +8,11 @@ import { summaryGaps, type GapProof, type KindProof, type ProofSummary } from ".
 
 export const receiptOpen = "<!-- hedge-proof-receipt";
 export const receiptClose = "<!-- /hedge-proof-receipt -->";
+const legacyReceiptOpen = "<!-- fleet-proof-receipt";
+const legacyReceiptClose = "<!-- /fleet-proof-receipt -->";
 const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
-const blockText = String.raw`${escaped(receiptOpen)}\b[^>]*-->(?:(?!${escaped(receiptOpen)})[\s\S])*?${escaped(receiptClose)}`;
+const opens = `(?:${escaped(receiptOpen)}|${escaped(legacyReceiptOpen)})`;
+const blockText = String.raw`${opens}\b[^>]*-->(?:(?!${opens})[\s\S])*?(?:${escaped(receiptClose)}|${escaped(legacyReceiptClose)})`;
 const blockAndBreak = new RegExp(String.raw`${blockText}(?:\r?\n){0,2}`, "g");
 const marker = /<!-- hedge-proof-receipt head=([0-9a-f]{40}) hash=([0-9a-f]+) -->/;
 

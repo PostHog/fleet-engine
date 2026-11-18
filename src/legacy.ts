@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, readFileSync, renameSync, symlinkSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { writePrivateFile } from "./files/private.ts";
 
@@ -21,6 +21,12 @@ export function adoptLegacyEnv(env: Record<string, string | undefined>): void {
   }
 }
 
+/** env with a FLEET_ copy of each HEDGE_ variable, for packs from before the rename that read the old names. */
+export function withLegacyNames(env: Record<string, string | undefined>): Record<string, string | undefined> {
+  const legacy = Object.fromEntries(Object.entries(env).filter(([key]) => key.startsWith("HEDGE_")).map(([key, value]) => [`FLEET_${key.slice("HEDGE_".length)}`, value]));
+  return { ...legacy, ...env };
+}
+
 /** Paths under the home folder that the engine owned before the rename, and their new names. */
 export const legacyPaths: ReadonlyArray<readonly [string, string]> = [
   [".config/fleet", ".config/hedge"],
@@ -35,6 +41,15 @@ export const legacyPaths: ReadonlyArray<readonly [string, string]> = [
   [".ssh/fleet-coder-git.pub", ".ssh/hedge-coder-git.pub"],
   [".ssh/fleet-peers.conf", ".ssh/hedge-peers.conf"],
 ];
+
+/** Writes the hedge command beside the fleet command that get.sh wrote before the rename, so hedge runs from a login shell after an update. Returns whether it wrote one. */
+export function linkHedgeCommand(home: string, engineRoot: string): boolean {
+  const old = join(home, ".local/bin/fleet");
+  const current = join(home, ".local/bin/hedge");
+  if (present(current) || !present(old)?.isFile() || readFileSync(old, "utf8").split("\n")[1] !== "# Fleet") return false;
+  writeFileSync(current, `#!/bin/sh\n# Hedge\nexec sh '${join(engineRoot, "hedge").replaceAll("'", "'\\''")}' "$@"\n`, { mode: 0o755 });
+  return true;
+}
 
 const legacyFilesGroup = "fleet";
 const filesGroup = "hedge";

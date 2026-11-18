@@ -55,7 +55,7 @@ export type T3Task = {
 
 /** Limits an item to some machines, plans, or one workflow. An item without a field fits every value. The role solo fits the only machine: it is not a devbox, the Hub pack is off, and the profile lists no devboxes. oncePerHedge keeps the item on one machine: the first node the profile lists, else the hub. */
 /** unless: workflows of any pack that the item gives way to: it stays out of the plan while one of them is on. */
-export type Scope = { on?: Os[]; roles?: Array<MachineRole | "solo">; oncePerHedge?: boolean; plans?: AiPlan[]; workflow?: string; unless?: string[] };
+export type Scope = { on?: Os[]; roles?: Array<MachineRole | "solo">; oncePerHedge?: boolean; oncePerFleet?: boolean; plans?: AiPlan[]; workflow?: string; unless?: string[] };
 
 export type TimerSchedule = { every: "5m" | "15m" | "1h" | "1d"; at?: string };
 

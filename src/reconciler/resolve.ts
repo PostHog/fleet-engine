@@ -80,10 +80,10 @@ export function resolve(profile: Profile, saved: MachineFile, sources: FetchedSo
   const fits = (pack: string, item: Scope, label: string) => {
     const unknown = declared && item.unless?.find((id) => !declared.has(id));
     if (unknown) throw new ResolveError(`${pack}: ${label} gives way to workflow ${unknown}, which no pack declares`);
-    const elected = item.oncePerHedge && onceRunner ? machine.name === onceRunner : undefined;
+    const elected = (item.oncePerHedge ?? item.oncePerFleet) && onceRunner ? machine.name === onceRunner : undefined;
     const reason =
       item.on && !item.on.includes(os) ? `not on ${os}`
-      : elected === false ? `runs once per hedge, on ${onceRunner}`
+      : elected === false ? `runs on one of your machines only, ${onceRunner}`
       : !elected && item.roles && !item.roles.includes(machine.role) && !(solo && item.roles.includes("solo")) ? (hubless && item.roles.includes("hub") ? hublessReason : `not on a ${machine.role}`)
       : item.plans && !item.plans.includes(profile.plan) ? `not for plan ${profile.plan}`
       : item.workflow && !active.has(item.workflow) ? `workflow ${item.workflow} is off`

@@ -67,6 +67,13 @@ test("a pack.ts command runs in the engine with the pack's settings", async () =
   expect(await (await machine(["kit"], { "kit.greeting": "hi" })).hedge("kit", "greet", "you")).toEqual({ code: 0, lines: ["hi you"] });
 });
 
+test("a pack command from before the rename finds the same values under their FLEET_ names", async () => {
+  const { engine, hedge } = await machine();
+  const [line] = (await hedge("kit", "legacy-env")).lines;
+  expect(line).toStartWith(`${engine} `);
+  expect(JSON.parse(line!.split(" ").slice(1).join(" "))).toMatchObject({ "kit.greeting": "hello" });
+});
+
 test("a pack.ts command sees today's pack-command environment", async () => {
   const { home, engine, hedge } = await machine();
   const [line] = (await hedge("kit", "env")).lines;

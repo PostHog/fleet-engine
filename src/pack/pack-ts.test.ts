@@ -149,6 +149,11 @@ describe("loading a pack.ts", () => {
     await expect(loadPacks(dir)).rejects.toThrow("service one-run names a check that the one pack did not declare");
   });
 
+  test("loads a pack from before the rename whose repair command starts with fleet", async () => {
+    const dir = source({ one: pack("one", `hedge.check({ id: "one-saved", say: "Save it.", test: async () => true, repair: { ask: "Save it.", command: "fleet one setup" } });`) });
+    expect((await loadPacks(dir)).map((loaded) => loaded.manifest.name)).toEqual(["one"]);
+  });
+
   test.each(["hedge one 'setup'", "hedge one setup ~/token", "hedge one setup $TOKEN", "hedge one setup && hedge apply", "one setup", "hedge one\nsetup", "hedge one  setup", "hedge one\tsetup"])("refuses a repair command that a shell would change or that is not a hedge command: %s", async (command) => {
     const dir = source({ one: pack("one", `hedge.check({ id: "one-saved", say: "Save it.", test: async () => true, repair: { ask: "Save it.", command: ${JSON.stringify(command)} } });`) });
     await expect(loadPacks(dir)).rejects.toThrow("check one-saved: repair.command must be hedge and plain words of letters, digits, and . _ / = : @ -, with one space between words, so a shell passes it as written and Hedge knows it when you run it");

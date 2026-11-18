@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { getShHarness, onLinuxHost } from "./testing/get-sh.ts";
 import { legacyPaths } from "./legacy.ts";
 
@@ -62,7 +62,7 @@ describe("hedge on the PATH", () => {
     expect(readFileSync(hedge, "utf8")).toBe("#!/bin/sh\necho someone else's hedge\n");
     const engine = join(box.home, ".local/share/hedge/engine/hedge");
     expect(result.output).toContain(`Hedge: ${hedge} is not Hedge's, so it stays as it is. Run Hedge with sh ${engine}.\n`);
-    expect(readdirSync(join(box.home, ".local/bin")).sort()).toEqual(["fleet", "gh", "hedge", "t3"]);
+    expect(readdirSync(join(box.home, ".local/bin")).sort()).toEqual(["gh", "hedge", "t3"]);
   });
 
   test("puts fleet beside hedge as the same command, replacing the fleet that Hedge wrote before the rename", () => {
@@ -100,9 +100,26 @@ describe("hedge on the PATH", () => {
     expect(lstatSync(join(box.home, ".local/share/fleet-mcphub")).isDirectory()).toBe(true);
   });
 
-  test("moves the same paths as hedge apply", () => {
-    const listed = /^legacy_paths="([^"]+)"$/m.exec(readFileSync(join(import.meta.dir, "../get.sh"), "utf8"))![1]!.split(" ").map((pair) => pair.split(":"));
-    expect(listed).toEqual(legacyPaths.map((pair) => [...pair]));
+  test("moves every path that hedge apply moves, and leaves a link at each old name", () => {
+    const box = sandbox("Linux");
+    const seed = (path: string) => (path.startsWith(".ssh/") ? path : `${path}/seed`);
+    for (const [before] of legacyPaths) {
+      mkdirSync(dirname(join(box.home, seed(before))), { recursive: true });
+      writeFileSync(join(box.home, seed(before)), `${before}\n`);
+    }
+    expect(getSh(box, ["--ref", "v0.1.0", "--install-only"]).code).toBe(0);
+    for (const [before, after] of legacyPaths) {
+      expect(readFileSync(join(box.home, seed(after)), "utf8")).toBe(`${before}\n`);
+      expect(readlinkSync(join(box.home, before))).toBe(basename(after));
+    }
+  });
+
+  test("installs an engine from before the rename, whose command is still fleet", () => {
+    const box = sandbox("Linux");
+    expect(getSh(box, ["--ref", "v0.0.9", "--install-only"]).code).toBe(0);
+    const result = Bun.spawnSync([join(box.home, ".local/bin/hedge"), "--help"], { cwd: box.home, env: { PATH: box.bin, HOME: box.home } });
+    expect(result.stderr.toString()).toBe("");
+    expect(result.stdout.toString()).toStartWith("Hedge: one setup for T3 Code, agents, and your workflows");
   });
 
   test("takes FLEET_ENGINE_DIR when HEDGE_ENGINE_DIR is not set", () => {

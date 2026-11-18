@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { isolateGit, spawnGit, tempDirs } from "../testing/git.ts";
 import { fetchSource } from "./sources.ts";
@@ -60,6 +60,18 @@ describe("fetchSource", () => {
     if ("error" in fetched) throw new Error(fetched.error);
     expect(fetched.packs[0]?.manifest.summary).toBe("Team rules v1.");
     expect(fetched.stale).toContain("could not fetch v2");
+  });
+
+  test("keeps the packs that Hedge fetched before the rename when the source is unreachable", async () => {
+    const repo = await packRepo("Team rules v1.");
+    const cache = temp.make("cache-");
+    await fetchSource({ name: "team", repo, ref: "v1" }, cache);
+    const checkout = readdirSync(cache).map((name) => join(cache, name)).find((path) => existsSync(join(path, ".git/hedge-source.json")))!;
+    renameSync(join(checkout, ".git/hedge-source.json"), join(checkout, ".git/fleet-source.json"));
+    rmSync(repo, { recursive: true, force: true });
+    const fetched = await fetchSource({ name: "team", repo, ref: "v2" }, cache);
+    if ("error" in fetched) throw new Error(fetched.error);
+    expect(fetched.packs[0]?.manifest.summary).toBe("Team rules v1.");
   });
 
   test("reports an error for an unreachable source never fetched before", async () => {

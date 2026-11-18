@@ -30,6 +30,11 @@ export function getShHarness() {
     git(engine.repo, "add", ".");
     git(engine.repo, "commit", "-q", "-m", "engine");
     git(engine.repo, "tag", "v0.1.0");
+    git(engine.repo, "checkout", "-q", "-b", "before-the-rename");
+    git(engine.repo, "mv", "hedge", "fleet");
+    git(engine.repo, "commit", "-q", "-m", "engine from before the rename");
+    git(engine.repo, "tag", "v0.0.9");
+    git(engine.repo, "checkout", "-q", "main");
     git(engine.repo, "repack", "-a", "-d", "-q", "--window=0");
     ghTar = buildGhTarball(shared.make("gh-"));
   });

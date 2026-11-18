@@ -7,6 +7,7 @@ import { quote } from "../hub/ssh.ts";
 import { gitEnv } from "../testing/git.ts";
 import { profilePath } from "./profile.ts";
 import { Stopped, type Terminal } from "./terminal.ts";
+import { remoteLauncher } from "../hub/ssh.ts";
 
 export const engineRoot = join(import.meta.dir, "../..");
 
@@ -186,7 +187,7 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
     }
   };
   const onTheHub = async (line: string, host: string): Promise<ExecResult | undefined> => {
-    const hedge = line.match(/\/\.local\/share\/hedge\/engine\/hedge" (.+)$/)?.[1];
+    const hedge = line.includes(`${remoteLauncher} `) ? line.slice(line.indexOf(`${remoteLauncher} `) + remoteLauncher.length + 1) : undefined;
     if (hedge === undefined) return undefined;
     if (options.hubDown) return { code: 255, output: "ssh: connect to host: Connection refused", stdout: "" };
     if (hedge === "update" && options.hubUpdateFails) return result(false, `${options.hubUpdateFails}\n`);

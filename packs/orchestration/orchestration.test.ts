@@ -51,7 +51,7 @@ describe("the Orchestration pack", () => {
     expect(withPack({ workflows: { "quality-loop": true }, settings }, devbox).jobs.map((job) => job.id)).toContain("quality-loop");
   });
 
-  test("runs each loop and the digest once per hedge: on the first node the profile lists, else on the hub", () => {
+  test("runs each loop and the digest on one machine only: on the first node the profile lists, else on the hub", () => {
     const workflows = { "quality-loop": true, "signal-loop": true, "pr-digest": true };
     const settings = { "orchestration.loopProject": "my-repo", "orchestration.qualityArea": "src", "orchestration.ledgerRepo": "me/ledger" };
     const jobsOn = (profile: { hub?: string; devboxes?: string[] }, name: string, role: "devbox" | "hub" | "linux" = "devbox") =>

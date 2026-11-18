@@ -58,6 +58,7 @@ export function track(home: string, event: string, properties: UsageProperties =
 
 /** Set on a hedge call that Hedge forwards to the hub, so the hub does not count the command a second time. */
 export const forwardedMark = "HEDGE_FORWARDED";
+export const legacyForwardedMark = "FLEET_FORWARDED";
 
 /** subcommands: the command's own first words. Any other first argument, such as a host, stays on the machine. */
 export function trackCommand(home: string, command: string, args: string[], subcommands: readonly string[], env: Env = Bun.env, interactive?: boolean): void {

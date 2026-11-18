@@ -13,6 +13,7 @@ import { launchHere, launchOnBox, launchOnNodes, spawnRunner, type Run } from ".
 import { manifest, serve } from "./lib/slack.ts";
 import { handleTrigger, retryPending, syncFollowed, takeTurn, triggerOf, type Started, type TriggerDeps } from "./lib/trigger.ts";
 import { startSlackStub, type Message } from "./testing.ts";
+import { remoteLauncher } from "../../src/hub/ssh.ts";
 
 const temp = tempDirs();
 const stops: Array<() => Promise<void> | void> = [];
@@ -183,7 +184,7 @@ describe("hedge slack-trigger run", () => {
 
     const ssh = hedge.calls.filter((call) => call.argv[0] === "ssh");
     expect(ssh.map((call) => call.argv.at(-2))).toEqual(["devbox-1", "devbox-2", "devbox-1"]);
-    expect(ssh[0]!.argv.at(-1)).toEndWith('/.local/share/hedge/engine/hedge" slack-trigger launch');
+    expect(ssh[0]!.argv.at(-1)).toEndWith(`${remoteLauncher} slack-trigger launch`);
     expect(ssh[0]!.argv).toContain("BatchMode=yes");
     expect(JSON.parse(ssh[0]!.input!)).toMatchObject({ title: "Slack: first", commandId: expect.any(String) });
     expect(hedge.calls.some((call) => call.argv.includes("box"))).toBe(false);

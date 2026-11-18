@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { main } from "./cli.ts";
 import { legacyPaths } from "./legacy.ts";
 import { cliFixtures, repoRoot } from "./testing/cli.ts";
 import { tempDirs } from "./testing/git.ts";
@@ -43,6 +42,22 @@ describe("hedge apply on a machine from before the rename", () => {
     expect(Object.keys(state.groups.hedge!).filter((target) => target.startsWith(".config/fleet/"))).toEqual([]);
     expect(Object.keys(state.groups.hedge!)).toContain(".config/hedge/hooks/run.sh");
     expect((await hedge(["apply", "--profile", profile], home)).output).not.toContain("moved");
+  });
+
+  test("adds the hedge command beside the fleet command that get.sh wrote before the rename, and leaves another fleet alone", async () => {
+    const home = temp.make("home-");
+    mkdirSync(join(home, ".local/bin"), { recursive: true });
+    writeFileSync(join(home, ".local/bin/fleet"), "#!/bin/sh\n# Fleet\nexec sh '/old/engine/fleet' \"$@\"\n");
+    const result = await hedge(["apply", "--profile", profileDir()], home);
+    expect(result.output).toContain("added ~/.local/bin/hedge");
+    expect(readFileSync(join(home, ".local/bin/hedge"), "utf8")).toBe(`#!/bin/sh\n# Hedge\nexec sh '${join(repoRoot, "hedge")}' "$@"\n`);
+    expect(lstatSync(join(home, ".local/bin/hedge")).mode & 0o777).toBe(0o755);
+
+    const other = temp.make("home-");
+    mkdirSync(join(other, ".local/bin"), { recursive: true });
+    writeFileSync(join(other, ".local/bin/fleet"), "#!/bin/sh\necho another fleet\n");
+    expect((await hedge(["apply", "--profile", profileDir()], other)).output).not.toContain("added ~/.local/bin/hedge");
+    expect(existsSync(join(other, ".local/bin/hedge"))).toBe(false);
   });
 
   test("on a machine set up after the rename, moves nothing and makes no old names", async () => {
@@ -97,10 +112,15 @@ describe("a profile from before the rename", () => {
 });
 
 describe("FLEET_ variables from before the rename", () => {
-  test("set each HEDGE_ variable that is unset, and leave a set one as it is", async () => {
-    const env: Record<string, string | undefined> = { FLEET_PROOF_REVIEWER: "reviewer", FLEET_MODELS: "old", HEDGE_MODELS: "new" };
-    await main(["--help"], { home: temp.make("home-"), engineRoot: repoRoot, platform: "linux", env, print: () => {} });
-    expect(env.HEDGE_PROOF_REVIEWER).toBe("reviewer");
-    expect(env.HEDGE_MODELS).toBe("new");
+  test("hedge reads a FLEET_ variable when its HEDGE_ variable is unset, and the HEDGE_ one when both are set", async () => {
+    const home = temp.make("home-");
+    expect((await hedge(["apply", "--profile", profileDir([], "# Remembered\n")], home)).code).toBe(0);
+    const old = profileDir([], "# Passed down\n");
+
+    const fromOld = await hedge(["doctor"], home, repoRoot, { FLEET_PROFILE_DIR: old });
+    const fromNew = await hedge(["doctor"], home, repoRoot, { FLEET_PROFILE_DIR: old, HEDGE_PROFILE_DIR: profileDir([], "# Remembered\n") });
+
+    expect(fromOld.output).toContain(".agents/AGENTS.md needs to be updated.");
+    expect(fromNew.output).not.toContain(".agents/AGENTS.md needs to be updated.");
   });
 });

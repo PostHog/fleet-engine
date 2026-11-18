@@ -8,7 +8,7 @@ live in the issues of their `hedge-profile` repo unless they name another
 repo with `--set orchestration.tracker=<owner/name>`.
 
 Three workflows run by themselves on a schedule and start off:
-`quality-loop`, `signal-loop`, and `pr-digest`. Each runs once per hedge, on
+`quality-loop`, `signal-loop`, and `pr-digest`. Each runs on one machine only, on
 the first node the profile lists, or on the hub when there is no node. They
 never run on the Mac. While that node is stopped, they do not run; take it out
 with `hedge devbox remove <host>` and they move to the next node. Each needs

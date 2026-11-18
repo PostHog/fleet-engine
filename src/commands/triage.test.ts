@@ -104,6 +104,7 @@ function failedMachine(home: string, leaked = secrets()) {
       `  read C:\\Users\\NoraQ\\.ssh\\id_ed25519 and C:\\Users\\NoraQ\\.gitconfig`,
       "  pushed nora/team-dotfiles and cloned nora/agent-notes",
       "  Created the private repo nora/hedge-profile",
+      "  cloned nora/fleet-profile-nora from before the rename",
       `  wrote ${home}/.claude/settings.json and /Users/nora/.zshrc`,
       "  fetched secret-org/team-packs at main",
       "  engine at 0123456789abcdef0123456789abcdef01234567",
@@ -158,6 +159,7 @@ describe("hedge triage", () => {
     expect(shown).toContain("read C:\\Users\\<user>\\.ssh\\id_ed25519 and C:\\Users\\<user>\\.gitconfig");
     expect(shown).toContain("pushed <profile repo> and cloned <private repo>");
     expect(shown).toContain("Created the private repo <profile repo>");
+    expect(shown).toContain("cloned <profile repo> from before the rename");
     expect(shown).toContain("hedge doctor: Everything matches. engine 0123456789abcdef0123456789abcdef01234567 v1.4.0 at git@github.com:<profile repo>.git");
     expect(shown).toContain("ssh <devbox 1>.<host> (<ip>) hedge doctor");
     expect(shown).toContain("wrote ~/.claude/settings.json and /Users/<user>/.zshrc");

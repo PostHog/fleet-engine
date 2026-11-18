@@ -82,7 +82,7 @@ export function recordPack(exported: unknown): { manifest: Record<string, unknow
     },
     check({ id, say, test, repair, ...scope }) {
       if (scope.after) throw new Error(`check ${id}: a check cannot wait for another check`);
-      if (repair?.command && !/^hedge( [A-Za-z0-9._\/=:@-]+)+$/.test(repair.command)) throw new Error(`check ${id}: repair.command must be hedge and plain words of letters, digits, and . _ / = : @ -, with one space between words, so a shell passes it as written and Hedge knows it when you run it`);
+      if (repair?.command && !/^(?:hedge|fleet)( [A-Za-z0-9._\/=:@-]+)+$/.test(repair.command)) throw new Error(`check ${id}: repair.command must be hedge and plain words of letters, digits, and . _ / = : @ -, with one space between words, so a shell passes it as written and Hedge knows it when you run it`);
       if (repair?.run && (repair.command || repair.interactive)) throw new Error(`check ${id}: a repair is a command a person runs or a run that Hedge runs, not both`);
       const ask = repair?.command ? say : [say, repair?.ask].filter(Boolean).join(" ");
       const probe = runnable(id, `check ${id}`);

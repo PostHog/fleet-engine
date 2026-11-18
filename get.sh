@@ -226,6 +226,7 @@ ours() {
 }
 
 link_command() {
+  [ "$1" = hedge ] || [ -e "$bin_dir/$1" ] || return 0
   if ! ours "$bin_dir/$1"; then
     [ "$1" != hedge ] || say "$bin_dir/hedge is not Hedge's, so it stays as it is. Run Hedge with sh $engine_dir/hedge."
     return 0
@@ -239,7 +240,7 @@ link_command() {
 link_hedge() {
   bin_dir="$HOME/.local/bin"
   mkdir -p "$bin_dir"
-  quoted=$(printf '%s' "$engine_dir/hedge" | sed "s/'/'\\\\''/g")
+  quoted=$(printf '%s' "$launcher" | sed "s/'/'\\\\''/g")
   link_command hedge
   link_command fleet
 }
@@ -291,6 +292,8 @@ fetch_engine
 ended engine
 install_packages
 ended packages
+launcher="$engine_dir/hedge"
+[ -e "$launcher" ] || launcher="$engine_dir/fleet"
 link_hedge
 login_path
 say "Engine ready at $ref in $engine_dir."
@@ -298,9 +301,9 @@ say "Engine ready at $ref in $engine_dir."
 [ -z "$install_only" ] || exit 0
 
 if [ -n "$profile" ]; then
-  exec sh "$engine_dir/hedge" apply --profile "$profile" "$@"
+  exec sh "$launcher" apply --profile "$profile" "$@"
 fi
 if [ ! -t 0 ] && (: </dev/tty) 2>/dev/null; then
-  exec sh "$engine_dir/hedge" setup "$@" </dev/tty
+  exec sh "$launcher" setup "$@" </dev/tty
 fi
-exec sh "$engine_dir/hedge" setup "$@"
+exec sh "$launcher" setup "$@"

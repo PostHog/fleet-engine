@@ -1,12 +1,14 @@
 import type { CatalogEntry, Owned, PackJob } from "../pack/types.ts";
 import { validHost } from "../profile/profile.ts";
-import { forwardedMark } from "../usage/usage.ts";
+import { forwardedMark, legacyForwardedMark } from "../usage/usage.ts";
 
 export const forwardId = "hub-forward";
 
 const batch = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=30", "-o", "ForwardAgent=no"];
 const keepAlive = ["-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=3"];
-const launcher = `${forwardedMark}=1 ` + 'PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH" sh "$HOME/.local/share/hedge/engine/hedge"';
+/** The engine launcher on another machine as one shell word: Hedge's, or Fleet's on a machine that has not taken the rename yet. */
+export const remoteLauncher = '"$(l="$HOME/.local/share/hedge/engine/hedge"; [ -e "$l" ] || l="$HOME/.local/share/fleet/engine/fleet"; printf %s "$l")"';
+const launcher = `${forwardedMark}=1 ${legacyForwardedMark}=1 PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH" sh ${remoteLauncher}`;
 const local = (port: number) => ["-L", `127.0.0.1:${port}:127.0.0.1:${port}`];
 
 /** The service on a node that dials the hub and carries every catalog port to the same port at loopback. */

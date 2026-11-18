@@ -9,6 +9,7 @@ import { guardSettle, type SettleDeps } from "./hooks/settle-guard.ts";
 import { prCommand } from "./lib/pr.ts";
 import { parseSettleCheck, settleCheckOver, settleCheckUsage } from "./lib/organize-guard.ts";
 import { handoverPath, threadsOwningPrs } from "./lib/pr-owners.ts";
+import { remoteLauncher } from "../../src/hub/ssh.ts";
 
 const temp = tempDirs();
 const stubs: T3Stub[] = [];
@@ -361,7 +362,7 @@ describe("the organize guard on another machine", () => {
     const ask = peer({ code: 0, stdout: `${JSON.stringify({ refusal: "Hedge blocked this settle: the thread owns open PR(s) x." })}\n` });
     const check = { ...deps([thread("mcp:lane")]), settleCheck: ask.settleCheck };
     expect(reasonOf(await guardSettle(remote("settle"), peerHome(), check))).toBe("Hedge blocked this settle: the thread owns open PR(s) x.");
-    expect(ask.calls).toEqual([{ alias: "devbox-2", command: `PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH" sh "$HOME/.local/share/hedge/engine/hedge" pr settle-check --action settle --thread mcp:lane` }]);
+    expect(ask.calls).toEqual([{ alias: "devbox-2", command: `PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH" sh ${remoteLauncher} pr settle-check --action settle --thread mcp:lane` }]);
   });
 
   test("lets the call through when the peer's Hedge finds nothing to refuse", async () => {

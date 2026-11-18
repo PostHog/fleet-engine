@@ -12,6 +12,6 @@ prefix_rule(pattern = ["gh", "search"], decision = "allow")
 
 prefix_rule(pattern = [["bun", "pnpm"], "install"], decision = "allow")
 
-prefix_rule(pattern = ["hedge", ["heavy", "proof", "providers", "activity", "disk", "frontier", "doctor"]], decision = "allow")
-prefix_rule(pattern = ["hedge", "apply", "--dry-run"], decision = "allow")
-prefix_rule(pattern = ["hedge", "thread", ["find", "read", "list"]], decision = "allow")
+prefix_rule(pattern = [["hedge", "fleet"], ["heavy", "proof", "providers", "activity", "disk", "frontier", "doctor"]], decision = "allow")
+prefix_rule(pattern = [["hedge", "fleet"], "apply", "--dry-run"], decision = "allow")
+prefix_rule(pattern = [["hedge", "fleet"], "thread", ["find", "read", "list"]], decision = "allow")

@@ -5,6 +5,7 @@ import { tempDirs } from "../../../src/testing/git.ts";
 import { caddyfile, hubHttps, type HttpsHub } from "./https.ts";
 import { fakeRun, modeOf, roleHome } from "./run-testing.ts";
 import { writeHome } from "./testing.ts";
+import { remoteLauncher } from "../../../src/hub/ssh.ts";
 
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
@@ -188,7 +189,7 @@ test("trusted fetches the hub's root certificate over SSH and passes only when t
   expect(trusted.probe().exitCode).toBe(0);
   const [ssh, security] = trusted.calls();
   expect(ssh).toStartWith("ssh -T -o BatchMode=yes -o ConnectTimeout=30 -o ForwardAgent=no my-hub ");
-  expect(ssh).toContain(`hedge/engine/hedge" hub-https ca`);
+  expect(ssh).toContain(`${remoteLauncher} hub-https ca`);
   expect(security).toMatch(/^security verify-cert -l -L -p ssl -c \S+$/);
   expect(readFileSync(join(trusted.bin, "checked.crt"), "utf8")).toBe(certificate);
   expect(existsSync(security!.split(" ").at(-1)!)).toBe(false);

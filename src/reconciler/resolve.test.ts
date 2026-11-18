@@ -395,6 +395,12 @@ describe("resolve guards", () => {
     expect(() => plan({ packs: ["prune"] }, mac, [engine, prune])).toThrow("job prune is declared by both base and prune");
   });
 
+  test("keeps a job of a pack from before the rename that says oncePerFleet on one machine only", () => {
+    const team = withPack(pack("team", { jobs: [{ id: "digest", command: ["true"], schedule: { every: "1d" }, oncePerFleet: true }] }));
+    const on = (name: string) => plan({ packs: ["team"], devboxes: ["node-1", "node-2"] }, { ...devbox, name }, [engine, team]).jobs.some((job) => job.id === "digest");
+    expect([on("node-1"), on("node-2")]).toEqual([true, false]);
+  });
+
   test("plans T3 project scripts by scope, owned by their pack", () => {
     const script = { id: "prepare", name: "Prepare worktree", command: "hedge prepare", projects: ["~/app"] };
     const team = withPack(pack("team", { t3ProjectScripts: [{ ...script, roles: ["devbox"] }, { ...script, id: "mac-only", on: ["darwin"] }] }));

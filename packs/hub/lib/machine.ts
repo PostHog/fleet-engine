@@ -6,7 +6,7 @@ import { withT3Session } from "../../base/lib/t3/index.ts";
 import { capture, type Capture, type Env, type Result } from "./coder.ts";
 import { isKeptForBoxes, isNodeName } from "../../../src/hub/names.ts";
 import type { Clock } from "./pool.ts";
-import { onHub } from "../../../src/hub/ssh.ts";
+import { onHub, remoteLauncher } from "../../../src/hub/ssh.ts";
 import { profileFile } from "../../../src/legacy.ts";
 
 export type BoxSettings = {
@@ -36,7 +36,7 @@ export const shellLimitMs = 5 * 60_000;
 export const hubCallLimitMs = 3 * 3_600_000;
 export const quote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
 export const peerSsh = (alias: string, command: string) => ["ssh", "-o", "BatchMode=yes", "-o", "ForwardAgent=no", "-o", "ConnectTimeout=10", alias, `bash -lc ${quote(command)}`];
-export const remoteHedge = (args: string) => `sh "$HOME/.local/share/hedge/engine/hedge" ${args}`;
+export const remoteHedge = (args: string) => `sh ${remoteLauncher} ${args}`;
 const machinePath = (home: string) => join(home, ".config/hedge/machine.json");
 
 export const proxyOn = (env: Env) => typeof (JSON.parse(env.HEDGE_SETTINGS ?? "{}") as Record<string, unknown>)["hub.proxyAccounts"] === "number";

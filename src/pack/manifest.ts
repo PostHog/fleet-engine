@@ -80,6 +80,7 @@ function scopeProblem(item: Record<string, unknown>) {
   if (item.on !== undefined && !isListOf(item.on, oses)) return "on must list darwin or linux";
   if (item.roles !== undefined && !isListOf(item.roles, roles)) return "roles must list mac, devbox, linux, hub, or solo";
   if (item.oncePerHedge !== undefined && typeof item.oncePerHedge !== "boolean") return "oncePerHedge must be true or false";
+  if (item.oncePerFleet !== undefined && typeof item.oncePerFleet !== "boolean") return "oncePerFleet must be true or false";
   if (item.plans !== undefined && !isListOf(item.plans, plans)) return "plans must list claude, codex, or both";
   if (item.workflow !== undefined && typeof item.workflow !== "string") return "workflow must be an id";
   if (item.unless !== undefined && !isStrings(item.unless)) return "unless must list workflow ids";

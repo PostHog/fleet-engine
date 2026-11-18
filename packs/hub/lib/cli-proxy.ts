@@ -6,7 +6,7 @@ import { basename, dirname, join } from "node:path";
 import { parse, stringify } from "smol-toml";
 import { codexCatalogPath, loginExpired, modelRegistryPath, management, managementFile, managementPattern, proxyDir, proxyUrl, readManagementKey, shortId } from "./cli-proxy-balance.ts";
 import { requireHubRole } from "./hub-job.ts";
-import { quote, readRole, remoteHedge } from "./machine.ts";
+import { quote, readRole } from "./machine.ts";
 import { changedFiles, ownedFiles, readIfThere, removeUnits, requireInstalled, writeFiles, type Managed } from "./managed.ts";
 import { refuseLinks, writePrivateFile, type Fetch } from "../../mcp-gateway/lib/client.ts";
 import type { Run } from "../../mcp-gateway/lib/hub.ts";
@@ -237,7 +237,7 @@ async function doctor(machine: ProxyMachine, paths: Layout): Promise<void> {
   if (!existsSync(paths.catalog)) machine.print(`CLI proxy: Warning: ${paths.catalog} is missing, so Codex does not offer the ultrafast tier. Run hedge cli-proxy catalog.`);
   if (!existsSync(paths.registry)) machine.print(`CLI proxy: Warning: ${paths.registry} is missing, so the proxy does not route the models upstream does not list yet. Run hedge cli-proxy catalog.`);
   if (machine.panel) machine.print(`Open the management panel at ${panelUrl} on the hub, or on a devbox through its tunnel, and sign in with the MANAGEMENT_PASSWORD in ${paths.management}.`);
-  for (const devbox of machine.devboxes.filter((name) => !isKeptForBoxes(name))) machine.print(`Connect ${devbox}: ssh ${devbox} ${quote(remoteHedge("cli-proxy connect"))} < ~/.config/hedge/cli-proxy.key`);
+  for (const devbox of machine.devboxes.filter((name) => !isKeptForBoxes(name))) machine.print(`Connect ${devbox}: ssh ${devbox} ${quote('sh "$HOME/.local/share/hedge/engine/hedge" cli-proxy connect')} < ~/.config/hedge/cli-proxy.key`);
 }
 
 async function panelDoctor(machine: ProxyMachine, paths: Layout, managementKey: string): Promise<void> {

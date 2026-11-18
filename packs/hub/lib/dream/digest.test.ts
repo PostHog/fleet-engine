@@ -8,6 +8,7 @@ import { tempDirs } from "../../../../src/testing/git.ts";
 import { boxSettings, fakeCoder, fakeMachine, writeHome, writePool } from "../testing.ts";
 import { release, sweep } from "../box.ts";
 import { digestClaude, digestCodex, digestLines, dreamHooks, inboxDir, localDigests, parseSince, repoOf, saveBoxDigests } from "./digest.ts";
+import { remoteLauncher } from "../../../../src/hub/ssh.ts";
 
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
@@ -134,7 +135,7 @@ test("saving a box's digests keeps what the box printed, and a box that fails or
   const { coder, calls } = fakeCoder({ ssh: async (box, command) => (calls.push({ box, command }), { code: 0, stdout: box === "box-a" ? "{\"session\":\"s\"}\n" : "", stderr: "" }) });
   await saveBoxDigests(coder, "box-a", home, {}, () => now);
   await saveBoxDigests(coder, "box-b", home, {}, () => now);
-  expect(calls.map((call) => call.command)).toEqual(Array(2).fill('sh "$HOME/.local/share/hedge/engine/hedge" dream digest --since 30d'));
+  expect(calls.map((call) => call.command)).toEqual(Array(2).fill(`sh ${remoteLauncher} dream digest --since 30d`));
   expect(readdirSync(inboxDir(home, {}))).toEqual([`box-a-${now}.jsonl`]);
   expect(readFileSync(join(inboxDir(home, {}), `box-a-${now}.jsonl`), "utf8")).toBe("{\"session\":\"s\"}\n");
   const broken = fakeCoder({ ssh: async () => { throw new Error("no route"); } });

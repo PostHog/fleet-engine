@@ -9,6 +9,7 @@ import type { ModelRow } from "../../../base/lib/models.ts";
 import { quote } from "../machine.ts";
 import { AnalystFailure, analystCommand, analystPrompt, analystTimeoutMs, modelAnalyst, render, type Analyst, type Spawn } from "./analyze.ts";
 import { dreamCommand, dreamPeers, type DreamIo } from "./command.ts";
+import { remoteLauncher } from "../../../../src/hub/ssh.ts";
 
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
@@ -87,7 +88,7 @@ test("collect reads the hub, every peer over SSH with the engine launcher, and t
     boxes: () => ({ running: async () => ["box-a", "box-b"], ssh: async (box, command) => (boxCalls.push(`${box}: ${command}`), box === "box-a" ? ok(line(longer)) : { code: 1, stdout: "", stderr: "" }) }),
   });
   expect(await dreamCommand(["collect", "--since", "3d"], dream)).toBe(0);
-  const remote = `sh "$HOME/.local/share/hedge/engine/hedge" dream digest --since '2026-11-02T04:10:00.000Z'`;
+  const remote = `sh ${remoteLauncher} dream digest --since '2026-11-02T04:10:00.000Z'`;
   expect(peerCalls).toEqual([`devbox-1: ${remote}`, `devbox-2: ${remote}`]);
   expect(boxCalls).toEqual([`box-a: bash -lc ${quote(remote)}`, `box-b: bash -lc ${quote(remote)}`]);
   const run = join(home, ".local/state/hedge/dream/2026-11-05");
@@ -210,7 +211,7 @@ test("collect refuses a --since value that is not a time, and asks no machine", 
 test("collect sends an ISO --since to the peers as one quoted canonical time", async () => {
   const { io: dream, peerCalls } = io(hubHome());
   expect(await dreamCommand(["collect", "--since", "2026-11-01"], dream)).toBe(0);
-  expect(peerCalls[0]).toBe(`devbox-1: sh "$HOME/.local/share/hedge/engine/hedge" dream digest --since '2026-11-01T00:00:00.000Z'`);
+  expect(peerCalls[0]).toBe(`devbox-1: sh ${remoteLauncher} dream digest --since '2026-11-01T00:00:00.000Z'`);
 });
 
 test("with Dream off, analyze, prepare, and run refuse with one line and build no analyst", async () => {

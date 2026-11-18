@@ -29,7 +29,8 @@ import { drift } from "./reconciler/drift.ts";
 import { spawnRunner, type CommandRunner } from "./adapters/run.ts";
 import { become, canBecome, type Become } from "./runner/become.ts";
 import { trackCommand } from "./usage/usage.ts";
-import { adoptLegacyEnv, migrateLegacyPaths } from "./legacy.ts";
+import { asHedge } from "./reconciler/engine-command.ts";
+import { adoptLegacyEnv, linkHedgeCommand, migrateLegacyPaths, withLegacyNames } from "./legacy.ts";
 
 /** env: the environment that tells a Coder workspace apart; tests pass their own. */
 export type CliOptions = { home: string; engineRoot: string; platform: NodeJS.Platform; env?: Record<string, string | undefined>; print: (line: string) => void; fail?: (line: string) => void; run?: Runner; terminal?: Terminal; apply?: (profileDir: string, skip?: string[]) => Promise<number>; setup?: Pick<SetupOptions, "machine" | "fetchSource" | "doctor" | "env" | "timeZone" | "clock">; clock?: Clock; adapters?: () => Adapter[]; hostname?: () => string; stdin?: () => ReadableStream<Uint8Array>; capture?: CommandRunner; become?: Become; interactive?: boolean };
@@ -75,7 +76,10 @@ export async function main(argv: string[], options: CliOptions): Promise<number>
   if (!command || command === "help" || command === "--help") return options.print(usage), 0;
   if (Object.hasOwn(builtins, command)) trackCommand(options.home, command, rest, builtins[command]!, options.env ?? {}, options.interactive);
   try {
-    if (migrates(command, rest)) for (const [before, after] of await migrateLegacyPaths(options.home)) options.print(`moved ~/${before} to ~/${after}`);
+    if (migrates(command, rest)) {
+      for (const [before, after] of await migrateLegacyPaths(options.home)) options.print(`moved ~/${before} to ~/${after}`);
+      if (linkHedgeCommand(options.home, options.engineRoot)) options.print("added ~/.local/bin/hedge");
+    }
     if (command === "apply" || command === "doctor") return await reconcile(command, rest, options);
     if (command === "update") return await runUpdate(options);
     if (command === "refresh") return await runRefresh(rest, options);
@@ -242,7 +246,7 @@ async function runPackCommand(name: string, args: string[], options: CliOptions)
   if (workflow && !workflow.active) throw new Error(`hedge ${name} belongs to the ${workflow.id} workflow, which ${workflow.reason === "turned off" ? `is off. Turn it on with hedge packs --workflows ${workflow.id}=on.` : `is off on this machine: it ${workflow.reason}.`}`);
   const loaded = loadedPack(sources, command.pack);
   const run = loaded?.code?.commands[name]?.run;
-  const repairs = plan.human.some((step) => step.command?.trim().split(/\s+/).join("\n") === typed.join("\n"));
+  const repairs = plan.human.some((step) => step.command !== undefined && asHedge(step.command.trim().split(/\s+/)).join("\n") === typed.join("\n"));
   if (!run && !repairs && options.become) return options.become(["bun", command.path, ...args], { ...Bun.env, ...packEnvironment(plan, options) });
   const exit = run ? await inPack(plan, loaded!, options, (ctx) => run(args, ctx)) : await spawnPackCommand(command.path, args, plan, options);
   return exit === 0 && repairs ? applyProfile(plan.machine.profileDir!, options) : exit;
@@ -426,7 +430,7 @@ async function inPack(plan: Plan, loaded: LoadedPack, options: CliOptions, work:
 }
 
 function packEnvironment(plan: Plan, options: CliOptions): Record<string, string | undefined> {
-  return { HOME: options.home, HEDGE_ENGINE_DIR: options.engineRoot, HEDGE_PROFILE_DIR: plan.machine.profileDir, HEDGE_SETTINGS: JSON.stringify(plan.settings), HEDGE_MODELS: JSON.stringify(plan.models), HEDGE_PLAN: plan.ai, HEDGE_HANDLERS: JSON.stringify(handlerPaths(plan)), HEDGE_HANDLER_SUBCOMMANDS: JSON.stringify(handlerSubcommands(plan)) };
+  return withLegacyNames({ HOME: options.home, HEDGE_ENGINE_DIR: options.engineRoot, HEDGE_PROFILE_DIR: plan.machine.profileDir, HEDGE_SETTINGS: JSON.stringify(plan.settings), HEDGE_MODELS: JSON.stringify(plan.models), HEDGE_PLAN: plan.ai, HEDGE_HANDLERS: JSON.stringify(handlerPaths(plan)), HEDGE_HANDLER_SUBCOMMANDS: JSON.stringify(handlerSubcommands(plan)) });
 }
 
 function handlerPaths(plan: Plan) {

@@ -12,10 +12,11 @@ import { link, restoreForwards } from "./links.ts";
 import type { Machine } from "./machine.ts";
 import { poolFile, pooled } from "./pool.ts";
 import { box, fakeCoder, fakeMachine, linkedHere, ok, registryOf, start, stubBin, writeHome, writePool } from "./testing.ts";
+import { remoteLauncher } from "../../../src/hub/ssh.ts";
 
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
-const launcher = 'sh "$HOME/.local/share/hedge/engine/hedge"';
+const launcher = `sh ${remoteLauncher}`;
 const machineFileCheck = "test -f ~/.config/hedge/machine.json";
 const noWait = { waitMs: 0 };
 

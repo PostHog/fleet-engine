@@ -3,6 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { matchThread, type ShellThread, t3UserData } from "../../base/lib/t3/index.ts";
 import { closingSettings } from "../../orchestration/lib/closing-marks.ts";
+import { remoteLauncher } from "../../../src/hub/ssh.ts";
 import { runGh } from "./gh.ts";
 import { isOrganize, pinnedReason, prState, readHandovers, readT3Threads, settleRefusal, settleTarget } from "./pr-owners.ts";
 
@@ -42,7 +43,7 @@ export const settleCheckOver = (ssh: Ssh = realSsh): SettleCheck => async (home,
   const alias = await peerOf(home, environmentId);
   if (!alias) return undefined;
   if (!threadPattern.test(threadId) || !["settle", "snooze", "archive"].includes(action)) throw new Error("the thread id or action has a form Hedge does not send");
-  const answer = await ssh(alias, `PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH" sh "$HOME/.local/share/hedge/engine/hedge" pr settle-check --action ${action} --thread ${threadId}`);
+  const answer = await ssh(alias, `PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH" sh ${remoteLauncher} pr settle-check --action ${action} --thread ${threadId}`);
   if (answer.code !== 0) throw new Error(`${alias} did not answer: hedge pr settle-check exited ${answer.code}`);
   const parsed = (() => { try { return JSON.parse(answer.stdout.trim().split("\n").at(-1) ?? "") as unknown; } catch { return undefined; } })();
   if (typeof parsed !== "object" || parsed === null || !("refusal" in parsed)) throw new Error(`${alias} sent no settle-check answer`);

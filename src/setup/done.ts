@@ -4,6 +4,7 @@ import { defaultTime } from "../adapters/jobs/schedule.ts";
 import type { MachineRole, PackJob, PackManifest, Plan } from "../pack/types.ts";
 import type { Machine } from "./commands.ts";
 import { overSsh } from "./devbox.ts";
+import { remoteLauncher } from "../hub/ssh.ts";
 import type { Step } from "./runner.ts";
 import { duration } from "../commands/triage-record.ts";
 import type { Terminal } from "./terminal.ts";
@@ -37,7 +38,7 @@ export function finalCheck(context: FinalCheckContext): Step {
       for (const host of context.devboxes) {
         const box = overSsh(context.machine, host);
         terminal.print(`  $ ssh ${host} hedge doctor`);
-        if ((await box.run(["sh", "-c", 'sh "$HOME/.local/share/hedge/engine/hedge" doctor'])) !== 0) throw new Error(`hedge doctor found something to fix on ${host}. Fix what it says above, then run hedge setup again.`);
+        if ((await box.run(["sh", "-c", `sh ${remoteLauncher} doctor`])) !== 0) throw new Error(`hedge doctor found something to fix on ${host}. Fix what it says above, then run hedge setup again.`);
         if ((await box.run(["sh", "-c", signingCheck])) !== 0) throw new Error(`A signed test commit failed on ${host}. Run hedge doctor there, then run hedge setup again.`);
         terminal.print(`  ✓ ${host} makes signed commits`);
         problems.push(...standaloneProblems(await onDevbox(box, host)));

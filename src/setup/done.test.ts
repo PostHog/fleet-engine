@@ -5,6 +5,7 @@ import { isolateGit, tempDirs } from "../testing/git.ts";
 import type { PackJob, PackManifest, Plan } from "../pack/types.ts";
 import { doneScreen, firstPrompt, here, repoName, runsByItself, standaloneProblems } from "./done.ts";
 import { fakeMachine, hedgeSetup, onBox } from "./testing.ts";
+import { remoteLauncher } from "../hub/ssh.ts";
 
 isolateGit();
 const temp = tempDirs();
@@ -82,7 +83,7 @@ describe("the final check", () => {
     expect(result.code).toBe(0);
     expect(result.doctored).toHaveLength(1);
     const ran = box.runs.map((run) => onBox(run.command));
-    expect(ran).toContainEqual(expect.stringContaining('hedge/engine/hedge" doctor'));
+    expect(ran).toContainEqual(expect.stringContaining(`${remoteLauncher} doctor`));
     expect(ran).toContainEqual(expect.stringContaining("git commit -q -S --allow-empty"));
     expect(result.output).toContain("✓ Hedge is set up.");
   });

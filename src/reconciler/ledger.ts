@@ -2,6 +2,7 @@ import { lstat, mkdir, readFile, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 import { checkParents, inside } from "../files/install.ts";
 import { writePrivateFile } from "../files/private.ts";
+import { asHedge } from "./engine-command.ts";
 
 /** A step with an undo that held on this machine, as it was when it last applied, so Hedge can undo it after it leaves the plan. */
 export type LedgerStep = { pack: string; id: string; check: string[]; undo: string[]; after?: string; prerequisite?: string[] };
@@ -23,7 +24,8 @@ export async function undoingPack(home: string, env: Record<string, string | und
   const key = env[undoVariable];
   if (!key) return undefined;
   const ledger = await readLedger(home);
-  const same = (line: string[] | undefined) => line?.length === command.length && line.every((part, index) => part === command[index]);
+  const typed = asHedge(command);
+  const same = (line: string[] | undefined) => line?.length === typed.length && asHedge(line).every((part, index) => part === typed[index]);
   const step = ledger.steps.find((item) => ledgerKey(item) === key);
   if (step && [step.undo, step.check, step.prerequisite].some(same)) return step.pack;
   const human = ledger.human.find((item) => ledgerKey(item) === key);

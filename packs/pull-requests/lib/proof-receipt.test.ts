@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { acceptGap, checkout, cleanFixtures, fakeModel, graded, hubAt, reviewHead, verdict, type Checkout } from "./proof-testing.ts";
+import { withoutReceipt } from "./proof-receipt.ts";
 
 afterEach(cleanFixtures);
 
@@ -802,4 +803,9 @@ test("code is left out of the page where the parser puts it, indented or fenced,
   expect(page.slice(page.indexOf("Before the code."), page.indexOf("After the code."))).not.toMatch(/```|~~~/);
   for (const kept of ["Before the code.", "A quote.", "An item.", "Tabbed:", "| Step | Result |", "Outer item.", "Nested item stays.", "lazy line stays.", "A line after a carriage return stays.", "A table item.", "A task step.", "Task prose stays.", "to the test inbox.", "The inbox shows the verification.", "After the fence.", "After the quoted fence.", "After the blank quoted fence.", "After the code."]) expect(page).toContain(kept);
   for (const output of ["TOP=", "NUMBERED=", "QUOTED=", "ITEM=", "TABBED=", "TABLED=", "FIRST=", "CR_FIRST=", "CR_SECOND=", "TABLE_CODE=", "HEADED=", "MARKED=", "TASKED=", "DELIMITED=", "FENCED_LIST=", "FENCED_QUOTE=", "QUOTED_FENCE=", "QUOTED_BLANK=", "FORGED=", "BULK_", "$ stays as written", "HTML_ENTITY_OUT", "\uE003", "hedge proof run"]) expect(Bun.markdown.html(page)).not.toContain(output);
+});
+
+test("a receipt that Hedge wrote before the rename leaves the body with the next one, so the PR never shows two", () => {
+  const old = `## Testing\n\n<!-- fleet-proof-receipt head=${"a".repeat(40)} hash=1 -->\nold receipt\n<!-- /fleet-proof-receipt -->\n\nMore text.\n`;
+  expect(withoutReceipt(old)).toBe("## Testing\n\nMore text.\n");
 });

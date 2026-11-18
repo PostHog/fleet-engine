@@ -6,6 +6,7 @@ import { writeHome } from "../testing.ts";
 import { dreamCommand } from "./command.ts";
 import type { Digest } from "./digest.ts";
 import { dreamNow, hubWithSubtree, quietIo } from "./testing.ts";
+import { remoteLauncher } from "../../../../src/hub/ssh.ts";
 
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
@@ -71,7 +72,7 @@ test("search away from the hub asks the hub over SSH and passes on its answer an
 
   expect(await dreamCommand(["search", "it's", "deploy"], io)).toBe(0);
 
-  expect(asked).toEqual([`my-hub: sh "$HOME/.local/share/hedge/engine/hedge" dream search 'it'\\''s' 'deploy'`]);
+  expect(asked).toEqual([`my-hub: sh ${remoteLauncher} dream search 'it'\\''s' 'deploy'`]);
   expect(printed).toEqual(["2026-11-04T09:00 hub claude s-1 (app)\n"]);
 });
 
