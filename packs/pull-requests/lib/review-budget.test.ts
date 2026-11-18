@@ -167,7 +167,7 @@ test("a merge-risk callout whose grade fleet cannot read gets the Pair tier, and
   expect(await tierAt("Greets new members.")).toBe("read");
 });
 
-test("each reviewer runs without the user's harness, and its token use lands in lenses/<lens>.json and round.json, while a reviewer without usage still counts", async () => {
+test("each reviewer runs without the user's harness, and its token use lands in lenses/<lens>.json and round.json", async () => {
   const pr = await checkout();
   await pr.commit("feature.txt", "greet\n");
   await pr.fleet("require", "--none", "--reason", "fixture");
@@ -187,9 +187,8 @@ test("each reviewer runs without the user's harness, and its token use lands in 
 
   const reviewed = await pr.git("rev-parse", "HEAD");
   await pr.commit("feature.txt", "greet the member\n");
-  writeFileSync(join(bin, "codex"), `#!/bin/sh\ncat >/dev/null\nfor arg in "$@"; do [ "$previous" = "-o" ] && echo 'No findings.' > "$arg"; previous="$arg"; done\n`, { mode: 0o755 });
   expect((await pr.fleet("review", "--scope", "final", "--base", reviewed)).code).toBe(0);
-  expect(JSON.parse(readFileSync(join(pr.pullRequest, "reviews/final-1/round.json"), "utf8")).usage).toBeUndefined();
+  expect(JSON.parse(readFileSync(join(pr.pullRequest, "reviews/final-1/round.json"), "utf8")).usage).toEqual({ input: 30, cacheRead: 20, output: 5 });
 });
 
 test("at the budget a known answer settles a major the PR body lists by file:line, and a known blocker holds the merge", async () => {

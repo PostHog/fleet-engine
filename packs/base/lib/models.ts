@@ -33,7 +33,7 @@ export function modelSessionEnv(env: Record<string, string | undefined>) {
 }
 
 export function leanClaudeEnv(home: string, env: Env): Env {
-  const path = join(home, ".claude/settings.json");
+  const path = join(env.CLAUDE_CONFIG_DIR ?? join(home, ".claude"), "settings.json");
   const settings = existsSync(path) ? ((JSON.parse(readFileSync(path, "utf8")) as { env?: Env }).env ?? {}) : {};
   return { ...env, ...settings, CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" };
 }

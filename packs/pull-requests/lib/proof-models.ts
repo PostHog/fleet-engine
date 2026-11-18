@@ -107,11 +107,13 @@ function eventOf(line: string): Event | undefined {
   try { return JSON.parse(line) as Event; } catch { return undefined; }
 }
 
-function eventText(line: string) {
+function eventMessage(line: string) {
   const event = eventOf(line);
   const text = event && [event.is_error === true ? event.result : undefined, event.message, event.error?.message, event.item?.type === "error" ? event.item.message : undefined].find((value) => typeof value === "string");
-  return typeof text === "string" ? text : line;
+  return typeof text === "string" ? text : undefined;
 }
+
+const eventText = (line: string) => eventMessage(line) ?? line;
 
 function usageOf(counts: Record<keyof Usage, unknown>): Usage | undefined {
   const usage = Object.fromEntries(Object.entries(counts).filter(([, value]) => typeof value === "number" && Number.isFinite(value)));
@@ -157,7 +159,7 @@ async function spawnWithLimit(command: string[], request: ModelRequest, env: Rec
     if (child.signalCode) return { cause: `stopped by ${child.signalCode} at the ${Math.round(timeout / 1000)} s limit` };
     if (code !== 0 && watch.waiting()) return { cause: `${quotaExhausted}: exit ${code} after "${watch.waiting()}"` };
     if (code !== 0) {
-      const last = lastLines(stderr) || lastLines(stdout.split("\n").map(eventText).join("\n"));
+      const last = lastLines(stderr) || lastLines(stdout.split("\n").map((line) => eventMessage(line) ?? "").join("\n"));
       return { cause: `exit ${code}${last ? `: ${last}` : ""}`, transient: true };
     }
     return { stdout };

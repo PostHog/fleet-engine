@@ -70,7 +70,7 @@ export const tierCeiling = (tier: ReviewTier, ceiling: number) => tier.name === 
 
 function gradeOf(body: string | undefined) {
   if (body === undefined) return "unreadable";
-  const grade = /Merge risk:\**\s*(low|medium|high)\b/i.exec(riskCalloutOf(body) ?? body)?.[1]?.toLowerCase();
+  const grade = /Merge risk:\**\s*(low|medium|high)(?![\w-])/i.exec(riskCalloutOf(body) ?? body)?.[1]?.toLowerCase();
   return grade ?? (/merge[- ]risk/i.test(body) ? "unreadable" : "none");
 }
 
@@ -78,8 +78,8 @@ function productionLines(identity: ProofIdentity, run: Run) {
   const stat = run(["git", "diff", "--numstat", "-z", "--no-renames", "--no-relative", mergeBase(identity, run), identity.commit]);
   if (stat.code !== 0) return undefined;
   return stat.stdout.split("\0").filter(Boolean).map((entry) => {
-    const [added = "", deleted = "", path = ""] = entry.split("\t");
-    return { lines: Number(added) + Number(deleted), path };
+    const [added = "", deleted = "", ...path] = entry.split("\t");
+    return { lines: (Number(added) || 0) + (Number(deleted) || 0), path: path.join("\t") };
   }).filter(({ path }) => authored(path)).reduce((sum, { lines }) => sum + lines, 0);
 }
 

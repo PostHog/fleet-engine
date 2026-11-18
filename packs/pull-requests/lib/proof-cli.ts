@@ -681,6 +681,7 @@ function tierOf(head: ProofIdentity, { run }: CommandContext): ReviewTier {
 }
 
 async function panelRequested({ lists, options, flags }: Parsed, head: ProofIdentity, context: CommandContext) {
+  if (flags.has("--single") && lists.has("--lens")) throw usageError("review", "--single runs one reviewer; leave out --lens");
   if (lists.has("--lens")) return true;
   const pending = await unfinishedReview(context.home, head, "fleet");
   if (pending) return Boolean(await readPlan(pending.directory) ?? await stagedPlan(pending.directory));
@@ -729,7 +730,7 @@ async function runPanel({ options, lists }: Parsed, head: ProofIdentity, context
   const pending = await unfinishedReview(context.home, head, "fleet");
   const planned = pending && (await readPlan(pending.directory) ?? await stagedPlan(pending.directory));
   const tier = planned ? planned.tier : tierOf(head, context);
-  const chosen = planned?.arguments ?? ((options.get("--scope") ?? "full") === "full" && tier ? tierLenses[tier.name] : []);
+  const chosen = planned ? planned.arguments ?? (planned.lenses.some(({ name }) => name === "combined") ? [] : planned.lenses.map(({ name }) => name)) : ((options.get("--scope") ?? "full") === "full" && tier ? tierLenses[tier.name] : []);
   const lensArguments = withLenses(chosen, lists.get("--lens") ?? []);
   const requested = lensArguments.map((argument) => resolveLens(guide, argument, author, knowledge, env));
   const combined = planned ? planned.lenses.map(({ name }) => name).join() === "combined" : tier?.name === "read";
