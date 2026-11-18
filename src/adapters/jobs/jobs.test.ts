@@ -210,7 +210,7 @@ describe("a pack source that cannot be fetched", () => {
 });
 
 describe("launchd jobs on a Mac", () => {
-  function launchctl(stuck = false) {
+  function launchctl(stuck = false, launchdLabel?: string) {
     const calls: string[][] = [];
     const loaded = new Set<string>();
     const mode = { stuck, printFails: false };
@@ -225,7 +225,7 @@ describe("launchd jobs on a Mac", () => {
       }
       return { code: 0, stdout: "" };
     };
-    return { calls, loaded, mode, adapter: jobsAdapter({ run, engineRoot: engine, uid: 501 }) };
+    return { calls, loaded, mode, run, adapter: jobsAdapter({ run, engineRoot: engine, uid: 501, launchdLabel }) };
   }
 
   test("writes a dev.hedge plist that runs the launcher script, and loads it", async () => {
@@ -276,6 +276,51 @@ describe("launchd jobs on a Mac", () => {
     await apply(plan("darwin", [prune]), { home, adapters: [mac.adapter] });
 
     expect(existsSync(join(agents, "dev.fleet.prune.plist"))).toBe(false);
+    expect(mac.loaded.has("gui/501/dev.fleet.prune")).toBe(false);
+    expect(mac.loaded.has("gui/501/dev.hedge.prune")).toBe(true);
+  });
+
+  const beforeTheRename = async (mac: ReturnType<typeof launchctl>, home: string) => {
+    await apply(plan("darwin", [prune]), { home, adapters: [mac.adapter] });
+    const agents = join(home, "Library/LaunchAgents");
+    const old = readFileSync(join(agents, "dev.hedge.prune.plist"), "utf8").replaceAll("hedge", "fleet");
+    rmSync(join(agents, "dev.hedge.prune.plist"));
+    writeFileSync(join(agents, "dev.fleet.prune.plist"), old);
+    writeFileSync(join(home, ".local/state/hedge/jobs/prune.plist"), old);
+    mac.loaded.delete("gui/501/dev.hedge.prune");
+    mac.loaded.add("gui/501/dev.fleet.prune");
+    return join(agents, "dev.fleet.prune.plist");
+  };
+
+  test("leaves the dev.fleet job that runs this apply loaded, so the update does not stop itself, and loads the dev.hedge one", async () => {
+    const home = temp.make("home-");
+    const mac = launchctl(false, "dev.fleet.prune");
+    const legacy = await beforeTheRename(mac, home);
+
+    const report = await apply(plan("darwin", [prune]), { home, adapters: [mac.adapter] });
+
+    expect(mac.calls.some((call) => call[1] === "bootout" && call[2] === "gui/501/dev.fleet.prune")).toBe(false);
+    expect(existsSync(legacy)).toBe(true);
+    expect(mac.loaded.has("gui/501/dev.hedge.prune")).toBe(true);
+    expect(report.findings.map((finding) => finding.say)).toContain("The old dev.fleet.prune job runs this apply, so Hedge leaves it for the next apply to stop.");
+    await apply(plan("darwin", [prune]), { home, adapters: [jobsAdapter({ run: mac.run, engineRoot: engine, uid: 501 })] });
+    expect(existsSync(legacy)).toBe(false);
+    expect(mac.loaded.has("gui/501/dev.fleet.prune")).toBe(false);
+  });
+
+  test("when the dev.fleet job does not stop, holds the dev.hedge one back and retires the old one on a later apply", async () => {
+    const home = temp.make("home-");
+    const mac = launchctl();
+    const legacy = await beforeTheRename(mac, home);
+    mac.mode.stuck = true;
+
+    await apply(plan("darwin", [prune]), { home, adapters: [mac.adapter] });
+
+    expect(mac.loaded.has("gui/501/dev.hedge.prune")).toBe(false);
+    expect(existsSync(legacy)).toBe(true);
+    mac.mode.stuck = false;
+    await apply(plan("darwin", [prune]), { home, adapters: [mac.adapter] });
+    expect(existsSync(legacy)).toBe(false);
     expect(mac.loaded.has("gui/501/dev.fleet.prune")).toBe(false);
     expect(mac.loaded.has("gui/501/dev.hedge.prune")).toBe(true);
   });
@@ -518,6 +563,17 @@ describe("T3 scheduled tasks", () => {
     expect(t3.tasks.get("fleet:quality-loop")?.enabled).toBe(false);
   });
 
+  test("keeps the fleet: task on while T3 Code does not take its hedge: task", async () => {
+    const home = temp.make("home-");
+    const t3 = server([{ ...wanted, id: "fleet:quality-loop" }]);
+    const client: T3Tasks = { list: async () => [...t3.tasks.values()], upsert: async () => Promise.reject(new Error("project not found")), setEnabled: async (id, enabled) => void t3.tasks.set(id, { ...t3.tasks.get(id)!, enabled }) };
+    await apply(plan("linux", [loop]), { home, adapters: [jobsAdapter({ run: async () => ({ code: 0, stdout: "" }), engineRoot: engine, t3: async () => client })] });
+    expect(t3.tasks.get("fleet:quality-loop")?.enabled).toBe(true);
+    await apply(plan("linux", [loop]), { home, adapters: [t3.adapter] });
+    expect(t3.tasks.get("fleet:quality-loop")?.enabled).toBe(false);
+    expect(t3.tasks.get("hedge:quality-loop")?.enabled).toBe(true);
+  });
+
   test("while a source is out, turns off a task the plan drops on purpose and keeps the others", async () => {
     const home = temp.make("home-");
     const other = { ...wanted, id: "hedge:digest" };
@@ -622,6 +678,27 @@ describe("service jobs", () => {
     expect(linux.units.get("fleet-slack-trigger.service")).toEqual({ active: false, enabled: false });
     expect(linux.units.get("hedge-slack-trigger.service")).toEqual({ active: true, enabled: true });
     expect(existsSync(unitPath(home))).toBe(true);
+  });
+
+  test("when the fleet- unit does not stop, does not start the hedge- unit beside it, and retires the old one on a later apply", async () => {
+    const home = temp.make("home-");
+    const refusing = systemd({ refuse: "disable" });
+    await apply(plan("linux", [trigger]), { home, adapters: [refusing.adapter] });
+    const legacy = join(home, ".config/systemd/user/fleet-slack-trigger.service");
+    renameSync(unitPath(home), legacy);
+    refusing.units.delete("hedge-slack-trigger.service");
+    refusing.units.set("fleet-slack-trigger.service", { active: true, enabled: true });
+
+    const report = await apply(plan("linux", [trigger]), { home, adapters: [refusing.adapter] });
+
+    expect(report.findings.map((finding) => finding.say)).toContain("systemd did not stop the old fleet-slack-trigger.service job (Failed to disable), so Hedge left it as it is and did not start the new one.");
+    expect(refusing.units.get("hedge-slack-trigger.service")).toBeUndefined();
+    const linux = systemd();
+    linux.units.set("fleet-slack-trigger.service", { active: true, enabled: true });
+    await apply(plan("linux", [trigger]), { home, adapters: [linux.adapter] });
+    expect(existsSync(legacy)).toBe(false);
+    expect(linux.units.get("fleet-slack-trigger.service")).toEqual({ active: false, enabled: false });
+    expect(linux.units.get("hedge-slack-trigger.service")).toEqual({ active: true, enabled: true });
   });
 
   test("leaves a fleet- unit alone that is not what Hedge wrote, such as the private Fleet's", async () => {

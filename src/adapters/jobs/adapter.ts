@@ -28,7 +28,7 @@ export type HedgeTask = {
 
 export type T3Tasks = { list(): Promise<HedgeTask[]>; upsert(task: HedgeTask): Promise<void>; setEnabled(id: string, enabled: boolean): Promise<void> };
 
-export type JobsOptions = { run?: CommandRunner; accountHome?: () => Promise<string | undefined>; engineRoot?: string; uid?: number; t3?: () => Promise<T3Tasks | undefined> };
+export type JobsOptions = { run?: CommandRunner; accountHome?: () => Promise<string | undefined>; engineRoot?: string; uid?: number; t3?: () => Promise<T3Tasks | undefined>; launchdLabel?: string };
 
 export const taskPrefix = "hedge:";
 const legacyTaskPrefix = "fleet:";
@@ -40,6 +40,7 @@ export function jobsAdapter(options: JobsOptions = {}): Adapter {
   const engineRoot = options.engineRoot ?? join(import.meta.dir, "..", "..", "..");
   const uid = options.uid ?? process.getuid?.() ?? 0;
   const t3 = options.t3 ?? (async () => undefined);
+  const launchdLabel = options.launchdLabel ?? process.env.XPC_SERVICE_NAME;
   return {
     name: "jobs",
     targets: () => [],
@@ -61,7 +62,7 @@ export function jobsAdapter(options: JobsOptions = {}): Adapter {
           const systemd = await reconcileSystemd(services, only(scripts, services), context, moving);
           const cron = await reconcileCron(timed, only(scripts, timed), context, new Set(services.map((job) => job.id)), new Set(services.filter((job) => !systemd.running.has(job.id)).map((job) => job.id)));
           if (cron) await systemd.removeMoved();
-        } else await reconcileLaunchd(osJobs, scripts, { ...context, uid });
+        } else await reconcileLaunchd(osJobs, scripts, { ...context, uid, launchdLabel });
         await reconcileTasks(plan, await t3(), context);
         return result;
       };
@@ -103,6 +104,26 @@ async function removeLauncher(home: string, id: string) {
   if (!(await linkOnPath(home, launcherTarget(id)))) await rm(inside(home, launcherTarget(id)), { force: true });
 }
 
+const legacyCopy = (copy: string) => `${copy}.fleet`;
+
+/** The jobs Hedge wrote before the rename, found by a match with the copy it kept. Keeps that copy under its own name, so a later apply still knows the job when this one cannot stop it. */
+async function legacyJobs(home: string, folder: string, prefix: string, suffix: string, copyOf: (id: string) => string): Promise<Array<{ name: string; id: string }>> {
+  const found: Array<{ name: string; id: string }> = [];
+  const text = (target: string) => readFile(inside(home, target), "utf8").catch(() => undefined);
+  for (const name of (await readdir(inside(home, folder)).catch(() => [] as string[])).filter((item) => item.startsWith(prefix) && item.endsWith(suffix))) {
+    const id = name.slice(prefix.length, -suffix.length);
+    if (!jobId.test(id)) continue;
+    const current = await text(`${folder}/${name}`);
+    if (current === undefined) continue;
+    if (current !== (await text(legacyCopy(copyOf(id))))) {
+      if (current !== (await text(copyOf(id)))) continue;
+      await writeFile(inside(home, legacyCopy(copyOf(id))), current);
+    }
+    found.push({ name, id });
+  }
+  return found;
+}
+
 async function reconcileCron(jobs: TimedJob[], scripts: Scripts, { home, dryRun, run, result, outage, gated }: Context, keep: Set<string> = new Set(), hold: Set<string> = new Set()): Promise<boolean> {
   const listed = await run(["crontab", "-l"]);
   const empty = listed.code !== 0 && /no crontab/i.test(listed.stderr ?? "");
@@ -133,7 +154,7 @@ async function reconcileCron(jobs: TimedJob[], scripts: Scripts, { home, dryRun,
   return true;
 }
 
-async function reconcileLaunchd(jobs: Array<Owned<PackJob>>, scripts: Scripts, { home, dryRun, run, result, uid, outage, gated }: Context & { uid: number }) {
+async function reconcileLaunchd(jobs: Array<Owned<PackJob>>, scripts: Scripts, { home, dryRun, run, result, uid, outage, gated, launchdLabel }: Context & { uid: number; launchdLabel?: string }) {
   const agents = join(home, "Library/LaunchAgents");
   const domain = `gui/${uid}`;
   const present = (await readdir(agents).catch(() => [] as string[])).filter((name) => name.startsWith(labelPrefix) && name.endsWith(".plist"));
@@ -164,17 +185,25 @@ async function reconcileLaunchd(jobs: Array<Owned<PackJob>>, scripts: Scripts, {
     result.findings.push({ id: `job:${id}`, pack: typeof job === "string" ? "engine" : job.pack, say, repair: "apply" });
     return false;
   };
-  if (!dryRun && !outage) {
-    for (const name of (await readdir(agents).catch(() => [] as string[])).filter((item) => item.startsWith(legacyLabelPrefix) && item.endsWith(".plist"))) {
+  const held = new Set<string>();
+  if (!dryRun && !outage && !(await linkOnPath(home, jobsFolder))) {
+    for (const { name, id } of await legacyJobs(home, "Library/LaunchAgents", legacyLabelPrefix, ".plist", agentCopyTarget)) {
       const label = name.slice(0, -".plist".length);
-      const id = label.slice(legacyLabelPrefix.length);
-      const text = await readFile(join(agents, name), "utf8").catch(() => undefined);
-      if (!jobId.test(id) || text === undefined || text !== (await written(id)) || !(await stop(id, label))) continue;
+      if (label === launchdLabel) {
+        result.findings.push({ id: `job:${id}`, pack: "engine", say: `The old ${label} job runs this apply, so Hedge leaves it for the next apply to stop.`, repair: "apply" });
+        continue;
+      }
+      if (!(await stop(id, label))) {
+        held.add(id);
+        continue;
+      }
       await rm(join(agents, name), { force: true });
+      await rm(inside(home, legacyCopy(agentCopyTarget(id))), { force: true });
       result.actions.push({ target: `Library/LaunchAgents/${name}`, operation: "remove" });
     }
   }
   for (const job of jobs) {
+    if (held.has(job.id)) continue;
     const label = `${labelPrefix}${job.id}`;
     const name = `${label}.plist`;
     const file = join(agents, name);
@@ -239,23 +268,23 @@ async function reconcileSystemd(jobs: Array<Owned<PackJob>>, scripts: Scripts, {
   const copies = linked ? [] : (await readdir(inside(home, jobsFolder)).catch(() => [] as string[])).filter((name) => name.endsWith(".service")).map((name) => name.slice(0, -".service".length));
   const gone = copies.filter((id) => jobId.test(id) && !jobs.some((job) => job.id === id) && (!outage || gated.has(id)));
   if (jobs.length && !systemdSafe(home)) return result.findings.push({ id: "jobs:systemd", pack: "engine", say: `Left services alone: systemd cannot run scripts from ${JSON.stringify(home)}, which holds a line break.`, repair: "human" }), done;
+  const held = new Set<string>();
   if (!dryRun && !linked && !outage) {
-    for (const name of (await readdir(inside(home, unitsFolder)).catch(() => [] as string[])).filter((item) => item.startsWith(legacyUnitPrefix) && item.endsWith(".service"))) {
-      const id = name.slice(legacyUnitPrefix.length, -".service".length);
-      if (!jobId.test(id)) continue;
-      const [text, copy] = [await read(`${unitsFolder}/${name}`), await read(copyTarget(id))];
-      if (typeof text !== "string" || text !== copy) continue;
+    for (const { name, id } of await legacyJobs(home, unitsFolder, legacyUnitPrefix, ".service", copyTarget)) {
       const stopped = await systemctl("disable", "--now", name);
       if (stopped.code !== 0) {
-        say(id, `systemd did not stop the old ${name} job (${reason(stopped)}), so Hedge left it as it is.`, "apply");
+        say(id, `systemd did not stop the old ${name} job (${reason(stopped)}), so Hedge left it as it is and did not start the new one.`, "apply");
+        held.add(id);
         continue;
       }
       await rm(inside(home, `${unitsFolder}/${name}`), { force: true });
+      await rm(inside(home, legacyCopy(copyTarget(id))), { force: true });
       result.actions.push({ target: `${unitsFolder}/${name}`, operation: "remove" });
     }
   }
   const plans: Array<{ job: Owned<PackJob>; script: Write; content: string; current?: string; copy?: string; reload: boolean; restart: boolean; enable: boolean; pending: boolean; marked?: string }> = [];
   for (const job of jobs) {
+    if (held.has(job.id)) continue;
     const script = scripts.get(job.id)!;
     const content = unit(job.id, inside(home, script.target));
     const [current, copy, pending] = [await read(unitTarget(job.id)), await read(copyTarget(job.id)), await read(restartTarget(job.id))];
@@ -349,9 +378,11 @@ async function reconcileTasks(plan: Plan, client: T3Tasks | undefined, { dryRun,
     result.findings.push({ id: "tasks:t3", pack: "engine", say: `Could not read T3 Code's scheduled tasks: ${(error as Error).message}. Run hedge apply again.`, repair: "apply" });
     return;
   }
+  const unplaced = new Set<string>();
   for (const job of jobs) {
     const task = job.task!;
     if (task.project === undefined) {
+      unplaced.add(job.id);
       result.findings.push({ id: `task:${job.id}`, pack: job.pack, say: `The ${job.id} task needs a project. Set it with hedge set ${task.projectSetting}=<path>.`, repair: "human" });
       continue;
     }
@@ -365,6 +396,7 @@ async function reconcileTasks(plan: Plan, client: T3Tasks | undefined, { dryRun,
     try {
       await client.upsert(wanted);
     } catch (error) {
+      unplaced.add(job.id);
       result.findings.push({ id: `task:${job.id}`, pack: job.pack, say: `Could not add the ${job.id} task to T3 Code: ${(error as Error).message}`, repair: "apply" });
       continue;
     }
@@ -372,6 +404,7 @@ async function reconcileTasks(plan: Plan, client: T3Tasks | undefined, { dryRun,
   }
   for (const task of existing) {
     if ((outage && !gated.has(task.id.slice(taskPrefix.length))) || ![taskPrefix, legacyTaskPrefix].some((prefix) => task.id.startsWith(prefix)) || !task.enabled || jobs.some((job) => `${taskPrefix}${job.id}` === task.id)) continue;
+    if (task.id.startsWith(legacyTaskPrefix) && unplaced.has(task.id.slice(legacyTaskPrefix.length))) continue;
     if (dryRun) {
       result.findings.push(needs(task.id.slice(taskPrefix.length), "turned off", "task"));
       continue;
