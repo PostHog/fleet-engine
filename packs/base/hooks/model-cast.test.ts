@@ -105,6 +105,7 @@ describe("cast the reviewer", () => {
     "Review beefedb",
     "Please do the code review for PR #12.",
     "Please review this. It's PR #12.",
+    "Review/approve PR #12",
     "Review 2aa78e",
     "Review PR #12. Do not review PR #13.",
     "Review the diff and answer the review comments.",
@@ -114,6 +115,11 @@ describe("cast the reviewer", () => {
       expect(result.code).toBe(0);
       expect(context(result.stdout)).toEqual({ hookEventName: "UserPromptSubmit", additionalContext: `${reviewReminder}\n\n${table}` });
     }
+  });
+
+  test("reads a prompt with a long pasted token in time", async () => {
+    const result = await castTheReviewer("claude", prompt(`Review PR #12 ${"a".repeat(50_000)}`), homeWith(instructions));
+    expect(context(result.stdout).additionalContext).toStartWith(reviewReminder);
   });
 
   test("on a home the engine rendered, the reminder holds a review row the profile renamed", async () => {
