@@ -65,6 +65,13 @@ describe("name a model", () => {
     expect(result.stderr).not.toContain("# Memory");
   });
 
+  test("keeps every row when a profile's work text spans lines or holds a pipe", async () => {
+    const agentsMd = renderedInstructions([{ role: "lookup", work: "Lookups:\nfind files | logs", provider: "claude", model: "claude-haiku-5-5", effort: "medium" }]);
+    const result = await nameAModel("claude", agentCall({}), homeWith(agentsMd));
+    expect(result.stderr).toContain("| Lookups: find files \\| logs | `claude-haiku-5-5` | medium |");
+    expect(result.stderr).toContain("| Review of code Claude wrote | `gpt-6.2-sol` | high |");
+  });
+
   test("names the table's place when the instructions or their table are missing", async () => {
     for (const agentsMd of [null, "# Agent rules\n\nNo table.\n", "## Model selection\n\nThe table moved.\n"]) {
       expect(await nameAModel("claude", agentCall({}), homeWith(agentsMd))).toEqual({ code: 2, stdout: "", stderr: `${reminder} ${pointer}\n` });
@@ -89,6 +96,9 @@ describe("cast the reviewer", () => {
     "Review the last commit",
     "Review 9303a8e6889d82b058c5e7b71302fe1eb4027380",
     "Review requests.ts in this branch",
+    "Review src/send.ts",
+    "Review 2aa78e",
+    "Review PR #12. Do not review PR #13.",
     "Review the diff and answer the review comments.",
   ])("reminds %p that a review runs cross-family, with the model table", async (text) => {
     for (const provider of ["claude", "codex"] as const) {
@@ -110,6 +120,8 @@ describe("cast the reviewer", () => {
     "What did the review say?",
     "Address the review comments on PR #123",
     "Address the review comments.",
+    "Summarize the review of PR #12",
+    "The bot reviewed PR #12. Apply its suggestions.",
     "Do not review this PR yet. Update the branch only.",
     "Don't review the diff, just rebase the branch",
     "Fix the review findings on this branch",
@@ -118,8 +130,8 @@ describe("cast the reviewer", () => {
     "You review a pull request as an independent reviewer from the other family. Work read-only.",
     "You review a pull request. Goal: <goal>",
     "Update on pull request #55: review requested",
-    "[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>Run the engine PR review round</task-notification>",
-    "<task-notification>\n<summary>Background command \"Request ReviewHog on PR 270\" completed</summary>\n</task-notification>",
+    "[SYSTEM NOTIFICATION - NOT USER INPUT]\n<task-notification>Review PR #12 finished</task-notification>",
+    "<task-notification>\n<summary>Background command \"Review PR #12\" completed</summary>\n</task-notification>",
   ])("adds nothing to %p", async (text) => {
     expect(await castTheReviewer("claude", prompt(text), homeWith(instructions))).toEqual(quiet);
   });
