@@ -248,6 +248,16 @@ describe("the PreToolUse hook", () => {
     expect(reads).toEqual([9]);
   });
 
+  test("outside the fleet CLI, the hook reads the decision ledger through its settings file, so a pass from another machine counts", async () => {
+    const home = homeWith({ "guards.person": "Robin" });
+    writeFileSync(join(home, ".local/state/fleet/decisions.jsonl"), JSON.stringify(gatePass(9, head)) + "\n");
+    const github = { pull: async (_repository: string, pr: number) => pulls[pr], pullFor: async () => undefined };
+    const where = { home, env: { FLEET_SETTINGS: undefined }, github, intent: io };
+    expect(await mergeGate(call("gh pr merge 9 --repo example/product"), where)).toBeUndefined();
+    writeFileSync(join(home, ".local/state/fleet/decisions.jsonl"), JSON.stringify(gatePass(9, older)) + "\n");
+    expect(await mergeGate(call("gh pr merge 9 --repo example/product"), where)).toBeDefined();
+  });
+
   test("guards.merge-gate-exempt lets the listed repositories merge without a gate pass", async () => {
     const where = (settings: unknown) => ({ home: homeWith(settings), env: {}, gate: gate(), intent: io });
     expect(await mergeGate(call("gh pr merge 9 --repo own/tooling"), where({ "guards.merge-gate-exempt": "own/*" }))).toBeUndefined();

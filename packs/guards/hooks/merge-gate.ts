@@ -5,18 +5,21 @@ import type { Env } from "../../pull-requests/lib/decision-ledger.ts";
 import { beforeDeadline, exemptList, mergeGateRisk, mergeIntent, realGateIO, realIntentIO, type GateIO, type IntentIO, type ToolCall } from "../lib/merge-gate.ts";
 
 export type Denial = { hookSpecificOutput: { hookEventName: "PreToolUse"; permissionDecision: "deny"; permissionDecisionReason: string } };
-export type Where = { home: string; env: Env; gate?: GateIO; intent?: IntentIO; deadlineMs?: number };
+export type Where = { home: string; env: Env; gate?: GateIO; github?: Pick<GateIO, "pull" | "pullFor">; intent?: IntentIO; deadlineMs?: number };
 
 const fallbackPerson = "the person who runs this machine";
 const deny = (reason: string): Denial => ({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } });
 
-function gateSettings(home: string): { person: string; exempt: string[] } {
+type GateSettings = { person: string; exempt: string[]; text: string };
+
+function gateSettings(home: string): GateSettings {
   const file = join(home, ".local/state/fleet/settings.json");
-  if (!existsSync(file)) return { person: fallbackPerson, exempt: [] };
-  const settings = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+  if (!existsSync(file)) return { person: fallbackPerson, exempt: [], text: "{}" };
+  const text = readFileSync(file, "utf8");
+  const settings = JSON.parse(text) as Record<string, unknown>;
   if (typeof settings !== "object" || settings === null || Array.isArray(settings)) throw new Error(`${file} is not a JSON object`);
   const person = settings["guards.person"];
-  return { person: typeof person === "string" && person.trim() ? person.trim() : fallbackPerson, exempt: exemptList(settings["guards.merge-gate-exempt"]) };
+  return { person: typeof person === "string" && person.trim() ? person.trim() : fallbackPerson, exempt: exemptList(settings["guards.merge-gate-exempt"]), text };
 }
 
 function shellCommand(input: Record<string, unknown> = {}) {
@@ -27,14 +30,16 @@ function shellCommand(input: Record<string, unknown> = {}) {
 
 /** Refuses an enqueue or merge until `fleet proof gate` passed at the head of each open layer of the PR's stack, or the person's gate override covers that head. */
 export async function mergeGate(call: ToolCall, where: Where): Promise<Denial | undefined> {
-  let settings: { person: string; exempt: string[] } | undefined;
+  let settings: GateSettings | undefined;
   let problem = "";
   try { settings = gateSettings(where.home); }
   catch (error) { problem = (error as Error).message; }
   const intent = mergeIntent(call, shellCommand(call.tool_input), settings?.exempt ?? [], where.intent ?? realIntentIO);
   if (!intent.refusal && !intent.targets.length) return undefined;
   if (!settings) return deny(`Fleet blocked this merge: the merge gate could not read its settings (${problem}), so it cannot tell which repositories skip the gate. Fix that file.`);
-  const refusal = await beforeDeadline(() => mergeGateRisk(intent, where.gate ?? realGateIO(where.home, where.env), settings.person), where.deadlineMs);
+  const env = { ...where.env, FLEET_SETTINGS: where.env.FLEET_SETTINGS ?? settings.text };
+  const io = where.gate ?? { ...realGateIO(where.home, env), ...where.github };
+  const refusal = await beforeDeadline(() => mergeGateRisk(intent, io, settings.person), where.deadlineMs);
   return refusal ? deny(refusal) : undefined;
 }
 
