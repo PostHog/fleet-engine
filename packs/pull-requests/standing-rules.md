@@ -21,5 +21,6 @@ A standing rule is a rule I write in the About me part of my profile that decide
 
 - Each rule names its date and its proof kinds from `PROOF.md` of `qa-swarm`. Review rounds, judge gaps, and post-deploy-watch gaps take no standing rule: decide them in the decision ledger.
 - With the `fleet` CLI, record each rule once per machine: `fleet proof standing --kind <kinds> --until <date> --rule "<the rule, word for word>"`.
+- A rule that names repositories covers only their pull requests. Its command then holds `--repositories <owner/name,owner/name>` between `--until` and `--rule`, and the judge reads the rule as the condition of each gap it accepts.
 - A rule lapses on its date, or when I remove it. A gap I keep owed takes no standing rule.
 - Without a rule or a decision that covers it, ask me.

@@ -304,18 +304,19 @@ each answer against HEAD.`,
     },
   },
   standing: {
-    usage: "standing [--kind <kind,kind> --until <date> --rule <rule>]",
+    usage: "standing [--kind <kind,kind> --until <date> [--repositories <owner/name,owner/name>] --rule <rule>]",
     summary: `Record a standing rule: the user's rule in ~/.agents/guides/standing-rules.md that decides for them until a
-date. For a gap kind, it accepts every gap of that kind. Kinds review, judge and post-deploy-watch are retired: decide
+date. For a gap kind, it accepts every gap of that kind. With --repositories, it accepts only the gaps of PRs in those
+repositories, and the judge reads the rule as the condition of each gap it accepts. Kinds review, judge and post-deploy-watch are retired: decide
 a review round with fleet proof review --agent, and those gaps with fleet decision record. The user's instructions,
-~/.agents/AGENTS.md or a file in ~/.agents/guides, must hold the whole command word for word, so only the user sets
-the rule, its kinds, and its date. The rule lapses on the date or when it leaves their instructions. Without options,
+~/.agents/AGENTS.md or a file in ~/.agents/guides, must hold the whole command word for word, in this option order, so
+only the user sets the rule, its kinds, its repositories, and its date. The rule lapses on the date or when it leaves their instructions. Without options,
 list the standing rules.`,
-    examples: ["fleet proof standing --kind prod-shape --until 2026-11-02 --rule '<the rule, word for word>'", "fleet proof standing"],
-    options: ["--kind", "--until", "--rule"],
+    examples: ["fleet proof standing --kind prod-shape --until 2026-11-02 --rule '<the rule, word for word>'", "fleet proof standing --kind live-run --until 2026-11-26 --repositories owner/name --rule '<the rule, word for word>'", "fleet proof standing"],
+    options: ["--kind", "--until", "--repositories", "--rule"],
     run: async ({ options }, _, { print, home }) => {
       if (!options.size) { for (const standing of await listStanding(home)) print(JSON.stringify(standing)); return 0; }
-      for (const standing of await recordStanding(home, required(options, "--kind", "standing"), required(options, "--until", "standing"), required(options, "--rule", "standing"))) print(JSON.stringify(standing));
+      for (const standing of await recordStanding(home, required(options, "--kind", "standing"), required(options, "--until", "standing"), required(options, "--rule", "standing"), options.get("--repositories"))) print(JSON.stringify(standing));
       return 0;
     },
   },
