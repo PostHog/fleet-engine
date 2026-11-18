@@ -1,11 +1,15 @@
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { type Hook, printing, runHook } from "../../base/lib/hook.ts";
-import { matchThread, questionCard, type ShellThread, t3CliRunner, t3UserData, withT3Session } from "../../base/lib/t3/index.ts";
-import { backgroundReason, closesWaiting, unwaitedBackgroundTasks } from "../lib/background-stop.ts";
-import { checksRun, claudeTaskRuns, proofStop, waits, type ProofStopEvent, type ProofStopOptions } from "../lib/proof-stop.ts";
+import { matchThread, questionCard, type ShellThread, t3CliRunner, t3UserData, type T3HttpClient, withT3Session } from "../../base/lib/t3/index.ts";
+import { backgroundReason, unwaitedBackgroundTasks } from "../lib/background-stop.ts";
+import { parkStop, type ParkT3, realSettleClock, settleWhenRunEnds } from "../lib/closing-line.ts";
+import { closesOn, closingSettings } from "../lib/closing-marks.ts";
+import { checksRun, claudeTaskRuns, proofStop, realProcesses, waits, type ProofStopEvent, type ProofStopOptions } from "../lib/proof-stop.ts";
 import { asksForDecision, personName } from "../lib/prose-question.ts";
 
 export type StopEvent = { transcript_path?: string; stop_hook_active?: boolean; last_assistant_message?: string };
@@ -17,7 +21,7 @@ type Block = { type?: string; text?: string; name?: string };
 type Step = { text: string } | { asked: true };
 
 export const questionToolReason = (person: string) => `Fleet blocked this stop: your last message asks ${person} a decision in prose, `
-  + "and this thread stays out of their inbox after the turn: it is snoozed, waits on a task, Monitor or thread wait, watches PR checks, or closes on ⏳, 💤 or 🔕. "
+  + "and this thread stays out of their inbox after the turn: it is snoozed, waits on a task, Monitor or thread wait, watches PR checks, or closes on a line that parks it. "
   + "Ask it now with the question tool (AskUserQuestion in Claude, request_user_input in Codex): restate the decision in full, with options. "
   + `A pending question brings the thread back to ${person}. `
   + `If you cannot ask on a card, because a skill asks in prose or ${person} turned down the card, end the turn with your complete reply again, word for word: `
@@ -78,15 +82,15 @@ export function currentTurn(transcript: string): string[] {
 const awaitsChecks = ({ snapshot, watch }: NonNullable<ShellThread["pullRequests"]>[number]) =>
   Boolean(watch) && !["merged", "closed"].includes(snapshot?.state?.toLowerCase() ?? "open") && (checksRun(watch!) || Boolean(watch!.awaitingApproval?.length));
 
-const closesOnPark = (message: string) => /^(⏳|💤|🔕)/u.test(message.split("\n").map((line) => line.trim()).filter(Boolean).at(-1) ?? "");
+const closesOnPark = (message: string, home: string) => closesOn(message, closingSettings(home).marks, ["wait", "snooze", "check"]);
 
-export const hiddenIn = (shell: ReadShell, now = Date.now): IsHidden => async (threadId, _home, event, message) => {
+export const hiddenIn = (shell: ReadShell, now = Date.now): IsHidden => async (threadId, home, event, message) => {
   if (!threadId) return false;
   try {
     const { threads } = await shell();
     const thread = matchThread(threads, threadId, (item) => item.id);
     if (!thread || thread.lineage?.parentThreadId) return false;
-    return (Boolean(thread.snoozedUntil) && Date.parse(thread.snoozedUntil!) > now()) || closesOnPark(message) || claudeTaskRuns(event)
+    return (Boolean(thread.snoozedUntil) && Date.parse(thread.snoozedUntil!) > now()) || closesOnPark(message, home) || claudeTaskRuns(event)
       || waits(threads, thread) || (thread.pullRequests ?? []).some(awaitsChecks);
   } catch {
     return false;
@@ -177,26 +181,72 @@ export async function guardSend(event: SendEvent, options: SendGuardOptions): Pr
 }
 
 const t3CallMs = 3_000;
+const parkStartsWithinMs = 6_000;
+const t3Scopes = ["orchestration:read", "orchestration:operate", "access:read"];
 
 const liveShell = (home: string): ReadShell => () =>
   withT3Session((client) => client.getShell<{ threads: ShellThread[] }>(), { home, ttl: "1m", timeoutMs: t3CallMs, runCli: t3CliRunner({ timeoutMs: t3CallMs }) });
 
-export type StopDeps = Partial<Pick<ProofStopOptions, "threadId" | "git" | "processes" | "deadline">> & { hidden?: IsHidden };
+export type HookT3 = ParkT3 & { freshShell: ReadShell; close: () => Promise<void> };
+
+export function hookT3(home: string, ttl = "1m"): HookT3 {
+  let opened: Promise<T3HttpClient> | undefined;
+  let release = () => {};
+  let closed: Promise<unknown> = Promise.resolve();
+  let shell: Promise<{ threads: ShellThread[] }> | undefined;
+  const client = () => (opened ??= new Promise<T3HttpClient>((resolve, reject) => {
+    const released = new Promise<void>((done) => { release = done; });
+    closed = withT3Session(async (session) => { resolve(session); await released; },
+      { home, ttl, scopes: t3Scopes, timeoutMs: t3CallMs, runCli: t3CliRunner({ timeoutMs: t3CallMs }) }).catch(reject);
+  }));
+  const freshShell = () => client().then((session) => session.getShell<{ threads: ShellThread[] }>());
+  return {
+    freshShell,
+    shell: () => (shell ??= freshShell()),
+    dispatch: async (command) => (await client()).call("orchestration.dispatchCommand", command, t3CallMs),
+    close: async () => { release(); await closed.catch(() => undefined); },
+  };
+}
+
+export function spawnSettle(threadId: string, runId: string): void {
+  spawn(process.execPath, [import.meta.path, "settle-after", threadId, runId], { detached: true, stdio: "ignore" }).unref();
+}
+
+export async function settleAfter(home: string, threadId: string, runId: string): Promise<boolean> {
+  const t3 = hookT3(home, "15m");
+  try {
+    return await settleWhenRunEnds({ shell: t3.freshShell, dispatch: t3.dispatch }, threadId, runId, realSettleClock).catch(() => false);
+  } finally {
+    await t3.close();
+  }
+}
+
+export type StopDeps = Partial<Pick<ProofStopOptions, "threadId" | "git" | "processes" | "deadline">> & {
+  hidden?: IsHidden; dispatch?: ParkT3["dispatch"]; settleAfterRun?: (threadId: string, runId: string) => void; now?: () => Date; elapsed?: () => number;
+};
 
 export async function guardBackground(event: StopEvent & ProofStopEvent, home: string, threadId: string | undefined): Promise<StopBlock | undefined> {
   if (event.stop_hook_active || !threadId || !event.transcript_path || !event.background_tasks?.length) return undefined;
-  if (closesWaiting(await finalMessage(event))) return undefined;
+  const { marks } = closingSettings(home);
+  if (closesOn((await finalMessage(event)) ?? "", marks, ["wait"])) return undefined;
   const ids = unwaitedBackgroundTasks(currentTurn(await readFile(event.transcript_path, "utf8")), event.background_tasks);
-  return ids.length ? { decision: "block", reason: backgroundReason(ids, personName(home)) } : undefined;
+  return ids.length ? { decision: "block", reason: backgroundReason(ids, personName(home), marks.wait) } : undefined;
 }
 
 async function guardStopAndProof(event: StopEvent & ProofStopEvent, home: string, shell: ReadShell, deps: StopDeps) {
+  const elapsed = deps.elapsed ?? ((started) => () => Date.now() - started)(Date.now());
   const threadId = "threadId" in deps ? deps.threadId : process.env.T3CODE_THREAD_ID;
   const prose = await guardStop(event, home, threadId, deps.hidden ?? hiddenIn(shell)).catch(() => undefined);
   if (prose || existsSync(join(home, killSwitch))) return prose;
   const background = await guardBackground(event, home, threadId).catch(() => undefined);
   if (background) return background;
-  return proofStop({ ...event, last_assistant_message: await finalMessage(event) }, { home, shell, ...deps, threadId });
+  const last = { ...event, last_assistant_message: await finalMessage(event) };
+  const proof = await proofStop(last, { home, shell, ...deps, threadId });
+  if (proof || !deps.dispatch || elapsed() >= parkStartsWithinMs) return proof;
+  return parkStop(last, {
+    home, threadId, t3: { shell, dispatch: deps.dispatch }, processes: deps.processes ?? realProcesses,
+    settleAfterRun: deps.settleAfterRun ?? spawnSettle, now: deps.now,
+  });
 }
 
 export const hookWith = (shell: (home: string) => ReadShell, stop: StopDeps = {}): Hook => async (_provider, readInput, home) => {
@@ -209,6 +259,17 @@ export const hookWith = (shell: (home: string) => ReadShell, stop: StopDeps = {}
   }
 };
 
-export const hook = hookWith(liveShell);
+export const hook: Hook = async (provider, readInput, home) => {
+  const t3 = hookT3(home);
+  try {
+    return await hookWith(() => t3.shell, { dispatch: t3.dispatch })(provider, readInput, home);
+  } finally {
+    await t3.close();
+  }
+};
 
-if (import.meta.main) await runHook(hook, { exitOnAnswer: true });
+if (import.meta.main) {
+  const [mode, threadId, runId] = process.argv.slice(2);
+  if (mode === "settle-after" && threadId && runId) await settleAfter(process.env.HOME ?? homedir(), threadId, runId);
+  else await runHook(hook, { exitOnAnswer: true });
+}

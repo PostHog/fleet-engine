@@ -393,3 +393,52 @@ describe("the background work guard", () => {
     expect(await background([...lines], [...inFlight], extra, threadId)).toBeUndefined();
   });
 });
+
+describe("the closing line in the installed Stop hook", () => {
+  const lane = "mcp:lane-1";
+  const tree = { pid: 900, table: async () => ["1 0 systemd", "500 1 t3", "700 500 claude", "800 700 sh", "900 800 bun"].join("\n") };
+  const parking = (extra: Record<string, unknown> = {}) => {
+    const dir = temp.make("home-");
+    mkdirSync(join(dir, ".local/state/fleet"), { recursive: true });
+    writeFileSync(join(dir, ".local/state/fleet/settings.json"), JSON.stringify({ "guards.person": "Robin", "orchestration.waitSnoozeDays": 3, "orchestration.timeZone": "UTC", ...extra }));
+    return dir;
+  };
+  const run = async (message: string, where: string, extra: { elapsed?: () => number; cwd?: string } = {}) => {
+    const sent: Record<string, unknown>[] = [];
+    const threads = [{ id: lane, title: "Lane", projectId: "p", status: "running", activeRunId: "run-1" }] as ShellThread[];
+    const routed = hookWith(() => async () => ({ threads }), {
+      threadId: lane, processes: tree, now: () => new Date("2026-11-14T12:00:00Z"), elapsed: extra.elapsed ?? (() => 0),
+      dispatch: async (command) => { sent.push(command); }, settleAfterRun: () => {},
+    });
+    const path = transcript(claudePrompt("Fix it"), claudeSays(message));
+    const result = await routed("claude", async () => JSON.stringify({ transcript_path: path, last_assistant_message: message }), where);
+    return { result, sent };
+  };
+
+  test("snoozes a thread whose turn closes waiting once the other stop checks pass", async () => {
+    const { result, sent } = await run("Pushed.\n\n⏳ **Waiting on** CI", parking());
+    expect(result).toEqual({ code: 0, stdout: "", stderr: "" });
+    expect(sent).toEqual([expect.objectContaining({ type: "thread.snooze", threadId: lane, snoozedUntil: "2026-11-17T12:00:00.000Z" })]);
+  });
+
+  test("leaves the thread alone when the prose guard blocks, the kill switch is on, or the hook ran too long already", async () => {
+    const asked = await run("Should I merge it?\n\n⏳ **Waiting on** the reviewer", parking());
+    expect(JSON.parse(asked.result.stdout).reason).toContain("asks Robin a decision in prose");
+    const off = parking();
+    mkdirSync(join(off, ".config/fleet"), { recursive: true });
+    writeFileSync(join(off, ".config/fleet/ask-guard.off"), "");
+    const switchedOff = await run("Pushed.\n\n⏳ **Waiting on** CI", off);
+    const late = await run("Pushed.\n\n⏳ **Waiting on** CI", parking(), { elapsed: () => 6_000 });
+    expect([asked.sent, switchedOff.sent, late.sent]).toEqual([[], [], []]);
+  });
+
+  test("reads a set wait mark for the hidden check, the background guard, and the snooze", async () => {
+    const where = parking({ "orchestration.waitMark": "WAIT:" });
+    const asked = await run("Should I merge it?\n\nWAIT: the reviewer", where);
+    expect(JSON.parse(asked.result.stdout).decision).toBe("block");
+    const waiting = await run("Pushed.\n\nWAIT: CI", where);
+    expect(waiting.sent).toEqual([expect.objectContaining({ type: "thread.snooze" })]);
+    const old = await run("Pushed.\n\n⏳ CI", where);
+    expect(old.sent).toEqual([]);
+  });
+});

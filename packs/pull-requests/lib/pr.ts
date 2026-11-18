@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { runGh } from "./gh.ts";
 import { parseBlockerArgs, prBlockers } from "./pr-blockers.ts";
+import { liveDeps, organizeRefusal, parseSettleCheck } from "./organize-guard.ts";
 import { recordHandover } from "./pr-owners.ts";
 import { prSize } from "./pr-size.ts";
 import { botThreads, parsePrArgs } from "./pr-threads.ts";
@@ -26,9 +27,12 @@ export const help = `fleet pr: review threads, blockers, review bots, and handov
                      Count the branch's authored non-test lines, new files, and new flags, env vars and config keys;
                      exit 1 when it is over 1.5 times the Cost estimate, so the delete pass runs before the PR opens
   fleet pr handover --pr <PR URL> --to <thread id>
-                     Record that another thread took over the PR, so this thread may settle; that thread links the PR`;
+                     Record that another thread took over the PR, so this thread may settle; that thread links the PR
+  fleet pr settle-check --action <settle|snooze|archive> --thread <thread id>
+                     Print, as JSON, why this machine's organize guard refuses the action on the thread, or null.
+                     The guard on another machine asks it over SSH before it settles a thread here`;
 
-const engineSubcommands = ["bot-threads", "blockers", "review", "stamp", "forecast", "handover", "size"];
+const engineSubcommands = ["bot-threads", "blockers", "review", "stamp", "forecast", "handover", "settle-check", "size"];
 
 type Env = Record<string, string | undefined>;
 
@@ -51,6 +55,10 @@ export async function prCommand(args: string[], home: string, env: Env = Bun.env
     return 0;
   }
   if (!engineSubcommands.includes(word)) throw new Error(`Usage: fleet pr <subcommand>, one of ${[...engineSubcommands, ...(pack?.words ?? [])].join(", ")}. Run fleet pr --help for each one's flags.`);
+  if (word === "settle-check") {
+    const { action, threadId } = parseSettleCheck(args.slice(1));
+    return console.log(JSON.stringify({ refusal: (await organizeRefusal(action, threadId, home, liveDeps())) ?? null })), 0;
+  }
   if (word === "handover") return console.log(JSON.stringify(await recordHandover(args.slice(1), home, env.T3CODE_THREAD_ID, now))), 0;
   if (args[0] === "review" || args[0] === "stamp" || args[0] === "forecast") return askReviewBot(parseReviewBotArgs(args[0], args.slice(1)));
   const report = args[0] === "size" ? await prSize(args.slice(1), process.cwd()) : args[0] === "blockers"

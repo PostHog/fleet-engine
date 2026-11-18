@@ -174,7 +174,7 @@
       "id": "pr-owners",
       "name": "PR owners",
       "default": true,
-      "sentence": "A thread that still owns an open pull request cannot settle or archive itself until it hands the pull request over, and a box with such a thread is not released."
+      "sentence": "A thread that still owns an open pull request cannot settle or archive itself until it hands the pull request over, and a box with such a thread is not released. A thread you pinned cannot be settled or snoozed by an agent. A settle, snooze or archive of a thread on a Fleet peer asks that machine's Fleet first, over SSH."
     }
   ],
   "files": [
@@ -192,6 +192,7 @@
       "forecast",
       "blockers",
       "bot-threads",
+      "settle-check",
       "size"
     ],
     "proof": [

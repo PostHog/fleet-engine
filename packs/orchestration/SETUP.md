@@ -121,3 +121,35 @@ The stop passes when any of these holds:
 - any read fails, or the check takes longer than 10 seconds. At the deadline
   it stops the git and `ps` commands it started, and the hook process exits
   once it has answered, even when a helper of those commands still runs.
+
+### Closing-line parking
+
+The `parking` workflow is off by default, and needs `question-guard`. When the
+prose check, the background check and the proof check let a stop pass, the
+same Stop hook parks a top-level T3 thread by the mark its last line starts
+with:
+
+| Setting | Default | The thread |
+| --- | --- | --- |
+| `orchestration.waitMark` | ⏳ | waits on someone else. The hook snoozes it for `orchestration.waitSnoozeDays` days, 3 by default. |
+| `orchestration.snoozeMark` | 💤 | snoozes until the time on the line, such as `14th Nov 22:00`, in `orchestration.timeZone`, or this machine's time zone when that is empty. With no future time on the line, within 180 days, the stop is sent back once, to snooze with `t3_thread_organize`. |
+| `orchestration.checkMark` | 🔕 | waits on its own scheduled check. It needs an enabled scheduled task bound to it with a next run in T3's state, else the stop is sent back once. A detached process settles the thread once its run completes. |
+| `orchestration.doneMark` | ➡️ | is done, and the person may settle it. The hook changes nothing. |
+
+A line that ends on the done or the check mark is sent back once while the
+thread owns an open PR that no other open thread links. A handover counts only
+while the thread it names stays open and links the PR. The hook reads the
+PR links from T3's shell snapshot and makes no GitHub call.
+
+The hook leaves the thread alone when it is a child thread, was delegated from
+another machine, waits on a question card, is settled or already snoozed, or
+when the hook runs in a nested model session. A thread the person pinned
+stays in view: only the snooze mark parks it, and the detached settle skips a
+thread pinned before its run ends. The settle also skips a run that did not
+complete, a run that another run follows, a pending request, a PR watch that
+started after the stop, and a run still going after 10 minutes.
+
+The prose check, the background check and the proof check read the same
+marks. Parking starts only while the hook has run for less than 6 seconds, and
+gives up after 4 more. Any error lets the stop pass. The hook keeps one T3
+session for all its calls.

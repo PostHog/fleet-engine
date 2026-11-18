@@ -2,6 +2,7 @@ import { realpath } from "node:fs/promises";
 import { matchThread, type PullRequestWatch, type ShellThread } from "../../base/lib/t3/index.ts";
 import { ownedPullRequests, subagentParent } from "../../pull-requests/lib/pr-owners.ts";
 import { lastGateRun } from "../../pull-requests/lib/proof.ts";
+import { closesOn, closingSettings } from "./closing-marks.ts";
 import { needsHuman } from "./lanes.ts";
 import { personName } from "./prose-question.ts";
 
@@ -30,7 +31,7 @@ export const realGit: Git = async (cwd, args, signal) => {
   return { code, stdout: stdout.trim() };
 };
 
-const realProcesses: ProcessTable = {
+export const realProcesses: ProcessTable = {
   pid: process.pid,
   table: async (signal) => {
     const child = Bun.spawn(["ps", "-A", "-o", "pid=,ppid=,comm="], { stdin: "ignore", stdout: "pipe", stderr: "ignore", signal });
@@ -49,7 +50,7 @@ const gitIn = (run: Git, cwd: string, signal: AbortSignal): GitIn => async (args
 
 const isProvider = (command: string) => ["claude", "codex"].includes(command.split("/").at(-1) ?? "");
 
-function nestedSession(table: string, pid: number): boolean {
+export function nestedSession(table: string, pid: number): boolean {
   const parents = new Map(table.split("\n").flatMap((line) => {
     const match = /^\s*(\d+)\s+(\d+)\s+(.+?)\s*$/.exec(line);
     return match ? [[Number(match[1]), { ppid: Number(match[2]), command: match[3]! }] as const] : [];
@@ -163,11 +164,11 @@ export async function proofStop(event: ProofStopEvent, options: ProofStopOptions
   }
 }
 
-const parksOnSnooze = (message: string) => (message.trim().split("\n").at(-1) ?? "").trim().startsWith("💤");
-
 async function check(event: ProofStopEvent, options: ProofStopOptions, signal: AbortSignal): Promise<ProofStopBlock | undefined> {
   const { threadId, home } = options;
-  if (event.stop_hook_active || !threadId || !event.cwd || waitsInClaude(event) || needsHuman(event.last_assistant_message ?? "") || parksOnSnooze(event.last_assistant_message ?? "")) return undefined;
+  const { marks } = closingSettings(home);
+  const message = event.last_assistant_message ?? "";
+  if (event.stop_hook_active || !threadId || !event.cwd || waitsInClaude(event) || needsHuman(message) || closesOn(message, marks, ["snooze"])) return undefined;
   const processes = options.processes ?? realProcesses;
   if (nestedSession(await processes.table(signal), processes.pid)) return undefined;
   const { threads } = await options.shell();
@@ -191,7 +192,7 @@ async function check(event: ProofStopEvent, options: ProofStopOptions, signal: A
   const others = rest.length ? ` Also owed: ${rest.map((item) => item.pr).join(", ")}.` : "";
   return {
     decision: "block",
-    reason: `Fleet blocked this stop: your PR is not proven. ${first.step}.${others} If you are parking for ${person}, ask with the question tool or end with a \`NEEDS_HUMAN:\` line. If ${person} parked the PR, end on 💤 with the park date. `
+    reason: `Fleet blocked this stop: your PR is not proven. ${first.step}.${others} If you are parking for ${person}, ask with the question tool or end with a \`NEEDS_HUMAN:\` line. If ${person} parked the PR, end on ${marks.snooze} with the park date. `
       + `If this turn only answered ${person} and the work is not finished, say what is still owed and end the turn again.`,
   };
 }
