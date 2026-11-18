@@ -5,8 +5,13 @@ import { loadPacks } from "../../../src/pack/manifest.ts";
 import type { AvailableSource, Profile } from "../../../src/pack/types.ts";
 import { resolve } from "../../../src/reconciler/resolve.ts";
 import { tempDirs } from "../../../src/testing/git.ts";
-import { hook as castTheReviewer, pointer as reviewPointer, reminder as reviewReminder } from "./cast-the-reviewer.ts";
-import { hook as nameAModel, pointer, reminder } from "./name-a-model.ts";
+import { hook as castTheReviewer } from "./cast-the-reviewer.ts";
+import { hook as nameAModel } from "./name-a-model.ts";
+
+const reminder = "Name a model on this Agent call: an omitted model inherits the parent model. Agent takes haiku, sonnet, opus, or fable; a row with a GPT model runs on Codex, through T3's `delegate_task`.";
+const pointer = "Cast it with the model table in ~/.agents/AGENTS.md.";
+const reviewReminder = "This prompt asks for a review. A review runs in a worker that did not write the code, cast from the review rows of the model table, and in the other model family when a row names it. Review the code yourself only when you were dispatched as its reviewer.";
+const reviewPointer = "The table is in ~/.agents/AGENTS.md.";
 
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
@@ -83,6 +88,8 @@ describe("cast the reviewer", () => {
     "Give my branch a code review",
     "Review the last commit",
     "Review 9303a8e6889d82b058c5e7b71302fe1eb4027380",
+    "Review requests.ts in this branch",
+    "Review the diff and answer the review comments.",
   ])("reminds %p that a review runs cross-family, with the model table", async (text) => {
     for (const provider of ["claude", "codex"] as const) {
       const result = await castTheReviewer(provider, prompt(text), homeWith(instructions));
@@ -102,6 +109,9 @@ describe("cast the reviewer", () => {
     "Fix the failing test",
     "What did the review say?",
     "Address the review comments on PR #123",
+    "Address the review comments.",
+    "Do not review this PR yet. Update the branch only.",
+    "Don't review the diff, just rebase the branch",
     "Fix the review findings on this branch",
     "answer and resolve every review-bot thread on PR #12",
     "Act as the review sub-agent for PR #12",
@@ -114,8 +124,12 @@ describe("cast the reviewer", () => {
     expect(await castTheReviewer("claude", prompt(text), homeWith(instructions))).toEqual(quiet);
   });
 
-  test("names the table's place when the instructions are missing, and lets a broken event through", async () => {
-    expect(context((await castTheReviewer("claude", prompt("Review PR #1"), homeWith(null))).stdout).additionalContext).toBe(`${reviewReminder} ${reviewPointer}`);
-    for (const broken of ["not json", "null", "[]", '{"prompt":7}']) expect(await castTheReviewer("claude", event(broken), homeWith(instructions))).toEqual(quiet);
+  test("names the table's place when the instructions are missing", async () => {
+    const result = await castTheReviewer("claude", prompt("Review PR #1"), homeWith(null));
+    expect(context(result.stdout).additionalContext).toBe(`${reviewReminder} ${reviewPointer}`);
+  });
+
+  test.each(["not json", "null", "[]", '{"prompt":7}'])("lets the broken event %p through", async (broken) => {
+    expect(await castTheReviewer("claude", event(broken), homeWith(instructions))).toEqual(quiet);
   });
 });

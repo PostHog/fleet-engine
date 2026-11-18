@@ -1,8 +1,8 @@
 import { blocking, type Hook, quiet, runHook } from "../lib/hook.ts";
 import { modelSelection } from "../lib/model-selection.ts";
 
-export const reminder = "Name a model on this Agent call: an omitted model inherits the parent model. Agent takes haiku, sonnet, opus, or fable; a row with a GPT model runs on Codex, through T3's `delegate_task`.";
-export const pointer = "Cast it with the model table in ~/.agents/AGENTS.md.";
+const reminder = "Name a model on this Agent call: an omitted model inherits the parent model. Agent takes haiku, sonnet, opus, or fable; a row with a GPT model runs on Codex, through T3's `delegate_task`.";
+const pointer = "Cast it with the model table in ~/.agents/AGENTS.md.";
 
 type ToolEvent = { tool_name?: unknown; tool_input?: { model?: unknown } | null };
 
