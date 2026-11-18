@@ -121,6 +121,8 @@ describe("cast the reviewer", () => {
     "Address the review comments on PR #123",
     "Address the review comments.",
     "Summarize the review of PR #12",
+    "Summarize the code review for PR #12",
+    "Respond to the code review on PR #12",
     "The bot reviewed PR #12. Apply its suggestions.",
     "Do not review this PR yet. Update the branch only.",
     "Don't review the diff, just rebase the branch",
