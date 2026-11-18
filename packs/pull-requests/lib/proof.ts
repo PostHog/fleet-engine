@@ -126,6 +126,9 @@ type FinalReadPhase = (typeof finalReadPhases)[number];
 
 const isReviewName = (name: string) => /^(\d+|final-\d+)$/.test(name);
 const reviewNames = async (reviews: string) => (await entries(reviews)).filter(isReviewName);
+/** When a round was reserved; a round that vanished meanwhile sorts last, so it never makes another back out. */
+const reservedAt = async (reviews: string, name: string) =>
+  (await readJson<{ startedAt?: string } | undefined>(join(reviews, name, "round.json"), undefined))?.startedAt ?? "￿";
 
 function finalReadPhase(value: string): FinalReadPhase {
   if (!(finalReadPhases as readonly string[]).includes(value)) throw new Error("Final read phase must be review or babysit");
@@ -234,7 +237,11 @@ async function startFinalRead(home: string, identity: ProofIdentity, base: strin
 }
 
 async function reservedAlone(reviews: string, counted: string[], name: string, reserved: Reserved) {
-  const other = (await reviewNames(reviews)).find((started) => started !== name && !counted.includes(started));
+  const others = (await reviewNames(reviews)).filter((started) => started !== name && !counted.includes(started));
+  const mine = await reservedAt(reviews, name);
+  // Both racers see each other, so only the later reservation backs out; the earlier one keeps its round.
+  const other = (await Promise.all(others.map(async (started) => ({ started, at: await reservedAt(reviews, started) }))))
+    .find(({ started, at }) => at < mine || (at === mine && started < name))?.started;
   if (!other) return reserved;
   await rm(join(reviews, name), { recursive: true, force: true });
   throw new Error(`Review ${other} started while this one weighed the budget. Run this one again to weigh it anew`);
