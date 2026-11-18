@@ -498,7 +498,7 @@ test("the installed hook reads gh's aliases from GH_CONFIG_DIR, and a FIFO as a 
   expect(await answer("curl -X POST https://api.github.com/repos/example/product/issues/7/comments -d @body", fifo)).toBe(rawReason);
 });
 
-test("a payload swapped for a FIFO after the gate chose it is never read by its path", async () => {
+test("a payload swapped for a FIFO after the reader checked it is read from the file it checked, never by its path", () => {
   const dir = temp.make("swap-");
   const body = join(dir, "body");
   writeFileSync(body, "Merged after review.\n");
@@ -506,12 +506,10 @@ test("a payload swapped for a FIFO after the gate chose it is never read by its 
   const swap = () => {
     rmSync(body);
     expect(Bun.spawnSync(["mkfifo", body]).exitCode).toBe(0);
-    writer = Bun.spawn(["sh", "-c", 'printf "Merged after review.\\n" > "$0"', body]);
+    writer = Bun.spawn(["sh", "-c", 'printf "/trunk merge\\n" > "$0"', body]);
   };
   try {
-    const command = "curl -X POST https://api.github.com/repos/example/product/issues/7/comments -d @body";
-    const intent = mergeIntent({ tool_name: "Bash", tool_input: { command }, cwd: dir }, command, [], { ...realIntentIO, readText: (path) => readPayload(path, swap) });
-    expect(intent.refusal).toBe(rawReason);
+    expect(readPayload(body, swap)).toBe("Merged after review.\n");
   } finally { writer?.kill(); }
 });
 

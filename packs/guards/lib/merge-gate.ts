@@ -73,13 +73,14 @@ export function ghBaseRepo(remoteConfig: string): string | undefined {
 
 const maxPayload = 1 << 20;
 
-export function readPayload(path: string, beforeOpen = () => {}): string | undefined {
+export function readPayload(path: string, afterCheck = () => {}): string | undefined {
   let fd: number | undefined;
   try {
-    beforeOpen();
     fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
     const file = fstatSync(fd);
-    return file.isFile() && file.size <= maxPayload ? readFileSync(fd, "utf8") : undefined;
+    if (!file.isFile() || file.size > maxPayload) return undefined;
+    afterCheck();
+    return readFileSync(fd, "utf8");
   } catch { return undefined; }
   finally { if (fd !== undefined) closeSync(fd); }
 }
