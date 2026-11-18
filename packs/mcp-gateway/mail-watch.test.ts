@@ -88,7 +88,12 @@ async function t3() {
         shell.threads.push({ id, title: payload.title, projectId: "scratch", status: "idle" });
         return { threadId: id };
       }
-      if (tag === "orchestration.dispatchCommand") return delivered.push({ threadId: payload.threadId, text: payload.text }), {};
+    },
+    tools(name, args) {
+      if (name !== "t3_thread_send") return undefined;
+      delivered.push({ threadId: args.threadId as string, text: args.message as string });
+      if (faults.lose.delete(name)) throw new Error("T3's answer was lost");
+      return { threadId: args.threadId, messageId: `message:${args.clientRequestId}`, delivery: "queued" };
     },
     loseAnswer: (tag) => faults.lose.delete(tag),
   });
@@ -199,7 +204,7 @@ test("a follow-up whose answer from T3 is lost goes to the same thread again, an
   await check();
   later(2 * minute);
   received("m3", "conv-1");
-  t3.faults.lose.add("orchestration.dispatchCommand");
+  t3.faults.lose.add("t3_thread_send");
   expect(await check()).toBe(false);
   later(2 * minute);
   expect(await check()).toBe(true);

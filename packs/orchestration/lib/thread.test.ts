@@ -33,9 +33,14 @@ function fixture(links = [linkedEnvironment], threads = linkedThreads): T3Fixtur
     },
     archived: { projects: [], threads: [shellThread("mcp:local-archived", { archivedAt: minutesAgo(100) })] },
     links,
-    tools: linkedTools(threads),
+    tools: (name, args) => (name === "t3_thread_send" && args.environmentId === undefined ? localSend(args) : linkedTools(threads)(name, args)),
     rpc: (tag) => (tag === "orchestration.dispatchCommand" ? { sequence: 1 } : undefined),
   };
+}
+
+function localSend(args: Record<string, unknown>) {
+  const delivery = args.threadId === "mcp:local-busy" ? "queued" : "started";
+  return { threadId: args.threadId, messageId: `message:${args.clientRequestId}`, runId: "run:local", status: delivery === "queued" ? "queued" : "starting", delivery };
 }
 
 async function stub(given = fixture()): Promise<T3Stub> {
@@ -63,7 +68,10 @@ test("fleet thread send reaches a thread on a linked environment, found without 
   expect(dispatched(t3)).toEqual([]);
 });
 
-test("fleet thread send takes the message from stdin and queues it behind the running turn of a thread on this machine", async () => {
+// T3 stamps a message that comes over its WebSocket as typed by a person. A queue that a stopped or failed run
+// held lets such a message go only when someone types in the web or mobile app, so it never started. T3's send
+// tool stamps it as an agent's, which T3 releases once the thread completes a later run.
+test("fleet thread send takes the message from stdin and queues it behind the running turn of a thread on this machine as an agent's message", async () => {
   const t3 = await stub();
   const child = Bun.spawn(["bun", command, "send", "--host", hostname(), "mcp:local-busy"], { env: { ...Bun.env, HOME: t3.home, FLEET_SETTINGS: "{}" }, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
   child.stdin.write("It's done'; rm -rf ~ #\n");
@@ -73,11 +81,8 @@ test("fleet thread send takes the message from stdin and queues it behind the ru
   expect(stderr).toBe("");
   expect(code).toBe(0);
   expect(JSON.parse(stdout)).toMatchObject({ threadId: "mcp:local-busy", delivery: "queued" });
-  expect(dispatched(t3)).toEqual([expect.objectContaining({
-    type: "message.dispatch", threadId: "mcp:local-busy", text: "It's done'; rm -rf ~ #", attachments: [],
-    dispatchMode: { type: "queue_after_active" }, createdBy: "agent", creationSource: "server",
-  })]);
-  expect(sends(t3)).toEqual([]);
+  expect(sends(t3)).toEqual([{ threadId: "mcp:local-busy", message: "It's done'; rm -rf ~ #", mode: "queue", clientRequestId: expect.stringMatching(/^fleet-thread-send:/) }]);
+  expect(dispatched(t3)).toEqual([]);
 });
 
 test("an idle thread on this machine starts a turn with the message", async () => {
@@ -86,7 +91,7 @@ test("an idle thread on this machine starts a turn with the message", async () =
 
   expect(code).toBe(0);
   expect(JSON.parse(output)).toMatchObject({ host: "this-box", threadId: "mcp:local-idle", delivery: "started" });
-  expect(dispatched(t3)).toEqual([expect.objectContaining({ text: "Go", dispatchMode: { type: "start_immediately" } })]);
+  expect(sends(t3)).toEqual([expect.objectContaining({ threadId: "mcp:local-idle", message: "Go", mode: "queue" })]);
 });
 
 test("fleet thread send refuses an archived thread, an empty message, and a thread it cannot place, and sends nothing", async () => {
@@ -119,8 +124,8 @@ test("words after the thread id are the message, even when they look like flags"
 
   expect(code).toBe(0);
   expect(JSON.parse(output)).toMatchObject({ host: "this-box", threadId: "mcp:everywhere" });
-  expect(dispatched(t3)).toEqual([expect.objectContaining({ threadId: "mcp:everywhere", text: "Explain --host devbox-2" })]);
-  expect(sends(t3)).toEqual([]);
+  expect(sends(t3)).toEqual([expect.objectContaining({ threadId: "mcp:everywhere", message: "Explain --host devbox-2" })]);
+  expect(dispatched(t3)).toEqual([]);
 });
 
 test("a short id finds a linked thread the same way it finds a local one, and an id that fits two threads is refused", async () => {
