@@ -120,12 +120,27 @@ test("fleet proof review stops a reviewer stuck on spent quota, exits 4, and kee
   expect((await pr.fleet("review")).code).toBe(4);
 
   pr.env.FLEET_PROOF_REVIEWER = "cat >/dev/null; echo 'API Error: 503 no auth available' >&2; exit 1";
-  await expect(pr.fleet("review")).rejects.toThrow("gave no findings (exit 1: API Error: 503 no auth available)");
+  await expect(pr.fleet("review")).rejects.toThrow("gave no findings (exit 1: API Error: 503 no auth available (after a retry))");
 
   fakeModel(pr, "REVIEWER", "1. [low] feature.txt:1 is fine.\n");
   const retried = await pr.fleet("review");
   expect(retried.code).toBe(0);
   expect(JSON.parse(retried.output.split("\n")[0]!)).toMatchObject({ round: 1 });
+});
+
+test("a reviewer that drops its stream with a lone reconnect and exits 1 is no quota: fleet retries it once, and a second failure keeps its own cause", async () => {
+  const pr = await quotaCheckout();
+  const runs = join(pr.home, "reviewer-runs");
+  pr.env.FLEET_PROOF_REVIEWER = `cat >/dev/null; echo run >> "${runs}"; [ "$(wc -l < "${runs}")" -gt 1 ] && { echo '${answer}'; exit 0; }
+printf 'ERROR: Reconnecting... 1/5\nERROR: unexpected status 400 Bad Request\n' >&2; exit 1`;
+  expect((await pr.fleet("review")).code).toBe(0);
+  expect(readFileSync(runs, "utf8").trim().split("\n")).toHaveLength(2);
+
+  const next = await quotaCheckout();
+  next.env.FLEET_PROOF_REVIEWER = "cat >/dev/null; printf 'ERROR: Reconnecting... 1/5\n' >&2; exit 1";
+  const failed = next.fleet("review");
+  await expect(failed).rejects.toThrow("gave no findings (exit 1: ERROR: Reconnecting... 1/5 (after a retry))");
+  await expect(failed).rejects.not.toThrow("other family");
 });
 
 test("a quota line that reaches fleet in pieces still counts as one quota line", async () => {
@@ -151,7 +166,7 @@ printf 'API Error: 429 Too Many Requests\nAPI Error: 429 Too Many Requests\n' >&
 
 test("a reviewer that answers again after quota lines keeps running, even before it ends a line", async () => {
   const pr = await quotaCheckout();
-  pr.env.FLEET_PROOF_REVIEWER = `cat >/dev/null; printf 'ERROR: Reconnecting... 1/5\nERROR: Reconnecting... 2/5\nThe issue is' >&2; ${thinks}
+  pr.env.FLEET_PROOF_REVIEWER = `cat >/dev/null; printf 'API Error: 429 Too Many Requests\nERROR: Reconnecting... 1/5\nThe issue is' >&2; ${thinks}
 printf ' in the handler\n' >&2; echo '${answer}'`;
 
   expect((await pr.fleet("review")).code).toBe(0);
@@ -160,7 +175,7 @@ printf ' in the handler\n' >&2; echo '${answer}'`;
 
 test("a reviewer that prints other output after quota lines keeps running, and its answer counts", async () => {
   const pr = await quotaCheckout();
-  pr.env.FLEET_PROOF_REVIEWER = `cat >/dev/null; printf 'ERROR: Reconnecting... 1/5\nERROR: Reconnecting... 2/5\nexec rg -n greet\n' >&2; ${thinks}; echo '${answer}'`;
+  pr.env.FLEET_PROOF_REVIEWER = `cat >/dev/null; printf 'API Error: 429 Too Many Requests\nERROR: Reconnecting... 1/5\nexec rg -n greet\n' >&2; ${thinks}; echo '${answer}'`;
 
   expect((await pr.fleet("review")).code).toBe(0);
   expect(findingsOf(pr)).toBe(`${answer}\n`);
