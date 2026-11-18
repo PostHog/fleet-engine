@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tempDirs } from "../../../src/testing/git.ts";
 import { balance, balanceCommand, priorities, quotaStatus, type Credential } from "./cli-proxy-balance.ts";
@@ -296,4 +296,32 @@ test("a ledger that refuses its samples is logged, and the balance still finishe
   await balance({ fetch: refusing, managementKey, now, dryRun: false, ledger: true, log: (line) => lines.push(line) });
   expect(lines).toContain("quota history not recorded: The CLI proxy management API quota-ledger/samples returned 404.");
   expect(calls.filter((call) => call.path === "reset-quota").map((call) => call.body)).toEqual([{ auth_index: "2" }]);
+});
+
+test("a subscription that bills extra usage turns off while a window is full and on again only when the balancer turned it off", async () => {
+  const pausedPath = join(temp.make(), "paused.json");
+  const iso = (days: number) => new Date(now + days * day).toISOString();
+  const seat = { name: "team.json", provider: "claude", auth_index: "1", priority: 0 };
+  const handOff = { name: "off.json", provider: "claude", auth_index: "2", priority: 0, disabled: true };
+  const usage = (fiveHour: number, extra = true) => ({ five_hour: { utilization: fiveHour, resets_at: iso(0.1) }, seven_day: { utilization: 60, resets_at: iso(5) }, extra_usage: { is_enabled: extra } });
+  const statusWrites = (calls: Call[]) => calls.filter((call) => call.path === "auth-files/status").map((call) => call.body);
+
+  const full = managementApi({ strategy: "fill-first", files: [seat, handOff], usage: { "1": usage(100), "2": usage(10) } });
+  await balance({ fetch: full.fetch, managementKey, now, dryRun: false, pausedPath, log: () => {} });
+  expect(statusWrites(full.calls)).toEqual([{ name: "team.json", disabled: true }]);
+  expect(JSON.parse(readFileSync(pausedPath, "utf8"))).toEqual(["team.json"]);
+
+  const unread = managementApi({ strategy: "fill-first", files: [{ ...seat, disabled: true }, handOff], usage: {} });
+  await balance({ fetch: unread.fetch, managementKey, now, dryRun: false, pausedPath, log: () => {} });
+  expect(statusWrites(unread.calls)).toEqual([]);
+
+  const free = managementApi({ strategy: "fill-first", files: [{ ...seat, disabled: true }, handOff], usage: { "1": usage(10), "2": usage(10) } });
+  await balance({ fetch: free.fetch, managementKey, now, dryRun: false, pausedPath, log: () => {} });
+  expect(statusWrites(free.calls)).toEqual([{ name: "team.json", disabled: false }]);
+  expect(free.calls.find((call) => call.path === "auth-files/fields")?.body).toEqual({ name: "team.json", priority: 1 });
+  expect(JSON.parse(readFileSync(pausedPath, "utf8"))).toEqual([]);
+
+  const plain = managementApi({ strategy: "fill-first", files: [seat], usage: { "1": usage(100, false) } });
+  await balance({ fetch: plain.fetch, managementKey, now, dryRun: false, pausedPath, log: () => {} });
+  expect(statusWrites(plain.calls)).toEqual([]);
 });
