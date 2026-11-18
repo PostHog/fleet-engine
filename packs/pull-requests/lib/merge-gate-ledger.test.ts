@@ -1,5 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { mergeGate } from "../../guards/hooks/merge-gate.ts";
 import { join } from "node:path";
 import { fold, localLedger, type LedgerEvent } from "./decision-ledger.ts";
 import { checkout, cleanFixtures, ledgerDecisions, reviewHead } from "./proof-testing.ts";
@@ -71,4 +73,28 @@ test("a gate override is the user's 👤 answer for one PR at one full head, wit
   const recorded = await override("--mark", "👤", "--condition", `${head}: incident fix, the judge is down`);
   expect(recorded.code).toBe(0);
   expect(ledgerDecisions(pr).at(-1)).toMatchObject({ class: "merge", mark: "👤", scope: { prs: ["example/product#42"], kinds: ["gate-override"], condition: `${head}: incident fix, the judge is down` } });
+});
+
+test("a gate run that throws after a pass at the same head is shared, so another machine's merge gate refuses the merge", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.txt", "new\n");
+  await reviewHead(pr);
+  await pr.fleet("require", "--none", "--reason", "docs only");
+  const head = await pr.git("rev-parse", "HEAD");
+  const other = join(tmpdir(), `merge-gate-other-${process.pid}-${Date.now()}`);
+  mkdirSync(join(other, ".local/state/fleet"), { recursive: true });
+  writeFileSync(join(other, ".local/state/fleet/settings.json"), "{}");
+  const github = { pull: async () => ({ head, base: "main", defaultBranch: "main", open: true }), pullFor: async () => undefined };
+  const mergeThere = async () => {
+    writeFileSync(join(other, ".local/state/fleet/decisions.jsonl"), readFileSync(ledgerFile(pr.home), "utf8"));
+    return mergeGate({ tool_name: "Bash", tool_input: { command: "gh pr merge 42 --repo example/product" }, cwd: "/" }, { home: other, env: { FLEET_SETTINGS: undefined }, github });
+  };
+  try {
+    expect((await pr.fleet("gate")).code).toBe(0);
+    expect(await mergeThere()).toBeUndefined();
+    pr.clock.now = new Date(pr.clock.now.getTime() + 60_000);
+    rmSync(join(pr.home, ".agents/guides/coding-standards.md"));
+    await expect(pr.fleet("gate")).rejects.toThrow("coding-standards.md is missing or empty");
+    expect((await mergeThere())?.hookSpecificOutput.permissionDecisionReason).toContain("has not passed at the head of example/product#42");
+  } finally { rmSync(other, { recursive: true, force: true }); }
 });

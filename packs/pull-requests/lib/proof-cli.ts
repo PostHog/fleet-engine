@@ -403,6 +403,7 @@ receipt link once one is recorded. The gate's lines and fleet decision report co
         gate = await finalGate(head, context, { landed: flags.has("--landed") });
       } catch (error) {
         await record({ code: 1, reason: String((error as Error).message ?? error).split("\n")[0]! }).catch(() => {});
+        await shareGateResult(head, false, context);
         throw error;
       }
       await record({ code: gate.code, reason: gate.reason });

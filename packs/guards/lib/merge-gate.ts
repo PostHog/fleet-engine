@@ -1,8 +1,8 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fold, gateOverride, overrideChoice, hubLedger, type DecisionState, type Env, type LedgerEvent } from "../../pull-requests/lib/decision-ledger.ts";
-import { lastGateRun } from "../../pull-requests/lib/proof.ts";
+import { lastGateResult } from "../../pull-requests/lib/proof.ts";
 import { endpointOf, ghGroups, inOrder, parseGh, values, type Gh } from "./gh.ts";
 import { githubSlug } from "./git.ts";
 import { commandsIn, shellTools, type Command, type Scope } from "./shell-words.ts";
@@ -71,8 +71,10 @@ export function ghBaseRepo(remoteConfig: string): string | undefined {
   return slugs.size === 1 ? [...remotes.values()].map((remote) => githubSlug(remote.url ?? "")).find(Boolean) : undefined;
 }
 
+const maxPayload = 1 << 20;
+
 export const realIntentIO: IntentIO = {
-  readText: (path) => { try { return readFileSync(path, "utf8"); } catch { return undefined; } },
+  readText: (path) => { try { const file = statSync(path); return file.isFile() && file.size <= maxPayload ? readFileSync(path, "utf8") : undefined; } catch { return undefined; } },
   checkoutRepo: (cwd) => {
     const child = Bun.spawnSync(["git", "-C", cwd, "config", "--get-regexp", "^remote\\..*\\.(url|gh-resolved)$"], { stdout: "pipe", stderr: "ignore" });
     return child.exitCode === 0 ? ghBaseRepo(child.stdout.toString()) : undefined;
@@ -101,8 +103,8 @@ function repositoryOf(gh: Gh, found: Command, cwd: string | undefined, io: Inten
 }
 
 function sentTexts(found: Command, cwd: string | undefined, io: IntentIO, inline: string[], files: string[]) {
-  const piped = files.includes("-") && !found.stdin;
   const fieldFiles = inline.flatMap((field) => field.match(/^[^=]*=@(.+)$/s)?.[1] ?? []);
+  const piped = [...files, ...fieldFiles].includes("-") && !found.stdin;
   const read = [...files, ...fieldFiles].map((path) => path === "-" ? found.stdin?.body ?? "" : io.readText(resolve(cwd ?? ".", found.chdir ?? ".", path)));
   const texts = [...inline, ...read.filter((text) => text !== undefined), found.stdin?.body ?? ""];
   return { texts: [...texts, ...texts.flatMap(jsonStrings)], unread: read.includes(undefined), piped };
@@ -137,7 +139,8 @@ function ghArguments({ name, args }: Command) {
 function expandAlias(args: string[], io: IntentIO): string[] | undefined {
   const [first = "", ...rest] = args;
   const aliases = io.aliases?.() ?? {};
-  if (Object.keys(aliases).some((name) => /\s/.test(name) && args.join(" ").startsWith(`${name.trim()} `))) return undefined;
+  const said = `${args.join(" ")} `;
+  if (Object.keys(aliases).some((name) => /\s/.test(name) && said.startsWith(`${name.trim().split(/\s+/).join(" ")} `))) return undefined;
   if (ghGroups.has(first) || first.startsWith("-")) return args;
   const alias = aliases[first];
   if (alias === undefined) return args;
@@ -258,7 +261,7 @@ export type GateIO = {
   pull: (repository: string, pr: number) => Promise<Pull | undefined>;
   pullFor: (repository: string, branch: string) => Promise<number | undefined>;
   isIssue: (repository: string, number: number) => Promise<boolean>;
-  localGate: (repository: string, pr: number, commit: string) => Promise<boolean | undefined>;
+  localGate: (repository: string, pr: number, commit: string) => Promise<{ passed: boolean; at: number } | undefined>;
   ledger: () => Promise<LedgerEvent[]>;
 };
 
@@ -286,10 +289,13 @@ async function layersOf(target: MergeTarget, io: GateIO): Promise<Layer[]> {
 
 const sameRepo = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
-function lastGateResult(events: LedgerEvent[], layer: Layer): boolean | undefined {
-  const results = events.flatMap((event) => event.type === "gate" && sameRepo(event.repository, layer.repository) && event.pr === layer.pr && event.commit === layer.head ? [event] : []);
-  return results.toSorted((a, b) => Date.parse(a.at) - Date.parse(b.at)).at(-1)?.passed;
+type GateOutcome = { passed: boolean; at: number };
+
+function sharedResults(events: LedgerEvent[], layer: Layer): GateOutcome[] {
+  return events.flatMap((event) => event.type === "gate" && sameRepo(event.repository, layer.repository) && event.pr === layer.pr && event.commit === layer.head ? [{ passed: event.passed, at: Date.parse(event.at) }] : []);
 }
+
+const latestPassed = (results: GateOutcome[]) => results.toSorted((a, b) => a.at - b.at || Number(b.passed) - Number(a.passed)).at(-1)?.passed === true;
 
 function overrideIn(decisions: DecisionState[], layer: Layer): boolean {
   return decisions.some((decision) => !decision.voided && !decision.reversed && decision.mark === "👤" && decision.class === "merge"
@@ -316,8 +322,7 @@ export async function mergeGateRisk(intent: MergeIntent, io: GateIO, person: str
         }
         if (overrideIn(decisions, layer)) continue;
         const local = await io.localGate(layer.repository, layer.pr, layer.head);
-        const shared = events && lastGateResult(events, layer);
-        if (local !== false && shared !== false && (local || shared)) continue;
+        if (latestPassed([...local ? [local] : [], ...events ? sharedResults(events, layer) : []])) continue;
         const top = layer.pr === target.pr ? "" : ` (a lower layer of ${target.repository}#${target.pr})`;
         missing.push(`${layer.repository}#${layer.pr}${top} at ${layer.head.slice(0, 12)}: run \`${gateCommand(layer)}\``);
       }
@@ -367,10 +372,7 @@ export function realGateIO(home: string, env: Env): GateIO {
       const issue = await api(`repos/${repository}/issues/${number}`) as { pull_request?: unknown } | undefined;
       return issue !== undefined && issue.pull_request === undefined;
     },
-    localGate: async (repository, pr, commit) => {
-      const run = await lastGateRun(home, { repository, pr, commit }).catch(() => ({ code: 1 }));
-      return run && run.code === 0;
-    },
+    localGate: (repository, pr, commit) => lastGateResult(home, { repository, pr, commit }).catch(() => ({ passed: false, at: Infinity })),
     ledger: () => hubLedger(home, env).read(),
   };
 }

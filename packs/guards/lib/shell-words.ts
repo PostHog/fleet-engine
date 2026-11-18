@@ -11,6 +11,7 @@ export type Command = {
   argSubstitutions: string[][];
   stdin?: { body: string; substitutions: string[] };
   outputs: string[];
+  writes: string[];
   bare: string[];
   inLoop: boolean;
   tested: boolean;
@@ -336,6 +337,7 @@ function tokenize(text: string): Token[] {
 function withoutRedirects(words: Word[]) {
   const kept: Word[] = [];
   const outputs: string[] = [];
+  const fileWrites: string[] = [];
   for (let index = 0; index < words.length; index++) {
     const match = words[index].raw.match(redirect);
     if (!match) {
@@ -346,8 +348,9 @@ function withoutRedirects(words: Word[]) {
     const target = words[index].text.slice(operator.length) || words[++index]?.text || "";
     const writes = direction !== "<" && direction !== "<&" && direction !== ">&" && (descriptor === "" || descriptor === "1" || descriptor === "&");
     if (writes) outputs.push(target);
+    if (/^(?:>>|>\||<>|>)$/.test(direction) || (direction === ">&" && !/^(?:\d+|-)$/.test(target))) fileWrites.push(target);
   }
-  return { kept, outputs };
+  return { kept, outputs, writes: fileWrites };
 }
 
 function wrapperOption(texts: string[], index: number, valued: string[]): { width: number; name: string; value?: string } {
@@ -401,7 +404,7 @@ export function parse(program: string, context: Context = { env: new Map(), inLo
 
   const finishCommand = (after?: string) => {
     if (words.length === 0 && !stdin) return;
-    const { kept, outputs } = withoutRedirects(words);
+    const { kept, outputs, writes } = withoutRedirects(words);
     const texts = kept.map((word) => word.text);
     const commandEnv = new Map(env);
     const assigned = new Map<string, string>();
@@ -438,7 +441,7 @@ export function parse(program: string, context: Context = { env: new Map(), inLo
     const leadingSubstitutions = kept.slice(0, index + 1).flatMap((word) => word.substitutions);
     const argSubstitutions = kept.slice(index + 1).map((word) => word.substitutions);
     const bare = kept.slice(index).map((word) => word.bare);
-    pipeline.push({ name, args, env: commandEnv, substitutions, leadingSubstitutions, argSubstitutions, stdin, outputs, bare, inLoop, tested, ...(after && { after }), scope, chdir });
+    pipeline.push({ name, args, env: commandEnv, substitutions, leadingSubstitutions, argSubstitutions, stdin, outputs, writes, bare, inLoop, tested, ...(after && { after }), scope, chdir });
     words = [];
     stdin = undefined;
   };

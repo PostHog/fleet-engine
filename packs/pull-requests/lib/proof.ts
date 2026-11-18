@@ -52,6 +52,15 @@ export async function startGateRun(home: string, identity: ProofIdentity): Promi
   }
 }
 
+export async function lastGateResult(home: string, identity: ProofIdentity): Promise<{ passed: boolean; at: number } | undefined> {
+  const directory = gateRunDirectory(home, identity);
+  const last = await lastRunNumber(directory);
+  if (!last) return undefined;
+  const at = (await stat(join(directory, `${last}.json`))).mtimeMs;
+  const record = await lastGateRun(home, identity).catch(() => undefined);
+  return { passed: record?.code === 0, at };
+}
+
 export async function lastGateRun(home: string, identity: ProofIdentity): Promise<GateRecord | undefined> {
   const directory = gateRunDirectory(home, identity);
   const last = await lastRunNumber(directory);

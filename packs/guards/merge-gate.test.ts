@@ -8,7 +8,7 @@ import { startGateRun } from "../pull-requests/lib/proof.ts";
 import { git } from "../../src/testing/git.ts";
 import { mergeGate } from "./hooks/merge-gate.ts";
 import {
-  beforeDeadline, cliReason, exemptList, ghAliases, ghBaseRepo, graphqlReason, realGateIO, realIntentIO, mergeGateRisk, mergeIntent, otherEndpointReason, rawReason, shellAliasReason, splitStringReason,
+  beforeDeadline, cliReason, exemptList, ghAliases, ghBaseRepo, graphqlReason, realIntentIO, mergeGateRisk, mergeIntent, otherEndpointReason, rawReason, shellAliasReason, splitStringReason,
   type GateIO, type IntentIO, type MergeIntent, type Pull,
 } from "./lib/merge-gate.ts";
 
@@ -104,6 +104,9 @@ describe("which calls enqueue or merge", () => {
     ["gh c 7 --body '/trunk merge'", shellAliasReason],
     ["gh ready 7 -R example/product", shellAliasReason],
     ["gh pr land 7 -R example/product", shellAliasReason],
+    ["gh pr land", shellAliasReason],
+    ["gh pr  land", shellAliasReason],
+    ["make-query | gh api graphql -F query=@-", graphqlReason],
     ["curl -X POST https://api.github.com/repos/example/product/issues/7/comments -d @missing.json", rawReason],
     ["curl https://api.github.com/repos/example/product/issues/7/comments --data-binary @payload.json", rawReason],
     ["curl https://api.github.com/graphql --json @query.json", rawReason],
@@ -158,12 +161,13 @@ const override = (commit: string, mark: Decision["mark"] = "👤", pr = 9): Ledg
   },
 });
 
+const localAt = Date.parse("2026-11-16T08:30:00Z");
 function gate({ local = [] as string[], failed = [] as string[], ledger = [] as LedgerEvent[], hubDown = false, github = true } = {}): GateIO {
   return {
     pull: async (_repository, pr) => { if (!github) throw new Error("GitHub answered 502"); return pulls[pr]; },
     pullFor: async (_repository, branch) => branch === "layer-1" ? 6 : undefined,
     isIssue: async (_repository, number) => number === 404,
-    localGate: async (_repository, pr, commit) => local.includes(`${pr}@${commit}`) ? true : failed.includes(`${pr}@${commit}`) ? false : undefined,
+    localGate: async (_repository, pr, commit) => local.includes(`${pr}@${commit}`) ? { passed: true, at: localAt } : failed.includes(`${pr}@${commit}`) ? { passed: false, at: localAt } : undefined,
     ledger: async () => { if (hubDown) throw new Error("hub unreachable over SSH"); return ledger; },
   };
 }
@@ -194,6 +198,7 @@ describe("the gate pass each layer needs", () => {
     expect(await risk(one(9), gate({ ledger: [gatePass(9, head, false), gatePass(9, head, true, later)] }))).toBeUndefined();
     expect(await risk(one(9), gate({ failed: [`9@${head}`], ledger: [gatePass(9, head)] }))).toContain("has not passed");
     expect(await risk(one(9), gate({ local: [`9@${head}`], ledger: [gatePass(9, head, false, later)] }))).toContain("has not passed");
+    expect(await risk(one(9), gate({ failed: [`9@${head}`], ledger: [gatePass(9, head, true, later)] }))).toBeUndefined();
   });
 
   test("the top layer of a stack needs every open layer below it to pass at its own head", async () => {
@@ -216,7 +221,7 @@ describe("the gate pass each layer needs", () => {
 
   test("a stack deeper than the walk, or one that loops, is refused, not passed", async () => {
     const chain = (pr: number): Pull => ({ head, base: `layer-${pr - 1}`, defaultBranch: "main", open: true });
-    const deep = { ...gate(), pull: async (_r: string, pr: number) => chain(pr), pullFor: async (_r: string, branch: string) => Number(branch.slice(6)), localGate: async () => true };
+    const deep = { ...gate(), pull: async (_r: string, pr: number) => chain(pr), pullFor: async (_r: string, branch: string) => Number(branch.slice(6)), localGate: async () => ({ passed: true, at: localAt }) };
     expect(await risk(one(100), deep)).toContain("deeper than 12 PRs");
     expect(await risk(one(100), { ...deep, pullFor: async () => 100 })).toContain("loops back to #100");
   });
@@ -251,15 +256,17 @@ describe("the gate pass each layer needs", () => {
   });
 });
 
+function homeIn(settings?: unknown) {
+  const home = temp.make("home-");
+  if (settings !== undefined) {
+    mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
+    writeFileSync(join(home, ".local/state/fleet/settings.json"), typeof settings === "string" ? settings : JSON.stringify(settings));
+  }
+  return home;
+}
+
 describe("the PreToolUse hook", () => {
-  const homeWith = (settings?: unknown) => {
-    const home = temp.make("home-");
-    if (settings !== undefined) {
-      mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
-      writeFileSync(join(home, ".local/state/fleet/settings.json"), typeof settings === "string" ? settings : JSON.stringify(settings));
-    }
-    return home;
-  };
+  const homeWith = homeIn;
   const call = (command: string) => ({ tool_name: "Bash", tool_input: { command }, cwd: "/work" });
 
   test("denies an enqueue without a gate pass and lets other calls through even while GitHub is down", async () => {
@@ -332,64 +339,88 @@ test("the merge-gate workflow installs the hook, and the installed script refuse
   expect(answer.hookSpecificOutput).toEqual({ hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: cliReason });
 });
 
-describe("the repository gh picks for a PR number in a checkout", () => {
-  const checkout = (...remotes: [string, string, string?][]) => {
-    const dir = temp.make("checkout-");
-    git(dir, "init", "-q");
-    for (const [name, url, resolved] of remotes) {
-      git(dir, "remote", "add", name, url);
-      if (resolved) git(dir, "config", `remote.${name}.gh-resolved`, resolved);
-    }
-    return realIntentIO.checkoutRepo(dir);
-  };
-
-  test("is the default gh repo set-default chose, else the only GitHub remote, and none when several remotes leave it open", () => {
-    expect(checkout(["origin", "git@github.com:example/product.git"])).toBe("example/product");
-    expect(checkout(["origin", "https://github.com/fork/product.git"], ["upstream", "https://github.com/example/product.git", "base"])).toBe("example/product");
-    expect(checkout(["origin", "https://github.com/fork/product.git", "example/product"])).toBe("example/product");
-    expect(checkout(["origin", "https://github.com/fork/product.git"], ["upstream", "https://github.com/example/product.git"])).toBeUndefined();
-    expect(checkout(["origin", "https://github.com/example/product.git"], ["mirror", "git@github.com:example/product.git"])).toBe("example/product");
-    expect(ghBaseRepo("")).toBeUndefined();
-  });
-});
-
-describe("the GitHub reads behind the gate", () => {
-  const github = (responses: Record<string, unknown>) => {
+describe("the hook against GitHub, faked at the gh boundary, and real checkouts, gate runs and ledgers", () => {
+  const pull = (sha: string, base = "main", state = "open") => ({ head: { sha }, base: { ref: base, repo: { default_branch: "main" } }, state });
+  const machine = (responses: Record<string, unknown>, passes: LedgerEvent[] = [], aliases: Record<string, string> = {}) => {
+    const home = homeIn({ "guards.person": "Robin" });
+    writeFileSync(join(home, ".local/state/fleet/decisions.jsonl"), passes.map((event) => JSON.stringify(event)).join("\n") + "\n");
     const bin = temp.make("bin-");
-    const answers = join(bin, "answers.json");
-    writeFileSync(answers, JSON.stringify(responses));
-    writeFileSync(join(bin, "gh"), `#!${process.execPath}\nconst body = (await Bun.file(${JSON.stringify(answers)}).json())[process.argv[4]];\n`
+    writeFileSync(join(bin, "answers.json"), JSON.stringify(responses));
+    writeFileSync(join(bin, "gh"), `#!${process.execPath}\nconst body = (await Bun.file(${JSON.stringify(join(bin, "answers.json"))}).json())[process.argv[4]];\n`
       + `process.stdout.write(body === undefined ? "HTTP/2.0 404 Not Found\\r\\n\\r\\n{}" : "HTTP/2.0 200 OK\\r\\n\\r\\n" + JSON.stringify(body));\nprocess.exit(body === undefined ? 1 : 0);\n`);
     chmodSync(join(bin, "gh"), 0o755);
-    return realGateIO(temp.make("home-"), { PATH: `${bin}:${process.env.PATH}` });
+    const where = { home, env: { FLEET_SETTINGS: undefined, PATH: `${bin}:${process.env.PATH}` }, intent: { ...realIntentIO, ghRepo: undefined, aliases: () => aliases } };
+    return async (command: string, cwd = "/") => (await mergeGate({ tool_name: "Bash", tool_input: { command }, cwd }, where))?.hookSpecificOutput.permissionDecisionReason;
   };
-  const head = (branch: string) => `pulls?state=open&per_page=2&head=example:${branch}`;
-  const closed = (branch: string) => `pulls?state=closed&sort=created&direction=desc&per_page=1&head=example:${branch}`;
+  const pass = (repository: string, pr: number, commit: string): LedgerEvent => ({ type: "gate", repository, pr, commit, passed: true, machine: "box-2", at: "2026-11-16T08:00:00Z" });
+  const openHead = (branch: string) => `repos/example/product/pulls?state=open&per_page=2&head=example:${branch}`;
+  const closedHead = (branch: string) => `repos/example/product/pulls?state=closed&sort=created&direction=desc&per_page=1&head=example:${branch}`;
 
-  test("a stack's parent is its open PR, a closed one only when none is open, and two open ones are refused", async () => {
-    const io = github({
-      [`repos/example/product/${head("layer-1")}`]: [{ number: 6 }],
-      [`repos/example/product/${closed("layer-1")}`]: [{ number: 8 }],
-      [`repos/example/product/${head("merged")}`]: [],
-      [`repos/example/product/${closed("merged")}`]: [{ number: 5 }],
-      [`repos/example/product/${head("twice")}`]: [{ number: 3 }, { number: 4 }],
-    });
-    expect(await io.pullFor("example/product", "layer-1")).toBe(6);
-    expect(await io.pullFor("example/product", "merged")).toBe(5);
-    expect(await io.pullFor("example/product", "gone")).toBeUndefined();
-    await expect(io.pullFor("example/product", "twice")).rejects.toThrow("more than one open PR");
+  test("a comment passes on an issue GitHub shows, and is refused on a PR without a pass or a target GitHub hides", async () => {
+    const hook = machine({ "repos/example/product/issues/4": { number: 4 }, "repos/example/product/pulls/9": pull(head), "repos/example/product/issues/9": { number: 9, pull_request: {} } });
+    const enqueue = (number: number) => hook(`gh pr comment ${number} --repo example/product --body '/trunk merge'`);
+    expect(await enqueue(4)).toBeUndefined();
+    expect(await enqueue(9)).toContain("has not passed at the head of example/product#9");
+    expect(await enqueue(5)).toContain("cannot read example/product#5");
   });
 
-  test("a comment target counts as an issue only when GitHub shows it as one", async () => {
-    const io = github({ "repos/example/product/issues/4": { number: 4 }, "repos/example/product/issues/5": { number: 5, pull_request: {} } });
-    expect(await io.isIssue("example/product", 4)).toBe(true);
-    expect(await io.isIssue("example/product", 5)).toBe(false);
-    expect(await io.isIssue("example/product", 6)).toBe(false);
+  test("a stack layer's parent is its open PR, not a newer closed one, and two open parents are refused", async () => {
+    const github = {
+      "repos/example/product/pulls/7": pull(head, "layer-1"), "repos/example/product/pulls/6": pull(lower), "repos/example/product/pulls/8": pull(older, "main", "closed"),
+      [openHead("layer-1")]: [{ number: 6 }], [closedHead("layer-1")]: [{ number: 8 }],
+      "repos/example/product/pulls/3": pull(head, "twice"), [openHead("twice")]: [{ number: 1 }, { number: 2 }],
+    };
+    const merge = "gh pr merge 7 --repo example/product";
+    expect(await machine(github, [pass("example/product", 7, head)])(merge)).toContain("example/product#6 (a lower layer of example/product#7)");
+    expect(await machine(github, [pass("example/product", 7, head), pass("example/product", 6, lower)])(merge)).toBeUndefined();
+    expect(await machine(github, [pass("example/product", 3, head)])("gh pr merge 3 --repo example/product")).toContain("more than one open PR");
   });
-});
 
-test("gh aliases are read from gh's config, quoted names included", () => {
-  const config = join(temp.make("gh-"), "config.yml");
-  writeFileSync(config, "git_protocol: https\naliases:\n    m: pr merge\n    \"pr land\": 'pr merge --squash'\nother: 1\n");
-  expect(ghAliases(config)).toEqual({ m: "pr merge", "pr land": "pr merge --squash" });
+  test("a merged parent is followed to the open layer below it", async () => {
+    const github = {
+      "repos/example/product/pulls/7": pull(head, "layer-1"), "repos/example/product/pulls/6": pull(lower, "layer-0", "closed"), "repos/example/product/pulls/5": pull(older),
+      [openHead("layer-1")]: [], [closedHead("layer-1")]: [{ number: 6 }], [openHead("layer-0")]: [{ number: 5 }],
+    };
+    const reason = await machine(github, [pass("example/product", 7, head)])("gh pr merge 7 --repo example/product");
+    expect(reason).toContain(`--pr 5 --commit ${older}`);
+    expect(reason).not.toContain("product#6");
+  });
+
+  test("a PR number in a checkout is checked in the repository gh picks, and refused when several remotes leave it open", async () => {
+    const checkout = (...remotes: [string, string, string?][]) => {
+      const dir = temp.make("checkout-");
+      git(dir, "init", "-q");
+      for (const [name, url, resolved] of remotes) {
+        git(dir, "remote", "add", name, url);
+        if (resolved) git(dir, "config", `remote.${name}.gh-resolved`, resolved);
+      }
+      return dir;
+    };
+    const github = { "repos/example/product/pulls/9": pull(head), "repos/fork/product/pulls/9": pull(older) };
+    const forkPassed = machine(github, [pass("fork/product", 9, older)]);
+    const upstreamPassed = machine(github, [pass("example/product", 9, head)]);
+    const resolved = checkout(["origin", "https://github.com/fork/product.git"], ["upstream", "https://github.com/example/product.git", "base"]);
+    expect(await forkPassed("gh pr merge 9", resolved)).toContain("has not passed at the head of example/product#9");
+    expect(await upstreamPassed("gh pr merge 9", resolved)).toBeUndefined();
+    expect(await upstreamPassed("gh pr merge 9", checkout(["origin", "https://github.com/fork/product.git", "example/product"]))).toBeUndefined();
+    expect(await forkPassed("gh pr merge 9", checkout(["origin", "git@github.com:fork/product.git"]))).toBeUndefined();
+    expect(await upstreamPassed("gh pr merge 9", checkout(["origin", "https://github.com/fork/product.git"], ["upstream", "https://github.com/example/product.git"]))).toContain("without naming the PR");
+    expect(ghBaseRepo("")).toBeUndefined();
+  });
+
+  test("gh aliases from gh's config, quoted names with several words included, are expanded or refused", async () => {
+    const config = join(temp.make("gh-"), "config.yml");
+    writeFileSync(config, "git_protocol: https\naliases:\n    m: pr merge\n    \"pr land\": 'pr merge 9 --repo example/product'\nother: 1\n");
+    const hook = machine({ "repos/example/product/pulls/9": pull(head) }, [], ghAliases(config));
+    expect(await hook("gh m 9 --repo example/product")).toContain("has not passed at the head of example/product#9");
+    expect(await hook("gh pr land")).toBe(shellAliasReason);
+    expect(await hook("gh pr view 9 --repo example/product")).toBeUndefined();
+  });
+
+  test("a payload path that is no regular file is not read, so a FIFO cannot stall the hook", async () => {
+    const dir = temp.make("fifo-");
+    Bun.spawnSync(["mkfifo", join(dir, "body")]);
+    const hook = machine({});
+    expect(await hook("curl -X POST https://api.github.com/repos/example/product/issues/7/comments -d @body", dir)).toBe(rawReason);
+  });
 });

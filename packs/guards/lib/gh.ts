@@ -334,9 +334,9 @@ export function allowRuleList(value: unknown): Set<string> {
   return new Set(rules);
 }
 
-function allowRuleRisk(args: string[], outputs: string[], rules: ReadonlySet<string>, person: string): string | undefined {
+function allowRuleRisk(args: string[], writes: string[], rules: ReadonlySet<string>, person: string): string | undefined {
   const command = ["gh", ...args].join(" ");
-  const writesFiles = outputs.some((target) => target !== "/dev/null");
+  const writesFiles = writes.some((target) => target !== "/dev/null");
   for (const rule of rules) {
     const narrowing = narrowings.get(rule);
     if (narrowing?.matches.test(command) && (writesFiles || !narrowing.allows(args))) return narrowing.reason(person);
@@ -354,7 +354,7 @@ export function ownerList(value: unknown): Set<string> | null {
  * code, name a repository whose owner is not allowed, or do more than an allow rule in `allowRules` is for.
  * `inheritedRepo` is the GH_REPO the agent's shell inherits. */
 export function ghRisk(command: string, allowed: ReadonlySet<string> | null, person: string, inheritedRepo?: string, allowRules: ReadonlySet<string> = new Set()): string | undefined {
-  for (const { name, args, env, bare, outputs } of commandsIn(command)) {
+  for (const { name, args, env, bare, writes } of commandsIn(command)) {
     if ((/[$`]/.test(name) || pattern.test(bare[0] ?? "")) && ghGroups.has(parseGh(args).group)) return commandReason(name);
     const ghArgs = name === "gh" ? args : name === "xargs" && args.includes("gh") ? args.slice(args.indexOf("gh") + 1) : undefined;
     if (!ghArgs) continue;
@@ -363,7 +363,7 @@ export function ghRisk(command: string, allowed: ReadonlySet<string> | null, per
     const gh = parseGh(ghArgs);
     const hidden = [gh.group, ...(singleCommands.has(gh.group) || !ghGroups.has(gh.group) ? [] : [gh.action])].find((word) => /[$`*?[{]/.test(word));
     if (hidden) return commandReason(hidden);
-    const narrowed = allowRuleRisk(ghArgs, outputs, allowRules, person);
+    const narrowed = allowRuleRisk(ghArgs, writes, allowRules, person);
     if (narrowed) return narrowed;
     if (values(gh, "--help").some((value) => !/^(?:0|f|false)$/i.test(value))) continue;
     const risk = exposure(gh, person);
