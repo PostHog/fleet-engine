@@ -592,7 +592,7 @@ what the port changes. The Hub pack is gone after step 4.
 
 | Today | v2 pack | Items and placement | Behavior change at the port |
 | --- | --- | --- | --- |
-| Base | `base` | Instructions, model table, the dispatcher and its two hooks, T3 defaults, update and prune jobs: nodes. Disk watch: hub. | None |
+| Base | `base` | Instructions, model table, the dispatcher and its hooks, T3 defaults, update and prune jobs: nodes. Disk watch: hub. | None |
 | Pull requests | `pull-requests` | Guides, settings, `fleet pr`, `fleet proof`: nodes. Owns the seam `pull-requests/review-bot`. | None |
 | Orchestration | `orchestration` | Commands: nodes. Three T3 tasks: hub. | Each task runs once, on the hub. Today it is planned on the hub and on every devbox. |
 | Communication | `communication` | Instructions and skills: nodes. | None |

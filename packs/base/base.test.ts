@@ -119,6 +119,7 @@ describe("the Base pack", () => {
     expect(linked(plan("both", devbox))).toContain(".config/systemd/user/fleet-heavy.slice");
     expect(linked(plan("both"))).not.toContain(".config/systemd/user/fleet-heavy.slice");
     expect(linked(plan("codex"))).not.toContain(".config/fleet/hooks/PreToolUse/name-a-model.ts");
+    for (const ai of plans) expect(linked(plan(ai))).toContain(".config/fleet/hooks/UserPromptSubmit/cast-the-reviewer.ts");
     expect(linked(plan("claude"))).toEqual(expect.arrayContaining([".config/fleet/hooks/run.sh", ".config/fleet/hooks/PostToolUse/secret-guard.ts", ".config/fleet/hooks/PreToolUse/name-a-model.ts"]));
   });
 
