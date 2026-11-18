@@ -199,6 +199,7 @@ describe("the gate pass each layer needs", () => {
     expect(await risk(one(9), gate({ failed: [`9@${head}`], ledger: [gatePass(9, head)] }))).toContain("has not passed");
     expect(await risk(one(9), gate({ local: [`9@${head}`], ledger: [gatePass(9, head, false, later)] }))).toContain("has not passed");
     expect(await risk(one(9), gate({ failed: [`9@${head}`], ledger: [gatePass(9, head, true, later)] }))).toBeUndefined();
+    expect(await risk(one(9), gate({ ledger: [gatePass(9, head, false), gatePass(9, head)] }))).toContain("has not passed");
   });
 
   test("the top layer of a stack needs every open layer below it to pass at its own head", async () => {
