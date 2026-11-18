@@ -19,7 +19,7 @@ test("fleet proof review sends the reviewer and its diff file a marker that name
   const pr = await tokenCheckout();
   const reviewer = fakeModel(pr, "REVIEWER", `1. [high] feature.txt:1 a token-shaped value is committed | anchor: ${masked}\n`);
 
-  expect((await pr.fleet("review")).code).toBe(0);
+  expect((await pr.fleet("review", "--single")).code).toBe(0);
 
   const prompt = reviewer.prompts()[0]!;
   expect(prompt).toContain(`+${masked}`);
@@ -37,7 +37,7 @@ test("a masked private key keeps its diff lines, so a finding anchored below it 
   await pr.fleet("require", "--none", "--reason", "docs only");
   const reviewer = fakeModel(pr, "REVIEWER", "1. [low] feature.txt:6 the greeting names no member | anchor: the greeting skips the member name\n");
 
-  expect((await pr.fleet("review")).code).toBe(0);
+  expect((await pr.fleet("review", "--single")).code).toBe(0);
 
   expect(reviewer.prompts()[0]).toContain("+intro\n+[redacted private key]\n+\n+\n+\n+the greeting skips the member name\n");
   expect(reviewer.prompts()[0]).not.toContain(key[1]);

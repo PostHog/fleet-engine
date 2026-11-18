@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import type { ModelRow } from "../../../base/lib/models.ts";
+import { leanClaudeEnv, type ModelRow } from "../../../base/lib/models.ts";
 import type { Env } from "../coder.ts";
 import { memoryCheckout, stateDir, type Digest } from "./digest.ts";
 import { recordRuns } from "./scorecard.ts";
@@ -111,12 +111,6 @@ export const reasonOf = (error: unknown): FailureReason => error instanceof Anal
 
 export type Spawn = (argv: string[], options: { cwd: string; env: Env; stdin: string; timeoutMs: number }) => Promise<{ code: number; stdout: string; timedOut?: boolean }>;
 
-function claudeEnv(home: string, env: Env): Env {
-  const path = join(home, ".claude/settings.json");
-  const settings = existsSync(path) ? ((JSON.parse(readFileSync(path, "utf8")) as { env?: Env }).env ?? {}) : {};
-  return { ...env, ...settings, CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" };
-}
-
 function checked(answer: { code: number; timedOut?: boolean }) {
   if (answer.timedOut) throw new AnalystFailure("timed out");
   if (answer.code !== 0) throw new AnalystFailure(`exit ${answer.code}`);
@@ -136,7 +130,7 @@ export type Ask<T> = (input: string, cwd: string) => Promise<T>;
 export function modelAsk<T>(row: ModelRow, home: string, env: Env, spawn: Spawn, prompt: string, schema: object): Ask<T> {
   return async (input, cwd) => {
     if (row.provider === "claude") {
-      const answer = await spawn(analystCommand(row, cwd, prompt, schema), { cwd, env: claudeEnv(home, env), stdin: input, timeoutMs: analystTimeoutMs });
+      const answer = await spawn(analystCommand(row, cwd, prompt, schema), { cwd, env: leanClaudeEnv(home, env), stdin: input, timeoutMs: analystTimeoutMs });
       checked(answer);
       return answerIn(() => {
         const parsed = JSON.parse(answer.stdout) as { is_error?: boolean; structured_output?: T };

@@ -6,7 +6,7 @@ import { acceptGap, checkout, cleanFixtures, fakeModel, graded, hubAt, reviewHea
 afterEach(cleanFixtures);
 
 const png = (seed: string) => Buffer.concat([Buffer.from("89504e470d0a1a0a", "hex"), Buffer.from(seed)]);
-const template = `## Problem\n\nSenders were lost.\n\n## Testing\n\nTest rationale: the send path and the settings page.\n\n- [x] I ticked this box\n\n${graded("non-critical")}`;
+const template = `## Problem\n\nSenders were lost.\n\n## Testing\n\nTest rationale: the send path and the settings page.\n\n- [x] I ticked this box\n\n${graded("non-critical", "medium")}`;
 const block = (body: string) => /<!-- fleet-proof-receipt head=[0-9a-f]{40} hash=[0-9a-f]+ -->\n[\s\S]*?\n<!-- \/fleet-proof-receipt -->/.exec(body)?.[0] ?? "";
 const patches = (pr: Checkout) => pr.githubCalls().filter((call) => call.includes("--method PATCH")).length;
 
@@ -421,10 +421,10 @@ function panelRound({ answer, minutes = 4.5 }: { answer?: string; minutes?: numb
     const start = pr.clock.now.getTime();
     let reads = 0;
     Object.defineProperty(pr.clock, "now", { get: () => new Date(start + reads++ * minutes * 60_000), configurable: true });
-    await pr.fleet("review", "--lens", "correctness", "--lens", "fresh-eyes");
+    await pr.fleet("review");
     expect((await pr.fleet("review", "--wait")).code).toBe(0);
     Object.defineProperty(pr.clock, "now", { value: new Date(start), writable: true, configurable: true, enumerable: true });
-    writeFileSync(join(pr.repository, "responses.md"), "1. fixed: one retry\n2. rejected: the domain term\n");
+    writeFileSync(join(pr.repository, "responses.md"), "1. fixed: one retry\n2. rejected: the domain term\n3. rejected: the same retry\n");
     expect((await pr.fleet("respond", "--round", "1", "responses.md")).code).toBe(0);
   };
 }

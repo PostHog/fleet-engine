@@ -1,5 +1,7 @@
 import { readPullRequest, type Run } from "./pr-ci.ts";
 import { reviewedDiff } from "./proof-review.ts";
+import { isTestFile } from "./proof-delta.ts";
+import { riskCalloutOf } from "./decision-ledger.ts";
 import type { CleanBaseMerge, DevPr, DevPull, ProofIdentity } from "./proof.ts";
 
 const short = (commit: string) => commit.slice(0, 7);
@@ -47,6 +49,50 @@ export function diffOf(from: string, to: string, run: Run) {
   const diff = run(["git", "diff", "--no-ext-diff", "--no-textconv", "--no-relative", from, to]);
   if (diff.code !== 0) throw new Error(`Cannot diff ${short(from)}..${short(to)} here (${firstLine(diff.stderr)})`);
   return reviewedDiff(diff.stdout);
+}
+
+const docsFile = /\.(md|mdx|markdown|rst)$/i;
+const lockFile = /(^|\/)([^/]+\.lockb?|package-lock\.json|pnpm-lock\.yaml|go\.sum)$/;
+const generatedFile = /(^|\/)(__generated__|generated)\/|\.(generated|gen|min)\.[a-z]+$|\.pb\.go$|_pb2\.pyi?$/;
+const readLines = 50;
+const authored = (path: string) => !isTestFile(path) && ![docsFile, lockFile, generatedFile].some((pattern) => pattern.test(path));
+
+export type TierName = "read" | "pair" | "panel";
+export type ReviewTier = { name: TierName; why: string };
+
+export const tierLenses: Record<TierName, string[]> = {
+  read: ["correctness:other", "risk:other"],
+  pair: ["correctness:other", "risk:other", "fresh-eyes:same"],
+  panel: ["fresh-eyes", "correctness", "risk", "design", "anti-overengineering"],
+};
+
+export const tierCeiling = (tier: ReviewTier, ceiling: number) => tier.name === "read" ? Math.min(2, ceiling) : ceiling;
+
+function gradeOf(body: string | undefined) {
+  if (body === undefined) return "unreadable";
+  const grade = /Merge risk:\**\s*(low|medium|high)(?![\w/-])(?!\s+[/-]\s*(?:low|medium|high)\b)/i.exec(riskCalloutOf(body) ?? body)?.[1]?.toLowerCase();
+  return grade ?? (/merge[- ]risk/i.test(body) ? "unreadable" : "none");
+}
+
+function productionLines(identity: ProofIdentity, run: Run) {
+  const stat = run(["git", "diff", "--numstat", "-z", "--no-renames", "--no-relative", mergeBase(identity, run), identity.commit]);
+  if (stat.code !== 0) return undefined;
+  return stat.stdout.split("\0").filter(Boolean).map((entry) => {
+    const [added = "", deleted = "", ...path] = entry.split("\t");
+    // Git prints "-" for a binary file; its size is unknown, so it never counts as small.
+    const binary = added === "-" || deleted === "-";
+    return { lines: binary ? Number.POSITIVE_INFINITY : (Number(added) || 0) + (Number(deleted) || 0), path: path.join("\t") };
+  }).filter(({ path }) => authored(path)).reduce((sum, { lines }) => sum + lines, 0);
+}
+
+export function reviewTier(identity: ProofIdentity, run: Run, body: string | undefined): ReviewTier {
+  const grade = gradeOf(body);
+  if (grade === "high") return { name: "panel", why: "merge-risk grade high" };
+  let lines: number | undefined;
+  try { lines = productionLines(identity, run); } catch { lines = undefined; }
+  const size = lines === undefined || Number.isNaN(lines) ? "size unknown" : `${lines} authored production lines`;
+  const read = ["low", "none"].includes(grade) && lines !== undefined && lines < readLines;
+  return { name: read ? "read" : "pair", why: `merge-risk grade ${grade}, ${size}` };
 }
 
 export function pullRequestDetails(identity: ProofIdentity, run: Run) {
