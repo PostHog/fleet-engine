@@ -6,6 +6,8 @@ export type Marks = Record<Park, string>;
 export type Parking = { waitSnoozeDays: number; timeZone: string };
 export type ClosingSettings = { marks: Marks; parking?: Parking };
 
+export const killSwitch = ".config/fleet/ask-guard.off";
+
 export const defaultMarks: Marks = { wait: "⏳", snooze: "💤", check: "🔕", done: "➡️" };
 
 const parks: Park[] = ["wait", "snooze", "check", "done"];

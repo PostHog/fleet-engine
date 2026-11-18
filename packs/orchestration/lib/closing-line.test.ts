@@ -189,6 +189,38 @@ describe("closing-line parking", () => {
     expect([disabled.settledAt, owning.settledAt]).toEqual([null, null]);
   });
 
+  test("the settle leaves a thread alone once parking is turned off or the hook's kill switch is on, before its run ends", async () => {
+    const off = await settleWith({}, (target, _poll, home) => {
+      writeFileSync(join(home, ".local/state/fleet/settings.json"), JSON.stringify({ "guards.person": "Robin" }));
+      target.endRun();
+    });
+    const killed = await settleWith({}, (target, _poll, home) => {
+      mkdirSync(join(home, ".config/fleet"), { recursive: true });
+      writeFileSync(join(home, ".config/fleet/ask-guard.off"), "");
+      target.endRun();
+    });
+    expect([off.settledAt, killed.settledAt]).toEqual([null, null]);
+  });
+
+  test("the settle reads the thread again after its last checks, and leaves it alone when a pin or a PR watch arrived meanwhile", async () => {
+    const watched = { pullRequests: [{ repository: "acme/app", number: 9, url: "https://github.com/acme/app/pull/9", snapshot: { state: "merged" }, watch: { startedAt: "2026-11-14T12:01:00.000Z" } }] };
+    for (const change of [{ pinnedAt: "2026-11-14T12:01:00.000Z" }, watched]) {
+      const server = t3Server({ status: "completed", activeRunId: null });
+      const checksThenChanges = async () => (Object.assign(server.threads[0]!, change), true);
+      await settleWhenRunEnds(server.t3, { threadId, runId, since: now, stillParks: checksThenChanges }, { now: () => 0, sleep: async () => {} });
+      expect([server.threads[0]!.settledAt, server.received]).toEqual([null, []]);
+    }
+  });
+
+  test("the longest mark wins when one set mark starts another", async () => {
+    const home = homeWith([], { ...parkingOn, "orchestration.timeZone": "UTC", "orchestration.waitMark": "WAIT", "orchestration.snoozeMark": "WAIT UNTIL" });
+    const timed = t3Server();
+    await stop("WAIT UNTIL 20th Nov 10:00", timed, { home });
+    const waiting = t3Server();
+    await stop("WAIT on CI", waiting, { home });
+    expect([timed.threads[0]!.snoozedUntil, waiting.threads[0]!.snoozedUntil]).toEqual(["2026-11-20T10:00:00.000Z", "2026-11-17T12:00:00.000Z"]);
+  });
+
   test("a stop that ends again after a send-back parks the thread, and never sends it back twice", async () => {
     const continued = (closing: string, server: ReturnType<typeof t3Server>, options: Partial<ParkOptions> = {}) => parkStop(
       { stop_hook_active: true, last_assistant_message: message(closing) },

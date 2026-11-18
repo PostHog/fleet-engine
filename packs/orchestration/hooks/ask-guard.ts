@@ -8,7 +8,7 @@ import { type Hook, printing, runHook } from "../../base/lib/hook.ts";
 import { matchThread, questionCard, type ShellThread, t3CliRunner, t3UserData, type T3HttpClient, withT3Session } from "../../base/lib/t3/index.ts";
 import { backgroundReason, unwaitedBackgroundTasks } from "../lib/background-stop.ts";
 import { parkStop, type ParkT3, realSettleClock, settleWhenRunEnds, stillParks } from "../lib/closing-line.ts";
-import { closesOn, closingSettings } from "../lib/closing-marks.ts";
+import { closesOn, closingSettings, killSwitch } from "../lib/closing-marks.ts";
 import { checksRun, claudeTaskRuns, proofStop, realProcesses, waits, type ProofStopEvent, type ProofStopOptions } from "../lib/proof-stop.ts";
 import { asksForDecision, personName } from "../lib/prose-question.ts";
 
@@ -121,7 +121,7 @@ export const pendingCardReason = (threadId: string, person: string) => `Fleet bl
   + `Send again with mode: "queue": the lane reads your message once ${person} answers. `
   + "Only when your message changes what the card asks, send the same message to the same thread once more to replace the card. A different message is denied again.";
 
-export const killSwitch = ".config/fleet/ask-guard.off";
+export { killSwitch };
 
 const isThreadSend = (name = "") => /^mcp__t3[-_]code__t3_thread_send$/.test(name);
 
@@ -234,6 +234,7 @@ export async function guardBackground(event: StopEvent & ProofStopEvent, home: s
 }
 
 async function guardStopAndProof(event: StopEvent & ProofStopEvent, home: string, shell: ReadShell, deps: StopDeps) {
+  const stoppedAt = deps.now?.() ?? new Date();
   const elapsed = deps.elapsed ?? ((started) => () => Date.now() - started)(Date.now());
   const threadId = "threadId" in deps ? deps.threadId : process.env.T3CODE_THREAD_ID;
   const prose = await guardStop(event, home, threadId, deps.hidden ?? hiddenIn(shell)).catch(() => undefined);
@@ -245,7 +246,7 @@ async function guardStopAndProof(event: StopEvent & ProofStopEvent, home: string
   if (proof || !deps.park || elapsed() >= parkStartsWithinMs) return proof;
   return parkStop(last, {
     home, threadId, t3: deps.park, processes: deps.processes ?? realProcesses,
-    settleAfterRun: deps.settleAfterRun ?? spawnSettle, now: deps.now,
+    settleAfterRun: deps.settleAfterRun ?? spawnSettle, now: () => stoppedAt,
   });
 }
 

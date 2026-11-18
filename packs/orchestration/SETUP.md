@@ -148,8 +148,11 @@ stays in view: only the snooze mark parks it, and the detached settle skips a
 thread pinned before its run ends. The settle also skips a run that did not
 complete, a run that another run follows, a pending request, a PR watch that
 started after the stop, and a run still going after 10 minutes. Right before
-it settles, it checks again that the scheduled check is still on and that the
-thread does not own an open PR alone.
+it settles, it checks again that parking is still on, the kill switch is off,
+the scheduled check is still on, and the thread does not own an open PR alone.
+Then it reads the thread once more and settles only if nothing changed. T3
+takes no pin or watch condition on a settle, so a pin set in that last moment
+can still be lost.
 
 After the hook sends a stop back once, it does not send it back again. It
 still parks the thread when the corrected closing line allows it.

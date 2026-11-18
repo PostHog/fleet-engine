@@ -99,8 +99,12 @@ export async function guardSettle(call: ToolCall, home: string, deps: SettleDeps
   const action = String(input.action);
   const machine = typeof input.environmentId === "string" && input.environmentId ? input.environmentId : undefined;
   if (machine && deps.settleCheck) {
-    const remote = await deps.settleCheck(home, machine, action, id).catch(() => undefined);
+    const remote = await deps.settleCheck(home, machine, action, id).catch(() => null);
     if (remote) return remote.refusal ? deny(remote.refusal) : undefined;
+    if (remote === null) {
+      const reason = await organizeRefusal(action, id, home, deps, machine, false);
+      return reason ? deny(reason) : undefined;
+    }
   }
   const reason = await organizeRefusal(action, id, home, deps, machine);
   return reason ? deny(reason) : undefined;
