@@ -8,7 +8,7 @@ import { startGateRun } from "../pull-requests/lib/proof.ts";
 import { git } from "../../src/testing/git.ts";
 import { mergeGate } from "./hooks/merge-gate.ts";
 import {
-  beforeDeadline, cliReason, exemptList, ghBaseRepo, graphqlReason, realGateIO, realIntentIO, mergeGateRisk, mergeIntent, otherEndpointReason, rawReason, shellAliasReason, splitStringReason,
+  beforeDeadline, cliReason, exemptList, ghAliases, ghBaseRepo, graphqlReason, realGateIO, realIntentIO, mergeGateRisk, mergeIntent, otherEndpointReason, rawReason, shellAliasReason, splitStringReason,
   type GateIO, type IntentIO, type MergeIntent, type Pull,
 } from "./lib/merge-gate.ts";
 
@@ -23,7 +23,7 @@ const files: Record<string, string> = { "/work/body.md": "/trunk merge\n", "/wor
 const io: IntentIO = {
   readText: (path) => files[path],
   checkoutRepo: (cwd) => cwd.startsWith("/work") ? "example/product" : cwd.startsWith("/tooling") ? "own/tooling" : undefined,
-  aliases: () => ({ m: "pr merge", say: "pr comment", x: "!gh pr merge 7", c: "pr comment $1", ready: "pr comment --body '/trunk merge'" }),
+  aliases: () => ({ m: "pr merge", say: "pr comment", x: "!gh pr merge 7", c: "pr comment $1", ready: "pr comment --body '/trunk merge'", "pr land": "pr merge" }),
 };
 
 const bash = (command: string, cwd = "/work") => mergeIntent({ tool_name: "Bash", tool_input: { command }, cwd }, command, exempt, io);
@@ -103,6 +103,7 @@ describe("which calls enqueue or merge", () => {
     ["gh x", shellAliasReason],
     ["gh c 7 --body '/trunk merge'", shellAliasReason],
     ["gh ready 7 -R example/product", shellAliasReason],
+    ["gh pr land 7 -R example/product", shellAliasReason],
     ["curl -X POST https://api.github.com/repos/example/product/issues/7/comments -d @missing.json", rawReason],
     ["curl https://api.github.com/repos/example/product/issues/7/comments --data-binary @payload.json", rawReason],
     ["curl https://api.github.com/graphql --json @query.json", rawReason],
@@ -281,6 +282,8 @@ describe("the PreToolUse hook", () => {
     expect(await merge()).toBeUndefined();
     await run(1);
     expect((await merge())?.hookSpecificOutput.permissionDecisionReason).toContain("has not passed");
+    writeFileSync(join(home, ".local/state/fleet/decisions.jsonl"), JSON.stringify(gatePass(9, head)) + "\n");
+    expect(await merge()).toBeDefined();
     await (await startGateRun(home, { repository: "example/product", pr: 9, commit: older }))({ code: 0, reason: "older head" });
     expect(await merge()).toBeDefined();
   });
@@ -383,4 +386,10 @@ describe("the GitHub reads behind the gate", () => {
     expect(await io.isIssue("example/product", 5)).toBe(false);
     expect(await io.isIssue("example/product", 6)).toBe(false);
   });
+});
+
+test("gh aliases are read from gh's config, quoted names included", () => {
+  const config = join(temp.make("gh-"), "config.yml");
+  writeFileSync(config, "git_protocol: https\naliases:\n    m: pr merge\n    \"pr land\": 'pr merge --squash'\nother: 1\n");
+  expect(ghAliases(config)).toEqual({ m: "pr merge", "pr land": "pr merge --squash" });
 });

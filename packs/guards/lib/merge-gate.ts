@@ -49,8 +49,8 @@ export function ghAliases(config = join(process.env.GH_CONFIG_DIR ?? join(homedi
   for (const line of readFileSync(config, "utf8").split("\n")) {
     if (/^aliases:\s*$/.test(line)) { inside = true; continue; }
     if (inside && /^\S/.test(line)) break;
-    const entry = inside ? line.match(/^\s+([^:\s]+):\s*(.+?)\s*$/) : null;
-    if (entry) aliases[entry[1]!] = entry[2]!.replace(/^(['"])(.*)\1$/, "$2");
+    const entry = inside ? line.match(/^\s+(?:(['"])(.+?)\1|([^:\s]+)):\s*(.+?)\s*$/) : null;
+    if (entry) aliases[entry[2] ?? entry[3]!] = entry[4]!.replace(/^(['"])(.*)\1$/, "$2");
   }
   return aliases;
 }
@@ -136,8 +136,10 @@ function ghArguments({ name, args }: Command) {
 
 function expandAlias(args: string[], io: IntentIO): string[] | undefined {
   const [first = "", ...rest] = args;
+  const aliases = io.aliases?.() ?? {};
+  if (Object.keys(aliases).some((name) => /\s/.test(name) && args.join(" ").startsWith(`${name.trim()} `))) return undefined;
   if (ghGroups.has(first) || first.startsWith("-")) return args;
-  const alias = io.aliases?.()[first];
+  const alias = aliases[first];
   if (alias === undefined) return args;
   if (alias.startsWith("!") || /\$\d|\$@|['"\\]/.test(alias)) return undefined;
   return [...alias.split(/\s+/).filter(Boolean), ...rest];
@@ -329,7 +331,7 @@ export async function mergeGateRisk(intent: MergeIntent, io: GateIO, person: str
     + `Run the gate on each head until it exits 0, then enqueue again. ${overrideHint(person)}`;
 }
 
-export const mergeGateDeadlineMs = 20_000;
+export const mergeGateDeadlineMs = 15_000;
 const after = (ms: number) => new Promise<void>((done) => { setTimeout(done, ms).unref(); });
 const deadlineReason = "Fleet blocked this merge: the merge gate could not read GitHub and the decision ledger in time. Try again; a merge needs a `fleet proof gate` pass at each PR's head.";
 
