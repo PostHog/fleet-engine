@@ -74,9 +74,10 @@ function handedOverBy(handovers: Handover[], threads: ShellThread[], id: string)
   const settling = matchThread(threads, id, (thread) => thread.id);
   if (!settling) return new Set();
   const named = (value: string) => matchThread(threads, value, (thread) => thread.id);
-  return new Set(handovers.filter(({ from, to }) => {
+  return new Set(handovers.filter(({ pr, from, to }) => {
     const taker = named(to);
-    return named(from) === settling && taker !== undefined && taker !== settling && live(taker);
+    return named(from) === settling && taker !== undefined && taker !== settling && live(taker)
+      && (taker.pullRequests ?? []).some((link) => key(link.url) === key(pr));
   }).map(({ pr }) => key(pr)));
 }
 
@@ -89,8 +90,9 @@ export async function settleRefusal(id: string, deps: OwnerDeps, person: string)
   }
   if (!open.length) return undefined;
   return `Fleet blocked this settle: the thread owns open PR(s) ${open.join(", ")}, and no other open thread links them. `
-    + "Hand each over first: the thread that takes it over links it with link_pull_request, or record the handover with "
-    + `\`fleet pr handover --pr <PR URL> --to <thread id>\`, which counts while the thread it names stays open. Or close or merge the PR. ${person} can still settle the thread in T3.`;
+    + `If ${person} parked them, snooze the thread until the park date instead. If they wait on someone else, snooze it until they move. `
+    + "Or hand each over first: the thread that takes it over links it with link_pull_request, and "
+    + "`fleet pr handover --pr <PR URL> --to <thread id>` counts only while the thread it names stays open and links the PR. Or close or merge the PR.";
 }
 
 export async function prState(gh: Gh, url: string): Promise<string> {

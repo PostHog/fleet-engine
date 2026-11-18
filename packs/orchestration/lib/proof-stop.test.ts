@@ -239,6 +239,7 @@ describe("the Stop proof check lets the stop pass", () => {
     ["without the event's cwd", ({ check }) => check(undefined, { cwd: undefined })],
     ["while a question card is pending", ({ thread, check }) => check([thread({ pendingRuntimeRequest: { id: "r1", kind: "user_input" } })])],
     ["on a NEEDS_HUMAN: last line", ({ check }) => check(undefined, { last_assistant_message: "Parked.\n\n`NEEDS_HUMAN: pick a mode, from Robin`" })],
+    ["on a park that snoozes until its date", ({ check }) => check(undefined, { last_assistant_message: "Robin parked #7.\n\n💤 This thread **snoozes until 25th Nov 09:00**" })],
     ["while a child task runs", ({ thread, check }) => check([thread({ pendingBackgroundTasks: [{ kind: "task", childThreadId: "mcp:child" }] })])],
     ["while the lane awaits a shell command", ({ thread, check }) => check([thread({ pendingBackgroundTasks: [{ kind: "command", awaited: true }] })])],
     ["while the lane waits on another thread", ({ thread, check }) => check([thread({ blockedOnThreadWait: true })])],

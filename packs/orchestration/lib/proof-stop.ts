@@ -163,9 +163,11 @@ export async function proofStop(event: ProofStopEvent, options: ProofStopOptions
   }
 }
 
+const parksOnSnooze = (message: string) => (message.trim().split("\n").at(-1) ?? "").trim().startsWith("💤");
+
 async function check(event: ProofStopEvent, options: ProofStopOptions, signal: AbortSignal): Promise<ProofStopBlock | undefined> {
   const { threadId, home } = options;
-  if (event.stop_hook_active || !threadId || !event.cwd || waitsInClaude(event) || needsHuman(event.last_assistant_message ?? "")) return undefined;
+  if (event.stop_hook_active || !threadId || !event.cwd || waitsInClaude(event) || needsHuman(event.last_assistant_message ?? "") || parksOnSnooze(event.last_assistant_message ?? "")) return undefined;
   const processes = options.processes ?? realProcesses;
   if (nestedSession(await processes.table(signal), processes.pid)) return undefined;
   const { threads } = await options.shell();
@@ -189,7 +191,7 @@ async function check(event: ProofStopEvent, options: ProofStopOptions, signal: A
   const others = rest.length ? ` Also owed: ${rest.map((item) => item.pr).join(", ")}.` : "";
   return {
     decision: "block",
-    reason: `Fleet blocked this stop: your PR is not proven. ${first.step}.${others} If you are parking for ${person}, ask with the question tool or end with a \`NEEDS_HUMAN:\` line. `
+    reason: `Fleet blocked this stop: your PR is not proven. ${first.step}.${others} If you are parking for ${person}, ask with the question tool or end with a \`NEEDS_HUMAN:\` line. If ${person} parked the PR, end on 💤 with the park date. `
       + `If this turn only answered ${person} and the work is not finished, say what is still owed and end the turn again.`,
   };
 }
