@@ -3,18 +3,22 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { tempDirs } from "../../../src/testing/git.ts";
-import { diskStatus } from "./disk.ts";
+import { diskStatus, startDecision } from "./disk.ts";
 
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
 const gigabyte = 1024 ** 3;
 
-test("calls the disk critical below the floor", () => {
-  expect(diskStatus(25 * gigabyte, 20)).toEqual({ critical: false, message: "Disk: 25.0G free." });
-  expect(diskStatus(15 * gigabyte, 20)).toEqual({
+test("calls the disk critical below the floor, or below 10% of free inodes though bytes remain", () => {
+  expect(diskStatus({ bytes: 25 * gigabyte, inodes: 0.5 }, 20)).toEqual({ critical: false, message: "Disk: 25.0G free, 50% of inodes free." });
+  expect(diskStatus({ bytes: 15 * gigabyte, inodes: 0.5 }, 20)).toEqual({
     critical: true,
-    message: "Disk is critical: 15.0G free, below 20G. Do not start worktree lanes or heavy jobs here. fleet prune frees space every few minutes.",
+    message: "Disk is critical: 15.0G free, 50% of inodes free, below 20G. Do not start worktree lanes or heavy jobs here. fleet prune frees space every few minutes, and fleet disk-sweep lists the folders with the most files.",
   });
+  expect(diskStatus({ bytes: 25 * gigabyte, inodes: 0.004 }, 20).message).toStartWith("Disk is critical: 25.0G free, 0% of inodes free, inodes below 10%.");
+  const place = { here: "box-7", names: ["box-7"], freeMap: () => undefined, now: 0 };
+  expect(startDecision(25 * gigabyte, 20, place, 0.004)).toMatchObject({ critical: true, message: expect.stringContaining("box-7: 0% of inodes free, below 10%") });
+  expect(startDecision(25 * gigabyte, 20, place, 0.5).critical).toBe(false);
 });
 
 async function disk(settings: Record<string, unknown> | undefined, ...args: string[]) {

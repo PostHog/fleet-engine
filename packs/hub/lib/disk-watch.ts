@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { freeBytes, freeMapFile } from "../../base/lib/disk.ts";
+import { freeBytes, freeInodeShare, freeMapFile, inodeFloorShare, shownInodes, type Space } from "../../base/lib/disk.ts";
 import { numberSetting, stringSetting } from "../../base/lib/settings.ts";
 import type { Env } from "./coder.ts";
 import { threadModel, requireHubRole, spawnText, sshArgv, stateDir, threadScript, underLock, writeStateFile, type JobContext } from "./hub-job.ts";
@@ -13,14 +13,16 @@ const repeatHours = 24;
 const reportLines = 40;
 const alertModel = "claude-haiku-5-5";
 const sweepMinutes = 90;
+const sweepBelowInodes = inodeFloorShare;
+const alertBelowInodes = 0.05;
 
 export type DiskWatchOptions = {
   boxes: string[]; statePath: string; now: () => number; log: (line: string) => void; dryRun?: boolean;
   sweepBelowGigabytes: number; alertBelowGigabytes: number;
-  read: (box: string) => Promise<number | null>;
+  read: (box: string) => Promise<Space | null>;
   hostOf?: (box: string) => string | undefined;
   sweep: (box: string) => Promise<string>;
-  alert: (box: string, free: number, report: string) => Promise<boolean>;
+  alert: (box: string, free: Space, report: string) => Promise<boolean>;
 };
 
 type WatchState = Record<string, { sweptAt?: number; alertedAt?: number }>;
@@ -28,7 +30,7 @@ type WatchState = Record<string, { sweptAt?: number; alertedAt?: number }>;
 export async function watchDisks(options: DiskWatchOptions): Promise<void> {
   const state = readState(options.statePath);
   const save = () => { if (!options.dryRun) writeStateFile(options.statePath, state); };
-  const boxes: Record<string, number> = {};
+  const boxes: Record<string, Space> = {};
   const checkedAt = new Date(options.now()).toISOString();
   const read = async (box: string) => {
     const free = await options.read(box);
@@ -39,7 +41,7 @@ export async function watchDisks(options: DiskWatchOptions): Promise<void> {
   save();
   const answered = Object.keys(boxes).sort();
   const hosts = Object.fromEntries(answered.flatMap((box) => { const host = options.hostOf?.(box); return host ? [[box, host]] : []; }));
-  if (!options.dryRun) writeStateFile(join(dirname(options.statePath), freeMapFile), { checkedAt, boxes: Object.fromEntries(answered.map((box) => [box, boxes[box]!])), hosts });
+  if (!options.dryRun) writeStateFile(join(dirname(options.statePath), freeMapFile), { checkedAt, boxes: Object.fromEntries(answered.map((box) => [box, boxes[box]!.bytes])), hosts });
   const failed = passes.find((pass) => pass.status === "rejected");
   if (failed) throw failed.reason;
 }
@@ -47,7 +49,8 @@ export async function watchDisks(options: DiskWatchOptions): Promise<void> {
 async function watchDisk(box: string, state: WatchState, options: DiskWatchOptions, save: () => void): Promise<void> {
   let free = await options.read(box);
   if (free === null) { options.log(`${box}: unreachable`); return; }
-  if (free >= options.sweepBelowGigabytes * gigabyte) { recovered(box, state, save); options.log(shown(box, free)); return; }
+  const roomy = (space: Space) => space.bytes >= options.sweepBelowGigabytes * gigabyte && space.inodes >= sweepBelowInodes;
+  if (roomy(free)) { recovered(box, state, save); options.log(shown(box, free)); return; }
   const entry = state[box] ??= {};
   let report = "No sweep ran in this pass. The last one ran less than an hour ago.";
   if (options.now() - (entry.sweptAt ?? 0) < sweepEveryHours * hour) options.log(`${shown(box, free)}; swept already`);
@@ -59,9 +62,9 @@ async function watchDisk(box: string, state: WatchState, options: DiskWatchOptio
     report = (await options.sweep(box)).split("\n").slice(-reportLines).join("\n");
     free = await options.read(box) ?? free;
     options.log(`${shown(box, free)} after the sweep`);
-    if (free >= options.sweepBelowGigabytes * gigabyte) { recovered(box, state, save); return; }
+    if (roomy(free)) { recovered(box, state, save); return; }
   }
-  if (free >= options.alertBelowGigabytes * gigabyte) return;
+  if (free.bytes >= options.alertBelowGigabytes * gigabyte && free.inodes >= alertBelowInodes) return;
   if (options.now() - (entry.alertedAt ?? 0) < repeatHours * hour) { options.log(`${box}: alerted already`); return; }
   if (options.dryRun) { options.log(`${box}: would alert`); return; }
   entry.alertedAt = options.now();
@@ -76,7 +79,15 @@ function recovered(box: string, state: WatchState, save: () => void): void {
   save();
 }
 
-const shown = (box: string, free: number) => `${box}: ${(free / gigabyte).toFixed(1)}G free`;
+const shown = (box: string, free: Space) => `${box}: ${(free.bytes / gigabyte).toFixed(1)}G free, ${shownInodes(free.inodes)}`;
+
+export function parseDf(output: string): { space: Space | null; host?: string } {
+  const [, usage, , inodeLine, host] = output.trim().split("\n");
+  const available = Number(usage?.split(/\s+/)[3]);
+  const [inodes, , free] = (inodeLine?.split(/\s+/) ?? []).slice(1, 4).map(Number);
+  const space = Number.isFinite(available) && Number.isFinite(inodes) && Number.isFinite(free) ? { bytes: available * 1024, inodes: inodes! > 0 ? free! / inodes! : 1 } : null;
+  return { space, host: host?.trim() || undefined };
+}
 
 function readState(path: string): WatchState {
   try {
@@ -89,7 +100,7 @@ export function diskWatchTargets(env: Env, home: string, hub: string, self: stri
   return { local: hub, remote: devboxesOf(env, home).filter((box) => box !== hub && box !== self) };
 }
 
-export type DiskWatchContext = JobContext & { localFree?: () => number };
+export type DiskWatchContext = JobContext & { localFree?: () => number; localInodes?: () => number };
 
 function hubDisks(context: DiskWatchContext, local: string, sweepBelowGigabytes: number, alertBelowGigabytes: number) {
   const { env } = context;
@@ -98,12 +109,11 @@ function hubDisks(context: DiskWatchContext, local: string, sweepBelowGigabytes:
   const localFleet = join(env.FLEET_ENGINE_DIR ?? join(context.home, ".local/share/fleet/engine"), "fleet");
   const hosts = new Map([[local, context.self]]);
   const read = async (box: string) => {
-    if (box === local) return (context.localFree ?? (() => freeBytes(context.home)))();
-    const df = await spawnText(sshArgv(box, 'df -Pk "$HOME" && hostname'), env, { timeoutMs: 30_000 });
-    const [, usage, host] = df.stdout.trim().split("\n");
-    const available = Number(usage?.split(/\s+/)[3]);
-    if (host?.trim()) hosts.set(box, host.trim());
-    return df.code === 0 && Number.isFinite(available) ? available * 1024 : null;
+    if (box === local) return { bytes: (context.localFree ?? (() => freeBytes(context.home)))(), inodes: (context.localInodes ?? (() => freeInodeShare(context.home)))() };
+    const df = await spawnText(sshArgv(box, 'df -Pk "$HOME" && df -Pi "$HOME" && hostname'), env, { timeoutMs: 30_000 });
+    const { space, host } = parseDf(df.stdout);
+    if (host) hosts.set(box, host);
+    return df.code === 0 ? space : null;
   };
   const sweep = async (box: string) => {
     const floors = ["--floor", String(sweepBelowGigabytes), "--alert-floor", String(alertBelowGigabytes)];
@@ -112,17 +122,17 @@ function hubDisks(context: DiskWatchContext, local: string, sweepBelowGigabytes:
     const output = `${swept.stdout}${swept.stderr}`.trim();
     return swept.code === 0 ? output : `The sweep failed with exit ${swept.code === 124 ? "timeout" : swept.code}.\n${output}`;
   };
-  const alert = async (box: string, free: number, report: string) => {
-    const shownFree = `${(free / gigabyte).toFixed(1)}G`;
-    const look = `df -h ~; ${remoteFleet("prune --dry-run --no-fetch --min-idle-hours 1")}`;
-    const prompt = `${box} has ${shownFree} free, below ${alertBelowGigabytes}G, though a cleanup sweep ran within the hour. A full disk crashes T3 and every lane on the box.
+  const alert = async (box: string, free: Space, report: string) => {
+    const shownFree = `${(free.bytes / gigabyte).toFixed(1)}G free, ${shownInodes(free.inodes)}`;
+    const look = `df -h ~; df -i ~; ${remoteFleet("prune --dry-run --no-fetch --min-idle-hours 1")}`;
+    const prompt = `${box} has ${shownFree}, below ${alertBelowGigabytes}G or ${alertBelowInodes * 100}% of inodes, though a cleanup sweep ran within the hour. A full disk crashes T3 and every lane on the box, and without inodes every new file fails with ENOSPC.
 The sweep ran fleet prune, trimmed the T3 boot log, and ran the pnpm, uv and Go cache cleaners. It removed nothing else. Its report from this pass ends with the largest folders under $HOME:
 
 ${report}
 
 Check what is left, read-only: run \`${box === local ? look : `ssh ${box} ${quote(inLoginShell(look))}`}\`.
 Delete nothing and start no lanes. Reply in at most 10 lines: the free space, the largest folders the report names, and what your user must decide to free it.`;
-    const script = threadScript(stringSetting("hub.threadFolder", env), `${box}: ${shownFree} free`, threadModel("lookup", alertModel, env));
+    const script = threadScript(stringSetting("hub.threadFolder", env), `${box}: ${shownFree}`, threadModel("lookup", alertModel, env));
     return (await spawnText(onBox(local, script), env, { stdin: prompt, timeoutMs: 600_000 })).code === 0;
   };
   return { read, sweep, alert, sweepBelowGigabytes, hostOf: (box: string) => hosts.get(box) };
