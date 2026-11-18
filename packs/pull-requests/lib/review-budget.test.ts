@@ -155,16 +155,18 @@ test("a high merge-risk diff gets the Panel tier without sweep or the author's T
 });
 
 test("a merge-risk callout whose grade fleet cannot read gets the Pair tier, and a PR without a callout gets the Read tier", async () => {
-  const tierAt = async (body: string) => {
+  const tierAt = async (body: string, file = "feature.ts", content = "export const greet = (name: string) => name;\n") => {
     const pr = await checkout();
     pr.pullRequestState({ body });
-    await pr.commit("feature.ts", "export const greet = (name: string) => name;\n");
+    await pr.commit(file, content);
     await pr.fleet("require", "--none", "--reason", "fixture");
-    fakeModel(pr, "REVIEWER", "FINDINGS:\n(none)\nCOVERED: feature.ts\n");
+    fakeModel(pr, "REVIEWER", `FINDINGS:\n(none)\nCOVERED: ${file}\n`);
     return JSON.parse((await pr.fleet("review")).output.split("\n")[0]!).tier.name;
   };
   expect(await tierAt("Greets new members.\n\n<!-- merge-risk -->\n> **Merge risk: unclear**\n<!-- /merge-risk -->\n")).toBe("pair");
+  expect(await tierAt("Greets new members.\n\n<!-- merge-risk -->\n> **Merge risk: low/medium**\n<!-- /merge-risk -->\n")).toBe("pair");
   expect(await tierAt("Greets new members.")).toBe("read");
+  expect(await tierAt("Greets new members.", "greeter.bin", "greet\0member\n")).toBe("pair");
 });
 
 test("each reviewer runs without the user's harness, and its token use lands in lenses/<lens>.json and round.json", async () => {

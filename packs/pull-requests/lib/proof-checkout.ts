@@ -70,7 +70,7 @@ export const tierCeiling = (tier: ReviewTier, ceiling: number) => tier.name === 
 
 function gradeOf(body: string | undefined) {
   if (body === undefined) return "unreadable";
-  const grade = /Merge risk:\**\s*(low|medium|high)(?![\w-])/i.exec(riskCalloutOf(body) ?? body)?.[1]?.toLowerCase();
+  const grade = /Merge risk:\**\s*(low|medium|high)(?![\w/-])/i.exec(riskCalloutOf(body) ?? body)?.[1]?.toLowerCase();
   return grade ?? (/merge[- ]risk/i.test(body) ? "unreadable" : "none");
 }
 
@@ -79,7 +79,9 @@ function productionLines(identity: ProofIdentity, run: Run) {
   if (stat.code !== 0) return undefined;
   return stat.stdout.split("\0").filter(Boolean).map((entry) => {
     const [added = "", deleted = "", ...path] = entry.split("\t");
-    return { lines: (Number(added) || 0) + (Number(deleted) || 0), path: path.join("\t") };
+    // Git prints "-" for a binary file; its size is unknown, so it never counts as small.
+    const binary = added === "-" || deleted === "-";
+    return { lines: binary ? Number.POSITIVE_INFINITY : (Number(added) || 0) + (Number(deleted) || 0), path: path.join("\t") };
   }).filter(({ path }) => authored(path)).reduce((sum, { lines }) => sum + lines, 0);
 }
 
