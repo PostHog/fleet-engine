@@ -480,7 +480,7 @@ function reviewedLines(findings: string) {
     if (tests) tested.push(line);
     else if (inside) kept.push(line);
   }
-  return tested.length ? [...kept, "", ...tested] : kept;
+  return { kept, tested };
 }
 
 function ladderFindings(findings: string) {
@@ -495,8 +495,13 @@ function ladderFindings(findings: string) {
 const continued = /^\s+\S/;
 const lazyContinued = /^[^\s#]/;
 
+/** The findings, then the TESTS items. Each part on its own: prose without list items is one finding of its part. */
 export function reviewedFindings(findings: string) {
-  const reviewed = reviewedLines(findings);
+  const { kept, tested } = reviewedLines(findings);
+  return [...listedItems(kept), ...listedItems(tested)];
+}
+
+function listedItems(reviewed: string[]) {
   const items: string[] = [];
   let open = false;
   for (const line of reviewed) {
@@ -1084,7 +1089,9 @@ function headStatus(identity: ProofIdentity, before: PushedHead, after: PushedHe
 /** devPull reads the dev PR that a prod PR waits on (fleet proof require --after-dev). */
 export type GateOptions = { ci: () => CiResult; pushedHead: () => PushedHead; ledger: Ledger; landed?: boolean; cleanBaseMerge?: CleanBaseMerge; quietCommit?: QuietCommit; now?: Date; devPull?: (dev: DevPr) => DevPull | Promise<DevPull> };
 
-const knownIssues = (body: string) => (/^#+\s*Known issues\b.*$([\s\S]*?)(?=^#|(?![\s\S]))/im.exec(body)?.[1] ?? "").split("\n").filter((line) => /^\s*[-*]\s+\S/.test(line)).map((line) => line.trim());
+// A fenced block is an example, never the section: drop it before looking for the heading.
+const unfenced = (body: string) => body.replace(/^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?^ {0,3}\1[^\n]*$/gm, "");
+const knownIssues = (body: string) => (/^#+\s*Known issues\b.*$([\s\S]*?)(?=^#|(?![\s\S]))/im.exec(unfenced(body))?.[1] ?? "").split("\n").filter((line) => /^\s*[-*]\s+\S/.test(line)).map((line) => line.trim());
 const knownBlocker = (body: string) => knownIssues(body).find((line) => /^[-*]\s+\**blocker\b/i.test(line));
 
 function heldStatus(head: PushedHead): Status | undefined {

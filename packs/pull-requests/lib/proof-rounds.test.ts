@@ -119,6 +119,18 @@ test("quota lines that reach fleet inside the JSON events of codex or claude sti
   expect((await pr.fleet("review", "--single")).code).toBe(4);
 });
 
+test("a Claude result envelope without a result string fails the review instead of saving the envelope as findings", async () => {
+  const pr = await quotaCheckout();
+  const bin = pr.env.PATH!.split(":")[0]!;
+  pr.env.FLEET_MODELS = JSON.stringify([lookup, { role: "review", work: "Review code", provider: "claude", model: "solo-model", effort: "high" }]);
+  writeFileSync(join(bin, "codex"), "#!/bin/sh\nexit 97\n", { mode: 0o755 });
+  writeFileSync(join(bin, "claude"), `#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' '{"type":"result","subtype":"error_max_turns","is_error":false}'\n`, { mode: 0o755 });
+  const failed = await pr.fleet("review", "--single").catch((error: Error) => ({ code: 1, output: error.message }));
+  expect(failed.code).not.toBe(0);
+  expect(failed.output).toContain("the reviewer returned no result");
+  expect(existsSync(join(pr.pullRequest, "reviews/1/findings.md"))).toBe(false);
+});
+
 test("fleet proof review stops a reviewer stuck on spent quota, exits 4, and keeps the round reserved for a retry", async () => {
   const pr = await quotaCheckout();
 

@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawnAsync } from "../../../src/testing/spawn.ts";
+import { reviewedFindings } from "./proof.ts";
 import { checkout, cleanFixtures, fakeModel, finishRound, fixture, graded, markPanel, models, recordingModel, settings, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
@@ -96,6 +97,13 @@ test("a blocker in the Known issues section of the PR body holds the merge, and 
   expect(held.code).toBe(1);
   expect(held.output).toContain("known issues: an open blocker holds the merge: - blocker: feature.txt:1 the greeting drops the name");
   expect(JSON.parse((await pr.fleet("gate", "--json")).output)).toMatchObject({ held: "known issues: an open blocker holds the merge: - blocker: feature.txt:1 the greeting drops the name" });
+  pr.pullRequestState({ body: "Greets new members.\n\n```md\n## Known issues\n\n- major: feature.txt:1 an example\n```\n\n## Known issues\n\n- blocker: feature.txt:1 the greeting drops the name\n" });
+  expect((await pr.fleet("gate")).output).toContain("known issues: an open blocker holds the merge: - blocker: feature.txt:1 the greeting drops the name");
+});
+
+test("a prose finding stays a finding when the review also lists TESTS items", () => {
+  const items = reviewedFindings("FINDINGS:\nThe greeting drops the name.\nCOVERED: a.ts\nTESTS:\n- a.test.ts:1 asserts a mock\n");
+  expect(items).toEqual(["The greeting drops the name.", "- a.test.ts:1 asserts a mock"]);
 });
 
 test("a test-only diff at low merge risk gets the Read tier: one combined Correctness and Risk lens on the other family, then one final read of its fixes", async () => {
@@ -165,6 +173,7 @@ test("a merge-risk callout whose grade fleet cannot read gets the Pair tier, and
   };
   expect(await tierAt("Greets new members.\n\n<!-- merge-risk -->\n> **Merge risk: unclear**\n<!-- /merge-risk -->\n")).toBe("pair");
   expect(await tierAt("Greets new members.\n\n<!-- merge-risk -->\n> **Merge risk: low/medium**\n<!-- /merge-risk -->\n")).toBe("pair");
+  expect(await tierAt("Greets new members.\n\n<!-- merge-risk -->\n> **Merge risk: low / medium**\n<!-- /merge-risk -->\n")).toBe("pair");
   expect(await tierAt("Greets new members.")).toBe("read");
   expect(await tierAt("Greets new members.", "greeter.bin", "greet\0member\n")).toBe("pair");
 });

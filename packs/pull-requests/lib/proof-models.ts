@@ -100,7 +100,7 @@ async function modelCommand(role: Role, row: ModelRow, request: ModelRequest, sc
     ...(schema ? ["--output-schema", schema] : []), ...(request.images ?? []).flatMap((image) => ["-i", image]), "-"];
 }
 
-type Event = { result?: unknown; is_error?: unknown; message?: unknown; error?: { message?: unknown }; item?: { type?: unknown; message?: unknown }; usage?: Record<string, unknown>; total_cost_usd?: unknown; info?: { total_token_usage?: Record<string, unknown> }; payload?: Event; msg?: Event };
+type Event = { type?: unknown; result?: unknown; is_error?: unknown; message?: unknown; error?: { message?: unknown }; item?: { type?: unknown; message?: unknown }; usage?: Record<string, unknown>; total_cost_usd?: unknown; info?: { total_token_usage?: Record<string, unknown> }; payload?: Event; msg?: Event };
 
 function eventOf(line: string): Event | undefined {
   if (!line.trimStart().startsWith("{")) return undefined;
@@ -122,7 +122,8 @@ function usageOf(counts: Record<keyof Usage, unknown>): Usage | undefined {
 
 function claudeReply(stdout: string): { text: string; usage?: Usage; error?: string } {
   const reply = eventOf(stdout.trim());
-  if (typeof reply?.result !== "string") return { text: stdout };
+  // A Claude result envelope without a result string is a failed call, never a review; other output is a custom reviewer's text.
+  if (typeof reply?.result !== "string") return reply?.type === "result" || "is_error" in (reply ?? {}) ? { text: "", error: "the reviewer returned no result" } : { text: stdout };
   if (reply.is_error === true) return { text: "", error: reply.result || "the reviewer reported an error" };
   const counts = reply.usage ?? {};
   return { text: reply.result, usage: usageOf({ input: counts.input_tokens, cacheRead: counts.cache_read_input_tokens, cacheWrite: counts.cache_creation_input_tokens, output: counts.output_tokens, total: undefined, costUsd: reply.total_cost_usd }) };

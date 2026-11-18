@@ -70,7 +70,7 @@ export const tierCeiling = (tier: ReviewTier, ceiling: number) => tier.name === 
 
 function gradeOf(body: string | undefined) {
   if (body === undefined) return "unreadable";
-  const grade = /Merge risk:\**\s*(low|medium|high)(?![\w/-])/i.exec(riskCalloutOf(body) ?? body)?.[1]?.toLowerCase();
+  const grade = /Merge risk:\**\s*(low|medium|high)(?![\w/-])(?!\s+[/-]\s*(?:low|medium|high)\b)/i.exec(riskCalloutOf(body) ?? body)?.[1]?.toLowerCase();
   return grade ?? (/merge[- ]risk/i.test(body) ? "unreadable" : "none");
 }
 
