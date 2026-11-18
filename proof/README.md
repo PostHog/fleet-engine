@@ -23,7 +23,7 @@ sudo sh proof/fresh-linux.sh
    with no environment from the box owner:
 
    ```sh
-   curl -fsSL https://raw.githubusercontent.com/Silthus/fleet-engine/main/get.sh | sh -s -- -- --non-interactive --preset everyday --plan both
+   curl -fsSL https://raw.githubusercontent.com/PostHog/fleet-engine/main/get.sh | sh -s -- -- --non-interactive --preset everyday --plan both
    ```
 
    The first run installs Bun, gh, and T3 Code, then stops at the GitHub

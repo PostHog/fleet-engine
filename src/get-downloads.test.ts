@@ -105,7 +105,7 @@ describe("profile install.sh shim", () => {
     return { dir, code: result.exitCode, output: result.stderr.toString(), calls: existsSync(box.log) ? readFileSync(box.log, "utf8") : "" };
   }
   test("runs get.sh from the engine pin of compact JSON with the profile directory", () => {
-    const json = '{"engine":{"repo":"Silthus/fleet-engine","ref":"v0.1.0","channel":"release"},"sources":[{"name":"team","repo":"me/team","ref":"v9.0.0"}]}';
+    const json = '{"engine":{"repo":"PostHog/fleet-engine","ref":"v0.1.0","channel":"release"},"sources":[{"name":"team","repo":"me/team","ref":"v9.0.0"}]}';
     const box = sandbox("Linux");
     const dir = temp.make("profile-");
     writeFileSync(join(dir, "fleet.json"), json);
@@ -114,7 +114,7 @@ describe("profile install.sh shim", () => {
     const result = Bun.spawnSync(["sh", join(dir, "install.sh")], { cwd: box.home, env: { PATH: box.bin, HOME: box.home } });
     expect(result.exitCode).toBe(0);
     const calls = readFileSync(box.log, "utf8");
-    expect(calls).toContain("curl -fsSL https://raw.githubusercontent.com/Silthus/fleet-engine/v0.1.0/get.sh -o ");
+    expect(calls).toContain("curl -fsSL https://raw.githubusercontent.com/PostHog/fleet-engine/v0.1.0/get.sh -o ");
     expect(calls).toContain(`get.sh --ref v0.1.0 --profile ${dir}`);
   });
 

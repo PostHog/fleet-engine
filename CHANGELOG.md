@@ -84,13 +84,13 @@ Everything.
 
 ### The site
 
-[The Fleet site](https://silthus.github.io/fleet-engine/) says what Fleet is
+[The Fleet site](https://posthog.github.io/fleet-engine/) says what Fleet is
 and offers two setups side by side: Mac only, and Mac plus a hub and a node.
 Each setup has a switch for Pull requests, Orchestration, and Communication.
 The Getting started prompt sits under the two setups and changes with each
 choice. Copy it, or open it in T3 Code.
 
-[The Packs page](https://silthus.github.io/fleet-engine/packs/) shows every
+[The Packs page](https://posthog.github.io/fleet-engine/packs/) shows every
 pack, and each pack has its own page with its workflows, its cost, and its
 settings. For a Fleet that already runs, select packs, and the page builds an
 install prompt that adds them with `fleet packs --add`.

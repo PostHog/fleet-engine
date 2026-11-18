@@ -11,10 +11,10 @@ case "$ref" in
 esac
 script=$(mktemp)
 trap 'rm -f "$script"' EXIT
-url="https://raw.githubusercontent.com/Silthus/fleet-engine/$ref/get.sh"
+url="https://raw.githubusercontent.com/PostHog/fleet-engine/$ref/get.sh"
 if ! curl -fsSL "$url" -o "$script"; then
   # While the engine repository is private, a signed-in gh can still fetch it.
-  if ! command -v gh >/dev/null 2>&1 || ! gh api -H "Accept: application/vnd.github.raw" "repos/Silthus/fleet-engine/contents/get.sh?ref=$ref" >"$script"; then
+  if ! command -v gh >/dev/null 2>&1 || ! gh api -H "Accept: application/vnd.github.raw" "repos/PostHog/fleet-engine/contents/get.sh?ref=$ref" >"$script"; then
     echo "Fleet: could not download $url." >&2
     exit 1
   fi
