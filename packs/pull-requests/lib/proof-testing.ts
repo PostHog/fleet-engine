@@ -46,7 +46,7 @@ else
 fi
 base=main; [ -f "${github}/base" ] && read -r base < "${github}/base"
 if [ -f "${github}/base-sha" ]; then read -r basesha < "${github}/base-sha"; else basesha=$(git -C "${repository}" rev-parse refs/remotes/origin/main 2>/dev/null); fi
-body='"Adds the greeting."'; [ -f "${github}/body" ] && body=$(cat "${github}/body")
+body='"Adds the greeting. Merge risk: medium."'; [ -f "${github}/body" ] && body=$(cat "${github}/body")
 case "$*" in
   "api "*"/pulls/"[0-9]*" --method PATCH --input "*)
     [ -f "${github}/patch-error" ] && { cat "${github}/patch-error" >&2; exit 1; }
@@ -232,9 +232,17 @@ Read it as a senior engineer who sees it for the first time.
 
 Trace one concrete input through each new branch.
 
+### Risk
+
+Weigh the blast radius of each changed path.
+
 ### Design
 
 Find the code judo move.
+
+### Anti-Overengineering
+
+Name the code the change does not need.
 
 ### Team
 
@@ -319,7 +327,7 @@ export function hubAt(pr: Checkout, hub: Hub | boolean = "up") {
 
 export const acceptGap = (pr: Checkout, kind: string, ...more: string[]) => pr.decide("record", "--mark", "👤", "--class", "proof-gap", "--kind", kind, "--pr", "example/product#42", ...more);
 
-export const graded = (tier: string) => `## Merge risk\n\n<!-- merge-risk -->\n> [!NOTE]\n> 🔵 **Merge risk: low** · two-way door\n> - **Tier:** ${tier}\n<!-- /merge-risk -->\n`;
+export const graded = (tier: string, grade = "low") => `## Merge risk\n\n<!-- merge-risk -->\n> [!NOTE]\n> 🔵 **Merge risk: ${grade}** · two-way door\n> - **Tier:** ${tier}\n<!-- /merge-risk -->\n`;
 
 export async function finishRound(pr: Checkout, round: string) {
   writeFileSync(join(pr.repository, "findings.md"), `Findings of ${round}.\n`);
