@@ -38,6 +38,7 @@ export type PruneOptions = {
   evict?: { targetGigabytes: number; free: () => number };
   sightingsPath: string;
   mergedPullRequest: (branch: string, worktree: string) => boolean;
+  makeWritable?: (path: string) => void;
 };
 
 const busyStatuses = new Set(["running", "starting", "preparing", "queued"]);
@@ -283,10 +284,10 @@ export function listCandidates(worktreeRoot: string, projects: string[], repos: 
 
 type Processes = { running: string[]; seen: Sightings };
 
-function gather(path: string, load: () => T3State, managed: boolean, processes: Processes, branches: Map<string, string | null>, options: PruneOptions): Facts {
-  const facts = inspect(path, processes, branches, options);
-  const state = load();
-  const thread = state.threads.get(path) ?? null;
+type WithState = (facts: Facts, state: T3State) => Facts;
+
+function withState(facts: Facts, state: T3State, managed: boolean): Facts {
+  const thread = state.threads.get(facts.path) ?? null;
   return { ...facts, thread, stateUnknown: managed && !state.ok, lastActivity: Math.max(facts.lastActivity, thread?.activeAt ?? 0) };
 }
 
@@ -325,30 +326,25 @@ function inspect(path: string, processes: Processes, branches: Map<string, strin
   return facts;
 }
 
-function removeDirectory(facts: Facts): { ok: boolean; error?: string } {
-  run(["find", facts.path, "-xdev", "-type", "d", "!", "-perm", "-u+w", "-exec", "chmod", "u+w", "{}", "+"], undefined, 600_000);
-  if (facts.kind === "worktree") {
-    const common = dirname(git(facts.path, "rev-parse", "--path-format=absolute", "--git-common-dir").out);
-    const force = facts.dirty;
-    if (force && !uncommitted(facts.path).disposable) return { ok: false, error: "new uncommitted changes" };
-    const removed = Bun.spawnSync(["git", "-C", common, "worktree", "remove", ...(force ? ["--force"] : []), facts.path], { stderr: "pipe", timeout: 600_000 });
-    if (removed.exitCode !== 0) return { ok: false, error: removed.stderr.toString().trim() };
-    return { ok: true };
-  }
-  const removed = run(removeTreeCommand(facts.path), undefined, 600_000);
-  return removed.ok ? { ok: true } : { ok: false, error: "rm failed" };
-}
+const makeWritable = (path: string) => { run(["find", path, "-xdev", "-type", "d", "!", "-perm", "-u+w", "-exec", "chmod", "u+w", "{}", "+"], undefined, 600_000); };
 
-function removeIfDecided(facts: Facts, verdict: Verdict, options: PruneOptions): Verdict {
+function removeIfDecided(facts: Facts, verdict: Verdict, options: PruneOptions, decideNow: (state: T3State) => Verdict): Verdict {
   if (!verdict.remove || options.dryRun) return verdict;
+  const failed = (error: string) => ({ ...verdict, remove: false, reason: `removal failed: ${error}` });
   if (inside(facts.path, processDirectories())) return { ...verdict, remove: false, reason: "a process started inside it" };
-  const result = removeDirectory(facts);
-  return result.ok ? verdict : { ...verdict, remove: false, reason: `removal failed: ${result.error}` };
+  (options.makeWritable ?? makeWritable)(facts.path);
+  if (facts.kind === "worktree" && facts.dirty && !uncommitted(facts.path).disposable) return failed("new uncommitted changes");
+  const decided = decideNow(readState(options.statePath));
+  if (!decided.remove) return decided;
+  if (facts.kind !== "worktree") return run(removeTreeCommand(facts.path), undefined, 600_000).ok ? decided : failed("rm failed");
+  const common = dirname(git(facts.path, "rev-parse", "--path-format=absolute", "--git-common-dir").out);
+  const removed = Bun.spawnSync(["git", "-C", common, "worktree", "remove", ...(facts.dirty ? ["--force"] : []), facts.path], { stderr: "pipe", timeout: 600_000 });
+  return removed.exitCode === 0 ? decided : failed(removed.stderr.toString().trim());
 }
 
 const device = (path: string) => { try { return statSync(path).dev; } catch { return -1; } };
 
-function evict(kept: Facts[], target: NonNullable<PruneOptions["evict"]>, options: PruneOptions, refresh: (path: string) => Facts): Verdict[] {
+function evict(kept: Facts[], target: NonNullable<PruneOptions["evict"]>, options: PruneOptions, refresh: (path: string) => Facts, current: WithState): Verdict[] {
   const evicted: Verdict[] = [];
   const pressured = device(options.worktreeRoot);
   const woken = (facts: Facts) => Number(Boolean(facts.thread?.wake));
@@ -365,9 +361,16 @@ function evict(kept: Facts[], target: NonNullable<PruneOptions["evict"]>, option
     const wakeNow = (facts: Facts) => Number(Boolean(threads.get(facts.path)?.wake));
     candidates.sort((a, b) => wakeNow(a) - wakeNow(b) || a.lastActivity - b.lastActivity);
     const facts = candidates.shift()!;
-    const current = refresh(facts.path);
-    if (!evictable(current, options)) continue;
-    const verdict = removeIfDecided(current, { path: current.path, remove: true, reason: reason(current) }, options);
+    const checked = refresh(facts.path);
+    if (!evictable(checked, options)) continue;
+    let outranked = false;
+    const verdict = removeIfDecided(checked, { path: checked.path, remove: true, reason: reason(checked) }, options, (state) => {
+      const latest = current(checked, state);
+      if (!evictable(latest, options)) return { path: latest.path, remove: false, reason: "its T3 thread became active" };
+      outranked = Boolean(latest.thread?.wake) && candidates.some((other) => !state.threads.get(other.path)?.wake);
+      return { path: latest.path, remove: !outranked, reason: outranked ? `its T3 thread ${latest.thread?.wake}` : reason(latest) };
+    });
+    if (outranked) { candidates.push(facts); continue; }
     options.log(`${verdict.remove ? "evicted" : "kept"}: ${facts.path} (${verdict.reason})`);
     if (verdict.remove) evicted.push(verdict);
   }
@@ -385,16 +388,16 @@ export function prune(options: PruneOptions): Verdict[] {
   options.log(`Prune ${options.dryRun ? "preview" : "pass"}, idle ${options.minIdleHours}h: ${describeFree(options.worktreeRoot)}`);
   if (!state.ok) options.log(`Cannot read ${options.statePath}. Keeping every T3 worktree${options.evict ? " except clean ones the disk pressure evicts" : ""}.`);
   const root = resolve(options.worktreeRoot);
+  const current: WithState = (facts, latest) => withState(facts, latest, facts.path.startsWith(`${root}/`));
   for (const path of listCandidates(root, state.projects, options.repos)) {
-    const managed = path.startsWith(`${root}/`);
-    const facts = gather(path, () => readState(options.statePath), managed, { running: processDirectories(), seen }, branches, options);
-    const verdict = removeIfDecided(facts, decide(facts, options), options);
+    const facts = current(inspect(path, { running: processDirectories(), seen }, branches, options), readState(options.statePath));
+    const verdict = removeIfDecided(facts, decide(facts, options), options, (latest) => decide(current(facts, latest), options));
     if (!verdict.remove) kept.set(path, facts);
     verdicts.push(verdict);
     options.log(`${verdict.remove ? (options.dryRun ? "would remove" : "removed") : "kept"}: ${path} (${verdict.reason})`);
   }
-  const refresh = (path: string) => gather(path, () => readState(options.statePath), path.startsWith(`${root}/`), { running: processDirectories(), seen }, branches, { ...options, fetch: false });
-  if (options.evict) for (const verdict of evict([...kept.values()], options.evict, options, refresh)) verdicts[verdicts.findIndex((item) => item.path === verdict.path)] = verdict;
+  const refresh = (path: string) => current(inspect(path, { running: processDirectories(), seen }, branches, { ...options, fetch: false }), readState(options.statePath));
+  if (options.evict) for (const verdict of evict([...kept.values()], options.evict, options, refresh, current)) verdicts[verdicts.findIndex((item) => item.path === verdict.path)] = verdict;
   for (const common of branches.keys()) if (!options.dryRun) run(["git", "-C", common, "worktree", "prune"]);
   options.log(`Done: ${verdicts.filter((verdict) => verdict.remove).length} removed, ${verdicts.filter((verdict) => !verdict.remove).length} kept. ${describeFree(options.worktreeRoot)}`);
   return verdicts;

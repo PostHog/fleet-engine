@@ -342,6 +342,40 @@ onLinux("under disk pressure, a worktree whose thread gets a wake during the pas
   expect(lines.filter((line) => line.startsWith("evicted")).map((line) => line.split(": ")[1].split(" (")[0])).toEqual([newer, older]);
 });
 
+onLinux("a prune pass reads the T3 state again right before it removes a worktree, so a run scheduled while it prepares the removal keeps it", async () => {
+  const { base, root, paths: [settled] } = await landedWorktrees("settled");
+  const statePath = t3State(join(base, "statev2.sqlite"), [{ id: "settled", worktreePath: settled, settledAt }]);
+
+  const verdicts = pass(base, root, statePath, { makeWritable: () => schedule(statePath, scheduledFor("settled")[0]) });
+
+  expect(verdicts.find((verdict) => verdict.path === settled)).toMatchObject({ remove: false, reason: "its T3 thread has a scheduled run at 2026-11-16T08:15:00.000Z" });
+  expect(await readdir(join(root, "repo"))).toEqual(["settled"]);
+});
+
+onLinux("under disk pressure, a worktree whose thread gets a wake during its own checks is kept while one without a wake can go instead", async () => {
+  const { base, root, paths: [older, newer] } = await landedWorktrees("older", "newer");
+  for (const path of [older, newer]) {
+    await writeFile(join(path, "app.ts"), `${basename(path)}\n`);
+    await commit(path, "work");
+  }
+  const later = Date.now() + 48 * 3600_000;
+  recordSightings(join(base, "sightings.json"), [newer], later - 2 * 3600_000);
+  const statePath = t3State(join(base, "statev2.sqlite"), [{ id: "older", worktreePath: older }, { id: "newer", worktreePath: newer }]);
+  const lines: string[] = [];
+  const checked: string[] = [];
+  const mergedPullRequest = (branch: string) => {
+    checked.push(branch);
+    if (branch === "older" && checked.filter((name) => name === "older").length === 2) schedule(statePath, scheduledFor("older")[0]);
+    return false;
+  };
+  const free = () => (lines.some((line) => line.startsWith("evicted")) ? Number.POSITIVE_INFINITY : 0);
+
+  pass(base, root, statePath, { ...pressured(later, lines), dryRun: false, mergedPullRequest, evict: { targetGigabytes: 1, free } });
+
+  expect(lines.filter((line) => line.startsWith("evicted")).map((line) => line.split(": ")[1].split(" (")[0])).toEqual([newer]);
+  expect(await readdir(join(root, "repo"))).toEqual(["older"]);
+});
+
 onLinux("a worktree that several threads share counts the latest activity of any of them", async () => {
   const { base, root, paths: [recent] } = await landedWorktrees("recent");
   const later = Date.now() + 48 * 3600_000;
