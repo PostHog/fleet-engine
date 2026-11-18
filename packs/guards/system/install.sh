@@ -3,10 +3,10 @@ set -eu
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 mode=${1:-install}
 root=${2:-}
-etc=$root/etc/hedge
+etc=$root/etc/fleet
 config=$etc/git-allowlist.gitconfig
-helper=$root/usr/local/bin/git-remote-hedge-blocked
-ssh_check=$root/usr/local/bin/hedge-git-ssh
+helper=$root/usr/local/bin/git-remote-fleet-blocked
+ssh_check=$root/usr/local/bin/fleet-git-ssh
 system=$root/etc/gitconfig
 included() { git config --file "$system" --get-all include.path 2>/dev/null | grep -qxF "$config"; }
 
@@ -30,7 +30,7 @@ trap 'rm -rf "$work"' EXIT
 cp "$here/git-allowlist" "$here/git-allowlist.sig" "$here/git-allowlist-signers" "$work/"
 signers=$etc/git-allowlist-signers
 [ -e "$signers" ] || signers=$work/git-allowlist-signers
-if ! ssh-keygen -Y verify -f "$signers" -I hedge-allowlist -n hedge-git-allowlist -s "$work/git-allowlist.sig" < "$work/git-allowlist" >/dev/null 2>&1; then
+if ! ssh-keygen -Y verify -f "$signers" -I fleet-allowlist -n fleet-git-allowlist -s "$work/git-allowlist.sig" < "$work/git-allowlist" >/dev/null 2>&1; then
   echo "Git allowlist: the list does not verify against $signers. Nothing changed." >&2
   exit 1
 fi
@@ -44,11 +44,11 @@ section() {
 }
 {
   echo "# Managed by Hedge's Guards pack from the signed Git allowlist. Do not edit."
-  printf '[protocol "hedge-blocked"]\n  allow = always\n'
+  printf '[protocol "fleet-blocked"]\n  allow = always\n'
   printf '[core]\n  sshCommand = %s\n' "$ssh_check"
   printf '[ssh]\n  variant = ssh\n'
   for prefix in https:// http:// git:// ssh:// git@ https:: http:: github.com: ssh.github.com: https://github.com/ http://github.com/ git://github.com/ ssh://${ssh_user}@github.com/ ${ssh_user}@github.com:; do
-    section "hedge-blocked::$prefix" "$prefix"
+    section "fleet-blocked::$prefix" "$prefix"
   done
   while IFS= read -r owner; do
     case "$owner" in
@@ -62,7 +62,7 @@ section() {
   done < "$work/git-allowlist"
 } > "$work/git-allowlist.gitconfig"
 
-cat > "$work/git-remote-hedge-blocked" <<'HELPER'
+cat > "$work/git-remote-fleet-blocked" <<'HELPER'
 #!/bin/sh
 url=$(printf '%s' "${2:-${1:-}}" | sed -e 's#//[^/@]*@#//<redacted>@#' -e 's/?.*$/?<redacted>/')
 person=$(sed -n 's/^ *"guards.person": *"\([^"]*\)".*/\1/p' "$HOME/.local/state/hedge/settings.json" 2>/dev/null)
@@ -83,14 +83,14 @@ person=$(sed -n 's/^ *"guards.person": *"\([^"]*\)".*/\1/p' "$HOME/.local/state/
 echo "fatal: Hedge blocked Git access over SSH to $host: its owner is not on the signed Git allowlist. Stop and ask ${person:-the person who runs this machine}. Do not retry, change the URL, or work around the block." >&2
 exit 1
 CHECK
-} > "$work/hedge-git-ssh"
+} > "$work/fleet-git-ssh"
 
 install -d -m 755 "$etc" "${helper%/*}"
 [ -e "$etc/git-allowlist-signers" ] || install -m 644 "$work/git-allowlist-signers" "$etc/git-allowlist-signers"
 install -m 644 "$work/git-allowlist" "$etc/git-allowlist"
 install -m 644 "$work/git-allowlist.sig" "$etc/git-allowlist.sig"
 install -m 644 "$work/git-allowlist.gitconfig" "$config"
-install -m 755 "$work/git-remote-hedge-blocked" "$helper"
-install -m 755 "$work/hedge-git-ssh" "$ssh_check"
+install -m 755 "$work/git-remote-fleet-blocked" "$helper"
+install -m 755 "$work/fleet-git-ssh" "$ssh_check"
 included || git config --file "$system" --add include.path "$config"
 echo "Git allowlist: on."

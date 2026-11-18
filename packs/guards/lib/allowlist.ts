@@ -1,18 +1,18 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const signerIdentity = "hedge-allowlist";
-export const signatureNamespace = "hedge-git-allowlist";
+export const signerIdentity = "fleet-allowlist";
+export const signatureNamespace = "fleet-git-allowlist";
 
 /** Where the root-owned allowlist lives under a system root, which is / on a real machine. */
 export const systemPaths = (root: string) => ({
-  dir: join(root, "etc/hedge"),
-  list: join(root, "etc/hedge/git-allowlist"),
-  signature: join(root, "etc/hedge/git-allowlist.sig"),
-  signers: join(root, "etc/hedge/git-allowlist-signers"),
-  config: join(root, "etc/hedge/git-allowlist.gitconfig"),
-  helper: join(root, "usr/local/bin/git-remote-hedge-blocked"),
-  sshCheck: join(root, "usr/local/bin/hedge-git-ssh"),
+  dir: join(root, "etc/fleet"),
+  list: join(root, "etc/fleet/git-allowlist"),
+  signature: join(root, "etc/fleet/git-allowlist.sig"),
+  signers: join(root, "etc/fleet/git-allowlist-signers"),
+  config: join(root, "etc/fleet/git-allowlist.gitconfig"),
+  helper: join(root, "usr/local/bin/git-remote-fleet-blocked"),
+  sshCheck: join(root, "usr/local/bin/fleet-git-ssh"),
   gitconfig: join(root, "etc/gitconfig"),
 });
 

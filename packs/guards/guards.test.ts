@@ -132,9 +132,9 @@ describe("the shell guards through the hook dispatcher", () => {
   test("refuses gh on an owner that only a list outside the system root allows", async () => {
     const home = homeWith(withGuards(), { "guards.person": "Robin", "guards.owners": "acme" });
     const agentRoot = temp.make("agent-root-");
-    mkdirSync(join(agentRoot, "etc/hedge"), { recursive: true });
+    mkdirSync(join(agentRoot, "etc/fleet"), { recursive: true });
     const owner = `hedge-test-${crypto.randomUUID().slice(0, 8)}`;
-    writeFileSync(join(agentRoot, "etc/hedge/git-allowlist"), `acme\n${owner}\n`);
+    writeFileSync(join(agentRoot, "etc/fleet/git-allowlist"), `acme\n${owner}\n`);
     const denied = await preToolUseInstalled(home, "claude", bash(`gh pr create -R ${owner}/repo --fill`), { HEDGE_SYSTEM_ROOT: agentRoot });
     expect(denied.refusal).toContain(`\`${owner}\` is not one of the GitHub owners`);
   });

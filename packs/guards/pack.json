@@ -153,7 +153,7 @@
       "on": [
         "linux"
       ],
-      "say": "Install the signed Git allowlist as root. Hedge stages the list that verifies against guards.signers, and the root script checks the signature again before it writes /etc/hedge, the blocked-remote helper and the include in /etc/gitconfig.",
+      "say": "Install the signed Git allowlist as root. Hedge stages the list that verifies against guards.signers, and the root script checks the signature again before it writes /etc/fleet, the blocked-remote helper and the include in /etc/gitconfig.",
       "command": "hedge guards allowlist stage ~/.local/state/hedge/git-allowlist && sudo sh ~/.local/state/hedge/git-allowlist/install.sh",
       "probe": [
         "hedge",
