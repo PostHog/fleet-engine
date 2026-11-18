@@ -1,15 +1,25 @@
 import { blocking, type Hook, runHook } from "../lib/hook.ts";
+import { modelSelection } from "../lib/model-selection.ts";
 
-export const reminder = "Name a model on this Agent call, cast with the model table in ~/.agents/AGENTS.md. An omitted model inherits the parent model.";
+export const reminder = "Name a model on this Agent call: an omitted model inherits the parent model. Agent takes haiku, sonnet, opus, or fable; a row with a GPT model runs on Codex, through T3's `delegate_task`.";
+export const pointer = "Cast it with the model table in ~/.agents/AGENTS.md.";
 
-type ToolEvent = { tool_name?: string; tool_input?: { model?: unknown } };
+type ToolEvent = { tool_name?: string; tool_input?: { model?: unknown } | null };
 
-/** Returns the reminder when a Claude subagent call names no model. */
-export function check(provider: string, event: ToolEvent): string | undefined {
+export function check(provider: string, event: ToolEvent, table?: string): string | undefined {
   if (provider !== "claude" || !/^(Agent|Task)$/.test(event.tool_name ?? "")) return undefined;
-  return event.tool_input?.model ? undefined : reminder;
+  if (event.tool_input?.model) return undefined;
+  return table ? `${reminder}\n\n${table}` : `${reminder} ${pointer}`;
 }
 
-export const hook: Hook = async (provider, readInput) => blocking(check(provider, JSON.parse(await readInput()) as ToolEvent));
+export const hook: Hook = async (provider, readInput, home) => {
+  let event: ToolEvent;
+  try {
+    event = JSON.parse(await readInput()) as ToolEvent;
+  } catch {
+    return blocking(undefined);
+  }
+  return blocking(check(provider, event, provider === "claude" ? modelSelection(home) : undefined));
+};
 
 if (import.meta.main) await runHook(hook);

@@ -2,7 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tempDirs } from "../../../src/testing/git.ts";
-import { check, reminder } from "./name-a-model.ts";
+import { hook as castTheReviewer, nudge, pointer as reviewPointer, reminder as reviewReminder } from "./cast-the-reviewer.ts";
+import { check, hook as nameAModel, pointer, reminder } from "./name-a-model.ts";
 import { dispatch, type HookResult } from "./run.ts";
 import { guard, type HookEvent } from "./secret-guard.ts";
 
@@ -454,16 +455,73 @@ describe("secret guard", () => {
   });
 });
 
+const instructions = "# Agent rules\n\nIntro.\n\n## Model selection\n\n| Work | Model | Effort |\n| --- | --- | --- |\n"
+  + "| **Survey**: read docs | `claude-sonnet-5-5` | high |\n| **Review** of Claude's code | `gpt-6.2-sol` | high |\n| **Review** of skills and agent documents | `claude-opus-5-5` | high |\n\n## About me\n\nOther rules.\n";
+
+function homeWith(agentsMd: string | null) {
+  const home = temp.make("model-cast-");
+  if (agentsMd !== null) {
+    mkdirSync(join(home, ".agents"));
+    writeFileSync(join(home, ".agents/AGENTS.md"), agentsMd);
+  }
+  return home;
+}
+
 describe("name a model", () => {
   test("blocks a Claude subagent call that names no model", () => {
-    expect(check("claude", { tool_name: "Agent", tool_input: {} })).toBe(reminder);
-    expect(check("claude", { tool_name: "Task" })).toBe(reminder);
+    expect(check("claude", { tool_name: "Agent", tool_input: {} })).toBe(`${reminder} ${pointer}`);
+    expect(check("claude", { tool_name: "Task", tool_input: null })).toBe(`${reminder} ${pointer}`);
+  });
+
+  test("bounces with the Model selection table from the agent instructions, and nothing past it", async () => {
+    const result = await nameAModel("claude", async () => JSON.stringify({ tool_name: "Agent", tool_input: { prompt: "find the files" } }), homeWith(instructions));
+    expect(result.code).toBe(2);
+    expect(result.stderr).toStartWith(reminder);
+    expect(result.stderr).toContain("## Model selection\n\n| Work | Model | Effort |");
+    expect(result.stderr).toContain("| **Survey**: read docs | `claude-sonnet-5-5` | high |");
+    expect(result.stderr).not.toContain("Other rules.");
+    expect(result.stderr).not.toContain("Intro.");
+  });
+
+  test("without the table, the bounce names its place; a broken event passes", async () => {
+    const missing = await nameAModel("claude", async () => JSON.stringify({ tool_name: "Agent", tool_input: {} }), homeWith(null));
+    expect(missing).toEqual({ code: 2, stdout: "", stderr: `${reminder} ${pointer}\n` });
+    const noSection = await nameAModel("claude", async () => JSON.stringify({ tool_name: "Agent", tool_input: {} }), homeWith("# Agent rules\n\nNo table.\n"));
+    expect(noSection.stderr).toBe(`${reminder} ${pointer}\n`);
+    expect(await nameAModel("claude", async () => "not json", homeWith(instructions))).toEqual({ code: 0, stdout: "", stderr: "" });
   });
 
   test("lets a call with a model, another tool, or Codex through", () => {
     expect(check("claude", { tool_name: "Agent", tool_input: { model: "sonnet" } })).toBeUndefined();
     expect(check("claude", { tool_name: "Bash", tool_input: {} })).toBeUndefined();
     expect(check("codex", { tool_name: "Agent", tool_input: {} })).toBeUndefined();
+  });
+});
+
+describe("cast the reviewer", () => {
+  const context = (stdout: string) => (stdout.trim() ? (JSON.parse(stdout) as { hookSpecificOutput: { hookEventName: string; additionalContext: string } }).hookSpecificOutput : undefined);
+
+  test.each(["Review PR #1234 please", "can you re-review the diff", "review https://github.com/o/r/pull/9", "Give my branch a code review", "Review the last commit"])("reminds %p that a review runs cross-family, with the table's review rows", async (prompt) => {
+    for (const provider of ["claude", "codex"] as const) {
+      const result = await castTheReviewer(provider, async () => JSON.stringify({ hook_event_name: "UserPromptSubmit", prompt }), homeWith(instructions));
+      expect(result.code).toBe(0);
+      expect(context(result.stdout)).toEqual({
+        hookEventName: "UserPromptSubmit",
+        additionalContext: `${reviewReminder}\n\n| Work | Model | Effort |\n| --- | --- | --- |\n| **Review** of Claude's code | \`gpt-6.2-sol\` | high |\n| **Review** of skills and agent documents | \`claude-opus-5-5\` | high |`,
+      });
+    }
+  });
+
+  test.each(["Fix the failing test", "What did the review say?", "Act as the review sub-agent for PR #12", "Update on pull request #55: review requested"])("adds nothing to %p", async (prompt) => {
+    expect(await castTheReviewer("claude", async () => JSON.stringify({ prompt }), homeWith(instructions))).toEqual({ code: 0, stdout: "", stderr: "" });
+  });
+
+  test("names the table's place when the instructions or their review rows are missing, and lets a broken event through", async () => {
+    expect(nudge("Review PR #1", undefined)).toBe(`${reviewReminder} ${reviewPointer}`);
+    expect(nudge("Review PR #1", "## Model selection\n\n| Work | Model | Effort |\n| --- | --- | --- |\n| Lookups | `claude-haiku-5-5` | medium |")).toBe(`${reviewReminder} ${reviewPointer}`);
+    const missing = await castTheReviewer("claude", async () => JSON.stringify({ prompt: "Review PR #1" }), homeWith(null));
+    expect(context(missing.stdout)?.additionalContext).toBe(`${reviewReminder} ${reviewPointer}`);
+    expect(await castTheReviewer("claude", async () => "not json", homeWith(instructions))).toEqual({ code: 0, stdout: "", stderr: "" });
   });
 });
 

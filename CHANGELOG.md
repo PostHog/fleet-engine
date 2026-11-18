@@ -34,7 +34,10 @@ packs, and your answers live in your own private profile repo.
 
 - **Base** (always on): safety rules, the model table, T3 Code defaults written
   before its first start, linked machines, worktree cleanup, a disk guard, and
-  nightly updates. With Codex, a rules file lets Codex run these commands
+  nightly updates. A Claude Agent call that names no model is sent back with
+  the model table. A prompt that asks to review a pull request, commit, or
+  diff gets the review rows of the table and a reminder that the reviewer is a
+  worker that did not write the code. With Codex, a rules file lets Codex run these commands
   outside its sandbox without asking: Git fetches, pulls, and pushes; `gh`
   commands that read pull requests, runs, issues, and repos, and
   `gh pr create`, `edit`, and `ready`, which change pull requests; `bun` and

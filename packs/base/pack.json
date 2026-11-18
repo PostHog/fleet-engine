@@ -677,6 +677,10 @@
       ]
     },
     {
+      "path": "hooks/cast-the-reviewer.ts",
+      "target": ".config/fleet/hooks/UserPromptSubmit/cast-the-reviewer.ts"
+    },
+    {
       "path": "hooks/format-on-edit.ts",
       "target": ".config/fleet/hooks/PostToolUse/format-on-edit.ts",
       "workflow": "format-on-edit"
