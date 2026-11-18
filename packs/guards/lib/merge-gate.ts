@@ -2,7 +2,7 @@ import { closeSync, constants, existsSync, fstatSync, openSync, readFileSync } f
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fold, gateOverride, overrideChoice, hubLedger, type DecisionState, type Env, type LedgerEvent } from "../../pull-requests/lib/decision-ledger.ts";
-import { lastGateResult } from "../../pull-requests/lib/proof.ts";
+import { lastGateResult, latestGateResult, type GateResult } from "../../pull-requests/lib/proof.ts";
 import { endpointOf, ghGroups, inOrder, parseGh, values, type Gh } from "./gh.ts";
 import { githubSlug } from "./git.ts";
 import { commandsIn, shellTools, type Command, type Scope } from "./shell-words.ts";
@@ -73,16 +73,19 @@ export function ghBaseRepo(remoteConfig: string): string | undefined {
 
 const maxPayload = 1 << 20;
 
+export function readPayload(path: string, beforeOpen = () => {}): string | undefined {
+  let fd: number | undefined;
+  try {
+    beforeOpen();
+    fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+    const file = fstatSync(fd);
+    return file.isFile() && file.size <= maxPayload ? readFileSync(fd, "utf8") : undefined;
+  } catch { return undefined; }
+  finally { if (fd !== undefined) closeSync(fd); }
+}
+
 export const realIntentIO: IntentIO = {
-  readText: (path) => {
-    let fd: number | undefined;
-    try {
-      fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
-      const file = fstatSync(fd);
-      return file.isFile() && file.size <= maxPayload ? readFileSync(fd, "utf8") : undefined;
-    } catch { return undefined; }
-    finally { if (fd !== undefined) closeSync(fd); }
-  },
+  readText: (path) => readPayload(path),
   checkoutRepo: (cwd) => {
     const child = Bun.spawnSync(["git", "-C", cwd, "config", "--get-regexp", "^remote\\..*\\.(url|gh-resolved)$"], { stdout: "pipe", stderr: "ignore" });
     return child.exitCode === 0 ? ghBaseRepo(child.stdout.toString()) : undefined;
@@ -111,9 +114,8 @@ function repositoryOf(gh: Gh, found: Command, cwd: string | undefined, io: Inten
 }
 
 function sentTexts(found: Command, cwd: string | undefined, io: IntentIO, inline: string[], files: string[]) {
-  const fieldFiles = inline.flatMap((field) => field.match(/^[^=]*=@(.+)$/s)?.[1] ?? []);
-  const piped = [...files, ...fieldFiles].includes("-") && !found.stdin;
-  const read = [...files, ...fieldFiles].map((path) => path === "-" ? found.stdin?.body ?? "" : io.readText(resolve(cwd ?? ".", found.chdir ?? ".", path)));
+  const piped = files.includes("-") && !found.stdin;
+  const read = files.map((path) => path === "-" ? found.stdin?.body ?? "" : io.readText(resolve(cwd ?? ".", found.chdir ?? ".", path)));
   const texts = [...inline, ...read.filter((text) => text !== undefined), found.stdin?.body ?? ""];
   return { texts: [...texts, ...texts.flatMap(jsonStrings)], unread: read.includes(undefined), piped };
 }
@@ -188,7 +190,8 @@ function commandIntent(found: Command, raw: string, cwd: string | undefined, io:
   if (gh.group !== "api") return { targets: [] };
   const fields = values(gh, "-f", "--raw-field", "-F", "--field");
   const inline = [...fields, ...fields.map((field) => field.replace(/^[^=]*=/, ""))];
-  const sent = sentTexts(found, cwd, io, inline, values(gh, "--input"));
+  const fieldFiles = values(gh, "-F", "--field").flatMap((field) => field.match(/^[^=]*=@(.+)$/s)?.[1] ?? []);
+  const sent = sentTexts(found, cwd, io, inline, [...values(gh, "--input"), ...fieldFiles]);
   const enqueues = sendsEnqueue(sent, raw);
   let endpoint = endpointOf(gh).replace(/[?#].*$/s, "").replace(/\/$/, "");
   if (endpoint === "graphql") return sent.piped || sent.unread || sent.texts.some((text) => mentionsEnqueue.test(text) || graphqlMerge.test(text)) || mentionsEnqueue.test(raw) ? { targets: [], refusal: graphqlReason } : { targets: [] };
@@ -269,7 +272,7 @@ export type GateIO = {
   pull: (repository: string, pr: number) => Promise<Pull | undefined>;
   pullFor: (repository: string, branch: string) => Promise<number | undefined>;
   isIssue: (repository: string, number: number) => Promise<boolean>;
-  localGate: (repository: string, pr: number, commit: string) => Promise<{ passed: boolean; at: number } | undefined>;
+  localGate: (repository: string, pr: number, commit: string) => Promise<GateResult | undefined>;
   ledger: () => Promise<LedgerEvent[]>;
 };
 
@@ -297,13 +300,11 @@ async function layersOf(target: MergeTarget, io: GateIO): Promise<Layer[]> {
 
 const sameRepo = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
-type GateOutcome = { passed: boolean; at: number };
-
-function sharedResults(events: LedgerEvent[], layer: Layer): GateOutcome[] {
+function sharedResults(events: LedgerEvent[], layer: Layer): GateResult[] {
   return events.flatMap((event) => event.type === "gate" && sameRepo(event.repository, layer.repository) && event.pr === layer.pr && event.commit === layer.head ? [{ passed: event.passed, at: Date.parse(event.at) }] : []);
 }
 
-const latestPassed = (results: GateOutcome[]) => results.toSorted((a, b) => a.at - b.at || Number(b.passed) - Number(a.passed)).at(-1)?.passed === true;
+const latestPassed = (results: GateResult[]) => latestGateResult(results)?.passed === true;
 
 function overrideIn(decisions: DecisionState[], layer: Layer): boolean {
   return decisions.some((decision) => !decision.voided && !decision.reversed && decision.mark === "👤" && decision.class === "merge"

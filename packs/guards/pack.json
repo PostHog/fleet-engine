@@ -69,7 +69,7 @@
         "gh"
       ],
       "sentence": "An agent's Trunk enqueue or merge of a pull request waits until fleet proof gate passed at the head of each open layer of its stack, or you overrode the gate for that head.",
-      "risk": "An enqueue or merge waits up to 20 seconds while the gate reads GitHub and the decision ledger, and it is refused when either cannot be read. Repositories in guards.merge-gate-exempt skip the gate.",
+      "risk": "An enqueue or merge waits up to 15 seconds while the gate reads GitHub and the decision ledger, and it is refused when either cannot be read. Repositories in guards.merge-gate-exempt skip the gate.",
       "settings": [
         "guards.merge-gate-exempt"
       ]

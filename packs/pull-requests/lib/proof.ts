@@ -33,9 +33,11 @@ export const gateRunDirectory = (home: string, identity: ProofIdentity) =>
 
 const unfinishedGateRun: GateRecord = { code: 1, reason: "the gate run has not finished: it still runs, or it stopped without a result" };
 
+const gateRunNames = async (directory: string) =>
+  (await readdir(directory).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return []; throw error; })).filter((name) => /^\d+\.json$/.test(name));
+
 async function lastRunNumber(directory: string): Promise<number> {
-  const names = await readdir(directory).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return []; throw error; });
-  return Math.max(0, ...names.flatMap((name) => /^(\d+)\.json$/.exec(name)?.[1] ?? []).map(Number));
+  return Math.max(0, ...(await gateRunNames(directory)).map((name) => parseInt(name, 10)));
 }
 
 export async function startGateRun(home: string, identity: ProofIdentity, startedAt = new Date()): Promise<(record: GateRecord) => Promise<void>> {
@@ -53,13 +55,18 @@ export async function startGateRun(home: string, identity: ProofIdentity, starte
   }
 }
 
-export async function lastGateResult(home: string, identity: ProofIdentity): Promise<{ passed: boolean; at: number } | undefined> {
+export type GateResult = { passed: boolean; at: number };
+
+export const latestGateResult = (results: GateResult[]) => results.toSorted((a, b) => a.at - b.at || Number(b.passed) - Number(a.passed)).at(-1);
+
+export async function lastGateResult(home: string, identity: ProofIdentity): Promise<GateResult | undefined> {
   const directory = gateRunDirectory(home, identity);
-  const last = await lastRunNumber(directory);
-  if (!last) return undefined;
-  const { code, startedAt } = (await readJson<{ code?: unknown; startedAt?: unknown } | null>(join(directory, `${last}.json`), null)) ?? {};
-  const at = typeof startedAt === "string" ? Date.parse(startedAt) : Number.NaN;
-  return { passed: code === 0 && !Number.isNaN(at), at: Number.isNaN(at) ? Infinity : at };
+  const results = await Promise.all((await gateRunNames(directory)).map(async (name) => {
+    const { code, startedAt } = (await readJson<{ code?: unknown; startedAt?: unknown } | null>(join(directory, name), null)) ?? {};
+    const at = typeof startedAt === "string" ? Date.parse(startedAt) : Number.NaN;
+    return Number.isNaN(at) ? { passed: false, at: -Infinity } : { passed: code === 0, at };
+  }));
+  return latestGateResult(results);
 }
 
 export async function lastGateRun(home: string, identity: ProofIdentity): Promise<GateRecord | undefined> {

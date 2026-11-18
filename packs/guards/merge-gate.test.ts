@@ -1,14 +1,14 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { appendFileSync, chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Decision, LedgerEvent } from "../pull-requests/lib/decision-ledger.ts";
 import { tempDirs } from "../../src/testing/git.ts";
 import { devbox, engineSource, resolveEngine, skillSources } from "../../src/testing/packs.ts";
-import { startGateRun } from "../pull-requests/lib/proof.ts";
+import { gateRunDirectory, startGateRun, writeJson } from "../pull-requests/lib/proof.ts";
 import { git } from "../../src/testing/git.ts";
 import { mergeGate } from "./hooks/merge-gate.ts";
 import {
-  beforeDeadline, cliReason, exemptList, ghAliases, ghBaseRepo, graphqlReason, realIntentIO, mergeGateRisk, mergeIntent, otherEndpointReason, rawReason, shellAliasReason, splitStringReason,
+  beforeDeadline, cliReason, exemptList, ghAliases, ghBaseRepo, graphqlReason, mergeGateDeadlineMs, readPayload, realIntentIO, mergeGateRisk, mergeIntent, otherEndpointReason, rawReason, shellAliasReason, splitStringReason,
   type GateIO, type IntentIO, type MergeIntent, type Pull,
 } from "./lib/merge-gate.ts";
 
@@ -48,6 +48,8 @@ describe("which calls enqueue or merge", () => {
     ["gh api repos/example/product/issues/7/comments -f body='/trunk merge'"],
     ["gh api -X POST repos/example/product/issues/7/comments -F 'body=/trunk merge'"],
     ["gh api repos/example/product/issues/7/comments -F body=@body.md"],
+    ["gh api repos/example/product/issues/7/comments --field body=@body.md"],
+    ["gh api repos/example/product/issues/7/comments -F body=@missing.md"],
     ["gh api repos/example/product/issues/7/comments --input payload.json"],
     ["gh api repos/{owner}/{repo}/issues/7/comments -f body='/trunk merge'"],
     ["gh api -X PUT repos/example/product/pulls/7/merge"],
@@ -81,6 +83,12 @@ describe("which calls enqueue or merge", () => {
     ["gh pr comment 7 --repo own/tooling --body '/trunk merge'"],
     ["gh pr merge 7 --repo Example/Notes --squash"],
     ["curl -s https://api.github.com/repos/example/product/pulls/7/merge"],
+    ["gh pr comment 7 --repo example/product --body Owners=@octocat"],
+    ["gh pr comment 7 --repo example/product --body 'Thanks, cc=@octocat'"],
+    ["gh issue comment 7 --repo example/product -b x=@octocat"],
+    ["gh api repos/example/product/issues/7/comments -f body=@octocat"],
+    ["gh api repos/example/product/issues/7/comments --raw-field body=@octocat"],
+    ["gh pr review 7 --repo example/product --comment --body Owners=@octocat"],
     ["echo done"],
   ])("%s enqueues nothing the gate checks", (command) => {
     expect(bash(command)).toEqual({ targets: [] });
@@ -424,6 +432,29 @@ describe("the hook against GitHub, faked at the gh boundary, and real checkouts,
     expect(await hook("make-query | gh api graphql -F query=@-", dir)).toBe(graphqlReason);
   });
 
+  test("the run that started last decides, even when an earlier run took a higher record number", async () => {
+    const hook = machine({ "repos/example/product/pulls/9": pull(head) });
+    const identity = { repository: "example/product", pr: 9, commit: head };
+    const merge = () => hook("gh pr merge 9 --repo example/product");
+    const later = await startGateRun(hook.home, identity, new Date("2026-11-16T08:10:00Z"));
+    const earlier = await startGateRun(hook.home, identity, new Date("2026-11-16T08:00:00Z"));
+    await earlier({ code: 0, reason: "pass" });
+    expect(await merge()).toContain("has not passed");
+    await later({ code: 1, reason: "CI is red" });
+    expect(await merge()).toContain("has not passed");
+    await (await startGateRun(hook.home, identity, new Date("2026-11-16T08:20:00Z")))({ code: 0, reason: "pass" });
+    expect(await merge()).toBeUndefined();
+  });
+
+  test("a gate record from before runs kept their start counts as a failure that any timed run replaces", async () => {
+    const hook = machine({ "repos/example/product/pulls/9": pull(head) });
+    const identity = { repository: "example/product", pr: 9, commit: head };
+    await writeJson(join(gateRunDirectory(hook.home, identity), "1.json"), { code: 0, reason: "every proof is in" });
+    expect(await hook("gh pr merge 9 --repo example/product")).toContain("has not passed");
+    await (await startGateRun(hook.home, identity, new Date("2026-11-16T08:20:00Z")))({ code: 0, reason: "pass" });
+    expect(await hook("gh pr merge 9 --repo example/product")).toBeUndefined();
+  });
+
   test("a PR number in a checkout without a GitHub remote is refused, since no repository can be checked", async () => {
     const dir = temp.make("checkout-");
     git(dir, "init", "-q");
@@ -465,4 +496,26 @@ test("the installed hook reads gh's aliases from GH_CONFIG_DIR, and a FIFO as a 
   };
   expect(await answer("gh pr land", "/")).toBe(shellAliasReason);
   expect(await answer("curl -X POST https://api.github.com/repos/example/product/issues/7/comments -d @body", fifo)).toBe(rawReason);
+});
+
+test("a payload swapped for a FIFO after the gate chose it is never read by its path", async () => {
+  const dir = temp.make("swap-");
+  const body = join(dir, "body");
+  writeFileSync(body, "Merged after review.\n");
+  let writer: ReturnType<typeof Bun.spawn> | undefined;
+  const swap = () => {
+    rmSync(body);
+    expect(Bun.spawnSync(["mkfifo", body]).exitCode).toBe(0);
+    writer = Bun.spawn(["sh", "-c", 'printf "Merged after review.\\n" > "$0"', body]);
+  };
+  try {
+    const command = "curl -X POST https://api.github.com/repos/example/product/issues/7/comments -d @body";
+    const intent = mergeIntent({ tool_name: "Bash", tool_input: { command }, cwd: dir }, command, [], { ...realIntentIO, readText: (path) => readPayload(path, swap) });
+    expect(intent.refusal).toBe(rawReason);
+  } finally { writer?.kill(); }
+});
+
+test("the merge-gate risk names the deadline the hook keeps", () => {
+  const pack = JSON.parse(readFileSync(join(import.meta.dir, "pack.json"), "utf8")) as { workflows: { id: string; risk: string }[] };
+  expect(pack.workflows.find((workflow) => workflow.id === "merge-gate")?.risk).toContain(`up to ${mergeGateDeadlineMs / 1000} seconds`);
 });
