@@ -17,14 +17,14 @@ if (arg === "on") await Bun.write(file, "on");
 else if (arg === "off") (await import("node:fs")).rmSync(file, { force: true });
 else process.exit((await Bun.file(file).exists()) ? 0 : 1);
 `;
-    function engineWithBox() {
+    function engineWithBox(word = "hedge") {
       const engine = engineWithCommands();
       cpSync(join(repoRoot, "src"), join(engine, "src"), { recursive: true });
       cpSync(join(repoRoot, "hedge"), join(engine, "hedge"));
       symlinkSync(join(repoRoot, "node_modules"), join(engine, "node_modules"));
       const base = JSON.parse(readFileSync(join(engine, "packs/base/pack.json"), "utf8"));
       writeFileSync(join(engine, "packs/base/pack.json"), JSON.stringify({ ...base, steps: [] }));
-      writeFileSync(join(engine, "packs/tools/pack.json"), JSON.stringify({ schema: 1, name: "tools", summary: "tools pack.", steps: [{ id: "box", run: ["hedge", "box", "on"], check: ["hedge", "box", "status"], undo: ["hedge", "box", "off"] }] }));
+      writeFileSync(join(engine, "packs/tools/pack.json"), JSON.stringify({ schema: 1, name: "tools", summary: "tools pack.", steps: [{ id: "box", run: [word, "box", "on"], check: [word, "box", "status"], undo: [word, "box", "off"] }] }));
       writeFileSync(join(engine, "packs/tools/commands/box.ts"), box);
       return engine;
     }
@@ -48,6 +48,17 @@ else process.exit((await Bun.file(file).exists()) ? 0 : 1);
       writeFileSync(join(home, "box.txt"), "by hand");
       expect(await run(["apply"], home, engine)).toBe(0);
       expect(existsSync(join(home, "box.txt"))).toBe(true);
+    });
+
+    test("has the steps of a pack from before the rename, whose commands start with fleet, undone the same way", async () => {
+      const home = temp.make("home-");
+      const engine = engineWithBox("fleet");
+      const profile = profileDir(["tools"]);
+      expect(await run(["apply", "--profile", profile], home, engine)).toBe(0);
+      expect(existsSync(join(home, "box.txt"))).toBe(true);
+      drop(profile);
+      expect(await run(["apply"], home, engine)).toBe(0);
+      expect(existsSync(join(home, "box.txt"))).toBe(false);
     });
 
     test("doctor says what a person removes by hand, through the pack's own probe", async () => {
