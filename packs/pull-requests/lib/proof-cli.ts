@@ -420,17 +420,18 @@ receipt link once one is recorded. The gate's lines and fleet decision report co
     run: async ({ flags }, identity, context) => {
       const { print, home } = context;
       const head = identity();
-      const record = await startGateRun(home, head);
+      const startedAt = context.now?.() ?? new Date();
+      const record = await startGateRun(home, head, startedAt);
       let gate: FinalGate;
       try {
         gate = await finalGate(head, context, { landed: flags.has("--landed") });
       } catch (error) {
         await record({ code: 1, reason: String((error as Error).message ?? error).split("\n")[0]! }).catch(() => {});
-        await shareGateResult(head, false, context);
+        await shareGateResult(head, false, startedAt, context);
         throw error;
       }
       await record({ code: gate.code, reason: gate.reason });
-      const shared = await shareGateResult(head, gate.code === 0, context);
+      const shared = await shareGateResult(head, gate.code === 0, startedAt, context);
       if (flags.has("--json")) print(JSON.stringify(gate.summary));
       else for (const line of [...gate.lines, ...shared ? [shared] : [], gate.verdict]) print(line);
       return gate.code;
@@ -1039,10 +1040,10 @@ export async function proofCommand(args: string[], context: ProofContext): Promi
   return command.run(parsed, () => identity ??= resolveIdentity(parsed.options, run), { ...context, run, lock: () => lock ??= roundLock(lockOwner(context)) });
 }
 
-async function shareGateResult(head: ProofIdentity, passed: boolean, context: ProofContext): Promise<string | undefined> {
+async function shareGateResult(head: ProofIdentity, passed: boolean, startedAt: Date, context: ProofContext): Promise<string | undefined> {
   const result = passed ? "pass" : "failure";
   try {
-    await ledgerOf(context).append({ type: "gate", repository: head.repository, pr: head.pr, commit: head.commit, passed, machine: thisMachine(context.env), at: (context.now?.() ?? new Date()).toISOString() });
+    await ledgerOf(context).append({ type: "gate", repository: head.repository, pr: head.pr, commit: head.commit, passed, machine: thisMachine(context.env), at: startedAt.toISOString() });
     return passed ? "merge gate: pass recorded in the decision ledger" : undefined;
   } catch (error) {
     const reach = passed ? "an enqueue from another machine is refused until the gate passes there" : "another machine may still count an earlier pass at this head";

@@ -348,7 +348,7 @@ function withoutRedirects(words: Word[]) {
     const target = words[index].text.slice(operator.length) || words[++index]?.text || "";
     const writes = direction !== "<" && direction !== "<&" && direction !== ">&" && (descriptor === "" || descriptor === "1" || descriptor === "&");
     if (writes) outputs.push(target);
-    if (/^(?:>>|>\||<>|>)$/.test(direction) || (direction === ">&" && !/^(?:\d+|-)$/.test(target))) fileWrites.push(target);
+    if (/^(?:>>|>\||<>|>)$/.test(direction) || (direction === ">&" && !/^(?:\d+-?|-)$/.test(target))) fileWrites.push(target);
   }
   return { kept, outputs, writes: fileWrites };
 }

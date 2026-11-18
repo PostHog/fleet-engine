@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { closeSync, constants, existsSync, fstatSync, openSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fold, gateOverride, overrideChoice, hubLedger, type DecisionState, type Env, type LedgerEvent } from "../../pull-requests/lib/decision-ledger.ts";
@@ -74,7 +74,15 @@ export function ghBaseRepo(remoteConfig: string): string | undefined {
 const maxPayload = 1 << 20;
 
 export const realIntentIO: IntentIO = {
-  readText: (path) => { try { const file = statSync(path); return file.isFile() && file.size <= maxPayload ? readFileSync(path, "utf8") : undefined; } catch { return undefined; } },
+  readText: (path) => {
+    let fd: number | undefined;
+    try {
+      fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+      const file = fstatSync(fd);
+      return file.isFile() && file.size <= maxPayload ? readFileSync(fd, "utf8") : undefined;
+    } catch { return undefined; }
+    finally { if (fd !== undefined) closeSync(fd); }
+  },
   checkoutRepo: (cwd) => {
     const child = Bun.spawnSync(["git", "-C", cwd, "config", "--get-regexp", "^remote\\..*\\.(url|gh-resolved)$"], { stdout: "pipe", stderr: "ignore" });
     return child.exitCode === 0 ? ghBaseRepo(child.stdout.toString()) : undefined;
@@ -117,7 +125,7 @@ function jsonStrings(text: string): string[] {
 
 const builtAtRunTime = /[$`]/;
 const sendsEnqueue = ({ texts, unread }: { texts: string[]; unread: boolean }, raw: string) =>
-  texts.some((text) => enqueueLine.test(text)) || ((unread || texts.some((text) => builtAtRunTime.test(text))) && mentionsEnqueue.test(raw));
+  unread || texts.some((text) => enqueueLine.test(text)) || (texts.some((text) => builtAtRunTime.test(text)) && mentionsEnqueue.test(raw));
 
 const httpWrites = (args: string[]) => args.some((arg, index) =>
   (/^(?:-X|--request)$/.test(arg) && !/^(?:GET|HEAD)$/i.test(args[index + 1] ?? "")) || /^-X(?!GET|HEAD)\w+/i.test(arg) || /^--request=(?!GET|HEAD)/i.test(arg)

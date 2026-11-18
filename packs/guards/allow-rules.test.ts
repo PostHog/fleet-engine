@@ -29,6 +29,8 @@ describe("review-request allow rules", () => {
     "gh pr edit 1506 --add-reviewer a-reviewer > /dev/null",
     "gh pr edit 1506 --add-reviewer a-reviewer 2>&1",
     "gh pr edit 1506 --add-reviewer a-reviewer 2> /dev/null",
+    "gh pr edit 1506 --add-reviewer a-reviewer 2>&3-",
+    "gh pr edit 1506 --add-reviewer a-reviewer >&3-",
   ])("lets a bare reviewer request through: %s", (command) => {
     expect(refusal(command)).toBeUndefined();
   });

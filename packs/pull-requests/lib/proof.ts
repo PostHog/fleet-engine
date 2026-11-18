@@ -38,14 +38,15 @@ async function lastRunNumber(directory: string): Promise<number> {
   return Math.max(0, ...names.flatMap((name) => /^(\d+)\.json$/.exec(name)?.[1] ?? []).map(Number));
 }
 
-export async function startGateRun(home: string, identity: ProofIdentity): Promise<(record: GateRecord) => Promise<void>> {
+export async function startGateRun(home: string, identity: ProofIdentity, startedAt = new Date()): Promise<(record: GateRecord) => Promise<void>> {
+  const started = { startedAt: startedAt.toISOString() };
   const directory = gateRunDirectory(home, identity);
   await mkdir(directory, { recursive: true, mode: 0o700 });
   for (let number = await lastRunNumber(directory) + 1; ; number++) {
     const path = join(directory, `${number}.json`);
     try {
-      await writeFile(path, JSON.stringify(unfinishedGateRun) + "\n", { flag: "wx", mode: 0o600 });
-      return (record) => writeJson(path, record);
+      await writeFile(path, JSON.stringify({ ...unfinishedGateRun, ...started }) + "\n", { flag: "wx", mode: 0o600 });
+      return (record) => writeJson(path, { ...record, ...started });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
@@ -56,9 +57,9 @@ export async function lastGateResult(home: string, identity: ProofIdentity): Pro
   const directory = gateRunDirectory(home, identity);
   const last = await lastRunNumber(directory);
   if (!last) return undefined;
-  const at = (await stat(join(directory, `${last}.json`))).mtimeMs;
-  const record = await lastGateRun(home, identity).catch(() => undefined);
-  return { passed: record?.code === 0, at };
+  const { code, startedAt } = (await readJson<{ code?: unknown; startedAt?: unknown } | null>(join(directory, `${last}.json`), null)) ?? {};
+  const at = typeof startedAt === "string" ? Date.parse(startedAt) : Number.NaN;
+  return { passed: code === 0 && !Number.isNaN(at), at: Number.isNaN(at) ? Infinity : at };
 }
 
 export async function lastGateRun(home: string, identity: ProofIdentity): Promise<GateRecord | undefined> {

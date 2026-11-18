@@ -104,9 +104,6 @@ describe("which calls enqueue or merge", () => {
     ["gh c 7 --body '/trunk merge'", shellAliasReason],
     ["gh ready 7 -R example/product", shellAliasReason],
     ["gh pr land 7 -R example/product", shellAliasReason],
-    ["gh pr land", shellAliasReason],
-    ["gh pr  land", shellAliasReason],
-    ["make-query | gh api graphql -F query=@-", graphqlReason],
     ["curl -X POST https://api.github.com/repos/example/product/issues/7/comments -d @missing.json", rawReason],
     ["curl https://api.github.com/repos/example/product/issues/7/comments --data-binary @payload.json", rawReason],
     ["curl https://api.github.com/graphql --json @query.json", rawReason],
@@ -351,7 +348,8 @@ describe("the hook against GitHub, faked at the gh boundary, and real checkouts,
       + `process.stdout.write(body === undefined ? "HTTP/2.0 404 Not Found\\r\\n\\r\\n{}" : "HTTP/2.0 200 OK\\r\\n\\r\\n" + JSON.stringify(body));\nprocess.exit(body === undefined ? 1 : 0);\n`);
     chmodSync(join(bin, "gh"), 0o755);
     const where = { home, env: { FLEET_SETTINGS: undefined, PATH: `${bin}:${process.env.PATH}` }, intent: { ...realIntentIO, ghRepo: undefined, aliases: () => aliases } };
-    return async (command: string, cwd = "/") => (await mergeGate({ tool_name: "Bash", tool_input: { command }, cwd }, where))?.hookSpecificOutput.permissionDecisionReason;
+    const hook = async (command: string, cwd = "/") => (await mergeGate({ tool_name: "Bash", tool_input: { command }, cwd }, where))?.hookSpecificOutput.permissionDecisionReason;
+    return Object.assign(hook, { home });
   };
   const pass = (repository: string, pr: number, commit: string): LedgerEvent => ({ type: "gate", repository, pr, commit, passed: true, machine: "box-2", at: "2026-11-16T08:00:00Z" });
   const openHead = (branch: string) => `repos/example/product/pulls?state=open&per_page=2&head=example:${branch}`;
@@ -418,10 +416,51 @@ describe("the hook against GitHub, faked at the gh boundary, and real checkouts,
     expect(await hook("gh pr view 9 --repo example/product")).toBeUndefined();
   });
 
-  test("a payload path that is no regular file is not read, so a FIFO cannot stall the hook", async () => {
-    const dir = temp.make("fifo-");
-    Bun.spawnSync(["mkfifo", join(dir, "body")]);
-    const hook = machine({});
-    expect(await hook("curl -X POST https://api.github.com/repos/example/product/issues/7/comments -d @body", dir)).toBe(rawReason);
+  test("a body the gate cannot read is gated like an enqueue, on the CLI and the REST comment path", async () => {
+    const hook = machine({ "repos/example/product/pulls/9": pull(head) });
+    const dir = temp.make("work-");
+    expect(await hook("gh pr comment 9 --repo example/product --body-file missing.md", dir)).toContain("has not passed at the head of example/product#9");
+    expect(await hook("gh api repos/example/product/issues/9/comments -F body=@missing.md", dir)).toContain("has not passed at the head of example/product#9");
+    expect(await hook("make-query | gh api graphql -F query=@-", dir)).toBe(graphqlReason);
   });
+
+  test("a PR number in a checkout without a GitHub remote is refused, since no repository can be checked", async () => {
+    const dir = temp.make("checkout-");
+    git(dir, "init", "-q");
+    expect(await machine({})("gh pr merge 9", dir)).toContain("without naming the PR");
+  });
+
+  test("ordered by when each run started, a run that started later decides, however late the older one finishes", async () => {
+    const hook = machine({ "repos/example/product/pulls/9": pull(head) }, [
+      { ...pass("example/product", 9, head), passed: false, at: "2026-11-16T08:10:00Z" } as LedgerEvent,
+      pass("example/product", 9, head),
+    ]);
+    const identity = { repository: "example/product", pr: 9, commit: head };
+    const older = await startGateRun(hook.home, identity, new Date("2026-11-16T08:00:00Z"));
+    const newer = await startGateRun(hook.home, identity, new Date("2026-11-16T08:10:00Z"));
+    await newer({ code: 1, reason: "CI is red" });
+    await older({ code: 0, reason: "pass" });
+    expect(await hook("gh pr merge 9 --repo example/product")).toContain("has not passed");
+    const later = await startGateRun(hook.home, identity, new Date("2026-11-16T08:20:00Z"));
+    await later({ code: 0, reason: "pass" });
+    expect(await hook("gh pr merge 9 --repo example/product")).toBeUndefined();
+  });
+});
+
+test("the installed hook reads gh's aliases from GH_CONFIG_DIR, and a FIFO as a payload cannot stall it", async () => {
+  const fifo = temp.make("fifo-");
+  expect(Bun.spawnSync(["mkfifo", join(fifo, "body")]).exitCode).toBe(0);
+  const config = temp.make("gh-");
+  writeFileSync(join(config, "config.yml"), "aliases:\n    \"pr land\": 'pr merge 9 --repo example/product'\n");
+  const answer = async (command: string, cwd: string) => {
+    const child = Bun.spawn([process.execPath, join(import.meta.dir, "hooks/merge-gate.ts"), "claude"], {
+      env: { ...process.env, HOME: temp.make("home-"), GH_CONFIG_DIR: config }, cwd, timeout: 4_000,
+      stdin: new Blob([JSON.stringify({ tool_name: "Bash", tool_input: { command }, cwd })]), stdout: "pipe",
+    });
+    const output = await new Response(child.stdout).text();
+    expect(await child.exited).toBe(0);
+    return JSON.parse(output).hookSpecificOutput.permissionDecisionReason;
+  };
+  expect(await answer("gh pr land", "/")).toBe(shellAliasReason);
+  expect(await answer("curl -X POST https://api.github.com/repos/example/product/issues/7/comments -d @body", fifo)).toBe(rawReason);
 });
