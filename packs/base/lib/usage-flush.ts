@@ -4,7 +4,7 @@ import { arrivingPath, hostSetting, projectKeySetting, sendingPath, spoolPath, t
 export type FlushIo = { home: string; settings: Record<string, unknown>; send: typeof fetch; print(line: string): void };
 type Destination = { host: string; projectKey: string };
 
-const usage = "Usage: fleet usage flush  Send the spooled usage events to your analytics project";
+const usage = "Usage: hedge usage flush  Send the spooled usage events to your analytics project";
 const loopback = /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/;
 
 export async function usageCommand(args: string[], io: FlushIo): Promise<number> {
@@ -15,12 +15,12 @@ export async function usageCommand(args: string[], io: FlushIo): Promise<number>
 }
 
 function destination(settings: Record<string, unknown>): Destination {
-  if (settings[hostSetting] === undefined) throw new Error("Usage events are off. Turn them on with fleet packs --workflows usage-events=on.");
+  if (settings[hostSetting] === undefined) throw new Error("Usage events are off. Turn them on with hedge packs --workflows usage-events=on.");
   const text = (key: string) => (typeof settings[key] === "string" ? (settings[key] as string).trim() : "");
   const host = text(hostSetting).replace(/\/+$/, "");
   const projectKey = text(projectKeySetting);
-  if (!host.startsWith("https://") && !loopback.test(host)) throw new Error(`${hostSetting} must be an https:// URL. Set it with fleet set ${hostSetting}=<url>.`);
-  if (!projectKey) throw new Error(`${projectKeySetting} is empty. Set it with fleet set ${projectKeySetting}=<key>.`);
+  if (!host.startsWith("https://") && !loopback.test(host)) throw new Error(`${hostSetting} must be an https:// URL. Set it with hedge set ${hostSetting}=<url>.`);
+  if (!projectKey) throw new Error(`${projectKeySetting} is empty. Set it with hedge set ${projectKeySetting}=<key>.`);
   return { host, projectKey };
 }
 
@@ -35,7 +35,7 @@ export async function flush(home: string, to: Destination, io: Pick<FlushIo, "se
   const batch = readLines(readFileSync(sending, "utf8")).map((line) => ({
     event: line.event,
     timestamp: line.timestamp,
-    properties: { ...line.properties, distinct_id: `fleet-${line.properties.machine ?? "unknown"}`, $process_person_profile: false, $lib: "fleet" },
+    properties: { ...line.properties, distinct_id: `hedge-${line.properties.machine ?? "unknown"}`, $process_person_profile: false, $lib: "hedge" },
   }));
   if (batch.length) await post(to, JSON.stringify({ api_key: to.projectKey, batch }), io);
   rmSync(sending, { force: true });

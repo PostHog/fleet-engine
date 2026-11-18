@@ -2,10 +2,10 @@ import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-export const sessionTarget = ".config/fleet/session.sh";
+export const sessionTarget = ".config/hedge/session.sh";
 export const sourceLine = `[ -r "$HOME/${sessionTarget}" ] && . "$HOME/${sessionTarget}"`;
 
-const usage = "usage: fleet shell-session [--check]";
+const usage = "usage: hedge shell-session [--check]";
 
 export async function shellSessionCommand(args: string[], home: string): Promise<number> {
   if (args.length > 1 || (args.length === 1 && args[0] !== "--check")) throw new Error(usage);

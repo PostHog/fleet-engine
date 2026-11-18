@@ -1,9 +1,9 @@
 #!/bin/sh
 set -eu
-usage='Usage: fleet heavy [--unit <name> | --service <name> | --stop <name> | --holders] -- <command> [argument...]'
+usage='Usage: hedge heavy [--unit <name> | --service <name> | --stop <name> | --holders] -- <command> [argument...]'
 commands=$(CDPATH='' cd -- "$(dirname -- "$0")/../commands" && pwd -P)
 self=$0
-if [ -n "${XDG_RUNTIME_DIR:-}" ]; then locks="$XDG_RUNTIME_DIR/fleet-heavy"; else locks="${TMPDIR:-/tmp}/fleet-heavy-$(id -u)"; fi
+if [ -n "${XDG_RUNTIME_DIR:-}" ]; then locks="$XDG_RUNTIME_DIR/hedge-heavy"; else locks="${TMPDIR:-/tmp}/hedge-heavy-$(id -u)"; fi
 report_every=120
 
 age() {
@@ -80,7 +80,7 @@ describe_slots() {
 
 check_slots() {
   case "$slots" in
-    ''|*[!0-9]*|0*) echo "Fleet heavy: base.heavySlots must be a whole number above 0, not '$slots'." >&2; exit 2 ;;
+    ''|*[!0-9]*|0*) echo "Hedge heavy: base.heavySlots must be a whole number above 0, not '$slots'." >&2; exit 2 ;;
   esac
 }
 
@@ -89,14 +89,14 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --unit|--service|--stop)
       [ "$#" -ge 2 ] || { echo "$usage" >&2; exit 2; }
-      case "$2" in ''|-*|*[!A-Za-z0-9_.@-]*) echo "Fleet heavy: invalid unit name '$2'." >&2; exit 2 ;; esac
+      case "$2" in ''|-*|*[!A-Za-z0-9_.@-]*) echo "Hedge heavy: invalid unit name '$2'." >&2; exit 2 ;; esac
       case "$1" in --unit) unit=$2 ;; --service) service=$2 ;; --stop) stop=$2 ;; esac
       shift 2 ;;
     --holders) holders=1; shift ;;
     -h|--help)
-      printf '%s\n\n%s\n%s\n%s\n' "$usage" 'Runs builds, broad tests, typechecks, and previews in the capped fleet-heavy.slice.' \
-        'Example: fleet heavy -- bun run test' \
-        'fleet heavy --holders shows the jobs that hold the slots and the jobs that wait for one.'
+      printf '%s\n\n%s\n%s\n%s\n' "$usage" 'Runs builds, broad tests, typechecks, and previews in the capped hedge-heavy.slice.' \
+        'Example: hedge heavy -- bun run test' \
+        'hedge heavy --holders shows the jobs that hold the slots and the jobs that wait for one.'
       exit 0 ;;
     --) shift; break ;;
     *) break ;;
@@ -107,11 +107,11 @@ if [ -n "$stop" ]; then
   exec systemctl --user stop "$stop"
 fi
 if [ -n "$holders" ]; then
-  [ "$(uname -s)" = Linux ] || { echo "Fleet heavy: only Linux has slots."; exit 0; }
-  [ -d "$locks" ] || { echo "Fleet heavy: no job has run here yet."; exit 0; }
-  slots=${FLEET_HEAVY_SLOTS:?}
+  [ "$(uname -s)" = Linux ] || { echo "Hedge heavy: only Linux has slots."; exit 0; }
+  [ -d "$locks" ] || { echo "Hedge heavy: no job has run here yet."; exit 0; }
+  slots=${HEDGE_HEAVY_SLOTS:?}
   check_slots
-  echo "Fleet heavy slots on $(hostname):"
+  echo "Hedge heavy slots on $(hostname):"
   describe_slots
   queued_at=$(date +%s)
   queue_place
@@ -124,14 +124,14 @@ if [ -n "$holders" ]; then
   exit 0
 fi
 [ "$#" -gt 0 ] || { echo "$usage" >&2; exit 2; }
-if [ -n "${FLEET_HEAVY_ROUTE:-}" ] && [ -z "$unit$service" ]; then
-  route=$FLEET_HEAVY_ROUTE
-  unset FLEET_HEAVY_ROUTE
-  FLEET_HEAVY_ROUTED=1 exec bun "$route" "$@"
+if [ -n "${HEDGE_HEAVY_ROUTE:-}" ] && [ -z "$unit$service" ]; then
+  route=$HEDGE_HEAVY_ROUTE
+  unset HEDGE_HEAVY_ROUTE
+  HEDGE_HEAVY_ROUTED=1 exec bun "$route" "$@"
 fi
-if [ "$1" = fleet ]; then
+if [ "$1" = hedge ]; then
   shift
-  set -- /bin/sh "$(CDPATH='' cd -- "$commands/../../.." && pwd -P)/fleet" "$@"
+  set -- /bin/sh "$(CDPATH='' cd -- "$commands/../../.." && pwd -P)/hedge" "$@"
 fi
 disk_has_room() { bun "$commands/disk.ts" >/dev/null || exit 75; }
 disk_has_room
@@ -139,20 +139,20 @@ disk_has_room
 
 if [ -n "$service" ]; then
   systemctl --user stop "$service" 2>/dev/null || true
-  systemd-run --user --quiet --collect --unit="$service" --slice=fleet-heavy.slice --working-directory="$PWD" \
-    --setenv=PATH="$PATH" ${HOME:+--setenv=HOME="$HOME"} ${FLEET_PROFILE_DIR:+--setenv=FLEET_PROFILE_DIR="$FLEET_PROFILE_DIR"} \
-    ${FLEET_MEMORY_DIR:+--setenv=FLEET_MEMORY_DIR="$FLEET_MEMORY_DIR"} ${XDG_STATE_HOME:+--setenv=XDG_STATE_HOME="$XDG_STATE_HOME"} \
+  systemd-run --user --quiet --collect --unit="$service" --slice=hedge-heavy.slice --working-directory="$PWD" \
+    --setenv=PATH="$PATH" ${HOME:+--setenv=HOME="$HOME"} ${HEDGE_PROFILE_DIR:+--setenv=HEDGE_PROFILE_DIR="$HEDGE_PROFILE_DIR"} \
+    ${HEDGE_MEMORY_DIR:+--setenv=HEDGE_MEMORY_DIR="$HEDGE_MEMORY_DIR"} ${XDG_STATE_HOME:+--setenv=XDG_STATE_HOME="$XDG_STATE_HOME"} \
     ${XDG_CONFIG_HOME:+--setenv=XDG_CONFIG_HOME="$XDG_CONFIG_HOME"} \
     ${VSCODE_PROXY_URI:+--setenv=VSCODE_PROXY_URI="$VSCODE_PROXY_URI"} -- "$@"
-  echo "Fleet heavy: $service serves from $(hostname)."
+  echo "Hedge heavy: $service serves from $(hostname)."
   exit 0
 fi
 
-slots=${FLEET_HEAVY_SLOTS:?}
+slots=${HEDGE_HEAVY_SLOTS:?}
 check_slots
 mkdir -m 700 "$locks" 2>/dev/null || true
 if [ -L "$locks" ] || [ ! -d "$locks" ] || [ "$(stat -c %u "$locks")" != "$(id -u)" ] || ! chmod 700 "$locks"; then
-  echo "Fleet heavy: $locks is not a private folder of this user, so it cannot keep job records there." >&2
+  echo "Hedge heavy: $locks is not a private folder of this user, so it cannot keep job records there." >&2
   exit 1
 fi
 
@@ -166,8 +166,8 @@ run_in_slot() {
   rm -f "$waiting"
   exec 8>&-
   trap - EXIT INT TERM
-  echo "Fleet heavy: runs in slot $slot after $(age $(($(date +%s) - queued_at))) in the queue." >&2
-  exec systemd-run --user --scope --quiet --collect ${unit:+--unit="$unit"} --slice=fleet-heavy.slice -- "$@"
+  echo "Hedge heavy: runs in slot $slot after $(age $(($(date +%s) - queued_at))) in the queue." >&2
+  exec systemd-run --user --scope --quiet --collect ${unit:+--unit="$unit"} --slice=hedge-heavy.slice -- "$@"
 }
 
 queued_at=$(date +%s)
@@ -191,9 +191,9 @@ while :; do
   fi
   now=$(date +%s)
   if [ $((now - reported)) -ge "$report_every" ]; then
-    echo "Fleet heavy: waiting for one of $slots slots; this job is number $((ahead + 1)) of $queued in the queue and waited $(age $((now - queued_at))) so far. The slots:" >&2
+    echo "Hedge heavy: waiting for one of $slots slots; this job is number $((ahead + 1)) of $queued in the queue and waited $(age $((now - queued_at))) so far. The slots:" >&2
     describe_slots >&2
-    echo "Fleet heavy reports again every $(age "$report_every"). Your own timeout keeps running while this job waits." >&2
+    echo "Hedge heavy reports again every $(age "$report_every"). Your own timeout keeps running while this job waits." >&2
     reported=$now
   fi
   sleep 1

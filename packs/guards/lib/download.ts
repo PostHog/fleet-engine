@@ -19,15 +19,15 @@ const gitConfigWrites = new Set(["set", "unset", "rename-section", "remove-secti
 const gitBypassEnv = /^GIT_CONFIG_(?:NOSYSTEM|SYSTEM|COUNT|KEY_\d+|VALUE_\d+|PARAMETERS)$/;
 const rewriteKey = /^(?:url|protocol)\./i;
 
-const networkCodeReason = (person: string) => "Fleet blocked this command: it runs code straight from the network. "
+const networkCodeReason = (person: string) => "Hedge blocked this command: it runs code straight from the network. "
   + "Download the file into a new, empty directory as its own step, read it, and run it only if it does what you expect "
   + `and ${person} asked for this tool. If you are not sure, stop and ask ${person}.`;
 
-const runnerReason = (runner: string, name: string, person: string) => `Fleet blocked this command: \`${runner} ${name}\` downloads and runs a package `
+const runnerReason = (runner: string, name: string, person: string) => `Hedge blocked this command: \`${runner} ${name}\` downloads and runs a package `
   + "that this project does not have. Use a tool that the project's lockfile already pins, or add it as a dev dependency "
   + `(\`pnpm add -D\` or \`bun add -d\`). If you need a one-off tool, stop and ask ${person}.`;
 
-const gitBypassReason = (person: string) => "Fleet blocked this command: it changes how Git maps or allows URLs, which goes around the Git allowlist. "
+const gitBypassReason = (person: string) => "Hedge blocked this command: it changes how Git maps or allows URLs, which goes around the Git allowlist. "
   + `Use the URL as it is. If its owner is blocked, stop and ask ${person} to add it to the list.`;
 
 function readsProgramFromStdin(command: Command): boolean {

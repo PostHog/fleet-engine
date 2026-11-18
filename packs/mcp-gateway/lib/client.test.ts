@@ -11,9 +11,9 @@ const tunnelled = { relayPort: 60001 };
 const token = "mcphub_test-token";
 
 function home(client?: unknown) {
-  const dir = temp.make("fleet-mcphub-client-");
+  const dir = temp.make("hedge-mcphub-client-");
   if (client !== undefined) {
-    mkdirSync(join(dir, ".config/fleet"), { recursive: true });
+    mkdirSync(join(dir, ".config/hedge"), { recursive: true });
     writeFileSync(clientPath(dir), JSON.stringify(client));
   }
   return dir;
@@ -62,14 +62,14 @@ test("replaces a world-readable key file with a new private file, and never writ
   expect(statSync(old).mode & 0o777).toBe(0o644);
   expect(statSync(clientPath(dir)).ino).not.toBe(statSync(old).ino);
   expect(statSync(clientPath(dir)).mode & 0o777).toBe(0o600);
-  expect(readdirSync(join(dir, ".config/fleet")).sort()).toEqual(["mcphub.client.json"]);
+  expect(readdirSync(join(dir, ".config/hedge")).sort()).toEqual(["mcphub.client.json"]);
 });
 
 test("refuses to save a key through a linked config folder or to an address that is not the hub's", async () => {
   const dir = home();
-  const outside = temp.make("fleet-mcphub-outside-");
+  const outside = temp.make("hedge-mcphub-outside-");
   mkdirSync(join(dir, ".config"));
-  symlinkSync(outside, join(dir, ".config/fleet"));
+  symlinkSync(outside, join(dir, ".config/hedge"));
   await expect(saveGatewayClient(dir, { baseUrl: localGatewayUrl, token }, secure)).rejects.toThrow("linked");
   await expect(saveGatewayClient(home(), { baseUrl: "https://elsewhere.example.com:60001/mcphub", token }, secure)).rejects.toThrow("is not a key from your hub");
 });

@@ -27,7 +27,7 @@ export type Pack = {
   risk?: string;
   requires?: string[];
   instructions?: string;
-  register(fleet: Fleet): void;
+  register(hedge: Hedge): void;
 };
 
 /** on: "hub" runs the command on the hub, also when a person types it on another node. when: the command runs only while that workflow is on. */
@@ -38,11 +38,11 @@ export type Process = { run(ctx: Context): Promise<void> };
 export type Serve = { port: number; health: string; credential(ctx: Context, node: string): Promise<string> };
 export type ServiceDef = Scope & { id: string } & ((Process & { serve?: Serve }) | { serve: Serve; run?: undefined });
 export type ConfigDef = Scope & { provider: "claude" | "codex" | "t3"; key: string; value: unknown };
-/** command: a fleet command a person runs. run: a repair that Fleet runs during apply when the check fails. */
+/** command: a hedge command a person runs. run: a repair that Hedge runs during apply when the check fails. */
 export type Repair = { ask: string; command?: string; interactive?: true; run?: never } | { run(ctx: Context): Promise<void>; ask?: string; command?: never; interactive?: never };
 export type CheckDef = Scope & { id: string; say: string; test(ctx: Context): Promise<boolean>; repair?: Repair };
 
-export type Fleet = {
+export type Hedge = {
   setting<K extends SettingType>(def: SettingDef<K>): Setting<ValueOf[K]>;
   workflow(def: WorkflowDef): Workflow;
   command(name: string, def: Command): void;

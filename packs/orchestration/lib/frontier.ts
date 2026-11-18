@@ -1,6 +1,6 @@
 import { descendants, fetchIssueFromGitHub, mapRef, parked, ticketType, type Blocker, type FetchIssue, type MapIo, type MapRef, type Ticket } from "./wayfinder.ts";
 
-const usage = "Usage: fleet frontier <map URL | owner/repo#number | number>";
+const usage = "Usage: hedge frontier <map URL | owner/repo#number | number>";
 
 export async function readFrontier(ref: MapRef, fetchIssue: FetchIssue): Promise<string> {
   const map = await fetchIssue(ref.owner, ref.repo, ref.number);

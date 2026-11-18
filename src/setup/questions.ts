@@ -205,7 +205,7 @@ async function askSetting(context: QuestionContext, setting: PackSetting): Promi
     if (saved === undefined && zoned !== undefined && !context.draftMayBeBehind) return save(zoned, true);
     const fallback = saved ?? setting.default;
     if (fallback !== undefined) return terminal.print(`  ✓ ${label(setting, fallback)}`);
-    if (setting.optional) return terminal.print(`  ✓ Skipped. Set it later with fleet set ${setting.key}=<value>.`);
+    if (setting.optional) return terminal.print(`  ✓ Skipped. Set it later with hedge set ${setting.key}=<value>.`);
     return "unanswered";
   }
   const fallback = saved ?? zoned ?? setting.default;
@@ -214,7 +214,7 @@ async function askSetting(context: QuestionContext, setting: PackSetting): Promi
     const preferred = setting.choices.findIndex((choice) => choice.value === fallback);
     const skip = setting.optional && preferred < 0;
     const index = await chooseFrom(terminal, setting.choices.map((choice) => choice.label), preferred, preferred >= 0 ? setting.choices[preferred]!.label : undefined, skip);
-    if (index < 0) return terminal.print(`  ✓ Skipped. Set it later with fleet set ${setting.key}=<value>.`);
+    if (index < 0) return terminal.print(`  ✓ Skipped. Set it later with hedge set ${setting.key}=<value>.`);
     return save(setting.choices[index]!.value);
   }
   const hint = fallback !== undefined ? `Press ↵ for ${String(fallback)}, or type a value: ` : setting.optional ? `Press ↵ to skip, or type a value: ` : "Type a value: ";
@@ -227,7 +227,7 @@ async function askSetting(context: QuestionContext, setting: PackSetting): Promi
       return undefined;
     }
   });
-  if (value === null) return terminal.print(`  ✓ Skipped. Set it later with fleet set ${setting.key}=<value>.`);
+  if (value === null) return terminal.print(`  ✓ Skipped. Set it later with hedge set ${setting.key}=<value>.`);
   return save(value);
 }
 

@@ -26,7 +26,7 @@ they turn one on. Ask with your question tool, in one call:
   push there. Add `--set guards.main-push-repos=<repos>`.
 
 `merge-gate` makes an agent's Trunk enqueue or merge wait for a
-`fleet proof gate` pass at the head of each open layer of the PR's stack, or
+`hedge proof gate` pass at the head of each open layer of the PR's stack, or
 for the person's gate override at that head. Turn it on only when the person
 proves PRs with the Pull requests pack: add `--workflows merge-gate=on`.
 Repositories that merge without the gate, such as their own tooling, go in

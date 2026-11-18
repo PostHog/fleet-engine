@@ -10,6 +10,6 @@ try {
     err: (text) => process.stderr.write(text),
   });
 } catch (error) {
-  console.error(`fleet secret: ${failureOf(error)}`);
+  console.error(`hedge secret: ${failureOf(error)}`);
   process.exitCode = 1;
 }

@@ -8,7 +8,7 @@ import { codexInstaller, nightlyAgentUpdate, t3Busy, updateAgents, updatePlugins
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
 
-const fleetCodex = 'sh -c readlink "$HOME/.local/bin/codex"';
+const hedgeCodex = 'sh -c readlink "$HOME/.local/bin/codex"';
 
 function stub(results: Record<string, { code: number; out: string }>) {
   const calls: string[] = [];
@@ -19,36 +19,36 @@ function stub(results: Record<string, { code: number; out: string }>) {
   return { run, calls };
 }
 
-test("updates the agent CLIs that Fleet installed", async () => {
+test("updates the agent CLIs that Hedge installed", async () => {
   const { run, calls } = stub({
     'sh -c test -x "$HOME/.local/bin/claude" && echo native': { code: 0, out: "native\n" },
     "claude update": { code: 0, out: "" },
     "bun pm ls -g": { code: 0, out: "├── @openai/codex@0.9.0" },
     "bun add -g @openai/codex@latest": { code: 0, out: "" },
   });
-  expect(await updateAgents(run)).toEqual({ ok: true, lines: ["Claude Code: up to date.", "Codex: not installed by Fleet, skipped.", "Codex from Bun: up to date."] });
+  expect(await updateAgents(run)).toEqual({ ok: true, lines: ["Claude Code: up to date.", "Codex: not installed by Hedge, skipped.", "Codex from Bun: up to date."] });
   expect(calls).toContain("bun add -g @openai/codex@latest");
 });
 
 test.each([
-  ["through its current release", "/home/me/.local/share/fleet/codex/current/bin/codex\n"],
-  ["from the earlier single-folder layout", "/home/me/.local/share/fleet/codex/bin/codex\n"],
-])("updates the Codex that Fleet installed from its release package %s", async (_layout, target) => {
-  const { run, calls } = stub({ [fleetCodex]: { code: 0, out: target }, [`sh ${codexInstaller}`]: { code: 0, out: "" }, "bun pm ls -g": { code: 0, out: "" } });
-  expect((await updateAgents(run)).lines).toEqual(["Claude Code: not installed by Fleet, skipped.", "Codex: up to date.", "Codex from Bun: not installed by Fleet, skipped."]);
+  ["through its current release", "/home/me/.local/share/hedge/codex/current/bin/codex\n"],
+  ["from the earlier single-folder layout", "/home/me/.local/share/hedge/codex/bin/codex\n"],
+])("updates the Codex that Hedge installed from its release package %s", async (_layout, target) => {
+  const { run, calls } = stub({ [hedgeCodex]: { code: 0, out: target }, [`sh ${codexInstaller}`]: { code: 0, out: "" }, "bun pm ls -g": { code: 0, out: "" } });
+  expect((await updateAgents(run)).lines).toEqual(["Claude Code: not installed by Hedge, skipped.", "Codex: up to date.", "Codex from Bun: not installed by Hedge, skipped."]);
   expect(calls).toContain(`sh ${codexInstaller}`);
   expect(codexInstaller).toEndWith("packs/base/lib/install-codex.sh");
 });
 
 test("skips a CLI that is missing and reports a failed update", async () => {
   const { run, calls } = stub({ 'sh -c test -x "$HOME/.local/bin/claude" && echo native': { code: 0, out: "native\n" }, "claude update": { code: 1, out: "" }, "bun pm ls -g": { code: 0, out: "typescript" } });
-  expect(await updateAgents(run)).toEqual({ ok: false, lines: ["Claude Code: update failed (exit 1).", "Codex: not installed by Fleet, skipped.", "Codex from Bun: not installed by Fleet, skipped."] });
+  expect(await updateAgents(run)).toEqual({ ok: false, lines: ["Claude Code: update failed (exit 1).", "Codex: not installed by Hedge, skipped.", "Codex from Bun: not installed by Hedge, skipped."] });
   expect(calls).not.toContain("bun add -g @openai/codex@latest");
 });
 
 test("leaves a Claude Code that a package manager installed to that manager", async () => {
   const { run, calls } = stub({ 'sh -c test -x "$HOME/.local/bin/claude" && echo native': { code: 1, out: "" }, "bun pm ls -g": { code: 0, out: "" } });
-  expect((await updateAgents(run)).lines).toContain("Claude Code: not installed by Fleet, skipped.");
+  expect((await updateAgents(run)).lines).toContain("Claude Code: not installed by Hedge, skipped.");
   expect(calls).not.toContain("claude update");
 });
 
@@ -72,7 +72,7 @@ test("skips the plugins of an agent CLI that is missing, and reports a plugin th
   });
   expect(await updatePlugins(run)).toEqual({ ok: false, lines: ["Claude Code plugins: review@team-tools did not update.", "Codex plugins: codex is not installed, skipped."] });
   const unreadable = stub({ "claude plugin marketplace update": { code: 0, out: "" }, "claude plugin list --json": { code: 0, out: "not json" } });
-  expect((await updatePlugins(unreadable.run)).lines[0]).toBe("Claude Code plugins: Fleet could not read the plugin list.");
+  expect((await updatePlugins(unreadable.run)).lines[0]).toBe("Claude Code plugins: Hedge could not read the plugin list.");
 });
 
 const healthCheck = (origin = "http://127.0.0.1:3773") => `curl --fail --silent --max-time 5 ${origin}/.well-known/t3/environment`;
@@ -135,7 +135,7 @@ test("a failed compaction or update fails the run", async () => {
   expect(await updateT3(run, t3Options())).toEqual({ ok: false, lines: ["T3 Code: t3 doctor --fix failed (exit 1).", "T3 Code: t3 update failed (exit 2)."] });
 });
 
-test("an agent turn counts as running from T3 Code's state, and a state Fleet cannot read counts as busy", () => {
+test("an agent turn counts as running from T3 Code's state, and a state Hedge cannot read counts as busy", () => {
   const dir = temp.make("t3-state-");
   const state = join(dir, "statev2.sqlite");
   expect(t3Busy(state)).toBe(false);

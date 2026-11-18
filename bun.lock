@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "fleet-engine",
+      "name": "hedge",
       "dependencies": {
         "smol-toml": "^1.9.1",
       },

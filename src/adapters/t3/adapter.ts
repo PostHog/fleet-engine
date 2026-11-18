@@ -47,7 +47,7 @@ export function t3Adapter(options: T3Options = {}): T3Adapter {
         if (!(await server.answering(home))) {
           if (!seeded) merge(result, await reconcileSettings(plan, home, settings));
           const waiting = [...new Set(taskProjects(plan).map((item) => item.path))];
-          if (waiting.length) result.findings.push(finding("projects", `T3 Code is not running, so ${waiting.join(", ")} ${waiting.length === 1 ? "waits to be added as a project" : "wait to be added as projects"}. The next fleet apply after T3 Code starts adds ${waiting.length === 1 ? "it" : "them"}.`, "apply"));
+          if (waiting.length) result.findings.push(finding("projects", `T3 Code is not running, so ${waiting.join(", ")} ${waiting.length === 1 ? "waits to be added as a project" : "wait to be added as projects"}. The next hedge apply after T3 Code starts adds ${waiting.length === 1 ? "it" : "them"}.`, "apply"));
           result.findings.push(...waitingScripts(plan));
           return result;
         }
@@ -60,7 +60,7 @@ export function t3Adapter(options: T3Options = {}): T3Adapter {
           });
           live = { home, plan };
         } catch (error) {
-          result.findings.push(finding("server", `T3 Code did not answer (${(error as Error).message}). Run fleet apply again.`, "apply"));
+          result.findings.push(finding("server", `T3 Code did not answer (${(error as Error).message}). Run hedge apply again.`, "apply"));
         }
         return result;
       };
@@ -102,7 +102,7 @@ function wantedProjects(plan: Plan, home: string): Wanted[] {
 function addedNote(path: string, owners: Owner[]) {
   const who = owners.map((owner) => owner.who);
   const off = [...new Set(owners.map((owner) => owner.off))];
-  return finding(`project:${path}`, `Fleet added the T3 project ${path}, because ${listed(who)} ${who.length === 1 ? "runs" : "run"} in it. To keep it removed, turn off ${listed(off)}.`);
+  return finding(`project:${path}`, `Hedge added the T3 project ${path}, because ${listed(who)} ${who.length === 1 ? "runs" : "run"} in it. To keep it removed, turn off ${listed(off)}.`);
 }
 
 async function reconcileProjects(rpc: T3Rpc, plan: Plan, home: string, run: CommandRunner, dryRun: boolean, result: AdapterResult) {
@@ -118,8 +118,8 @@ async function reconcileProjects(rpc: T3Rpc, plan: Plan, home: string, run: Comm
     if (added.code === 0) {
       result.actions.push({ target: `t3 project ${path}`, operation: "create" });
       result.findings.push(addedNote(path, owners));
-    } else if (added.code === 127) result.findings.push(finding(`project:${path}`, `Fleet cannot run t3 to add the project ${path}. Add the folder as a project in T3 Code, then run fleet apply.`, "human"));
-    else result.findings.push(finding(`project:${path}`, `T3 Code did not add the project ${path} (exit ${added.code}). Check that the folder exists, then run fleet apply.`, "apply"));
+    } else if (added.code === 127) result.findings.push(finding(`project:${path}`, `Hedge cannot run t3 to add the project ${path}. Add the folder as a project in T3 Code, then run hedge apply.`, "human"));
+    else result.findings.push(finding(`project:${path}`, `T3 Code did not add the project ${path} (exit ${added.code}). Check that the folder exists, then run hedge apply.`, "apply"));
   }
 }
 
@@ -128,7 +128,7 @@ async function checkLinks(rpc: T3Rpc, result: AdapterResult) {
   try {
     links = (await rpc.call<{ links: Link[] }>("peerLinks.list", {})).links;
   } catch (error) {
-    return void result.findings.push(finding("links", `Fleet could not read T3 Code's linked environments (${(error as Error).message}).`));
+    return void result.findings.push(finding("links", `Hedge could not read T3 Code's linked environments (${(error as Error).message}).`));
   }
   for (const link of links) {
     if (link.status === "expired") result.findings.push(finding(`link:${link.environmentId}`, `The link to ${link.label} has expired. Link it again in T3 Code: Settings, Environments, Link environment.`, "human"));

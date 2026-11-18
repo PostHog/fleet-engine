@@ -11,9 +11,9 @@ export type TunnelMode = "plan" | "install" | "doctor" | "remove" | "left";
 /** dialsHub: the devboxes that the profile names, which reach the hub's served ports through their own forward. */
 export type TunnelMachine = { home: string; devboxes: string[]; dialsHub: string[]; relayPort: number; httpsHost?: string; proxy?: boolean; hosts: string; run: Run; print(line: string): void };
 
-const marker = "# Managed by Fleet hub SSH tunnels.";
-const hostsMarker = " # fleet-hub-tunnel";
-const unitName = (alias: string) => `fleet-ssh-${alias}.service`;
+const marker = "# Managed by Hedge hub SSH tunnels.";
+const hostsMarker = " # hedge-hub-tunnel";
+const unitName = (alias: string) => `hedge-ssh-${alias}.service`;
 const loopback = (port: number) => `-R 127.0.0.1:${port}:127.0.0.1:${port}`;
 
 export function tunnelTargets(hub: string, devboxes: string[], self: string): string[] {
@@ -23,7 +23,7 @@ export function tunnelTargets(hub: string, devboxes: string[], self: string): st
 export function tunnelUnit(alias: string, relayPort: number, proxy = false, gateway = false): string {
   return `${marker}
 [Unit]
-Description=Fleet hub SSH tunnel for ${sshName(alias)}
+Description=Hedge hub SSH tunnel for ${sshName(alias)}
 
 [Service]
 Environment=CODER_SSH_DISABLE_AUTOSTART=true
@@ -48,7 +48,7 @@ export async function sshTunnels(mode: TunnelMode, machine: TunnelMachine): Prom
   const role = readRole(machine.home);
   if (role === "hub") return hubTunnels(mode, machine);
   if (role === "devbox") return devboxHosts(mode, machine);
-  throw new Error(`fleet ssh-tunnels runs on the hub or a devbox, not on a ${role ?? "machine without a role"}. On a Mac, run fleet hub-tunnel.`);
+  throw new Error(`hedge ssh-tunnels runs on the hub or a devbox, not on a ${role ?? "machine without a role"}. On a Mac, run hedge hub-tunnel.`);
 }
 
 async function hubTunnels(mode: TunnelMode, machine: TunnelMachine) {
@@ -58,7 +58,7 @@ async function hubTunnels(mode: TunnelMode, machine: TunnelMachine) {
   const changed = await changedFiles(machine.home, units, marker, "tunnel");
   const systemctl = (...args: string[]) => must(machine.run, ["systemctl", "--user", ...args]);
   const stale = mode === "plan" ? [] : await staleUnits(machine.home, directory, units.map((unit) => unit.name));
-  if (mode === "doctor") await requireInstalled(machine.home, units, marker, "tunnel", "fleet ssh-tunnels install", stale.map((name) => join(directory, name)));
+  if (mode === "doctor") await requireInstalled(machine.home, units, marker, "tunnel", "hedge ssh-tunnels install", stale.map((name) => join(directory, name)));
   if (mode === "install") {
     for (const name of stale) {
       await systemctl("disable", "--now", name);
@@ -81,7 +81,7 @@ async function hubTunnels(mode: TunnelMode, machine: TunnelMachine) {
   return 0;
 }
 
-/** On any role, remove takes away every tunnel unit and the hosts entry Fleet wrote, and left exits 0 while one is here. */
+/** On any role, remove takes away every tunnel unit and the hosts entry Hedge wrote, and left exits 0 while one is here. */
 async function withoutTunnels(mode: "remove" | "left", machine: TunnelMachine) {
   const directory = join(machine.home, ".config/systemd/user");
   const units = (await staleUnits(machine.home, directory, [])).sort().map((name) => join(directory, name));
@@ -101,7 +101,7 @@ async function staleUnits(home: string, directory: string, wanted: string[]): Pr
   await refuseLinks(home, directory, "tunnel path");
   const names = await readdir(directory).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return []; throw error; });
   const stale: string[] = [];
-  for (const name of names.filter((file) => /^fleet-ssh-.+\.service$/.test(file) && !wanted.includes(file))) {
+  for (const name of names.filter((file) => /^hedge-ssh-.+\.service$/.test(file) && !wanted.includes(file))) {
     const path = join(directory, name);
     if ((await lstat(path)).isFile() && ownedBy((await readIfThere(path)) ?? "", marker)) stale.push(name);
   }
@@ -115,7 +115,7 @@ async function devboxHosts(mode: TunnelMode, machine: TunnelMachine) {
   if ((await lstat(machine.hosts)).isSymbolicLink()) throw new Error(`Keep linked hosts file: ${machine.hosts}`);
   const previous = await readFile(machine.hosts, "utf8");
   const wanted = hostsWith(previous, host);
-  if (mode === "doctor" && previous !== wanted) throw new Error(`${machine.hosts} does not map ${host} to the hub tunnel. Run fleet ssh-tunnels install.`);
+  if (mode === "doctor" && previous !== wanted) throw new Error(`${machine.hosts} does not map ${host} to the hub tunnel. Run hedge ssh-tunnels install.`);
   if (mode === "install" && previous !== wanted) await must(machine.run, ["sudo", "-n", "tee", machine.hosts], wanted);
   machine.print(`${host}: hosts entry ${mode === "plan" ? "planned" : "present"}`);
   return 0;

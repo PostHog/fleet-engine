@@ -45,7 +45,7 @@ type Subcommand = {
 };
 
 const overrideHelp = `--override takes the user's answer to the question that review-start prints when the arbiter escalates or gives no
-verdict. At the review budget fleet asks nothing, and only the user's --override runs another review. Ask it with your question tool, with the options "Run one more round" and "Stop
+verdict. At the review budget hedge asks nothing, and only the user's --override runs another review. Ask it with your question tool, with the options "Run one more round" and "Stop
 here". Only their choice of "Run one more round" there counts, quoted with the date they gave it, for example
 --override '2026-10-24 "Run one more round"'. --thread names the T3 thread where they answered and defaults to this
 one (T3CODE_THREAD_ID). A typed message, a refusal, or a general rule, such as "ship everything autonomously", does
@@ -53,7 +53,7 @@ not answer a round. The question names the PR, and an answer to the question of 
 answer lands in the decision ledger as a 👤 review decision; one answer records one decision and starts one round.
 --agent takes your own reason for a round that the arbiter escalates; it never passes the review budget. It lands in the ledger
 as a 🤖 review decision, refused on a PR whose merge-risk callout has no Tier line at HEAD. --standing is its old
-name. The round keeps the decision and the arbiter's verdict. List decisions with fleet decision list.
+name. The round keeps the decision and the arbiter's verdict. List decisions with hedge decision list.
 A round starts only once its decision is in the ledger. A round that holds a decision stays reserved until the
 ledger holds another decision for the same answer. A round of another commit whose decision is still not in the
 ledger is dropped when the next round starts: its decision never counted. It stays reserved while the hub is down or
@@ -63,19 +63,19 @@ ledger does not hold it yet, asks for no new answer, and goes on with that round
 starts them on the same command or on --wait, with or without --round, and each lens starts once. A single-reviewer
 round whose findings are saved prints them and runs no reviewer again. review-finish records the round's decision
 first when its review-start ended before it did. Commands on one round take turns, and a new round is reserved with
-its lock already held. A command that finds another fleet proof command at work on the round stops and names its
-process and lock file; wait for it to end, then run the command again, or, on a panel, run fleet proof review --wait,
+its lock already held. A command that finds another hedge proof command at work on the round stops and names its
+process and lock file; wait for it to end, then run the command again, or, on a panel, run hedge proof review --wait,
 which waits for it. A round is taken over when its command is gone, when its process id now names a process that
 started later, or when its lock file stays empty for a minute.
 The settings pull-requests.freeReviews and pull-requests.reviewCeiling set how many reviews run before the arbiter weighs
 one more and where the loop stops: the panel rounds and the final reads of the review phase count together, and the
 final reads of the babysit phase count apart. The default budget is the panel, the fixes read, and the last read. A
 PR of the Read tier gets its one read and one final read of its fixes. The arbiter is the lookup model of your
-AI plan; FLEET_REVIEW_ARBITER replaces its command.`;
+AI plan; HEDGE_REVIEW_ARBITER replaces its command.`;
 
 const subcommands: Record<string, Subcommand> = {
   path: {
-    usage: "path", summary: "Print the proof directory of the commit.", examples: ["fleet proof path"],
+    usage: "path", summary: "Print the proof directory of the commit.", examples: ["hedge proof path"],
     run: async (_, identity, { print, home }) => { print(proofDirectory(home, identity())); return 0; },
   },
   save: {
@@ -84,14 +84,14 @@ const subcommands: Record<string, Subcommand> = {
 and for clean merges of the base on top of it. When the evidence of an earlier commit still proves HEAD, record
 that with --reuse-from and the reason; the gate prints it.
 --ran and --result give one line each of what ran and what it showed, for the proof receipt. Without files they
-record only the lines, such as for evidence that fleet proof run saved. A later save of the kind at the commit with
+record only the lines, such as for evidence that hedge proof run saved. A later save of the kind at the commit with
 them replaces both, and a save without them keeps them. --caption names what one ui-walk screenshot shows; the
 receipt lists screenshots in the order of their first caption, and a new caption keeps that place. The lines and
 captions live in the PR's display/ directory, outside the evidence: the gate and the judge never read them.`,
     examples: [
-      "fleet proof save --kind live-run --ran 'Sent a test email to the sandbox inbox' --result 'Delivered in one attempt' run.log",
-      "fleet proof save --kind ui-walk --caption 'Settings page after the save' after.png",
-      "fleet proof save --kind live-run --reuse-from 1a2b3c4 --reason 'The fix only renames a variable'",
+      "hedge proof save --kind live-run --ran 'Sent a test email to the sandbox inbox' --result 'Delivered in one attempt' run.log",
+      "hedge proof save --kind ui-walk --caption 'Settings page after the save' after.png",
+      "hedge proof save --kind live-run --reuse-from 1a2b3c4 --reason 'The fix only renames a variable'",
     ],
     options: ["--kind", "--reuse-from", "--reason", "--ran", "--result", "--caption"],
     run: async ({ options, files }, identity, { print, home, cwd, run, now }) => {
@@ -122,15 +122,15 @@ captions live in the PR's display/ directory, outside the evidence: the gate and
     usage: "run --kind <kind> -- <command> [argument...]",
     summary: `Run a proof command on a clean commit and save its output as evidence of the kind. Everything after the first
 -- is the command, unchanged, run without a shell and with stdin closed; run a pipeline as sh -c '<pipeline>'. The
-output passes through to the terminal, and stdout and stderr go together into one private spool. fleet reads HEAD
+output passes through to the terminal, and stdout and stderr go together into one private spool. hedge reads HEAD
 and the status before and after the run: a tree with modified or untracked files refuses with exit 2, so commit
 first. Only a run that exits 0 with text output, with HEAD unchanged and the tree clean at both checks, saves: the
 output, with known secrets redacted, as <kind> evidence of the HEAD read before the run, and a run record of the
 redacted command in runs/<commit>/<kind>/. Every other run saves nothing, says why, and exits with the command's
 status: 128 + n when signal n stopped it, 127 when it cannot start, and 1 when it printed nothing, printed a null
-byte, or HEAD or the tree changed. The judge marks runner files as captured by the Fleet runner. --commit is not
-taken; ui-walk takes screenshots, so save them with fleet proof save.`,
-    examples: ["fleet proof run --kind live-run -- bun test src/send.test.ts", "fleet proof run --kind live-run -- sh -c 'curl -s localhost:8000/health | jq .status'"],
+byte, or HEAD or the tree changed. The judge marks runner files as captured by the Hedge runner. --commit is not
+taken; ui-walk takes screenshots, so save them with hedge proof save.`,
+    examples: ["hedge proof run --kind live-run -- bun test src/send.test.ts", "hedge proof run --kind live-run -- sh -c 'curl -s localhost:8000/health | jq .status'"],
     options: ["--kind"], takesCommand: true,
     run: async ({ options, command }, _, context) => {
       if (options.has("--commit")) throw usageError("run", "--commit is not taken: the runner reads HEAD from Git. After --, --commit belongs to the command");
@@ -143,11 +143,11 @@ taken; ui-walk takes screenshots, so save them with fleet proof save.`,
   publish: {
     usage: "publish --asset-repo <owner/name> [--recheck] <file>...",
     summary: `Publish screenshots to a public repository of your own GitHub account when gh cannot attach them to the PR.
---asset-repo names that repository; fleet has no default. It refuses a private repository and one your account does
-not own, and it publishes each screenshot under proof/ on the fleet-proof branch, named by the hash of its bytes,
+--asset-repo names that repository; hedge has no default. It refuses a private repository and one your account does
+not own, and it publishes each screenshot under proof/ on the hedge-proof branch, named by the hash of its bytes,
 with no name of the PR or its repository. Publish only screenshots with invented test data. --recheck asks GitHub
 again after you change the repository's access.`,
-    examples: ["fleet proof publish --asset-repo octocat/assets after.png"], options: ["--asset-repo"], flags: ["--recheck"],
+    examples: ["hedge proof publish --asset-repo octocat/assets after.png"], options: ["--asset-repo"], flags: ["--recheck"],
     run: async ({ options, flags, files }, identity, { print, home, cwd, github }) => {
       requireFiles(files, "publish");
       const assets = required(options, "--asset-repo", "publish");
@@ -167,13 +167,13 @@ proof summary the gate saved at HEAD and the decision ledger, never a proof's pa
 between ${receiptOpen} head=<sha> hash=<hex> --> and ${receiptClose}; the rest of the body stays as it is, and the
 judge never reads the block. A run does nothing when the body already holds the receipt of HEAD with the same
 content. --not-checked replaces the list of what was not checked; without it the last list stays. Run it after each
-fleet proof gate on a new head. The body is public: fleet reads each field as GitHub renders it and refuses one with
+hedge proof gate on a new head. The body is public: hedge reads each field as GitHub renders it and refuses one with
 a number of four or more digits, a percentage, a thousands separator, an email address or an HTML entity, and names
 it; move such detail into an evidence note. The prod-shape result always reads "${prodShapeResult}". A pack's
 ${publisherSeam} handler publishes the full receipt: it reads {repository, pr, title, page, previous: {id, url}} as
 JSON on stdin and prints {id, url}, or {failed}, as its last line; the block then links the URL, and the next run
 on this machine passes it back as previous. A machine that did not publish it sends no previous, so the handler
-publishes a new page. Without a handler, fleet writes the page to display/receipt.md in the PR's proof store,
+publishes a new page. Without a handler, hedge writes the page to display/receipt.md in the PR's proof store,
 prints its path, links nothing in the block, and records the PR itself as the receipt unless one is recorded. The
 page shows the proof of each commit in the order it was proved or reviewed, each review round with its lenses and
 findings, the judge verdicts, the gaps with their decisions, the screenshots, the lines and notes of each owed proof,
@@ -182,13 +182,13 @@ its line, table cell or text run, followed by a space, whatever markup or inline
 everything after it. Fenced and indented code
 and HTML blocks are left out wherever they sit, and headings show as bold lines. When the handler's request is over ${receiptBudget}
 bytes, the page leaves out the raw lens answers, then the judge reasons, then note lines past the 40th, and says so.
-fleet refuses an empty body read, a body that changed between its read and the write,
+hedge refuses an empty body read, a body that changed between its read and the write,
 broken markers, a write that would change the merge-risk callout, and a body that reads back different. It warns about each proof without a line and each screenshot
 without a caption or a published URL. Exit 0 when the receipt is current or written; 1 when publishing or GitHub
 fails, or the page is still over the budget; 2 when the guard refuses a field; 3 when the hub ledger cannot be reached. --comment records a comment you
-posted on the PR as its receipt instead: GitHub must show the comment on this PR. fleet proof gate --json and fleet
+posted on the PR as its receipt instead: GitHub must show the comment on this PR. hedge proof gate --json and hedge
 decision report link the receipt.`,
-    examples: ["fleet proof receipt --not-checked 'Safari' --not-checked 'the mobile layout'", "fleet proof receipt", "fleet proof receipt --comment https://github.com/owner/name/pull/7#issuecomment-1"],
+    examples: ["hedge proof receipt --not-checked 'Safari' --not-checked 'the mobile layout'", "hedge proof receipt", "hedge proof receipt --comment https://github.com/owner/name/pull/7#issuecomment-1"],
     options: ["--comment"], repeatable: ["--not-checked"],
     run: async ({ options, lists }, identity, context) => {
       if (!options.has("--comment")) return runReceipt(identity(), lists.get("--not-checked"), context);
@@ -206,15 +206,15 @@ decision report link the receipt.`,
     usage: "require (--kinds <kind,kind> | --after-dev <owner/name#number> | --none --reason <why>) [--author claude|gpt]",
     summary: `Record the proof kinds the PR owes. Repeated calls add kinds. A PR that owes none records --none with the
 reason. The gate fails until one of them is recorded. The first call also records the model family that wrote the
-PR, from the Claude Code or Codex session that runs it; pass --author only outside such a session. fleet proof review
+PR, from the Claude Code or Codex session that runs it; pass --author only outside such a session. hedge proof review
 and the judge pick their model from it: the review row of the model table for a PR that Claude wrote, and the
 review-codex row for one that Codex wrote when the table has one. The recorded family does not change.
 A prod PR that waits on an observed result in dev, when infrastructure goes to dev first, names its dev PR with
 --after-dev. That adds the kind dev-observed and records the dev PR once. The gate then reads the dev PR on GitHub
 and prints "waiting on the dev result of <dev PR>" until the dev PR has merged and evidence of dev-observed was saved
-after that merge, such as with fleet proof run --kind dev-observed -- <command>. The judge then gets that evidence
+after that merge, such as with hedge proof run --kind dev-observed -- <command>. The judge then gets that evidence
 with the merge time and the time it was saved.`,
-    examples: ["fleet proof require --kinds live-run,ui-walk", "fleet proof require --none --reason 'Docs only'", "fleet proof require --kinds prod-shape,post-deploy-watch --after-dev owner/charts#123"],
+    examples: ["hedge proof require --kinds live-run,ui-walk", "hedge proof require --none --reason 'Docs only'", "hedge proof require --kinds prod-shape,post-deploy-watch --after-dev owner/charts#123"],
     options: ["--kinds", "--reason", "--author", "--after-dev"], flags: ["--none"],
     run: async ({ options, flags }, identity, { print, home, env }) => {
       if (flags.has("--none") === (options.has("--kinds") || options.has("--after-dev"))) throw usageError("require", "Pass --kinds, --after-dev, or --none");
@@ -228,55 +228,55 @@ with the merge time and the time it was saved.`,
   },
   review: {
     usage: "review [--lens <name>[:same|:other]]... [--knowledge <lens>=<file>]... [--scope full|fixes|final] [--base <reviewed-sha>] [--phase review|babysit] [--single] [--override <dated quote> [--thread <id>] | --agent <reason>] | review --wait [--round <number|final>]",
-    summary: `Without --lens, --scope full runs the panel of the PR's review tier, which fleet picks from the merge-risk grade
+    summary: `Without --lens, --scope full runs the panel of the PR's review tier, which hedge picks from the merge-risk grade
 of the PR description and the authored production lines of the diff: lines outside tests, docs, lockfiles, and
 generated files. Read: grade low or no grade, and under 50 authored lines; one combined Correctness and Risk lens on the
-other family, and at most one final read of its fixes. Pair: any other grade but high, or a grade fleet cannot read;
+other family, and at most one final read of its fixes. Pair: any other grade but high, or a grade hedge cannot read;
 the lenses correctness:other, risk:other, and fresh-eyes:same. Panel: grade high; the lenses fresh-eyes, correctness,
 risk, design, and anti-overengineering. --lens adds lenses to the tier's set, such as security, ui, systems, or a
-Team perspective; it never removes one. The output and fleet proof show name the tier and why. An unfinished panel
+Team perspective; it never removes one. The output and hedge proof show name the tier and why. An unfinished panel
 runs again with the lenses it started with when you pass no --lens.
 --single, --scope fixes, and --scope final reserve a review round and run one reviewer yourself, read-only, from the model table of your AI plan: the review
 row for a PR that Claude wrote, and the review-codex row for a PR that Codex wrote when the table has one, else the
 review row. On the both plan that reviewer is the family that did not write the PR; on a single plan it is a fresh
-session of that provider. fleet builds the prompt from the diff, the PR title and description, and the coding
-standards in ~/.agents/guides/coding-standards.md, and saves the reviewer's answer as the findings. fleet checks each
-finding's anchor against the diff and prints the result after the findings; it keeps it apart, in anchors.md. Answer them with fleet proof respond. Scope and --base work as for
-review-start. When the reviewer gives no answer, the round stays reserved and the next fleet proof review on the same
-commit retries it. The setting pull-requests.reviewTimeoutMinutes limits the reviewer. FLEET_PROOF_REVIEWER replaces
-its command, and FLEET_PROOF_REVIEWER_MODEL its model.
+session of that provider. hedge builds the prompt from the diff, the PR title and description, and the coding
+standards in ~/.agents/guides/coding-standards.md, and saves the reviewer's answer as the findings. hedge checks each
+finding's anchor against the diff and prints the result after the findings; it keeps it apart, in anchors.md. Answer them with hedge proof respond. Scope and --base work as for
+review-start. When the reviewer gives no answer, the round stays reserved and the next hedge proof review on the same
+commit retries it. The setting pull-requests.reviewTimeoutMinutes limits the reviewer. HEDGE_PROOF_REVIEWER replaces
+its command, and HEDGE_PROOF_REVIEWER_MODEL its model.
 Spent quota stops a reviewer or judge early. When its CLI prints two quota lines in a row, such as
 "exceeded retry limit, last status: 429", "All credentials for model <model> are cooling down", or "Reconnecting...
-2/5" after one of those, and then prints nothing else for 5 minutes, fleet stops it. A lone "Reconnecting... 1/5" is
+2/5" after one of those, and then prints nothing else for 5 minutes, hedge stops it. A lone "Reconnecting... 1/5" is
 no quota line: Codex reconnects on any dropped stream, such as a proxy restart. A run that fails right after a quota
-line counts too. The cause starts with "quota exhausted", and fleet proof review exits 4.
-FLEET_PROOF_QUOTA_GRACE_MS changes the 5 minutes; 0 stops the run at once. Any other failed exit keeps the last lines
+line counts too. The cause starts with "quota exhausted", and hedge proof review exits 4.
+HEDGE_PROOF_QUOTA_GRACE_MS changes the 5 minutes; 0 stops the run at once. Any other failed exit keeps the last lines
 of its stderr and runs once more after 30 seconds, so a restarted proxy can load its credentials;
-FLEET_PROOF_RETRY_DELAY_MS changes the wait.
+HEDGE_PROOF_RETRY_DELAY_MS changes the wait.
 
 With --lens, the round is a qa-swarm panel: one reviewer per lens, each with the Brief of the qa-swarm PANEL.md in
-~/.agents/skills/qa-swarm, filled by fleet, and the lens's hunting grounds. A lens runs on the family of its PANEL.md
+~/.agents/skills/qa-swarm, filled by hedge, and the lens's hunting grounds. A lens runs on the family of its PANEL.md
 lane: the fresh-eyes lane on the author's family, the others on the reviewer above. A Security lane lens runs on the
-security row of the model table, at its effort, whoever wrote the PR; FLEET_PROOF_SECURITY_MODEL replaces its model,
+security row of the model table, at its effort, whoever wrote the PR; HEDGE_PROOF_SECURITY_MODEL replaces its model,
 and without either it runs on the reviewer above. :same or :other picks the family, and moves a Security lane lens
 to that family's reviewer.
 --knowledge adds the repo's review material for a lens, and gives the text of a Team perspective that PANEL.md does
-not list. fleet starts the lenses in the background and returns at once; at most pull-requests.panelSlots reviewers
+not list. hedge starts the lenses in the background and returns at once; at most pull-requests.panelSlots reviewers
 run at once on this machine, and the rest wait. Each raw answer is kept in lenses/<name>.md. A lens that ends without
 a FINDINGS block or a COVERED list of every changed file runs once more, and a lens stopped by spent quota does not;
 when it fails again, the round stays unfinished with the cause, and the same review --lens command reruns the failed
 lenses; :same or :other moves a failed lens to the family that is up when the other has an outage. When every lens
-is done, fleet joins the answers under one heading per lens as the round's findings. On a PR of the Read tier the
+is done, hedge joins the answers under one heading per lens as the round's findings. On a PR of the Read tier the
 lenses run as one combined lens. Each reviewer runs without the user's settings, hooks, memory, and MCP servers, and
-fleet keeps its token use as usage in lenses/<name>.json, or in round.json for one reviewer.
+hedge keeps its token use as usage in lenses/<name>.json, or in round.json for one reviewer.
 A final read, --scope final, reads every fix from the commit of the first panel round to HEAD with the Correctness
 lens of PANEL.md.
 --wait waits up to 9 minutes for the panel of the unfinished round, the latest round, or --round, and prints each
 lens. Exit 0 when the round is finished, with its findings; 1 when a lens failed; 2 when lenses still run, so run
 --wait again; 4 when a lens stopped on spent quota. It restarts a lens whose worker died, and waits while another
-fleet proof command works on the round.
+hedge proof command works on the round.
 ${overrideHelp}`,
-    examples: ["fleet proof review", "fleet proof review --lens security", "fleet proof review --scope final --base 1a2b3c4", "fleet proof review --lens team-billing --knowledge team-billing=perspective.md", "fleet proof review --wait"],
+    examples: ["hedge proof review", "hedge proof review --lens security", "hedge proof review --scope final --base 1a2b3c4", "hedge proof review --lens team-billing --knowledge team-billing=perspective.md", "hedge proof review --wait"],
     options: ["--scope", "--base", "--phase", "--override", "--thread", "--agent", "--standing", "--round"], repeatable: ["--lens", "--knowledge"], flags: ["--wait", "--single"],
     run: async (parsed, identity, context) => {
       if (parsed.flags.has("--wait")) return waitForReview(parsed.options, identity(), context);
@@ -289,7 +289,7 @@ ${overrideHelp}`,
     summary: `Print the latest review round, or --round: who reviewed it and where its findings are. --round final is the
 latest final read. For a panel, print each lens: its state, family and model, how long it ran, and its raw answer, or
 its log while it runs.`,
-    examples: ["fleet proof show", "fleet proof show --round 2", "fleet proof show --round final-1"],
+    examples: ["hedge proof show", "hedge proof show --round 2", "hedge proof show --round final-1"],
     options: ["--round"],
     run: async ({ options }, identity, context) => {
       const directory = await reviewDirectory(context.home, identity(), roundOption(options));
@@ -298,7 +298,7 @@ its log while it runs.`,
     },
   },
   "panel-lens": {
-    usage: "panel-lens --directory <round directory> --lens <name>", summary: "Run one lens of a panel. fleet proof review starts it.", examples: [], hidden: true,
+    usage: "panel-lens --directory <round directory> --lens <name>", summary: "Run one lens of a panel. hedge proof review starts it.", examples: [], hidden: true,
     options: ["--directory", "--lens"],
     run: async ({ options }, _, context) => {
       await runLens(required(options, "--directory", "panel-lens"), required(options, "--lens", "panel-lens"), panelIO(context));
@@ -312,9 +312,9 @@ answers in the order of the findings, one line each, such as "1. fixed in 1a2b3c
 the review budget is spent, "3. known: <why>" answers a finding that the PR body lists by its file:line under Known
 issues; a known blocker holds the merge. Each
 list item of findings.md is one finding; findings without a list are one. The gate fails while a finding has no
-answer. A new call replaces the earlier answer. A final read takes the id that review-start printed. The judge in fleet proof gate checks
+answer. A new call replaces the earlier answer. A final read takes the id that review-start printed. The judge in hedge proof gate checks
 each answer against HEAD.`,
-    examples: ["fleet proof respond --round 1 responses.md", "fleet proof respond --round final-1 responses.md"],
+    examples: ["hedge proof respond --round 1 responses.md", "hedge proof respond --round final-1 responses.md"],
     options: ["--round"],
     run: async ({ options, files }, identity, context) => {
       const { print, home, cwd } = context;
@@ -330,11 +330,11 @@ each answer against HEAD.`,
     summary: `Record a standing rule: the user's rule in ~/.agents/guides/standing-rules.md that decides for them until a
 date. For a gap kind, it accepts every gap of that kind. With --repositories, it accepts only the gaps of PRs in those
 repositories, and the judge reads the rule as the condition of each gap it accepts. Kinds review, judge and post-deploy-watch are retired: decide
-a review round with fleet proof review --agent, and those gaps with fleet decision record. The user's instructions,
+a review round with hedge proof review --agent, and those gaps with hedge decision record. The user's instructions,
 ~/.agents/AGENTS.md or a file in ~/.agents/guides, must hold the whole command word for word, in this option order, so
 only the user sets the rule, its kinds, its repositories, and its date. The rule lapses on the date or when it leaves their instructions. Without options,
 list the standing rules.`,
-    examples: ["fleet proof standing --kind prod-shape --until 2026-11-02 --rule '<the rule, word for word>'", "fleet proof standing --kind live-run --until 2026-11-26 --repositories owner/name --rule '<the rule, word for word>'", "fleet proof standing"],
+    examples: ["hedge proof standing --kind prod-shape --until 2026-11-02 --rule '<the rule, word for word>'", "hedge proof standing --kind live-run --until 2026-11-26 --repositories owner/name --rule '<the rule, word for word>'", "hedge proof standing"],
     options: ["--kind", "--until", "--repositories", "--rule"],
     run: async ({ options }, _, { print, home }) => {
       if (!options.size) { for (const standing of await listStanding(home)) print(JSON.stringify(standing)); return 0; }
@@ -346,15 +346,15 @@ list the standing rules.`,
     usage: "gap --kind <kind> --reason <why it could not run>",
     summary: `Record why an owed proof could not run. It prints a question that names the gap kind and the PR, with the
 options "Accept the gap" and "Keep the gap open". Ask it with your question tool. When the user chooses "Accept the
-gap", record their answer with fleet decision record --mark 👤 --class proof-gap --kind <kind> --pr <owner/repo#n>:
+gap", record their answer with hedge decision record --mark 👤 --class proof-gap --kind <kind> --pr <owner/repo#n>:
 it lands in the decision ledger and the gate counts it. A gap recorded again, such as with another reason, keeps
 its acceptance. An agent's own 🤖 decision covers a gap when the PR's tier lets it, never a panel gap. A standing
-rule (fleet proof standing) covers the kinds it still takes. The user's acceptance settles the kind: the gate then
+rule (hedge proof standing) covers the kinds it still takes. The user's acceptance settles the kind: the gate then
 ignores that kind's evidence, and the judge does not see it. Kind ci records that CI cannot run on HEAD, such as on
 a fork PR. Kind panel records that the PR runs no qa-swarm panel under an exception in the user's rules; once
 accepted, any finished review at HEAD covers it. A judge gap counts only decisions made after it was recorded on
 HEAD.`,
-    examples: ["fleet proof gap --kind prod-shape --reason 'No production read access'"],
+    examples: ["hedge proof gap --kind prod-shape --reason 'No production read access'"],
     options: ["--kind", "--reason", "--accept", "--thread"],
     run: async ({ options }, identity, context) => {
       const kind = required(options, "--kind", "gap");
@@ -374,7 +374,7 @@ is not reviewed, a blocker or major finding has no answer, a "## Known issues" s
 or misses a finding answered known,
 the commit is not the PR's head on GitHub, its checks are red or pending,
 or the judge failed or was unavailable; 3 means only unaccepted gaps remain. No gap waives the head check. The last
-line is the verdict and names what it covered. fleet reads the PR and its CI over GitHub's REST API. Only finding the PR of the
+line is the verdict and names what it covered. hedge reads the PR and its CI over GitHub's REST API. Only finding the PR of the
 checkout without --repo and --pr uses gh pr view; pass both when GraphQL is out. A check that ran more than once
 counts with its newest run from each app, as GitHub's required checks do. The
 required checks of the base branch, from its rulesets and branch protection, decide CI; other checks print as not
@@ -391,8 +391,8 @@ an earlier commit of the PR, and single-parent commits that only change, add, or
 files with an unchanged mode. A mode change, a symlink, a comment, a file in a test folder, or a test
 file whose name other code holds, such as an import of limits.test.ts, needs a review. The gate then prints "final read carried from <sha>: test-only delta" or "revert of a PR commit", and the receipt in
 carried/<HEAD>.json names the quiet commits and the reason. Evidence does not carry across quiet commits.
-When those checks pass, the judge runs read-only on the reviewer's row of the model table, as fleet proof review
-picks it. fleet hands it the diff from the merge base, CI, the owed kinds, the counted evidence, every review's
+When those checks pass, the judge runs read-only on the reviewer's row of the model table, as hedge proof review
+picks it. hedge hands it the diff from the merge base, CI, the owed kinds, the counted evidence, every review's
 findings and responses, and the coding standards in ~/.agents/guides/coding-standards.md. It answers four questions:
 does the evidence prove HEAD, do the owed kinds fit the diff, does the review hold, and how good is the code. A finding
 holds when it is fixed, rejected for a sound reason, or parked with a reach read for a problem the diff did not
@@ -402,21 +402,21 @@ diff measurably changes. A body without a callout passes it. A failed question o
 gate; medium and low findings are listed. The verdict is cached per set of inputs, and a later run asks an unavailable
 judge again. Each run saves its proof summary for its commit, with the PR's head, base and base SHA on GitHub, the tier,
 --landed, and a fingerprint of the PR's proof files, the standing rules and the ledger decisions that cover the PR.
-fleet decision report prints that summary only while all of them still match. From the third failing verdict on a PR, the arbiter may escalate to the user; a judge gap on HEAD (gap
---kind judge) lets the gate pass once a decision in the ledger accepts it: the user's answer, recorded with fleet
+hedge decision report prints that summary only while all of them still match. From the third failing verdict on a PR, the arbiter may escalate to the user; a judge gap on HEAD (gap
+--kind judge) lets the gate pass once a decision in the ledger accepts it: the user's answer, recorded with hedge
 decision record --mark 👤, or your own 🤖 decision when the PR's tier lets you. A refusal or a typed message never
 accepts it. The judge reads the condition of each accepted gap and fails one that HEAD breaks; the setting
 pull-requests.criticalPathFiles gives it the repository's critical-path list. The gate reads the decision ledger on
 the hub and the tier from the merge-risk callout at HEAD; with the hub unreachable, no ledger decision counts and the
 gate fails closed. It prints each 🤖 acceptance that lapsed. The setting
-pull-requests.reviewTimeoutMinutes limits the judge, and spent quota stops it early, as for fleet proof review.
-FLEET_PROOF_JUDGE replaces its command, and FLEET_PROOF_JUDGE_MODEL its model.
+pull-requests.reviewTimeoutMinutes limits the judge, and spent quota stops it early, as for hedge proof review.
+HEDGE_PROOF_JUDGE replaces its command, and HEDGE_PROOF_JUDGE_MODEL its model.
 --json prints the proof summary instead of the lines, with the gate's exit code: each owed kind as pending, ran,
 reused, carried, gap (with the decision that accepts it, or the 🤖 decision that lapsed and why), or missing; the
 review and its unanswered findings; the head; CI; the tier; the judge at HEAD as pass, fail, unavailable, or skipped
 when the gate's own checks fail first, with its lines and its judge gap; the lapsed and voided decision ids; and the
-receipt link once one is recorded. The gate's lines and fleet decision report come from the same summary.`,
-    examples: ["fleet proof gate", "fleet proof gate --landed", "fleet proof gate --json"], flags: ["--landed", "--json"],
+receipt link once one is recorded. The gate's lines and hedge decision report come from the same summary.`,
+    examples: ["hedge proof gate", "hedge proof gate --landed", "hedge proof gate --json"], flags: ["--landed", "--json"],
     run: async ({ flags }, identity, context) => {
       const { print, home } = context;
       const head = identity();
@@ -440,15 +440,15 @@ receipt link once one is recorded. The gate's lines and fleet decision report co
   miss: {
     usage: `miss --source ${missSources.join("|")} --finding <what the reviewer should have flagged> [--file <path> [--line <number>]] [--url <link>] [--introduced-by-fix]`,
     summary: `Record a reviewer miss: a problem that a human reviewer, a review bot, CI, a rollback, or a revert found after
-fleet proof review read the commit and said nothing about it. --commit is the reviewed commit that already held the
+hedge proof review read the commit and said nothing about it. --commit is the reviewed commit that already held the
 problem. --finding says in one or two sentences what the reviewer should have flagged; record only a problem a
 person has checked. The CLI refuses a commit that no finished review of the PR read, because then no reviewer
 missed it. Each case keeps the diff range the review read, the PR title and description, and the source, as one
-JSON line in ${missesPath("~")}. fleet proof eval reruns the reviewer on every case. --introduced-by-fix marks a missed line
+JSON line in ${missesPath("~")}. hedge proof eval reruns the reviewer on every case. --introduced-by-fix marks a missed line
 that a review fix brought in, between the commit of the first panel round and HEAD.`,
     examples: [
-      "fleet proof miss --source human --finding 'The retry loop sends the email twice when the first send times out' --file src/send.ts --line 42 --url https://github.com/owner/name/pull/7#discussion_r1",
-      "fleet proof miss --pr 7 --commit 1a2b3c4 --source revert --finding 'The migration drops the index the dashboard query needs'",
+      "hedge proof miss --source human --finding 'The retry loop sends the email twice when the first send times out' --file src/send.ts --line 42 --url https://github.com/owner/name/pull/7#discussion_r1",
+      "hedge proof miss --pr 7 --commit 1a2b3c4 --source revert --finding 'The migration drops the index the dashboard query needs'",
     ],
     options: ["--source", "--finding", "--file", "--line", "--url"], flags: ["--introduced-by-fix"],
     run: async ({ options, flags }, identity, context) => {
@@ -474,22 +474,22 @@ that a review fix brought in, between the commit of the first panel round and HE
   },
   eval: {
     usage: "eval [--checkout <owner/name>=<path>]... [--case <id>]... [--limit <number>]",
-    summary: `Rerun the reviewer of fleet proof review on every recorded miss and score it. For each case, fleet checks out
+    summary: `Rerun the reviewer of hedge proof review on every recorded miss and score it. For each case, hedge checks out
 the reviewed commit in a temporary worktree of the case's repository, builds the same prompt from the diff the
-review read, and runs the reviewer that fleet proof review picks for that PR. A cheap judge, the lookup row of the
+review read, and runs the reviewer that hedge proof review picks for that PR. A cheap judge, the lookup row of the
 model table, answers whether the findings name the known problem: caught or missed. The current checkout serves
 the repository its remotes point at; --checkout names a checkout of another one. A case without a checkout, or
 whose commits the checkout lacks, is skipped and listed. At most pull-requests.panelSlots reviewers run at once on
 this machine, shared with panels.
-fleet prints recall per source and overall, and compares it with the previous run on the cases both runs scored.
+hedge prints recall per source and overall, and compares it with the previous run on the cases both runs scored.
 It appends the run to ${evalsPath("~")}: the date, the reviewer and judge models, a hash of the prompt template, a
-hash of PANEL.md, the coding standards, and the skill references, and each case's verdict. FLEET_PROOF_REVIEWER
-and FLEET_PROOF_REVIEWER_MODEL score a candidate reviewer; FLEET_PROOF_EVAL_JUDGE and FLEET_PROOF_EVAL_JUDGE_MODEL
+hash of PANEL.md, the coding standards, and the skill references, and each case's verdict. HEDGE_PROOF_REVIEWER
+and HEDGE_PROOF_REVIEWER_MODEL score a candidate reviewer; HEDGE_PROOF_EVAL_JUDGE and HEDGE_PROOF_EVAL_JUDGE_MODEL
 change the judge. Exit 1 when no case was scored.`,
     examples: [
-      "fleet proof eval --limit 3",
-      "fleet proof eval --checkout owner/name=$HOME/name",
-      "FLEET_PROOF_REVIEWER_MODEL=candidate-model fleet proof eval --case 1a2b3c4d5e",
+      "hedge proof eval --limit 3",
+      "hedge proof eval --checkout owner/name=$HOME/name",
+      "HEDGE_PROOF_REVIEWER_MODEL=candidate-model hedge proof eval --case 1a2b3c4d5e",
     ],
     options: ["--limit"], repeatable: ["--checkout", "--case"],
     run: async ({ options, lists }, _, context) => runEval(options, lists, context),
@@ -503,7 +503,7 @@ across quiet commits is refused, unless --agent with your reason, or the user's 
 A later round with --agent, or the user's --override, may be --scope full: it reviews
 the whole PR diff at HEAD again, such as after a restack.
 ${overrideHelp}`,
-    examples: ["fleet proof review-start --scope full", "fleet proof review-start --scope fixes --base 1a2b3c4", "fleet proof review-start --scope final --base 1a2b3c4"],
+    examples: ["hedge proof review-start --scope full", "hedge proof review-start --scope fixes --base 1a2b3c4", "hedge proof review-start --scope final --base 1a2b3c4"],
     options: ["--scope", "--base", "--phase", "--override", "--thread", "--agent", "--standing"],
     run: async ({ options }, identity, context) => {
       const head = identity();
@@ -522,7 +522,7 @@ ${overrideHelp}`,
 printed. --reviewer names the model that wrote them; the gate prints it. The findings file must not be empty; write
 "No findings." when the reviewer found none. When the round's decision is not recorded yet, review-finish records it
 first and needs the hub; a round whose decision is recorded finishes without it.`,
-    examples: ["fleet proof review-finish --round 1 --reviewer gpt-6.2-sol findings.md", "fleet proof review-finish --round final-1 --reviewer claude-opus-5-5 findings.md"],
+    examples: ["hedge proof review-finish --round 1 --reviewer gpt-6.2-sol findings.md", "hedge proof review-finish --round final-1 --reviewer claude-opus-5-5 findings.md"],
     options: ["--round", "--findings", "--reviewer"],
     run: async ({ options, files }, identity, context) => {
       const findings = options.has("--findings") ? [options.get("--findings")!, ...files] : files;
@@ -546,13 +546,13 @@ type SingleRound = { round: number | "final"; id: string; directory: string; sco
 async function runReview(options: Map<string, string>, head: ProofIdentity, context: CommandContext) {
   const { home, run } = context;
   const author = await authorOf(home, head);
-  const pending = await unfinishedReview(home, head, "fleet");
+  const pending = await unfinishedReview(home, head, "hedge");
   if (pending) requireSameRequest(pending, options, run);
   const reserved: SingleRound = pending
     ? { round: pending.reservation.round, id: basename(pending.directory), directory: pending.directory, scope: pending.reservation.scope, base: pending.reservation.base, from: pending.reservation.from ?? rangeStart(pending.reservation.scope, pending.reservation.base, head, run), phase: (pending.reservation as { phase?: string }).phase }
-    : await reserveFleetReview(options, head, context);
+    : await reserveHedgeReview(options, head, context);
   return roundStep(reserved.directory, context, async () => {
-    if (await readPlan(reserved.directory) || await stagedPlan(reserved.directory)) throw new Error(`${reserved.directory} is an unfinished panel. Rerun it with the same fleet proof review --lens command, or wait for it with --wait`);
+    if (await readPlan(reserved.directory) || await stagedPlan(reserved.directory)) throw new Error(`${reserved.directory} is an unfinished panel. Rerun it with the same hedge proof review --lens command, or wait for it with --wait`);
     await takeOverride(reserved.directory, options, head, context);
     await recordRound(reserved.directory, context);
     if (existsSync(join(reserved.directory, "findings.md"))) return printSavedReview(reserved, context);
@@ -586,10 +586,10 @@ async function askReviewer(reserved: SingleRound, head: ProofIdentity, author: F
   const answer = await askModel("reviewer", row, { prompt, cwd: topLevel(run) ?? cwd, readable: [join(home, ".agents/skills"), reserved.directory] }, env, limit);
   const label = reserved.round === "final" ? "The final read" : `Round ${reserved.round}`;
   if (!answer.ok && isQuotaExhausted(answer.cause)) {
-    print(`The reviewer ${answer.model} stopped: ${answer.cause}. ${label} stays reserved; run fleet proof review again once the quota is back.`);
+    print(`The reviewer ${answer.model} stopped: ${answer.cause}. ${label} stays reserved; run hedge proof review again once the quota is back.`);
     return quotaExitCode;
   }
-  if (!answer.ok) throw new Error(`The reviewer ${answer.model} gave no findings (${answer.cause}). ${label} stays reserved; run fleet proof review again to retry it`);
+  if (!answer.ok) throw new Error(`The reviewer ${answer.model} gave no findings (${answer.cause}). ${label} stays reserved; run hedge proof review again to retry it`);
   const anchors = anchorCheck(answer.text, diff, await reviewRecords(home, head));
   await storeCapturedFindings(reserved.directory, head, roundId(reserved.id), answer.text, answer.model, answer.usage);
   if (anchors) await writeFile(join(reserved.directory, "anchors.md"), anchors + "\n", { mode: 0o600 });
@@ -599,10 +599,10 @@ async function askReviewer(reserved: SingleRound, head: ProofIdentity, author: F
   return 0;
 }
 
-async function reserveFleetReview(options: Map<string, string>, head: ProofIdentity, context: CommandContext, panel = false) {
+async function reserveHedgeReview(options: Map<string, string>, head: ProofIdentity, context: CommandContext, panel = false) {
   const scope = options.get("--scope") ?? "full";
   if (["fixes", "final"].includes(scope) && !options.has("--base")) throw usageError("review", "--scope fixes and --scope final need --base with the commit of the latest finished review");
-  return reserveRound(options, head, context, "fleet", panel);
+  return reserveRound(options, head, context, "hedge", panel);
 }
 
 async function reserveRound(options: Map<string, string>, head: ProofIdentity, context: CommandContext, capturedBy: CapturedBy, panel = false) {
@@ -613,7 +613,7 @@ async function reserveRound(options: Map<string, string>, head: ProofIdentity, c
   const from = lastRead ? await panelCommit(context.home, head) ?? base : rangeStart(scope, base, head, context.run);
   const { decision, ...permit } = await decisionOf(options, head, context);
   const tier = tierOf(head, context);
-  if (tier.name === "read" && capturedBy === "fleet" && !panel && !decision && !await panelCommit(context.home, head)) throw new Error("A PR of the Read tier gets one read, and it is the panel: run fleet proof review, which runs its combined lens");
+  if (tier.name === "read" && capturedBy === "hedge" && !panel && !decision && !await panelCommit(context.home, head)) throw new Error("A PR of the Read tier gets one read, and it is the panel: run hedge proof review, which runs its combined lens");
   const firstPanel = panel && !await panelCommit(context.home, head);
   const limits = firstPanel ? permit.limits : { ...permit.limits, ceiling: tierCeiling(tier, permit.limits.ceiling) };
   const reserved = await startReview(context.home, head, { scope, base, from, ...permit, limits, decision, phase: options.get("--phase"), cleanBaseMerge: cleanBaseMerge(head, context.run), quietCommit: quietCommitIn(context.run, () => baseRefs(head, context.run)), capturedBy, lock: async (directory) => lockNewRound(directory, await context.lock()) });
@@ -686,7 +686,7 @@ function tierOf(head: ProofIdentity, { run }: CommandContext): ReviewTier {
 async function panelRequested({ lists, options, flags }: Parsed, head: ProofIdentity, context: CommandContext) {
   if (flags.has("--single") && lists.has("--lens")) throw usageError("review", "--single runs one reviewer; leave out --lens");
   if (lists.has("--lens")) return true;
-  const pending = await unfinishedReview(context.home, head, "fleet");
+  const pending = await unfinishedReview(context.home, head, "hedge");
   if (pending) return Boolean(await readPlan(pending.directory) ?? await stagedPlan(pending.directory));
   return !flags.has("--single") && (options.get("--scope") ?? "full") === "full";
 }
@@ -712,11 +712,11 @@ const panelIO = (context: CommandContext): PanelIO => ({
 const pausing = ({ pause }: ProofContext) => pause ?? (() => Bun.sleep(pollInterval));
 
 async function startLens(directory: string, name: string, context: CommandContext) {
-  const detach = context.detach ?? detachFleet(context);
+  const detach = context.detach ?? detachHedge(context);
   await recordWorker(directory, name, await detach(["panel-lens", "--directory", directory, "--lens", name], lensLog(directory, name)));
 }
 
-const detachFleet = ({ cwd, env }: CommandContext) => async (args: string[], log: string) => {
+const detachHedge = ({ cwd, env }: CommandContext) => async (args: string[], log: string) => {
   const output = openSync(log, "a", 0o600);
   try {
     const child = Bun.spawn([process.execPath, proofEntry, ...args], { cwd, env: env as Record<string, string>, stdin: "ignore", stdout: output, stderr: output, detached: true });
@@ -730,7 +730,7 @@ async function runPanel({ options, lists }: Parsed, head: ProofIdentity, context
   const author = await authorOf(home, head);
   const guide = await readPanelGuide(home);
   const knowledge = await knowledgeOf(lists.get("--knowledge") ?? [], context.cwd);
-  const pending = await unfinishedReview(context.home, head, "fleet");
+  const pending = await unfinishedReview(context.home, head, "hedge");
   const planned = pending && (await readPlan(pending.directory) ?? await stagedPlan(pending.directory));
   const tier = planned ? planned.tier : tierOf(head, context);
   const chosen = planned ? planned.arguments ?? (planned.lenses.some(({ name }) => name === "combined") ? [] : planned.lenses.map(({ name }) => name)) : ((options.get("--scope") ?? "full") === "full" && tier ? tierLenses[tier.name] : []);
@@ -743,7 +743,7 @@ async function runPanel({ options, lists }: Parsed, head: ProofIdentity, context
   const round = (await readJson<{ round: number | "final" }>(join(directory, "round.json"), { round: 0 })).round;
   print(JSON.stringify({ round, directory, ...tier ? { tier } : {}, lenses: lenses.map(({ name, family }) => ({ name, family })) }));
   if (tier) print(tierLine(tier));
-  print("The lenses run in the background. Run fleet proof review --wait for the findings, and fleet proof show to see each lens.");
+  print("The lenses run in the background. Run hedge proof review --wait for the findings, and hedge proof show to see each lens.");
   return 0;
 }
 
@@ -751,7 +751,7 @@ const castOf = ({ family, row, security }: Lens, env: Record<string, string | un
 
 async function reservePanel(options: Map<string, string>, head: ProofIdentity, lenses: Lens[], guide: PanelGuide, context: CommandContext, chosen: Pick<Plan, "tier" | "arguments">) {
   const rubric = await readRubric(context.home);
-  const reserved = await reserveFleetReview(options, head, context, true);
+  const reserved = await reserveHedgeReview(options, head, context, true);
   return roundStep(reserved.directory, context, async () => {
     try {
       const { plan, briefs } = await panelBriefs(reserved, head, lenses, guide, rubric, context);
@@ -800,9 +800,9 @@ async function panelBriefs(reserved: { directory: string; from?: string }, head:
 async function rerunPanel(pending: { directory: string; reservation: { scope: string; base?: string; from?: string } }, options: Map<string, string>, head: ProofIdentity, lenses: Lens[], guide: PanelGuide, context: CommandContext) {
   const { directory, reservation } = pending;
   const plan = await readPlan(directory) ?? await stagedPlan(directory);
-  if (!plan) throw new Error(`${directory} is reserved for one reviewer. Run fleet proof review without --lens to retry it`);
+  if (!plan) throw new Error(`${directory} is reserved for one reviewer. Run hedge proof review without --lens to retry it`);
   const planned = plan.lenses.map((lens) => lens.name);
-  if (lenses.map((lens) => lens.name).sort().join() !== [...planned].sort().join()) throw new Error(`The unfinished round runs the lenses ${planned.join(", ")}. Run fleet proof review without --lens to rerun its failed lenses; --lens <name>:same or :other moves one of them to that family`);
+  if (lenses.map((lens) => lens.name).sort().join() !== [...planned].sort().join()) throw new Error(`The unfinished round runs the lenses ${planned.join(", ")}. Run hedge proof review without --lens to rerun its failed lenses; --lens <name>:same or :other moves one of them to that family`);
   return roundStep(directory, context, async () => {
     await takeOverride(directory, options, head, context);
     await recordRound(directory, context);
@@ -827,7 +827,7 @@ async function knowledgeOf(values: string[], cwd: string) {
 }
 
 async function waitForReview(options: Map<string, string>, head: ProofIdentity, context: CommandContext) {
-  const pending = options.has("--round") ? undefined : await unfinishedReview(context.home, head, "fleet");
+  const pending = options.has("--round") ? undefined : await unfinishedReview(context.home, head, "hedge");
   const directory = pending?.directory ?? await reviewDirectory(context.home, head, roundOption(options));
   await requireReservation(directory);
   await startStaged(directory, context);
@@ -835,9 +835,9 @@ async function waitForReview(options: Map<string, string>, head: ProofIdentity, 
   const code = await waitForPanel(directory, panelIO(context), restart, waitPolls);
   for (const line of await roundLines(directory, context)) context.print(line);
   if (code === 0) context.print(await readFile(join(directory, "findings.md"), "utf8"));
-  if (code === 1) context.print("A lens failed, and the round stays unfinished. Run the same fleet proof review --lens command to rerun the failed lenses.");
-  if (code === 2) context.print("Lenses still run. Run fleet proof review --wait again.");
-  if (code === quotaExitCode) context.print("A lens stopped on spent quota, and the round stays unfinished. Run the same fleet proof review --lens command once the quota is back, or move the lens to the family that is up with :same or :other.");
+  if (code === 1) context.print("A lens failed, and the round stays unfinished. Run the same hedge proof review --lens command to rerun the failed lenses.");
+  if (code === 2) context.print("Lenses still run. Run hedge proof review --wait again.");
+  if (code === quotaExitCode) context.print("A lens stopped on spent quota, and the round stays unfinished. Run the same hedge proof review --lens command once the quota is back, or move the lens to the family that is up with :same or :other.");
   return code;
 }
 
@@ -856,7 +856,7 @@ async function runEval(options: Map<string, string>, lists: Map<string, string[]
   const limit = options.has("--limit") ? positive(options.get("--limit")!, "--limit", "eval") : undefined;
   const wanted = lists.get("--case");
   const recorded = await readMisses(home);
-  if (!recorded.length) throw new Error(`No misses are recorded in ${missesPath(home)}. Record one with fleet proof miss`);
+  if (!recorded.length) throw new Error(`No misses are recorded in ${missesPath(home)}. Record one with hedge proof miss`);
   const unknown = wanted?.find((id) => !recorded.some((miss) => miss.id === id));
   if (unknown) throw usageError("eval", `No recorded case ${unknown}`);
   const cases = recorded.filter((miss) => !wanted || wanted.includes(miss.id)).slice(0, limit);
@@ -906,14 +906,14 @@ function positive(value: string, option: string, name: string) {
 async function roundLines(directory: string, { now }: CommandContext) {
   const round = await readJson<{ round: number | "final"; commit: string; reviewer?: string; capturedBy?: string; standing?: { reason: string; until: string }; decision?: { mark: string; id: string } } | undefined>(join(directory, "round.json"), undefined);
   if (!round) throw new Error(`${directory} has no reservation`);
-  const finished = round.reviewer ? `finished by ${round.reviewer}, ${round.capturedBy === "fleet" ? "captured by fleet" : "saved by the author"}: ${join(directory, "findings.md")}` : "reserved, no findings yet";
+  const finished = round.reviewer ? `finished by ${round.reviewer}, ${round.capturedBy === "hedge" ? "captured by hedge" : "saved by the author"}: ${join(directory, "findings.md")}` : "reserved, no findings yet";
   const header = `${round.round === "final" ? "final read" : `round ${round.round}`} on ${short(round.commit)}: ${finished}`;
   const anchors = join(directory, "anchors.md");
   const standing = round.standing ? [`accepted by the standing rule until ${round.standing.until}: ${round.standing.reason}`] : [];
   if (round.decision) standing.push(`decided by ${round.decision.mark} decision ${round.decision.id}`);
   const plan = await readPlan(directory);
   const panel = plan ? [...plan.tier ? [tierLine(plan.tier)] : [], ...await panelLines(directory, now?.() ?? new Date())] : [];
-  return [header, ...(existsSync(anchors) ? [`anchor check by fleet: ${anchors}`] : []), ...standing, ...panel];
+  return [header, ...(existsSync(anchors) ? [`anchor check by hedge: ${anchors}`] : []), ...standing, ...panel];
 }
 
 const tierLine = ({ name, why }: ReviewTier) => `review tier: ${name}: ${why}`;
@@ -954,18 +954,18 @@ reads HEAD from Git and takes no --commit.`;
 const kindsHelp = "Kinds: live-run, ui-walk, prod-shape, cross-version, shadow-diff, post-deploy-watch, dev-observed (owed through require --after-dev). A gap also takes ci, judge, and panel. A standing rule takes none of review, judge and post-deploy-watch.";
 
 function overview() {
-  const lines = Object.values(subcommands).filter((command) => !command.hidden).map((command) => `  fleet proof ${command.usage}`);
-  return [`Usage: fleet proof <command> [--repo owner/name] [--pr number] [--commit sha]`, ...lines, "", identityHelp, kindsHelp,
-    "Run fleet proof <command> --help for its details and an example."].join("\n");
+  const lines = Object.values(subcommands).filter((command) => !command.hidden).map((command) => `  hedge proof ${command.usage}`);
+  return [`Usage: hedge proof <command> [--repo owner/name] [--pr number] [--commit sha]`, ...lines, "", identityHelp, kindsHelp,
+    "Run hedge proof <command> --help for its details and an example."].join("\n");
 }
 
 function help(name: string, command: Subcommand) {
   const identity = command.takesCommand ? "[--repo owner/name] [--pr number]" : "[--repo owner/name] [--pr number] [--commit sha]";
-  return [`Usage: fleet proof ${command.usage} ${identity}`, "", command.summary, "", command.takesCommand ? runIdentityHelp : identityHelp,
+  return [`Usage: hedge proof ${command.usage} ${identity}`, "", command.summary, "", command.takesCommand ? runIdentityHelp : identityHelp,
     ...(["save", "run", "require", "gap", "standing"].includes(name) ? [kindsHelp] : []), "", "Examples:", ...command.examples.map((example) => `  ${example}`)].join("\n");
 }
 
-const usageError = (name: string, problem: string) => new Error(`${problem}. Run fleet proof ${name} --help.`);
+const usageError = (name: string, problem: string) => new Error(`${problem}. Run hedge proof ${name} --help.`);
 
 function required(options: Map<string, string>, option: string, name: string) {
   const value = options.get(option);
@@ -1023,12 +1023,12 @@ const short = (commit: string) => commit.slice(0, 7);
 export async function proofCommand(args: string[], context: ProofContext): Promise<number> {
   const name = args.shift();
   if (name === undefined || ["help", "--help", "-h"].includes(name)) {
-    if (name === undefined) throw new Error("Name a command. Run fleet proof --help");
+    if (name === undefined) throw new Error("Name a command. Run hedge proof --help");
     context.print(overview());
     return 0;
   }
   const command = subcommands[name];
-  if (!command) throw new Error(`Unknown command ${name}. Run fleet proof --help`);
+  if (!command) throw new Error(`Unknown command ${name}. Run hedge proof --help`);
   const split = args.indexOf("--");
   const own = split < 0 ? args : args.slice(0, split);
   if (own.includes("--help") || own.includes("-h")) { context.print(help(name, command)); return 0; }

@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+hedge_root=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
+exec bun "$hedge_root/src/cli.ts" "$@"

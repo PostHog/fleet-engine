@@ -14,7 +14,7 @@ afterEach(() => temp.cleanup());
 const claude = ".claude/settings.json";
 const claudeJson = ".claude.json";
 const codex = ".codex/config.toml";
-const record = ".config/fleet/provider-fields.json";
+const record = ".config/hedge/provider-fields.json";
 
 function plan(config: Array<ConfigEntry & { pack?: string }> = []): Plan {
   return {
@@ -46,10 +46,10 @@ function write(home: string, target: string, content: unknown) {
 }
 
 const read = (home: string, target: string) => JSON.parse(readFileSync(join(home, target), "utf8"));
-const pluginRecord = ".config/fleet/provider-plugins.json";
-const earlierRecord = ".config/fleet/plugins.json";
+const pluginRecord = ".config/hedge/provider-plugins.json";
+const earlierRecord = ".config/hedge/plugins.json";
 const backups = (home: string) => {
-  const root = join(home, ".local/state/fleet/backups");
+  const root = join(home, ".local/state/hedge/backups");
   return existsSync(root) ? readdirSync(root).map((run) => join(root, run)) : [];
 };
 
@@ -68,7 +68,7 @@ function claudeCli(installed: string[] = []) {
 const adapters = (run = claudeCli().run) => [filesAdapter, providerConfigAdapter({ run })];
 
 describe("provider config", () => {
-  test("removes a stale proxy base URL with a backup, and keeps every key Fleet never wrote", async () => {
+  test("removes a stale proxy base URL with a backup, and keeps every key Hedge never wrote", async () => {
     const home = temp.make("home-");
     const before = { model: "opus", env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317", ANTHROPIC_AUTH_TOKEN: "proxy-key", MY_FLAG: "1" }, permissions: { allow: ["Bash(ls)"] } };
     write(home, claude, before);
@@ -97,9 +97,9 @@ describe("provider config", () => {
     const home = temp.make("home-");
     write(home, codex, [
       'model = "gpt-5"',
-      'model_provider = "fleet-proxy"',
+      'model_provider = "hedge-proxy"',
       "",
-      "[model_providers.fleet-proxy]",
+      "[model_providers.hedge-proxy]",
       'base_url = "http://hub.example.test:8317/v1"',
       "",
       "[model_providers.mine]",
@@ -145,7 +145,7 @@ describe("provider config", () => {
     expect(read(home, record)).toEqual({});
   });
 
-  test("keeps a local edit to an owned key until the user adopts Fleet's value", async () => {
+  test("keeps a local edit to an owned key until the user adopts Hedge's value", async () => {
     const home = temp.make("home-");
     const owned = plan([{ provider: "claude", key: "permissions.defaultMode", value: "acceptEdits" }]);
     await apply(owned, { home, adapters: adapters() });
@@ -153,7 +153,7 @@ describe("provider config", () => {
 
     const kept = await apply(owned, { home, adapters: adapters() });
     expect(read(home, claude)).toEqual({ permissions: { defaultMode: "plan" } });
-    expect(kept.findings).toContainEqual({ id: `kept:${claude}`, pack: "engine", say: `Kept your permissions.defaultMode in ${claude}. Run fleet apply --adopt ${claude} to take Fleet's value.` });
+    expect(kept.findings).toContainEqual({ id: `kept:${claude}`, pack: "engine", say: `Kept your permissions.defaultMode in ${claude}. Run hedge apply --adopt ${claude} to take Hedge's value.` });
     expect((await check(owned, { home, adapters: adapters() })).ok).toBe(false);
 
     await apply(owned, { home, adopt: [claude], adapters: adapters() });
@@ -172,7 +172,7 @@ describe("provider config", () => {
     expect(read(home, record)).toEqual({ [claude]: [{ path: ["model"], value: "opus", pack: "base" }] });
   });
 
-  test("removes a key that an earlier Fleet recorded without an owning pack", async () => {
+  test("removes a key that an earlier Hedge recorded without an owning pack", async () => {
     const home = temp.make("home-");
     write(home, claude, { env: { ENABLE_TOOL_SEARCH: "true", MINE: "1" } });
     write(home, record, { [claude]: [{ path: ["env", "ENABLE_TOOL_SEARCH"], value: "true" }] });
@@ -204,12 +204,12 @@ describe("provider config", () => {
 
   test("trusts the Codex hooks a pack owns, and drops the trust with the hook", async () => {
     const home = temp.make("home-");
-    const hook = { provider: "codex" as const, key: "hooks.UserPromptSubmit", value: [{ hooks: [{ type: "command", command: "fleet-guard", timeout: 10 }] }] };
+    const hook = { provider: "codex" as const, key: "hooks.UserPromptSubmit", value: [{ hooks: [{ type: "command", command: "hedge-guard", timeout: 10 }] }] };
 
     await apply(plan([hook]), { home, adapters: adapters() });
 
     const config = parse(readFileSync(join(home, codex), "utf8")) as { hooks: { state: Record<string, unknown> } };
-    expect(config.hooks.state).toEqual({ [`${join(home, codex)}:user_prompt_submit:0:0`]: { trusted_hash: "sha256:aab555051f739465c1259296584ef25cd30fdcd220e6362a4e65e8a41af30f45" } });
+    expect(config.hooks.state).toEqual({ [`${join(home, codex)}:user_prompt_submit:0:0`]: { trusted_hash: "sha256:9ad165f683c4ada17ea667bc5c38348688b4cbe210d860e271db1a625df17728" } });
     await apply(plan(), { home, adapters: adapters() });
     expect(readFileSync(join(home, codex), "utf8").trim()).toBe("");
   });
@@ -225,7 +225,7 @@ describe("provider config", () => {
 
     expect(lstatSync(join(home, claude)).isSymbolicLink()).toBe(true);
     expect(read(dotfiles, "settings.json")).toEqual({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" } });
-    expect(report.findings).toContainEqual({ id: `kept:${claude}`, pack: "engine", say: `Kept ${claude} because it is a link. Fleet would remove env.ANTHROPIC_BASE_URL there. Make it a plain file in a plain folder to let Fleet change it.` });
+    expect(report.findings).toContainEqual({ id: `kept:${claude}`, pack: "engine", say: `Kept ${claude} because it is a link. Hedge would remove env.ANTHROPIC_BASE_URL there. Make it a plain file in a plain folder to let Hedge change it.` });
   });
 
   test("leaves a settings file it cannot read as it is", async () => {
@@ -264,7 +264,7 @@ describe("provider config", () => {
     expect(read(home, claude)).toEqual({ env: { A: "1", B: "2" } });
   });
 
-  test("keeps a proxy URL the user changed after Fleet wrote it", async () => {
+  test("keeps a proxy URL the user changed after Hedge wrote it", async () => {
     const home = temp.make("home-");
     await apply(plan([{ provider: "claude", key: "env.ANTHROPIC_BASE_URL", value: "http://127.0.0.1:8317", pack: "hub" }]), { home, adapters: adapters() });
     write(home, claude, { env: { ANTHROPIC_BASE_URL: "http://localhost:8317" } });
@@ -324,9 +324,9 @@ describe("provider config", () => {
     expect(read(home, claude)).toEqual({});
   });
 
-  test("keeps a key helper Fleet did not write, though it names a file beside the proxy key", async () => {
+  test("keeps a key helper Hedge did not write, though it names a file beside the proxy key", async () => {
     const home = temp.make("home-");
-    const mine = { apiKeyHelper: 'my-helper --cache "$HOME/.config/fleet/cli-proxy.key-cache"' };
+    const mine = { apiKeyHelper: 'my-helper --cache "$HOME/.config/hedge/cli-proxy.key-cache"' };
     write(home, claude, mine);
     await apply(plan(), { home, adapters: adapters() });
     expect(read(home, claude)).toEqual(mine);
@@ -389,11 +389,11 @@ describe("provider config", () => {
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
   });
 
-  test("stops while another Fleet run holds the lock, and writes nothing", async () => {
+  test("stops while another Hedge run holds the lock, and writes nothing", async () => {
     const home = temp.make("home-");
     write(home, claude, { env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" } });
-    mkdirSync(join(home, ".local/state/fleet/lock"), { recursive: true });
-    await expect(apply(plan(), { home, adapters: [claudeCli().adapter] })).rejects.toThrow("Another Fleet operation holds");
+    mkdirSync(join(home, ".local/state/hedge/lock"), { recursive: true });
+    await expect(apply(plan(), { home, adapters: [claudeCli().adapter] })).rejects.toThrow("Another Hedge operation holds");
     expect(read(home, claude)).toEqual({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" } });
   });
 
@@ -408,8 +408,8 @@ describe("provider config", () => {
     const home = temp.make("home-");
     const elsewhere = temp.make("elsewhere-");
     write(home, claude, { env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317", ANTHROPIC_AUTH_TOKEN: "secret" } });
-    mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
-    symlinkSync(elsewhere, join(home, ".local/state/fleet/backups"));
+    mkdirSync(join(home, ".local/state/hedge"), { recursive: true });
+    symlinkSync(elsewhere, join(home, ".local/state/hedge/backups"));
     await expect(apply(plan(), { home, adapters: [claudeCli().adapter] })).rejects.toThrow("is a link or not a directory");
     expect(readdirSync(elsewhere)).toEqual([]);
     expect(read(home, claude).env.ANTHROPIC_AUTH_TOKEN).toBe("secret");
@@ -438,10 +438,10 @@ describe("provider config", () => {
 });
 
 describe("Claude MCP servers", () => {
-  const metabase = { type: "stdio", command: "fleet", args: ["posthog-mcp", "metabase"] };
+  const metabase = { type: "stdio", command: "hedge", args: ["posthog-mcp", "metabase"] };
   const server = { provider: "claude" as const, key: "mcpServers.metabase", value: metabase, pack: "posthog" };
   const claudeState = { numStartups: 41, oauthAccount: { emailAddress: "nora@example.com" }, env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, projects: { "/work/app": { allowedTools: [] } }, mcpServers: { mine: { type: "http", url: "http://localhost:9000/mcp" } } };
-  const serverRecord = ".config/fleet/claude-servers.json";
+  const serverRecord = ".config/hedge/claude-servers.json";
 
   /** Behaves like claude mcp add-json and remove at user scope: each call reads ~/.claude.json fresh and writes it whole. */
   function claudeMcp(options: { normalize?: (value: Record<string, unknown>) => unknown; missing?: boolean; beforeEachCall?: (home: string, command: string[]) => void; refuse?: (command: string[]) => boolean } = {}) {
@@ -494,7 +494,7 @@ describe("Claude MCP servers", () => {
     expect(read(home, serverRecord)).toEqual({ servers: [] });
   });
 
-  test("lose nothing Claude Code saves while Fleet applies, because Fleet never writes ~/.claude.json itself", async () => {
+  test("lose nothing Claude Code saves while Hedge applies, because Hedge never writes ~/.claude.json itself", async () => {
     const home = temp.make("home-");
     write(home, claudeJson, claudeState);
     const cli = claudeMcp({ beforeEachCall: (dir) => write(dir, claudeJson, { ...read(dir, claudeJson), numStartups: 42 }) });
@@ -525,7 +525,7 @@ describe("Claude MCP servers", () => {
     expect(after.actions).toEqual([]);
   });
 
-  test("keep a server of the same name that the user wrote, until they adopt Fleet's", async () => {
+  test("keep a server of the same name that the user wrote, until they adopt Hedge's", async () => {
     const home = temp.make("home-");
     const theirs = { type: "stdio", command: "my-metabase" };
     write(home, claudeJson, { mcpServers: { metabase: theirs } });
@@ -533,7 +533,7 @@ describe("Claude MCP servers", () => {
 
     const report = await apply(plan([server]), { home, adapters: cli.adapters });
     expect(cli.mcp()).toEqual([]);
-    expect(report.findings).toContainEqual({ id: `kept:${claudeJson}`, pack: "engine", say: `Kept your mcpServers.metabase in ${claudeJson}. Run fleet apply --adopt ${claudeJson} to take Fleet's value.` });
+    expect(report.findings).toContainEqual({ id: `kept:${claudeJson}`, pack: "engine", say: `Kept your mcpServers.metabase in ${claudeJson}. Run hedge apply --adopt ${claudeJson} to take Hedge's value.` });
 
     await apply(plan([server]), { home, adapters: cli.adapters, adopt: [claudeJson] });
     expect(cli.mcp().map((call) => call[2])).toEqual(["remove", "add-json"]);
@@ -549,7 +549,7 @@ describe("Claude MCP servers", () => {
   test("settle on the shape Claude Code stores, and replace the server when the pack changes it", async () => {
     const home = temp.make("home-");
     const cli = claudeMcp({ normalize: (value) => ({ args: [], ...value }) });
-    const bare = { ...server, value: { type: "stdio", command: "fleet" } };
+    const bare = { ...server, value: { type: "stdio", command: "hedge" } };
     await apply(plan([bare]), { home, adapters: cli.adapters });
     await apply(plan([bare]), { home, adapters: cli.adapters });
     expect(cli.mcp()).toHaveLength(1);
@@ -642,7 +642,7 @@ describe("Codex plugins", () => {
     return { calls, installed, run, adapter: providerConfigAdapter({ run }), changes: () => calls.filter((call) => call[0] === "codex" && call[2] !== "list") };
   }
 
-  test("installs an enabled plugin once, records Fleet's ownership, and removes it when no pack enables it", async () => {
+  test("installs an enabled plugin once, records Hedge's ownership, and removes it when no pack enables it", async () => {
     const home = temp.make("home-");
     const cli = codexCli();
     await apply(plan([wants()]), { home, adapters: [cli.adapter] });
@@ -699,7 +699,7 @@ describe("Codex plugins", () => {
     const home = temp.make("home-");
     const refused = codexCli({}, { addFails: "before" });
     const report = await apply(plan([wants()]), { home, adapters: [refused.adapter] });
-    expect(report.findings.map((finding) => finding.say)).toContainEqual(`Could not install the Codex plugin ${github}: sign in to ChatGPT first. Fleet tries again at the next apply.`);
+    expect(report.findings.map((finding) => finding.say)).toContainEqual(`Could not install the Codex plugin ${github}: sign in to ChatGPT first. Hedge tries again at the next apply.`);
     const user = codexCli({ [github]: { version: "1.0.0", enabled: false } });
     await apply(plan([]), { home, adapters: [user.adapter] });
     expect(user.changes()).toEqual([]);
@@ -723,13 +723,13 @@ describe("Codex plugins", () => {
     expect(later.changes()).toEqual([["codex", "plugin", "remove", github, "--json"]]);
   });
 
-  test("keeps a plugin whose enabled state changed outside Fleet, says so, and gives it to the user once no pack enables it", async () => {
+  test("keeps a plugin whose enabled state changed outside Hedge, says so, and gives it to the user once no pack enables it", async () => {
     const home = temp.make("home-");
     const cli = codexCli();
     await apply(plan([wants()]), { home, adapters: [cli.adapter] });
     cli.installed.set(github, { version: "1.0.0", enabled: false });
     const kept = await apply(plan([wants()]), { home, adapters: [cli.adapter] });
-    expect(kept.findings.map((finding) => finding.say)).toContainEqual(`Kept the Codex plugin ${github} as you left it: it is disabled now, and Fleet installed it enabled.`);
+    expect(kept.findings.map((finding) => finding.say)).toContainEqual(`Kept the Codex plugin ${github} as you left it: it is disabled now, and Hedge installed it enabled.`);
     const released = await apply(plan(), { home, adapters: [cli.adapter] });
     expect(released.findings.map((finding) => finding.say)).toContainEqual(expect.stringContaining("It is yours now"));
     expect(cli.changes()).toEqual([["codex", "plugin", "add", github, "--json"]]);
@@ -738,7 +738,7 @@ describe("Codex plugins", () => {
     expect(cli.changes()).toHaveLength(1);
   });
 
-  test("keeps the plugins Fleet installed while a pack source is out, and removes them once it is back", async () => {
+  test("keeps the plugins Hedge installed while a pack source is out, and removes them once it is back", async () => {
     const home = temp.make("home-");
     const cli = codexCli();
     await apply(plan([wants()]), { home, adapters: [cli.adapter] });
@@ -792,7 +792,7 @@ describe("Codex plugins", () => {
     expect(read(home, pluginRecord).codex).toHaveLength(1);
   });
 
-  test("leaves the plugins the earlier Fleet installed alone until a pack enables one again, then owns that one, and never writes the earlier Fleet's record", async () => {
+  test("leaves the plugins the earlier Hedge installed alone until a pack enables one again, then owns that one, and never writes the earlier Hedge's record", async () => {
     const home = temp.make("home-");
     const slack = "slack@openai-curated-remote";
     const context7 = "context7@claude-plugins-official";
@@ -823,7 +823,7 @@ describe("Codex plugins", () => {
     expect(readFileSync(join(home, earlierRecord)).equals(earlier)).toBe(true);
   });
 
-  test("keeps a Claude plugin the earlier Fleet installed when its enabled state changed outside Fleet", async () => {
+  test("keeps a Claude plugin the earlier Hedge installed when its enabled state changed outside Hedge", async () => {
     const home = temp.make("home-");
     const context7 = "context7@claude-plugins-official";
     write(home, earlierRecord, { version: 1, installed: [{ provider: "claude", id: context7, version: "1.0.0", enabled: true }] });
@@ -832,10 +832,10 @@ describe("Codex plugins", () => {
     await apply(plan([{ provider: "claude", key: `enabledPlugins.${context7}`, value: true }]), { home, adapters: [cli.adapter] });
     const report = await apply(plan(), { home, adapters: [cli.adapter] });
     expect(cli.calls.some((call) => call[2] === "uninstall")).toBe(false);
-    expect(report.findings.map((finding) => finding.say)).toContainEqual(`Kept the Claude plugin ${context7}, which no pack enables any more, because it changed outside Fleet. It is yours now.`);
+    expect(report.findings.map((finding) => finding.say)).toContainEqual(`Kept the Claude plugin ${context7}, which no pack enables any more, because it changed outside Hedge. It is yours now.`);
   });
 
-  test("runs Codex outside any CODEX_HOME, so its plugins land in the home Fleet applies to", async () => {
+  test("runs Codex outside any CODEX_HOME, so its plugins land in the home Hedge applies to", async () => {
     const home = temp.make("home-");
     const elsewhere = temp.make("codex-home-");
     const bin = temp.make("bin-");
@@ -874,7 +874,7 @@ esac
 describe("Claude plugins", () => {
   const enabled = { provider: "claude" as const, key: "enabledPlugins.context7@claude-plugins-official", value: true };
 
-  test("keeps a plugin Fleet installed when the user turned it off, once no pack enables it", async () => {
+  test("keeps a plugin Hedge installed when the user turned it off, once no pack enables it", async () => {
     const home = temp.make("home-");
     const cli = claudeCli();
     await apply(plan([enabled]), { home, adapters: [cli.adapter] });

@@ -14,22 +14,22 @@ beforeAll(async () => (engine = await engineSource()));
 
 const start = Date.parse("2026-11-10T20:00:00Z");
 const minute = 60_000;
-const reportPath = (home: string) => join(home, ".local/state/fleet/provider-availability.json");
+const reportPath = (home: string) => join(home, ".local/state/hedge/provider-availability.json");
 
 function providers(home: string, proxy: ReturnType<typeof fakeProxy>, now = start, args: string[] = []) {
   const lines: string[] = [];
-  const exit = providersCommand(args, { home, env: { FLEET_MODELS: JSON.stringify(modelRows) }, fetch: proxy.fetch, now: () => now, print: (line) => lines.push(line) });
+  const exit = providersCommand(args, { home, env: { HEDGE_MODELS: JSON.stringify(modelRows) }, fetch: proxy.fetch, now: () => now, print: (line) => lines.push(line) });
   return exit.then((code) => ({ code, lines }));
 }
 
 describe("the Recovery pack", () => {
-  test("gives a machine fleet providers", () => {
+  test("gives a machine hedge providers", () => {
     const plan = resolveEngine([engine, ...skillSources(temp.make("skills-"), engine)], { packs: ["hub", "recovery"] }, devbox);
     expect(plan.commands.providers).toMatchObject({ pack: "recovery" });
   });
 });
 
-describe("fleet providers", () => {
+describe("hedge providers", () => {
   test("probes each provider's model through the proxy and says which is available and which is exhausted", async () => {
     const home = recoveryHome(temp.make("home-"));
     const proxy = fakeProxy({ "claude-test-1": 200, "gpt-test-1": [429, "{}"] });
@@ -62,7 +62,7 @@ describe("fleet providers", () => {
     const home = recoveryHome(temp.make("home-"));
     const proxy = fakeProxy({ "claude-test-1": 200 });
     const lines: string[] = [];
-    await providersCommand([], { home, env: { FLEET_MODELS: JSON.stringify(modelRows.filter((row) => row.provider === "claude")) }, fetch: proxy.fetch, now: () => start, print: (line) => lines.push(line) });
+    await providersCommand([], { home, env: { HEDGE_MODELS: JSON.stringify(modelRows.filter((row) => row.provider === "claude")) }, fetch: proxy.fetch, now: () => start, print: (line) => lines.push(line) });
     expect(lines.map((line) => line.split(" (")[0])).toEqual(["claude: available", "codex: unknown"]);
     expect(proxy.calls).toEqual(["/v1/messages claude-test-1"]);
   });
@@ -82,7 +82,7 @@ describe("fleet providers", () => {
 
   test("probes again when the saved report is unreadable or from the future", async () => {
     const home = recoveryHome(temp.make("home-"));
-    mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
+    mkdirSync(join(home, ".local/state/hedge"), { recursive: true });
     const proxy = fakeProxy({ "claude-test-1": 200, "gpt-test-1": 200 });
     writeFileSync(reportPath(home), "not json");
     await providers(home, proxy);

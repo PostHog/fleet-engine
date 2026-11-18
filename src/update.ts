@@ -15,14 +15,14 @@ export type UpdateOptions = {
 type Version = { tag: string; parts: [number, number, number] };
 
 export function noticePath(home: string) {
-  return join(home, ".local", "state", "fleet", "update.json");
+  return join(home, ".local", "state", "hedge", "update.json");
 }
 
 export async function readNotice(home: string): Promise<string | undefined> {
   const file = Bun.file(noticePath(home));
   if (!(await file.exists())) return undefined;
   const notice = (await file.json()) as { newMajor?: string };
-  return notice.newMajor ? `Fleet ${notice.newMajor} is out. It is a new major version, so fleet update does not apply it. Read its changelog, then change the engine ref in your profile.` : undefined;
+  return notice.newMajor ? `Hedge ${notice.newMajor} is out. It is a new major version, so hedge update does not apply it. Read its changelog, then change the engine ref in your profile.` : undefined;
 }
 
 export async function update(options: UpdateOptions): Promise<number> {
@@ -41,53 +41,53 @@ async function pullProfile(options: UpdateOptions) {
   const remotes = await git(options.profileDir, "remote");
   if (!remotes.ok || !remotes.out) return true;
   const pulled = await git(options.profileDir, "pull", "-q", "--ff-only");
-  if (!pulled.ok) options.print(`fleet update: your profile did not fast-forward, so this machine applies its last version and the update counts as failed: ${pulled.err}`);
+  if (!pulled.ok) options.print(`hedge update: your profile did not fast-forward, so this machine applies its last version and the update counts as failed: ${pulled.err}`);
   return pulled.ok;
 }
 
 /** The engine checkout must be clean, and its origin must be the profile's engine repository. */
 async function ready(options: UpdateOptions) {
   const status = await git(options.engineDir, "status", "--porcelain");
-  if (!status.ok) return options.print(`fleet update: ${options.engineDir} is not an engine checkout: ${status.err}`), false;
-  if (status.out) return options.print(`fleet update: ${options.engineDir} has local changes. Save them elsewhere and remove them, then run fleet update again.`), false;
+  if (!status.ok) return options.print(`hedge update: ${options.engineDir} is not an engine checkout: ${status.err}`), false;
+  if (status.out) return options.print(`hedge update: ${options.engineDir} has local changes. Save them elsewhere and remove them, then run hedge update again.`), false;
   const wanted = repoUrl(options.engine.repo);
   const origin = await git(options.engineDir, "remote", "get-url", "origin");
   if (origin.ok && origin.out === wanted) return true;
   const changed = await git(options.engineDir, "remote", origin.ok ? "set-url" : "add", "origin", wanted);
-  if (!changed.ok) return options.print(`fleet update: could not point the engine at ${wanted}: ${changed.err}`), false;
+  if (!changed.ok) return options.print(`hedge update: could not point the engine at ${wanted}: ${changed.err}`), false;
   options.print(`The engine now comes from ${options.engine.repo}.`);
   return true;
 }
 
 async function trackMain(options: UpdateOptions) {
   const fetched = await git(options.engineDir, "fetch", "-q", "--depth", "1", "origin", "main");
-  if (!fetched.ok) return options.print(`fleet update: could not fetch the engine: ${fetched.err}`), false;
+  if (!fetched.ok) return options.print(`hedge update: could not fetch the engine: ${fetched.err}`), false;
   const checkedOut = await git(options.engineDir, "checkout", "-q", "--detach", "FETCH_HEAD");
-  if (!checkedOut.ok) return options.print(`fleet update: could not check out main: ${checkedOut.err}`), false;
+  if (!checkedOut.ok) return options.print(`hedge update: could not check out main: ${checkedOut.err}`), false;
   options.print(`Engine follows main at ${(await git(options.engineDir, "rev-parse", "--short", "HEAD")).out}.`);
   return true;
 }
 
 async function followRelease(options: UpdateOptions) {
   const fetched = await git(options.engineDir, "fetch", "-q", "--depth", "1", "--tags", "--force", "origin");
-  if (!fetched.ok) return options.print(`fleet update: could not fetch the engine: ${fetched.err}`), false;
+  if (!fetched.ok) return options.print(`hedge update: could not fetch the engine: ${fetched.err}`), false;
   const versions = (await git(options.engineDir, "tag", "--list", "v*")).out.split("\n").flatMap((tag) => parse(tag) ?? []);
   const pin = parse(options.engine.ref);
-  if (!pin) return options.print(`fleet update: the release channel needs a version tag as the engine ref, not ${options.engine.ref}.`), false;
+  if (!pin) return options.print(`hedge update: the release channel needs a version tag as the engine ref, not ${options.engine.ref}.`), false;
   const sameMajor = versions.filter((version) => version.parts[0] === pin.parts[0]).sort(compare);
   const target = sameMajor.at(-1) ?? pin;
   const newer = versions.filter((version) => version.parts[0] > pin.parts[0]).sort(compare).at(-1);
   await saveNotice(options.home, newer?.tag);
-  if (newer) options.print(`Fleet ${newer.tag} is out. It is a new major version, so this update stays on v${pin.parts[0]}.`);
+  if (newer) options.print(`Hedge ${newer.tag} is out. It is a new major version, so this update stays on v${pin.parts[0]}.`);
   const installed = (await git(options.engineDir, "tag", "--points-at", "HEAD")).out.split("\n").flatMap((tag) => parse(tag) ?? []).sort(compare).at(-1);
   if (!installed) {
     const head = (await git(options.engineDir, "rev-parse", "--short", "HEAD")).out;
-    options.print(`Engine stays at ${head}, which is not a release, so fleet update does not move it back. Set engine.channel to track to follow main, or run get.sh --ref ${target.tag}.`);
+    options.print(`Engine stays at ${head}, which is not a release, so hedge update does not move it back. Set engine.channel to track to follow main, or run get.sh --ref ${target.tag}.`);
     return true;
   }
   if (compare(installed, target) >= 0) return options.print(`Engine is at ${installed.tag}.`), true;
   const checkedOut = await git(options.engineDir, "checkout", "-q", "--detach", `refs/tags/${target.tag}`);
-  if (!checkedOut.ok) return options.print(`fleet update: could not check out ${target.tag}: ${checkedOut.err}`), false;
+  if (!checkedOut.ok) return options.print(`hedge update: could not check out ${target.tag}: ${checkedOut.err}`), false;
   options.print(`Engine is at ${target.tag}.`);
   return true;
 }
@@ -99,7 +99,7 @@ async function installPackages(engineDir: string) {
 }
 
 async function rollBack(options: UpdateOptions, before: string, installError: string) {
-  const failed = `fleet update: could not install the engine's packages in ${options.engineDir}`;
+  const failed = `hedge update: could not install the engine's packages in ${options.engineDir}`;
   const restored = await git(options.engineDir, "checkout", "-q", "--force", "--detach", before);
   if (!restored.ok) return options.print(`${failed}, and could not roll the engine back to ${before.slice(0, 7)}: ${restored.err}. Run get.sh again to repair it.\n${installError}`);
   const repair = (await installPackages(options.engineDir)) === undefined ? "" : " Its packages did not install either, so run get.sh again to repair it.";

@@ -9,11 +9,11 @@ export type ThreadIo = { home: string; host: string; print(line: string): void; 
 
 type Place = { local: ShellThread } | { environmentId: string; threadId: string };
 
-const usage = `Usage: fleet thread list [host] [--limit count] [--json]
-       fleet thread find <id>
-       fleet thread read [--host host] <id> [--words]
-       fleet thread send [--host host] <id> [message]
-Without --host, Fleet finds the machine that has the thread. find names that machine and reads nothing of the thread.
+const usage = `Usage: hedge thread list [host] [--limit count] [--json]
+       hedge thread find <id>
+       hedge thread read [--host host] <id> [--words]
+       hedge thread send [--host host] <id> [message]
+Without --host, Hedge finds the machine that has the thread. find names that machine and reads nothing of the thread.
 --words prints only the messages a person typed; on a linked machine it leaves out answers to question tools.
 The message comes from stdin when you leave it out.`;
 const threadIdPattern = /^[a-zA-Z0-9][a-zA-Z0-9:._%-]{0,511}$/;

@@ -9,18 +9,18 @@ export const codexInstaller = join(import.meta.dir, "../lib/install-codex.sh");
 
 const updates: Array<{ name: string; installed: string[]; marker: string; update: string[] }> = [
   { name: "Claude Code", installed: ["sh", "-c", 'test -x "$HOME/.local/bin/claude" && echo native'], marker: "native", update: ["claude", "update"] },
-  { name: "Codex", installed: ["sh", "-c", 'readlink "$HOME/.local/bin/codex"'], marker: "/.local/share/fleet/codex/", update: ["sh", codexInstaller] },
+  { name: "Codex", installed: ["sh", "-c", 'readlink "$HOME/.local/bin/codex"'], marker: "/.local/share/hedge/codex/", update: ["sh", codexInstaller] },
   { name: "Codex from Bun", installed: ["bun", "pm", "ls", "-g"], marker: "@openai/codex", update: ["bun", "add", "-g", "@openai/codex@latest"] },
 ];
 
-/** Updates each agent CLI that Fleet installed and skips the others. Returns the lines to print and whether every update worked. */
+/** Updates each agent CLI that Hedge installed and skips the others. Returns the lines to print and whether every update worked. */
 export async function updateAgents(run: Run): Promise<{ ok: boolean; lines: string[] }> {
   const lines: string[] = [];
   let ok = true;
   for (const agent of updates) {
     const found = await run(agent.installed);
     if (found.code !== 0 || !found.out.includes(agent.marker)) {
-      lines.push(`${agent.name}: not installed by Fleet, skipped.`);
+      lines.push(`${agent.name}: not installed by Hedge, skipped.`);
       continue;
     }
     const result = await run(agent.update);
@@ -42,7 +42,7 @@ export async function updatePlugins(run: Run): Promise<{ ok: boolean; lines: str
     const ids = userPlugins((await run(["claude", "plugin", "list", "--json"])).out);
     for (const id of ids ?? []) if ((await run(["claude", "plugin", "update", id, "--scope", "user"])).code !== 0) failed.push(id);
     ok &&= ids !== undefined && failed.length === 0;
-    if (!ids) lines.push("Claude Code plugins: Fleet could not read the plugin list.");
+    if (!ids) lines.push("Claude Code plugins: Hedge could not read the plugin list.");
     else lines.push(failed.length === 0 ? "Claude Code plugins: up to date." : `Claude Code plugins: ${failed.join(", ")} did not update.`);
   }
   const codex = await run(["codex", "plugin", "marketplace", "upgrade"]);

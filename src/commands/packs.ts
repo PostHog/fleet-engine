@@ -4,7 +4,7 @@ import { memoryRepo, namedMemory } from "../setup/profile.ts";
 import { settingsFrom, title, unmetNeeds } from "../setup/questions.ts";
 import { activePacks, type ChangeContext, manifests, saveAndApply } from "./change.ts";
 
-const usage = "fleet packs [--add <pack>]... [--remove <pack>]... [--workflows <id=on|off,...>] [--set <pack.key=value>]...";
+const usage = "hedge packs [--add <pack>]... [--remove <pack>]... [--workflows <id=on|off,...>] [--set <pack.key=value>]...";
 
 /** Lists the packs, or turns packs and workflows on and off. */
 export async function packsCommand(args: string[], context: ChangeContext): Promise<number> {

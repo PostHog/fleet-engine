@@ -7,10 +7,10 @@ const root = join(import.meta.dir, "..");
 const guidePath = join(root, "docs/getting-started.md");
 const read = (path: string) => readFileSync(path, "utf8");
 
-async function fleetCommands() {
+async function hedgeCommands() {
   let usage = "";
   await main(["help"], { home: "/nonexistent", engineRoot: root, platform: "linux", print: (line) => (usage += line) });
-  return new Set([...usage.matchAll(/^ {2}fleet ([a-z]+)/gm)].map((match) => match[1]));
+  return new Set([...usage.matchAll(/^ {2}hedge ([a-z]+)/gm)].map((match) => match[1]));
 }
 
 describe("the getting-started guide", () => {
@@ -22,13 +22,13 @@ describe("the getting-started guide", () => {
   test("walks from the install line to a linked devbox", () => {
     const guide = read(guidePath);
     expect(guide).toContain("curl -fsSL https://raw.githubusercontent.com/PostHog/fleet-engine/main/get.sh | sh");
-    expect(guide).toContain("fleet devbox add");
+    expect(guide).toContain("hedge devbox add");
     expect(guide).toContain("t3 up --connect");
   });
 
-  test("runs only fleet commands that exist", async () => {
-    const known = await fleetCommands();
-    const used = [...read(guidePath).matchAll(/\bfleet ([a-z]+)\b/g)].map((match) => match[1]);
+  test("runs only hedge commands that exist", async () => {
+    const known = await hedgeCommands();
+    const used = [...read(guidePath).matchAll(/\bhedge ([a-z]+)\b/g)].map((match) => match[1]);
     expect(used.length).toBeGreaterThan(0);
     expect(used.filter((command) => !known.has(command))).toEqual([]);
   });

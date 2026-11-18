@@ -22,15 +22,15 @@ function homeWith(plan: Plan, settings?: Record<string, unknown>) {
   const home = temp.make("home-");
   mkdirSync(join(home, ".bun/bin"), { recursive: true });
   symlinkSync(process.execPath, join(home, ".bun/bin/bun"));
-  for (const file of plan.files.filter((item) => item.target.startsWith(".config/fleet/hooks/"))) {
+  for (const file of plan.files.filter((item) => item.target.startsWith(".config/hedge/hooks/"))) {
     const target = join(home, file.target);
     mkdirSync(dirname(target), { recursive: true });
     if ("source" in file) symlinkSync(file.source, target);
     else writeFileSync(target, file.content);
   }
   if (settings) {
-    mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
-    writeFileSync(join(home, ".local/state/fleet/settings.json"), JSON.stringify(settings), { mode: 0o600 });
+    mkdirSync(join(home, ".local/state/hedge"), { recursive: true });
+    writeFileSync(join(home, ".local/state/hedge/settings.json"), JSON.stringify(settings), { mode: 0o600 });
   }
   return home;
 }
@@ -53,7 +53,7 @@ function refusalOf({ code, stdout }: HookResult): Answer {
 const stdinOf = (call: ToolCall | string) => (typeof call === "string" ? call : JSON.stringify(call));
 
 async function preToolUseInstalled(home: string, provider: "claude" | "codex", call: ToolCall | string, env: Record<string, string> = {}) {
-  const child = Bun.spawn(["sh", join(home, ".config/fleet/hooks/run.sh"), provider, "PreToolUse"], {
+  const child = Bun.spawn(["sh", join(home, ".config/hedge/hooks/run.sh"), provider, "PreToolUse"], {
     env: { ...process.env, HOME: home, ...env },
     stdin: new Blob([stdinOf(call)]),
     stdout: "pipe",
@@ -81,20 +81,20 @@ async function preToolUse(home: string, provider: "claude" | "codex", call: Tool
       return { code: 1, stdout: "", stderr: String(error) };
     }
   };
-  return refusalOf(await dispatch(join(home, ".config/fleet/hooks/PreToolUse"), provider, stdinOf(call), run));
+  return refusalOf(await dispatch(join(home, ".config/hedge/hooks/PreToolUse"), provider, stdinOf(call), run));
 }
 
 const bash = (command: string, cwd = "/"): ToolCall => ({ tool_name: "Bash", tool_input: { command }, cwd });
 
 describe("the Guards pack", () => {
   test("installs no hook until the shell guards are turned on", () => {
-    const hook = ".config/fleet/hooks/PreToolUse/guards.ts";
+    const hook = ".config/hedge/hooks/PreToolUse/guards.ts";
     expect(withGuards({}).files.map((file) => file.target)).not.toContain(hook);
     expect(withGuards().files.map((file) => file.target)).toContain(hook);
   });
 
   test("installs gh stack and its pinned install step only with the gh-stack workflow", () => {
-    const script = ".local/share/fleet/guards/install-gh-stack.sh";
+    const script = ".local/share/hedge/guards/install-gh-stack.sh";
     const off = withGuards({ "shell-guards": true });
     expect(off.files.map((file) => file.target)).not.toContain(script);
     expect(off.steps.map((step) => step.id)).not.toContain("gh-stack");
@@ -132,10 +132,10 @@ describe("the shell guards through the hook dispatcher", () => {
   test("refuses gh on an owner that only a list outside the system root allows", async () => {
     const home = homeWith(withGuards(), { "guards.person": "Robin", "guards.owners": "acme" });
     const agentRoot = temp.make("agent-root-");
-    mkdirSync(join(agentRoot, "etc/fleet"), { recursive: true });
-    const owner = `fleet-test-${crypto.randomUUID().slice(0, 8)}`;
-    writeFileSync(join(agentRoot, "etc/fleet/git-allowlist"), `acme\n${owner}\n`);
-    const denied = await preToolUseInstalled(home, "claude", bash(`gh pr create -R ${owner}/repo --fill`), { FLEET_SYSTEM_ROOT: agentRoot });
+    mkdirSync(join(agentRoot, "etc/hedge"), { recursive: true });
+    const owner = `hedge-test-${crypto.randomUUID().slice(0, 8)}`;
+    writeFileSync(join(agentRoot, "etc/hedge/git-allowlist"), `acme\n${owner}\n`);
+    const denied = await preToolUseInstalled(home, "claude", bash(`gh pr create -R ${owner}/repo --fill`), { HEDGE_SYSTEM_ROOT: agentRoot });
     expect(denied.refusal).toContain(`\`${owner}\` is not one of the GitHub owners`);
   });
 
@@ -388,7 +388,7 @@ describe("the download guard", () => {
     ["cd web && bunx @scope/unheard-of-tool@1.2 --help", "bunx @scope/unheard-of-tool"],
     ["uvx --from unheard-of-cli unheard-of-cli run", "uvx unheard-of-cli"],
     ["pnpm dlx unheard-of-degit owner/repo", "pnpm dlx unheard-of-degit"],
-    ["~/dev/fleet/fleet heavy -- npx unheard-of-pad", "npx unheard-of-pad"],
+    ["~/dev/hedge/hedge heavy -- npx unheard-of-pad", "npx unheard-of-pad"],
   ])("refuses a package runner that fetches a package the project lacks: %s", (command, named) => {
     expect(refusal(command)).toContain(`\`${named}\``);
   });
@@ -520,8 +520,8 @@ describe("the download guard", () => {
 describe("the gh guard", () => {
   const homeAllowing = (owners: string | null) => {
     const home = temp.make("home-");
-    mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
-    writeFileSync(join(home, ".local/state/fleet/settings.json"), JSON.stringify({ "guards.person": "Robin", "guards.owners": owners }));
+    mkdirSync(join(home, ".local/state/hedge"), { recursive: true });
+    writeFileSync(join(home, ".local/state/hedge/settings.json"), JSON.stringify({ "guards.person": "Robin", "guards.owners": owners }));
     return home;
   };
   const refusal = (command: string, owners: string | null = "acme octo-org") => {
@@ -839,7 +839,7 @@ describe("the gh guard", () => {
   test("refuses gh on the repository that GH_REPO names when the agent inherits it", async () => {
     const home = homeWith(withGuards(), { "guards.person": "Robin", "guards.owners": "acme" });
     const run = async (repo: string) => {
-      const child = Bun.spawn(["sh", join(home, ".config/fleet/hooks/run.sh"), "claude", "PreToolUse"], {
+      const child = Bun.spawn(["sh", join(home, ".config/hedge/hooks/run.sh"), "claude", "PreToolUse"], {
         env: { ...process.env, HOME: home, GH_REPO: repo },
         stdin: new Blob([JSON.stringify(bash("gh pr create --fill"))]),
         stdout: "pipe",
@@ -868,11 +868,11 @@ describe("the gh guard", () => {
 
   test.each(["{not json", "[]", '{"guards.owners": 7}'])("refuses shell calls while the settings file cannot be read: %s", (content) => {
     const home = temp.make("home-");
-    mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
-    writeFileSync(join(home, ".local/state/fleet/settings.json"), content);
+    mkdirSync(join(home, ".local/state/hedge"), { recursive: true });
+    writeFileSync(join(home, ".local/state/hedge/settings.json"), content);
     const denied = guard(bash("gh pr create -R other/app --fill"), home, temp.make("root-"));
     expect(denied?.hookSpecificOutput.permissionDecision).toBe("deny");
-    expect(denied?.hookSpecificOutput.permissionDecisionReason).toContain(join(home, ".local/state/fleet/settings.json"));
+    expect(denied?.hookSpecificOutput.permissionDecisionReason).toContain(join(home, ".local/state/hedge/settings.json"));
     expect(guard(bash("ls"), home, temp.make("root-"))?.hookSpecificOutput.permissionDecision).toBe("deny");
   });
 
@@ -1159,7 +1159,7 @@ describe("the gh-stack install script", () => {
       return { code: result.exitCode, out: `${result.stdout}${result.stderr}`.trim() };
     };
     const calls = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : []);
-    return { home, data, run, calls, marker: join(home, ".config/fleet/gh-stack.version") };
+    return { home, data, run, calls, marker: join(home, ".config/hedge/gh-stack.version") };
   }
 
   test("skips a machine without gh", () => {
@@ -1176,17 +1176,17 @@ describe("the gh-stack install script", () => {
     expect(box.run("--check").code).toBe(1);
   });
 
-  test("keeps a gh-stack that Fleet did not install", () => {
+  test("keeps a gh-stack that Hedge did not install", () => {
     const box = machine();
     mkdirSync(join(box.data, "extensions/gh-stack"), { recursive: true });
     writeFileSync(join(box.data, "extensions/gh-stack/gh-stack"), "someone's own build");
     const result = box.run();
     expect(result.code).toBe(1);
-    expect(result.out).toContain("kept the gh-stack that Fleet did not install");
+    expect(result.out).toContain("kept the gh-stack that Hedge did not install");
     expect(box.calls()).toEqual([]);
   });
 
-  test("replaces an outdated gh-stack that Fleet installed", () => {
+  test("replaces an outdated gh-stack that Hedge installed", () => {
     const box = machine();
     mkdirSync(join(box.data, "extensions/gh-stack"), { recursive: true });
     writeFileSync(join(box.data, "extensions/gh-stack/gh-stack"), "an older pin");

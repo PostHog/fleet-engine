@@ -63,7 +63,7 @@ export async function finalGate(head: ProofIdentity, context: GateContext, { lan
   });
   const judged: Judged = checked.code === 0 ? await judgeHead(head, checked, context) : { code: checked.code, lines: [], covered: "", judge: { state: "skipped", lines: [] }, reason: checked.failure };
   const shown = pull === undefined ? undefined : receiptMarker((pull as PullRequest).body);
-  const stale = shown && shown.head !== head.commit ? [`receipt: the PR body shows the receipt of ${shown.head.slice(0, 7)}, not HEAD ${head.commit.slice(0, 7)}. Refresh it with fleet proof receipt`] : [];
+  const stale = shown && shown.head !== head.commit ? [`receipt: the PR body shows the receipt of ${shown.head.slice(0, 7)}, not HEAD ${head.commit.slice(0, 7)}. Refresh it with hedge proof receipt`] : [];
   const gate = {
     code: judged.code,
     reason: judged.code === 0 ? "pass" : judged.reason ?? `exit ${judged.code}`,
@@ -146,8 +146,8 @@ async function judgeHead(head: ProofIdentity, checked: Checked, context: GateCon
     return { code: 3, lines, covered: "", judge: verdict(lines, judgeGapProof(head.commit, gap)), reason: `judge gap: ${gap.line}: ${gap.reason}` };
   }
   const hint = checked.tier === "ungraded"
-    ? "judge gap: when the judge is wrong, record fleet proof gap --kind judge --reason <why> and ask the user; an agent never decides on an ungraded PR"
-    : `judge gap: when the judge is wrong, record fleet proof gap --kind judge --reason <why> and decide it with fleet decision record --mark 🤖 --class proof-gap --kind judge --pr ${refText(head)} --question <q> --answer <a> --rejected <option> --reason <why>, or ask the user`;
+    ? "judge gap: when the judge is wrong, record hedge proof gap --kind judge --reason <why> and ask the user; an agent never decides on an ungraded PR"
+    : `judge gap: when the judge is wrong, record hedge proof gap --kind judge --reason <why> and decide it with hedge decision record --mark 🤖 --class proof-gap --kind judge --pr ${refText(head)} --question <q> --answer <a> --rejected <option> --reason <why>, or ask the user`;
   const lines = [...outcome.lines, hint];
   return { code: 1, lines, covered: "", judge: verdict(lines), reason };
 }
@@ -161,4 +161,4 @@ async function judgeDiff(head: ProofIdentity, known: Omit<JudgeInput, "cwd" | "f
   });
 }
 
-const voidBroken = (ids: string[]) => `End ${ids.map((id) => `decision ${id}`).join(" and ")} with fleet decision void <id> --reason <why its condition no longer holds>, then decide or ask again`;
+const voidBroken = (ids: string[]) => `End ${ids.map((id) => `decision ${id}`).join(" and ")} with hedge decision void <id> --reason <why its condition no longer holds>, then decide or ask again`;

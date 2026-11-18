@@ -9,7 +9,7 @@ import { dreamNow, hubWithSubtree, quietIo } from "./testing.ts";
 
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
-const state = ".local/state/fleet/dream";
+const state = ".local/state/hedge/dream";
 const day = 86_400_000;
 
 function digest(session: string, endedAt: string, texts: string[], fields: Partial<Digest> = {}): Digest {
@@ -22,7 +22,7 @@ function digest(session: string, endedAt: string, texts: string[], fields: Parti
 }
 
 function hubWithRuns() {
-  const home = temp.make("fleet-dream-search-");
+  const home = temp.make("hedge-dream-search-");
   hubWithSubtree(home, { "MEMORY.md": "# Memory index\n" });
   writeHome(home, {
     [`${state}/2026-11-04/digests/a.json`]: JSON.stringify(digest("s-new", "2026-11-04T09:00:00Z", ["When do we deploy?", "We deploy on Tuesday after the freeze."])),
@@ -64,14 +64,14 @@ test("search says when nothing matches", async () => {
 });
 
 test("search away from the hub asks the hub over SSH and passes on its answer and exit code", async () => {
-  const home = temp.make("fleet-dream-search-");
-  writeHome(home, { ".config/fleet/machine.json": JSON.stringify({ schema: 1, role: "devbox" }) });
+  const home = temp.make("hedge-dream-search-");
+  writeHome(home, { ".config/hedge/machine.json": JSON.stringify({ schema: 1, role: "devbox" }) });
   const asked: string[] = [];
   const { io, printed } = quietIo(home, { onPeer: async (alias, command) => (asked.push(`${alias}: ${command}`), { code: 0, stdout: "2026-11-04T09:00 hub claude s-1 (app)\n", stderr: "" }) });
 
   expect(await dreamCommand(["search", "it's", "deploy"], io)).toBe(0);
 
-  expect(asked).toEqual([`my-hub: sh "$HOME/.local/share/fleet/engine/fleet" dream search 'it'\\''s' 'deploy'`]);
+  expect(asked).toEqual([`my-hub: sh "$HOME/.local/share/hedge/engine/hedge" dream search 'it'\\''s' 'deploy'`]);
   expect(printed).toEqual(["2026-11-04T09:00 hub claude s-1 (app)\n"]);
 });
 
@@ -80,7 +80,7 @@ test("search with no word prints its usage and exits 2", async () => {
 
   expect(await dreamCommand(["search"], io)).toBe(2);
 
-  expect(said).toEqual(["Usage: fleet dream search <word>..."]);
+  expect(said).toEqual(["Usage: hedge dream search <word>..."]);
 });
 
 test("the hub keeps runs and box digests for 30 days, then drops them", async () => {

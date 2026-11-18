@@ -8,10 +8,10 @@
   "settings": [{ "key": "twin.greeting", "type": "string", "question": "Which greeting?" }],
   "workflows": [{ "id": "twin-hello", "name": "Greet", "sentence": "The hub greets you.", "default": false, "settings": ["twin.greeting"] }],
   "jobs": [
-    { "id": "twin-greeter", "command": ["fleet", "run", "twin/twin-greeter"], "schedule": { "every": "always" }, "roles": ["hub", "solo"], "workflow": "twin-hello", "after": "twin-picked" },
-    { "id": "twin-linux", "command": ["fleet", "run", "twin/twin-linux"], "schedule": { "every": "always" }, "on": ["linux"], "plans": ["claude"] }
+    { "id": "twin-greeter", "command": ["hedge", "run", "twin/twin-greeter"], "schedule": { "every": "always" }, "roles": ["hub", "solo"], "workflow": "twin-hello", "after": "twin-picked" },
+    { "id": "twin-linux", "command": ["hedge", "run", "twin/twin-linux"], "schedule": { "every": "always" }, "on": ["linux"], "plans": ["claude"] }
   ],
   "human": [
-    { "id": "twin-picked", "say": "Pick a greeting.", "probe": ["fleet", "run", "twin/twin-picked"], "command": "fleet twin-hello setup", "interactive": true, "roles": ["hub", "solo"], "workflow": "twin-hello" }
+    { "id": "twin-picked", "say": "Pick a greeting.", "probe": ["hedge", "run", "twin/twin-picked"], "command": "hedge twin-hello setup", "interactive": true, "roles": ["hub", "solo"], "workflow": "twin-hello" }
   ]
 }

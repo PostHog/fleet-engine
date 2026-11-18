@@ -3,8 +3,8 @@
   "name": "base",
   "summary": "Every machine gets safety rules, the model table, T3 Code defaults, and the jobs that keep it current.",
   "day": "Agents ask before they break things, pick the right model for each task, and every machine is up to date when you start.",
-  "cost": "You set up nothing. Every Fleet machine gets it.",
-  "risk": "Fleet owns its hooks in Claude Code and Codex. Fleet keeps a hook that you wrote yourself on the same event until you adopt Fleet's.",
+  "cost": "You set up nothing. Every Hedge machine gets it.",
+  "risk": "Hedge owns its hooks in Claude Code and Codex. Hedge keeps a hook that you wrote yourself on the same event until you adopt Hedge's.",
   "instructions": "AGENTS.md",
   "guides": [
     {
@@ -195,26 +195,26 @@
     },
     {
       "key": "base.diskFloorGigabytes",
-      "question": "Below how many free gigabytes should Fleet refuse new worktrees and heavy jobs?",
+      "question": "Below how many free gigabytes should Hedge refuse new worktrees and heavy jobs?",
       "type": "number",
       "default": 10,
       "ask": "never"
     },
     {
       "key": "base.startFloorGigabytes",
-      "question": "Below how many free gigabytes should fleet disk --start refuse a new thread or scheduled run?",
+      "question": "Below how many free gigabytes should hedge disk --start refuse a new thread or scheduled run?",
       "type": "number",
       "default": 25,
       "ask": "never"
     },
     {
       "key": "identity.signer",
-      "question": "Which key signs your Git commits? Fleet picks coder in a Coder workspace and ssh everywhere else.",
+      "question": "Which key signs your Git commits? Hedge picks coder in a Coder workspace and ssh everywhere else.",
       "type": "choice",
       "choices": [
         {
           "value": "ssh",
-          "label": "A Fleet SSH key"
+          "label": "A Hedge SSH key"
         },
         {
           "value": "coder",
@@ -230,7 +230,7 @@
     },
     {
       "key": "context.repo",
-      "question": "Which GitHub repo, such as you/context, holds what your agents learn and record: memory, notes, maps, and logs? Share it with your team, but keep it private. Fleet takes the memory, library, map, and log settings from it unless you set them.",
+      "question": "Which GitHub repo, such as you/context, holds what your agents learn and record: memory, notes, maps, and logs? Share it with your team, but keep it private. Hedge takes the memory, library, map, and log settings from it unless you set them.",
       "type": "string",
       "optional": true,
       "ask": "never"
@@ -244,7 +244,7 @@
     },
     {
       "key": "base.usageHost",
-      "question": "Which analytics host receives Fleet's usage events? Give its capture URL, such as https://us.i.posthog.com.",
+      "question": "Which analytics host receives Hedge's usage events? Give its capture URL, such as https://us.i.posthog.com.",
       "type": "string"
     },
     {
@@ -277,13 +277,13 @@
       "id": "nightly-updates",
       "name": "Nightly updates",
       "default": true,
-      "sentence": "Fleet, your profile, Claude Code, Codex, their plugins, and T3 Code update themselves every night. T3 Code waits until no agent turn runs. A failed update tries again each hour until 05:47 UTC."
+      "sentence": "Hedge, your profile, Claude Code, Codex, their plugins, and T3 Code update themselves every night. T3 Code waits until no agent turn runs. A failed update tries again each hour until 05:47 UTC."
     },
     {
       "id": "source-refresh",
       "name": "Fresh skills",
       "default": true,
-      "sentence": "Every five minutes, Fleet asks each pack source that follows a branch, such as your skills repository, whether it moved. When it moved forward, Fleet updates the skills, guides, and instructions it brings. A source you edited, such as a changed skill, and a rewritten branch wait for you. Everything else waits for the nightly update."
+      "sentence": "Every five minutes, Hedge asks each pack source that follows a branch, such as your skills repository, whether it moved. When it moved forward, Hedge updates the skills, guides, and instructions it brings. A source you edited, such as a changed skill, and a rewritten branch wait for you. Everything else waits for the nightly update."
     },
     {
       "id": "linked-machines",
@@ -298,7 +298,7 @@
       "id": "worktree-cleanup",
       "name": "Worktree cleanup",
       "default": true,
-      "sentence": "Every few minutes, Fleet removes idle worktrees whose work has merged."
+      "sentence": "Every few minutes, Hedge removes idle worktrees whose work has merged."
     },
     {
       "id": "disk-guard",
@@ -317,7 +317,7 @@
         "base.usageHost",
         "base.usageProjectKey"
       ],
-      "sentence": "Fleet counts how often you and your agents run its commands and recall memory, and sends the counts to your own analytics project every five minutes.",
+      "sentence": "Hedge counts how often you and your agents run its commands and recall memory, and sends the counts to your own analytics project every five minutes.",
       "risk": "Command names, counts, and the machine name leave the machine for the analytics project you name. Arguments, prompts, file contents, and secrets never do."
     },
     {
@@ -337,7 +337,7 @@
           "hooks": [
             {
               "type": "command",
-              "command": "sh \"$HOME/.config/fleet/hooks/run.sh\" claude UserPromptSubmit",
+              "command": "sh \"$HOME/.config/hedge/hooks/run.sh\" claude UserPromptSubmit",
               "timeout": 30
             }
           ]
@@ -352,7 +352,7 @@
           "hooks": [
             {
               "type": "command",
-              "command": "sh \"$HOME/.config/fleet/hooks/run.sh\" claude PreToolUse",
+              "command": "sh \"$HOME/.config/hedge/hooks/run.sh\" claude PreToolUse",
               "timeout": 30
             }
           ]
@@ -367,7 +367,7 @@
           "hooks": [
             {
               "type": "command",
-              "command": "sh \"$HOME/.config/fleet/hooks/run.sh\" claude PostToolUse",
+              "command": "sh \"$HOME/.config/hedge/hooks/run.sh\" claude PostToolUse",
               "timeout": 90
             }
           ]
@@ -382,7 +382,7 @@
           "hooks": [
             {
               "type": "command",
-              "command": "sh \"$HOME/.config/fleet/hooks/run.sh\" claude SessionStart",
+              "command": "sh \"$HOME/.config/hedge/hooks/run.sh\" claude SessionStart",
               "timeout": 30
             }
           ]
@@ -397,7 +397,7 @@
           "hooks": [
             {
               "type": "command",
-              "command": "sh \"$HOME/.config/fleet/hooks/run.sh\" claude Stop",
+              "command": "sh \"$HOME/.config/hedge/hooks/run.sh\" claude Stop",
               "timeout": 30
             }
           ]
@@ -412,7 +412,7 @@
           "hooks": [
             {
               "type": "command",
-              "command": "sh \"$HOME/.config/fleet/hooks/run.sh\" codex UserPromptSubmit",
+              "command": "sh \"$HOME/.config/hedge/hooks/run.sh\" codex UserPromptSubmit",
               "timeout": 30
             }
           ]
@@ -431,7 +431,7 @@
           "hooks": [
             {
               "type": "command",
-              "command": "sh \"$HOME/.config/fleet/hooks/run.sh\" codex PreToolUse",
+              "command": "sh \"$HOME/.config/hedge/hooks/run.sh\" codex PreToolUse",
               "timeout": 30
             }
           ]
@@ -450,7 +450,7 @@
           "hooks": [
             {
               "type": "command",
-              "command": "sh \"$HOME/.config/fleet/hooks/run.sh\" codex PostToolUse",
+              "command": "sh \"$HOME/.config/hedge/hooks/run.sh\" codex PostToolUse",
               "timeout": 90
             }
           ]
@@ -469,7 +469,7 @@
           "hooks": [
             {
               "type": "command",
-              "command": "sh \"$HOME/.config/fleet/hooks/run.sh\" codex SessionStart",
+              "command": "sh \"$HOME/.config/hedge/hooks/run.sh\" codex SessionStart",
               "timeout": 30
             }
           ]
@@ -488,7 +488,7 @@
           "hooks": [
             {
               "type": "command",
-              "command": "sh \"$HOME/.config/fleet/hooks/run.sh\" codex Stop",
+              "command": "sh \"$HOME/.config/hedge/hooks/run.sh\" codex Stop",
               "timeout": 30
             }
           ]
@@ -654,23 +654,23 @@
   "files": [
     {
       "path": "hooks/run.sh",
-      "target": ".config/fleet/hooks/run.sh"
+      "target": ".config/hedge/hooks/run.sh"
     },
     {
       "path": "hooks/run.ts",
-      "target": ".config/fleet/hooks/run.ts"
+      "target": ".config/hedge/hooks/run.ts"
     },
     {
       "path": "hooks/secret-guard.ts",
-      "target": ".config/fleet/hooks/UserPromptSubmit/secret-guard.ts"
+      "target": ".config/hedge/hooks/UserPromptSubmit/secret-guard.ts"
     },
     {
       "path": "hooks/secret-guard.ts",
-      "target": ".config/fleet/hooks/PostToolUse/secret-guard.ts"
+      "target": ".config/hedge/hooks/PostToolUse/secret-guard.ts"
     },
     {
       "path": "hooks/name-a-model.ts",
-      "target": ".config/fleet/hooks/PreToolUse/name-a-model.ts",
+      "target": ".config/hedge/hooks/PreToolUse/name-a-model.ts",
       "plans": [
         "claude",
         "both"
@@ -678,16 +678,16 @@
     },
     {
       "path": "hooks/cast-the-reviewer.ts",
-      "target": ".config/fleet/hooks/UserPromptSubmit/cast-the-reviewer.ts"
+      "target": ".config/hedge/hooks/UserPromptSubmit/cast-the-reviewer.ts"
     },
     {
       "path": "hooks/format-on-edit.ts",
-      "target": ".config/fleet/hooks/PostToolUse/format-on-edit.ts",
+      "target": ".config/hedge/hooks/PostToolUse/format-on-edit.ts",
       "workflow": "format-on-edit"
     },
     {
-      "path": "fleet-heavy.slice",
-      "target": ".config/systemd/user/fleet-heavy.slice",
+      "path": "hedge-heavy.slice",
+      "target": ".config/systemd/user/hedge-heavy.slice",
       "on": [
         "linux"
       ],
@@ -695,7 +695,7 @@
     },
     {
       "path": "session.sh",
-      "target": ".config/fleet/session.sh",
+      "target": ".config/hedge/session.sh",
       "on": [
         "linux"
       ]
@@ -703,13 +703,13 @@
   ],
   "jobs": [
     {
-      "id": "fleet-update",
+      "id": "hedge-update",
       "command": [
-        "fleet",
+        "hedge",
         "nightly",
-        "fleet-update",
+        "hedge-update",
         "--",
-        "fleet",
+        "hedge",
         "update"
       ],
       "schedule": {
@@ -721,11 +721,11 @@
     {
       "id": "agent-update",
       "command": [
-        "fleet",
+        "hedge",
         "nightly",
         "agent-update",
         "--",
-        "fleet",
+        "hedge",
         "agent-update"
       ],
       "schedule": {
@@ -737,7 +737,7 @@
     {
       "id": "source-refresh",
       "command": [
-        "fleet",
+        "hedge",
         "refresh"
       ],
       "schedule": {
@@ -748,7 +748,7 @@
     {
       "id": "worktree-prune",
       "command": [
-        "fleet",
+        "hedge",
         "prune",
         "--auto"
       ],
@@ -760,7 +760,7 @@
     {
       "id": "usage-flush",
       "command": [
-        "fleet",
+        "hedge",
         "usage",
         "flush"
       ],
@@ -774,11 +774,11 @@
     {
       "id": "settings-snapshot",
       "run": [
-        "fleet",
+        "hedge",
         "settings-snapshot"
       ],
       "check": [
-        "fleet",
+        "hedge",
         "settings-snapshot",
         "--check"
       ]
@@ -786,11 +786,11 @@
     {
       "id": "shell-session",
       "run": [
-        "fleet",
+        "hedge",
         "shell-session"
       ],
       "check": [
-        "fleet",
+        "hedge",
         "shell-session",
         "--check"
       ],
@@ -817,7 +817,7 @@
     {
       "id": "codex-cli",
       "run": [
-        "fleet",
+        "hedge",
         "install-codex"
       ],
       "check": [
@@ -836,11 +836,11 @@
     {
       "id": "cargo-git-cli",
       "run": [
-        "fleet",
+        "hedge",
         "cargo-git-cli"
       ],
       "check": [
-        "fleet",
+        "hedge",
         "cargo-git-cli",
         "--check"
       ],
@@ -851,7 +851,7 @@
     {
       "id": "node-runtime",
       "run": [
-        "fleet",
+        "hedge",
         "install-node"
       ],
       "check": [

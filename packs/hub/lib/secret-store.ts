@@ -24,8 +24,8 @@ export type SecretEvent =
   | { type: "on"; off: string; words: string; thread: string; message: string; at: string };
 
 export const secretFilesDir = (home: string) => join(home, ".t3/userdata/secrets/files");
-export const valuesDir = (home: string) => join(home, ".config/fleet/secrets");
-export const eventLogPath = (home: string) => join(home, ".local/state/fleet/secrets.jsonl");
+export const valuesDir = (home: string) => join(home, ".config/hedge/secrets");
+export const eventLogPath = (home: string) => join(home, ".local/state/hedge/secrets.jsonl");
 
 export class SecretRefusal extends Error {}
 
@@ -201,7 +201,7 @@ export const showsValue = (text: string, values: string[]) => values.some((value
 export const unshown = (texts: string[], values: string[]) => texts.find((text) => !showsValue(text, values)) ?? "✗";
 const hiddenValue = "Refused, and the reason would show part of the value. Nothing was stored";
 
-export const olderHub = (op: string) => `the hub runs an older fleet secret that has no ${op}, so nothing was done there. Run fleet update on the hub`;
+export const olderHub = (op: string) => `the hub runs an older hedge secret that has no ${op}, so nothing was done there. Run hedge update on the hub`;
 
 export function failureOf(error: unknown) {
   if (error instanceof SecretRefusal) return error.message;
@@ -219,7 +219,7 @@ export const piecesOf = (text: string) => text.split(/\r?\n/).flatMap((line) => 
 export async function putValue(store: Store, input: PutInput): Promise<PutEvent> {
   try {
     const row = input.lane ? laneRowFor(store, input.name, input.lane) : rowOf(store, input.name);
-    if (!row || row.file) throw new SecretRefusal(`No declared secret ${input.name} is kept by the store. fleet secret list shows the names`);
+    if (!row || row.file) throw new SecretRefusal(`No declared secret ${input.name} is kept by the store. hedge secret list shows the names`);
     return await checkAndStore(store, row, input);
   } catch (error) {
     throw new SecretRefusal(unshown([error instanceof SecretRefusal ? error.message : `${failureOf(error)}. Nothing was stored`, hiddenValue, "Refused"], piecesOf(input.text)));
@@ -260,7 +260,7 @@ async function checkAndStore(store: Store, row: SecretRow, input: PutInput): Pro
   appendEvents(store, event);
   const events = readEvents(store.home);
   const at = landed(events, event);
-  if (at < 0) throw new SecretRefusal(`The ${row.name} put's event did not land whole in the event log, so it was not stored, and the torn line keeps the store off. Only the user's words turn it on: fleet secret on`);
+  if (at < 0) throw new SecretRefusal(`The ${row.name} put's event did not land whole in the event log, so it was not stored, and the torn line keeps the store off. Only the user's words turn it on: hedge secret on`);
   const owner = fold(events.slice(0, at + 1)).puts.get(row.name);
   if (owner?.id !== event.id) {
     removeValue(store.home, event);
@@ -386,7 +386,7 @@ export function deliver(store: Store, input: { names: string[]; thread?: string;
   return delivered;
 }
 
-const offRefusal = (off: OffEvent) => `The store is off since ${off.at.slice(0, 16)}Z (${off.reason}). Only the user's words turn it on: fleet secret on`;
+const offRefusal = (off: OffEvent) => `The store is off since ${off.at.slice(0, 16)}Z (${off.reason}). Only the user's words turn it on: hedge secret on`;
 
 export function turnOff(store: Store, input: { reason: string; thread?: string; machine: string }) {
   appendEvents(store, { type: "off", id: newId("o"), reason: input.reason, at: store.now.toISOString(), ...input.thread ? { thread: input.thread } : {}, machine: input.machine });
@@ -464,12 +464,12 @@ function rowLine(store: Store, row: SecretRow, put: PutEvent | undefined) {
 export function cardText(row: SecretRow, put?: PutEvent) {
   if (isLane(put)) {
     const revoke = put.revoke ? ` Revoke the old one at ${put.revoke}.` : "";
-    return `Ask the user with one request_secret card (delivery "file") for ${row.name}: lane ${put.lane}'s secret for ${put.env}, which lives at most ${laneDays} days.${revoke} The card asks for the value alone, on one line. Then: fleet secret put ${row.name} --file <the saved file> --lane ${put.lane} --env ${put.env} --why <why> (--expires <a date within ${laneDays} days> | --revoke <link>)`;
+    return `Ask the user with one request_secret card (delivery "file") for ${row.name}: lane ${put.lane}'s secret for ${put.env}, which lives at most ${laneDays} days.${revoke} The card asks for the value alone, on one line. Then: hedge secret put ${row.name} --file <the saved file> --lane ${put.lane} --env ${put.env} --why <why> (--expires <a date within ${laneDays} days> | --revoke <link>)`;
   }
   const where = whereOf(row);
   const kind = row.file ? "an existing secret with its own lifecycle" : `a standing secret: set its expiry within ${standingDays} days, or none`;
   const paste = row.env.length === 1 ? "the value alone, on one line" : `one line per variable: ${row.env.map((key) => `${key}=…`).join(", ")}`;
-  const store = row.file ? `Then store it with: ${row.file.renew}` : `Then: fleet secret put ${row.name} --file <the saved file>`;
+  const store = row.file ? `Then store it with: ${row.file.renew}` : `Then: hedge secret put ${row.name} --file <the saved file>`;
   return `Ask the user with one request_secret card (delivery "file") for ${row.name}: ${row.provider.name}${where ? ` for ${where}` : ""}, scope ${row.scope}, ${kind}. Create or revoke it at ${row.settings}. The card asks for ${paste}. ${store}`;
 }
 
@@ -477,14 +477,14 @@ export async function needLines(store: Store, input: { names: string[]; thread?:
   const names = [...new Set(input.names)];
   const held = fold(readEvents(store.home)).puts;
   const unknown = names.filter((name) => !rowFor(store, name, held.get(name)));
-  if (unknown.length) throw new SecretRefusal(`No declared secret ${unknown.join(", ")}. fleet secret list shows the names`);
+  if (unknown.length) throw new SecretRefusal(`No declared secret ${unknown.join(", ")}. hedge secret list shows the names`);
   const read = (name: string, refused?: string): SecretEvent => ({ type: "read", id: newId("r"), name, at: store.now.toISOString(), ...input.thread ? { thread: input.thread } : {}, machine: input.machine, check: true, ...refused ? { refused } : {} });
   const lines: string[] = [];
   for (const [index, name] of names.entries()) {
     const now = switchState(store);
     if (now.off) {
       appendEvents(store, ...names.slice(index).map((rest) => read(rest, "the store is off")));
-      throw new SecretRefusal(`The store is off since ${now.off.at.slice(0, 16)}Z (${now.off.reason}), so no check runs. Only the user's words turn it on: fleet secret on`);
+      throw new SecretRefusal(`The store is off since ${now.off.at.slice(0, 16)}Z (${now.off.reason}), so no check runs. Only the user's words turn it on: hedge secret on`);
     }
     const put = now.puts.get(name);
     const row = rowFor(store, name, put);
@@ -502,7 +502,7 @@ export async function needLines(store: Store, input: { names: string[]; thread?:
     else if (checked && !checked.ok) lines.push(`${name}: failing its check (${unshown([checked.reason, "its reason would show part of the value"], Object.values(values))}). ${cardText(row, put)}`);
   }
   const end = fold(readEvents(store.home)).off;
-  if (end) throw new SecretRefusal(`The store went off on ${end.at.slice(0, 16)}Z (${end.reason}) during the checks, so their answers are withheld. Only the user's words turn it on: fleet secret on`);
+  if (end) throw new SecretRefusal(`The store went off on ${end.at.slice(0, 16)}Z (${end.reason}) during the checks, so their answers are withheld. Only the user's words turn it on: hedge secret on`);
   const one = names.length === 1;
   return lines.length ? lines : [`Nothing to ask: ${names.join(", ")} ${one ? "is" : "are"} held and ${one ? "passes its check" : "pass their checks"}.`];
 }
@@ -535,7 +535,7 @@ function droppedWhole(store: Store, puts: PutEvent[]) {
   return puts.filter((_, index) => landed(events, drops[index]!) >= 0);
 }
 
-const tornDrop = (puts: PutEvent[]) => new SecretRefusal(`The drop of ${puts.map((put) => put.name).join(", ")} did not land whole in the event log, so ${puts.length === 1 ? "its value stays" : "their values stay"}, and the torn line keeps the store off. Only the user's words turn it on: fleet secret on`);
+const tornDrop = (puts: PutEvent[]) => new SecretRefusal(`The drop of ${puts.map((put) => put.name).join(", ")} did not land whole in the event log, so ${puts.length === 1 ? "its value stays" : "their values stay"}, and the torn line keeps the store off. Only the user's words turn it on: hedge secret on`);
 
 export function dropLane(store: Store, lane: string): string[] {
   const events = readEvents(store.home);

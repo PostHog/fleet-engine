@@ -36,8 +36,8 @@ function transcript(...lines: object[]) {
 function home(person?: string) {
   const dir = temp.make("home-");
   if (person) {
-    mkdirSync(join(dir, ".local/state/fleet"), { recursive: true });
-    writeFileSync(join(dir, ".local/state/fleet/settings.json"), JSON.stringify({ "guards.person": person }));
+    mkdirSync(join(dir, ".local/state/hedge"), { recursive: true });
+    writeFileSync(join(dir, ".local/state/hedge/settings.json"), JSON.stringify({ "guards.person": person }));
   }
   return dir;
 }
@@ -210,16 +210,16 @@ describe("the question guard workflow", () => {
     resolveEngine([engine, ...skillSources(temp.make("skills-"), engine)], { packs: ["pull-requests", "orchestration"], workflows, plan: plans }, devbox);
 
   test("installs the Stop hook by default, and the base pack routes Stop to it for Claude and Codex", () => {
-    expect(plan().files.map((file) => file.target)).toContain(".config/fleet/hooks/Stop/ask-guard.ts");
-    expect(plan({ "question-guard": false }).files.map((file) => file.target)).not.toContain(".config/fleet/hooks/Stop/ask-guard.ts");
+    expect(plan().files.map((file) => file.target)).toContain(".config/hedge/hooks/Stop/ask-guard.ts");
+    expect(plan({ "question-guard": false }).files.map((file) => file.target)).not.toContain(".config/hedge/hooks/Stop/ask-guard.ts");
     const stops = plan().config.filter((entry) => entry.key === "hooks.Stop");
     expect(stops.map((entry) => entry.provider).sort()).toEqual(["claude", "codex"]);
     for (const entry of stops) expect(JSON.stringify(entry.value)).toContain(`run.sh\\" ${entry.provider} Stop`);
   });
 
   test("installs the send guard as a PreToolUse hook, and the base pack routes PreToolUse to it for Claude and Codex", () => {
-    expect(plan().files.map((file) => file.target)).toContain(".config/fleet/hooks/PreToolUse/ask-guard.ts");
-    expect(plan({ "question-guard": false }).files.map((file) => file.target)).not.toContain(".config/fleet/hooks/PreToolUse/ask-guard.ts");
+    expect(plan().files.map((file) => file.target)).toContain(".config/hedge/hooks/PreToolUse/ask-guard.ts");
+    expect(plan({ "question-guard": false }).files.map((file) => file.target)).not.toContain(".config/hedge/hooks/PreToolUse/ask-guard.ts");
     const preToolUse = plan().config.filter((entry) => entry.key === "hooks.PreToolUse");
     expect(preToolUse.map((entry) => entry.provider).sort()).toEqual(["claude", "codex"]);
     for (const entry of preToolUse) expect(JSON.stringify(entry.value)).toContain(`run.sh\\" ${entry.provider} PreToolUse`);
@@ -227,7 +227,7 @@ describe("the question guard workflow", () => {
 
   test("the hook dispatcher hands the block to the agent as JSON", async () => {
     const where = home("Robin");
-    const target = join(where, ".config/fleet/hooks/Stop/ask-guard.ts");
+    const target = join(where, ".config/hedge/hooks/Stop/ask-guard.ts");
     mkdirSync(dirname(target), { recursive: true });
     symlinkSync(join(import.meta.dir, "ask-guard.ts"), target);
     const path = transcript(claudePrompt("Fix it"), claudeSays("Should I merge?"));
@@ -265,8 +265,8 @@ describe("the send guard", () => {
 
   test("lets every send through while the kill switch file exists", async () => {
     const where = home("Robin");
-    mkdirSync(join(where, ".config/fleet"), { recursive: true });
-    writeFileSync(join(where, ".config/fleet/ask-guard.off"), "");
+    mkdirSync(join(where, ".config/hedge"), { recursive: true });
+    writeFileSync(join(where, ".config/hedge/ask-guard.off"), "");
     expect(await guard(send({ mode: "auto" }), { home: where })).toBeUndefined();
   });
 
@@ -304,7 +304,7 @@ describe("the send guard", () => {
   test("forgets denials older than one day when it records a new one", async () => {
     const where = home("Robin");
     expect(await guard(send({ mode: "auto" }), { home: where })).toBeDefined();
-    const records = join(where, ".local/state/fleet/ask-guard");
+    const records = join(where, ".local/state/hedge/ask-guard");
     const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
     for (const record of readdirSync(records)) utimesSync(join(records, record), twoDaysAgo, twoDaysAgo);
     expect(await guard(send({ mode: "auto", message: "S2 pushed" }), { home: where })).toBeDefined();
@@ -334,7 +334,7 @@ describe("the send guard", () => {
 
   test("lets the send through when the guard cannot write its state", async () => {
     const where = home("Robin");
-    writeFileSync(join(where, ".local/state/fleet/ask-guard"), "");
+    writeFileSync(join(where, ".local/state/hedge/ask-guard"), "");
     expect(await guard(send({ mode: "auto" }), { home: where })).toBeUndefined();
   });
 
@@ -354,7 +354,7 @@ describe("the send guard", () => {
 
   test("the PreToolUse dispatcher hands the denial to the agent", async () => {
     const where = home("Robin");
-    const target = join(where, ".config/fleet/hooks/PreToolUse/ask-guard.ts");
+    const target = join(where, ".config/hedge/hooks/PreToolUse/ask-guard.ts");
     mkdirSync(dirname(target), { recursive: true });
     symlinkSync(join(import.meta.dir, "ask-guard.ts"), target);
     const routed = hookWith(() => t3(waiting));
@@ -403,8 +403,8 @@ describe("the closing line in the installed Stop hook", () => {
   const tree = { pid: 900, table: async () => ["1 0 systemd", "500 1 t3", "700 500 claude", "800 700 sh", "900 800 bun"].join("\n") };
   const parking = (extra: Record<string, unknown> = {}) => {
     const dir = temp.make("home-");
-    mkdirSync(join(dir, ".local/state/fleet"), { recursive: true });
-    writeFileSync(join(dir, ".local/state/fleet/settings.json"), JSON.stringify({ "guards.person": "Robin", "orchestration.waitSnoozeDays": 3, "orchestration.timeZone": "UTC", ...extra }));
+    mkdirSync(join(dir, ".local/state/hedge"), { recursive: true });
+    writeFileSync(join(dir, ".local/state/hedge/settings.json"), JSON.stringify({ "guards.person": "Robin", "orchestration.waitSnoozeDays": 3, "orchestration.timeZone": "UTC", ...extra }));
     return dir;
   };
   const run = async (message: string, where: string, extra: { elapsed?: () => number; lines?: object[]; event?: Record<string, unknown> } = {}) => {
@@ -437,8 +437,8 @@ describe("the closing line in the installed Stop hook", () => {
     const asked = await run("Should I merge it?\n\n⏳ **Waiting on** the reviewer", parking());
     expect(JSON.parse(asked.result.stdout).reason).toContain("asks Robin a decision in prose");
     const off = parking();
-    mkdirSync(join(off, ".config/fleet"), { recursive: true });
-    writeFileSync(join(off, ".config/fleet/ask-guard.off"), "");
+    mkdirSync(join(off, ".config/hedge"), { recursive: true });
+    writeFileSync(join(off, ".config/hedge/ask-guard.off"), "");
     const switchedOff = await run("Pushed.\n\n⏳ **Waiting on** CI", off);
     const late = await run("Pushed.\n\n⏳ **Waiting on** CI", parking(), { elapsed: () => 6_000 });
     expect([asked.sent, switchedOff.sent, late.sent]).toEqual([[], [], []]);
@@ -495,7 +495,7 @@ describe("the closing line in the installed Stop hook", () => {
     });
     const closing = "Done.\n\n💤 This thread **snoozes until 14th Nov 12:00**";
     const result = await routed("claude", async () => JSON.stringify({ transcript_path: transcript(claudePrompt("Fix it"), claudeSays(closing)), last_assistant_message: closing }), parking());
-    expect([JSON.parse(result.stdout).reason, sent]).toEqual([expect.stringContaining("Fleet read no future time in UTC"), []]);
+    expect([JSON.parse(result.stdout).reason, sent]).toEqual([expect.stringContaining("Hedge read no future time in UTC"), []]);
   });
 
   test("the hook's settle-after process settles the thread once T3 shows its run complete", async () => {
@@ -506,8 +506,8 @@ describe("the closing line in the installed Stop hook", () => {
       rpc: (tag, payload) => (tag === "orchestration.dispatchCommand" ? (received.push(payload as Record<string, unknown>), { sequence: 1 }) : undefined),
     });
     try {
-      mkdirSync(join(stub.home, ".local/state/fleet"), { recursive: true });
-      writeFileSync(join(stub.home, ".local/state/fleet/settings.json"), JSON.stringify({ "orchestration.waitSnoozeDays": 3 }));
+      mkdirSync(join(stub.home, ".local/state/hedge"), { recursive: true });
+      writeFileSync(join(stub.home, ".local/state/hedge/settings.json"), JSON.stringify({ "orchestration.waitSnoozeDays": 3 }));
       const db = new Database(join(stub.home, ".t3/userdata/statev2.sqlite"));
       db.run("create table if not exists scheduled_tasks (task_id text primary key, thread_id text, enabled integer not null, next_run_at text)");
       db.query("insert into scheduled_tasks values ('check', ?, 1, ?)").run(lane, new Date(Date.now() + 3_600_000).toISOString());

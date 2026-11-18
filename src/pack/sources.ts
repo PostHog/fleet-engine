@@ -31,7 +31,7 @@ export async function fetchSource(ref: SourceRef, cacheRoot: string, loadLimitMs
   const dir = cacheDir(ref, cacheRoot);
   if (typeof dir !== "string") return { ref, error: dir.error };
   const lock = await waitLock(cacheLock(cacheRoot, ref.name), clock.sleep, cacheWaitMs);
-  if (!lock) return { ref, error: `another Fleet run kept working in ${dir} for over ${cacheWaitMs / 60_000} minutes` };
+  if (!lock) return { ref, error: `another Hedge run kept working in ${dir} for over ${cacheWaitMs / 60_000} minutes` };
   try {
     return await fetchLocked(ref, dir, loadLimitMs);
   } finally {
@@ -74,7 +74,7 @@ async function localEdits(dir: string) {
 }
 
 function editsReason(ref: SourceRef, dir: string, edits: string[]) {
-  return `kept your edits to ${edits.join(", ")} in ${dir}. Commit or undo them there, and Fleet updates ${ref.name} again`;
+  return `kept your edits to ${edits.join(", ")} in ${dir}. Commit or undo them there, and Hedge updates ${ref.name} again`;
 }
 
 async function keepEdits(ref: SourceRef, dir: string, edits: string[], loadLimitMs: number): Promise<FetchedSource> {
@@ -113,7 +113,7 @@ async function load(dir: string, limitMs: number): Promise<{ packs: LoadedPack[]
 }
 
 function goodPath(dir: string) {
-  return join(dir, ".git", "fleet-source.json");
+  return join(dir, ".git", "hedge-source.json");
 }
 
 async function lastGood(dir: string): Promise<Good | undefined> {
@@ -147,7 +147,7 @@ async function git(dir: string, ...args: string[]) {
 }
 
 export function sourceCache(home: string) {
-  return join(home, ".local", "share", "fleet", "sources");
+  return join(home, ".local", "share", "hedge", "sources");
 }
 
 export async function followsBranch(ref: SourceRef, cacheRoot: string) {
@@ -169,7 +169,7 @@ export type Advance =
   | { state: "failed"; say: string };
 
 /**
- * Moves a branch source forward from the commit it last loaded, for fleet refresh.
+ * Moves a branch source forward from the commit it last loaded, for hedge refresh.
  * It asks the remote first and fetches only when the branch moved. It leaves the
  * source as it is while another run works in its cache, while it has local edits,
  * and when the new commit does not build on the old one.
@@ -195,9 +195,9 @@ async function advanceLocked(ref: SourceRef, dir: string, from: string, loadLimi
   const commit = listed.stdout.split("\n").map((line) => line.split("\t")).find(([, name]) => name === head)?.[0];
   if (!commit) return { state: "failed", say: `${ref.repo} has no branch ${branch}` };
   if (commit === from) return { state: "same", commit };
-  const rewritten = (tip: string) => ({ state: "refused" as const, say: `${branch} of ${ref.repo} moved to ${tip.slice(0, 12)}, which does not build on ${from.slice(0, 12)}, the commit Fleet loaded last. Fleet refresh runs no pack code from a rewritten branch. Run fleet update to take it.` });
+  const rewritten = (tip: string) => ({ state: "refused" as const, say: `${branch} of ${ref.repo} moved to ${tip.slice(0, 12)}, which does not build on ${from.slice(0, 12)}, the commit Hedge loaded last. Hedge refresh runs no pack code from a rewritten branch. Run hedge update to take it.` });
   const edits = await localEdits(dir);
-  if (edits.length) return { state: "edited", say: `${ref.name} moved, but Fleet ${editsReason(ref, dir, edits)}.` };
+  if (edits.length) return { state: "edited", say: `${ref.name} moved, but Hedge ${editsReason(ref, dir, edits)}.` };
   const fetched = await git(dir, "fetch", "-q", "--no-tags", repo, head);
   if (!fetched.ok) return { state: "failed", say: `could not fetch ${branch} from ${ref.repo}: ${fetched.stderr}` };
   const tip = (await git(dir, "rev-parse", "FETCH_HEAD")).stdout;
@@ -215,7 +215,7 @@ async function advanceLocked(ref: SourceRef, dir: string, from: string, loadLimi
 
 export async function cachedSource(ref: SourceRef, cacheRoot: string): Promise<FetchedSource> {
   const dir = join(cacheRoot, ref.name);
-  if (!existsSync(join(dir, ".git"))) return { ref, error: "never fetched; run fleet apply" };
+  if (!existsSync(join(dir, ".git"))) return { ref, error: "never fetched; run hedge apply" };
   return { ref, dir, packs: await loadPacks(dir) };
 }
 

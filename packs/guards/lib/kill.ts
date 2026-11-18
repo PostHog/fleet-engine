@@ -1,6 +1,6 @@
 import { commandsIn, type Command } from "./shell-words.ts";
 
-export const killReason = (person: string) => "Fleet blocked this command: matching full command lines also matches the agent's own shell, "
+export const killReason = (person: string) => "Hedge blocked this command: matching full command lines also matches the agent's own shell, "
   + "which holds this command's text, so it kills the tool call (exit 144) or waits forever. "
   + "Find the PID with `pgrep -a <name>` or `ps`, then `kill <pid>`. "
   + `A bracket pattern such as \`pkill -f '[b]un dev'\` cannot match itself. If you are not sure, stop and ask ${person}.`;

@@ -12,7 +12,7 @@ const head1 = "aaaaaaaaaaaa1111111111111111111111111111";
 const head2 = "bbbbbbbbbbbb2222222222222222222222222222";
 
 function sandbox() {
-  const root = temp.make("fleet-pr-");
+  const root = temp.make("hedge-pr-");
   const bin = join(root, "bin");
   const home = join(root, "home");
   const replies = join(root, "replies");
@@ -37,7 +37,7 @@ cat "${replies}/$reply.json"
 `);
   chmodSync(join(bin, "gh"), 0o755);
   const reply = (name: string, value: unknown) => writeFileSync(join(replies, `${name}.json`), JSON.stringify(value));
-  const env: Record<string, string> = { FLEET_HANDLERS: "{}", FLEET_SETTINGS: "{}" };
+  const env: Record<string, string> = { HEDGE_HANDLERS: "{}", HEDGE_SETTINGS: "{}" };
   const run = (...args: string[]) => {
     const result = Bun.spawnSync([process.execPath, command, ...args], { cwd: root, env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}`, ...env } });
     return { code: result.exitCode, out: result.stdout.toString().trim(), err: result.stderr.toString().trim() };
@@ -47,7 +47,7 @@ cat "${replies}/$reply.json"
     const warned: string[] = [];
     const print = spyOn(console, "log").mockImplementation((...line: unknown[]) => void printed.push(line.join(" ")));
     const warn = spyOn(console, "error").mockImplementation((...line: unknown[]) => void warned.push(line.join(" ")));
-    const saved = { FLEET_HANDLERS: process.env.FLEET_HANDLERS, FLEET_HANDLER_SUBCOMMANDS: process.env.FLEET_HANDLER_SUBCOMMANDS, FLEET_SETTINGS: process.env.FLEET_SETTINGS };
+    const saved = { HEDGE_HANDLERS: process.env.HEDGE_HANDLERS, HEDGE_HANDLER_SUBCOMMANDS: process.env.HEDGE_HANDLER_SUBCOMMANDS, HEDGE_SETTINGS: process.env.HEDGE_SETTINGS };
     Object.assign(process.env, env);
     try {
       return { code: await prCommand(args, home), out: printed.join("\n").trim(), err: warned.join("\n").trim() };
@@ -69,14 +69,14 @@ cat "${replies}/$reply.json"
   const reviewBot = (exitCode: number) => {
     const path = join(root, "review-bot.ts");
     writeFileSync(path, `await Bun.write(${JSON.stringify(join(root, "bot-args.json"))}, JSON.stringify(Bun.argv.slice(2)));\nconsole.log("bot says hi");\nprocess.exit(${exitCode});\n`);
-    env.FLEET_HANDLERS = JSON.stringify({ "review-bot": path });
+    env.HEDGE_HANDLERS = JSON.stringify({ "review-bot": path });
   };
   const botArgs = () => JSON.parse(readFileSync(join(root, "bot-args.json"), "utf8"));
   const packCommands = (exitCode: number, subcommands = ["queue-wait"]) => {
     const path = join(root, "pr-command.ts");
     writeFileSync(path, `await Bun.write(${JSON.stringify(join(root, "pack-args.json"))}, JSON.stringify(Bun.argv.slice(2)));\nconsole.log("pack says hi");\nprocess.exit(${exitCode});\n`);
-    env.FLEET_HANDLERS = JSON.stringify({ ...JSON.parse(env.FLEET_HANDLERS || "{}"), "pr-command": path });
-    env.FLEET_HANDLER_SUBCOMMANDS = JSON.stringify({ "pr-command": subcommands });
+    env.HEDGE_HANDLERS = JSON.stringify({ ...JSON.parse(env.HEDGE_HANDLERS || "{}"), "pr-command": path });
+    env.HEDGE_HANDLER_SUBCOMMANDS = JSON.stringify({ "pr-command": subcommands });
   };
   const packArgs = () => (existsSync(join(root, "pack-args.json")) ? JSON.parse(readFileSync(join(root, "pack-args.json"), "utf8")) : undefined);
   return { home, env, reply, run, call, refusal, calls, reviewBot, botArgs, packCommands, packArgs };
@@ -240,14 +240,14 @@ test("bot-threads names a pull request that does not exist", () => {
   box.reply("threads", { data: { viewer: { login: "me" }, repository: { pullRequest: null } } });
   const result = box.run("bot-threads", "--repo", "acme/widgets", "--pr", "404");
   expect(result.code).toBe(1);
-  expect(result.err).toBe("fleet pr: No pull request acme/widgets#404");
+  expect(result.err).toBe("hedge pr: No pull request acme/widgets#404");
 });
 
 test("a failing gh call surfaces its error", () => {
   const box = sandbox();
   const result = box.run("blockers", "--repo", "acme/widgets", "--pr", "12");
   expect(result.code).toBe(1);
-  expect(result.err).toBe("fleet pr: gh pr failed: no pr reply");
+  expect(result.err).toBe("hedge pr: gh pr failed: no pr reply");
 });
 
 const pr = (head: string, fields: Record<string, unknown> = {}) => ({ headRefOid: head, isDraft: false, mergeable: "MERGEABLE", mergeStateStatus: "CLEAN", reviewDecision: "APPROVED", statusCheckRollup: [], ...fields });
@@ -291,7 +291,7 @@ test("blockers lists failing checks and a conflict with their signature", () => 
   const result = box.run("blockers", "--repo", "acme/widgets", "--pr", "12");
   expect(result.out).toBe(["head: aaaaaaaaaaaa", "failing: build", "failing: test", "conflict: the branch conflicts with its base", "signature: conflict|failing:build|failing:test"].join("\n"));
   expect(result.code).toBe(1);
-  expect(existsSync(join(box.home, ".local/state/fleet/pr-blockers"))).toBe(false);
+  expect(existsSync(join(box.home, ".local/state/hedge/pr-blockers"))).toBe(false);
 });
 
 test("blockers --record exits 3 when a new head still has the same blockers", () => {
@@ -309,7 +309,7 @@ test("blockers --record exits 3 when a new head still has the same blockers", ()
     "No progress: the same blockers stood at aaaaaaaaaaaa before the last fix. Read the failing log: a new cause under the same check is progress; the same cause is a question for the user.",
   ].join("\n"));
   expect(result.code).toBe(3);
-  const ledger = readFileSync(join(box.home, ".local/state/fleet/pr-blockers/acme/widgets/12.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  const ledger = readFileSync(join(box.home, ".local/state/hedge/pr-blockers/acme/widgets/12.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
   expect(ledger.map((record) => [record.head, record.signature])).toEqual([[head1, "failing:test"], [head1, "failing:test"], [head2, "failing:test"]]);
 });
 
@@ -355,10 +355,10 @@ test("forecast takes exactly one of --pr, --branch and --paths, and --request on
   for (const args of [["forecast"], ["forecast", "--branch", "x", "--pr", "1"], ["forecast", "--branch", "x", "--paths", "p"], ["forecast", "--branch", "x", "--request"], ["forecast", "--paths", "p", "--request"], ["forecast", "--branch", "--pr"], ["review", "--branch", "x"], ["stamp", "--paths", "p"]]) {
     const refused = await box.refusal(args[0]!, "--repo", "acme/widgets", ...args.slice(1));
     expect(refused).toBeInstanceOf(Error);
-    expect((refused as Error).message).toContain("Usage: fleet pr");
+    expect((refused as Error).message).toContain("Usage: hedge pr");
   }
   expect(existsSync(join(box.home, "..", "bot-args.json"))).toBe(false);
-  box.env.FLEET_HANDLERS = "{}";
+  box.env.HEDGE_HANDLERS = "{}";
   expect((await box.call("forecast", "--repo", "acme/widgets", "--branch", "feat/x")).code).toBe(2);
 });
 
@@ -369,13 +369,13 @@ test("a subcommand the pack declares goes to its pr-command handler with every a
   expect(box.packArgs()).toEqual(["queue-wait", "--repo", "acme/widgets", "--pr", "12"]);
 });
 
-test("a typo or a bare fleet pr shows the engine's usage and never reaches the pack", () => {
+test("a typo or a bare hedge pr shows the engine's usage and never reaches the pack", () => {
   const box = sandbox();
   box.packCommands(0);
   for (const args of [["queue-wiat", "--pr", "12"], [], ["--repo", "acme/widgets"]]) {
     const result = box.run(...args);
     expect(result.code).toBe(1);
-    expect(result.err).toStartWith("fleet pr: Usage: fleet pr <subcommand>");
+    expect(result.err).toStartWith("hedge pr: Usage: hedge pr <subcommand>");
     expect(result.err).toContain("bot-threads, blockers, review, stamp, forecast, handover, settle-check, size, queue-wait");
   }
   expect(box.packArgs()).toBeUndefined();
@@ -387,7 +387,7 @@ test("the engine's own subcommands never reach the pr-command handler, even when
   box.packCommands(0, ["forecast", "bot-threads", "queue-wait"]);
   expect(box.run("forecast", "--repo", "acme/widgets", "--pr", "12").code).toBe(4);
   const refused = await box.refusal("bot-threads", "--repo", "widgets");
-  expect((refused as Error).message).toStartWith("Usage: fleet pr ");
+  expect((refused as Error).message).toStartWith("Usage: hedge pr ");
   expect(box.packArgs()).toBeUndefined();
 });
 
@@ -397,7 +397,7 @@ test("help lists the pack's subcommands after the engine's and exits 0 whatever 
   for (const word of ["--help", "help"]) {
     const result = box.run(word);
     expect(result.code).toBe(0);
-    expect(result.out).toStartWith("fleet pr: review threads");
+    expect(result.out).toStartWith("hedge pr: review threads");
     expect(result.out).toContain("From packs: queue-wait, ownerless");
     expect(result.out).toEndWith("pack says hi");
     expect(box.packArgs()).toEqual(["help"]);
@@ -406,14 +406,14 @@ test("help lists the pack's subcommands after the engine's and exits 0 whatever 
 
 test("settle-check refuses an action it cannot check, so the machine that asks never reads silence as a yes", () => {
   const result = sandbox().run("settle-check", "--action", "snooze", "--thread", "mcp:lane");
-  expect([result.code, JSON.parse(result.out)]).toEqual([0, { refusal: "Fleet blocked this snooze: T3 did not answer; retry, or snooze in the T3 UI." }]);
+  expect([result.code, JSON.parse(result.out)]).toEqual([0, { refusal: "Hedge blocked this snooze: T3 did not answer; retry, or snooze in the T3 UI." }]);
 });
 
-test("without a pack, a bare fleet pr shows the engine's usage", () => {
+test("without a pack, a bare hedge pr shows the engine's usage", () => {
   const box = sandbox();
   const result = box.run();
   expect(result.code).toBe(1);
-  expect(result.err).toBe("fleet pr: Usage: fleet pr <subcommand>, one of bot-threads, blockers, review, stamp, forecast, handover, settle-check, size. Run fleet pr --help for each one's flags.");
+  expect(result.err).toBe("hedge pr: Usage: hedge pr <subcommand>, one of bot-threads, blockers, review, stamp, forecast, handover, settle-check, size. Run hedge pr --help for each one's flags.");
 });
 
 test("forecast refuses review and stamp flags, and says there is nothing to forecast without a review bot", async () => {
@@ -422,29 +422,29 @@ test("forecast refuses review and stamp flags, and says there is nothing to fore
   for (const args of [["forecast", "--minutes", "5"], ["forecast", "--deep"], ["review", "--request"], ["stamp", "--request"]]) {
     const refused = await box.refusal(args[0]!, "--repo", "acme/widgets", "--pr", "12", ...args.slice(1));
     expect(refused).toBeInstanceOf(Error);
-    expect((refused as Error).message).toContain("Usage: fleet pr");
+    expect((refused as Error).message).toContain("Usage: hedge pr");
   }
   expect(existsSync(join(box.home, "..", "bot-args.json"))).toBe(false);
-  box.env.FLEET_HANDLERS = "{}";
+  box.env.HEDGE_HANDLERS = "{}";
   expect(await box.call("forecast", "--repo", "acme/widgets", "--pr", "12")).toEqual({ code: 2, out: "No review bot is on for this machine, so there is no forecast. Ask for a review the way the repo's docs say.", err: "" });
 });
 
 test("without a review-bot handler, review and stamp print the fallback the settings name and exit 2", async () => {
   const box = sandbox();
-  box.env.FLEET_SETTINGS = JSON.stringify({ "pull-requests.reviewFallback": "Comment `review please` on {repo}#{pr}.", "pull-requests.stampFallback": "Add the `approve-me` label to {repo}#{pr}." });
+  box.env.HEDGE_SETTINGS = JSON.stringify({ "pull-requests.reviewFallback": "Comment `review please` on {repo}#{pr}.", "pull-requests.stampFallback": "Add the `approve-me` label to {repo}#{pr}." });
   expect(await box.call("review", "--repo", "acme/widgets", "--pr", "12")).toEqual({ code: 2, out: "No review bot is on for this machine. Comment `review please` on acme/widgets#12.", err: "" });
   expect(await box.call("stamp", "--repo", "acme/widgets", "--pr", "12")).toEqual({ code: 2, out: "No review bot is on for this machine. Add the `approve-me` label to acme/widgets#12.", err: "" });
-  box.env.FLEET_SETTINGS = "{}";
+  box.env.HEDGE_SETTINGS = "{}";
   expect(await box.call("review", "--repo", "acme/widgets", "--pr", "12")).toEqual({ code: 2, out: "No review bot is on for this machine. Ask for a review the way the repo's docs say.", err: "" });
   expect(await box.call("stamp", "--repo", "acme/widgets", "--pr", "12")).toEqual({ code: 2, out: "No review bot is on for this machine. Ask for an approval the way the repo's docs say.", err: "" });
   expect(box.calls()).toEqual([]);
 });
 
-test("run outside fleet, review and stamp still print the default fallback and exit 2", () => {
+test("run outside hedge, review and stamp still print the default fallback and exit 2", () => {
   const box = sandbox();
-  delete box.env.FLEET_HANDLERS;
-  delete box.env.FLEET_SETTINGS;
-  const { FLEET_HANDLERS: _, FLEET_SETTINGS: __, ...inherited } = process.env;
+  delete box.env.HEDGE_HANDLERS;
+  delete box.env.HEDGE_SETTINGS;
+  const { HEDGE_HANDLERS: _, HEDGE_SETTINGS: __, ...inherited } = process.env;
   const result = Bun.spawnSync([process.execPath, command, "review", "--repo", "acme/widgets", "--pr", "12"], { env: { ...inherited, HOME: box.home } });
   expect(result.exitCode).toBe(2);
   expect(result.stdout.toString().trim()).toBe("No review bot is on for this machine. Ask for a review the way the repo's docs say.");
@@ -455,7 +455,7 @@ test("stopping review stops the review-bot handler before review exits", async (
   const stopped = join(box.home, "stopped");
   const handler = join(box.home, "slow-bot.ts");
   writeFileSync(handler, `process.on("SIGTERM", async () => { await Bun.write(${JSON.stringify(stopped)}, "stopped"); process.exit(5); });\nconsole.log("ready");\nsetInterval(() => {}, 1000);\n`);
-  const child = Bun.spawn([process.execPath, command, "review", "--repo", "acme/widgets", "--pr", "12"], { env: { ...process.env, HOME: box.home, FLEET_SETTINGS: "{}", FLEET_HANDLERS: JSON.stringify({ "review-bot": handler }) }, stdout: "pipe" });
+  const child = Bun.spawn([process.execPath, command, "review", "--repo", "acme/widgets", "--pr", "12"], { env: { ...process.env, HOME: box.home, HEDGE_SETTINGS: "{}", HEDGE_HANDLERS: JSON.stringify({ "review-bot": handler }) }, stdout: "pipe" });
   try {
     const reader = child.stdout.getReader();
     let seen = "";
@@ -477,11 +477,11 @@ test("wrong arguments print the usage and exit 1", async () => {
   for (const args of [[], ["threads"], ["bot-threads", "--repo", "widgets", "--pr", "1"], ["blockers", "--repo", "acme/widgets"], ["blockers", "--repo", "acme/widgets", "--pr", "x"], ["review", "--repo", "acme/widgets"], ["review", "--repo", "acme/widgets", "--pr", "1", "--minutes", "0"], ["stamp", "--repo", "acme/widgets", "--pr", "1", "--deep"], ["bot-threads", "--repo", "acme/widgets", "--pr", "1", "--fixed", "example.test/1"], ["bot-threads", "--repo", "acme/widgets", "--pr", "1", "--fixed"]]) {
     const refused = await box.refusal(...args);
     expect(refused).toBeInstanceOf(Error);
-    expect((refused as Error).message).toStartWith("Usage: fleet pr ");
+    expect((refused as Error).message).toStartWith("Usage: hedge pr ");
   }
   const cli = box.run("threads");
   expect(cli.code).toBe(1);
-  expect(cli.err).toStartWith("fleet pr: Usage: fleet pr ");
+  expect(cli.err).toStartWith("hedge pr: Usage: hedge pr ");
   expect(box.calls()).toEqual([]);
 });
 
@@ -489,8 +489,8 @@ test("help lists every subcommand", async () => {
   const box = sandbox();
   const result = await box.call("--help");
   expect(result.code).toBe(0);
-  expect(result.out).toContain("fleet pr bot-threads --repo <owner/repo> --pr <number> [--resolve] [--fixed <thread URL>]...");
-  expect(result.out).toContain("fleet pr blockers --repo <owner/repo> --pr <number> [--record]");
-  expect(result.out).toContain("fleet pr review --repo <owner/repo> --pr <number> [--deep] [--minutes <n>]");
-  expect(result.out).toContain("fleet pr stamp --repo <owner/repo> --pr <number> [--minutes <n>]");
+  expect(result.out).toContain("hedge pr bot-threads --repo <owner/repo> --pr <number> [--resolve] [--fixed <thread URL>]...");
+  expect(result.out).toContain("hedge pr blockers --repo <owner/repo> --pr <number> [--record]");
+  expect(result.out).toContain("hedge pr review --repo <owner/repo> --pr <number> [--deep] [--minutes <n>]");
+  expect(result.out).toContain("hedge pr stamp --repo <owner/repo> --pr <number> [--minutes <n>]");
 });

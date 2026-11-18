@@ -41,7 +41,7 @@ export function memorySyncHarness() {
     const home = join(root, `home-${machine}`);
     mkdirSync(home, { recursive: true });
     const child = Bun.spawn(["sh", join(import.meta.dir, "sync/sync.sh")], {
-      env: { ...gitEnv, HOME: home, FLEET_MEMORY_URL: remote, CODER_WORKSPACE_NAME: machine, ...env },
+      env: { ...gitEnv, HOME: home, HEDGE_MEMORY_URL: remote, CODER_WORKSPACE_NAME: machine, ...env },
       stdout: "pipe",
       stderr: "pipe",
     });

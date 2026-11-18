@@ -1,7 +1,7 @@
 # Getting started
 
 This guide takes you from a Mac with nothing on it to a Mac and a Coder devbox
-that run the same Fleet setup and reach each other through T3 Code. Plan about
+that run the same Hedge setup and reach each other through T3 Code. Plan about
 20 minutes. Most of it is waiting for installs.
 
 You need:
@@ -24,7 +24,7 @@ curl -fsSL https://raw.githubusercontent.com/PostHog/fleet-engine/main/get.sh | 
 
 `get.sh` installs the Command Line Tools, the GitHub CLI, Bun, and T3 Code
 when they are missing. It needs Homebrew, and installs it, only when the T3 Code
-app is missing. Then it starts `fleet setup`. Setup asks
+app is missing. Then it starts `hedge setup`. Setup asks
 plain-language questions. Where it shows a default, press ↵ to take it.
 
 Setup asks you to sign in. Each sign-in opens a page in your browser, and
@@ -32,22 +32,22 @@ setup goes on by itself when you are done:
 
 | Sign-in | What it asks |
 | --- | --- |
-| GitHub | A code from the terminal on `github.com/login/device`, then your approval. Fleet asks for `repo`, `read:org`, `admin:public_key`, `admin:ssh_signing_key`, and `workflow` once, so it can make your profile repo, add your keys, and push to large repos, where GitHub can ask for `workflow` even when a push changes no workflow file. |
+| GitHub | A code from the terminal on `github.com/login/device`, then your approval. Hedge asks for `repo`, `read:org`, `admin:public_key`, `admin:ssh_signing_key`, and `workflow` once, so it can make your profile repo, add your keys, and push to large repos, where GitHub can ask for `workflow` even when a push changes no workflow file. |
 | Claude | Your Claude account, in the browser. Only when your plan includes Claude. |
 | ChatGPT | Your ChatGPT account, in the browser. Only when your plan includes Codex. Setup checks the sign-in with a real request, because a stale sign-in still looks signed in. |
 
-Setup creates the private repo `fleet-profile` in your GitHub account and saves
+Setup creates the private repo `hedge-profile` in your GitHub account and saves
 your answers there. When a team pack you picked names a profile org, setup
-creates `fleet-profile-<login>` in that org instead, private to the org, where
+creates `hedge-profile-<login>` in that org instead, private to the org, where
 teammates may read it. If you already have a personal profile, setup keeps it and prints the
 two commands that move it to the org. Then it applies your packs to the Mac and checks the result
-with `fleet doctor`. It ends with a screen that lists your packs and what runs
+with `hedge doctor`. It ends with a screen that lists your packs and what runs
 by itself.
 
 If you stop, or a step fails, run the same line again. Every step skips what is
 done.
 
-When setup ends, open a new terminal window. `get.sh` added `fleet` and the
+When setup ends, open a new terminal window. `get.sh` added `hedge` and the
 other tools to your `PATH` in your login file, and only a new terminal reads
 it.
 
@@ -63,7 +63,7 @@ the devbox, but not the other way round.
 
 ## 3. Make the Coder workspace an SSH host
 
-Fleet reaches the devbox over SSH. Install the Coder CLI, sign in, and write
+Hedge reaches the devbox over SSH. Install the Coder CLI, sign in, and write
 the SSH hosts for your workspaces:
 
 ```sh
@@ -81,17 +81,17 @@ ssh coder.dev true
 ## 4. Add the devbox
 
 ```sh
-fleet devbox add coder.dev
+hedge devbox add coder.dev
 ```
 
-Fleet runs these steps on the devbox, in this order. It shows each one as it
+Hedge runs these steps on the devbox, in this order. It shows each one as it
 starts:
 
 | Step | What it asks |
 | --- | --- |
-| Install Fleet | Nothing. It runs `get.sh` on the devbox at the engine ref your profile pins. |
+| Install Hedge | Nothing. It runs `get.sh` on the devbox at the engine ref your profile pins. |
 | Sign in to GitHub | It opens `github.com/login/device` on the Mac. Type the code that the devbox prints. |
-| Apply your profile | Nothing. It clones your `fleet-profile` repo on the devbox and applies it. |
+| Apply your profile | Nothing. It clones your `hedge-profile` repo on the devbox and applies it. |
 | Sign in to Claude | It opens an SSH terminal. Open the link it prints, sign in, and paste the code back into that terminal. |
 | Sign in to ChatGPT | Open the link it prints and type the code it shows. |
 | Link T3 Connect | Open the link that `t3 up --connect` prints on the devbox and sign in. |
@@ -100,46 +100,46 @@ starts:
 When it ends, it prints that the host is your devbox now. T3 Code on the Mac
 lists it as an environment.
 
-If a step stops, run `fleet devbox add coder.dev` again. It picks up where it
+If a step stops, run `hedge devbox add coder.dev` again. It picks up where it
 stopped.
 
-If you write the SSH hosts before step 1, `fleet setup` asks which host is
-your devbox and runs the same steps. `fleet devbox` lists your devboxes.
-When a new devbox replaces an old one, `fleet devbox remove <ssh host>`
+If you write the SSH hosts before step 1, `hedge setup` asks which host is
+your devbox and runs the same steps. `hedge devbox` lists your devboxes.
+When a new devbox replaces an old one, `hedge devbox remove <ssh host>`
 takes the old one out of your profile and unlinks it in T3 Code.
 
 ## Change things later
 
-- `fleet packs` lists your packs. `fleet packs --add <pack>` and
+- `hedge packs` lists your packs. `hedge packs --add <pack>` and
   `--remove <pack>` turn one on or off.
-- `fleet settings` lists your settings. `fleet set <pack.key>=<value>` changes
+- `hedge settings` lists your settings. `hedge set <pack.key>=<value>` changes
   one.
-- `fleet doctor` checks a machine against your profile without changing it.
-- `fleet update` moves the engine and your profile forward. Each machine also
+- `hedge doctor` checks a machine against your profile without changing it.
+- `hedge update` moves the engine and your profile forward. Each machine also
   runs it every night.
-- `fleet refresh` asks each pack source that follows a branch, such as a
+- `hedge refresh` asks each pack source that follows a branch, such as a
   skills repository, whether it moved. When it moved forward, it updates the
   files your packs place, such as skills, guides, and instructions, and leaves
   steps, settings, and jobs to the nightly update. Each machine runs it every
-  five minutes. Your skills are links into Fleet's copy of each source, so an
-  edit to a skill is an edit in that copy. Fleet keeps it: `fleet refresh`,
-  `fleet apply`, and `fleet update` leave that source where it is and name the
-  edited files until you commit or undo them. `fleet refresh` also takes no
-  rewritten branch; `fleet update` does.
+  five minutes. Your skills are links into Hedge's copy of each source, so an
+  edit to a skill is an edit in that copy. Hedge keeps it: `hedge refresh`,
+  `hedge apply`, and `hedge update` leave that source where it is and name the
+  edited files until you commit or undo them. `hedge refresh` also takes no
+  rewritten branch; `hedge update` does.
 
 ## When setup goes wrong
 
-`fleet triage` collects what the Fleet maintainer needs to fix a setup
-problem: the versions of Fleet, T3 Code, Claude Code, Codex, gh, Bun and your
-OS, the `fleet doctor` output, the step that failed and its error, the setup
+`hedge triage` collects what the Hedge maintainer needs to fix a setup
+problem: the versions of Hedge, T3 Code, Claude Code, Codex, gh, Bun and your
+OS, the `hedge doctor` output, the step that failed and its error, the setup
 timings, and the setup transcript. It removes tokens, keys, email addresses,
 hostnames and home paths, and shows you the report. Then you pick: open a
 public issue on `PostHog/fleet-engine` with it, save it to a file to send
 yourself, or neither.
 
-An agent can run `fleet triage --print` to show you the report in the chat,
-and `fleet triage --send` once you say yes. `--save <file>` writes it to a
+An agent can run `hedge triage --print` to show you the report in the chat,
+and `hedge triage --send` once you say yes. `--save <file>` writes it to a
 file, and `--note <text>` says what went wrong.
 
-[The Fleet page](https://posthog.github.io/fleet-engine/) shows what each
+[The Hedge page](https://posthog.github.io/fleet-engine/) shows what each
 pack does, and builds the setup prompt with your picks.

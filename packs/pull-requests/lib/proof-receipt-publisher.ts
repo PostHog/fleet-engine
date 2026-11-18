@@ -12,7 +12,7 @@ const answerOf = (stdout: string) => {
 };
 
 export function handlerPublisher(env: Env): Publisher | undefined {
-  const handler = (JSON.parse(env.FLEET_HANDLERS || "{}") as Record<string, string>)[publisherSeam];
+  const handler = (JSON.parse(env.HEDGE_HANDLERS || "{}") as Record<string, string>)[publisherSeam];
   if (!handler) return undefined;
   return async (request) => {
     const child = Bun.spawn(["bun", handler], { env: env as Record<string, string>, stdin: new Blob([JSON.stringify(request)]), stdout: "pipe", stderr: "pipe" });

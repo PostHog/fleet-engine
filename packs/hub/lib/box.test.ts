@@ -15,13 +15,13 @@ import { box, fakeCoder, fakeMachine, linkedHere, ok, registryOf, start, stubBin
 
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
-const launcher = 'sh "$HOME/.local/share/fleet/engine/fleet"';
-const machineFileCheck = "test -f ~/.config/fleet/machine.json";
+const launcher = 'sh "$HOME/.local/share/hedge/engine/hedge"';
+const machineFileCheck = "test -f ~/.config/hedge/machine.json";
 const noWait = { waitMs: 0 };
 
 function hubHome() {
-  const home = temp.make("fleet-box-");
-  writeHome(home, { ".config/fleet/machine.json": JSON.stringify({ schema: 1, role: "hub" }) });
+  const home = temp.make("hedge-box-");
+  writeHome(home, { ".config/hedge/machine.json": JSON.stringify({ schema: 1, role: "hub" }) });
   return home;
 }
 
@@ -30,28 +30,28 @@ const answers = (claim: () => string, threads = () => "") => async (_box: string
 const depsFor = (machine: Machine, coder: BoxDeps["coder"]): BoxDeps => ({ machine: () => machine, coder, tokens: () => ({ here: machine, hub: "my-hub", coder: coder(machine) }), print: machine.print, readStdin: async () => "", hooks: {} });
 
 test("release refuses a workspace that is not a box and deletes nothing", async () => {
-  const { machine } = fakeMachine(temp.make("fleet-box-"));
+  const { machine } = fakeMachine(temp.make("hedge-box-"));
   const { coder, done } = fakeCoder();
   for (const name of ["devbox-2", "my-hub", "compute-lane", "box-", "box-a.b", "box--x", "box-a--x"]) await expect(release(coder, machine, name)).rejects.toThrow("not a box");
   expect(done).toEqual([]);
 });
 
 test("release unlinks the box and stops its hub forward on every machine before it deletes it, through the engine launcher", async () => {
-  const home = temp.make("fleet-box-");
+  const home = temp.make("hedge-box-");
   linkedHere(home);
   const { machine, calls } = fakeMachine(home);
   const { coder, calls: onBox, done } = fakeCoder();
   expect(await release(coder, machine, "box-lane")).toBe(0);
-  expect(onBox.map((call) => call.command)).toEqual(["cut -d' ' -f1 ~/.config/fleet/box-claim 2>/dev/null", `${launcher} box threads`]);
-  const onPeers = `${launcher} box unlink box-lane; unlinked=$?; systemctl --user stop fleet-box-box-lane-hub.service 2>/dev/null; exit $unlinked`;
+  expect(onBox.map((call) => call.command)).toEqual(["cut -d' ' -f1 ~/.config/hedge/box-claim 2>/dev/null", `${launcher} box threads`]);
+  const onPeers = `${launcher} box unlink box-lane; unlinked=$?; systemctl --user stop hedge-box-box-lane-hub.service 2>/dev/null; exit $unlinked`;
   expect(calls.filter((call) => call.startsWith("peer")).sort()).toEqual([`peer devbox-2: ${onPeers}`, `peer my-hub: ${onPeers}`]);
   expect(calls).toContain(`run ${join(home, ".local/bin/t3")} environment unlink env-1`);
-  expect(calls).toContain("run systemctl --user stop fleet-box-box-lane-hub.service");
+  expect(calls).toContain("run systemctl --user stop hedge-box-box-lane-hub.service");
   expect(done).toEqual(["remove box-lane"]);
 });
 
 test("release still deletes the box but fails and names the machines that could not unlink it", async () => {
-  const { machine, lines } = fakeMachine(temp.make("fleet-box-"), { onPeer: async (alias) => ({ ...ok, code: alias === "devbox-2" ? 255 : 0 }) });
+  const { machine, lines } = fakeMachine(temp.make("hedge-box-"), { onPeer: async (alias) => ({ ...ok, code: alias === "devbox-2" ? 255 : 0 }) });
   const { coder, done } = fakeCoder();
   expect(await release(coder, machine, "box-lane")).toBe(1);
   expect(lines.join("\n")).toContain("still linked on devbox-2");
@@ -59,14 +59,14 @@ test("release still deletes the box but fails and names the machines that could 
 });
 
 test("a reap's release spares a box that started again while the peers unlinked it", async () => {
-  const { machine } = fakeMachine(temp.make("fleet-box-"));
+  const { machine } = fakeMachine(temp.make("hedge-box-"));
   const { coder, done } = fakeCoder();
   expect(await release(coder, machine, "box-lane", { stillDoomed: async () => false })).toBe(1);
   expect(done).toEqual([]);
 });
 
 test("release keeps a box whose threads still run or wait for an answer, names them, and unlinks nothing", async () => {
-  const { machine, calls, lines } = fakeMachine(temp.make("fleet-box-"));
+  const { machine, calls, lines } = fakeMachine(temp.make("hedge-box-"));
   const { coder, done } = fakeCoder({ ssh: async () => ({ ...ok, stdout: "Lane A (runs)\nLane B (waits for an answer)\n" }) });
   expect(await release(coder, machine, "box-lane")).toBe(1);
   expect(lines.join("\n")).toContain("Lane A (runs)");
@@ -78,20 +78,20 @@ test("release keeps a box whose threads still run or wait for an answer, names t
 
 test("box threads also names each thread that owns an open PR, and says when T3 does not answer", async () => {
   const pr = (n: number) => ({ repository: "acme/app", number: n, url: `https://github.com/acme/app/pull/${n}` });
-  const { machine, lines } = fakeMachine(temp.make("fleet-box-"), { workspace: "box-lane" });
+  const { machine, lines } = fakeMachine(temp.make("hedge-box-"), { workspace: "box-lane" });
   expect(await threads(machine, async () => [{ id: "mcp:a", title: "Lane A", projectId: "p", status: "idle", pullRequests: [pr(1)] }, { id: "mcp:b", title: "Lane B", projectId: "p", status: "idle" }])).toBe(0);
   expect(lines).toEqual(["Lane A (owns open PR https://github.com/acme/app/pull/1)"]);
-  const silent = fakeMachine(temp.make("fleet-box-"), { workspace: "box-lane" });
+  const silent = fakeMachine(temp.make("hedge-box-"), { workspace: "box-lane" });
   expect(await threads(silent.machine, async () => undefined)).toBe(0);
   expect(silent.lines).toEqual(["T3 did not answer, so which threads own open PRs is unknown"]);
-  const quiet = fakeMachine(temp.make("fleet-box-"), { workspace: "box-lane" });
+  const quiet = fakeMachine(temp.make("hedge-box-"), { workspace: "box-lane" });
   expect(await threads(quiet.machine, async () => [])).toBe(0);
   expect(quiet.lines).toEqual([]);
-  await expect(threads(fakeMachine(temp.make("fleet-box-")).machine, async () => [])).rejects.toThrow("devbox-1 is not a box.");
+  await expect(threads(fakeMachine(temp.make("hedge-box-")).machine, async () => [])).rejects.toThrow("devbox-1 is not a box.");
 });
 
 test("release keeps a box it cannot ask about its threads: one that is stopped, gone, or does not answer", async () => {
-  const { machine } = fakeMachine(temp.make("fleet-box-"));
+  const { machine } = fakeMachine(temp.make("hedge-box-"));
   const stopped = fakeCoder({}, [box("box-lane", "stopped")]);
   const gone = fakeCoder({}, []);
   const silent = fakeCoder({ ssh: async () => ({ code: 255, stdout: "", stderr: "connection refused" }) });
@@ -103,7 +103,7 @@ test("release keeps a box it cannot ask about its threads: one that is stopped, 
 });
 
 test("a forced release deletes a box without asking about its threads", async () => {
-  const { machine } = fakeMachine(temp.make("fleet-box-"));
+  const { machine } = fakeMachine(temp.make("hedge-box-"));
   const { coder, calls, done } = fakeCoder({}, [box("box-lane", "stopped")]);
   expect(await release(coder, machine, "box-lane", { force: true })).toBe(0);
   expect(calls).toEqual([]);
@@ -111,7 +111,7 @@ test("a forced release deletes a box without asking about its threads", async ()
 });
 
 test("release calls the stopping hook before a box with no open threads leaves, and not on a forced release", async () => {
-  const { machine } = fakeMachine(temp.make("fleet-box-"));
+  const { machine } = fakeMachine(temp.make("hedge-box-"));
   const stopping: string[] = [];
   const hooks = { stopping: (box: string) => void stopping.push(box) };
   await release(fakeCoder().coder, machine, "box-lane", { hooks });
@@ -137,7 +137,7 @@ test("release returns a box to the pool on the hub: it marks the box as leaving,
   expect(registryOf(home).boxes["box-lane"]).toEqual({ id: "ws-box-lane" });
   expect(existsSync(record)).toBe(true);
   expect(calls.filter((call) => call.includes("unlink"))).toEqual([]);
-  expect(calls).toContain("run systemctl --user stop fleet-box-box-lane-hub.service");
+  expect(calls).toContain("run systemctl --user stop hedge-box-box-lane-hub.service");
 });
 
 test("release deletes the box when the pool is full, and forgets it only after the delete", async () => {
@@ -157,8 +157,8 @@ test("release deletes the box when the pool is full, and forgets it only after t
 });
 
 test("on a devbox, spawn, start and release are one SSH call to the hub with the lane label and this devbox's SSH name, and never call Coder", async () => {
-  const home = temp.make("fleet-box-");
-  writeHome(home, { ".config/fleet/machine.json": JSON.stringify({ schema: 1, role: "devbox" }) });
+  const home = temp.make("hedge-box-");
+  writeHome(home, { ".config/hedge/machine.json": JSON.stringify({ schema: 1, role: "devbox" }) });
   const { machine, toHub, calls } = fakeMachine(home);
   machine.toHub = async (args) => (toHub.push(args), args.includes("release") ? 1 : 0);
   const deps = depsFor(machine, () => {
@@ -216,7 +216,7 @@ test("the sweep asks each running box through the engine launcher, stops idle on
   const answers: Record<string, number> = { "box-idle": 0, "box-busy": 1, "box-old": 127, "box-flaky": 1, "box-later": 0 };
   const asked: string[] = [];
   const stopping: string[] = [];
-  const home = temp.make("fleet-box-");
+  const home = temp.make("hedge-box-");
   writePool(home, { boxes: Object.fromEntries(["box-idle", "box-busy", "box-old", "box-stopped", "box-flaky", "box-later"].map((name) => [name, { id: `ws-${name}`, claim: `c-${name}` }])) });
   const { machine } = fakeMachine(home);
   const listed = [box("box-idle"), box("box-busy"), box("box-old"), box("box-stopped", "stopped"), box("box-flaky"), box("box-later")];
@@ -242,9 +242,9 @@ function spawnCoder(machineFileAfter = 2, listed: Box[] = []) {
   return fake;
 }
 
-test("spawning a new box waits for fleet apply's machine file, hands over the hub's files, sets it up, and links it on every devbox and the caller, never the hub over SSH", async () => {
+test("spawning a new box waits for hedge apply's machine file, hands over the hub's files, sets it up, and links it on every devbox and the caller, never the hub over SSH", async () => {
   const home = hubHome();
-  writeHome(home, { ".config/fleet/box-claude-token": "sk-secret-token\n" });
+  writeHome(home, { ".config/hedge/box-claude-token": "sk-secret-token\n" });
   const { machine, calls, lines } = onHub(home, { workspace: "my-hub", self: "hub-host", peers: ["my-hub", "devbox-1", "devbox-2"] });
   const spawned = spawnCoder();
   expect(await spawn(spawned.coder, machine, "Lane 7", { devbox: "devbox-3" })).toBe(0);
@@ -267,13 +267,13 @@ test("a spawn without a Claude token still works and says Claude is not signed i
   const spawned = spawnCoder(0);
   expect(await spawn(spawned.coder, machine, "lane")).toBe(0);
   expect(lines.join("\n")).toContain("Claude is not signed in on box-lane");
-  expect(lines.join("\n")).toContain("fleet box run box-lane -- codex login --device-auth");
+  expect(lines.join("\n")).toContain("hedge box run box-lane -- codex login --device-auth");
 });
 
-test("a spawn gives up when fleet apply never writes the machine file on the box, after a bounded wait on the injected clock", async () => {
+test("a spawn gives up when hedge apply never writes the machine file on the box, after a bounded wait on the injected clock", async () => {
   const { machine } = onHub(hubHome());
   const spawned = spawnCoder(Number.POSITIVE_INFINITY);
-  await expect(spawn(spawned.coder, machine, "lane")).rejects.toThrow("did not finish fleet apply");
+  await expect(spawn(spawned.coder, machine, "lane")).rejects.toThrow("did not finish hedge apply");
   expect(machine.now() - start).toBeLessThan(16 * 60_000);
 });
 
@@ -287,7 +287,7 @@ test("a spawn claims a pooled box first, starts it by its recorded id, cleans it
   const claim = registryOf(home).boxes["box-pooled"]?.claim;
   expect(registryOf(home).boxes["box-pooled"]).toEqual({ id: "ws-box-pooled", claim: expect.any(String) });
   const commands = spawned.calls.map((call) => call.command);
-  expect(commands.some((command) => command.includes("fleet-heavy.slice"))).toBe(true);
+  expect(commands.some((command) => command.includes("hedge-heavy.slice"))).toBe(true);
   expect(commands.some((command) => command.includes(`${claim} lane by devbox-3 at 2026-11-01`))).toBe(true);
   expect(calls.some((call) => call.startsWith("peer devbox-3:") && call.includes(`${launcher} box link box-pooled`))).toBe(true);
   expect(pooled(poolFile(home))).toEqual([]);
@@ -314,13 +314,13 @@ test("the nightly pool refresh warms each free box with hub.boxWarmCommand in a 
   spawned = spawnCoder(0, [box("box-a", "stopped"), box("box-b", "stopped")]);
   expect(await refreshPool(spawned.coder, plain.machine)).toBe(0);
   for (const call of spawned.calls.filter((entry) => entry.command.startsWith("bash -lc"))) {
-    expect(call.command).toContain("fleet-heavy.slice");
+    expect(call.command).toContain("hedge-heavy.slice");
     expect(call.command).not.toContain("make warm");
   }
 });
 
 test("the nightly job checks the session, reaps, refreshes the pool, and fails if any part failed, but grants no devbox token", async () => {
-  const { machine, lines } = fakeMachine(temp.make("fleet-box-"), { self: "my-hub", isHub: true, devboxes: ["devbox-1", "devbox-2"] });
+  const { machine, lines } = fakeMachine(temp.make("hedge-box-"), { self: "my-hub", isHub: true, devboxes: ["devbox-1", "devbox-2"] });
   const steps = nightlySteps({ session: async () => 1, reap: async () => 0, refresh: async () => 0 });
   expect(steps.map((step) => step.name)).toEqual(["check the Coder session", "reap", "refresh the pool"]);
   expect(await nightly(steps, machine)).toBe(1);
@@ -329,7 +329,7 @@ test("the nightly job checks the session, reaps, refreshes the pool, and fails i
   expect(await nightly(nightlySteps({ session: async () => 0, reap: async () => 0, refresh: async () => 0 }), machine)).toBe(0);
 });
 
-describe("fleet box grants, while Boxes is off", () => {
+describe("hedge box grants, while Boxes is off", () => {
   const now = start;
   const day = 86_400_000;
   const boxesOff = () => { throw new Error("Boxes is off."); };
@@ -337,12 +337,12 @@ describe("fleet box grants, while Boxes is off", () => {
     const home = hubHome();
     const created: string[] = [];
     const tokens = [
-      { id: "k1", token_name: "fleet-devbox-1-202610010000-abcd", expires_at: new Date(now + day).toISOString() },
-      { id: "k2", token_name: "fleet-devbox-2-202610010000-abcd", expires_at: new Date(now + 30 * day).toISOString() },
+      { id: "k1", token_name: "hedge-devbox-1-202610010000-abcd", expires_at: new Date(now + day).toISOString() },
+      { id: "k2", token_name: "hedge-devbox-2-202610010000-abcd", expires_at: new Date(now + 30 * day).toISOString() },
     ];
     const coder = {
       env: { CODER_URL: "https://coder.example.com" },
-      sessionFrom: "fleet" as const,
+      sessionFrom: "hedge" as const,
       sessionKey: async () => (fields.session === "rejected" ? { rejected: true as const } : { rejected: false as const, expiresAt: now + 30 * day, lifetimeMs: 90 * day }),
       token: async (args: string[]) => (args[0] === "list" ? JSON.stringify(tokens) : args[0] === "create" ? (created.push(args[2]!), "new-secret\n") : ""),
     };
@@ -360,26 +360,26 @@ describe("fleet box grants, while Boxes is off", () => {
     expect(await boxCommand(["grants"], deps)).toBe(0);
     expect(lines.filter((line) => line.includes(" grant "))).toEqual([expect.stringMatching(/ grant devbox-1$/), expect.stringMatching(/ grant devbox-2$/)]);
     expect([...new Set(reached)]).toEqual(["devbox-1", "devbox-2"]);
-    expect(created).toEqual([expect.stringMatching(/^fleet-devbox-1-/)]);
+    expect(created).toEqual([expect.stringMatching(/^hedge-devbox-1-/)]);
   });
 
   test("help and a mistyped token command print the usage, not that Boxes is off", async () => {
     const { deps, lines } = grantsOn();
     expect(await boxCommand(["help"], deps)).toBe(0);
-    expect(lines.at(-1)).toStartWith("Usage: fleet box");
+    expect(lines.at(-1)).toStartWith("Usage: hedge box");
     for (const args of [["grant"], ["grant", "--if-expiring"], ["grants", "devbox-1"], ["session", "now"]]) {
       lines.length = 0;
       expect([args.join(" "), await boxCommand(args, deps)]).toEqual([args.join(" "), 2]);
-      expect(lines).toEqual([expect.stringMatching(/^Usage: fleet box/)]);
+      expect(lines).toEqual([expect.stringMatching(/^Usage: hedge box/)]);
     }
   });
 
   test("renews only the devbox token that expires within a week, after it checks the hub's Coder session", async () => {
     const { deps, created, lines } = grantsOn();
     expect(await boxCommand(["grants"], deps)).toBe(0);
-    expect(created).toEqual([expect.stringMatching(/^fleet-devbox-1-/)]);
+    expect(created).toEqual([expect.stringMatching(/^hedge-devbox-1-/)]);
     expect(lines.findIndex((line) => line.includes("check the Coder session"))).toBeLessThan(lines.findIndex((line) => line.includes("grant devbox-1")));
-    expect(lines.some((line) => line.startsWith("fleet-devbox-2-202610010000-abcd: still valid"))).toBe(true);
+    expect(lines.some((line) => line.startsWith("hedge-devbox-2-202610010000-abcd: still valid"))).toBe(true);
   });
 
   test("still grants when the session check fails, and fails when the session or a grant failed", async () => {
@@ -391,63 +391,63 @@ describe("fleet box grants, while Boxes is off", () => {
     expect(failing.lines.some((line) => line.startsWith("grant devbox-1 failed"))).toBe(true);
   });
 
-  test("fleet box grant and fleet box session also run without the Boxes settings", async () => {
+  test("hedge box grant and hedge box session also run without the Boxes settings", async () => {
     const { deps, created } = grantsOn();
     expect(await boxCommand(["session"], deps)).toBe(0);
     expect(await boxCommand(["grant", "devbox-2"], deps)).toBe(0);
-    expect(created).toEqual([expect.stringMatching(/^fleet-devbox-2-/)]);
+    expect(created).toEqual([expect.stringMatching(/^hedge-devbox-2-/)]);
   });
 });
 
-test("fleet box grants runs on a hub with Boxes off and only the Coder address set, and grants each devbox but the hub and boxes", async () => {
-  const home = temp.make("fleet-hub-");
-  writeHome(home, { ".config/fleet/machine.json": JSON.stringify({ schema: 1, role: "hub", name: "my-hub" }) });
-  const profile = temp.make("fleet-profile-");
-  writeHome(profile, { "fleet.json": JSON.stringify({ schema: 1, packs: ["hub"], workflows: {}, hub: "hub", devboxes: ["devbox-1", "hub", "my-hub", "box-lane"] }) });
-  const bin = temp.make("fleet-bin-");
-  const peers = temp.make("fleet-peers-");
+test("hedge box grants runs on a hub with Boxes off and only the Coder address set, and grants each devbox but the hub and boxes", async () => {
+  const home = temp.make("hedge-hub-");
+  writeHome(home, { ".config/hedge/machine.json": JSON.stringify({ schema: 1, role: "hub", name: "my-hub" }) });
+  const profile = temp.make("hedge-profile-");
+  writeHome(profile, { "hedge.json": JSON.stringify({ schema: 1, packs: ["hub"], workflows: {}, hub: "hub", devboxes: ["devbox-1", "hub", "my-hub", "box-lane"] }) });
+  const bin = temp.make("hedge-bin-");
+  const peers = temp.make("hedge-peers-");
   writeHome(bin, {
     coder: `#!/bin/sh\ncase "$2" in list) echo '[]' ;; create) echo new-secret ;; esac\n`,
     ssh: `#!/bin/sh\nmkdir -p "${peers}/$7" && HOME="${peers}/$7" exec sh -c "$8"\n`,
   });
   for (const name of ["coder", "ssh"]) chmodSync(join(bin, name), 0o755);
   const { CODER_SESSION_TOKEN: _token, CODER_URL: _url, ...outer } = Bun.env;
-  const env = { ...outer, HOME: home, PATH: `${bin}:${Bun.env.PATH}`, FLEET_PROFILE_DIR: profile, FLEET_SETTINGS: JSON.stringify({ "hub.alias": "hub", "hub.coderUrl": "https://coder.example.com" }) };
+  const env = { ...outer, HOME: home, PATH: `${bin}:${Bun.env.PATH}`, HEDGE_PROFILE_DIR: profile, HEDGE_SETTINGS: JSON.stringify({ "hub.alias": "hub", "hub.coderUrl": "https://coder.example.com" }) };
   const ran = await spawnAsync(["bun", join(import.meta.dir, "../commands/box.ts"), "grants"], { env });
   expect([ran.exitCode, `${ran.stdout}${ran.stderr}`]).toEqual([0, expect.not.stringContaining("Boxes is off")]);
   expect(readdirSync(peers)).toEqual(["devbox-1"]);
-  expect(readFileSync(join(peers, "devbox-1/.config/fleet/coder-session"), "utf8")).toBe("new-secret\n");
-  expect(readFileSync(join(peers, "devbox-1/.config/fleet/coder-url"), "utf8")).toBe("https://coder.example.com\n");
-  expect(existsSync(join(home, ".config/fleet/coder-session"))).toBe(false);
+  expect(readFileSync(join(peers, "devbox-1/.config/hedge/coder-session"), "utf8")).toBe("new-secret\n");
+  expect(readFileSync(join(peers, "devbox-1/.config/hedge/coder-url"), "utf8")).toBe("https://coder.example.com\n");
+  expect(existsSync(join(home, ".config/hedge/coder-session"))).toBe(false);
 });
 
-test("fleet box token saves the pasted token with mode 0600, and refuses an empty paste", async () => {
-  const home = temp.make("fleet-box-");
+test("hedge box token saves the pasted token with mode 0600, and refuses an empty paste", async () => {
+  const home = temp.make("hedge-box-");
   await saveToken(home, "  sk-pasted-token \n");
-  const path = join(home, ".config/fleet/box-claude-token");
+  const path = join(home, ".config/hedge/box-claude-token");
   expect(readFileSync(path, "utf8")).toBe("sk-pasted-token\n");
   expect(statSync(path).mode & 0o777).toBe(0o600);
-  expect(readdirSync(join(home, ".config/fleet"))).toEqual(["box-claude-token"]);
+  expect(readdirSync(join(home, ".config/hedge"))).toEqual(["box-claude-token"]);
   await expect(saveToken(home, "\n")).rejects.toThrow("claude setup-token");
 });
 
 function commandDeps(home: string, role?: string) {
-  if (role) writeHome(home, { ".config/fleet/machine.json": JSON.stringify({ schema: 1, role }) });
+  if (role) writeHome(home, { ".config/hedge/machine.json": JSON.stringify({ schema: 1, role }) });
   const { machine, lines } = fakeMachine(home, { isHub: role === "hub" });
   return { deps: depsFor(machine, () => fakeCoder().coder), lines };
 }
 
-test("on a machine that is not the hub, sweep, reap, pool, grant, grants, session, and nightly refuse and say to run fleet hub here", async () => {
-  const { deps } = commandDeps(temp.make("fleet-box-"), "devbox");
+test("on a machine that is not the hub, sweep, reap, pool, grant, grants, session, and nightly refuse and say to run hedge hub here", async () => {
+  const { deps } = commandDeps(temp.make("hedge-box-"), "devbox");
   for (const args of [["sweep"], ["reap"], ["pool", "list"], ["grant", "devbox-2"], ["grants"], ["session"], ["nightly"]]) {
-    await expect(boxCommand(args, deps)).rejects.toThrow("Run fleet hub here on the hub");
+    await expect(boxCommand(args, deps)).rejects.toThrow("Run hedge hub here on the hub");
   }
-  const hub = commandDeps(temp.make("fleet-box-"), "hub");
+  const hub = commandDeps(temp.make("hedge-box-"), "hub");
   expect(await boxCommand(["sweep"], hub.deps)).toBe(0);
 });
 
 test("an unknown box command prints the usage and fails, and the hold verbs the devboxes used are gone", async () => {
-  const { deps, lines } = commandDeps(temp.make("fleet-box-"), "hub");
+  const { deps, lines } = commandDeps(temp.make("hedge-box-"), "hub");
   const unknown = [
     ["launch"], ["release"], ["release", "box-lane", "--now"], ["run", "devbox-4", "--", "true"], ["run", "box-a.b", "--", "true"], ["run", "box--x", "--", "true"], ["run", "box-a--x", "--", "true"], ["run", "box-lane", "true"], ["run", "box-lane", "--"], ["spawn", "lane", "--old"], ["release", "box-lane", "--new"], ["pool", "empty"], ["token", "extra"],
     ["spawn", "--for"], ["start", "box-lane", "--for", "bad name"], ["start", "box-lane", "--for", "Node-1"], ["start", "box-lane", "--for", "worker_1"], ["start", "box-lane", "--for", "box-other"], ["link", "box-lane", "--for", "devbox-2"],
@@ -455,18 +455,18 @@ test("an unknown box command prints the usage and fails, and the hold verbs the 
     ["pool", "claim"],
   ];
   for (const args of unknown) expect([args.join(" "), await boxCommand(args, deps)]).toEqual([args.join(" "), 2]);
-  expect(lines.at(-1)).toContain("fleet box token");
+  expect(lines.at(-1)).toContain("hedge box token");
   expect(lines.at(-1)).not.toMatch(/renew|unhold|claim, own/);
 });
 
-test("fleet box token reads the token from standard input", async () => {
-  const home = temp.make("fleet-box-");
+test("hedge box token reads the token from standard input", async () => {
+  const home = temp.make("hedge-box-");
   const { deps } = commandDeps(home);
   expect(await boxCommand(["token"], { ...deps, readStdin: async () => "sk-from-stdin\n" })).toBe(0);
-  expect(readFileSync(join(home, ".config/fleet/box-claude-token"), "utf8")).toBe("sk-from-stdin\n");
+  expect(readFileSync(join(home, ".config/hedge/box-claude-token"), "utf8")).toBe("sk-from-stdin\n");
 });
 
-test("fleet box nightly exits 1 when a reaped box could not be released everywhere", async () => {
+test("hedge box nightly exits 1 when a reaped box could not be released everywhere", async () => {
   const home = hubHome();
   const { machine, lines } = onHub(home, { devboxes: [], peers: ["devbox-2"], onPeer: async (alias) => ({ ...ok, code: alias === "devbox-2" ? 255 : 0 }) });
   machine.settings = { ...machine.settings, poolSize: 0 };
@@ -498,13 +498,13 @@ test("waiting for a new box gives up at its deadline even when every coder call 
   const applying = onHub(hubHome());
   const stuck = hangingCoder(applying.machine, { sshAfterStartup: async () => ok });
   stuck.coder.ssh = async (_box, _command, _stdin, timeoutMs) => stuck.hang(timeoutMs);
-  await expect(spawn(stuck.coder, applying.machine, "lane")).rejects.toThrow("did not finish fleet apply");
+  await expect(spawn(stuck.coder, applying.machine, "lane")).rejects.toThrow("did not finish hedge apply");
   expect(applying.machine.now() - start).toBeLessThanOrEqual(15 * 60_000 + 5000);
 });
 
 test("linking gives up at its deadline when the box's T3 never answers a request, because each request gets the time that is left", async () => {
   const limits: number[] = [];
-  const { machine } = fakeMachine(temp.make("fleet-box-"), {
+  const { machine } = fakeMachine(temp.make("hedge-box-"), {
     environmentId: async (_url, timeoutMs) => {
       if (timeoutMs === undefined) throw new Error("hangs forever: no time limit");
       limits.push(timeoutMs);
@@ -569,7 +569,7 @@ test("a release from a lane that no longer holds the box changes nothing: it che
   expect(lines.join("\n")).toContain("claimed again");
 });
 
-test("fleet box start takes a pooled box out of the pool under its lock before it starts it, and fails with one line on a box another operation holds", async () => {
+test("hedge box start takes a pooled box out of the pool under its lock before it starts it, and fails with one line on a box another operation holds", async () => {
   const home = hubHome();
   writePool(home, { free: ["box-a"], boxes: { "box-a": { id: "ws-box-a" }, "box-b": { id: "ws-box-b", claim: "c-1" } } });
   const { machine } = onHub(home);
@@ -587,7 +587,7 @@ test("fleet box start takes a pooled box out of the pool under its lock before i
   expect(registryOf(home).boxes["box-a"]).toEqual({ id: "ws-box-a", claim: expect.any(String) });
   expect(fake.calls.some((call) => call.box === "box-a" && call.command.includes("box-claim") && call.command.includes(claim!))).toBe(true);
   const unlock = await lockBox(home, "box-b", noWait);
-  await expect(startBox(fake.coder, machine, "box-b", noWait)).rejects.toThrow(/^box-b is busy: another fleet box operation on it still runs\. Try again in a few minutes\.$/);
+  await expect(startBox(fake.coder, machine, "box-b", noWait)).rejects.toThrow(/^box-b is busy: another hedge box operation on it still runs\. Try again in a few minutes\.$/);
   unlock();
   expect(fake.done).toEqual(["start box-a"]);
 });
@@ -615,7 +615,7 @@ test("a reaped box that turns active while it is being released is neither stopp
   const { machine, lines } = onHub(home, {
     devboxes: [], peers: ["devbox-2"],
     onPeer: async (_alias, command) => {
-      if (command.includes("fleet-box-box-old-hub.service")) listed[0]!.status = "running";
+      if (command.includes("hedge-box-box-old-hub.service")) listed[0]!.status = "running";
       return ok;
     },
   });
@@ -627,7 +627,7 @@ test("a reaped box that turns active while it is being released is neither stopp
   expect(lines.join("\n")).toContain("kept box-old");
 });
 
-test("fleet box start on a box a lane holds keeps a release out until the box is up, and a release's lock keeps a start out", async () => {
+test("hedge box start on a box a lane holds keeps a release out until the box is up, and a release's lock keeps a start out", async () => {
   const home = hubHome();
   writePool(home, { boxes: { "box-lane": { id: "ws-box-lane", claim: "c-1" } } });
   const { machine } = onHub(home);
@@ -688,32 +688,32 @@ test("a release whose delete fails keeps the box's record, so sweep, reap and th
 
 
 test("recycling clears T3 worktrees and scratch, stops the heavy slice, keeps exactly hub.boxKeepDirs in ~/dev, and removes the claim", () => {
-  const home = temp.make("fleet-box-");
+  const home = temp.make("hedge-box-");
   writeHome(home, {
     "dev/notes/a": "", "dev/tools/b": "", "dev/project/c": "", "dev/other repo/d": "", "dev/notes-old/e": "",
-    ".t3/worktrees/project/lane/f": "", ".t3/scratch/g": "", ".config/fleet/box-claim": "lane", ".config/fleet/mcphub.client.json": "{}",
+    ".t3/worktrees/project/lane/f": "", ".t3/scratch/g": "", ".config/hedge/box-claim": "lane", ".config/hedge/mcphub.client.json": "{}",
   });
-  const bin = stubBin(temp.make("fleet-bin-"), ["systemctl", "docker"]);
+  const bin = stubBin(temp.make("hedge-bin-"), ["systemctl", "docker"]);
   const run = Bun.spawnSync(["sh", "-c", recycleScript(["notes", "tools"])], { env: { HOME: home, PATH: `${bin}:/usr/bin:/bin` } });
   expect(run.exitCode).toBe(0);
   expect(readdirSync(join(home, "dev")).sort()).toEqual(["notes", "tools"]);
   expect(readdirSync(join(home, ".t3/worktrees/project"))).toEqual([]);
   expect(readdirSync(join(home, ".t3/scratch"))).toEqual([]);
-  expect(existsSync(join(home, ".config/fleet/box-claim"))).toBe(false);
-  expect(existsSync(join(home, ".config/fleet/mcphub.client.json"))).toBe(true);
-  expect(readFileSync(join(bin, "calls.log"), "utf8")).toBe("systemctl --user stop fleet-heavy.slice\n");
+  expect(existsSync(join(home, ".config/hedge/box-claim"))).toBe(false);
+  expect(existsSync(join(home, ".config/hedge/mcphub.client.json"))).toBe(true);
+  expect(readFileSync(join(bin, "calls.log"), "utf8")).toBe("systemctl --user stop hedge-heavy.slice\n");
   Bun.spawnSync(["sh", "-c", recycleScript([])], { env: { HOME: home, PATH: `${bin}:/usr/bin:/bin` } });
   expect(readdirSync(join(home, "dev"))).toEqual([]);
 });
 
 test("recycling clears hidden entries too: hidden repositories in ~/dev, hidden scratch files, hidden lanes and hidden project roots", () => {
-  const home = temp.make("fleet-box-");
+  const home = temp.make("hedge-box-");
   writeHome(home, {
     "dev/.old-repo/secret": "old lane", "dev/notes/.kept-inside": "kept", "dev/.notes/x": "", "dev/..dots/y": "",
     ".t3/scratch/.old-secret": "old lane", ".t3/scratch/..twice": "old lane",
     ".t3/worktrees/project/.old-lane/secret": "old lane", ".t3/worktrees/.hidden-project/lane/secret": "old lane",
   });
-  const bin = stubBin(temp.make("fleet-bin-"), ["systemctl"]);
+  const bin = stubBin(temp.make("hedge-bin-"), ["systemctl"]);
   const run = Bun.spawnSync(["sh", "-c", recycleScript(["notes"])], { env: { HOME: home, PATH: `${bin}:/usr/bin:/bin` } });
   expect(run.exitCode).toBe(0);
   expect(readdirSync(join(home, "dev"))).toEqual(["notes"]);
@@ -728,11 +728,11 @@ function treeOf(root: string): string[] {
 }
 
 test("recycling refuses a symlinked ~/dev and leaves the folders in its target alone", () => {
-  const home = temp.make("fleet-box-");
-  const elsewhere = temp.make("fleet-elsewhere-");
+  const home = temp.make("hedge-box-");
+  const elsewhere = temp.make("hedge-elsewhere-");
   writeHome(elsewhere, { "project/a": "keep me", "other/b": "keep me" });
   symlinkSync(elsewhere, join(home, "dev"));
-  const bin = stubBin(temp.make("fleet-bin-"), ["systemctl"]);
+  const bin = stubBin(temp.make("hedge-bin-"), ["systemctl"]);
   const before = treeOf(elsewhere);
   const run = Bun.spawnSync(["sh", "-c", recycleScript([])], { env: { HOME: home, PATH: `${bin}:/usr/bin:/bin` }, stderr: "pipe" });
   expect(treeOf(elsewhere)).toEqual(before);
@@ -741,14 +741,14 @@ test("recycling refuses a symlinked ~/dev and leaves the folders in its target a
 });
 
 test("recycling removes a symlink under the T3 worktrees or in ~/dev itself, and never what it points to, even a kept folder", () => {
-  const home = temp.make("fleet-box-");
-  const outside = temp.make("fleet-outside-");
+  const home = temp.make("hedge-box-");
+  const outside = temp.make("hedge-outside-");
   writeHome(home, { "dev/notes/plan.md": "kept", "dev/notes/sub/x": "kept", ".t3/worktrees/real/lane/f": "" });
   writeHome(outside, { "secret/s": "kept" });
   mkdirSync(join(home, ".t3/worktrees"), { recursive: true });
   symlinkSync(join(home, "dev/notes"), join(home, ".t3/worktrees/notes-link"));
   symlinkSync(join(outside, "secret"), join(home, "dev/linked"));
-  const bin = stubBin(temp.make("fleet-bin-"), ["systemctl"]);
+  const bin = stubBin(temp.make("hedge-bin-"), ["systemctl"]);
   const run = Bun.spawnSync(["sh", "-c", recycleScript(["notes"])], { env: { HOME: home, PATH: `${bin}:/usr/bin:/bin` } });
   expect(run.exitCode).toBe(0);
   expect(treeOf(join(home, "dev/notes"))).toEqual(["plan.md", "sub", "sub/x"]);
@@ -759,22 +759,22 @@ test("recycling removes a symlink under the T3 worktrees or in ~/dev itself, and
 });
 
 test("the token drop-in never writes through a planted symlink, and refuses a symlinked drop-in folder", () => {
-  const home = temp.make("fleet-box-");
-  const elsewhere = temp.make("fleet-elsewhere-");
-  writeHome(home, { ".config/fleet/box-claude-token": "sk-test-token\n" });
+  const home = temp.make("hedge-box-");
+  const elsewhere = temp.make("hedge-elsewhere-");
+  writeHome(home, { ".config/hedge/box-claude-token": "sk-test-token\n" });
   writeHome(elsewhere, { target: "untouched\n" });
   const dir = join(home, ".config/systemd/user/t3code.service.d");
   mkdirSync(dir, { recursive: true });
   symlinkSync(join(elsewhere, "target"), join(dir, "claude-token.conf.new"));
-  const bin = stubBin(temp.make("fleet-bin-"), ["systemctl", "curl", "sleep"]);
+  const bin = stubBin(temp.make("hedge-bin-"), ["systemctl", "curl", "sleep"]);
   expect(runOnBox(setUpScript("claim"), home, bin).exitCode).toBe(0);
   expect(readFileSync(join(elsewhere, "target"), "utf8")).toBe("untouched\n");
   expect(statSync(join(dir, "claude-token.conf")).mode & 0o777).toBe(0o600);
   expect(readdirSync(dir).filter((name) => name !== "claude-token.conf.new")).toEqual(["claude-token.conf"]);
 
-  const linkedHome = temp.make("fleet-box-");
-  const target = temp.make("fleet-elsewhere-");
-  writeHome(linkedHome, { ".config/fleet/box-claude-token": "sk-test-token\n" });
+  const linkedHome = temp.make("hedge-box-");
+  const target = temp.make("hedge-elsewhere-");
+  writeHome(linkedHome, { ".config/hedge/box-claude-token": "sk-test-token\n" });
   mkdirSync(join(linkedHome, ".config/systemd/user"), { recursive: true });
   symlinkSync(target, join(linkedHome, ".config/systemd/user/t3code.service.d"));
   const refused = runOnBox(setUpScript("claim"), linkedHome, bin);
@@ -788,44 +788,44 @@ function runOnBox(script: string, home: string, bin: string) {
 }
 
 test("setting up a box puts the handed-over Claude token into the T3 service's environment, in a drop-in only its owner reads, then restarts T3", () => {
-  const home = temp.make("fleet-box-");
-  writeHome(home, { ".config/fleet/box-claude-token": "sk-test-token\n" });
-  const bin = stubBin(temp.make("fleet-bin-"), ["systemctl", "curl", "sleep"]);
+  const home = temp.make("hedge-box-");
+  writeHome(home, { ".config/hedge/box-claude-token": "sk-test-token\n" });
+  const bin = stubBin(temp.make("hedge-bin-"), ["systemctl", "curl", "sleep"]);
   expect(runOnBox(setUpScript("box-lane by devbox-1 at now"), home, bin).exitCode).toBe(0);
   const dropIn = join(home, ".config/systemd/user/t3code.service.d/claude-token.conf");
   expect(readFileSync(dropIn, "utf8")).toBe('[Service]\nEnvironment="CLAUDE_CODE_OAUTH_TOKEN=sk-test-token"\n');
   expect(statSync(dropIn).mode & 0o777).toBe(0o600);
-  expect(readFileSync(join(home, ".config/fleet/box-claim"), "utf8")).toBe("box-lane by devbox-1 at now\n");
+  expect(readFileSync(join(home, ".config/hedge/box-claim"), "utf8")).toBe("box-lane by devbox-1 at now\n");
   const log = readFileSync(join(bin, "calls.log"), "utf8");
   expect(log).toContain("systemctl --user daemon-reload\nsystemctl --user restart t3code.service\n");
   expect(log).not.toContain("sk-test-token");
 });
 
 test("claiming a pooled box restarts T3 only when the Claude token changed", () => {
-  const home = temp.make("fleet-box-");
-  writeHome(home, { ".config/fleet/box-claude-token": "sk-test-token\n" });
-  const bin = stubBin(temp.make("fleet-bin-"), ["systemctl", "curl", "sleep"]);
+  const home = temp.make("hedge-box-");
+  writeHome(home, { ".config/hedge/box-claude-token": "sk-test-token\n" });
+  const bin = stubBin(temp.make("hedge-bin-"), ["systemctl", "curl", "sleep"]);
   expect(runOnBox(claimScript("lane by devbox-1 at now"), home, bin).exitCode).toBe(0);
   expect(readFileSync(join(bin, "calls.log"), "utf8")).toContain("systemctl --user restart t3code.service");
   Bun.spawnSync(["rm", join(bin, "calls.log")]);
   expect(runOnBox(claimScript("lane by devbox-1 at later"), home, bin).exitCode).toBe(0);
   expect(existsSync(join(bin, "calls.log"))).toBe(false);
-  expect(readFileSync(join(home, ".config/fleet/box-claim"), "utf8")).toBe("lane by devbox-1 at later\n");
+  expect(readFileSync(join(home, ".config/hedge/box-claim"), "utf8")).toBe("lane by devbox-1 at later\n");
 });
 
 test("a box without a handed-over Claude token keeps T3 without a token drop-in", () => {
-  const home = temp.make("fleet-box-");
-  const bin = stubBin(temp.make("fleet-bin-"), ["systemctl", "curl", "sleep"]);
+  const home = temp.make("hedge-box-");
+  const bin = stubBin(temp.make("hedge-bin-"), ["systemctl", "curl", "sleep"]);
   expect(runOnBox(setUpScript("claim"), home, bin).exitCode).toBe(0);
   expect(existsSync(join(home, ".config/systemd/user/t3code.service.d"))).toBe(false);
 });
 
 test("the token drop-in refuses a destination that is a folder or a symlink to one, and a symlink anywhere below the home folder", () => {
-  const bin = stubBin(temp.make("fleet-bin-"), ["systemctl", "curl", "sleep"]);
+  const bin = stubBin(temp.make("hedge-bin-"), ["systemctl", "curl", "sleep"]);
   const dropIn = ".config/systemd/user/t3code.service.d";
   const homeWithToken = () => {
-    const home = temp.make("fleet-box-");
-    writeHome(home, { ".config/fleet/box-claude-token": "sk-test-token\n" });
+    const home = temp.make("hedge-box-");
+    writeHome(home, { ".config/hedge/box-claude-token": "sk-test-token\n" });
     return home;
   };
   const refuses = (home: string) => {
@@ -835,7 +835,7 @@ test("the token drop-in refuses a destination that is a folder or a symlink to o
   };
 
   const linkedConf = homeWithToken();
-  const folder = temp.make("fleet-elsewhere-");
+  const folder = temp.make("hedge-elsewhere-");
   mkdirSync(join(linkedConf, dropIn), { recursive: true });
   symlinkSync(folder, join(linkedConf, dropIn, "claude-token.conf"));
   refuses(linkedConf);
@@ -848,7 +848,7 @@ test("the token drop-in refuses a destination that is a folder or a symlink to o
 
   for (const ancestor of [".config/systemd/user", ".config/systemd"]) {
     const linkedAncestor = homeWithToken();
-    const target = temp.make("fleet-elsewhere-");
+    const target = temp.make("hedge-elsewhere-");
     mkdirSync(join(linkedAncestor, ancestor, ".."), { recursive: true });
     symlinkSync(target, join(linkedAncestor, ancestor));
     refuses(linkedAncestor);
@@ -857,9 +857,9 @@ test("the token drop-in refuses a destination that is a folder or a symlink to o
 });
 
 test("saving the Claude token never writes through a file planted at a temporary name", async () => {
-  const home = temp.make("fleet-box-");
-  writeHome(home, { victim: "keep\n", ".config/fleet/box-claude-token": "sk-old\n" });
-  const path = join(home, ".config/fleet/box-claude-token");
+  const home = temp.make("hedge-box-");
+  writeHome(home, { victim: "keep\n", ".config/hedge/box-claude-token": "sk-old\n" });
+  const path = join(home, ".config/hedge/box-claude-token");
   symlinkSync(join(home, "victim"), `${path}.${process.pid}.partial`);
   await saveToken(home, "sk-new\n");
   expect(readFileSync(join(home, "victim"), "utf8")).toBe("keep\n");
@@ -960,9 +960,9 @@ test("round 4, finding 2: a spawn whose peer calls outlast the old 30-minute hol
   expect(fake.done).toEqual(["start box-a", "create box-other-lane from devbox-1 with 120 GB"]);
 });
 
-test("round 4, finding 3: setup writes credentials only while it holds the box, however long fleet apply takes", async () => {
+test("round 4, finding 3: setup writes credentials only while it holds the box, however long hedge apply takes", async () => {
   const home = hubHome();
-  writeHome(home, { ".config/fleet/box-claude-token": "sk-secret-token\n" });
+  writeHome(home, { ".config/hedge/box-claude-token": "sk-secret-token\n" });
   const { machine } = onHub(home);
   let checks = 0;
   let during: unknown;
@@ -983,7 +983,7 @@ test("round 4, finding 3: setup writes credentials only while it holds the box, 
 
 test("round 4, finding 3: setup writes no credentials and no claim to a workspace that was recreated under the box's name while it waited", async () => {
   const home = hubHome();
-  writeHome(home, { ".config/fleet/box-claude-token": "sk-secret-token\n" });
+  writeHome(home, { ".config/hedge/box-claude-token": "sk-secret-token\n" });
   const { machine } = onHub(home);
   const listed: Box[] = [];
   const fake = spawnCoder(0, listed);
@@ -993,7 +993,7 @@ test("round 4, finding 3: setup writes no credentials and no claim to a workspac
     return ssh(name, command, stdin, timeoutMs);
   };
   await expect(spawn(fake.coder, machine, "lane")).rejects.toThrow("box-lane is no longer the workspace this operation holds");
-  expect(fake.calls.filter((call) => call.stdin !== undefined || call.command.includes("box-claim") || call.command.includes("fleet-heavy"))).toEqual([]);
+  expect(fake.calls.filter((call) => call.stdin !== undefined || call.command.includes("box-claim") || call.command.includes("hedge-heavy"))).toEqual([]);
 });
 
 test("round 4, finding 4: there is no lease to expire, so a sweep whose idle check takes 45 minutes still holds the box until it stops it", async () => {
@@ -1027,7 +1027,7 @@ const resumedLane = (claimOnBox: Record<string, string>, failing: Record<string,
   return ok;
 };
 
-test("round 5, finding 1: fleet box start refuses a box whose release began and did not finish, in one line, and the sweep then finishes that release", async () => {
+test("round 5, finding 1: hedge box start refuses a box whose release began and did not finish, in one line, and the sweep then finishes that release", async () => {
   for (const how of ["pool", "delete"] as const) {
     const home = hubHome();
     writePool(home, { boxes: { "box-lane": { id: "ws-box-lane", claim: "c-1", leaving: how } } });
@@ -1081,7 +1081,7 @@ test("round 5, finding 1: the sweep never pools a box with a stale claiming mark
   });
   const { machine, lines } = onHub(home);
   const listed = [box("box-handover"), box("box-cleaned"), box("box-asleep", "stopped"), box("box-silent")];
-  const fake = fakeCoder({ ssh: resumedLane({ "box-handover": `c-1 fleet box start by devbox-1 ${claimedAt}` }, { "box-silent": 255 }) }, listed);
+  const fake = fakeCoder({ ssh: resumedLane({ "box-handover": `c-1 hedge box start by devbox-1 ${claimedAt}` }, { "box-silent": 255 }) }, listed);
   expect(await sweep(fake.coder, machine)).toBe(0);
   expect(fake.done).toEqual(["extend box-handover until 2026-11-01T02:00:00.000Z", "stop box-cleaned"]);
   expect(registryOf(home)).toEqual({
@@ -1154,29 +1154,29 @@ const hubKey = JSON.stringify({ baseUrl: "http://127.0.0.1:3317/mcphub", token: 
 test("round 6, finding 1: a spawn checks the handed-over gateway key from the box before it reports success, and a failed check is a warning, not a failed spawn", async () => {
   for (const code of [0, 1]) {
     const home = hubHome();
-    writeHome(home, { ".config/fleet/mcphub.client.json": hubKey });
+    writeHome(home, { ".config/hedge/mcphub.client.json": hubKey });
     const { machine, lines, calls } = onHub(home);
     const spawned = spawnCoder(0);
     const ssh = spawned.coder.ssh;
     spawned.coder.ssh = async (name, command, stdin) => {
       if (!command.includes("run mcp-gateway/mcp-gateway-client")) return ssh(name, command, stdin);
       spawned.calls.push({ box: name, command });
-      return { ...ok, code, stderr: code ? "The MCP gateway at http://127.0.0.1:3317/mcphub does not answer. On the hub, run: fleet mcp-gateway doctor\n" : "" };
+      return { ...ok, code, stderr: code ? "The MCP gateway at http://127.0.0.1:3317/mcphub does not answer. On the hub, run: hedge mcp-gateway doctor\n" : "" };
     };
     expect(await spawn(spawned.coder, machine, "lane")).toBe(0);
     const commands = spawned.calls.map((call) => call.command);
     expect(commands.findIndex((command) => command.includes("run mcp-gateway/mcp-gateway-client"))).toBeGreaterThan(commands.findIndex((command) => command.includes("mcphub.client.json")));
     expect(calls.some((call) => call.includes("'-R' '3317:127.0.0.1:3317'"))).toBe(true);
     expect(lines.at(-1)).toBe("box-lane env-box");
-    expect(lines.filter((line) => line.includes("MCP gateway"))).toEqual(code ? ["box-lane cannot reach the hub's MCP gateway yet (The MCP gateway at http://127.0.0.1:3317/mcphub does not answer. On the hub, run: fleet mcp-gateway doctor). Check it with fleet box run box-lane -- fleet run mcp-gateway/mcp-gateway-client"] : []);
+    expect(lines.filter((line) => line.includes("MCP gateway"))).toEqual(code ? ["box-lane cannot reach the hub's MCP gateway yet (The MCP gateway at http://127.0.0.1:3317/mcphub does not answer. On the hub, run: hedge mcp-gateway doctor). Check it with hedge box run box-lane -- hedge run mcp-gateway/mcp-gateway-client"] : []);
   }
 });
 
-test("round 6, finding 1: fleet box start brings back the box's hub forward with its gateway route, and restores the T3 forward of that box only", async () => {
+test("round 6, finding 1: hedge box start brings back the box's hub forward with its gateway route, and restores the T3 forward of that box only", async () => {
   const home = hubHome();
   writePool(home, { free: ["box-lane"], boxes: { "box-lane": { id: "ws-box-lane" } } });
   linkedHere(home);
-  writeHome(home, { ".config/fleet/boxes/box-other.json": JSON.stringify({ environmentId: "env-2", port: 22000 }) });
+  writeHome(home, { ".config/hedge/boxes/box-other.json": JSON.stringify({ environmentId: "env-2", port: 22000 }) });
   const started: string[] = [];
   const { machine } = onHub(home, {
     run: async (argv) => {
@@ -1187,7 +1187,7 @@ test("round 6, finding 1: fleet box start brings back the box's hub forward with
   });
   const { coder } = fakeCoder({}, [box("box-lane", "stopped"), box("box-other", "stopped")]);
   expect(await startBox(coder, machine, "box-lane", noWait)).toBe(0);
-  expect(started.map((line) => line.split(" ")[0])).toEqual(["--unit=fleet-box-box-lane-hub", "--unit=fleet-box-box-lane-t3"]);
+  expect(started.map((line) => line.split(" ")[0])).toEqual(["--unit=hedge-box-box-lane-hub", "--unit=hedge-box-box-lane-t3"]);
   expect(started[0]).toContain("'-R' '3317:127.0.0.1:3317'");
   expect(started[1]).toContain("'21000:3773'");
 });
@@ -1200,9 +1200,9 @@ const onBoxShell = (homes: Record<string, string>, bin = "/nonexistent") => (nam
 test("round 6, finding 2: the sweep keeps a box with a stale claiming mark whose claim file it cannot read, and says why, while a box with no claim file goes back to the pool", async () => {
   const home = hubHome();
   writePool(home, { boxes: { "box-locked": { id: "ws-box-locked", claim: "c-1", claiming: true }, "box-empty": { id: "ws-box-empty", claim: "c-2", claiming: true } } });
-  const homes = { "box-locked": temp.make("fleet-onbox-"), "box-empty": temp.make("fleet-onbox-") };
-  writeHome(homes["box-locked"], { ".config/fleet/box-claim": `c-1 lane by devbox-1 ${claimedAt}\n` });
-  chmodSync(join(homes["box-locked"], ".config/fleet/box-claim"), 0o000);
+  const homes = { "box-locked": temp.make("hedge-onbox-"), "box-empty": temp.make("hedge-onbox-") };
+  writeHome(homes["box-locked"], { ".config/hedge/box-claim": `c-1 lane by devbox-1 ${claimedAt}\n` });
+  chmodSync(join(homes["box-locked"], ".config/hedge/box-claim"), 0o000);
   const shell = onBoxShell(homes);
   const { machine, lines } = onHub(home);
   const fake = fakeCoder({
@@ -1222,7 +1222,7 @@ test("round 6, finding 2: the sweep keeps a box with a stale claiming mark whose
   expect(kept).toEndWith("; kept");
 });
 
-test("round 6, finding 3: fleet box start holds the box through its last forward step, so a release and a replacement spawn wait, and the link record and the forward agree", async () => {
+test("round 6, finding 3: hedge box start holds the box through its last forward step, so a release and a replacement spawn wait, and the link record and the forward agree", async () => {
   const home = hubHome();
   writePool(home, { boxes: { "box-lane": { id: "ws-box-lane", claim: "c-1" } } });
   linkedHere(home);
@@ -1235,26 +1235,26 @@ test("round 6, finding 3: fleet box start holds the box through its last forward
     freePort: () => 22000,
     run: async (argv) => {
       if (argv[2] === "is-active") return { ...ok, code: 3 };
-      if (argv[2] === "stop" && argv[3] === "fleet-box-box-lane-t3.service" && !interleaved) {
+      if (argv[2] === "stop" && argv[3] === "hedge-box-box-lane-t3.service" && !interleaved) {
         interleaved = true;
         meanwhile.push(await release(fake.coder, machine, "box-lane", { force: true, recycle: false, waitMs: 0 }).catch((error) => error));
         meanwhile.push(await spawn(fake.coder, machine, "lane", { reuse: false, waitMs: 0 }).catch((error) => error));
       }
-      if (argv[0] === "systemd-run" && argv[3] === "--unit=fleet-box-box-lane-t3") services.push(argv.at(-1)!);
+      if (argv[0] === "systemd-run" && argv[3] === "--unit=hedge-box-box-lane-t3") services.push(argv.at(-1)!);
       return ok;
     },
   });
   expect(await startBox(fake.coder, machine, "box-lane", noWait)).toBe(0);
   expect(meanwhile.map((outcome) => outcome instanceof LockBusy)).toEqual([true, true]);
-  const { port } = (await Bun.file(join(home, ".config/fleet/boxes/box-lane.json")).json()) as { port: number };
+  const { port } = (await Bun.file(join(home, ".config/hedge/boxes/box-lane.json")).json()) as { port: number };
   expect(services.at(-1)).toContain(`'${port}:3773'`);
   expect(fake.done).toEqual(["start box-lane"]);
 });
 
-test("round 6, finding 3: a standalone restore holds each box while it restores its forward and skips a box another operation holds, and fleet box link holds its box", async () => {
+test("round 6, finding 3: a standalone restore holds each box while it restores its forward and skips a box another operation holds, and hedge box link holds its box", async () => {
   const home = hubHome();
   linkedHere(home);
-  writeHome(home, { ".config/fleet/boxes/box-other.json": JSON.stringify({ environmentId: "env-2", port: 22000 }) });
+  writeHome(home, { ".config/hedge/boxes/box-other.json": JSON.stringify({ environmentId: "env-2", port: 22000 }) });
   const probe = () => lockBox(home, "box-lane", noWait).then((unlock) => (unlock(), "free"), (error) => (error instanceof LockBusy ? "busy" : String(error)));
   const during: string[] = [];
   const { machine, lines } = onHub(home, {
@@ -1269,24 +1269,24 @@ test("round 6, finding 3: a standalone restore holds each box while it restores 
   const unlock = await lockBox(home, "box-other", noWait);
   expect(await restoreForwards(coder, machine)).toBe(0);
   unlock();
-  expect(during).toEqual(["--unit=fleet-box-box-lane-t3 busy"]);
+  expect(during).toEqual(["--unit=hedge-box-box-lane-t3 busy"]);
   expect(lines).toContain("box-other: another operation holds it; skipped");
   during.length = 0;
   expect(await boxCommand(["link", "box-lane"], depsFor(machine, () => coder))).toBe(0);
-  expect(during).toEqual(["unlink busy", "--unit=fleet-box-box-lane-t3 busy", "link busy"]);
+  expect(during).toEqual(["unlink busy", "--unit=hedge-box-box-lane-t3 busy", "link busy"]);
 });
 
 const lockedFolders = (home: string, folders: string[], mode: number) => folders.forEach((folder) => chmodSync(join(home, folder), mode));
 
 test("round 6, finding 4: recycling fails when any removal fails, even when a later one succeeds: in ~/dev, under a project, and for symlinks", () => {
-  const bin = stubBin(temp.make("fleet-bin-"), ["systemctl"]);
+  const bin = stubBin(temp.make("hedge-bin-"), ["systemctl"]);
   const cases: { files: Record<string, string>; links: string[]; locked: string[]; left: string; gone: string }[] = [
     { files: { "dev/a-locked/secret": "old lane", "dev/z-removable/file": "" }, links: [], locked: ["dev/a-locked"], left: "dev/a-locked/secret", gone: "dev/z-removable" },
     { files: { ".t3/worktrees/b-project/lane/f": "" }, links: [".t3/worktrees/a-project/link"], locked: [".t3/worktrees/a-project"], left: ".t3/worktrees/a-project/link", gone: ".t3/worktrees/b-project/lane" },
     { files: { "dev/z-removable/file": "" }, links: [".t3/worktrees/project-link"], locked: [".t3/worktrees"], left: ".t3/worktrees/project-link", gone: "dev/z-removable" },
   ];
   for (const { files, links, locked, left, gone } of cases) {
-    const home = temp.make("fleet-box-");
+    const home = temp.make("hedge-box-");
     writeHome(home, files);
     for (const path of links) {
       mkdirSync(join(home, path, ".."), { recursive: true });
@@ -1303,9 +1303,9 @@ test("round 6, finding 4: recycling fails when any removal fails, even when a la
 });
 
 test("round 6, finding 4: a spawn never hands out a pooled box whose cleaning left an old lane's file behind, and the pool refresh reports it", async () => {
-  const bin = stubBin(temp.make("fleet-bin-"), ["systemctl"]);
+  const bin = stubBin(temp.make("hedge-bin-"), ["systemctl"]);
   const dirtyBox = () => {
-    const onBox = temp.make("fleet-onbox-");
+    const onBox = temp.make("hedge-onbox-");
     writeHome(onBox, { "dev/a-locked/secret": "old lane", "dev/z-removable/file": "" });
     lockedFolders(onBox, ["dev/a-locked"], 0o500);
     return onBox;
@@ -1321,7 +1321,7 @@ test("round 6, finding 4: a spawn never hands out a pooled box whose cleaning le
   const { machine, lines } = onHub(home, { peers: [] });
   const spawned = spawnCoder(0, [box("box-dirty", "stopped")]);
   const ssh = spawned.coder.ssh;
-  spawned.coder.ssh = async (name, command, stdin) => (name === "box-dirty" && command.includes("fleet-heavy.slice") ? recycling(onBox, machine.settings.keepDirs) : ssh(name, command, stdin));
+  spawned.coder.ssh = async (name, command, stdin) => (name === "box-dirty" && command.includes("hedge-heavy.slice") ? recycling(onBox, machine.settings.keepDirs) : ssh(name, command, stdin));
   expect(await spawn(spawned.coder, machine, "lane")).toBe(0);
   lockedFolders(onBox, ["dev/a-locked"], 0o700);
   expect(lines.at(-1)).toBe("box-lane env-box");
@@ -1333,7 +1333,7 @@ test("round 6, finding 4: a spawn never hands out a pooled box whose cleaning le
   writePool(refreshHome, { free: ["box-dirty"], boxes: { "box-dirty": { id: "ws-box-dirty" } } });
   const refreshBox = dirtyBox();
   const refreshing = onHub(refreshHome, { peers: [] });
-  const fake = fakeCoder({ ssh: async (_name, command) => (command.includes("fleet-heavy.slice") ? recycling(refreshBox, []) : { ...ok, stdout: command.includes("t3 pair") ? "pair-code\n" : "" }) }, [box("box-dirty", "stopped")]);
+  const fake = fakeCoder({ ssh: async (_name, command) => (command.includes("hedge-heavy.slice") ? recycling(refreshBox, []) : { ...ok, stdout: command.includes("t3 pair") ? "pair-code\n" : "" }) }, [box("box-dirty", "stopped")]);
   expect(await refreshPool(fake.coder, refreshing.machine)).toBe(1);
   lockedFolders(refreshBox, ["dev/a-locked"], 0o700);
   expect(refreshing.lines).toContain("box-dirty: refresh failed (exit 1); kept in the pool");
@@ -1342,8 +1342,8 @@ test("round 6, finding 4: a spawn never hands out a pooled box whose cleaning le
 test("round 7, finding 1: the sweep keeps a box with a stale claiming mark when a folder above its claim file cannot be searched", async () => {
   const home = hubHome();
   writePool(home, { boxes: { "box-locked": { id: "ws-box-locked", claim: "c-1", claiming: true } } });
-  const homes = { "box-locked": temp.make("fleet-onbox-") };
-  writeHome(homes["box-locked"], { ".config/fleet/box-claim": `c-1 lane by devbox-1 ${claimedAt}\n` });
+  const homes = { "box-locked": temp.make("hedge-onbox-") };
+  writeHome(homes["box-locked"], { ".config/hedge/box-claim": `c-1 lane by devbox-1 ${claimedAt}\n` });
   chmodSync(join(homes["box-locked"], ".config"), 0o000);
   const shell = onBoxShell(homes);
   const { machine, lines } = onHub(home);
@@ -1366,7 +1366,7 @@ test("round 7, finding 1: the sweep keeps a box with a stale claiming mark when 
 });
 
 test("round 7, finding 2: recycling fails when a folder it cleans, or a folder above one, cannot be listed, and succeeds on a box without those folders", () => {
-  const bin = stubBin(temp.make("fleet-bin-"), ["systemctl"]);
+  const bin = stubBin(temp.make("hedge-bin-"), ["systemctl"]);
   const recycle = (home: string) => Bun.spawnSync(["sh", "-c", recycleScript([])], { env: { HOME: home, PATH: `${bin}:/usr/bin:/bin` }, stderr: "pipe" });
   const cases: { files: Record<string, string>; locked: string; mode: number; left: string; says: string }[] = [
     { files: { "dev/old/secret": "old lane" }, locked: "dev", mode: 0o300, left: "dev/old/secret", says: "cannot list" },
@@ -1375,7 +1375,7 @@ test("round 7, finding 2: recycling fails when a folder it cleans, or a folder a
     { files: { ".t3/scratch/secret": "old lane" }, locked: ".t3", mode: 0o000, left: ".t3/scratch/secret", says: "cannot search" },
   ];
   for (const { files, locked, mode, left, says } of cases) {
-    const home = temp.make("fleet-box-");
+    const home = temp.make("hedge-box-");
     writeHome(home, files);
     chmodSync(join(home, locked), mode);
     const run = recycle(home);
@@ -1384,26 +1384,26 @@ test("round 7, finding 2: recycling fails when a folder it cleans, or a folder a
     expect(run.stderr.toString()).toContain(says);
     expect(existsSync(join(home, left))).toBe(true);
   }
-  const bare = temp.make("fleet-box-");
+  const bare = temp.make("hedge-box-");
   const run = recycle(bare);
   expect([run.exitCode, run.stderr.toString()]).toEqual([0, ""]);
 });
 
 test("setting up or claiming a box marks it as a box, the mark outlives a recycle, and it never writes through a planted symlink", () => {
-  const bin = stubBin(temp.make("fleet-bin-"), ["systemctl", "curl", "sleep"]);
+  const bin = stubBin(temp.make("hedge-bin-"), ["systemctl", "curl", "sleep"]);
   for (const script of [setUpScript("box-lane by devbox-1 at now"), claimScript("lane by devbox-1 at now")]) {
-    const home = temp.make("fleet-box-");
+    const home = temp.make("hedge-box-");
     expect(runOnBox(script, home, bin).exitCode).toBe(0);
-    expect(readFileSync(join(home, ".config/fleet/box-marker"), "utf8")).toBe("");
+    expect(readFileSync(join(home, ".config/hedge/box-marker"), "utf8")).toBe("");
     expect(Bun.spawnSync(["sh", "-c", recycleScript([])], { env: { HOME: home, PATH: `${bin}:/usr/bin:/bin` } }).exitCode).toBe(0);
-    expect(existsSync(join(home, ".config/fleet/box-claim"))).toBe(false);
-    expect(existsSync(join(home, ".config/fleet/box-marker"))).toBe(true);
+    expect(existsSync(join(home, ".config/hedge/box-claim"))).toBe(false);
+    expect(existsSync(join(home, ".config/hedge/box-marker"))).toBe(true);
   }
-  const planted = temp.make("fleet-box-");
-  const elsewhere = temp.make("fleet-elsewhere-");
+  const planted = temp.make("hedge-box-");
+  const elsewhere = temp.make("hedge-elsewhere-");
   writeHome(elsewhere, { target: "untouched\n" });
-  mkdirSync(join(planted, ".config/fleet"), { recursive: true });
-  symlinkSync(join(elsewhere, "target"), join(planted, ".config/fleet/box-marker"));
+  mkdirSync(join(planted, ".config/hedge"), { recursive: true });
+  symlinkSync(join(elsewhere, "target"), join(planted, ".config/hedge/box-marker"));
   expect(runOnBox(claimScript("lane by devbox-1 at now"), planted, bin).exitCode).toBe(0);
   expect(readFileSync(join(elsewhere, "target"), "utf8")).toBe("untouched\n");
 });

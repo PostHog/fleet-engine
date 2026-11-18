@@ -17,12 +17,12 @@ function claudeSession(home: string, session: string, cwd: string, said: string,
 }
 
 test("digest names the notes that the recall hook showed a session because a call named their trigger", async () => {
-  const home = temp.make("fleet-dream-logs-");
+  const home = temp.make("hedge-dream-logs-");
   hubWithSubtree(home, { "MEMORY.md": "# Memory index\n" });
   claudeSession(home, "s-1", `${home}/dev/app`, "Prove the PR.", "Proved.");
   logShown(home, { session: "s-1", via: "index", note: "projects/app/INDEX.md" });
-  logShown(home, { session: "s-1", via: "trigger", note: "tech/proof-traps.md", trigger: "fleet proof" });
-  logShown(home, { session: "s-1", agent: "a-1", via: "trigger", note: "tech/proof-traps.md", trigger: "fleet proof" });
+  logShown(home, { session: "s-1", via: "trigger", note: "tech/proof-traps.md", trigger: "hedge proof" });
+  logShown(home, { session: "s-1", agent: "a-1", via: "trigger", note: "tech/proof-traps.md", trigger: "hedge proof" });
   logShown(home, { session: "s-other", via: "trigger", note: "tech/other.md", trigger: "other" });
   const { io, printed } = quietIo(home);
 
@@ -33,7 +33,7 @@ test("digest names the notes that the recall hook showed a session because a cal
 });
 
 test("logs prints the Dream's own sessions on this machine and leaves the other sessions out", async () => {
-  const home = temp.make("fleet-dream-logs-");
+  const home = temp.make("hedge-dream-logs-");
   hubWithSubtree(home, { "MEMORY.md": "# Memory index\n" });
   claudeSession(home, "s-dream", `${home}/dev/app`, "Follow the dream skill with the run directory /tmp/run.", "Opened the Dream PR.");
   claudeSession(home, "s-work", `${home}/dev/app`, "Fix the login bug.", "Fixed.");
@@ -48,7 +48,7 @@ test("logs prints the Dream's own sessions on this machine and leaves the other 
 });
 
 test("logs says so when this machine ran no Dream session in that time", async () => {
-  const home = temp.make("fleet-dream-logs-");
+  const home = temp.make("hedge-dream-logs-");
   hubWithSubtree(home, { "MEMORY.md": "# Memory index\n" });
   claudeSession(home, "s-work", `${home}/dev/app`, "Fix the login bug.", "Fixed.");
   const { io, printed } = quietIo(home);

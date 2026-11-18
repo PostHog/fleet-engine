@@ -4,8 +4,8 @@ import type { CommandRunner } from "../run.ts";
 import { get, keyPath, type Document } from "./fields.ts";
 import { readState, writeWithBackups } from "./store.ts";
 
-export const pluginsTarget = ".config/fleet/provider-plugins.json";
-const earlierTarget = ".config/fleet/plugins.json";
+export const pluginsTarget = ".config/hedge/provider-plugins.json";
+const earlierTarget = ".config/hedge/plugins.json";
 const pluginId = /^[a-z0-9][a-z0-9._-]*@[a-z0-9][a-z0-9._-]*$/;
 
 type CodexOwned = { id: string; version: string; enabled: boolean; pending?: true };
@@ -39,8 +39,8 @@ export function wantedCodexPlugins(plan: Plan) {
 type PluginSettings = { outage: boolean; accepted?: string[]; claudeEnabled?: Record<string, boolean>; marketplaces?: Sources; acceptedCodex?: string[] };
 
 /**
- * Installs the plugins packs enable, through Claude Code and Codex in the given home. Removes only plugins that Fleet installed.
- * Reads the earlier Fleet's record, and never writes it: a plugin that Fleet installed becomes this Fleet's only once a pack enables it again.
+ * Installs the plugins packs enable, through Claude Code and Codex in the given home. Removes only plugins that Hedge installed.
+ * Reads the earlier Hedge's record, and never writes it: a plugin that Hedge installed becomes this Hedge's only once a pack enables it again.
  */
 export async function reconcilePlugins(plan: Plan, home: string, dryRun: boolean, run: CommandRunner, settings: PluginSettings): Promise<Finding[]> {
   const text = await readState(home, pluginsTarget);
@@ -66,7 +66,7 @@ async function reconcileClaude(plan: Plan, home: string, dryRun: boolean, run: C
   const owned = record.map((entry) => entry.id);
   const wanted = planned.filter((id) => settings.accepted?.includes(id));
   if (!planned.length && !owned.length) return { findings: [] };
-  if (!settings.accepted) return { findings: planned.length ? [{ id: "plugins:claude", pack: "engine", say: `Claude plugins wait until Fleet can change .claude/settings.json: ${planned.join(", ")}.`, repair: "apply" }] : [] };
+  if (!settings.accepted) return { findings: planned.length ? [{ id: "plugins:claude", pack: "engine", say: `Claude plugins wait until Hedge can change .claude/settings.json: ${planned.join(", ")}.`, repair: "apply" }] : [] };
   const claude = (args: string[]) => run(["claude", "plugin", ...args], { home });
   const installed = await listInstalled(claude);
   if (!installed) {
@@ -77,7 +77,7 @@ async function reconcileClaude(plan: Plan, home: string, dryRun: boolean, run: C
   const changedOutside = (entry: ClaudeOwned) => entry.enabled !== undefined && settings.claudeEnabled?.[entry.id] !== undefined && settings.claudeEnabled[entry.id] !== entry.enabled;
   const released = leaving.filter(changedOutside).map((entry) => entry.id);
   const departed = leaving.map((entry) => entry.id).filter((id) => !released.includes(id));
-  const releasedFindings = released.map((id) => ({ id: `plugin:${id}`, pack: "engine", say: `Kept the Claude plugin ${id}, which no pack enables any more, because it changed outside Fleet. It is yours now.` }));
+  const releasedFindings = released.map((id) => ({ id: `plugin:${id}`, pack: "engine", say: `Kept the Claude plugin ${id}, which no pack enables any more, because it changed outside Hedge. It is yours now.` }));
   if (dryRun) {
     return { findings: [
       ...missing.map((id) => ({ id: `plugin:${id}`, pack: "engine", say: `The Claude plugin ${id} needs to be installed.`, repair: "apply" as const })),
@@ -104,7 +104,7 @@ const codexFinding = (id: string, say: string): Finding => ({ id: `plugin:codex:
 async function reconcileCodex(plan: Plan, home: string, dryRun: boolean, run: CommandRunner, settings: PluginSettings, owned: CodexOwned[], save: (next: CodexOwned[]) => Promise<void>): Promise<Finding[]> {
   const planned = wantedCodexPlugins(plan);
   if (!planned.length && !owned.length) return [];
-  if (!settings.acceptedCodex) return planned.length ? [{ id: "plugins:codex", pack: "engine", say: `Codex plugins wait until Fleet can change .codex/config.toml: ${planned.join(", ")}.`, repair: "apply" }] : [];
+  if (!settings.acceptedCodex) return planned.length ? [{ id: "plugins:codex", pack: "engine", say: `Codex plugins wait until Hedge can change .codex/config.toml: ${planned.join(", ")}.`, repair: "apply" }] : [];
   const wanted = planned.filter((id) => settings.acceptedCodex!.includes(id));
   const codex: Codex = (args) => run(["codex", "plugin", ...args], { home, clearEnv: ["CODEX_HOME"] });
   const installed = await listCodex(codex);
@@ -123,7 +123,7 @@ async function reconcileCodex(plan: Plan, home: string, dryRun: boolean, run: Co
     if (after) record.set(id, after);
     else if (listed) record.delete(id);
     await commit();
-    if (added.code !== 0 || !after) findings.push(codexFinding(id, `Could not install the Codex plugin ${id}: ${added.code !== 0 ? reasonOf(added) : listed ? "Codex does not list it afterwards" : "Codex cannot list its plugins afterwards"}. Fleet tries again at the next apply.`));
+    if (added.code !== 0 || !after) findings.push(codexFinding(id, `Could not install the Codex plugin ${id}: ${added.code !== 0 ? reasonOf(added) : listed ? "Codex does not list it afterwards" : "Codex cannot list its plugins afterwards"}. Hedge tries again at the next apply.`));
   };
   for (const id of wanted) {
     const found = present(id);
@@ -140,7 +140,7 @@ async function reconcileCodex(plan: Plan, home: string, dryRun: boolean, run: Co
       continue;
     }
     if (found.enabled !== mine.enabled) {
-      findings.push(codexFinding(id, `Kept the Codex plugin ${id} as you left it: it is ${found.enabled ? "enabled" : "disabled"} now, and Fleet installed it ${mine.enabled ? "enabled" : "disabled"}.`));
+      findings.push(codexFinding(id, `Kept the Codex plugin ${id} as you left it: it is ${found.enabled ? "enabled" : "disabled"} now, and Hedge installed it ${mine.enabled ? "enabled" : "disabled"}.`));
       continue;
     }
     if (found.version !== mine.version) record.set(id, { ...mine, version: found.version });
@@ -153,7 +153,7 @@ async function reconcileCodex(plan: Plan, home: string, dryRun: boolean, run: Co
       continue;
     }
     if (!mine.pending && found.enabled !== mine.enabled) {
-      findings.push(codexFinding(mine.id, `Kept the Codex plugin ${mine.id}, which no pack enables any more, because it changed outside Fleet. It is yours now.`));
+      findings.push(codexFinding(mine.id, `Kept the Codex plugin ${mine.id}, which no pack enables any more, because it changed outside Hedge. It is yours now.`));
       if (!dryRun) record.delete(mine.id);
       continue;
     }
@@ -262,7 +262,7 @@ const isCodexOwned = (entry: unknown): entry is CodexOwned => {
 function parseOwned(text: string | undefined, target: string): Owned {
   if (text === undefined) return { claude: [], codex: [] };
   const value = JSON.parse(text) as { claude?: unknown; codex?: unknown; version?: unknown; installed?: unknown };
-  const owned = value?.version === 1 && Array.isArray(value.installed) ? fromEarlierFleet(value.installed, target) : value;
+  const owned = value?.version === 1 && Array.isArray(value.installed) ? fromEarlierHedge(value.installed, target) : value;
   const codex = owned?.codex ?? [];
   const claude = owned?.claude;
   if (!Array.isArray(claude) || !claude.every(isClaudeOwned) || !Array.isArray(codex) || !codex.every(isCodexOwned)) throw new Error(`${target} is not a plugin record`);
@@ -277,7 +277,7 @@ function adopt(owned: Owned, earlier: Owned, planned: { claude: string[]; codex:
   return { claude: take(owned.claude, earlier.claude, planned.claude), codex: take(owned.codex, earlier.codex, planned.codex) };
 }
 
-function fromEarlierFleet(installed: unknown[], target: string): { claude: ClaudeOwned[]; codex: CodexOwned[] } {
+function fromEarlierHedge(installed: unknown[], target: string): { claude: ClaudeOwned[]; codex: CodexOwned[] } {
   const entries = installed.map((entry) => entry as Record<string, unknown>);
   if (!entries.every((entry) => (entry?.provider === "claude" || entry?.provider === "codex") && isCodexOwned(entry))) throw new Error(`${target} is not a plugin record`);
   const of = (provider: string) => entries.filter((entry) => entry.provider === provider) as unknown as CodexOwned[];

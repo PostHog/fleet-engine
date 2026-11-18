@@ -1,6 +1,6 @@
 import { isTestFile } from "./proof-delta.ts";
 
-const usage = "Usage: fleet pr size --base <ref> [--lines <n>] [--concepts <n>]";
+const usage = "Usage: hedge pr size --base <ref> [--lines <n>] [--concepts <n>]";
 const generated = /\.lockb?$|-lock\.(json|yaml)$|(^|\/)go\.sum$/;
 const authored = (path: string) => !isTestFile(path) && !generated.test(path);
 const codeConcepts = [

@@ -18,7 +18,7 @@ const fallbackPerson = "the person who runs this machine";
 type Settings = { person: string; owners: Set<string> | null; mainPushRepos: Set<string>; allowRules: Set<string>; unreadable?: string };
 
 function guardSettings(home: string): Settings {
-  const file = join(home, ".local/state/fleet/settings.json");
+  const file = join(home, ".local/state/hedge/settings.json");
   if (!existsSync(file)) return { person: fallbackPerson, owners: null, mainPushRepos: new Set(), allowRules: new Set() };
   try {
     const settings: unknown = JSON.parse(readFileSync(file, "utf8"));
@@ -40,10 +40,10 @@ function shellCommand(input: Record<string, unknown> = {}) {
 
 const deny = (reason: string): Denial => ({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } });
 
-const unreadableReason = (problem: string, person: string) => `Fleet blocked this call: the shell guards could not read their settings in ${problem}, `
+const unreadableReason = (problem: string, person: string) => `Hedge blocked this call: the shell guards could not read their settings in ${problem}, `
   + `so they cannot tell which GitHub owners and repositories agents may use. Fix that file, or stop and ask ${person}.`;
 
-const uncheckedReason = (error: unknown, person: string) => `Fleet blocked this call: the shell guards could not check it (${error instanceof Error ? error.message : String(error)}). `
+const uncheckedReason = (error: unknown, person: string) => `Hedge blocked this call: the shell guards could not check it (${error instanceof Error ? error.message : String(error)}). `
   + `Split it into simpler commands, or stop and ask ${person}.`;
 
 function check(call: ToolCall, { person, owners, mainPushRepos, allowRules, unreadable }: Settings): string | undefined {

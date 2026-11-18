@@ -86,7 +86,7 @@ function readRequired(repository: string, branch: string, run: Run): RequiredChe
 }
 
 function requiredChecks(home: string, repository: string, branch: string, run: Run, now: Date): RequiredCheck[] {
-  const path = join(home, ".local/state/fleet/required-checks", repository, `${encodeURIComponent(branch)}.json`);
+  const path = join(home, ".local/state/hedge/required-checks", repository, `${encodeURIComponent(branch)}.json`);
   try {
     const cached = JSON.parse(readFileSync(path, "utf8")) as { fetchedAt: string; checks: RequiredCheck[] };
     const age = now.getTime() - new Date(cached.fetchedAt).getTime();

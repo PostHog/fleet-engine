@@ -47,7 +47,7 @@ async function run(engineDir: string, engine: ProfileFile["engine"], profileDir 
   let appliedProfile: string | undefined;
   const runApply = async () => {
     applied++;
-    const answers = join(profileDir, "fleet.json");
+    const answers = join(profileDir, "hedge.json");
     appliedProfile = existsSync(answers) ? readFileSync(answers, "utf8") : undefined;
     return 0;
   };
@@ -55,14 +55,14 @@ async function run(engineDir: string, engine: ProfileFile["engine"], profileDir 
   return { code, home, applied, appliedProfile, output: lines.join("\n"), version: await Bun.file(join(engineDir, "VERSION")).text() };
 }
 
-describe("fleet update", () => {
+describe("hedge update", () => {
   test("moves the release channel to the newest tag of its major and reports a new major", async () => {
     const remote = await engineRemote(["v0.1.0", "v0.1.1", "v0.2.0", "v1.0.0"]);
     const result = await run(await engineCheckout(remote, "v0.1.0"), { repo: remote, ref: "v0.1.0", channel: "release" });
     expect(result).toMatchObject({ code: 0, applied: 1 });
     expect(result.version).toBe("v0.2.0");
-    expect(result.output).toContain("Fleet v1.0.0 is out. It is a new major version, so this update stays on v0.");
-    expect(await readNotice(result.home)).toStartWith("Fleet v1.0.0 is out.");
+    expect(result.output).toContain("Hedge v1.0.0 is out. It is a new major version, so this update stays on v0.");
+    expect(await readNotice(result.home)).toStartWith("Hedge v1.0.0 is out.");
   });
 
   test("clears the notice when no new major exists", async () => {
@@ -83,29 +83,29 @@ describe("fleet update", () => {
     const remote = await engineRemote(["v0.1.0"]);
     const profileRemote = temp.make("profile-remote-");
     await spawnGit(profileRemote, "init", "-q", "-b", "main");
-    writeFileSync(join(profileRemote, "fleet.json"), "{}\n");
+    writeFileSync(join(profileRemote, "hedge.json"), "{}\n");
     await spawnGit(profileRemote, "add", ".");
     await spawnGit(profileRemote, "commit", "-q", "-m", "start");
     const profileDir = temp.make("profile-");
     await spawnGit(profileDir, "clone", "-q", profileRemote, ".");
-    writeFileSync(join(profileRemote, "fleet.json"), '{"plan":"claude"}\n');
+    writeFileSync(join(profileRemote, "hedge.json"), '{"plan":"claude"}\n');
     await spawnGit(profileRemote, "commit", "-q", "-am", "answers");
     await run(await engineCheckout(remote, "v0.1.0"), { repo: remote, ref: "v0.1.0", channel: "release" }, profileDir);
-    expect(await Bun.file(join(profileDir, "fleet.json")).text()).toBe('{"plan":"claude"}\n');
+    expect(await Bun.file(join(profileDir, "hedge.json")).text()).toBe('{"plan":"claude"}\n');
   });
 
   test("applies the last profile but fails when the profile does not fast-forward", async () => {
     const remote = await engineRemote(["v0.1.0"]);
     const profileRemote = temp.make("profile-remote-");
     await spawnGit(profileRemote, "init", "-q", "-b", "main");
-    writeFileSync(join(profileRemote, "fleet.json"), "{}\n");
+    writeFileSync(join(profileRemote, "hedge.json"), "{}\n");
     await spawnGit(profileRemote, "add", ".");
     await spawnGit(profileRemote, "commit", "-q", "-m", "start");
     const profileDir = temp.make("profile-");
     await spawnGit(profileDir, "clone", "-q", profileRemote, ".");
-    writeFileSync(join(profileRemote, "fleet.json"), '{"plan":"claude"}\n');
+    writeFileSync(join(profileRemote, "hedge.json"), '{"plan":"claude"}\n');
     await spawnGit(profileRemote, "commit", "-q", "-am", "answers");
-    writeFileSync(join(profileDir, "fleet.json"), '{"plan":"local"}\n');
+    writeFileSync(join(profileDir, "hedge.json"), '{"plan":"local"}\n');
     await spawnGit(profileDir, "commit", "-q", "-am", "local answers");
     const result = await run(await engineCheckout(remote, "v0.1.0"), { repo: remote, ref: "v0.1.0", channel: "release" }, profileDir);
     expect(result).toMatchObject({ code: 1, appliedProfile: '{"plan":"local"}\n', output: expect.stringContaining("your profile did not fast-forward") });
@@ -144,7 +144,7 @@ describe("fleet update", () => {
   test("never moves an engine that is not on a release back to one", async () => {
     const remote = await engineRemote(["v0.1.0"]);
     const result = await run(await engineCheckout(remote, "main"), { repo: remote, ref: "v0.1.0", channel: "release" });
-    expect(result).toMatchObject({ code: 0, applied: 1, output: expect.stringContaining("is not a release, so fleet update does not move it back") });
+    expect(result).toMatchObject({ code: 0, applied: 1, output: expect.stringContaining("is not a release, so hedge update does not move it back") });
     expect(result.version).toBe("main");
   });
 

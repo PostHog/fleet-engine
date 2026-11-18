@@ -25,7 +25,7 @@ function profile(overrides: Partial<Profile> = {}): Profile {
     sources: [],
     packs: ["pull-requests", "orchestration"],
     plan: "both",
-    settings: { "pull-requests.reviewer": "other", "orchestration.tracker": "me/fleet-profile" },
+    settings: { "pull-requests.reviewer": "other", "orchestration.tracker": "me/hedge-profile" },
     workflows: {},
     ...overrides,
   };
@@ -62,7 +62,7 @@ describe("resolve", () => {
   test("builds AGENTS.md from fragments in pack order with about me last", () => {
     const content = file(plan({ aboutMe: "I review every diff.\n" }), ".agents/AGENTS.md");
     expect(content).toBe("# Agent rules\n\nConfirm before a destructive action.\n\n## Pull requests\n\nOpen every pull request as a draft.\n\n## About me\n\nI review every diff.\n");
-    expect(file(plan(), ".codex/AGENTS.md")).toBe(file(plan(), ".claude/rules/fleet.md"));
+    expect(file(plan(), ".codex/AGENTS.md")).toBe(file(plan(), ".claude/rules/hedge.md"));
   });
 
   test("appends named sections from other packs to the owning guide", () => {
@@ -146,7 +146,7 @@ describe("resolve", () => {
     expect(onMac.jobs).toEqual([]);
     expect(onMac.dropped).toContainEqual({ pack: "orchestration", item: "job box-pool", reason: "workflow boxes is off" });
 
-    const onDevbox = plan({ workflows: { "quality-loop": true }, settings: { ...profile().settings, "orchestration.loopProject": "fleet" } }, devbox);
+    const onDevbox = plan({ workflows: { "quality-loop": true }, settings: { ...profile().settings, "orchestration.loopProject": "hedge" } }, devbox);
     expect(onDevbox.jobs.map((job) => job.id)).toEqual(["prune", "quality-loop"]);
     expect(plan({ devboxes: ["my-box"], workflows: { "quality-loop": true } }).jobs.map((job) => job.id)).toContain("quality-loop");
   });
@@ -201,8 +201,8 @@ describe("resolve", () => {
         { id: "morning", name: "Morning", sentence: "Runs in the morning.", default: false, settings: ["loops.project"] },
       ],
     });
-    const result = plan({ packs: ["loops"], settings: { "loops.project": "fleet" } }, mac, [engine, loops]);
-    expect(result.settings["loops.project"]).toBe("fleet");
+    const result = plan({ packs: ["loops"], settings: { "loops.project": "hedge" } }, mac, [engine, loops]);
+    expect(result.settings["loops.project"]).toBe("hedge");
     expect(plan({ packs: ["loops"] }, mac, [engine, loops]).unanswered.map((setting) => setting.key)).toEqual(["loops.project"]);
     expect(plan({ packs: ["loops"], workflows: { night: false } }, mac, [engine, loops]).unanswered).toEqual([]);
   });
@@ -242,7 +242,7 @@ describe("resolve", () => {
   test("joins a pack's Codex rules that fit this machine into one file of the pack, only for a Codex plan", () => {
     const flow = { id: "boxes", name: "Boxes", sentence: "Boxes.", default: false };
     const rules = withPack({ schema: 1, name: "rules", summary: "Rules.", workflows: [flow], codexRules: [{ path: "all.rules" }, { path: "devbox.rules", roles: ["devbox"] }, { path: "boxes.rules", workflow: "boxes" }] }, { "all.rules": "# all\n", "devbox.rules": "# devbox", "boxes.rules": "# boxes\n" });
-    const target = ".codex/rules/fleet-rules.rules";
+    const target = ".codex/rules/hedge-rules.rules";
     const rulesOf = (fields: Partial<Profile>, machine: MachineFile) => plan({ packs: ["rules"], ...fields }, machine, [engine, rules]).files.filter((item) => item.target.startsWith(".codex/rules/"));
     expect(rulesOf({}, mac)).toEqual([{ target, content: "# all\n" }]);
     expect(rulesOf({ workflows: { boxes: true } }, devbox)).toEqual([{ target, content: "# all\n# devbox\n# boxes\n" }]);
@@ -283,7 +283,7 @@ describe("resolve", () => {
     expect(() => plan({ packs: ["hub", "rival"] }, mac, [engine, clash])).toThrow("command box is shipped by both hub and rival");
   });
 
-  test("hands a profile's secret rows and a pack's secret providers to fleet secret", () => {
+  test("hands a profile's secret rows and a pack's secret providers to hedge secret", () => {
     const rows = withPack({ schema: 1, name: "rows", summary: "Rows.", handlers: [{ seam: "secret-rows", path: "lib/rows.ts" }] }, { "lib/rows.ts": "export const rows = () => [];\n" });
     const providers = withPack({ schema: 1, name: "keys", summary: "Keys.", handlers: [{ seam: "secret-providers", path: "lib/providers.ts" }] }, { "lib/providers.ts": "export const providers = {};\n" });
     expect(plan({ packs: ["rows", "keys"] }, mac, [engine, rows, providers]).handlers).toEqual({
@@ -376,7 +376,7 @@ describe("resolve guards", () => {
   });
 
   test("refuses a pack file that is a broken link, so it cannot point outside later", () => {
-    const source = withPack(pack("dangling", { files: [{ path: "hook.ts", target: ".config/fleet/hooks/hook.ts" }] }));
+    const source = withPack(pack("dangling", { files: [{ path: "hook.ts", target: ".config/hedge/hooks/hook.ts" }] }));
     symlinkSync(join(temp.make("outside-"), "later.ts"), join(source.dir, "packs/dangling/hook.ts"));
     expect(() => plan({ packs: ["dangling"] }, mac, [engine, source])).toThrow("dangling: path hook.ts is a broken link");
   });
@@ -396,14 +396,14 @@ describe("resolve guards", () => {
   });
 
   test("plans T3 project scripts by scope, owned by their pack", () => {
-    const script = { id: "prepare", name: "Prepare worktree", command: "fleet prepare", projects: ["~/app"] };
+    const script = { id: "prepare", name: "Prepare worktree", command: "hedge prepare", projects: ["~/app"] };
     const team = withPack(pack("team", { t3ProjectScripts: [{ ...script, roles: ["devbox"] }, { ...script, id: "mac-only", on: ["darwin"] }] }));
     expect(plan({ packs: ["team"] }, devbox, [engine, team]).t3ProjectScripts).toEqual([{ ...script, roles: ["devbox"], pack: "team" }]);
     expect(plan({ packs: ["team"] }, mac, [engine, team]).t3ProjectScripts).toEqual([{ ...script, id: "mac-only", on: ["darwin"], pack: "team" }]);
   });
 
   test("adds the path a T3 project script's setting names to its projects", () => {
-    const script = { id: "prepare", name: "Prepare worktree", command: "fleet prepare", projects: ["~/app"], projectSetting: "team.checkout" };
+    const script = { id: "prepare", name: "Prepare worktree", command: "hedge prepare", projects: ["~/app"], projectSetting: "team.checkout" };
     const team = withPack(pack("team", { settings: [{ key: "team.checkout", question: "Where is the checkout?", type: "string", default: "~/dev/app", ask: "never" }], t3ProjectScripts: [script] }));
     expect(plan({ packs: ["team"] }, mac, [engine, team]).t3ProjectScripts).toEqual([{ ...script, projects: ["~/app", "~/dev/app"], pack: "team" }]);
     expect(plan({ packs: ["team"], settings: { "team.checkout": "~/app" } }, mac, [engine, team]).t3ProjectScripts).toEqual([{ ...script, pack: "team" }]);
@@ -411,12 +411,12 @@ describe("resolve guards", () => {
   });
 
   test("rejects two T3 project scripts that would get the same id", () => {
-    const script = { id: "prepare", name: "Prepare worktree", command: "fleet prepare", projects: ["~/app"] };
+    const script = { id: "prepare", name: "Prepare worktree", command: "hedge prepare", projects: ["~/app"] };
     const team = withPack(pack("team", { t3ProjectScripts: [{ ...script, id: "extra-prepare" }] }));
     const teamExtra = withPack(pack("team-extra", { t3ProjectScripts: [script] }));
-    expect(() => plan({ packs: ["team", "team-extra"] }, mac, [engine, team, teamExtra])).toThrow(new ResolveError("t3 project script prepare of team-extra and extra-prepare of team both get the id fleet-team-extra-prepare"));
+    expect(() => plan({ packs: ["team", "team-extra"] }, mac, [engine, team, teamExtra])).toThrow(new ResolveError("t3 project script prepare of team-extra and extra-prepare of team both get the id hedge-team-extra-prepare"));
     const twice = withPack(pack("twice", { t3ProjectScripts: [script, { ...script, name: "Again" }] }));
-    expect(() => plan({ packs: ["twice"] }, mac, [engine, twice])).toThrow(new ResolveError("t3 project script prepare of twice and prepare of twice both get the id fleet-twice-prepare"));
+    expect(() => plan({ packs: ["twice"] }, mac, [engine, twice])).toThrow(new ResolveError("t3 project script prepare of twice and prepare of twice both get the id hedge-twice-prepare"));
   });
 
   test("keeps the AI plan and resolves a T3 job's project", () => {
@@ -462,8 +462,8 @@ describe("resolve per AI plan", () => {
       ],
       steps: [{ id: "codex-cli", run: ["install", "codex"], plans: ["codex", "both"], on: ["linux"] }],
       files: [
-        { path: "hooks/guard.ts", target: ".config/fleet/hooks/guard.ts" },
-        { path: "heavy.slice", target: ".config/systemd/user/fleet-heavy.slice", on: ["linux"] },
+        { path: "hooks/guard.ts", target: ".config/hedge/hooks/guard.ts" },
+        { path: "heavy.slice", target: ".config/systemd/user/hedge-heavy.slice", on: ["linux"] },
       ],
     },
     { "AGENTS.md": "# Models fragment\n", "hooks/guard.ts": "export {};\n", "heavy.slice": "[Slice]\n" },
@@ -472,7 +472,7 @@ describe("resolve per AI plan", () => {
 
   test("refuses a T3 job whose model role the plan's model table lacks", () => {
     const task = { prompt: "Run.", projectSetting: "jobs.project", modelRole: "worker", workspaceStrategy: "worktree" as const, runtimeMode: "auto" as const };
-    const jobs = withPack({ schema: 1, name: "jobs", summary: "Jobs.", settings: [{ key: "jobs.project", question: "Which project?", type: "string", default: "fleet" }], jobs: [{ id: "nightly", command: [], runner: "t3", schedule: { every: "1d" }, task }] });
+    const jobs = withPack({ schema: 1, name: "jobs", summary: "Jobs.", settings: [{ key: "jobs.project", question: "Which project?", type: "string", default: "hedge" }], jobs: [{ id: "nightly", command: [], runner: "t3", schedule: { every: "1d" }, task }] });
     const resolveJobs = (overrides: Partial<Profile> = {}) => plan({ packs: ["pull-requests", "orchestration", "models", "jobs"], ...overrides }, mac, [engine, agentSkills, tables, jobs]);
     expect(() => resolveJobs()).toThrow("job nightly asks for model role worker, which the model table lacks");
     const worker = { role: "worker", work: "Workers", provider: "claude" as const, model: "claude-worker", effort: "high" as const };
@@ -516,10 +516,10 @@ describe("resolve per AI plan", () => {
   test("links pack files into the home directory, limited by os", () => {
     const links = (result: Plan) => result.files.filter((item) => "source" in item && item.target.startsWith(".config/"));
     expect(links(withTables({}, devbox))).toEqual([
-      { target: ".config/fleet/hooks/guard.ts", source: join(tables.dir, "packs/models/hooks/guard.ts") },
-      { target: ".config/systemd/user/fleet-heavy.slice", source: join(tables.dir, "packs/models/heavy.slice") },
+      { target: ".config/hedge/hooks/guard.ts", source: join(tables.dir, "packs/models/hooks/guard.ts") },
+      { target: ".config/systemd/user/hedge-heavy.slice", source: join(tables.dir, "packs/models/heavy.slice") },
     ]);
-    expect(links(withTables()).map((item) => item.target)).toEqual([".config/fleet/hooks/guard.ts"]);
+    expect(links(withTables()).map((item) => item.target)).toEqual([".config/hedge/hooks/guard.ts"]);
   });
 
   test("refuses a pack file that leaves its pack or the home directory", () => {
@@ -555,7 +555,7 @@ describe("a step's undo", () => {
     const { world, run } = box(true);
     const off = planWith([step], { boxes: false });
     const home = temp.make("home-");
-    expect((await check(off, { home, run })).findings).toContainEqual({ id: "undo:auto-box", pack: "team", say: "The workflow boxes is off, but step auto-box of the team pack still holds what it set. Run fleet apply to undo it.", repair: "apply" });
+    expect((await check(off, { home, run })).findings).toContainEqual({ id: "undo:auto-box", pack: "team", say: "The workflow boxes is off, but step auto-box of the team pack still holds what it set. Run hedge apply to undo it.", repair: "apply" });
     const applied = await apply(off, { home, run });
     expect(world.on).toBe(false);
     expect(applied.actions).toContainEqual({ target: "step team/auto-box", operation: "remove", reason: "workflow boxes is off" });
@@ -576,7 +576,7 @@ describe("a step's undo", () => {
     const { world, run } = box(true, 1);
     const report = await apply(planWith([step], { boxes: false }), { home: temp.make("home-"), run });
     expect(world.on).toBe(true);
-    expect(report.findings).toContainEqual({ id: "undo:auto-box", pack: "team", say: "Fleet could not undo step auto-box of the team pack, whose workflow boxes is off. The next fleet apply tries again.", repair: "apply" });
+    expect(report.findings).toContainEqual({ id: "undo:auto-box", pack: "team", say: "Hedge could not undo step auto-box of the team pack, whose workflow boxes is off. The next hedge apply tries again.", repair: "apply" });
   });
 
   test("waits for the step's prerequisite and runs nothing in a pack whose step failed in this apply", async () => {
@@ -586,7 +586,7 @@ describe("a step's undo", () => {
     const home = temp.make("home-");
     expect((await apply(gated, { home, run: waiting.run })).actions.filter((action) => action.target.startsWith("step "))).toEqual([]);
     expect(waiting.world.on).toBe(true);
-    expect((await check(gated, { home, run: waiting.run })).findings).toContainEqual({ id: "undo:auto-box", pack: "team", say: "Step auto-box of the team pack waits for sign-in before Fleet can undo it.", repair: "human" });
+    expect((await check(gated, { home, run: waiting.run })).findings).toContainEqual({ id: "undo:auto-box", pack: "team", say: "Step auto-box of the team pack waits for sign-in before Hedge can undo it.", repair: "human" });
     waiting.world.signedIn = true;
     await apply(gated, { home, run: waiting.run });
     expect(waiting.world.on).toBe(false);
@@ -600,7 +600,7 @@ describe("a step's undo", () => {
     blind.world.signedIn = false;
     const gated = planWith([{ ...step, check: ["box-state"], after: "sign-in" }], { boxes: false });
     const home = temp.make("home-");
-    const note = { id: "undo:auto-box", pack: "team", say: "Step auto-box of the team pack waits for sign-in before Fleet can undo it." };
+    const note = { id: "undo:auto-box", pack: "team", say: "Step auto-box of the team pack waits for sign-in before Hedge can undo it." };
     expect((await apply(gated, { home, run: blind.run })).findings).toContainEqual(note);
     expect(blind.world.on).toBe(true);
     const doctor = await check(gated, { home, run: blind.run });
@@ -615,7 +615,7 @@ describe("a step's undo", () => {
     const unsure = planWith([{ ...step, check: ["box-unsure"], after: "sign-in" }], { boxes: false });
     const home = temp.make("home-");
     const { world, run } = box(true);
-    const finding = { id: "undo:auto-box", pack: "team", say: "Fleet cannot tell whether step auto-box of the team pack still holds what it set, though its workflow boxes is off.", repair: "apply" as const };
+    const finding = { id: "undo:auto-box", pack: "team", say: "Hedge cannot tell whether step auto-box of the team pack still holds what it set, though its workflow boxes is off.", repair: "apply" as const };
     expect((await apply(unsure, { home, run })).findings).toContainEqual(finding);
     expect(world.on).toBe(true);
     const doctor = await check(unsure, { home, run });
@@ -627,7 +627,7 @@ describe("a step's undo", () => {
     const { world, run } = box(true);
     const gated = planWith([{ ...step, after: "sign-in" }], { boxes: false });
     const preview = await apply(gated, { home: temp.make("home-"), run, dryRun: true });
-    expect(preview.actions).toContainEqual({ target: "step team/auto-box", operation: "remove", reason: "fleet apply would undo it: workflow boxes is off" });
+    expect(preview.actions).toContainEqual({ target: "step team/auto-box", operation: "remove", reason: "hedge apply would undo it: workflow boxes is off" });
     expect(world.on).toBe(true);
     world.signedIn = false;
     const waiting = await apply(gated, { home: temp.make("home-"), run, dryRun: true });
@@ -658,8 +658,8 @@ describe("a step's undo", () => {
     await apply(planWith([step], {}), { home, run });
     expect(world.on).toBe(true);
     const removed = plan({ packs: [], workflows: {} }, devbox, [engine, team([step])]);
-    expect((await check(removed, { home, run })).findings).toContainEqual({ id: "undo:auto-box", pack: "team", say: "The team pack is off, but step auto-box of the team pack still holds what it set. Run fleet apply to undo it.", repair: "apply" });
-    expect((await apply(removed, { home, run, dryRun: true })).actions).toContainEqual({ target: "step team/auto-box", operation: "remove", reason: "fleet apply would undo it: the team pack is off" });
+    expect((await check(removed, { home, run })).findings).toContainEqual({ id: "undo:auto-box", pack: "team", say: "The team pack is off, but step auto-box of the team pack still holds what it set. Run hedge apply to undo it.", repair: "apply" });
+    expect((await apply(removed, { home, run, dryRun: true })).actions).toContainEqual({ target: "step team/auto-box", operation: "remove", reason: "hedge apply would undo it: the team pack is off" });
     expect(world.on).toBe(true);
     expect((await apply(removed, { home, run })).actions).toContainEqual({ target: "step team/auto-box", operation: "remove", reason: "the team pack is off" });
     expect(world.on).toBe(false);
@@ -700,7 +700,7 @@ describe("a step's undo", () => {
     expect(world.on).toBe(true);
     world.signedIn = false;
     const removed = plan({ packs: [], workflows: {} }, devbox, [engine, team([step])]);
-    expect((await apply(removed, { home, run })).findings).toContainEqual({ id: "undo:auto-box", pack: "team", say: "Step auto-box of the team pack waits for sign-in before Fleet can undo it.", repair: "human" });
+    expect((await apply(removed, { home, run })).findings).toContainEqual({ id: "undo:auto-box", pack: "team", say: "Step auto-box of the team pack waits for sign-in before Hedge can undo it.", repair: "human" });
     expect(world.on).toBe(true);
     world.signedIn = true;
     await apply(removed, { home, run });
@@ -712,7 +712,7 @@ describe("a step's undo", () => {
     const home = temp.make("home-");
     await apply(planWith([step], {}), { home, run: failing.run });
     const removed = plan({ packs: [], workflows: {} }, devbox, [engine, team([step])]);
-    expect((await apply(removed, { home, run: failing.run })).findings).toContainEqual({ id: "undo:auto-box", pack: "team", say: "Fleet could not undo step auto-box of the team pack, which is off. The next fleet apply tries again.", repair: "apply" });
+    expect((await apply(removed, { home, run: failing.run })).findings).toContainEqual({ id: "undo:auto-box", pack: "team", say: "Hedge could not undo step auto-box of the team pack, which is off. The next hedge apply tries again.", repair: "apply" });
     const working = box(true);
     await apply(removed, { home, run: working.run });
     expect(working.world.on).toBe(false);
@@ -720,9 +720,9 @@ describe("a step's undo", () => {
 
   test("stops when the step ledger is not one, rather than forget what it would undo", async () => {
     const home = temp.make("home-");
-    mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
-    writeFileSync(join(home, ".local/state/fleet/steps.json"), JSON.stringify({ version: 1, steps: [{ pack: "team", id: "auto-box" }] }));
-    await expect(apply(planWith([step], {}), { home, run: box(true).run })).rejects.toThrow(".local/state/fleet/steps.json is not a Fleet step ledger");
+    mkdirSync(join(home, ".local/state/hedge"), { recursive: true });
+    writeFileSync(join(home, ".local/state/hedge/steps.json"), JSON.stringify({ version: 1, steps: [{ pack: "team", id: "auto-box" }] }));
+    await expect(apply(planWith([step], {}), { home, run: box(true).run })).rejects.toThrow(".local/state/hedge/steps.json is not a Hedge step ledger");
   });
 
   test("reads the step's left probe instead of its check, when the check also passes with nothing to hold", async () => {
@@ -794,14 +794,14 @@ describe("a step's undo", () => {
 
   test("doctor names the secrets folder of a pack that is off, and keeps it", async () => {
     const home = temp.make("home-");
-    mkdirSync(join(home, ".config/fleet/secrets/team"), { recursive: true });
-    mkdirSync(join(home, ".config/fleet/secrets/not a pack"), { recursive: true });
-    writeFileSync(join(home, ".config/fleet/secrets/team/token"), "secret");
-    const note = { id: "secrets:team", pack: "team", say: "The team pack is off. Its secrets stay in ~/.config/fleet/secrets/team. Delete that folder when you no longer need them." };
+    mkdirSync(join(home, ".config/hedge/secrets/team"), { recursive: true });
+    mkdirSync(join(home, ".config/hedge/secrets/not a pack"), { recursive: true });
+    writeFileSync(join(home, ".config/hedge/secrets/team/token"), "secret");
+    const note = { id: "secrets:team", pack: "team", say: "The team pack is off. Its secrets stay in ~/.config/hedge/secrets/team. Delete that folder when you no longer need them." };
     expect((await check(planWith([], {}), { home, run: box(true).run })).findings).not.toContainEqual(note);
     const removed = plan({ packs: [], workflows: {} }, devbox, [engine, team([])]);
     await apply(removed, { home, run: box(true).run });
-    expect(readFileSync(join(home, ".config/fleet/secrets/team/token"), "utf8")).toBe("secret");
+    expect(readFileSync(join(home, ".config/hedge/secrets/team/token"), "utf8")).toBe("secret");
     const doctor = await check(removed, { home, run: box(true).run });
     expect(doctor.findings).toContainEqual(note);
     expect(doctor.findings.map((finding) => finding.id)).not.toContain("secrets:not a pack");
@@ -870,9 +870,9 @@ describe("a step's undo", () => {
     const home = temp.make("home-");
     const elsewhere = join(temp.make("elsewhere-"), "steps.json");
     writeFileSync(elsewhere, JSON.stringify({ version: 1, steps: [] }));
-    mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
-    symlinkSync(elsewhere, join(home, ".local/state/fleet/steps.json"));
-    await expect(apply(planWith([step], {}), { home, run: box(true).run })).rejects.toThrow(".local/state/fleet/steps.json must be a regular file");
+    mkdirSync(join(home, ".local/state/hedge"), { recursive: true });
+    symlinkSync(elsewhere, join(home, ".local/state/hedge/steps.json"));
+    await expect(apply(planWith([step], {}), { home, run: box(true).run })).rejects.toThrow(".local/state/hedge/steps.json must be a regular file");
   });
 
   test("needs an id no other step of the pack uses, once a step has an undo", async () => {
@@ -880,7 +880,7 @@ describe("a step's undo", () => {
     await loadPacks(team([{ id: "twin", run: ["on-linux"], on: ["linux"] }, { id: "twin", run: ["on-mac"], on: ["darwin"] }]).dir);
   });
 
-  test("needs a check, so Fleet can tell what is left to undo", async () => {
+  test("needs a check, so Hedge can tell what is left to undo", async () => {
     await expect(loadPacks(team([{ id: "auto-box", run: ["box-on"], undo: ["box-off"] }]).dir)).rejects.toThrow("steps auto-box: undo needs a check");
     await expect(loadPacks(team([{ ...step, check: [] }]).dir)).rejects.toThrow("steps auto-box: undo needs a check");
     await expect(loadPacks(team([{ ...step, undo: "box-off" as unknown as string[] }]).dir)).rejects.toThrow("steps auto-box: undo must be a command list");

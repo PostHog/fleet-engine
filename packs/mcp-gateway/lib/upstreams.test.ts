@@ -12,36 +12,36 @@ import { dockerHost, fakeHub, fakeMcpHub, fakeRun, mcphubFetch, writeMcpHubSetti
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
 
-const olderGateway: FakeContainer = { Config: { Labels: { "org.fleet.service": "mcphub" }, Env: [] }, Image: "sha256:older", State: { Running: true }, Mounts: [] };
+const olderGateway: FakeContainer = { Config: { Labels: { "org.hedge.service": "mcphub" }, Env: [] }, Image: "sha256:older", State: { Running: true }, Mounts: [] };
 const notes = { kind: "oauth", name: "notes", title: "Notes", url: "https://notes.example.com/mcp", tools: ["search_notes", "read_note"] };
 const mail = {
   kind: "codex-app", name: "mail", title: "Mail", app: "connector_mail", plugin: "mail@example-remote", prefix: "mail.",
-  tools: ["read_*", "create_draft"], refusal: "Fleet's Mail route only reads mail and writes drafts.", account: "work",
+  tools: ["read_*", "create_draft"], refusal: "Hedge's Mail route only reads mail and writes drafts.", account: "work",
 };
 
-const notesServer = { kind: "local", name: "notes-search", title: "Notes search", script: "/srv/server.ts", mounts: [{ source: "/srv/notes", target: "/fleet-notes" }], env: { FLEET_NOTES: "/fleet-notes" } };
+const notesServer = { kind: "local", name: "notes-search", title: "Notes search", script: "/srv/server.ts", mounts: [{ source: "/srv/notes", target: "/hedge-notes" }], env: { HEDGE_NOTES: "/hedge-notes" } };
 
 function hubWith(declared: Record<string, unknown>, fields: Partial<FakeMcpHub> = {}) {
   const home = temp.make("upstreams-");
   writeMcpHubSettings(home);
-  mkdirSync(join(home, ".local/share/fleet/codex/current/bin"), { recursive: true }), writeFileSync(join(home, ".local/share/fleet/codex/current/bin/codex"), "");
-  const dir = join(home, ".config/fleet/mcp-gateway/upstreams");
+  mkdirSync(join(home, ".local/share/hedge/codex/current/bin"), { recursive: true }), writeFileSync(join(home, ".local/share/hedge/codex/current/bin/codex"), "");
+  const dir = join(home, ".config/hedge/mcp-gateway/upstreams");
   mkdirSync(dir, { recursive: true });
   for (const [file, value] of Object.entries(declared)) writeFileSync(join(dir, file), typeof value === "string" ? value : JSON.stringify(value));
-  const api = fakeMcpHub({ groups: [{ id: "g", name: "fleet", servers: ["tickets", "calendar"] }], ...fields });
+  const api = fakeMcpHub({ groups: [{ id: "g", name: "hedge", servers: ["tickets", "calendar"] }], ...fields });
   const ran = fakeRun(dockerHost(home, olderGateway));
   return { api, home, ran, hub: fakeHub(home, { fetch: mcphubFetch(api), run: ran.run }) };
 }
 
 const writes = (api: FakeMcpHub) => api.calls.filter((call) => call.method !== "GET").map((call) => `${call.method} ${call.path}`);
 
-test("an OAuth upstream that a pack declares joins the gateway with its sign-in callback, and the Fleet group serves only its allowed tools", async () => {
+test("an OAuth upstream that a pack declares joins the gateway with its sign-in callback, and the Hedge group serves only its allowed tools", async () => {
   const { api, hub } = hubWith({ "notes.json": notes });
   expect(await upstreamsRegistered(hub)).toBe(false);
   await registerUpstreams(hub);
-  expect(api.configs.notes).toEqual({ type: "streamable-http", url: "https://notes.example.com/mcp", description: "Added by Fleet", startOnDemand: true, oauth: { redirectUri: "http://127.0.0.1:3317/mcphub/oauth/callback" } });
+  expect(api.configs.notes).toEqual({ type: "streamable-http", url: "https://notes.example.com/mcp", description: "Added by Hedge", startOnDemand: true, oauth: { redirectUri: "http://127.0.0.1:3317/mcphub/oauth/callback" } });
   expect(api.groups[0]!.servers).toEqual(["tickets", "calendar", { name: "notes", tools: ["search_notes", "read_note"] }]);
-  expect(hub.printed).toEqual(["Notes is in the MCP gateway. To sign in to it, on the hub, run: fleet mcp-gateway sign-in"]);
+  expect(hub.printed).toEqual(["Notes is in the MCP gateway. To sign in to it, on the hub, run: hedge mcp-gateway sign-in"]);
   expect(await upstreamsRegistered(hub)).toBe(true);
 });
 
@@ -66,16 +66,16 @@ test("a moved upstream keeps the sign-in that the gateway stored beside it", asy
   expect(api.configs.notes).toMatchObject({ url: "https://notes.example.com/mcp", oauth: { refreshToken: "kept" } });
 });
 
-test("a Codex app upstream that a pack declares runs Fleet's app bridge with its definition, in the Codex home of its account", async () => {
+test("a Codex app upstream that a pack declares runs Hedge's app bridge with its definition, in the Codex home of its account", async () => {
   const { api, home, hub } = hubWith({ "mail.json": mail });
   await registerUpstreams(hub);
   expect(api.configs.mail).toEqual({
-    type: "stdio", command: "node", args: ["/app/fleet-app-bridge.mjs"], description: "Added by Fleet", startOnDemand: true, options: { timeout: 300000 },
-    env: { HOME: "/app/data/work-codex", CODEX_HOME: "/app/data/work-codex", FLEET_CODEX_BIN: "/opt/fleet-codex/current/bin/codex", FLEET_APP: JSON.stringify(mail) },
+    type: "stdio", command: "node", args: ["/app/hedge-app-bridge.mjs"], description: "Added by Hedge", startOnDemand: true, options: { timeout: 300000 },
+    env: { HOME: "/app/data/work-codex", CODEX_HOME: "/app/data/work-codex", HEDGE_CODEX_BIN: "/opt/hedge-codex/current/bin/codex", HEDGE_APP: JSON.stringify(mail) },
   });
   expect(api.groups[0]!.servers).toEqual(["tickets", "calendar", "mail"]);
-  expect(statSync(join(home, ".local/share/fleet-mcphub/data/work-codex")).mode & 0o777).toBe(0o700);
-  expect(hub.printed.at(-1)).toBe("Sign Mail in to ChatGPT, with the account whose Mail app it should use. On the hub, run: fleet mcp-gateway sign-in mail");
+  expect(statSync(join(home, ".local/share/hedge-mcphub/data/work-codex")).mode & 0o777).toBe(0o700);
+  expect(hub.printed.at(-1)).toBe("Sign Mail in to ChatGPT, with the account whose Mail app it should use. On the hub, run: hedge mcp-gateway sign-in mail");
   expect(await upstreamsRegistered(hub)).toBe(true);
 });
 
@@ -84,14 +84,14 @@ test("a local upstream runs its script, bundled for node, in the gateway with ea
   const script = join(outside, "server.ts");
   writeFileSync(script, 'process.stdout.write("v1");\n');
   mkdirSync(join(outside, "notes")), symlinkSync(join(outside, "notes"), join(outside, "notes-link"));
-  const declared = { ...notesServer, script, mounts: [{ source: join(outside, "notes-link"), target: "/fleet-notes" }] };
+  const declared = { ...notesServer, script, mounts: [{ source: join(outside, "notes-link"), target: "/hedge-notes" }] };
   const { api, home, hub, ran } = hubWith({ "notes-search.json": declared });
-  const local = join(home, ".local/share/fleet-mcphub/local");
+  const local = join(home, ".local/share/hedge-mcphub/local");
   await registerUpstreams(hub);
-  expect(api.configs["notes-search"]).toEqual({ type: "stdio", command: "node", args: ["/fleet-local/notes-search.mjs"], description: "Added by Fleet", env: { FLEET_NOTES: "/fleet-notes" }, startOnDemand: true });
+  expect(api.configs["notes-search"]).toEqual({ type: "stdio", command: "node", args: ["/hedge-local/notes-search.mjs"], description: "Added by Hedge", env: { HEDGE_NOTES: "/hedge-notes" }, startOnDemand: true });
   expect(api.groups[0]!.servers).toEqual(["tickets", "calendar", "notes-search"]);
   const started = ran.calls.filter((call) => call.command[1] === "run").at(-1)!.command;
-  expect(started.join(" ")).toContain(`-v ${local}:/fleet-local:ro -v ${join(outside, "notes")}:/fleet-notes:ro --entrypoint`);
+  expect(started.join(" ")).toContain(`-v ${local}:/hedge-local:ro -v ${join(outside, "notes")}:/hedge-notes:ro --entrypoint`);
   expect(readFileSync(join(local, "notes-search.mjs"), "utf8")).toContain('process.stdout.write("v1")');
   expect(statSync(local).mode & 0o777).toBe(0o700);
   expect(hub.printed.at(-1)).toBe("Notes search is in the MCP gateway.");
@@ -104,7 +104,7 @@ test("a local upstream runs its script, bundled for node, in the gateway with ea
   mkdirSync(join(outside, "moved")), rmSync(join(outside, "notes-link")), symlinkSync(join(outside, "moved"), join(outside, "notes-link"));
   expect(await upstreamsRegistered(hub)).toBe(false);
   await registerUpstreams(hub);
-  expect(ran.calls.filter((call) => call.command[1] === "run").at(-1)!.command.join(" ")).toContain(`-v ${join(outside, "moved")}:/fleet-notes:ro`);
+  expect(ran.calls.filter((call) => call.command[1] === "run").at(-1)!.command.join(" ")).toContain(`-v ${join(outside, "moved")}:/hedge-notes:ro`);
   expect(await upstreamsRegistered(hub)).toBe(true);
 });
 
@@ -112,7 +112,7 @@ test("a local upstream whose folder is missing on the hub waits with a warning w
   const outside = temp.make("local-upstream-");
   writeFileSync(join(outside, "server.ts"), "export {};\n");
   const missing = join(outside, "not-cloned-yet");
-  const { api, hub, ran } = hubWith({ "mail.json": mail, "notes-search.json": { ...notesServer, script: join(outside, "server.ts"), mounts: [{ source: missing, target: "/fleet-notes" }] } });
+  const { api, hub, ran } = hubWith({ "mail.json": mail, "notes-search.json": { ...notesServer, script: join(outside, "server.ts"), mounts: [{ source: missing, target: "/hedge-notes" }] } });
   await registerUpstreams(hub);
   expect(api.configs.mail).toBeDefined();
   expect(api.configs["notes-search"]).toBeUndefined();
@@ -121,15 +121,15 @@ test("a local upstream whose folder is missing on the hub waits with a warning w
   expect(await upstreamsRegistered(hub)).toBe(false);
   mkdirSync(missing);
   await registerUpstreams(hub);
-  expect(api.configs["notes-search"]).toMatchObject({ command: "node", args: ["/fleet-local/notes-search.mjs"] });
-  expect(ran.calls.filter((call) => call.command[1] === "run").at(-1)!.command.join(" ")).toContain(`-v ${missing}:/fleet-notes:ro`);
+  expect(api.configs["notes-search"]).toMatchObject({ command: "node", args: ["/hedge-local/notes-search.mjs"] });
+  expect(ran.calls.filter((call) => call.command[1] === "run").at(-1)!.command.join(" ")).toContain(`-v ${missing}:/hedge-notes:ro`);
   expect(await upstreamsRegistered(hub)).toBe(true);
 });
 
-test("keeps a server of the same name that Fleet did not add", async () => {
+test("keeps a server of the same name that Hedge did not add", async () => {
   const theirs = { type: "streamable-http", url: "https://other.example.com/mcp" };
   const { api, hub } = hubWith({ "notes.json": notes }, { servers: ["tickets", "calendar", "notes"], configs: { notes: theirs } });
-  await expect(registerUpstreams(hub)).rejects.toThrow("Keep the MCP gateway's notes server: Fleet did not add it. Remove it in the gateway's dashboard to use Notes.");
+  await expect(registerUpstreams(hub)).rejects.toThrow("Keep the MCP gateway's notes server: Hedge did not add it. Remove it in the gateway's dashboard to use Notes.");
   expect(api.configs.notes).toEqual(theirs);
   expect(writes(api)).toEqual([]);
 });
@@ -138,10 +138,10 @@ test("a declared file that is not an upstream names its path and what is wrong",
   const cases: Array<[unknown, string]> = [
     ["{", "is not JSON"],
     [{ ...notes, kind: "socket" }, "kind must be oauth, codex-app or local"],
-    [{ ...notesServer, mounts: [{ source: "notes", target: "/fleet-notes" }] }, "mounts must give each folder an absolute source and a target such as /fleet-notes"],
-    [{ ...notesServer, mounts: [{ source: "/srv/notes", target: "/app/data" }] }, "mounts must give each folder an absolute source and a target such as /fleet-notes"],
-    [{ ...notesServer, mounts: [{ source: "/srv/notes", target: "/fleet-local" }] }, "mounts must give each folder an absolute source and a target such as /fleet-notes"],
-    [{ ...notesServer, mounts: [{ source: "/a", target: "/fleet-notes" }, { source: "/b", target: "/fleet-notes" }] }, "mounts must not share a target"],
+    [{ ...notesServer, mounts: [{ source: "notes", target: "/hedge-notes" }] }, "mounts must give each folder an absolute source and a target such as /hedge-notes"],
+    [{ ...notesServer, mounts: [{ source: "/srv/notes", target: "/app/data" }] }, "mounts must give each folder an absolute source and a target such as /hedge-notes"],
+    [{ ...notesServer, mounts: [{ source: "/srv/notes", target: "/hedge-local" }] }, "mounts must give each folder an absolute source and a target such as /hedge-notes"],
+    [{ ...notesServer, mounts: [{ source: "/a", target: "/hedge-notes" }, { source: "/b", target: "/hedge-notes" }] }, "mounts must not share a target"],
     [{ ...notesServer, mounts: undefined, env: undefined }, ""],
     [{ ...notes, name: "Notes!" }, "name must be lowercase letters, digits and dashes"],
     [{ ...notes, url: "http://notes.example.com/mcp" }, "url must be an https address"],
@@ -159,10 +159,10 @@ test("a declared file that is not an upstream names its path and what is wrong",
   for (const [value, problem] of cases) {
     const { home } = hubWith({ "bad.json": value });
     if (!problem) expect(await declaredUpstreams(home)).toHaveLength(1);
-    else await expect(declaredUpstreams(home)).rejects.toThrow(`${join(home, ".config/fleet/mcp-gateway/upstreams/bad.json")}: ${problem}`);
+    else await expect(declaredUpstreams(home)).rejects.toThrow(`${join(home, ".config/hedge/mcp-gateway/upstreams/bad.json")}: ${problem}`);
   }
   const { home } = hubWith({ "a.json": notes, "b.json": notes });
-  await expect(declaredUpstreams(home)).rejects.toThrow(`${join(home, ".config/fleet/mcp-gateway/upstreams/b.json")}: name notes is declared twice`);
+  await expect(declaredUpstreams(home)).rejects.toThrow(`${join(home, ".config/hedge/mcp-gateway/upstreams/b.json")}: name notes is declared twice`);
 });
 
 test("with no declared upstreams the check holds without asking the gateway, and other files in the folder are ignored", async () => {
@@ -173,7 +173,7 @@ test("with no declared upstreams the check holds without asking the gateway, and
   expect(await declaredUpstreams(join(hub.home, "nowhere"))).toEqual([]);
 });
 
-test("every later sync of the Fleet group keeps a declared upstream's allowlist, also one that issues a machine key from an older view of the group", async () => {
+test("every later sync of the Hedge group keeps a declared upstream's allowlist, also one that issues a machine key from an older view of the group", async () => {
   const { api, hub } = hubWith({ "notes.json": notes });
   await registerUpstreams(hub);
   api.groups[0]!.servers = ["tickets", "calendar"];
@@ -185,7 +185,7 @@ test("every later sync of the Fleet group keeps a declared upstream's allowlist,
 });
 
 test("narrowing an upstream's tools keeps the rest of its group entry, and keeps only the pinned tools that stay allowed", async () => {
-  const { api, hub } = hubWith({ "notes.json": notes }, { servers: ["tickets", "calendar", "notes"], configs: { notes: { type: "streamable-http", url: notes.url, description: "Added by Fleet" } } });
+  const { api, hub } = hubWith({ "notes.json": notes }, { servers: ["tickets", "calendar", "notes"], configs: { notes: { type: "streamable-http", url: notes.url, description: "Added by Hedge" } } });
   api.groups[0]!.servers = ["tickets", { name: "notes", alias: "n", tools: "all", prompts: [], resources: [], pinnedTools: ["read_note", "delete_note"] }];
   await registerUpstreams(hub);
   expect(api.groups[0]!.servers).toEqual(["tickets", { name: "notes", alias: "n", tools: ["search_notes", "read_note"], prompts: [], resources: [], pinnedTools: ["read_note"] }, "calendar"]);
@@ -194,7 +194,7 @@ test("narrowing an upstream's tools keeps the rest of its group entry, and keeps
 test("one ChatGPT sign-in serves every Google route and the gateway reloads all three, and signing in again replaces a broken sign-in", async () => {
   const { api, home, hub } = hubWith({});
   for (const app of googleApps) await registerUpstream(hub, app);
-  const codex = join(home, ".local/share/fleet/codex/current/bin/codex");
+  const codex = join(home, ".local/share/hedge/codex/current/bin/codex");
   writeFileSync(codex, `#!/bin/sh\necho "$*" >> "${home}/logins"\necho '{}' > "$CODEX_HOME/auth.json"\n`);
   chmodSync(codex, 0o755);
   api.calls.length = 0;
@@ -202,18 +202,18 @@ test("one ChatGPT sign-in serves every Google route and the gateway reloads all 
   for (const app of googleApps) expect(await appSignedIn(hub, app)).toBe(true);
   expect(writes(api)).toEqual(["POST servers/gmail/reload", "POST servers/google-calendar/reload", "POST servers/google-drive/reload"]);
   expect(await appSignedIn(hub, slack)).toBe(false);
-  writeFileSync(join(home, ".local/share/fleet-mcphub/data/google-codex/auth.json"), "broken");
+  writeFileSync(join(home, ".local/share/hedge-mcphub/data/google-codex/auth.json"), "broken");
   api.calls.length = 0;
   expect(await signInApp(hub, googleCalendar)).toBe(0);
   expect(readFileSync(join(home, "logins"), "utf8")).toBe("login --device-auth\nlogin --device-auth\n");
-  expect(readFileSync(join(home, ".local/share/fleet-mcphub/data/google-codex/auth.json"), "utf8")).toBe("{}\n");
+  expect(readFileSync(join(home, ".local/share/hedge-mcphub/data/google-codex/auth.json"), "utf8")).toBe("{}\n");
   expect(writes(api)).toEqual(["POST servers/gmail/reload", "POST servers/google-calendar/reload", "POST servers/google-drive/reload"]);
 });
 
 test("a sign-in reloads every Google route even when the gateway fails to list one route's tools", async () => {
   const { api, home, hub } = hubWith({});
   for (const app of googleApps) await registerUpstream(hub, app);
-  const codex = join(home, ".local/share/fleet/codex/current/bin/codex");
+  const codex = join(home, ".local/share/hedge/codex/current/bin/codex");
   writeFileSync(codex, `#!/bin/sh\necho '{}' > "$CODEX_HOME/auth.json"\n`);
   chmodSync(codex, 0o755);
   const gateway = hub.fetch;
@@ -234,7 +234,7 @@ test("two Google sign-ins that overlap each finish, and the one that finishes la
   for (const app of googleApps) await registerUpstream(hub, app);
   const [started, release] = [join(home, "started"), join(home, "release")];
   expect(await Bun.spawn(["mkfifo", started, release]).exited).toBe(0);
-  const codex = join(home, ".local/share/fleet/codex/current/bin/codex");
+  const codex = join(home, ".local/share/hedge/codex/current/bin/codex");
   writeFileSync(codex, `#!/bin/sh\nif mkdir "${home}/first" 2>/dev/null; then\n  echo first > "$CODEX_HOME/auth.json"\n  echo > "${started}"\n  read go < "${release}"\nelse\n  echo second > "$CODEX_HOME/auth.json"\nfi\n`);
   chmodSync(codex, 0o755);
   const first = signInApp(hub, gmail);
@@ -243,7 +243,7 @@ test("two Google sign-ins that overlap each finish, and the one that finishes la
   await writeFile(release, "go\n");
   expect(second).toBe(0);
   expect(await first).toBe(0);
-  expect(readFileSync(join(home, ".local/share/fleet-mcphub/data/google-codex/auth.json"), "utf8")).toBe("first\n");
+  expect(readFileSync(join(home, ".local/share/hedge-mcphub/data/google-codex/auth.json"), "utf8")).toBe("first\n");
 });
 
 test("a group entry whose server is named like an object property keeps its own tool selection", async () => {

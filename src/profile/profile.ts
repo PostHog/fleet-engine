@@ -1,18 +1,19 @@
 import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import type { MachineFile, PackManifest, Profile, ProfileFile, SourceRef } from "../pack/types.ts";
 import { configEntryProblem, isModelRow } from "../pack/manifest.ts";
 import { sourceName } from "../pack/sources.ts";
 import { withoutCredentials } from "../credentials.ts";
 import { writePrivateFile } from "../files/private.ts";
 import { isKeptForBoxes } from "../hub/names.ts";
+import { profileFile } from "../legacy.ts";
 
 export class ProfileError extends Error {}
 
 export async function loadProfile(dir: string): Promise<Profile> {
-  const path = join(dir, "fleet.json");
+  const path = profileFile(dir);
   const file = await readJson(path);
   if (!file) throw new ProfileError(`${path}: missing`);
   const profile = checkProfile({ ...file, workflows: file.workflows ?? {}, settings: file.settings ?? {}, sources: file.sources ?? [] }, path);
@@ -41,23 +42,24 @@ async function rebasing(dir: string) {
 }
 
 /**
- * Saves answers to fleet.json and commits only that file. Settings merge key by
+ * Saves answers to hedge.json and commits only that file. Settings merge key by
  * key; every other field, workflows included, replaces the saved one, so a
  * caller removes a workflow override by saving the full override set.
  */
 export async function saveAnswers(dir: string, answers: Partial<ProfileFile>, options: { push?: boolean } = {}) {
-  const path = join(dir, "fleet.json");
+  const path = profileFile(dir);
+  const name = basename(path);
   if (options.push) await pullUnder(dir, path, answers);
   const current = (await readJson(path)) ?? { schema: 1 };
   if (current.schema !== 1) throw new ProfileError(`${path}: unknown schema ${String(current.schema)}`);
   const settings = { ...(current.settings as Record<string, unknown> | undefined), ...answers.settings };
   await writeFile(path, JSON.stringify({ ...current, ...answers, settings, schema: 1 }, null, 2) + "\n");
-  const added = await run(dir, "git", "add", "--", "fleet.json");
-  if (!added.ok) throw new ProfileError(`${dir}: could not stage fleet.json: ${added.stderr}`);
-  const changed = await run(dir, "git", "diff", "--cached", "--quiet", "--", "fleet.json");
-  if (changed.code !== 0 && changed.code !== 1) throw new ProfileError(`${dir}: could not compare fleet.json: ${changed.stderr}`);
+  const added = await run(dir, "git", "add", "--", name);
+  if (!added.ok) throw new ProfileError(`${dir}: could not stage ${name}: ${added.stderr}`);
+  const changed = await run(dir, "git", "diff", "--cached", "--quiet", "--", name);
+  if (changed.code !== 0 && changed.code !== 1) throw new ProfileError(`${dir}: could not compare ${name}: ${changed.stderr}`);
   if (changed.code === 1) {
-    const committed = await run(dir, "git", "commit", "-q", "-m", "Save Fleet answers", "--", "fleet.json");
+    const committed = await run(dir, "git", "commit", "-q", "-m", "Save Hedge answers", "--", name);
     if (!committed.ok) throw new ProfileError(`${dir}: could not commit answers: ${committed.stderr}`);
   }
   if (options.push) await push(dir);
@@ -105,7 +107,7 @@ export function activeChoices(profile: Pick<ProfileFile, "workflows">, packs: Pa
 export const validHost = (host: string) => /^[\w][\w.@-]*$/.test(host);
 
 export function machinePath(home: string) {
-  return join(home, ".config", "fleet", "machine.json");
+  return join(home, ".config", "hedge", "machine.json");
 }
 
 export async function loadMachine(home: string): Promise<MachineFile | undefined> {

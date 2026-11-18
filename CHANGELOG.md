@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Fleet is now Hedge
+
+- The product and its command are now Hedge and `hedge`. `get.sh` also
+  installs `fleet` as the same command, so hooks, jobs, and habits from
+  before the rename keep working.
+- `hedge apply`, `hedge setup`, `hedge update`, and `get.sh` move each folder
+  and file that the engine owned under an old name, such as `~/.config/fleet`,
+  `~/.local/state/fleet`, and `~/.local/share/fleet`, to its new name, and
+  leave a link at the old name. When both names are there, the new one wins
+  and the old one stays as it is.
+- A profile with `fleet.json` and no `hedge.json` still works. Each `FLEET_`
+  variable still works while its `HEDGE_` variable is unset. Setup reuses a
+  `fleet-profile` or `fleet-memory` repo.
+- Jobs, crontab lines, launchd agents, T3 tasks, and T3 worktree scripts that
+  the engine made under the old names are replaced by the new ones.
+- The repository and the site keep their addresses for now.
+
 ## v0.1.0
 
 The first public release. Fleet sets up T3 Code, Claude Code, Codex, and a set

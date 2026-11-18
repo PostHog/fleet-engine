@@ -51,7 +51,7 @@ const readOr = (path: string) => {
   }
 };
 
-/** Only a missing file reads as absent. Any other error throws, so a file Fleet cannot read is never taken for one it may write. */
+/** Only a missing file reads as absent. Any other error throws, so a file Hedge cannot read is never taken for one it may write. */
 const readIfThere = (path: string) => {
   try {
     return readFileSync(path, "utf8");
@@ -63,7 +63,7 @@ const readIfThere = (path: string) => {
 
 const invocationId = /^[0-9a-f]{32}$/;
 
-/** What the restart marker owes: nothing, a reload, or a restart of the T3 Code started under that invocation. A marker Fleet did not write owes a reload again, so a spoiled marker never drops the token. */
+/** What the restart marker owes: nothing, a reload, or a restart of the T3 Code started under that invocation. A marker Hedge did not write owes a reload again, so a spoiled marker never drops the token. */
 async function owedRestart(pending: string): Promise<string | undefined> {
   const marker = lstatSync(pending, { throwIfNoEntry: false });
   if (!marker) return undefined;
@@ -95,24 +95,24 @@ async function invocation(run: CommandRunner) {
 async function loadToken(run: CommandRunner, env: Environment, pending: string, result: AdapterResult) {
   let loadedAt = await owedRestart(pending);
   if (loadedAt === needsReload) {
-    if ((await run(["systemctl", "--user", "daemon-reload"])).code !== 0) return void result.findings.push(tokenFinding(`systemd did not reload T3 Code's service, so T3 Code runs without the Claude token. Run fleet apply again, or run: systemctl --user daemon-reload && ${restartCommand}`));
+    if ((await run(["systemctl", "--user", "daemon-reload"])).code !== 0) return void result.findings.push(tokenFinding(`systemd did not reload T3 Code's service, so T3 Code runs without the Claude token. Run hedge apply again, or run: systemctl --user daemon-reload && ${restartCommand}`));
     loadedAt = await invocation(run);
     if (loadedAt !== undefined && invocationId.test(loadedAt)) await writePrivateFile(pending, loadedAt);
   } else if (loadedAt !== undefined) {
     const now = await invocation(run);
     if (now !== undefined && now !== loadedAt) return void rmSync(pending, { force: true });
   }
-  if (insideT3(env)) return void result.findings.push(tokenFinding(`T3 Code picks up the Claude token at its next restart. Fleet did not restart it, because this apply runs inside T3 Code and the restart would end it. From a shell outside T3 Code, run: ${restartCommand}`));
-  if ((await run(["systemctl", "--user", "try-restart", "t3code.service"])).code !== 0) return void result.findings.push(tokenFinding(`T3 Code did not restart with the new Claude token. Run fleet apply again, or run: ${restartCommand}`));
+  if (insideT3(env)) return void result.findings.push(tokenFinding(`T3 Code picks up the Claude token at its next restart. Hedge did not restart it, because this apply runs inside T3 Code and the restart would end it. From a shell outside T3 Code, run: ${restartCommand}`));
+  if ((await run(["systemctl", "--user", "try-restart", "t3code.service"])).code !== 0) return void result.findings.push(tokenFinding(`T3 Code did not restart with the new Claude token. Run hedge apply again, or run: ${restartCommand}`));
   rmSync(pending, { force: true });
 }
 
-/** T3 Code's user service does not inherit the session, so a Claude token that the session gets from its environment reaches T3 through a file. A drop-in that Fleet did not write stays. */
+/** T3 Code's user service does not inherit the session, so a Claude token that the session gets from its environment reaches T3 through a file. A drop-in that Hedge did not write stays. */
 export async function reconcileClaudeToken(run: CommandRunner, home: string, env: Environment, dryRun: boolean, result: AdapterResult) {
   const token = env.CLAUDE_CODE_OAUTH_TOKEN;
   if (!token) return;
-  if (!tokenShape.test(token)) return void result.findings.push(tokenFinding("CLAUDE_CODE_OAUTH_TOKEN in this session has characters that a Claude token does not use, so Fleet did not give it to T3 Code. Set it again from claude setup-token, then run fleet apply."));
-  if (!(await realFolders(home))) return void result.findings.push(tokenFinding(`Fleet did not give the Claude token to T3 Code, because a folder on the way to ~/${tokenFile} or ~/${tokenDropIn} is a link or not a folder. Make them plain folders in your home, then run fleet apply.`));
+  if (!tokenShape.test(token)) return void result.findings.push(tokenFinding("CLAUDE_CODE_OAUTH_TOKEN in this session has characters that a Claude token does not use, so Hedge did not give it to T3 Code. Set it again from claude setup-token, then run hedge apply."));
+  if (!(await realFolders(home))) return void result.findings.push(tokenFinding(`Hedge did not give the Claude token to T3 Code, because a folder on the way to ~/${tokenFile} or ~/${tokenDropIn} is a link or not a folder. Make them plain folders in your home, then run hedge apply.`));
   const file = join(home, tokenFile);
   const dropIn = join(home, tokenDropIn);
   const pending = join(home, pendingFile);
@@ -120,7 +120,7 @@ export async function reconcileClaudeToken(run: CommandRunner, home: string, env
   try {
     present = readIfThere(dropIn);
   } catch {
-    return void result.findings.push(tokenFinding(`Fleet cannot read ~/${tokenDropIn}, so it leaves that file alone and does not give the Claude token to T3 Code. Make the file readable, or remove it if Fleet wrote it, then run fleet apply.`));
+    return void result.findings.push(tokenFinding(`Hedge cannot read ~/${tokenDropIn}, so it leaves that file alone and does not give the Claude token to T3 Code. Make the file readable, or remove it if Hedge wrote it, then run hedge apply.`));
   }
   if (present !== undefined && present !== dropInText) return;
   const wanted = `CLAUDE_CODE_OAUTH_TOKEN=${token}\n`;
@@ -146,32 +146,32 @@ export async function reconcileService(run: CommandRunner, wait: Wait, user: str
   else if (!cli) {
     const version = await newestNightly(run, wait);
     const installed = await retried(() => run(installT3(version)), wait);
-    if (installed.code !== 0) return void result.findings.push(finding("cli", `T3 Code did not install (exit ${installed.code}). Run fleet apply again.`, "apply"));
-    if (!(await present())) return void result.findings.push(finding("cli", "T3 Code installed, but t3 is not on your PATH. Add ~/.local/bin to PATH, then run fleet apply.", "human"));
+    if (installed.code !== 0) return void result.findings.push(finding("cli", `T3 Code did not install (exit ${installed.code}). Run hedge apply again.`, "apply"));
+    if (!(await present())) return void result.findings.push(finding("cli", "T3 Code installed, but t3 is not on your PATH. Add ~/.local/bin to PATH, then run hedge apply.", "human"));
     cli = true;
     result.actions.push({ target: "t3", operation: "create", reason: "nightly channel" });
   }
   if ((await run(["systemctl", "--user", "show-environment"])).code !== 0) {
-    return void result.findings.push(finding("service", "T3 Code cannot run as a service: systemd's user manager does not answer (systemctl --user). Log in to this machine in a normal session, or install your system's systemd user-session support, then run fleet apply.", "human"));
+    return void result.findings.push(finding("service", "T3 Code cannot run as a service: systemd's user manager does not answer (systemctl --user). Log in to this machine in a normal session, or install your system's systemd user-session support, then run hedge apply.", "human"));
   }
   const linger = (await run(["loginctl", "show-user", user, "--property=Linger", "--value"])).stdout.trim();
   if (linger === "no" && !dryRun && (await run(["sudo", "-n", "loginctl", "enable-linger", user])).code === 0) result.actions.push({ target: "t3 linger", operation: "create" });
   else if (linger === "no") result.findings.push(finding("linger", `T3 Code stops when you log out, because lingering is off for ${user}. Run: sudo loginctl enable-linger ${user}`, "human"));
-  else if (linger !== "yes") result.findings.push(finding("linger", `Fleet cannot tell whether T3 Code keeps running after you log out. Check with: loginctl show-user ${user} --property=Linger`, "human"));
+  else if (linger !== "yes") result.findings.push(finding("linger", `Hedge cannot tell whether T3 Code keeps running after you log out. Check with: loginctl show-user ${user} --property=Linger`, "human"));
   if (!cli) return void result.findings.push(finding("service", "T3 Code's service needs to be installed.", "apply"));
   const status = await run(["t3", "service", "status"]);
-  if (status.code !== 0) return void result.findings.push(finding("service", `Fleet could not read the T3 Code service status (exit ${status.code}). Run t3 service status to see why.`, "human"));
+  if (status.code !== 0) return void result.findings.push(finding("service", `Hedge could not read the T3 Code service status (exit ${status.code}). Run t3 service status to see why.`, "human"));
   if (/Status: installed/.test(status.stdout)) return;
   if (/Status: unavailable/.test(status.stdout)) return void result.findings.push(finding("service", "T3 Code says it cannot run as a service on this machine. It needs Linux with systemd.", "human"));
   if (dryRun) return void result.findings.push(finding("service", "T3 Code's service needs to be installed.", "apply"));
   const installed = await run(["t3", "service", "install"]);
-  if (installed.code !== 0) return void result.findings.push(finding("service", `t3 service install failed (exit ${installed.code}). Run it yourself to see why, then run fleet apply.`, "apply"));
+  if (installed.code !== 0) return void result.findings.push(finding("service", `t3 service install failed (exit ${installed.code}). Run it yourself to see why, then run hedge apply.`, "apply"));
   result.actions.push({ target: "t3 service", operation: "create" });
 }
 
 export const timeZoneSetting = "base.t3TimeZone";
-const timeZoneDropIn = ".config/systemd/user/t3code.service.d/fleet-timezone.conf";
-const timeZoneRecord = ".config/fleet/t3-timezone.conf";
+const timeZoneDropIn = ".config/systemd/user/t3code.service.d/hedge-timezone.conf";
+const timeZoneRecord = ".config/hedge/t3-timezone.conf";
 const timeZoneText = (zone: string) => `[Service]\nEnvironment=TZ=${zone}\n`;
 const zoneName = /^[A-Za-z0-9_+-]+(\/[A-Za-z0-9_+-]+)*$/;
 const timeZoneFinding = (say: string, repair?: Finding["repair"]) => ({ id: "t3:timezone", pack: "engine", say, ...(repair ? { repair } : {}) });
@@ -197,7 +197,7 @@ async function restore(path: string, text: string | undefined) {
   else await writePrivateFile(path, text);
 }
 
-/** Fleet changes or removes the drop-in only while it matches what Fleet recorded writing. Any other drop-in, such as one an older Fleet or you wrote, stays as it is. */
+/** Hedge changes or removes the drop-in only while it matches what Hedge recorded writing. Any other drop-in, such as one an older Hedge or you wrote, stays as it is. */
 export async function reconcileTimeZone(run: CommandRunner, home: string, zone: string, dryRun: boolean, result: AdapterResult, zoneInfo = "/usr/share/zoneinfo") {
   if (zone && !knownZone(zone, zoneInfo)) return void result.findings.push(timeZoneFinding(`${timeZoneSetting} is ${zone}, which is not a time zone. Use an IANA name, such as Europe/Berlin, or leave it empty for the machine's zone.`, "human"));
   const dropIn = join(home, timeZoneDropIn);
@@ -208,11 +208,11 @@ export async function reconcileTimeZone(run: CommandRunner, home: string, zone: 
     present = readIfThere(dropIn);
     recorded = readIfThere(record);
   } catch {
-    return void result.findings.push(timeZoneFinding(`Fleet cannot read ~/${timeZoneDropIn} or ~/${timeZoneRecord}, so it leaves T3 Code's time zone alone. Make the files readable, then run fleet apply.`, "human"));
+    return void result.findings.push(timeZoneFinding(`Hedge cannot read ~/${timeZoneDropIn} or ~/${timeZoneRecord}, so it leaves T3 Code's time zone alone. Make the files readable, then run hedge apply.`, "human"));
   }
   const wanted = zone ? timeZoneText(zone) : undefined;
   if (present !== undefined && present !== recorded) {
-    if (wanted && present !== wanted) result.findings.push(timeZoneFinding(`~/${timeZoneDropIn} is not Fleet's, so Fleet does not set T3 Code's time zone to ${zone}. Remove the file, then run fleet apply.`, "human"));
+    if (wanted && present !== wanted) result.findings.push(timeZoneFinding(`~/${timeZoneDropIn} is not Hedge's, so Hedge does not set T3 Code's time zone to ${zone}. Remove the file, then run hedge apply.`, "human"));
     return;
   }
   if (present === wanted) {
@@ -220,7 +220,7 @@ export async function reconcileTimeZone(run: CommandRunner, home: string, zone: 
     return;
   }
   if (dryRun) return void result.findings.push(timeZoneFinding(zone ? `T3 Code's service needs to run in ${zone}.` : "T3 Code's service needs to return to the machine's time zone.", "apply"));
-  if (!(await realFolders(home, [timeZoneDropIn, timeZoneRecord]))) return void result.findings.push(timeZoneFinding(`Fleet did not set T3 Code's time zone, because a folder on the way to ~/${timeZoneDropIn} or ~/${timeZoneRecord} is a link or not a folder. Make them plain folders in your home, then run fleet apply.`, "human"));
+  if (!(await realFolders(home, [timeZoneDropIn, timeZoneRecord]))) return void result.findings.push(timeZoneFinding(`Hedge did not set T3 Code's time zone, because a folder on the way to ~/${timeZoneDropIn} or ~/${timeZoneRecord} is a link or not a folder. Make them plain folders in your home, then run hedge apply.`, "human"));
   if (wanted) {
     mkdirSync(dirname(record), { recursive: true });
     await writePrivateFile(record, wanted);
@@ -235,7 +235,7 @@ export async function reconcileTimeZone(run: CommandRunner, home: string, zone: 
     await restore(dropIn, present);
     await restore(record, recorded);
     result.actions.pop();
-    return void result.findings.push(timeZoneFinding("systemd did not reload T3 Code's service, so Fleet left its time zone as it was. Run fleet apply again.", "apply"));
+    return void result.findings.push(timeZoneFinding("systemd did not reload T3 Code's service, so Hedge left its time zone as it was. Run hedge apply again.", "apply"));
   }
-  result.findings.push(timeZoneFinding(`T3 Code runs in ${zone || "the machine's time zone"} from its next restart, such as the nightly update. Fleet does not restart it now, because a restart ends running agent turns. To switch now, run: ${restartCommand}`));
+  result.findings.push(timeZoneFinding(`T3 Code runs in ${zone || "the machine's time zone"} from its next restart, such as the nightly update. Hedge does not restart it now, because a restart ends running agent turns. To switch now, run: ${restartCommand}`));
 }

@@ -19,7 +19,7 @@ afterEach(async () => {
 
 type Visit = { from?: Window; files?: SiteFiles; url?: string };
 
-function visit(path: string, { from, files = site, url = `https://fleet.test/fleet-engine/${path.replace(/index\.html$/, "")}` }: Visit = {}) {
+function visit(path: string, { from, files = site, url = `https://hedge.test/hedge-engine/${path.replace(/index\.html$/, "")}` }: Visit = {}) {
   const window = new Window({ url });
   open.push(window);
   if (from) carryStorage(from, window);
@@ -45,27 +45,27 @@ const line = (window: Window, label: string) => text(window, "start-text").match
 const switchOf = (window: Window, where: string, pack: string) => input(window, `input[name="${where}:${pack}"]`);
 const switches = (window: Window, where: string) => ["pull-requests", "orchestration", "communication"].filter((pack) => switchOf(window, where, pack).checked);
 const selected = (window: Window) => [...window.document.querySelectorAll('input[name="pack"]')].flatMap((box) => ((box as unknown as HTMLInputElement).checked ? [(box as unknown as HTMLInputElement).value] : []));
-const command = (window: Window) => text(window, "install-text").match(/^ {3}(fleet packs .*)$/m)?.[1];
+const command = (window: Window) => text(window, "install-text").match(/^ {3}(hedge packs .*)$/m)?.[1];
 const shown = (window: Window, id: string) => !(window.document.getElementById(id) as unknown as HTMLElement).hidden;
 const t3Prompt = (window: Window, id: string) => new URL((window.document.getElementById(`${id}-t3`) as unknown as HTMLAnchorElement).href).searchParams.get("prompt");
 
 describe("the landing page in a browser", () => {
   test("choosing the other box rewrites the prompt under the boxes, its T3 Code link, and the status for a screen reader", () => {
     const window = visit("index.html");
-    expect([line(window, "Where Fleet runs"), line(window, "Packs once the hub runs")]).toEqual(["Mac only", undefined]);
+    expect([line(window, "Where Hedge runs"), line(window, "Packs once the hub runs")]).toEqual(["Mac only", undefined]);
     input(window, "#where-hub").click();
-    expect([line(window, "Where Fleet runs"), line(window, "Packs once the hub runs")]).toEqual(["Mac plus a hub and a node", "hub"]);
+    expect([line(window, "Where Hedge runs"), line(window, "Packs once the hub runs")]).toEqual(["Mac plus a hub and a node", "hub"]);
     expect(t3Prompt(window, "start")).toBe(text(window, "start-text"));
     expect(text(window, "start-status")).toBe("The prompt is for Mac plus a hub and a node.");
     input(window, "#where-mac").click();
-    expect([line(window, "Where Fleet runs"), line(window, "Packs once the hub runs")]).toEqual(["Mac only", undefined]);
+    expect([line(window, "Where Hedge runs"), line(window, "Packs once the hub runs")]).toEqual(["Mac only", undefined]);
   });
 
   test("a switch in a box chooses that box and takes the pack out of its prompt, and the other box keeps its own switches", () => {
     const window = visit("index.html");
     switchOf(window, "hub", "communication").click();
     expect(input(window, "#where-hub").checked).toBe(true);
-    expect([line(window, "Where Fleet runs"), line(window, "Packs on the first setup")]).toEqual(["Mac plus a hub and a node", "pull-requests, orchestration"]);
+    expect([line(window, "Where Hedge runs"), line(window, "Packs on the first setup")]).toEqual(["Mac plus a hub and a node", "pull-requests, orchestration"]);
     expect(switches(window, "mac")).toEqual(["pull-requests", "orchestration", "communication"]);
     input(window, "#where-mac").click();
     expect(line(window, "Packs on the first setup")).toBe("pull-requests, orchestration, communication");
@@ -111,7 +111,7 @@ describe("the Packs page in a browser", () => {
     input(window, "#pick-memory").click();
     expect([shown(window, "install-empty"), shown(window, "install-full"), text(window, "install-count")]).toEqual([false, true, "1 pack selected"]);
     input(window, "#pick-guards").click();
-    expect([text(window, "install-count"), command(window)]).toEqual(["2 packs selected", "fleet packs --add memory --add guards"]);
+    expect([text(window, "install-count"), command(window)]).toEqual(["2 packs selected", "hedge packs --add memory --add guards"]);
     expect(t3Prompt(window, "install")).toBe(text(window, "install-text"));
     input(window, "#pick-memory").click();
     input(window, "#pick-guards").click();
@@ -122,7 +122,7 @@ describe("the Packs page in a browser", () => {
     const window = visit("packs/index.html");
     input(window, "#pick-orchestration").click();
     expect(selected(window)).toEqual(["pull-requests", "orchestration"]);
-    expect(command(window)).toBe("fleet packs --add pull-requests --add orchestration");
+    expect(command(window)).toBe("hedge packs --add pull-requests --add orchestration");
     input(window, "#pick-pull-requests").click();
     expect(selected(window)).toEqual([]);
   });
@@ -134,7 +134,7 @@ describe("the Packs page in a browser", () => {
     (memory.document.querySelector("a[data-select]") as unknown as HTMLAnchorElement).click();
     const back = visit("packs/index.html", { from: memory });
     expect(selected(back)).toEqual(["communication", "memory"]);
-    expect(command(back)).toBe("fleet packs --add communication --add memory");
+    expect(command(back)).toBe("hedge packs --add communication --add memory");
   });
 
   test("a page that the browser restores from its history reads the selection again, so a later tick does not drop a pack added elsewhere", () => {
@@ -148,7 +148,7 @@ describe("the Packs page in a browser", () => {
     packs.dispatchEvent(restored);
     expect(selected(packs)).toEqual(["communication", "memory"]);
     input(packs, "#pick-guards").click();
-    expect(command(packs)).toBe("fleet packs --add communication --add memory --add guards");
+    expect(command(packs)).toBe("hedge packs --add communication --add memory --add guards");
   });
 
   test("leaves out a remembered pack that this site does not have", () => {
@@ -158,6 +158,6 @@ describe("the Packs page in a browser", () => {
     expect(selected(team)).toEqual(["slack", "acme"]);
     const publicPacks = visit("packs/index.html", { from: team });
     expect(selected(publicPacks)).toEqual(["slack"]);
-    expect(command(publicPacks)).toBe("fleet packs --add slack");
+    expect(command(publicPacks)).toBe("hedge packs --add slack");
   });
 });

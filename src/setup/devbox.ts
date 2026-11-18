@@ -14,8 +14,8 @@ import { chatgptSignIn, claudeSignIn, githubSignIn } from "./signins.ts";
 import type { Terminal } from "./terminal.ts";
 
 export const skipDevbox = "skip";
-const boxProfile = "$HOME/.local/share/fleet/profile";
-const boxEngine = "$HOME/.local/share/fleet/engine";
+const boxProfile = "$HOME/.local/share/hedge/profile";
+const boxEngine = "$HOME/.local/share/hedge/engine";
 
 /** The concrete hosts in ~/.ssh/config: Host entries without wildcards or negations. */
 export function sshHosts(home: string): string[] {
@@ -54,7 +54,7 @@ export type DevboxContext = {
   terminal: Terminal;
   machine: Machine;
   nonInteractive: boolean;
-  /** Waits for browser sign-ins although it asks nothing, as fleet setup --chat does. */
+  /** Waits for browser sign-ins although it asks nothing, as hedge setup --chat does. */
   chat?: boolean;
   /** Counts a wait for the person in the setup timings. */
   waited?(): void;
@@ -84,13 +84,13 @@ export function devboxQuestion(context: { terminal: Terminal; home: string; flag
       const { terminal } = context;
       const chosen = async (host: string | undefined) => {
         await context.answer(host);
-        terminal.print(host ? `  ✓ ${host}` : "  ✓ No devbox for now. Add one later with fleet devbox add <host>.");
+        terminal.print(host ? `  ✓ ${host}` : "  ✓ No devbox for now. Add one later with hedge devbox add <host>.");
       };
       if (context.flag) return chosen(context.flag === skipDevbox ? undefined : context.flag);
       const hosts = sshHosts(context.home).filter(canBeDevbox);
       if (context.nonInteractive || !hosts.length) return chosen(undefined);
       terminal.print("? Which SSH host is your devbox?");
-      terminal.print("  Fleet installs itself there over SSH, signs it in, and links it with T3 Code here.");
+      terminal.print("  Hedge installs itself there over SSH, signs it in, and links it with T3 Code here.");
       hosts.forEach((host, index) => terminal.print(`  ${index + 1}) ${host}`));
       for (;;) {
         const reply = await terminal.ask("Press ↵ to skip, or type a number: ");
@@ -109,7 +109,7 @@ export function devboxSteps(host: string, context: DevboxContext): Step[] {
   const on = (signIn: SignIn): SignIn => Object.assign(Object.create(signIn) as SignIn, { id: `devbox:${host}:${signIn.id}`, title: `${signIn.title} on ${host}` });
   const chatgpt = chatgptSignIn(box, context.models);
   return [
-    auto(host, "install", `Install Fleet on ${host}`, 4, context.terminal, () => install(box, host, context)),
+    auto(host, "install", `Install Hedge on ${host}`, 4, context.terminal, () => install(box, host, context)),
     ...(host.startsWith(coderPrefix) && context.machine.has("coder") ? [auto(host, "coder", `Sign in to Coder on ${host}`, 1, context.terminal, () => coderOnBox(host, box, context.machine))] : []),
     humanStep(on(githubSignIn(box, async () => {})), human),
     auto(host, "profile", `Apply your profile on ${host}`, 3, context.terminal, () => applyProfile(box, context)),
@@ -138,31 +138,31 @@ async function shown(box: Machine, script: string, failure: string) {
   if ((await box.run(["sh", "-c", script])) !== 0) throw new Error(failure);
 }
 
-/** Installs Fleet on the devbox and names it by the SSH host this machine reaches it by, the name the profile lists it by. */
+/** Installs Hedge on the devbox and names it by the SSH host this machine reaches it by, the name the profile lists it by. */
 async function install(box: Machine, host: string, context: DevboxContext) {
   const { engineRef } = await context.profile();
   const getSh = `https://raw.githubusercontent.com/${engineRepo}/${engineRef}/get.sh`;
   await nameBox(box, host);
   const download = `installer=$(mktemp) && { curl -fsSL ${quote(getSh)} -o "$installer" && sh "$installer" --ref ${quote(engineRef)} --install-only; s=$?; rm -f "$installer"; exit $s; }`;
-  await shown(box, download, "Fleet did not install on the devbox. Fix what it says above, then run fleet setup again.");
+  await shown(box, download, "Hedge did not install on the devbox. Fix what it says above, then run hedge setup again.");
 }
 
-const roleFolder = `"$HOME/.config/fleet"`;
-const roleFile = `"$HOME/.config/fleet/machine.json"`;
+const roleFolder = `"$HOME/.config/hedge"`;
+const roleFile = `"$HOME/.config/hedge/machine.json"`;
 
 export async function nameBox(box: Machine, host: string) {
   const read = await box.exec(["sh", "-c", `[ ! -f ${roleFile} ] || cat ${roleFile}`]);
-  if (read.code !== 0) throw new Error(`Fleet could not reach ${host} over SSH: ${read.output.trim()}`);
+  if (read.code !== 0) throw new Error(`Hedge could not reach ${host} over SSH: ${read.output.trim()}`);
   const saved = read.stdout.trim() ? roleOf(host, read.stdout) : undefined;
   if (saved?.name === host) return;
-  if (saved?.name !== undefined) throw new Error(`${host} already calls itself ${String(saved.name)} in ~/.config/fleet/machine.json. Run fleet devbox add ${String(saved.name)} to keep that name, or set its name there to ${host} and run fleet devbox add ${host} again.`);
+  if (saved?.name !== undefined) throw new Error(`${host} already calls itself ${String(saved.name)} in ~/.config/hedge/machine.json. Run hedge devbox add ${String(saved.name)} to keep that name, or set its name there to ${host} and run hedge devbox add ${host} again.`);
   const named = { schema: 1, role: "devbox", ...saved, name: host };
   const written = await box.exec(["sh", "-c", `mkdir -p ${roleFolder} && cat > ${roleFile}`], { input: `${JSON.stringify(named)}\n` });
-  if (written.code !== 0) throw new Error(`Fleet could not write the role file on ${host}: ${written.output.trim()}`);
+  if (written.code !== 0) throw new Error(`Hedge could not write the role file on ${host}: ${written.output.trim()}`);
 }
 
 function roleOf(host: string, text: string): Record<string, unknown> {
-  const unreadable = new Error(`Fleet cannot read ~/.config/fleet/machine.json on ${host}. Fix or remove it, then run fleet devbox add ${host} again.`);
+  const unreadable = new Error(`Hedge cannot read ~/.config/hedge/machine.json on ${host}. Fix or remove it, then run hedge devbox add ${host} again.`);
   try {
     const role: unknown = JSON.parse(text);
     if (typeof role !== "object" || role === null || Array.isArray(role)) throw unreadable;
@@ -201,7 +201,7 @@ const sameCoderUser = (here: CoderSession, box: CoderSession | undefined) => box
 /** Signs the workspace in to Coder with a new token from this machine, sent on standard input, then writes its SSH config, so it reaches every coder.<workspace> by name. A workspace already signed in as the same Coder user keeps its session, whatever address it reaches Coder by. */
 async function coderOnBox(host: string, box: Machine, here: Machine) {
   const session = await coderSession(here);
-  if (!session) throw new Error(`Coder is not signed in on this machine. Run coder login <your Coder address> here, then fleet devbox add ${host} again.`);
+  if (!session) throw new Error(`Coder is not signed in on this machine. Run coder login <your Coder address> here, then hedge devbox add ${host} again.`);
   const { address } = session;
   if (!sameCoderUser(session, await coderSession(box))) {
     const token = await here.exec(["coder", "tokens", "create"]);
@@ -219,7 +219,7 @@ async function coderOnBox(host: string, box: Machine, here: Machine) {
 async function applyProfile(box: Machine, context: DevboxContext) {
   const { url, engineRef } = await context.profile();
   const clone = `[ -d "${boxProfile}/.git" ] || gh repo clone ${quote(url)} "${boxProfile}" -- -q`;
-  await shown(box, `${clone} && sh "${boxEngine}/get.sh" --ref ${quote(engineRef)} --profile "${boxProfile}"`, "The devbox could not apply your profile. Fix what it says above, then run fleet setup again.");
+  await shown(box, `${clone} && sh "${boxEngine}/get.sh" --ref ${quote(engineRef)} --profile "${boxProfile}"`, "The devbox could not apply your profile. Fix what it says above, then run hedge setup again.");
 }
 
 /** Claude signs in on the box in an SSH terminal: its sign-in asks for a code that the person pastes. */
@@ -241,7 +241,7 @@ function claudeOnBox(host: string, box: Machine, context: DevboxContext): Step {
       terminal.print(`  $ ssh -t ${host} claude auth login`);
       terminal.release?.();
       await box.run(["claude", "auth", "login"], { input: true });
-      if (!(await signIn.probe())) throw new Error(`Claude is not signed in on ${host} yet. Run fleet setup again to try once more.`);
+      if (!(await signIn.probe())) throw new Error(`Claude is not signed in on ${host} yet. Run hedge setup again to try once more.`);
       terminal.print(`  ✓ ${title}: done`);
     },
   };
@@ -287,7 +287,7 @@ const tunnelStartPolls = 15;
 async function tunnelFromServer(machine: Machine): Promise<string | undefined> {
   const origin = await liveServerOrigin(machine);
   if (!origin) return undefined;
-  const session = parsed<{ sessionId?: unknown; token?: unknown }>(await machine.exec(["t3", "auth", "session", "issue", "--json", "--ttl", "5m", "--label", "fleet", "--subject", "fleet", "--scope", "relay:read"]));
+  const session = parsed<{ sessionId?: unknown; token?: unknown }>(await machine.exec(["t3", "auth", "session", "issue", "--json", "--ttl", "5m", "--label", "hedge", "--subject", "hedge", "--scope", "relay:read"]));
   if (typeof session?.sessionId !== "string" || typeof session.token !== "string") return undefined;
   try {
     const headers = `authorization: Bearer ${session.token}\nx-t3-orchestration-protocol: 2\n`;
@@ -307,7 +307,7 @@ function parsed<T>(result: ExecResult): T | undefined {
   }
 }
 
-/** The T3 server's own record of where it listens, read from the same base directory the t3 commands here use (a T3CODE_HOME that T3 would trim, expand, or resolve is refused), trusted only at a numeric loopback address and while its process runs: the record T3's own CLI sends its relay sessions to. A dev server keeps its record elsewhere, so Fleet does not guess it. */
+/** The T3 server's own record of where it listens, read from the same base directory the t3 commands here use (a T3CODE_HOME that T3 would trim, expand, or resolve is refused), trusted only at a numeric loopback address and while its process runs: the record T3's own CLI sends its relay sessions to. A dev server keeps its record elsewhere, so Hedge does not guess it. */
 async function liveServerOrigin(machine: Machine): Promise<string | undefined> {
   const runtime = parsed<{ origin?: unknown; pid?: unknown }>(await machine.exec(["sh", "-c", runtimeRecord]));
   const url = loopbackUrl(runtime?.origin);
@@ -362,18 +362,18 @@ async function linkBothWays(host: string, box: Machine, context: DevboxContext) 
   const link = async (from: Machine, fromName: string, address: string, to: Machine, toName: string) => {
     const paired = await from.exec(["t3", "pair", "--ttl", "5m", "--label", toName]);
     const found = paired.code === 0 ? pairing(paired.output) : undefined;
-    if (!found) throw new Error(`${fromName} did not give a pairing code. Check that T3 Code runs there, then run fleet setup again.`);
+    if (!found) throw new Error(`${fromName} did not give a pairing code. Check that T3 Code runs there, then run hedge setup again.`);
     const linked = await to.exec(["t3", "environment", "link", address, "--pairing-code", found.code, "--access", "full-access"]);
     if (linked.code !== 0) throw new Error(`could not link ${fromName} from ${toName}: ${linked.output.trim().split("\n").at(-1) ?? ""}`);
   };
   const boxAddress = await connectAddressWithin(box);
   const limit = boxAddress ? undefined : await tunnelLimitReached(box);
-  if (limit) throw new Error(`${host} has no T3 Connect tunnel: T3 Code there says ${limit}. Free one: run t3 connect logout on a machine that no longer needs T3 Connect, or unlink it in T3 Connect. Then run ${restartCommand} on ${host}, and run fleet setup again.`);
-  if (!boxAddress) throw new Error(`${host} has no T3 Connect address yet. Update T3 Code on ${host}, then run fleet setup again.`);
+  if (limit) throw new Error(`${host} has no T3 Connect tunnel: T3 Code there says ${limit}. Free one: run t3 connect logout on a machine that no longer needs T3 Connect, or unlink it in T3 Connect. Then run ${restartCommand} on ${host}, and run hedge setup again.`);
+  if (!boxAddress) throw new Error(`${host} has no T3 Connect address yet. Update T3 Code on ${host}, then run hedge setup again.`);
   await link(box, host, boxAddress, context.machine, here);
   const hereAddress = await connectAddress(context.machine);
   if (hereAddress) await link(context.machine, here, hereAddress, box, host);
-  else if (await linkedStatus(context.machine)) context.terminal.print(`  · T3 Connect is on here, but Fleet could not find this machine's tunnel address. Update T3 Code here, then run fleet setup again so ${host} links back.`);
+  else if (await linkedStatus(context.machine)) context.terminal.print(`  · T3 Connect is on here, but Hedge could not find this machine's tunnel address. Update T3 Code here, then run hedge setup again so ${host} links back.`);
   else context.terminal.print(`  · ${host} does not link back to this machine, because T3 Connect is off here. Turn it on with t3 up --connect, and T3 Code on ${host} can pair with this machine.`);
 }
 
@@ -430,16 +430,16 @@ export async function listInProfile(profileDir: string | undefined, host: string
 
 /** Has the hub take the new node before the node applies its profile, so the hub serves the node's credentials, and its disk watch and tunnels include it. */
 export async function tellHub({ machine, terminal }: HubContext, hub: string, host: string): Promise<boolean> {
-  terminal.print(`▶ The hub, ${hub}, takes ${host} with fleet update there. This can take some minutes.`);
+  terminal.print(`▶ The hub, ${hub}, takes ${host} with hedge update there. This can take some minutes.`);
   const updated = await machine.exec(onHub(hub, ["update"]), { timeoutMs: hubUpdateLimitMs });
   const reason = updated.output.trim().split("\n").at(-1);
   if (updated.code === 0) terminal.print(`✓ The hub, ${hub}, took ${host}: its disk watch, tunnels and credentials include it now.`);
-  else if (updated.code === sshFailed || !reason) terminal.print(`· The hub, ${hub}, did not answer. It takes ${host} at its next fleet update, or run fleet update there now.`);
-  else terminal.print(`· The hub, ${hub}, could not update: ${reason} Fix that there and run fleet update there; it takes ${host} then.`);
+  else if (updated.code === sshFailed || !reason) terminal.print(`· The hub, ${hub}, did not answer. It takes ${host} at its next hedge update, or run hedge update there now.`);
+  else terminal.print(`· The hub, ${hub}, could not update: ${reason} Fix that there and run hedge update there; it takes ${host} then.`);
   return updated.code === 0;
 }
 
 export async function linkFromHub({ machine, terminal }: HubContext, hub: string, host: string, hubTook: boolean) {
   const linked = hubTook && (await machine.exec(onHub(hub, ["peers", "link", host]), { timeoutMs: hubLinkLimitMs })).code === 0;
-  terminal.print(linked ? `✓ The hub, ${hub}, linked ${host} in T3 Code.` : `· The hub, ${hub}, has not linked ${host} in T3 Code yet. Its daily fleet peers renew links it, or run fleet peers link ${host} there now.`);
+  terminal.print(linked ? `✓ The hub, ${hub}, linked ${host} in T3 Code.` : `· The hub, ${hub}, has not linked ${host} in T3 Code yet. Its daily hedge peers renew links it, or run hedge peers link ${host} there now.`);
 }

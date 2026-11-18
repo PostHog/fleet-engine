@@ -29,40 +29,41 @@ import { drift } from "./reconciler/drift.ts";
 import { spawnRunner, type CommandRunner } from "./adapters/run.ts";
 import { become, canBecome, type Become } from "./runner/become.ts";
 import { trackCommand } from "./usage/usage.ts";
+import { adoptLegacyEnv, migrateLegacyPaths } from "./legacy.ts";
 
 /** env: the environment that tells a Coder workspace apart; tests pass their own. */
 export type CliOptions = { home: string; engineRoot: string; platform: NodeJS.Platform; env?: Record<string, string | undefined>; print: (line: string) => void; fail?: (line: string) => void; run?: Runner; terminal?: Terminal; apply?: (profileDir: string, skip?: string[]) => Promise<number>; setup?: Pick<SetupOptions, "machine" | "fetchSource" | "doctor" | "env" | "timeZone" | "clock">; clock?: Clock; adapters?: () => Adapter[]; hostname?: () => string; stdin?: () => ReadableStream<Uint8Array>; capture?: CommandRunner; become?: Become; interactive?: boolean };
 
-const usage = `Fleet: one setup for T3 Code, agents, and your workflows
+const usage = `Hedge: one setup for T3 Code, agents, and your workflows
 
-  fleet setup [--preset <id>] [--add <pack>]... [--remove <pack>]...
+  hedge setup [--preset <id>] [--add <pack>]... [--remove <pack>]...
               [--workflows <id=on|off,...>] [--set <pack.key=value>]...
               [--plan <claude|codex|both>] [--non-interactive | --chat]
                      Answer a few questions and set up this machine
-  fleet apply [--profile <dir>] [--adopt <path>]... [--adopt-from <name>]... [--skip <pack>/<step>]... [--dry-run]
+  hedge apply [--profile <dir>] [--adopt <path>]... [--adopt-from <name>]... [--skip <pack>/<step>]... [--dry-run]
                      Put your profile's packs onto this machine
-  fleet doctor [--profile <dir>]
+  hedge doctor [--profile <dir>]
                      Check this machine against your profile without changing it
-  fleet update       Move the engine and your profile forward, then apply
-  fleet refresh      Fetch the pack sources that follow a branch, and when one moved,
+  hedge update       Move the engine and your profile forward, then apply
+  hedge refresh      Fetch the pack sources that follow a branch, and when one moved,
                      update the files, skills, guides, and instructions of your packs
-  fleet packs [--add <pack>]... [--remove <pack>]... [--workflows <id=on|off,...>] [--set <pack.key=value>]...
+  hedge packs [--add <pack>]... [--remove <pack>]... [--workflows <id=on|off,...>] [--set <pack.key=value>]...
                      List your packs, or turn packs and workflows on and off
-  fleet settings     List the settings of your packs
-  fleet set [--set] <pack.key=value>...
+  hedge settings     List the settings of your packs
+  hedge set [--set] <pack.key=value>...
                      Change settings
-  fleet devbox [add|remove <ssh host>]
+  hedge devbox [add|remove <ssh host>]
                      List your devboxes, make an SSH host one, or remove one you replaced
-  fleet hub here [<ssh name>]
+  hedge hub here [<ssh name>]
                      Make this machine the hub of your profile
-  fleet hub status   Show this machine's name and the hub
-  fleet run <pack>/<id> [--repair]
+  hedge hub status   Show this machine's name and the hub
+  hedge run <pack>/<id> [--repair]
                      Run a pack's service, test one of its checks, or run its repair
-  fleet credential <pack>/<id> <node>
+  hedge credential <pack>/<id> <node>
                      On the hub, print a served service's credential for a node
-  fleet triage [--note <text>] [--print | --save <file> | --send]
-                     Show a report of this machine's setup, then send it to the Fleet maintainer
-  fleet <command>    Run a command that one of your packs ships`;
+  hedge triage [--note <text>] [--print | --save <file> | --send]
+                     Show a report of this machine's setup, then send it to the Hedge maintainer
+  hedge <command>    Run a command that one of your packs ships`;
 
 const changes = { packs: packsCommand, settings: settingsCommand, set: setCommand };
 const builtins: Record<string, string[]> = { apply: [], doctor: [], update: [], packs: [], settings: [], set: [], hub: ["here", "status"], devbox: ["add", "remove"], run: [], credential: [], setup: [], triage: [] };
@@ -70,9 +71,11 @@ const builtins: Record<string, string[]> = { apply: [], doctor: [], update: [], 
 
 export async function main(argv: string[], options: CliOptions): Promise<number> {
   const [command, ...rest] = argv;
+  if (options.env) adoptLegacyEnv(options.env);
   if (!command || command === "help" || command === "--help") return options.print(usage), 0;
   if (Object.hasOwn(builtins, command)) trackCommand(options.home, command, rest, builtins[command]!, options.env ?? {}, options.interactive);
   try {
+    if (migrates(command, rest)) for (const [before, after] of await migrateLegacyPaths(options.home)) options.print(`moved ~/${before} to ~/${after}`);
     if (command === "apply" || command === "doctor") return await reconcile(command, rest, options);
     if (command === "update") return await runUpdate(options);
     if (command === "refresh") return await runRefresh(rest, options);
@@ -85,12 +88,14 @@ export async function main(argv: string[], options: CliOptions): Promise<number>
     return await runPackCommand(command, rest, options);
   } catch (error) {
     if (!(error instanceof Error)) throw error;
-    (options.fail ?? options.print)(`fleet: ${error.message}`);
+    (options.fail ?? options.print)(`hedge: ${error.message}`);
     return 1;
   }
 }
 
-/** Runs fleet setup and records its transcript. A failed step's message names fleet triage. */
+const migrates = (command: string, args: string[]) => (command === "apply" && !args.includes("--dry-run")) || command === "setup" || command === "update";
+
+/** Runs hedge setup and records its transcript. A failed step's message names hedge triage. */
 async function runSetup(args: string[], options: CliOptions) {
   const record = recordSetup(options.home, options.terminal ?? { ...ttyTerminal(), print: options.print }, args);
   const fail = options.fail ?? options.print;
@@ -100,8 +105,8 @@ async function runSetup(args: string[], options: CliOptions) {
   } catch (error) {
     if (!(error instanceof Error)) throw error;
     record.failed(error.message);
-    fail(`fleet: ${error.message}`);
-    fail("Stuck? Run fleet triage. It shows a report of this setup that you can send to the Fleet maintainer.");
+    fail(`hedge: ${error.message}`);
+    fail("Stuck? Run hedge triage. It shows a report of this setup that you can send to the Hedge maintainer.");
     return 1;
   }
 }
@@ -113,7 +118,7 @@ async function triage(args: string[], options: CliOptions) {
     try {
       await reconcile("doctor", [], { ...options, print: collect, fail: collect });
     } catch (error) {
-      collect(`fleet: ${error instanceof Error ? error.message : String(error)}`);
+      collect(`hedge: ${error instanceof Error ? error.message : String(error)}`);
     }
     return lines;
   };
@@ -121,7 +126,7 @@ async function triage(args: string[], options: CliOptions) {
     return await triageCommand(args, { home: options.home, engineRoot: options.engineRoot, platform: options.platform, terminal: options.terminal ?? { ...ttyTerminal(), print: options.print }, capture: options.capture ?? spawnRunner, hostname: (options.hostname ?? hostname)(), doctor });
   } catch (error) {
     if (!(error instanceof FlagError)) throw error;
-    options.print(`fleet triage: ${error.message}`);
+    options.print(`hedge triage: ${error.message}`);
     return 2;
   }
 }
@@ -152,7 +157,7 @@ async function devbox(args: string[], options: CliOptions) {
     return await devboxCommand(args, { home: options.home, terminal, machine: { ...realMachine, ...options.setup?.machine }, machineFile: plan.machine, plan });
   } catch (error) {
     if (!(error instanceof FlagError)) throw error;
-    options.print(`fleet devbox: ${error.message}`);
+    options.print(`hedge devbox: ${error.message}`);
     return 2;
   }
 }
@@ -183,14 +188,14 @@ async function change(command: keyof typeof changes | "hub", args: string[], opt
     return await (command === "hub" ? hubCommand(args, { ...context, home: options.home }) : changes[command](args, context));
   } catch (error) {
     if (!(error instanceof FlagError)) throw error;
-    options.print(`fleet ${command}: ${error.message}`);
+    options.print(`hedge ${command}: ${error.message}`);
     return 2;
   }
 }
 
 async function runUpdate(options: CliOptions) {
   const machine = await loadMachine(options.home);
-  if (!machine?.profileDir) throw new Error("no profile on this machine. Run get.sh, or fleet apply --profile <dir>.");
+  if (!machine?.profileDir) throw new Error("no profile on this machine. Run get.sh, or hedge apply --profile <dir>.");
   const profile = await loadProfile(machine.profileDir);
   return update({
     home: options.home,
@@ -198,19 +203,19 @@ async function runUpdate(options: CliOptions) {
     profileDir: machine.profileDir,
     engine: profile.engine,
     print: options.print,
-    runApply: () => Bun.spawn(["sh", join(options.engineRoot, "fleet"), "apply"], { stdio: ["inherit", "inherit", "inherit"], env: { ...Bun.env, HOME: options.home } }).exited,
+    runApply: () => Bun.spawn(["sh", join(options.engineRoot, "hedge"), "apply"], { stdio: ["inherit", "inherit", "inherit"], env: { ...Bun.env, HOME: options.home } }).exited,
   });
 }
 
 async function runRefresh(args: string[], options: CliOptions) {
-  if (args.length) return options.print("Usage: fleet refresh"), 2;
+  if (args.length) return options.print("Usage: hedge refresh"), 2;
   const machine = await loadMachine(options.home);
-  if (!machine?.profileDir) throw new Error("no profile on this machine. Run get.sh, or fleet apply --profile <dir>.");
+  if (!machine?.profileDir) throw new Error("no profile on this machine. Run get.sh, or hedge apply --profile <dir>.");
   const profile = await loadProfile(machine.profileDir);
   const applyFiles = async (moved: FetchedSource[]) => {
     const { plan } = await loadPlan(options, machine.profileDir, { fetch: false, remember: false, fetched: moved });
     if (plan.unanswered.length) {
-      for (const setting of plan.unanswered) options.print(`To do: ${setting.question} Answer it with fleet set ${setting.key}=<value>.`);
+      for (const setting of plan.unanswered) options.print(`To do: ${setting.question} Answer it with hedge set ${setting.key}=<value>.`);
       return false;
     }
     const result = await filesAdapter.apply(plan, { home: options.home, dryRun: false, adopt: [], adoptFrom: [] });
@@ -221,20 +226,20 @@ async function runRefresh(args: string[], options: CliOptions) {
 }
 
 async function runPackCommand(name: string, args: string[], options: CliOptions) {
-  const typed = ["fleet", name, ...args];
+  const typed = ["hedge", name, ...args];
   const undoing = await undoingPack(options.home, options.env ?? {}, typed);
   if (undoing) return runUndo(name, args, undoing, options);
   const { plan, sources } = await loadPlan(options, undefined, { fetch: false, remember: false, inherit: true });
   const command = plan.commands[name];
   if (!command) {
     const owner = sources.flatMap((source) => ("error" in source ? [] : source.packs)).find((pack) => existsSync(join(pack.dir, "commands", `${name}.ts`)) || Object.hasOwn(pack.code?.commands ?? {}, name));
-    options.print(owner ? `fleet ${name} comes from the ${owner.manifest.title ?? owner.manifest.name} pack, which is off. Turn it on with fleet packs.` : `fleet: unknown command ${name}\n\n${usage}`);
+    options.print(owner ? `hedge ${name} comes from the ${owner.manifest.title ?? owner.manifest.name} pack, which is off. Turn it on with hedge packs.` : `hedge: unknown command ${name}\n\n${usage}`);
     return 2;
   }
   if (name !== "usage") trackCommand(options.home, name, args, command.subcommands ?? [], options.env ?? {}, options.interactive);
   if (command.on === "hub" && !plan.onHub) return runOnHub(name, args, plan, options);
   const workflow = command.workflow ? plan.workflows.find((entry) => entry.id === command.workflow) : undefined;
-  if (workflow && !workflow.active) throw new Error(`fleet ${name} belongs to the ${workflow.id} workflow, which ${workflow.reason === "turned off" ? `is off. Turn it on with fleet packs --workflows ${workflow.id}=on.` : `is off on this machine: it ${workflow.reason}.`}`);
+  if (workflow && !workflow.active) throw new Error(`hedge ${name} belongs to the ${workflow.id} workflow, which ${workflow.reason === "turned off" ? `is off. Turn it on with hedge packs --workflows ${workflow.id}=on.` : `is off on this machine: it ${workflow.reason}.`}`);
   const loaded = loadedPack(sources, command.pack);
   const run = loaded?.code?.commands[name]?.run;
   const repairs = plan.human.some((step) => step.command?.trim().split(/\s+/).join("\n") === typed.join("\n"));
@@ -243,9 +248,9 @@ async function runPackCommand(name: string, args: string[], options: CliOptions)
   return exit === 0 && repairs ? applyProfile(plan.machine.profileDir!, options) : exit;
 }
 
-/** Runs the undo, check or prerequisite of a ledger step whose pack is off, with that pack's own command on this machine. When Fleet cannot run it here, it exits cannotTell, so the ledger keeps the step for a later apply. */
+/** Runs the undo, check or prerequisite of a ledger step whose pack is off, with that pack's own command on this machine. When Hedge cannot run it here, it exits cannotTell, so the ledger keeps the step for a later apply. */
 async function runUndo(name: string, args: string[], pack: string, options: CliOptions) {
-  const cannot = (why: string) => (options.print(`fleet ${name}: cannot run the ${pack} pack's command to undo its step: ${why}`), cannotTell);
+  const cannot = (why: string) => (options.print(`hedge ${name}: cannot run the ${pack} pack's command to undo its step: ${why}`), cannotTell);
   let loaded: Awaited<ReturnType<typeof loadPlan>>;
   try {
     loaded = await loadPlan(options, undefined, { fetch: false, remember: false, inherit: true, withPack: pack });
@@ -263,13 +268,13 @@ async function runUndo(name: string, args: string[], pack: string, options: CliO
 
 /** A node of the profile, or a Mac on a profile with a hub, runs a hub command on the hub over the one SSH path, with this terminal. Any other machine is told where it runs. When ssh exits 255, it exits 1, so a caller can fall back to another way. */
 async function runOnHub(name: string, args: string[], plan: Plan, options: CliOptions) {
-  if (!plan.pullsFromHub) throw new Error(`fleet ${name} runs on the hub${plan.hub ? `, ${plan.hub}` : ""}. Run it there.`);
+  if (!plan.pullsFromHub) throw new Error(`hedge ${name} runs on the hub${plan.hub ? `, ${plan.hub}` : ""}. Run it there.`);
   const answer = await (options.capture ?? spawnRunner)(onHub(plan.hub!, [name, ...args]), { inherit: true });
   const fail = options.fail ?? options.print;
   for (const line of lines(answer.stdout)) options.print(line);
   for (const line of lines(answer.stderr ?? "")) fail(line);
   if (answer.code !== sshUnreachable) return answer.code;
-  fail(`fleet ${name}: ssh to the hub ${plan.hub} exited 255. Either ssh could not reach the hub, or the command failed there with 255.`);
+  fail(`hedge ${name}: ssh to the hub ${plan.hub} exited 255. Either ssh could not reach the hub, or the command failed there with 255.`);
   return 1;
 }
 
@@ -295,7 +300,7 @@ async function runItem(args: string[], options: CliOptions) {
   const slash = item.indexOf("/");
   const [pack, id] = slash < 0 ? ["", ""] : [item.slice(0, slash), item.slice(slash + 1)];
   const repairing = extra.length === 1 && extra[0] === "--repair";
-  if (!pack || !id || (extra.length && !repairing)) return options.print("Usage: fleet run <pack>/<id> [--repair]"), 2;
+  if (!pack || !id || (extra.length && !repairing)) return options.print("Usage: hedge run <pack>/<id> [--repair]"), 2;
   const { plan, sources } = await loadPlan(options, undefined, { fetch: false, remember: false, inherit: true });
   const loaded = plan.packs.some((entry) => entry.name === pack && entry.available) ? loadedPack(sources, pack) : undefined;
   const code = loaded?.code;
@@ -304,17 +309,17 @@ async function runItem(args: string[], options: CliOptions) {
   const check = plan.human.some((step) => step.pack === pack && step.id === id) ? code?.checks[id] : undefined;
   if (!service && !check) {
     const dropped = plan.dropped.find((entry) => entry.pack === pack && (entry.item === `job ${id}` || entry.item === `human ${id}`));
-    return options.print(dropped ? `fleet run: ${item} does not run here: ${dropped.reason}` : `fleet run: your packs have no service or check ${item}`), 2;
+    return options.print(dropped ? `hedge run: ${item} does not run here: ${dropped.reason}` : `hedge run: your packs have no service or check ${item}`), 2;
   }
   const repair = repairing ? code?.repairs[id] : undefined;
-  if (repairing && (!check || !repair)) return options.print(`fleet run: ${item} has no repair that Fleet runs`), 2;
+  if (repairing && (!check || !repair)) return options.print(`hedge run: ${item} has no repair that Hedge runs`), 2;
   return inPack(plan, loaded!, options, async (ctx) => {
     if (repair) return await repair(ctx), 0;
     if (!service) return (await check!(ctx)) ? 0 : 1;
     const waits = job?.after ? plan.human.find((step) => step.pack === pack && step.id === job.after) : undefined;
     const ready = async () => !waits || (await code!.checks[waits.id]!(ctx));
     if (!(await ready())) {
-      options.print(`fleet run: ${item} waits until ${waits!.id} passes. ${waits!.say}${waits!.command ? ` Run: ${waits!.command}` : ""}`);
+      options.print(`hedge run: ${item} waits until ${waits!.id} passes. ${waits!.say}${waits!.command ? ` Run: ${waits!.command}` : ""}`);
       do await ctx.sleep(60_000);
       while (!(await ready()));
     }
@@ -344,7 +349,7 @@ async function issueCredentials(entries: CatalogEntry[], node: string, plan: Pla
       });
     } catch {
       const service = `${entry.pack}/${entry.id}`;
-      findings.push({ id: `credential:${service}`, pack: entry.pack, say: `Could not issue the credential of ${service}. Run fleet credential ${service} ${node} to see why. Fleet tries again at the next apply.`, repair: "apply" });
+      findings.push({ id: `credential:${service}`, pack: entry.pack, say: `Could not issue the credential of ${service}. Run hedge credential ${service} ${node} to see why. Hedge tries again at the next apply.`, repair: "apply" });
     }
   }
   return findings;
@@ -381,8 +386,8 @@ async function pullCredentials(entries: CatalogEntry[], node: string, hub: strin
       if (stored !== value) await store.write(name, value);
       continue;
     }
-    const reason = late ? `it did not answer within ${pullLimitMs / 1000} seconds` : answer.code === 255 ? `ssh exited 255. Run ssh ${hub} true to see why` : `fleet credential exited ${answer.code} there. Run fleet credential ${service} ${node} on the hub to see why`;
-    const kept = stored instanceof Error ? stored.message : stored ? "Kept the one this machine has." : "Fleet tries again at the next apply.";
+    const reason = late ? `it did not answer within ${pullLimitMs / 1000} seconds` : answer.code === 255 ? `ssh exited 255. Run ssh ${hub} true to see why` : `hedge credential exited ${answer.code} there. Run hedge credential ${service} ${node} on the hub to see why`;
+    const kept = stored instanceof Error ? stored.message : stored ? "Kept the one this machine has." : "Hedge tries again at the next apply.";
     findings.push({ id: `credential:${service}`, pack: entry.pack, say: `Could not pull the credential of ${service} from the hub ${hub} (${reason}). ${kept}`, repair: "apply" });
   }
   return findings;
@@ -393,9 +398,9 @@ async function credential(args: string[], options: CliOptions) {
   const [item = "", node, ...extra] = args;
   const slash = item.indexOf("/");
   const [pack, id] = slash < 0 ? ["", ""] : [item.slice(0, slash), item.slice(slash + 1)];
-  if (!pack || !id || !node || extra.length) return options.print("Usage: fleet credential <pack>/<id> <node>"), 2;
+  if (!pack || !id || !node || extra.length) return options.print("Usage: hedge credential <pack>/<id> <node>"), 2;
   const { plan, sources } = await loadPlan(options, undefined, { fetch: false, remember: false });
-  if (!plan.onHub) throw new Error(`fleet credential runs on the hub${plan.hub ? `, ${plan.hub}` : ""}.`);
+  if (!plan.onHub) throw new Error(`hedge credential runs on the hub${plan.hub ? `, ${plan.hub}` : ""}.`);
   if (!plan.catalog?.some((entry) => entry.pack === pack && entry.id === id)) throw new Error(`the service catalog has no ${item}: its workflow or plan is off in your profile.`);
   const loaded = loadedPack(sources, pack)!;
   const issue = loaded.code!.credentials[id]!;
@@ -421,7 +426,7 @@ async function inPack(plan: Plan, loaded: LoadedPack, options: CliOptions, work:
 }
 
 function packEnvironment(plan: Plan, options: CliOptions): Record<string, string | undefined> {
-  return { HOME: options.home, FLEET_ENGINE_DIR: options.engineRoot, FLEET_PROFILE_DIR: plan.machine.profileDir, FLEET_SETTINGS: JSON.stringify(plan.settings), FLEET_MODELS: JSON.stringify(plan.models), FLEET_PLAN: plan.ai, FLEET_HANDLERS: JSON.stringify(handlerPaths(plan)), FLEET_HANDLER_SUBCOMMANDS: JSON.stringify(handlerSubcommands(plan)) };
+  return { HOME: options.home, HEDGE_ENGINE_DIR: options.engineRoot, HEDGE_PROFILE_DIR: plan.machine.profileDir, HEDGE_SETTINGS: JSON.stringify(plan.settings), HEDGE_MODELS: JSON.stringify(plan.models), HEDGE_PLAN: plan.ai, HEDGE_HANDLERS: JSON.stringify(handlerPaths(plan)), HEDGE_HANDLER_SUBCOMMANDS: JSON.stringify(handlerSubcommands(plan)) };
 }
 
 function handlerPaths(plan: Plan) {
@@ -435,7 +440,7 @@ function handlerSubcommands(plan: Plan) {
 /** withPack resolves the plan as if the profile also had that pack on, for the undo of one of its steps. */
 async function loadPlan(options: CliOptions, profileFlag: string | undefined, mode: { fetch: boolean; remember: boolean; inherit?: boolean; pull?: boolean; withPack?: string; fetched?: FetchedSource[] }): Promise<{ plan: Plan; sources: FetchedSource[] }> {
   const saved = await loadMachine(options.home);
-  const inherited = mode.inherit && !profileFlag ? options.env?.FLEET_PROFILE_DIR : undefined;
+  const inherited = mode.inherit && !profileFlag ? options.env?.HEDGE_PROFILE_DIR : undefined;
   const profileDir = profileFlag ? resolvePath(profileFlag) : inherited ? resolvePath(inherited) : saved?.profileDir;
   if (!profileDir) throw new Error("no profile on this machine. Run get.sh, or pass --profile <dir>.");
   const machine: MachineFile = { ...thisMachine(saved, options.platform, options.env ?? {}, (options.hostname ?? hostname)()), profileDir };
@@ -475,9 +480,9 @@ function printReport(report: Report, command: string, print: (line: string) => v
   const changes = report.actions.filter((action) => action.operation !== "keep" && action.operation !== "conflict");
   if (command === "apply") for (const action of changes) print(`${action.operation} ${action.target}`);
   for (const finding of report.findings) print(`${finding.repair === "human" ? "To do" : finding.repair ? "Fix" : "Note"}: ${finding.say}`);
-  if (command === "doctor") print(report.ok ? "Everything matches your profile." : "Run fleet apply to fix what Fleet can fix.");
-  else if (dryRun) print(report.ok ? `Preview: ${changes.length} change${changes.length === 1 ? "" : "s"} to apply. Nothing was written.` : "Preview: Fleet could not apply your profile. Nothing was written.");
-  else print(report.ok ? `Applied ${changes.length} change${changes.length === 1 ? "" : "s"}.` : "Fleet could not apply your profile.");
+  if (command === "doctor") print(report.ok ? "Everything matches your profile." : "Run hedge apply to fix what Hedge can fix.");
+  else if (dryRun) print(report.ok ? `Preview: ${changes.length} change${changes.length === 1 ? "" : "s"} to apply. Nothing was written.` : "Preview: Hedge could not apply your profile. Nothing was written.");
+  else print(report.ok ? `Applied ${changes.length} change${changes.length === 1 ? "" : "s"}.` : "Hedge could not apply your profile.");
 }
 
 
@@ -485,7 +490,7 @@ if (import.meta.main) {
   const engineRoot = resolvePath(import.meta.dir, "..");
   if (Bun.argv[2] === "setup") {
     process.on("SIGINT", () => {
-      console.log("\nStopped. Run fleet setup again to pick up where it stopped.");
+      console.log("\nStopped. Run hedge setup again to pick up where it stopped.");
       process.exit(130);
     });
   }

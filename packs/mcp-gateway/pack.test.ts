@@ -7,7 +7,7 @@ import type { AvailableSource, MachineFile, Profile } from "../../src/pack/types
 import { filesAdapter } from "../../src/reconciler/apply.ts";
 import { tempDirs } from "../../src/testing/git.ts";
 import { devbox, engineSource, engineSteps, mac, resolveEngine, skillSources } from "../../src/testing/packs.ts";
-import { fakeSsh, remoteFleet, type Host } from "../../src/testing/ssh.ts";
+import { fakeSsh, remoteHedge, type Host } from "../../src/testing/ssh.ts";
 import { fakeMcpHub, mcphubFetch, writeMcpHubSettings } from "./lib/testing.ts";
 
 const temp = tempDirs();
@@ -18,9 +18,9 @@ afterEach(() => {
 
 const repoRoot = join(import.meta.dir, "../..");
 const issued = "mcphub_new-machine-token";
-const clientFile = (home: string) => join(home, ".config/fleet/mcphub.client.json");
-const storeFile = (home: string) => join(home, ".config/fleet/secrets/mcp-gateway/credential.mcp-gateway");
-const gatewayKeys = ["claude:mcpServers.fleet-hub", "codex:mcp_servers.fleet-hub"];
+const clientFile = (home: string) => join(home, ".config/hedge/mcphub.client.json");
+const storeFile = (home: string) => join(home, ".config/hedge/secrets/mcp-gateway/credential.mcp-gateway");
+const gatewayKeys = ["claude:mcpServers.hedge-hub", "codex:mcp_servers.hedge-hub"];
 
 let sources: AvailableSource[];
 beforeAll(async () => {
@@ -32,22 +32,22 @@ describe("the plan", () => {
   const hubAnswers = { "hub.alias": "my-hub" };
   const keys = (fields: Partial<Profile>, machine: MachineFile = devbox) => resolveEngine(sources, { packs: ["mcp-gateway"], ...fields }, machine).config.map((entry) => `${entry.provider}:${entry.key}`).filter((key) => gatewayKeys.includes(key));
 
-  test("every node's catalog holds the hub's gateway at loopback port 3317, and its MCP entries start fleet mcp-connect with no host or key", () => {
+  test("every node's catalog holds the hub's gateway at loopback port 3317, and its MCP entries start hedge mcp-connect with no host or key", () => {
     for (const machine of [devbox, mac]) {
       const plan = resolveEngine(sources, { packs: ["mcp-gateway"], hub: "hub-1" }, machine);
       expect(plan.catalog).toEqual([{ pack: "mcp-gateway", id: "mcp-gateway", port: 3317, health: "/health", after: "mcp-gateway-installed" }]);
       expect(plan.human.map((step) => step.id)).toEqual(["mcp-gateway-client"]);
       for (const entry of plan.config.filter((item) => item.pack === "mcp-gateway")) {
         const text = JSON.stringify(entry.value);
-        expect(text).toContain('fleet\\" mcp-connect');
+        expect(text).toContain('hedge\\" mcp-connect');
         expect(text).not.toMatch(/https?:|token|bearer|authorization|127\.0\.0\.1/i);
       }
     }
   });
 
   test("gives each plan only its own provider's entry, owned by this pack", () => {
-    expect(keys({ plan: "claude" })).toEqual(["claude:mcpServers.fleet-hub"]);
-    expect(keys({ plan: "codex" })).toEqual(["codex:mcp_servers.fleet-hub"]);
+    expect(keys({ plan: "claude" })).toEqual(["claude:mcpServers.hedge-hub"]);
+    expect(keys({ plan: "codex" })).toEqual(["codex:mcp_servers.hedge-hub"]);
     expect(keys({}, mac)).toEqual(gatewayKeys);
     const owners = resolveEngine(sources, { packs: ["mcp-gateway"] }, devbox).owners;
     for (const key of gatewayKeys) expect(owners[key]).toBe("mcp-gateway");
@@ -88,7 +88,7 @@ describe("the plan", () => {
     expect(steps(hub, { gmail: true, "mcp-gateway": false })).toEqual([]);
     expect(off(devbox, { gmail: true, "mcp-gateway": false })).toEqual([]);
     expect(plan(devbox, { gmail: true, "mcp-gateway": false }).workflows.find((state) => state.id === "gmail")).toMatchObject({ active: false, reason: "needs workflow mcp-gateway" });
-    expect(plan(hub, { gmail: true }).human.find((step) => step.id === "gmail-sign-in")).toMatchObject({ command: "fleet mcp-gateway sign-in gmail" });
+    expect(plan(hub, { gmail: true }).human.find((step) => step.id === "gmail-sign-in")).toMatchObject({ command: "hedge mcp-gateway sign-in gmail" });
   });
 
   test("mail watch stays off until the profile turns it on, needs the Gmail route, and then runs only on the hub", () => {
@@ -113,12 +113,12 @@ describe("the plan", () => {
 const startEnvironment = { ...process.env };
 
 function gatewayServer(fields: Parameters<typeof fakeMcpHub>[0] = {}) {
-  const state = fakeMcpHub({ groups: [{ id: "g", name: "fleet", servers: ["tickets", "calendar"] }], ...fields });
+  const state = fakeMcpHub({ groups: [{ id: "g", name: "hedge", servers: ["tickets", "calendar"] }], ...fields });
   const api = mcphubFetch(state);
   const bridged: string[] = [];
   spyOn(globalThis, "fetch").mockImplementation((async (input: string | URL | Request, init: RequestInit = {}) => {
     const url = new URL(String(input));
-    if (url.pathname !== "/mcphub/mcp/fleet") return api(input, init);
+    if (url.pathname !== "/mcphub/mcp/hedge") return api(input, init);
     const key = new Headers(init.headers).get("authorization");
     bridged.push(`${init.method} ${key}`);
     if (key !== `Bearer ${issued}`) return new Response("Unauthorized", { status: 401 });
@@ -141,9 +141,9 @@ function gatewayServer(fields: Parameters<typeof fakeMcpHub>[0] = {}) {
 function machine(saved: MachineFile, fields: Partial<Profile> = {}, hosts: Record<string, Host | "down"> = {}, platform: NodeJS.Platform = "linux") {
   const home = temp.make("home-");
   const profile = temp.make("profile-");
-  writeFileSync(join(profile, "fleet.json"), JSON.stringify({ schema: 1, engine: { repo: "example/engine", ref: "main", channel: "track" }, sources: [], packs: ["mcp-gateway"], plan: "codex", settings: {}, workflows: {}, hub: "hub-1", devboxes: ["node-2"], ...fields }));
-  mkdirSync(join(home, ".config/fleet"), { recursive: true });
-  writeFileSync(join(home, ".config/fleet/machine.json"), JSON.stringify({ ...saved, profileDir: profile }));
+  writeFileSync(join(profile, "hedge.json"), JSON.stringify({ schema: 1, engine: { repo: "example/engine", ref: "main", channel: "track" }, sources: [], packs: ["mcp-gateway"], plan: "codex", settings: {}, workflows: {}, hub: "hub-1", devboxes: ["node-2"], ...fields }));
+  mkdirSync(join(home, ".config/hedge"), { recursive: true });
+  writeFileSync(join(home, ".config/hedge/machine.json"), JSON.stringify({ ...saved, profileDir: profile }));
   let lines: string[] = [];
   const errors: string[] = [];
   let input = "";
@@ -160,13 +160,13 @@ function machine(saved: MachineFile, fields: Partial<Profile> = {}, hosts: Recor
     run: engineSteps(repoRoot, (args) => main(args, { ...options, print: () => {} })),
     adapters: () => [filesAdapter, providerConfigAdapter({ run: async () => ({ code: 0, stdout: "" }) })],
   };
-  const fleet = async (args: string[], stdin = "") => {
+  const hedge = async (args: string[], stdin = "") => {
     lines = [];
     input = stdin;
     const code = await main(args, options);
     return { code, output: lines.join("\n") };
   };
-  return { home, fleet, errors, host: remoteFleet(() => options) };
+  return { home, hedge, errors, host: remoteHedge(() => options) };
 }
 
 const initialize = `${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "agent", version: "1" } } })}\n`;
@@ -176,102 +176,102 @@ const macMachine: MachineFile = { schema: 1, role: "mac", name: "laptop-3" };
 
 describe("on the hub", () => {
   test("apply issues the hub's own key, writes the client file from it, and the bridge reaches the gateway with it", async () => {
-    const { home, fleet } = machine(hubMachine);
+    const { home, hedge } = machine(hubMachine);
     writeMcpHubSettings(home);
     const { state, bridged, spawned } = gatewayServer({ home });
-    const applied = await fleet(["apply"]);
+    const applied = await hedge(["apply"]);
     expect(applied.code).toBe(0);
     expect(spawned).toEqual([]);
     expect(applied.output).not.toContain("cannot reach the MCP gateway");
-    expect(state.calls.find((call) => call.path === "auth/keys")?.body).toEqual({ name: "Fleet hub-1", kind: "system", accessType: "groups", allowedGroups: ["fleet"] });
+    expect(state.calls.find((call) => call.path === "auth/keys")?.body).toEqual({ name: "Hedge hub-1", kind: "system", accessType: "groups", allowedGroups: ["hedge"] });
     expect(readFileSync(storeFile(home), "utf8")).toBe(issued);
     expect(JSON.parse(readFileSync(clientFile(home), "utf8"))).toEqual({ baseUrl: "http://127.0.0.1:3317/mcphub", token: issued });
     expect(statSync(clientFile(home)).mode & 0o777).toBe(0o600);
     expect(readFileSync(join(home, ".codex/config.toml"), "utf8")).toContain("mcp-connect");
 
-    const connected = await fleet(["mcp-connect"], initialize);
+    const connected = await hedge(["mcp-connect"], initialize);
     expect(connected.code).toBe(0);
     expect(bridged[0]).toBe(`POST Bearer ${issued}`);
     expect(JSON.parse(connected.output.split("\n")[0]!)).toMatchObject({ id: 1, result: { serverInfo: { name: "mcphub" } } });
 
-    const again = await fleet(["apply"]);
+    const again = await hedge(["apply"]);
     expect(again.code).toBe(0);
     expect(state.calls.filter((call) => call.path === "auth/keys")).toHaveLength(1);
   });
 
   test("an apply while the gateway does not answer runs the install repair, issues no key when it fails, and the bridge says to apply on the hub", async () => {
-    const { home, fleet } = machine(hubMachine);
+    const { home, hedge } = machine(hubMachine);
     writeMcpHubSettings(home);
     const { spawned } = gatewayServer({ home, healthy: false });
-    const applied = await fleet(["apply"]);
+    const applied = await hedge(["apply"]);
     expect(applied.output).toContain("The MCP gateway is not installed on the hub, or does not answer.");
-    expect(spawned[0]).toEqual(["docker", "image", "inspect", expect.stringMatching(/^fleet-mcphub:1\.1\.0-/)]);
+    expect(spawned[0]).toEqual(["docker", "image", "inspect", expect.stringMatching(/^hedge-mcphub:1\.1\.0-/)]);
     expect(existsSync(storeFile(home))).toBe(false);
     const errors: string[] = [];
     spyOn(console, "error").mockImplementation((line: string) => { errors.push(line); });
-    expect(await fleet(["mcp-connect"], initialize)).toEqual({ code: 1, output: "" });
-    expect(errors).toEqual(["mcp-gateway/mcp-gateway has no credential on this machine yet. Run fleet apply on the hub."]);
+    expect(await hedge(["mcp-connect"], initialize)).toEqual({ code: 1, output: "" });
+    expect(errors).toEqual(["mcp-gateway/mcp-gateway has no credential on this machine yet. Run hedge apply on the hub."]);
   });
 
-  test("the docker commands of the install repair run with the home Fleet runs the pack in", async () => {
-    const { home, fleet } = machine(hubMachine);
+  test("the docker commands of the install repair run with the home Hedge runs the pack in", async () => {
+    const { home, hedge } = machine(hubMachine);
     writeMcpHubSettings(home);
     const { dockerHomes } = gatewayServer({ home, healthy: false });
-    await fleet(["apply"]);
+    await hedge(["apply"]);
     expect(dockerHomes.length).toBeGreaterThan(0);
     expect(new Set(dockerHomes)).toEqual(new Set([home]));
   });
 
   test("a gateway installed at an HTTPS address fails the install check, and apply reinstalls it at loopback", async () => {
-    const { home, fleet } = machine(hubMachine);
+    const { home, hedge } = machine(hubMachine);
     writeMcpHubSettings(home, { systemConfig: { install: { baseUrl: "https://hub.internal.example.com:60001/mcphub" } } });
     const { spawned } = gatewayServer({ home });
-    expect(await fleet(["run", "mcp-gateway/mcp-gateway-installed"])).toMatchObject({ code: 1 });
-    expect((await fleet(["mcp-gateway", "doctor"])).output).toContain("MCPHub answers at https://hub.internal.example.com:60001/mcphub, not http://127.0.0.1:3317/mcphub. Run: fleet apply");
-    await fleet(["apply"]);
-    expect(spawned[0]).toEqual(["docker", "image", "inspect", expect.stringMatching(/^fleet-mcphub:1\.1\.0-/)]);
+    expect(await hedge(["run", "mcp-gateway/mcp-gateway-installed"])).toMatchObject({ code: 1 });
+    expect((await hedge(["mcp-gateway", "doctor"])).output).toContain("MCPHub answers at https://hub.internal.example.com:60001/mcphub, not http://127.0.0.1:3317/mcphub. Run: hedge apply");
+    await hedge(["apply"]);
+    expect(spawned[0]).toEqual(["docker", "image", "inspect", expect.stringMatching(/^hedge-mcphub:1\.1\.0-/)]);
   });
 
   test("a failure before the bridge starts goes to standard error, never onto the MCP stream", async () => {
-    const { home, fleet, errors } = machine(hubMachine);
-    mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
-    writeFileSync(join(home, ".local/state/fleet/mcp-gateway"), "");
+    const { home, hedge, errors } = machine(hubMachine);
+    mkdirSync(join(home, ".local/state/hedge"), { recursive: true });
+    writeFileSync(join(home, ".local/state/hedge/mcp-gateway"), "");
     gatewayServer({ home });
-    expect(await fleet(["mcp-connect"], initialize)).toEqual({ code: 1, output: "" });
-    expect(errors).toEqual([expect.stringMatching(/^fleet: EEXIST/)]);
+    expect(await hedge(["mcp-connect"], initialize)).toEqual({ code: 1, output: "" });
+    expect(errors).toEqual([expect.stringMatching(/^hedge: EEXIST/)]);
   });
 
   test("sign-in prints the forward for your computer with the profile's hub, and each pending authorization address", async () => {
-    const { home, fleet } = machine(hubMachine);
+    const { home, hedge } = machine(hubMachine);
     writeMcpHubSettings(home, { mcpServers: { tickets: { oauth: { pendingAuthorization: { authorizationUrl: "https://auth.example.com/authorize?state=1" } } } } });
     gatewayServer({ home });
-    expect(await fleet(["mcp-gateway", "sign-in"])).toEqual({ code: 0, output: "On your computer, keep this running while you sign in: coder port-forward hub-1 --tcp 3317\ntickets: https://auth.example.com/authorize?state=1" });
-    expect((await fleet(["mcp-gateway", "sign", "in"])).code).toBe(2);
+    expect(await hedge(["mcp-gateway", "sign-in"])).toEqual({ code: 0, output: "On your computer, keep this running while you sign in: coder port-forward hub-1 --tcp 3317\ntickets: https://auth.example.com/authorize?state=1" });
+    expect((await hedge(["mcp-gateway", "sign", "in"])).code).toBe(2);
   });
 
   test("doctor asks for the Slack sign-in while the bridge has none or the gateway lists it with no tools, and not while it lists them or does not answer", async () => {
-    const { home, fleet } = machine(hubMachine, { workflows: { "slack-bridge": true } });
+    const { home, hedge } = machine(hubMachine, { workflows: { "slack-bridge": true } });
     writeMcpHubSettings(home);
     const { state } = gatewayServer({ home, servers: ["tickets", "calendar", "slack"], toolCounts: { slack: 21 } });
-    const finding = "To do: The Slack bridge has no ChatGPT sign-in, or the gateway finds no Slack tools for it. Connect Slack in ChatGPT, Settings, Apps, then sign in with that ChatGPT account. Run: fleet mcp-gateway slack-bridge sign-in";
-    expect((await fleet(["doctor"])).output).toContain(finding);
-    mkdirSync(join(home, ".local/share/fleet-mcphub/data/slack-codex"), { recursive: true });
-    writeFileSync(join(home, ".local/share/fleet-mcphub/data/slack-codex/auth.json"), "{}");
+    const finding = "To do: The Slack bridge has no ChatGPT sign-in, or the gateway finds no Slack tools for it. Connect Slack in ChatGPT, Settings, Apps, then sign in with that ChatGPT account. Run: hedge mcp-gateway slack-bridge sign-in";
+    expect((await hedge(["doctor"])).output).toContain(finding);
+    mkdirSync(join(home, ".local/share/hedge-mcphub/data/slack-codex"), { recursive: true });
+    writeFileSync(join(home, ".local/share/hedge-mcphub/data/slack-codex/auth.json"), "{}");
     state.toolCounts.slack = 0;
-    expect((await fleet(["doctor"])).output).toContain(finding);
+    expect((await hedge(["doctor"])).output).toContain(finding);
     state.toolCounts.slack = 21;
-    expect((await fleet(["doctor"])).output).not.toContain(finding);
+    expect((await hedge(["doctor"])).output).not.toContain(finding);
     state.toolCounts.slack = 0;
     state.notReadyFor = 1000;
-    expect((await fleet(["doctor"])).output).not.toContain(finding);
+    expect((await hedge(["doctor"])).output).not.toContain(finding);
   });
 
   test("a solo machine, with no hub in the profile, is its own hub and issues its own key", async () => {
-    const { home, fleet } = machine({ schema: 1, role: "linux", name: "only-1" }, { hub: undefined, devboxes: undefined });
+    const { home, hedge } = machine({ schema: 1, role: "linux", name: "only-1" }, { hub: undefined, devboxes: undefined });
     writeMcpHubSettings(home);
     const { state } = gatewayServer({ home });
-    expect((await fleet(["apply"])).code).toBe(0);
-    expect(state.calls.find((call) => call.path === "auth/keys")?.body).toMatchObject({ name: "Fleet only-1" });
+    expect((await hedge(["apply"])).code).toBe(0);
+    expect(state.calls.find((call) => call.path === "auth/keys")?.body).toMatchObject({ name: "Hedge only-1" });
     expect(readFileSync(storeFile(home), "utf8")).toBe(issued);
   });
 });
@@ -279,14 +279,14 @@ describe("on the hub", () => {
 describe("on a node", () => {
   test("apply adopts the key that today's client file holds into the store, at loopback or at the hub's old HTTPS address, and the bridge uses it", async () => {
     for (const baseUrl of ["http://127.0.0.1:3317/mcphub", "https://hub.internal.example.com:60001/mcphub"]) {
-      const { home, fleet } = machine(nodeMachine);
+      const { home, hedge } = machine(nodeMachine);
       writeFileSync(clientFile(home), JSON.stringify({ baseUrl, token: issued }));
       const { bridged } = gatewayServer();
-      const applied = await fleet(["apply"]);
+      const applied = await hedge(["apply"]);
       expect(applied.output).not.toContain("cannot reach the MCP gateway");
       expect(readFileSync(storeFile(home), "utf8")).toBe(issued);
       expect(JSON.parse(readFileSync(clientFile(home), "utf8"))).toEqual({ baseUrl: "http://127.0.0.1:3317/mcphub", token: issued });
-      expect((await fleet(["mcp-connect"], initialize)).code).toBe(0);
+      expect((await hedge(["mcp-connect"], initialize)).code).toBe(0);
       expect(bridged[0]).toBe(`POST Bearer ${issued}`);
       mock.restore();
     }
@@ -299,25 +299,25 @@ describe("on a node", () => {
     const hub = machine(hubMachine);
     writeMcpHubSettings(hub.home);
     const { state, bridged } = gatewayServer({ home: hub.home });
-    expect((await hub.fleet(["apply"])).code).toBe(0);
-    const { home, fleet } = machine(saved, {}, { "hub-1": hub.host }, platform);
-    const applied = await fleet(["apply"]);
+    expect((await hub.hedge(["apply"])).code).toBe(0);
+    const { home, hedge } = machine(saved, {}, { "hub-1": hub.host }, platform);
+    const applied = await hedge(["apply"]);
     expect(applied.output).not.toContain("Could not pull");
-    expect(state.calls.filter((call) => call.path === "auth/keys").map((call) => call.body)).toEqual([expect.objectContaining({ name: "Fleet hub-1" }), expect.objectContaining({ name: `Fleet ${saved.name}` })]);
+    expect(state.calls.filter((call) => call.path === "auth/keys").map((call) => call.body)).toEqual([expect.objectContaining({ name: "Hedge hub-1" }), expect.objectContaining({ name: `Hedge ${saved.name}` })]);
     expect(readFileSync(storeFile(home), "utf8")).toBe(issued);
     expect(JSON.parse(readFileSync(clientFile(home), "utf8"))).toEqual({ baseUrl: "http://127.0.0.1:3317/mcphub", token: issued });
     expect(statSync(clientFile(home)).mode & 0o777).toBe(0o600);
-    expect((await fleet(["mcp-connect"], initialize)).code).toBe(0);
+    expect((await hedge(["mcp-connect"], initialize)).code).toBe(0);
     expect(bridged.at(-1)).toBe(`POST Bearer ${issued}`);
   });
 
   test("without a key and with the hub down, apply names the failed pull and the client check", async () => {
-    const { fleet } = machine(nodeMachine, {}, { "hub-1": "down" });
+    const { hedge } = machine(nodeMachine, {}, { "hub-1": "down" });
     gatewayServer();
-    const applied = await fleet(["apply"]);
-    expect(applied.output).toContain("Fix: Could not pull the credential of mcp-gateway/mcp-gateway from the hub hub-1 (ssh exited 255. Run ssh hub-1 true to see why). Fleet tries again at the next apply.");
+    const applied = await hedge(["apply"]);
+    expect(applied.output).toContain("Fix: Could not pull the credential of mcp-gateway/mcp-gateway from the hub hub-1 (ssh exited 255. Run ssh hub-1 true to see why). Hedge tries again at the next apply.");
     expect(applied.output).toContain("This machine cannot reach the MCP gateway.");
-    expect(await fleet(["run", "mcp-gateway/mcp-gateway-client"])).toEqual({ code: 1, output: "This machine has no MCP gateway key. Run fleet apply on this machine to pull its key from the hub." });
+    expect(await hedge(["run", "mcp-gateway/mcp-gateway-client"])).toEqual({ code: 1, output: "This machine has no MCP gateway key. Run hedge apply on this machine to pull its key from the hub." });
   });
 
   const trickyServer = "team docs; $(touch pwned) 'x'";
@@ -325,26 +325,26 @@ describe("on a node", () => {
     const hub = machine(hubMachine);
     writeMcpHubSettings(hub.home, { mcpServers: { [trickyServer]: { oauth: { pendingAuthorization: { authorizationUrl: "https://auth.example.com/authorize?state=1" } } } } });
     const { state } = gatewayServer({ home: hub.home });
-    return { state, fleet: machine(nodeMachine, {}, { "hub-1": hub.host }).fleet };
+    return { state, hedge: machine(nodeMachine, {}, { "hub-1": hub.host }).hedge };
   };
 
-  test("fleet mcp-gateway reconnect typed on a devbox reconnects that server on the hub, with a name that holds a space and shell characters", async () => {
-    const { state, fleet } = nodeOfHub();
-    expect(await fleet(["mcp-gateway", "reconnect", trickyServer])).toEqual({ code: 0, output: `MCPHub reconnected ${trickyServer}. If it needs a sign-in, run: fleet mcp-gateway sign-in` });
+  test("hedge mcp-gateway reconnect typed on a devbox reconnects that server on the hub, with a name that holds a space and shell characters", async () => {
+    const { state, hedge } = nodeOfHub();
+    expect(await hedge(["mcp-gateway", "reconnect", trickyServer])).toEqual({ code: 0, output: `MCPHub reconnected ${trickyServer}. If it needs a sign-in, run: hedge mcp-gateway sign-in` });
     expect(state.calls.map((call) => call.path)).toContain(`servers/${encodeURIComponent(trickyServer)}/reload`);
   });
 
-  test("fleet mcp-gateway sign-in typed on a devbox prints the hub's pending sign-ins", async () => {
-    const { fleet } = nodeOfHub();
-    expect(await fleet(["mcp-gateway", "sign-in"])).toEqual({ code: 0, output: `On your computer, keep this running while you sign in: coder port-forward hub-1 --tcp 3317\n${trickyServer}: https://auth.example.com/authorize?state=1` });
+  test("hedge mcp-gateway sign-in typed on a devbox prints the hub's pending sign-ins", async () => {
+    const { hedge } = nodeOfHub();
+    expect(await hedge(["mcp-gateway", "sign-in"])).toEqual({ code: 0, output: `On your computer, keep this running while you sign in: coder port-forward hub-1 --tcp 3317\n${trickyServer}: https://auth.example.com/authorize?state=1` });
   });
 
 
   test("the hub's install check and the key issue stay off a devbox", async () => {
-    const { home, fleet } = machine(nodeMachine);
+    const { home, hedge } = machine(nodeMachine);
     const { state } = gatewayServer();
-    await fleet(["apply"]);
+    await hedge(["apply"]);
     expect(state.calls).toEqual([]);
-    expect(existsSync(join(home, ".local/share/fleet-mcphub"))).toBe(false);
+    expect(existsSync(join(home, ".local/share/hedge-mcphub"))).toBe(false);
   });
 });

@@ -25,7 +25,7 @@ function engineWithTools() {
 const run = (args: string[], home: string, engine: string) =>
   main(args, { home, engineRoot: engine, platform: "linux", env: {}, print: () => {}, run: (command, env = {}) => Bun.spawn(command, { stdout: "ignore", stderr: "ignore", env: { ...Bun.env, HOME: home, ...env } }).exited });
 
-describe("fleet apply --skip", () => {
+describe("hedge apply --skip", () => {
   test("leaves the named step for a later apply, and never undoes a step it skips", async () => {
     const home = temp.make("home-");
     const engine = engineWithTools();
@@ -43,8 +43,8 @@ describe("fleet apply --skip", () => {
     const engine = engineWithTools();
     const profile = profileDir(["tools"]);
     expect(await run(["apply", "--profile", profile], home, engine)).toBe(0);
-    const file = JSON.parse(readFileSync(join(profile, "fleet.json"), "utf8"));
-    writeFileSync(join(profile, "fleet.json"), JSON.stringify({ ...file, packs: [] }));
+    const file = JSON.parse(readFileSync(join(profile, "hedge.json"), "utf8"));
+    writeFileSync(join(profile, "hedge.json"), JSON.stringify({ ...file, packs: [] }));
     expect(await run(["apply", "--skip", "tools/box"], home, engine)).toBe(0);
     expect(existsSync(join(home, "box.txt"))).toBe(true);
     expect(await run(["apply"], home, engine)).toBe(0);
@@ -52,7 +52,7 @@ describe("fleet apply --skip", () => {
   });
 });
 
-describe("fleet apply progress", () => {
+describe("hedge apply progress", () => {
   test("names each step before its work is done, and stays quiet for a step that already holds", async () => {
     const home = temp.make("home-");
     const engine = engineWithTools();

@@ -66,7 +66,7 @@ test("search neither matches, counts nor shows a secret: a private key's lines o
   expect(found.text).not.toContain("ghp_");
 });
 
-test("on the hub, fleet context declares the library's search to the MCP gateway, which runs it under node with the checkout mounted read-only", async () => {
+test("on the hub, hedge context declares the library's search to the MCP gateway, which runs it under node with the checkout mounted read-only", async () => {
   const base = temp.make("context-hub-");
   const remote = join(base, "remote.git");
   git(base, "init", "-q", "--bare", "-b", "main", remote);
@@ -79,28 +79,28 @@ test("on the hub, fleet context declares the library's search to the MCP gateway
   mkdirSync(home);
   const printed: string[] = [];
   const settings = { "context-library.repo": `file://${remote}`, "context-library.path": "~/notes", "context-library.url": "https://notes.example.com/blob/main/", "context-library.owner": "" };
-  const fleet = (args: string[]) => contextCommand(args, { env: { FLEET_SETTINGS: JSON.stringify(settings) }, home, print: (line) => printed.push(line), git: runGit, agent: () => async () => ({ code: 1, stdout: "", stderr: "" }), today: () => "2026-11-12", share: () => { throw new Error("unused"); } });
-  expect(await fleet(["sync"])).toBe(0);
-  expect(await fleet(["upstream", "doctor"])).toBe(1);
-  expect(await fleet(["upstream", "install"])).toBe(0);
-  expect(await fleet(["upstream", "doctor"])).toBe(0);
+  const hedge = (args: string[]) => contextCommand(args, { env: { HEDGE_SETTINGS: JSON.stringify(settings) }, home, print: (line) => printed.push(line), git: runGit, agent: () => async () => ({ code: 1, stdout: "", stderr: "" }), today: () => "2026-11-12", share: () => { throw new Error("unused"); } });
+  expect(await hedge(["sync"])).toBe(0);
+  expect(await hedge(["upstream", "doctor"])).toBe(1);
+  expect(await hedge(["upstream", "install"])).toBe(0);
+  expect(await hedge(["upstream", "doctor"])).toBe(0);
   expect((await declaredUpstreams(home)).map((upstream) => upstream.name)).toEqual(["context"]);
 
   writeMcpHubSettings(home);
-  mkdirSync(join(home, ".local/share/fleet/codex/current/bin"), { recursive: true }), writeFileSync(join(home, ".local/share/fleet/codex/current/bin/codex"), "");
-  const api = fakeMcpHub({ groups: [{ id: "g", name: "fleet", servers: [] }] });
-  const ran = fakeRun(dockerHost(home, { Config: { Labels: { "org.fleet.service": "mcphub" }, Env: [] }, Image: "sha256:older", State: { Running: true }, Mounts: [] }));
+  mkdirSync(join(home, ".local/share/hedge/codex/current/bin"), { recursive: true }), writeFileSync(join(home, ".local/share/hedge/codex/current/bin/codex"), "");
+  const api = fakeMcpHub({ groups: [{ id: "g", name: "hedge", servers: [] }] });
+  const ran = fakeRun(dockerHost(home, { Config: { Labels: { "org.hedge.service": "mcphub" }, Env: [] }, Image: "sha256:older", State: { Running: true }, Mounts: [] }));
   await registerUpstreams(fakeHub(home, { fetch: mcphubFetch(api), run: ran.run }));
-  expect(api.configs.context).toMatchObject({ command: "node", args: ["/fleet-local/context.mjs"], env: { FLEET_CONTEXT_LIBRARY: "/fleet-context", FLEET_CONTEXT_URL: "https://notes.example.com/blob/main/" } });
-  expect(ran.calls.filter((call) => call.command[1] === "run").at(-1)!.command.join(" ")).toContain(`-v ${realpathSync(join(home, "notes"))}:/fleet-context:ro`);
+  expect(api.configs.context).toMatchObject({ command: "node", args: ["/hedge-local/context.mjs"], env: { HEDGE_CONTEXT_LIBRARY: "/hedge-context", HEDGE_CONTEXT_URL: "https://notes.example.com/blob/main/" } });
+  expect(ran.calls.filter((call) => call.command[1] === "run").at(-1)!.command.join(" ")).toContain(`-v ${realpathSync(join(home, "notes"))}:/hedge-context:ro`);
 
-  const bundle = join(home, ".local/share/fleet-mcphub/local/context.mjs");
+  const bundle = join(home, ".local/share/hedge-mcphub/local/context.mjs");
   const messages = [
     { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } },
     { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "context_search", arguments: { query: "zebra canary" } } },
   ];
   const child = Bun.spawn([Bun.which("node") ?? process.execPath, bundle], {
-    env: { PATH: process.env.PATH, FLEET_CONTEXT_LIBRARY: join(home, "notes"), FLEET_CONTEXT_URL: "https://notes.example.com/blob/main/" },
+    env: { PATH: process.env.PATH, HEDGE_CONTEXT_LIBRARY: join(home, "notes"), HEDGE_CONTEXT_URL: "https://notes.example.com/blob/main/" },
     stdin: Buffer.from(messages.map((message) => JSON.stringify(message)).join("\n") + "\n"), stdout: "pipe", stderr: "pipe",
   });
   const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
@@ -108,7 +108,7 @@ test("on the hub, fleet context declares the library's search to the MCP gateway
   expect(replies[1].result.structuredContent.results[0]).toMatchObject({ path: "decisions/canary.md", url: "https://notes.example.com/blob/main/decisions/canary.md" });
   expect(stderr).not.toContain("zebra");
 
-  expect(await fleet(["upstream", "remove"])).toBe(0);
-  expect(existsSync(join(home, ".config/fleet/mcp-gateway/upstreams/context.json"))).toBe(false);
-  expect(await fleet(["upstream", "sideways"])).toBe(2);
+  expect(await hedge(["upstream", "remove"])).toBe(0);
+  expect(existsSync(join(home, ".config/hedge/mcp-gateway/upstreams/context.json"))).toBe(false);
+  expect(await hedge(["upstream", "sideways"])).toBe(2);
 });

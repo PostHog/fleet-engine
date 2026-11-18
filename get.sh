@@ -1,26 +1,27 @@
 #!/bin/sh
-# Fleet bootstrap. Installs what Fleet needs, fetches the engine at a pinned
-# ref, installs its packages, puts fleet on the login PATH, then runs
-# fleet setup, or fleet apply when --profile names a profile.
+# Hedge bootstrap. Installs what Hedge needs, fetches the engine at a pinned
+# ref, installs its packages, puts hedge on the login PATH, then runs
+# hedge setup, or hedge apply when --profile names a profile.
 #
 #   curl -fsSL https://raw.githubusercontent.com/PostHog/fleet-engine/main/get.sh | sh
-#   sh get.sh [--ref <ref>] [--profile <dir> | --install-only] [-- <flags for fleet>]
+#   sh get.sh [--ref <ref>] [--profile <dir> | --install-only] [-- <flags for hedge>]
 #
 # Running it again picks up where it stopped: every step skips what is done.
 set -eu
 
-engine_repo=${FLEET_ENGINE_REPO:-https://github.com/PostHog/fleet-engine.git}
-engine_dir=${FLEET_ENGINE_DIR:-$HOME/.local/share/fleet/engine}
-ref=${FLEET_ENGINE_REF:-main}
+engine_slug=PostHog/fleet-engine
+engine_repo=${HEDGE_ENGINE_REPO:-${FLEET_ENGINE_REPO:-https://github.com/$engine_slug.git}}
+engine_dir=${HEDGE_ENGINE_DIR:-${FLEET_ENGINE_DIR:-$HOME/.local/share/hedge/engine}}
+ref=${HEDGE_ENGINE_REF:-${FLEET_ENGINE_REF:-main}}
 profile=
 install_only=
 bun_version=1.4.4
 gh_mac_version=2.103.3
 
-say() { printf 'Fleet: %s\n' "$*" >&2; }
+say() { printf 'Hedge: %s\n' "$*" >&2; }
 fail() {
   say "$*"
-  [ "$(sed -n 2p "$HOME/.local/bin/fleet" 2>/dev/null)" != "# Fleet" ] || say "Stuck? Run fleet triage. It shows a report of this setup that you can send to the Fleet maintainer."
+  [ "$(sed -n 2p "$HOME/.local/bin/hedge" 2>/dev/null)" != "# Hedge" ] || say "Stuck? Run hedge triage. It shows a report of this setup that you can send to the Hedge maintainer."
   exit 1
 }
 has() { command -v "$1" >/dev/null 2>&1; }
@@ -31,15 +32,26 @@ while [ $# -gt 0 ]; do
     --profile) [ $# -ge 2 ] || fail "--profile needs a directory."; profile=$2; shift 2 ;;
     --install-only) install_only=1; shift ;;
     --) shift; break ;;
-    *) fail "unknown option $1. Put flags for fleet after --." ;;
+    *) fail "unknown option $1. Put flags for hedge after --." ;;
   esac
 done
 
 [ "$(id -u)" -ne 0 ] || fail "run this as your login user, without sudo."
 export PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH"
 
-# fleet setup reads this log to time the whole install, from this line on.
-install_log="$HOME/.local/state/fleet/logs/install-timings"
+# Paths from before the rename move to their new names and keep a link at the old one.
+legacy_paths=".config/fleet:.config/hedge .local/state/fleet:.local/state/hedge .local/share/fleet:.local/share/hedge .local/share/fleet-cli-proxy:.local/share/hedge-cli-proxy .local/share/fleet-hub-https:.local/share/hedge-hub-https .local/share/fleet-mcphub:.local/share/hedge-mcphub .ssh/fleet_ed25519:.ssh/hedge_ed25519 .ssh/fleet_ed25519.pub:.ssh/hedge_ed25519.pub .ssh/fleet-allowed-signers:.ssh/hedge-allowed-signers .ssh/fleet-coder-git.pub:.ssh/hedge-coder-git.pub .ssh/fleet-peers.conf:.ssh/hedge-peers.conf"
+for pair in $legacy_paths; do
+  before="$HOME/${pair%%:*}"
+  after="$HOME/${pair#*:}"
+  if { [ -e "$before" ] && [ ! -L "$before" ]; } && ! { [ -e "$after" ] || [ -L "$after" ]; }; then
+    mv "$before" "$after"
+    ln -s "${after##*/}" "$before"
+  fi
+done
+
+# hedge setup reads this log to time the whole install, from this line on.
+install_log="$HOME/.local/state/hedge/logs/install-timings"
 needed_you=
 mkdir -p "${install_log%/*}"
 printf 'start %s\n' "$(date +%s)" >"$install_log"
@@ -183,7 +195,7 @@ t3_cli() {
 
 fetch_engine() {
   if [ -d "$engine_dir" ] && [ ! -d "$engine_dir/.git" ] && [ -n "$(ls -A "$engine_dir")" ]; then
-    fail "$engine_dir holds files that are not a Fleet engine. Move them away, or set FLEET_ENGINE_DIR."
+    fail "$engine_dir holds files that are not a Hedge engine. Move them away, or set HEDGE_ENGINE_DIR."
   fi
   mkdir -p "$engine_dir"
   engine_dir=$(CDPATH='' cd -- "$engine_dir" && pwd)
@@ -209,18 +221,27 @@ install_packages() {
   rm -f "$log"
 }
 
-link_fleet() {
-  bin_dir="$HOME/.local/bin"
-  mkdir -p "$bin_dir"
-  if { [ -e "$bin_dir/fleet" ] || [ -L "$bin_dir/fleet" ]; } && [ "$(sed -n 2p "$bin_dir/fleet" 2>/dev/null)" != "# Fleet" ]; then
-    say "$bin_dir/fleet is not Fleet's, so it stays as it is. Run Fleet with sh $engine_dir/fleet."
+ours() {
+  ! { [ -e "$1" ] || [ -L "$1" ]; } || [ "$(sed -n 2p "$1" 2>/dev/null)" = "# Hedge" ] || [ "$(sed -n 2p "$1" 2>/dev/null)" = "# Fleet" ]
+}
+
+link_command() {
+  if ! ours "$bin_dir/$1"; then
+    [ "$1" != hedge ] || say "$bin_dir/hedge is not Hedge's, so it stays as it is. Run Hedge with sh $engine_dir/hedge."
     return 0
   fi
-  quoted=$(printf '%s' "$engine_dir/fleet" | sed "s/'/'\\\\''/g")
-  wrapper=$(mktemp "$bin_dir/fleet.XXXXXX")
-  printf "#!/bin/sh\n# Fleet\nexec sh '%s' \"\$@\"\n" "$quoted" >"$wrapper"
+  wrapper=$(mktemp "$bin_dir/$1.XXXXXX")
+  printf "#!/bin/sh\n# Hedge\nexec sh '%s' \"\$@\"\n" "$quoted" >"$wrapper"
   chmod 755 "$wrapper"
-  mv -f "$wrapper" "$bin_dir/fleet"
+  mv -f "$wrapper" "$bin_dir/$1"
+}
+
+link_hedge() {
+  bin_dir="$HOME/.local/bin"
+  mkdir -p "$bin_dir"
+  quoted=$(printf '%s' "$engine_dir/hedge" | sed "s/'/'\\\\''/g")
+  link_command hedge
+  link_command fleet
 }
 
 add_login_line() {
@@ -238,20 +259,20 @@ login_path() {
   case "${shell##*/}" in
     zsh) file=.zprofile ;;
     bash) file=.profile; [ ! -f "$HOME/.bash_login" ] || file=.bash_login; [ ! -f "$HOME/.bash_profile" ] || file=.bash_profile ;;
-    fish) file=.config/fish/conf.d/fleet.fish ;;
+    fish) file=.config/fish/conf.d/hedge.fish ;;
     *) file=.profile ;;
   esac
-  if [ "$file" = .config/fish/conf.d/fleet.fish ]; then
+  if [ "$file" = .config/fish/conf.d/hedge.fish ]; then
     line="fish_add_path --global $dirs"
     [ "$(cat "$HOME/$file" 2>/dev/null)" != "$line" ] || return 0
     mkdir -p "$HOME/.config/fish/conf.d"
     printf '%s\n' "$line" >"$HOME/$file"
   else
-    line="export PATH=\"$(printf '%s' "$dirs" | tr ' ' ':'):\$PATH\" # Added by Fleet"
+    line="export PATH=\"$(printf '%s' "$dirs" | tr ' ' ':'):\$PATH\" # Added by Hedge"
     ! grep -qxF "$line" "$HOME/$file" 2>/dev/null || return 0
     add_login_line "$HOME/$file" "$line"
   fi
-  say "Open a new terminal to use fleet. ~/$file now puts ~/.local/bin and ~/.bun/bin on your PATH."
+  say "Open a new terminal to use hedge. ~/$file now puts ~/.local/bin and ~/.bun/bin on your PATH."
 }
 
 case "$(uname -s)" in
@@ -260,7 +281,7 @@ case "$(uname -s)" in
     for tool in curl git tar sha256sum python3; do has "$tool" || fail "install $tool first."; done
     has gh || linux_gh
     has bun || direct_bun ;;
-  *) fail "Fleet runs on macOS and Linux." ;;
+  *) fail "Hedge runs on macOS and Linux." ;;
 esac
 ended tools "$needed_you"
 t3_cli
@@ -270,16 +291,16 @@ fetch_engine
 ended engine
 install_packages
 ended packages
-link_fleet
+link_hedge
 login_path
 say "Engine ready at $ref in $engine_dir."
 
 [ -z "$install_only" ] || exit 0
 
 if [ -n "$profile" ]; then
-  exec sh "$engine_dir/fleet" apply --profile "$profile" "$@"
+  exec sh "$engine_dir/hedge" apply --profile "$profile" "$@"
 fi
 if [ ! -t 0 ] && (: </dev/tty) 2>/dev/null; then
-  exec sh "$engine_dir/fleet" setup "$@" </dev/tty
+  exec sh "$engine_dir/hedge" setup "$@" </dev/tty
 fi
-exec sh "$engine_dir/fleet" setup "$@"
+exec sh "$engine_dir/hedge" setup "$@"

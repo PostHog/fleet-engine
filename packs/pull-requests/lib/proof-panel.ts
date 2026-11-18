@@ -56,7 +56,7 @@ export function parseGuide(text: string, path: string): PanelGuide {
   const lenses = section(text, "## Lenses");
   const freshEyes = /\*\*Fresh-eyes lane\*\*:.*?It runs (.+?)(?:, with |\. )/.exec(oneLine(text))?.[1];
   const security = /\*\*Security lane\*\*:.*?It runs (.+?)(?:, |\. )/.exec(oneLine(text))?.[1];
-  if (!brief || !lenses || !freshEyes) throw new Error(`${path} lacks the Brief, the Lenses, or the Fresh-eyes lane that fleet reads`);
+  if (!brief || !lenses || !freshEyes) throw new Error(`${path} lacks the Brief, the Lenses, or the Fresh-eyes lane that hedge reads`);
   const contextFree = /Context \(every lens except (.+?)\):/.exec(oneLine(brief))?.[1];
   return {
     brief,
@@ -134,7 +134,7 @@ ${input.rubric}
 `;
 }
 
-const briefDrift = (placeholder: string) => new Error(`The Brief of PANEL.md has no ${placeholder}, which fleet fills. Update lensBrief in packs/pull-requests/lib/proof-panel.ts to the new brief`);
+const briefDrift = (placeholder: string) => new Error(`The Brief of PANEL.md has no ${placeholder}, which hedge fills. Update lensBrief in packs/pull-requests/lib/proof-panel.ts to the new brief`);
 
 const lensFile = (directory: string, name: string, suffix: string) => join(directory, "lenses", `${name}${suffix}`);
 const planPath = (directory: string) => join(directory, "panel.json");
@@ -325,9 +325,9 @@ async function claimRound(directory: string, holder: Holder) {
 }
 
 async function busy(directory: string, holder: Holder | undefined) {
-  const who = holder?.pid ? `Process ${holder.pid}, another fleet proof command,` : "Another fleet proof command";
+  const who = holder?.pid ? `Process ${holder.pid}, another hedge proof command,` : "Another hedge proof command";
   const panel = await readPlan(directory) ?? await stagedPlan(directory);
-  return new RoundBusy(`${who} works on ${directory} and holds its lock ${lockPath(directory)}. Wait for it to end${panel ? ", or run fleet proof review --wait" : ", then run this command again"}`);
+  return new RoundBusy(`${who} works on ${directory} and holds its lock ${lockPath(directory)}. Wait for it to end${panel ? ", or run hedge proof review --wait" : ", then run this command again"}`);
 }
 
 async function claim(path: string, holder: Holder) {

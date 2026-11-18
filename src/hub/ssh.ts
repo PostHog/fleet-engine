@@ -6,7 +6,7 @@ export const forwardId = "hub-forward";
 
 const batch = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=30", "-o", "ForwardAgent=no"];
 const keepAlive = ["-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=3"];
-const launcher = `${forwardedMark}=1 ` + 'PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH" sh "$HOME/.local/share/fleet/engine/fleet"';
+const launcher = `${forwardedMark}=1 ` + 'PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH" sh "$HOME/.local/share/hedge/engine/hedge"';
 const local = (port: number) => ["-L", `127.0.0.1:${port}:127.0.0.1:${port}`];
 
 /** The service on a node that dials the hub and carries every catalog port to the same port at loopback. */
@@ -19,7 +19,7 @@ export function quote(word: string) {
   return /^[\w@%+:,./-][\w@%+=:,./-]*$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`;
 }
 
-/** The one ssh call from a node to the hub: batch mode, a checked host name, each word quoted, and Fleet's launcher at its install path, not the login PATH. */
+/** The one ssh call from a node to the hub: batch mode, a checked host name, each word quoted, and Hedge's launcher at its install path, not the login PATH. */
 export function onHub(hub: string, args: string[]): string[] {
   return onHost(hub, args);
 }

@@ -12,8 +12,8 @@ export const modelRows: ModelRow[] = [
 ];
 
 export function recoveryHome(home: string): string {
-  mkdirSync(join(home, ".config/fleet"), { recursive: true });
-  writeFileSync(join(home, ".config/fleet/cli-proxy.key"), `${proxyKey}\n`, { mode: 0o600 });
+  mkdirSync(join(home, ".config/hedge"), { recursive: true });
+  writeFileSync(join(home, ".config/hedge/cli-proxy.key"), `${proxyKey}\n`, { mode: 0o600 });
   return home;
 }
 

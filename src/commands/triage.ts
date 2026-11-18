@@ -17,7 +17,7 @@ export type TriageContext = {
   terminal: Terminal;
   capture: CommandRunner;
   hostname: string;
-  /** Runs fleet doctor and returns what it printed. */
+  /** Runs hedge doctor and returns what it printed. */
   doctor(): Promise<string[]>;
   now?: Date;
 };
@@ -28,7 +28,7 @@ const transcriptLines = 400;
 const bodyLimit = 60_000;
 const issueUrl = `https://github.com/${engineRepo}/issues/new`;
 
-/** fleet triage: builds a redacted report of this machine's setup, shows it, and with a yes opens an issue on the engine repo or saves it to a file. */
+/** hedge triage: builds a redacted report of this machine's setup, shows it, and with a yes opens an issue on the engine repo or saves it to a file. */
 export async function triageCommand(args: string[], context: TriageContext): Promise<number> {
   const flags = parseFlags(args);
   const { terminal } = context;
@@ -38,12 +38,12 @@ export async function triageCommand(args: string[], context: TriageContext): Pro
     terminal.print("");
     for (const line of [`# ${report.title}`, "", ...report.body.split("\n")]) terminal.print(line);
     terminal.print("");
-    terminal.print("Fleet removed tokens, keys, email addresses, hostnames and home paths from this report. Read it before you send it.");
+    terminal.print("Hedge removed tokens, keys, email addresses, hostnames and home paths from this report. Read it before you send it.");
     if (flags.print) return 0;
     if (flags.save) return save(report, resolve(flags.save), context);
     if (flags.send) return send(report, context);
     terminal.print("");
-    terminal.print("Send this report to the Fleet maintainer?");
+    terminal.print("Send this report to the Hedge maintainer?");
     terminal.print(`  1) Open a public issue on github.com/${engineRepo} with it`);
     terminal.print("  2) Save it to a file that you send yourself (default)");
     terminal.print("  3) Neither");
@@ -69,7 +69,7 @@ export async function triageReport(context: TriageContext, note?: string): Promi
   const timings = readTimings(context.home);
   const [versions, doctor, gitName, origin] = await Promise.all([
     versionLines(context, profile),
-    context.doctor().catch((error: Error) => [`fleet doctor could not run: ${error.message}`]),
+    context.doctor().catch((error: Error) => [`hedge doctor could not run: ${error.message}`]),
     firstLine(context, ["git", "config", "--global", "user.name"]),
     machine?.profileDir ? firstLine(context, ["git", "-C", machine.profileDir, "remote", "get-url", "origin"]) : Promise.resolve(undefined),
   ]);
@@ -78,8 +78,8 @@ export async function triageReport(context: TriageContext, note?: string): Promi
   const described = note?.trim() ? clean(note.trim()) : "Not described.";
   const facts = clean([...setupLines(machine, failure, timings), "", "## Versions", "", ...versions].join("\n"));
   const checked = clean(doctor.join("\n")).split("\n");
-  const head = ["## What happened", "", described, "", "## Setup", "", facts, "", "## fleet doctor", "", fence(checked), "", ""].join("\n");
-  const ending = "\n\nMade by `fleet triage`.";
+  const head = ["## What happened", "", described, "", "## Setup", "", facts, "", "## hedge doctor", "", fence(checked), "", ""].join("\n");
+  const ending = "\n\nMade by `hedge triage`.";
   const transcript = transcriptTail(context.home, transcriptLines);
   const lines = transcript.lines.length ? clean(transcript.lines.join("\n")).split("\n") : [];
   const room = bodyLimit - head.length - ending.length - 200;
@@ -89,13 +89,13 @@ export async function triageReport(context: TriageContext, note?: string): Promi
   const shown = lines.slice(lines.length - kept);
   const cut = transcript.cut + lines.length - kept;
   const tail = [`## Setup transcript${cut ? ` (newest ${shown.length} lines)` : ""}`, "", shown.length ? fence(shown) : lines.length ? "The setup transcript is too long to include." : "No setup transcript on this machine."].join("\n");
-  const title = shortenTo(clean(`fleet triage: ${note?.trim() || (failure ? `setup failed: ${failure.error}` : "setup report")}`).split("\n")[0]!, 120);
+  const title = shortenTo(clean(`hedge triage: ${note?.trim() || (failure ? `setup failed: ${failure.error}` : "setup report")}`).split("\n")[0]!, 120);
   return { title, body: `${head}${tail}${ending}`, clean };
 }
 
 function setupLines(machine: MachineFile | undefined, failure: ReturnType<typeof readFailure>, timings: SetupTimings | undefined) {
   const lines: string[] = [];
-  if (!machine) lines.push("- No machine file: fleet setup has not saved progress on this machine.");
+  if (!machine) lines.push("- No machine file: hedge setup has not saved progress on this machine.");
   else lines.push(`- Role: ${machine.role}${machine.coder ? ", a Coder workspace" : ""}`, `- Steps done: ${machine.setup?.done.length ? machine.setup.done.join(", ") : "none saved"}`);
   if (failure) lines.push(`- Failed at ${failure.at}${failure.step ? `, ${failure.step}` : ""}: ${failure.error}`);
   else lines.push("- No failed setup run is recorded.");
@@ -186,7 +186,7 @@ async function send(report: TriageReport, context: TriageContext) {
 
 function save(report: TriageReport, path: string, context: TriageContext) {
   write(report, path);
-  context.terminal.print(`✓ Saved the report to ${path}. Send it to the Fleet maintainer, or open ${issueUrl} and paste it.`);
+  context.terminal.print(`✓ Saved the report to ${path}. Send it to the Hedge maintainer, or open ${issueUrl} and paste it.`);
   return 0;
 }
 
@@ -196,7 +196,7 @@ function write(report: TriageReport, path: string) {
 
 function defaultFile(context: TriageContext) {
   const stamp = (context.now ?? new Date()).toISOString().slice(0, 16).replace(/:/g, "-");
-  return join(context.home, `fleet-triage-${stamp}.md`);
+  return join(context.home, `hedge-triage-${stamp}.md`);
 }
 
 type TriageFlags = { note?: string; print: boolean; save?: string; send: boolean };

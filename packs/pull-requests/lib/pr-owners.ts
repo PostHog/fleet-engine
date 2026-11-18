@@ -6,8 +6,8 @@ import type { Gh } from "./gh.ts";
 export type Handover = { pr: string; from: string; to: string; at: string };
 export type OwnerDeps = { threads: ShellThread[]; handovers: () => Promise<Handover[]>; prState: (url: string) => Promise<string> };
 
-export const handoverUsage = "Usage: fleet pr handover --pr <PR URL> --to <thread id>";
-export const handoverPath = (home: string) => join(home, ".local/state/fleet/pr-handovers.jsonl");
+export const handoverUsage = "Usage: hedge pr handover --pr <PR URL> --to <thread id>";
+export const handoverPath = (home: string) => join(home, ".local/state/hedge/pr-handovers.jsonl");
 const prUrl = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/\d+$/;
 const threadId = /^[a-zA-Z0-9][a-zA-Z0-9:._%-]{0,511}$/;
 const key = (url: string) => url.toLowerCase().replace(/\/+$/, "");
@@ -21,7 +21,7 @@ export function parseHandover(args: string[]): { pr: string; to: string } {
 
 export async function recordHandover(args: string[], home: string, from: string | undefined, now: Date): Promise<Handover> {
   const { pr, to } = parseHandover(args);
-  if (!from) throw new Error("fleet pr handover runs inside a T3 thread: T3CODE_THREAD_ID names the thread that hands the PR over.");
+  if (!from) throw new Error("hedge pr handover runs inside a T3 thread: T3CODE_THREAD_ID names the thread that hands the PR over.");
   const record: Handover = { pr: key(pr), from, to, at: now.toISOString() };
   await mkdir(dirname(handoverPath(home)), { recursive: true, mode: 0o700 });
   await appendFile(handoverPath(home), `${JSON.stringify(record)}\n`, { mode: 0o600 });
@@ -93,10 +93,10 @@ export async function settleRefusal(id: string, deps: OwnerDeps, person: string)
     if (!["closed", "merged"].includes(state)) open.push(state === "open" ? url : `${url} (state ${state})`);
   }
   if (!open.length) return undefined;
-  return `Fleet blocked this settle: the thread owns open PR(s) ${open.join(", ")}, and no other open thread links them. `
+  return `Hedge blocked this settle: the thread owns open PR(s) ${open.join(", ")}, and no other open thread links them. `
     + `If ${person} parked them, snooze the thread until the park date instead. If they wait on someone else, snooze it until they move. `
     + "Or hand each over first: the thread that takes it over links it with link_pull_request, and "
-    + "`fleet pr handover --pr <PR URL> --to <thread id>` counts only while the thread it names stays open and links the PR. Or close or merge the PR.";
+    + "`hedge pr handover --pr <PR URL> --to <thread id>` counts only while the thread it names stays open and links the PR. Or close or merge the PR.";
 }
 
 export async function prState(gh: Gh, url: string): Promise<string> {
@@ -110,7 +110,7 @@ export const isOrganize = (name = "") => /^mcp__t3[-_]code__t3_thread_organize$/
 
 export const guardedActions = ["settle", "snooze", "archive"];
 
-export const pinnedReason = (person: string, snoozeMark?: string) => `Fleet blocked this call: ${person} pinned this thread to keep it in view, so leave it open. `
+export const pinnedReason = (person: string, snoozeMark?: string) => `Hedge blocked this call: ${person} pinned this thread to keep it in view, so leave it open. `
   + (snoozeMark
     ? `Only a snooze ${person} asks for in the thread applies: end the turn on a line that starts with ${snoozeMark} and names the wake time.`
     : `Only ${person} snoozes it, in T3.`);

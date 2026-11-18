@@ -27,8 +27,8 @@ function digest(fields: Partial<Digest> = {}): Digest {
 const line = (item: Digest) => `${JSON.stringify(item)}\n`;
 
 function hubHome() {
-  const home = temp.make("fleet-dream-");
-  writeHome(home, { ".config/fleet/machine.json": JSON.stringify({ schema: 1, role: "hub" }), ".agents/memory/MEMORY.md": "# Memory index\n" });
+  const home = temp.make("hedge-dream-");
+  writeHome(home, { ".config/hedge/machine.json": JSON.stringify({ schema: 1, role: "hub" }), ".agents/memory/MEMORY.md": "# Memory index\n" });
   return home;
 }
 
@@ -41,7 +41,7 @@ function io(home: string, fields: Partial<DreamIo> = {}) {
   const analyst: Analyst = async (item) => (analyzed.push(item.session), { taskType: "fix", findings: [{ kind: "correction", topic: "run-tests-first", scope: "app", reach: "general", claim: "Run the tests first.", evidence: "run the tests", memory: "", importance: 3 }] });
   const value: DreamIo = {
     home,
-    env: { FLEET_SETTINGS: JSON.stringify(settings) },
+    env: { HEDGE_SETTINGS: JSON.stringify(settings) },
     self: "hub-host",
     now: () => now,
     print: (text) => printed.push(text),
@@ -64,17 +64,17 @@ test("the peers are the hub alias and the devboxes, without duplicates, without 
 
 test("every subcommand but digest refuses with one line when the Memory pack's memory.repo is not in the settings", async () => {
   for (const command of ["collect", "analyze", "prepare", "budget", "scorecard", "run"]) {
-    const { io: dream, printed, said } = io(hubHome(), { env: { FLEET_SETTINGS: JSON.stringify({ "hub.alias": "my-hub" }) } });
+    const { io: dream, printed, said } = io(hubHome(), { env: { HEDGE_SETTINGS: JSON.stringify({ "hub.alias": "my-hub" }) } });
     expect([command, await dreamCommand([command], dream)]).toEqual([command, 1]);
-    expect([...printed, ...said]).toEqual(["Dream needs the Memory pack: turn it on, then run fleet apply"]);
+    expect([...printed, ...said]).toEqual(["Dream needs the Memory pack: turn it on, then run hedge apply"]);
   }
-  const { io: dream } = io(hubHome(), { env: { FLEET_SETTINGS: JSON.stringify({}) } });
+  const { io: dream } = io(hubHome(), { env: { HEDGE_SETTINGS: JSON.stringify({}) } });
   expect(await dreamCommand(["digest", "--since", "1d"], dream)).toBe(0);
 });
 
 test("collect runs only on the hub", async () => {
-  const home = temp.make("fleet-dream-");
-  writeHome(home, { ".config/fleet/machine.json": JSON.stringify({ schema: 1, role: "devbox" }) });
+  const home = temp.make("hedge-dream-");
+  writeHome(home, { ".config/hedge/machine.json": JSON.stringify({ schema: 1, role: "devbox" }) });
   await expect(dreamCommand(["collect"], io(home).io)).rejects.toThrow("runs only on the hub");
 });
 
@@ -87,10 +87,10 @@ test("collect reads the hub, every peer over SSH with the engine launcher, and t
     boxes: () => ({ running: async () => ["box-a", "box-b"], ssh: async (box, command) => (boxCalls.push(`${box}: ${command}`), box === "box-a" ? ok(line(longer)) : { code: 1, stdout: "", stderr: "" }) }),
   });
   expect(await dreamCommand(["collect", "--since", "3d"], dream)).toBe(0);
-  const remote = `sh "$HOME/.local/share/fleet/engine/fleet" dream digest --since '2026-11-02T04:10:00.000Z'`;
+  const remote = `sh "$HOME/.local/share/hedge/engine/hedge" dream digest --since '2026-11-02T04:10:00.000Z'`;
   expect(peerCalls).toEqual([`devbox-1: ${remote}`, `devbox-2: ${remote}`]);
   expect(boxCalls).toEqual([`box-a: bash -lc ${quote(remote)}`, `box-b: bash -lc ${quote(remote)}`]);
-  const run = join(home, ".local/state/fleet/dream/2026-11-05");
+  const run = join(home, ".local/state/hedge/dream/2026-11-05");
   expect(printed).toEqual([run]);
   const files = readdirSync(join(run, "digests")).sort();
   expect(files).toEqual(["box-a-claude-s-1-20261104120000.json", "hub-host-claude-h-1-20261105030000.json"]);
@@ -106,7 +106,7 @@ test("collect skips the boxes when the Boxes workflow is off", async () => {
 
 test("collect leaves out what an earlier analysis already read, and drops runs older than 14 days", async () => {
   const home = hubHome();
-  const state = join(home, ".local/state/fleet/dream");
+  const state = join(home, ".local/state/hedge/dream");
   mkdirSync(join(state, "2026-10-01"), { recursive: true });
   writeFileSync(join(state, "seen.json"), JSON.stringify({ "claude:s-1": "2026-11-04T11:00:00Z" }));
   const { io: dream } = io(home);
@@ -117,17 +117,17 @@ test("collect leaves out what an earlier analysis already read, and drops runs o
 
 test("analyze asks one analyst per session, the busiest first up to hub.dreamSessions, records the analyzed ones as seen, and writes findings.md", async () => {
   const home = hubHome();
-  const run = join(home, ".local/state/fleet/dream/2026-11-05");
+  const run = join(home, ".local/state/hedge/dream/2026-11-05");
   mkdirSync(join(run, "digests"), { recursive: true });
   const quiet = digest({ session: "quiet-1" });
   const busy = digest({ session: "busy-1", entries: [...digest().entries, { at: "2026-11-04T10:30:00Z", role: "user", text: "Again" }, { at: "2026-11-04T10:31:00Z", role: "error", text: "boom" }] });
   writeFileSync(join(run, "digests", "a.json"), JSON.stringify(quiet));
   writeFileSync(join(run, "digests", "b.json"), JSON.stringify(busy));
-  const { io: dream, printed, analyzed } = io(home, { env: { FLEET_SETTINGS: JSON.stringify({ ...settings, "hub.dreamSessions": 1 }) } });
+  const { io: dream, printed, analyzed } = io(home, { env: { HEDGE_SETTINGS: JSON.stringify({ ...settings, "hub.dreamSessions": 1 }) } });
   expect(await dreamCommand(["analyze", run], dream)).toBe(0);
   expect(printed).toEqual([run]);
   expect(analyzed).toEqual(["busy-1"]);
-  expect(JSON.parse(readFileSync(join(home, ".local/state/fleet/dream/seen.json"), "utf8"))).toEqual({ "claude:busy-1": "2026-11-04T11:00:00Z" });
+  expect(JSON.parse(readFileSync(join(home, ".local/state/hedge/dream/seen.json"), "utf8"))).toEqual({ "claude:busy-1": "2026-11-04T11:00:00Z" });
   const report = readFileSync(join(run, "findings.md"), "utf8");
   expect(report).toContain("1 sessions analyzed from 1 machines (devbox-1).");
   expect(report).toContain("1 sessions with the fewest messages were left out by --limit.");
@@ -136,27 +136,27 @@ test("analyze asks one analyst per session, the busiest first up to hub.dreamSes
 
 test("analyze lists an analyst that failed and does not mark its session as seen", async () => {
   const home = hubHome();
-  const run = join(home, ".local/state/fleet/dream/2026-11-05");
+  const run = join(home, ".local/state/hedge/dream/2026-11-05");
   mkdirSync(join(run, "digests"), { recursive: true });
   writeFileSync(join(run, "digests", "a.json"), JSON.stringify(digest()));
   const { io: dream } = io(home, { analyst: () => async () => { throw new AnalystFailure("exit 1"); } });
   expect(await dreamCommand(["analyze", run], dream)).toBe(1);
   expect(readFileSync(join(run, "findings.md"), "utf8")).toContain("Analysts failed on:\n- a.json: exit 1");
-  expect(JSON.parse(readFileSync(join(home, ".local/state/fleet/dream/seen.json"), "utf8"))).toEqual({});
+  expect(JSON.parse(readFileSync(join(home, ".local/state/hedge/dream/seen.json"), "utf8"))).toEqual({});
 });
 
 test("run prepares, then starts one T3 thread that follows the dream skill with the run directory, and exits 0", async () => {
   const home = hubHome();
   const { io: dream, launched, printed } = io(home);
   expect(await dreamCommand(["run"], dream)).toBe(0);
-  const run = join(home, ".local/state/fleet/dream/2026-11-05");
+  const run = join(home, ".local/state/hedge/dream/2026-11-05");
   expect(launched).toEqual([{ title: "Dream 2026-11-05", prompt: `Follow the dream skill with the run directory ${run}.` }]);
   expect(printed.at(-1)).toBe(`Started the dream thread thread-1 for ${run}`);
 });
 
 test("run exits 1 when prepare fails, and starts no thread", async () => {
-  const home = temp.make("fleet-dream-");
-  writeHome(home, { ".config/fleet/machine.json": JSON.stringify({ schema: 1, role: "devbox" }) });
+  const home = temp.make("hedge-dream-");
+  writeHome(home, { ".config/hedge/machine.json": JSON.stringify({ schema: 1, role: "devbox" }) });
   const { io: dream, launched, said } = io(home);
   expect(await dreamCommand(["run"], dream)).toBe(1);
   expect(launched).toEqual([]);
@@ -166,7 +166,7 @@ test("run exits 1 when prepare fails, and starts no thread", async () => {
 test("run exits 1 when the thread does not start", async () => {
   const { io: dream, said } = io(hubHome(), { launch: async () => { throw new Error("T3 Code is not running"); } });
   expect(await dreamCommand(["run"], dream)).toBe(1);
-  expect(said.at(-1)).toBe("Fleet dream: cannot start the dream thread: T3 Code is not running");
+  expect(said.at(-1)).toBe("Hedge dream: cannot start the dream thread: T3 Code is not running");
 });
 
 test("render shortens a long session from the middle and keeps the opening and the end", () => {
@@ -210,25 +210,25 @@ test("collect refuses a --since value that is not a time, and asks no machine", 
 test("collect sends an ISO --since to the peers as one quoted canonical time", async () => {
   const { io: dream, peerCalls } = io(hubHome());
   expect(await dreamCommand(["collect", "--since", "2026-11-01"], dream)).toBe(0);
-  expect(peerCalls[0]).toBe(`devbox-1: sh "$HOME/.local/share/fleet/engine/fleet" dream digest --since '2026-11-01T00:00:00.000Z'`);
+  expect(peerCalls[0]).toBe(`devbox-1: sh "$HOME/.local/share/hedge/engine/hedge" dream digest --since '2026-11-01T00:00:00.000Z'`);
 });
 
 test("with Dream off, analyze, prepare, and run refuse with one line and build no analyst", async () => {
   for (const command of ["analyze", "prepare", "run"]) {
     let built = 0;
     const { io: dream, printed, said, launched } = io(hubHome(), {
-      env: { FLEET_SETTINGS: JSON.stringify({ "hub.alias": "my-hub", "memory.repo": "me/notes" }) },
+      env: { HEDGE_SETTINGS: JSON.stringify({ "hub.alias": "my-hub", "memory.repo": "me/notes" }) },
       analyst: () => (built++, async () => ({ findings: [] })),
     });
     expect([command, await dreamCommand([command], dream)]).toEqual([command, 1]);
-    expect([...printed, ...said]).toEqual(["Dream is off: turn it on with fleet packs --workflows dream=on, then run fleet apply"]);
+    expect([...printed, ...said]).toEqual(["Dream is off: turn it on with hedge packs --workflows dream=on, then run hedge apply"]);
     expect([command, built, launched.length]).toEqual([command, 0, 0]);
   }
 });
 
 function twoDigests(home: string) {
-  const run = join(home, ".local/state/fleet/dream/2026-11-05");
-  writeHome(home, { ".local/state/fleet/dream/2026-11-05/digests/a.json": JSON.stringify(digest({ session: "s-a" })), ".local/state/fleet/dream/2026-11-05/digests/b.json": JSON.stringify(digest({ session: "s-b" })) });
+  const run = join(home, ".local/state/hedge/dream/2026-11-05");
+  writeHome(home, { ".local/state/hedge/dream/2026-11-05/digests/a.json": JSON.stringify(digest({ session: "s-a" })), ".local/state/hedge/dream/2026-11-05/digests/b.json": JSON.stringify(digest({ session: "s-b" })) });
   return run;
 }
 
@@ -279,14 +279,14 @@ test("every analyst runs with a ten minute limit, and one that hits it fails its
     const limits: number[] = [];
     const spawn: Spawn = async (_argv, options) => (limits.push(options.timeoutMs), { code: 137, stdout: "", timedOut: true });
     const analyst = modelAnalyst(lookup(provider), hubHome(), {}, spawn);
-    await expect(analyst(digest(), "# index", temp.make("fleet-dream-run-"))).rejects.toThrow("timed out");
+    await expect(analyst(digest(), "# index", temp.make("hedge-dream-run-"))).rejects.toThrow("timed out");
     expect(limits).toEqual([600_000]);
   }
 });
 
 test("final finding 4: collect saves the machines it could not reach in the run, and findings.md names them in its first lines without their error text", async () => {
   const home = hubHome();
-  const run = join(home, ".local/state/fleet/dream/2026-11-05");
+  const run = join(home, ".local/state/hedge/dream/2026-11-05");
   const errorText = ["ssh: Permission denied for ", "fake", "Secret42"].join("");
   const { io: dream } = io(home, {
     onPeer: async (alias) => alias === "devbox-1" ? ok(line(digest())) : { code: 255, stdout: "", stderr: errorText },
@@ -324,7 +324,7 @@ test("recheck finding 4: findings.md and the run name only a fixed failure categ
     const { io: dream, said } = io(home, { onPeer: async () => ok(), analyst: () => modelAnalyst(lookup("claude"), home, {}, spawn) });
     expect([reason, await dreamCommand(["run"], dream)]).toEqual([reason, 1]);
     expect(readFileSync(join(run, "findings.md"), "utf8")).toContain(`Analysts failed on:\n- a.json: ${reason}\n- b.json: ${reason}`);
-    const leaked = [...filesIn(join(home, ".local/state/fleet/dream")).filter((path) => readFileSync(path, "utf8").includes("AnalystError")), ...said.filter((text) => text.includes("AnalystError"))];
+    const leaked = [...filesIn(join(home, ".local/state/hedge/dream")).filter((path) => readFileSync(path, "utf8").includes("AnalystError")), ...said.filter((text) => text.includes("AnalystError"))];
     expect([reason, leaked]).toEqual([reason, []]);
   }
   const home = hubHome();
@@ -337,13 +337,13 @@ test("recheck finding 4: findings.md and the run name only a fixed failure categ
 
 test("recheck finding 4: a Codex analyst with no answer file fails as a bad answer", async () => {
   const analyst = modelAnalyst(lookup("codex"), hubHome(), {}, async () => ({ code: 0, stdout: "" }));
-  await expect(analyst(digest(), "# index", temp.make("fleet-dream-run-"))).rejects.toThrow("bad answer");
+  await expect(analyst(digest(), "# index", temp.make("hedge-dream-run-"))).rejects.toThrow("bad answer");
 });
 
 test("a collect killed part way asks only the machines it has not read yet in this run, and collect.md names every machine it reached", async () => {
   const home = hubHome();
-  const run = join(home, ".local/state/fleet/dream/2026-11-05");
-  writeHome(home, { [".local/state/fleet/dream/2026-11-05/collected/devbox-1.jsonl"]: line(digest()) });
+  const run = join(home, ".local/state/hedge/dream/2026-11-05");
+  writeHome(home, { [".local/state/hedge/dream/2026-11-05/collected/devbox-1.jsonl"]: line(digest()) });
   const { io: dream, peerCalls } = io(home, { onPeer: async (alias, command) => (peerCalls.push(`${alias}: ${command}`), ok(line(digest({ machine: alias, session: `s-${alias}` })))) });
   expect(await dreamCommand(["collect"], dream)).toBe(0);
   expect(peerCalls.map((call) => call.split(":")[0])).toEqual(["devbox-2"]);

@@ -11,35 +11,35 @@ export type TokenCoder = Pick<Coder, "env" | "token" | "sessionFrom" | "sessionK
 export type TokenDeps = { here: PeerMachine; hub: string; coder: TokenCoder };
 export type BoxDeps = { machine(): Machine; coder(here: Machine): CommandCoder; tokens(): TokenDeps; print(line: string): void; readStdin(): Promise<string>; hooks: BoxHooks };
 
-const usage = `Usage: fleet box spawn [<name>] [--new]
+const usage = `Usage: hedge box spawn [<name>] [--new]
                                    Claim a stopped box from the pool, or create box-<name>; set it up like a devbox,
                                    link it to T3 on the hub and every devbox, and print "<box> <environmentId>"
-       fleet box link <box>        Forward a box's T3 to this machine and link it without an approval
-       fleet box unlink <box>      Unlink a box here and stop its forward
-       fleet box release <box> [--force] [--delete]
+       hedge box link <box>        Forward a box's T3 to this machine and link it without an approval
+       hedge box unlink <box>      Unlink a box here and stop its forward
+       hedge box release <box> [--force] [--delete]
                                    Return a box to the pool and stop it, or, when the pool is full or with
                                    --delete, unlink it everywhere and delete it; refuses while its threads
                                    still run, wait for an answer, or own an open PR, unless forced
-       fleet box list              List the boxes
-       fleet box run <box> -- <command>
-                                   Run a command in a login shell on the box with Fleet's Coder session
-       fleet box start <box>       Start a stopped box and reconnect its forwards everywhere
-       fleet box idle              On a box: exit 0 when it is idle, 1 when it is at work
-       fleet box threads           On a box: list the threads that still run, wait for an answer, or own an open PR
-       fleet box restore           Start the T3 forwards of recorded box links again
-       fleet box token             Save a Claude token from standard input for new boxes (claude setup-token makes one)
-       fleet box sweep             Stop idle boxes, keep busy ones up, and finish what a crashed operation left (hub, every 15 minutes)
-       fleet box reap [--days <n>] [--dry-run]
+       hedge box list              List the boxes
+       hedge box run <box> -- <command>
+                                   Run a command in a login shell on the box with Hedge's Coder session
+       hedge box start <box>       Start a stopped box and reconnect its forwards everywhere
+       hedge box idle              On a box: exit 0 when it is idle, 1 when it is at work
+       hedge box threads           On a box: list the threads that still run, wait for an answer, or own an open PR
+       hedge box restore           Start the T3 forwards of recorded box links again
+       hedge box token             Save a Claude token from standard input for new boxes (claude setup-token makes one)
+       hedge box sweep             Stop idle boxes, keep busy ones up, and finish what a crashed operation left (hub, every 15 minutes)
+       hedge box reap [--days <n>] [--dry-run]
                                    Delete boxes stopped for n days, hub.boxReapDays by default (hub)
-       fleet box pool [list | refresh]
+       hedge box pool [list | refresh]
                                    The hub's pool of stopped boxes; refresh starts, cleans, warms and stops
                                    each free box (hub)
-       fleet box grant <devbox> [--if-expiring]
+       hedge box grant <devbox> [--if-expiring]
                                    Mint a Coder token on the hub and give it to a devbox (hub)
-       fleet box grants            Check the Coder session, then grant each devbox a token when its token expires soon
+       hedge box grants            Check the Coder session, then grant each devbox a token when its token expires soon
                                    (hub, nightly, also while Boxes is off)
-       fleet box session           Check that the hub's Coder session does not expire soon, and name the fix when it does (hub)
-       fleet box nightly           Check the Coder session, reap, and refresh the pool (hub, nightly)
+       hedge box session           Check that the hub's Coder session does not expire soon, and name the fix when it does (hub)
+       hedge box nightly           Check the Coder session, reap, and refresh the pool (hub, nightly)
 
 spawn, start and release change boxes only on the hub. On a devbox they run there over SSH, with --for <this devbox>
 so the hub links the box to it.`;

@@ -23,10 +23,10 @@ const child = (id: string, root: string, fields: Partial<ShellThread> = {}) => t
 const organize = (input: Record<string, unknown>, name = "mcp__t3-code__t3_thread_organize") => ({ tool_name: name, tool_input: input });
 
 function homeWith(settings?: Record<string, unknown>) {
-  const home = temp.make("fleet-settle-");
+  const home = temp.make("hedge-settle-");
   if (settings) {
-    mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
-    writeFileSync(join(home, ".local/state/fleet/settings.json"), JSON.stringify(settings));
+    mkdirSync(join(home, ".local/state/hedge"), { recursive: true });
+    writeFileSync(join(home, ".local/state/hedge/settings.json"), JSON.stringify(settings));
   }
   return home;
 }
@@ -54,10 +54,10 @@ describe("the settle guard", () => {
     for (const name of ["mcp__t3-code__t3_thread_organize", "mcp__t3_code__t3_thread_organize"]) for (const action of ["settle", "archive"]) {
       const denial = await guardSettle(organize({ action }, name), home, deps([thread("mcp:me", { pullRequests: [pr(1)] })]));
       expect(denial?.hookSpecificOutput).toMatchObject({ hookEventName: "PreToolUse", permissionDecision: "deny" });
-      expect(reasonOf(denial)).toBe("Fleet blocked this settle: the thread owns open PR(s) https://github.com/acme/app/pull/1, and no other open thread links them. "
+      expect(reasonOf(denial)).toBe("Hedge blocked this settle: the thread owns open PR(s) https://github.com/acme/app/pull/1, and no other open thread links them. "
         + "If Robin parked them, snooze the thread until the park date instead. If they wait on someone else, snooze it until they move. "
         + "Or hand each over first: the thread that takes it over links it with link_pull_request, and "
-        + "`fleet pr handover --pr <PR URL> --to <thread id>` counts only while the thread it names stays open and links the PR. Or close or merge the PR.");
+        + "`hedge pr handover --pr <PR URL> --to <thread id>` counts only while the thread it names stays open and links the PR. Or close or merge the PR.");
     }
   });
 
@@ -160,7 +160,7 @@ describe("the settle guard", () => {
     expect(await handover(home, "mcp:me", "https://github.com/Acme/App/pull/12", "mcp:next")).toBe(0);
     expect(readFileSync(handoverPath(home), "utf8")).toBe(`${JSON.stringify({ pr: "https://github.com/acme/app/pull/12", from: "mcp:me", to: "mcp:next", at: "2026-11-12T10:00:00.000Z" })}\n`);
     expect(statSync(handoverPath(home)).mode & 0o777).toBe(0o600);
-    expect(statSync(join(home, ".local/state/fleet")).mode & 0o777).toBe(0o700);
+    expect(statSync(join(home, ".local/state/hedge")).mode & 0o777).toBe(0o700);
     expect(reasonOf(await guardSettle(organize({ action: "settle" }), home, deps([me, thread("mcp:next")])))).toContain("open PR(s) https://github.com/acme/app/pull/12, https://github.com/acme/app/pull/13, and");
     expect(reasonOf(await guardSettle(organize({ action: "settle" }), home, deps([me, thread("mcp:next", { pullRequests: [pr(12)] })])))).toContain("open PR(s) https://github.com/acme/app/pull/13, and");
     writeFileSync(handoverPath(home), `not json\n${JSON.stringify({ to: "x" })}\n${readFileSync(handoverPath(home), "utf8")}${JSON.stringify({ pr: "https://github.com/acme/app/pull/13", from: "me", to: "next", at: "x" })}\n`);
@@ -199,13 +199,13 @@ describe("the settle guard", () => {
   });
 
   test("refuses the settle when T3 does not answer, and names a fallback person without settings", async () => {
-    expect(reasonOf(await guardSettle(organize({ action: "settle" }), homeWith(), deps(undefined)))).toBe("Fleet blocked this settle: T3 did not answer; retry, or settle in the T3 UI.");
+    expect(reasonOf(await guardSettle(organize({ action: "settle" }), homeWith(), deps(undefined)))).toBe("Hedge blocked this settle: T3 did not answer; retry, or settle in the T3 UI.");
     expect(reasonOf(await guardSettle(organize({ action: "settle" }), homeWith(), { ...deps([]), threads: async () => { throw new Error("gone"); } }))).toContain("T3 did not answer");
     for (const settings of [undefined, { "guards.person": "  " }, { "guards.person": 3 }]) {
       expect(reasonOf(await guardSettle(organize({ action: "settle" }), homeWith(settings), deps([thread("mcp:me", { pullRequests: [pr(1)] })])))).toContain("If the person who runs this machine parked them, snooze the thread");
     }
     const broken = homeWith({});
-    writeFileSync(join(broken, ".local/state/fleet/settings.json"), "{");
+    writeFileSync(join(broken, ".local/state/hedge/settings.json"), "{");
     expect(reasonOf(await guardSettle(organize({ action: "settle" }), broken, deps([thread("mcp:me", { pullRequests: [pr(1)] })])))).toContain("If the person who runs this machine parked them, snooze the thread");
   });
 
@@ -216,8 +216,8 @@ describe("the settle guard", () => {
       ["--pr", "http://github.com/acme/app/pull/1", "--to", "mcp:x"], ["--pr", "https://github.com/acme/app/pull/1", "--to", "-x"],
       ["--to", "mcp:x", "--pr", "https://github.com/acme/app/pull/1", "extra"], ["--pr", "--to", "https://github.com/acme/app/pull/1", "mcp:x"],
       ["--pr", "https://github.com/acme/app/pull/1", "--to", "mcp x"], ["--pr", "https://github.com/acme/app/pull/1x", "--to", "mcp:x"], ["mcp:x", "--pr", "https://github.com/acme/app/pull/1", "mcp:y"],
-    ]) await expect(prCommand(["handover", ...args], home)).rejects.toThrow("Usage: fleet pr handover --pr <PR URL> --to <thread id>");
-    await expect(handover(home, undefined, "https://github.com/acme/app/pull/1", "mcp:x")).rejects.toThrow("fleet pr handover runs inside a T3 thread");
+    ]) await expect(prCommand(["handover", ...args], home)).rejects.toThrow("Usage: hedge pr handover --pr <PR URL> --to <thread id>");
+    await expect(handover(home, undefined, "https://github.com/acme/app/pull/1", "mcp:x")).rejects.toThrow("hedge pr handover runs inside a T3 thread");
     expect(() => statSync(handoverPath(home))).toThrow();
   });
 
@@ -235,7 +235,7 @@ describe("the installed settle guard", () => {
   const hookPath = join(import.meta.dir, "hooks", "settle-guard.ts");
 
   async function run(home: string, input: unknown, env: Record<string, string> = {}) {
-    const bin = temp.make("fleet-gh-");
+    const bin = temp.make("hedge-gh-");
     writeFileSync(join(bin, "gh"), `#!/bin/sh\ncase "$*" in\n  "api repos/acme/app/pulls/1") echo '{"state":"open","merged_at":null}' ;;\n  "api repos/acme/app/pulls/2") echo '{"state":"closed","merged_at":"2026-11-01T00:00:00Z"}' ;;\n  *) echo "unexpected $*" >&2; exit 9 ;;\nesac\n`);
     chmodSync(join(bin, "gh"), 0o755);
     const child = Bun.spawn([process.execPath, hookPath, "claude"], { stdin: new Blob([typeof input === "string" ? input : JSON.stringify(input)]), stdout: "pipe", stderr: "pipe", env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}`, T3CODE_THREAD_ID: "mcp:me", ...env } });
@@ -292,7 +292,7 @@ describe("the installed settle guard", () => {
     expect(await run(home, organize({ action: "settle", threadId: "mcp:shared", environmentId: "env-there" }))).toEqual({ stdout: "", stderr: "", code: 0 });
     const down = await machines(new Error("the machine did not answer"));
     const unread = await run(down, organize({ action: "settle", threadId: "mcp:far", environmentId: "env-there" }));
-    expect(JSON.parse(unread.stdout).hookSpecificOutput.permissionDecisionReason).toBe("Fleet blocked this settle: T3 did not answer; retry, or settle in the T3 UI.");
+    expect(JSON.parse(unread.stdout).hookSpecificOutput.permissionDecisionReason).toBe("Hedge blocked this settle: T3 did not answer; retry, or settle in the T3 UI.");
   });
 
   test("on a linked machine, refuses to settle or snooze a thread pinned there", async () => {
@@ -345,8 +345,8 @@ describe("the organize guard on a pinned thread", () => {
 describe("the organize guard on another machine", () => {
   function peerHome(environmentId = "env-peer", here = "env-here") {
     const home = homeWith({ "guards.person": "Robin" });
-    mkdirSync(join(home, ".config/fleet/peer-links"), { recursive: true });
-    writeFileSync(join(home, ".config/fleet/peer-links/devbox-2.json"), JSON.stringify({ environmentId, port: 47001 }));
+    mkdirSync(join(home, ".config/hedge/peer-links"), { recursive: true });
+    writeFileSync(join(home, ".config/hedge/peer-links/devbox-2.json"), JSON.stringify({ environmentId, port: 47001 }));
     mkdirSync(join(home, ".t3/userdata"), { recursive: true });
     writeFileSync(join(home, ".t3/userdata/environment-id"), `${here}\n`);
     return home;
@@ -357,20 +357,20 @@ describe("the organize guard on another machine", () => {
   }
   const remote = (action: string, environmentId = "env-peer") => organize({ action, threadId: "mcp:lane", environmentId });
 
-  test("asks the peer's Fleet, and denies with its refusal", async () => {
-    const ask = peer({ code: 0, stdout: `${JSON.stringify({ refusal: "Fleet blocked this settle: the thread owns open PR(s) x." })}\n` });
+  test("asks the peer's Hedge, and denies with its refusal", async () => {
+    const ask = peer({ code: 0, stdout: `${JSON.stringify({ refusal: "Hedge blocked this settle: the thread owns open PR(s) x." })}\n` });
     const check = { ...deps([thread("mcp:lane")]), settleCheck: ask.settleCheck };
-    expect(reasonOf(await guardSettle(remote("settle"), peerHome(), check))).toBe("Fleet blocked this settle: the thread owns open PR(s) x.");
-    expect(ask.calls).toEqual([{ alias: "devbox-2", command: `PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH" sh "$HOME/.local/share/fleet/engine/fleet" pr settle-check --action settle --thread mcp:lane` }]);
+    expect(reasonOf(await guardSettle(remote("settle"), peerHome(), check))).toBe("Hedge blocked this settle: the thread owns open PR(s) x.");
+    expect(ask.calls).toEqual([{ alias: "devbox-2", command: `PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH" sh "$HOME/.local/share/hedge/engine/hedge" pr settle-check --action settle --thread mcp:lane` }]);
   });
 
-  test("lets the call through when the peer's Fleet finds nothing to refuse", async () => {
+  test("lets the call through when the peer's Hedge finds nothing to refuse", async () => {
     const check = { ...deps([thread("mcp:lane", { pullRequests: [pr(1)] })]), settleCheck: peer({ code: 0, stdout: '{"refusal":null}\n' }).settleCheck };
     expect(await guardSettle(remote("snooze"), peerHome(), check)).toBeUndefined();
   });
 
-  test("reads the machine's threads through T3 when the peer's Fleet does not answer, is older, or answers with something else", async () => {
-    const answers = [{ code: 255, stdout: "" }, { code: 1, stdout: "fleet pr: Usage: fleet pr <subcommand>\n" }, { code: 0, stdout: "Unknown command settle-check\n" }, { code: 0, stdout: '{"refusal":false}\n' }, { code: 0, stdout: '{"refusal":" "}\n' }];
+  test("reads the machine's threads through T3 when the peer's Hedge does not answer, is older, or answers with something else", async () => {
+    const answers = [{ code: 255, stdout: "" }, { code: 1, stdout: "hedge pr: Usage: hedge pr <subcommand>\n" }, { code: 0, stdout: "Unknown command settle-check\n" }, { code: 0, stdout: '{"refusal":false}\n' }, { code: 0, stdout: '{"refusal":" "}\n' }];
     for (const answer of answers) {
       const owning = { ...deps([thread("mcp:lane", { pullRequests: [pr(1)] })]), settleCheck: peer(answer).settleCheck };
       expect(reasonOf(await guardSettle(remote("settle"), peerHome(), owning))).toContain("open PR(s) https://github.com/acme/app/pull/1, and");
@@ -381,9 +381,9 @@ describe("the organize guard on another machine", () => {
     }
   });
 
-  test("refuses a snooze when neither the peer's Fleet nor T3 answers, or T3 does not list the thread, since nothing can show it is not pinned", async () => {
+  test("refuses a snooze when neither the peer's Hedge nor T3 answers, or T3 does not list the thread, since nothing can show it is not pinned", async () => {
     const check = { ...deps(undefined), settleCheck: peer({ code: 255, stdout: "" }).settleCheck };
-    expect(reasonOf(await guardSettle(remote("snooze"), peerHome(), check))).toBe("Fleet blocked this snooze: T3 did not answer; retry, or snooze in the T3 UI.");
+    expect(reasonOf(await guardSettle(remote("snooze"), peerHome(), check))).toBe("Hedge blocked this snooze: T3 did not answer; retry, or snooze in the T3 UI.");
     const missing = { ...deps([thread("mcp:other")]), settleCheck: peer({ code: 255, stdout: "" }).settleCheck };
     expect(reasonOf(await guardSettle(remote("snooze"), peerHome(), missing))).toContain("T3 did not list thread mcp:lane");
   });
@@ -404,7 +404,7 @@ describe("the organize guard on another machine", () => {
     expect(ask.calls).toEqual([]);
   });
 
-  test("fleet pr settle-check takes one action and one thread", () => {
+  test("hedge pr settle-check takes one action and one thread", () => {
     expect(parseSettleCheck(["--action", "snooze", "--thread", "mcp:lane"])).toEqual({ action: "snooze", threadId: "mcp:lane" });
     for (const args of [[], ["--action", "pin", "--thread", "mcp:lane"], ["--action", "settle", "--thread", "a b"], ["--action", "settle"]]) {
       expect(() => parseSettleCheck(args)).toThrow(settleCheckUsage);

@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { chmodSync, lstatSync, readFileSync, renameSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tempDirs } from "../testing/git.ts";
-import { linkedFleets } from "../testing/linked.ts";
+import { linkedHedges } from "../testing/linked.ts";
 import type { Clock } from "../runner/context.ts";
 import { leakedKey } from "./fixtures/issued/pack.ts";
 
@@ -10,9 +10,9 @@ const temp = tempDirs();
 afterEach(() => temp.cleanup());
 
 test("a node's apply pulls its credential from the hub over ssh, stores it, and ctx.use returns it", async () => {
-  const { hub, node } = linkedFleets(temp);
+  const { hub, node } = linkedHedges(temp);
   expect((await hub("apply")).code).toBe(0);
-  expect(await node("issued", "use")).toEqual({ code: 1, output: "fleet: issued/issued-api has no credential on this machine yet. Run fleet apply on the hub." });
+  expect(await node("issued", "use")).toEqual({ code: 1, output: "hedge: issued/issued-api has no credential on this machine yet. Run hedge apply on the hub." });
   const applied = await node("apply");
   expect(applied.code).toBe(0);
   expect(applied.output).not.toContain("Could not pull");
@@ -21,7 +21,7 @@ test("a node's apply pulls its credential from the hub over ssh, stores it, and 
 });
 
 test("when the hub does not answer or refuses, the node keeps its stored credential and apply reports a finding", async () => {
-  const { hub, node, hosts } = linkedFleets(temp);
+  const { hub, node, hosts } = linkedHedges(temp);
   await hub("apply");
   await node("apply");
   const answering = hosts["hub-1"]!;
@@ -35,14 +35,14 @@ test("when the hub does not answer or refuses, the node keeps its stored credent
   hosts["hub-1"] = answering;
   await hub("issued", "refuse");
   const refused = await node("apply");
-  expect(refused.output).toContain("Fix: Could not pull the credential of issued/issued-api from the hub hub-1 (fleet credential exited 1 there. Run fleet credential issued/issued-api node-2 on the hub to see why). Kept the one this machine has.");
+  expect(refused.output).toContain("Fix: Could not pull the credential of issued/issued-api from the hub hub-1 (hedge credential exited 1 there. Run hedge credential issued/issued-api node-2 on the hub to see why). Kept the one this machine has.");
   expect((await node("issued", "use")).output).toBe("http://127.0.0.1:4600 key-2-for-node-2");
 });
 
-const nodeCredential = (home: string) => join(home, ".config/fleet/secrets/issued/credential.issued-api");
+const nodeCredential = (home: string) => join(home, ".config/hedge/secrets/issued/credential.issued-api");
 
 test("a stored credential that other users can read, or a link, is replaced by the pulled one, and apply goes on", async () => {
-  const { hub, node, nodeHome } = linkedFleets(temp);
+  const { hub, node, nodeHome } = linkedHedges(temp);
   await hub("apply");
   await node("apply");
   const file = nodeCredential(nodeHome);
@@ -67,14 +67,14 @@ test("a stored credential that other users can read, or a link, is replaced by t
 });
 
 test("when the hub does not answer and the stored credential is open to other users, the finding says how to fix the file", async () => {
-  const { hub, node, nodeHome, hosts } = linkedFleets(temp);
+  const { hub, node, nodeHome, hosts } = linkedHedges(temp);
   await hub("apply");
   await node("apply");
   chmodSync(nodeCredential(nodeHome), 0o640);
   hosts["hub-1"] = "down";
   const down = await node("apply");
   expect(down.code).toBe(0);
-  expect(down.output).toContain("Fix: Could not pull the credential of issued/issued-api from the hub hub-1 (ssh exited 255. Run ssh hub-1 true to see why). ~/.config/fleet/secrets/issued/credential.issued-api is open to other users. Run chmod 600 ~/.config/fleet/secrets/issued/credential.issued-api, or save the secret again.");
+  expect(down.output).toContain("Fix: Could not pull the credential of issued/issued-api from the hub hub-1 (ssh exited 255. Run ssh hub-1 true to see why). ~/.config/hedge/secrets/issued/credential.issued-api is open to other users. Run chmod 600 ~/.config/hedge/secrets/issued/credential.issued-api, or save the secret again.");
 });
 
 /** A clock that moves only when the test advances it. next resolves when the next sleep after the call starts. */
@@ -100,12 +100,12 @@ const settled = () => new Promise((done) => setImmediate(done));
 
 test("a pull waits for a slow hub until its deadline, then gives up and the node keeps its stored credential", async () => {
   const hand = handClock();
-  const { hub, hubFleet, node, hosts } = linkedFleets(temp, undefined, hand.clock);
+  const { hub, hubHedge, node, hosts } = linkedHedges(temp, undefined, hand.clock);
   await hub("apply");
   expect((await node("apply")).output).not.toContain("Could not pull");
 
   const answer = Promise.withResolvers<void>();
-  hosts["hub-1"] = async (args) => (await answer.promise, hubFleet(args));
+  hosts["hub-1"] = async (args) => (await answer.promise, hubHedge(args));
   const slowStarted = hand.next();
   const slow = node("apply");
   await slowStarted;
@@ -127,37 +127,37 @@ test("a pull waits for a slow hub until its deadline, then gives up and the node
 });
 
 test("a pull's finding copies nothing that the hub printed, so a key that a service prints or throws stays on the hub", async () => {
-  const { hub, node } = linkedFleets(temp);
+  const { hub, node } = linkedHedges(temp);
   await hub("apply");
   await node("apply");
   await hub("issued", "leak");
   const leaked = await node("apply");
-  expect(leaked.output).toContain("Fix: Could not pull the credential of issued/issued-api from the hub hub-1 (fleet credential exited 1 there. Run fleet credential issued/issued-api node-2 on the hub to see why). Kept the one this machine has.");
+  expect(leaked.output).toContain("Fix: Could not pull the credential of issued/issued-api from the hub hub-1 (hedge credential exited 1 there. Run hedge credential issued/issued-api node-2 on the hub to see why). Kept the one this machine has.");
   expect(leaked.output).not.toContain(leakedKey);
 });
 
 test("a pull's finding names only the exit code, and for 255 points at ssh", async () => {
-  const { hub, node, hosts } = linkedFleets(temp);
+  const { hub, node, hosts } = linkedHedges(temp);
   await hub("apply");
   await node("apply");
   const reason = async (code: number) => {
-    hosts["hub-1"] = async () => ({ code, stdout: "", stderr: "fleet: leaked-key\nleaked-key\n" });
+    hosts["hub-1"] = async () => ({ code, stdout: "", stderr: "hedge: leaked-key\nleaked-key\n" });
     const { output } = await node("apply");
     expect(output).not.toContain("leaked-key");
     return output.match(/hub-1 \((.*)\)\. Kept/)?.[1];
   };
   expect(await reason(255)).toBe("ssh exited 255. Run ssh hub-1 true to see why");
-  expect(await reason(137)).toBe("fleet credential exited 137 there. Run fleet credential issued/issued-api node-2 on the hub to see why");
+  expect(await reason(137)).toBe("hedge credential exited 137 there. Run hedge credential issued/issued-api node-2 on the hub to see why");
 });
 
-test("fleet credential on the hub prints only the key for a node that the profile names, and what the service says goes to standard error", async () => {
-  const { hub, hubFleet } = linkedFleets(temp);
+test("hedge credential on the hub prints only the key for a node that the profile names, and what the service says goes to standard error", async () => {
+  const { hub, hubHedge } = linkedHedges(temp);
   await hub("apply");
-  expect(await hubFleet(["credential", "issued/issued-api", "node-2"])).toEqual({ code: 0, stdout: "key-2-for-node-2\n", stderr: "Issuing a key for node-2\n" });
+  expect(await hubHedge(["credential", "issued/issued-api", "node-2"])).toEqual({ code: 0, stdout: "key-2-for-node-2\n", stderr: "Issuing a key for node-2\n" });
 });
 
 test("a Mac on a profile with a hub pulls its credential from the hub at apply, though no devbox list names it", async () => {
-  const { hub, mac: macOf } = linkedFleets(temp);
+  const { hub, mac: macOf } = linkedHedges(temp);
   const mac = macOf();
   await hub("apply");
   const applied = await mac("apply");
@@ -166,13 +166,13 @@ test("a Mac on a profile with a hub pulls its credential from the hub at apply, 
   expect(await mac("issued", "use")).toEqual({ code: 0, output: "http://127.0.0.1:4600 key-2-for-laptop-3" });
 });
 
-test("fleet credential refuses to run off the hub", async () => {
-  const { node } = linkedFleets(temp);
-  expect(await node("credential", "issued/issued-api", "node-2")).toEqual({ code: 1, output: "fleet: fleet credential runs on the hub, hub-1." });
+test("hedge credential refuses to run off the hub", async () => {
+  const { node } = linkedHedges(temp);
+  expect(await node("credential", "issued/issued-api", "node-2")).toEqual({ code: 1, output: "hedge: hedge credential runs on the hub, hub-1." });
 });
 
-test("fleet credential refuses a service that is not in the catalog", async () => {
-  const { hub } = linkedFleets(temp);
+test("hedge credential refuses a service that is not in the catalog", async () => {
+  const { hub } = linkedHedges(temp);
   await hub("apply");
-  expect(await hub("credential", "issued/issued-spare", "node-2")).toEqual({ code: 1, output: "fleet: the service catalog has no issued/issued-spare: its workflow or plan is off in your profile." });
+  expect(await hub("credential", "issued/issued-spare", "node-2")).toEqual({ code: 1, output: "hedge: the service catalog has no issued/issued-spare: its workflow or plan is off in your profile." });
 });

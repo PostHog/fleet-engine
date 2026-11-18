@@ -22,7 +22,7 @@ const base = {
   summary: "Safety rules every agent follows.",
   settings: [{ key: "base.heavySlots", question: "How many heavy commands may run at once?", type: "number", default: 2 }],
   workflows: [{ id: "heavy", name: "Heavy slot", sentence: "Builds run in a capped slot.", default: true, needs: ["devbox"] }],
-  jobs: [{ id: "prune", command: ["fleet", "prune"], schedule: { every: "1d" }, workflow: "heavy" }],
+  jobs: [{ id: "prune", command: ["hedge", "prune"], schedule: { every: "1d" }, workflow: "heavy" }],
 };
 
 describe("loadPacks", () => {
@@ -105,7 +105,7 @@ describe("loadPacks", () => {
   });
 
   test("accepts T3 project scripts with a name, a command, and project paths", async () => {
-    const script = { id: "prepare", name: "Prepare worktree", command: "fleet prepare", projects: ["~/posthog", "~/*/posthog"] };
+    const script = { id: "prepare", name: "Prepare worktree", command: "hedge prepare", projects: ["~/posthog", "~/*/posthog"] };
     expect(loadPacks(sourceWith({ base: { ...base, t3ProjectScripts: [script] } }))).resolves.toHaveLength(1);
     expect(loadPacks(sourceWith({ base: { ...base, t3ProjectScripts: [{ ...script, command: undefined }] } }))).rejects.toThrow("t3ProjectScripts prepare: needs an id, a name, a command, and projects or a projectSetting");
     expect(loadPacks(sourceWith({ base: { ...base, t3ProjectScripts: [{ ...script, projects: ["posthog"] }] } }))).rejects.toThrow("t3ProjectScripts prepare: each project must be an absolute path or start with ~/");
@@ -115,7 +115,7 @@ describe("loadPacks", () => {
   });
 
   test("accepts a T3 project script whose project comes from a setting", async () => {
-    const script = { id: "prepare", name: "Prepare worktree", command: "fleet prepare", projects: [], projectSetting: "team.checkout" };
+    const script = { id: "prepare", name: "Prepare worktree", command: "hedge prepare", projects: [], projectSetting: "team.checkout" };
     await expect(loadPacks(sourceWith({ base: { ...base, t3ProjectScripts: [script] } }))).resolves.toHaveLength(1);
     await expect(loadPacks(sourceWith({ base: { ...base, t3ProjectScripts: [{ ...script, projectSetting: undefined }] } }))).rejects.toThrow("t3ProjectScripts prepare: needs an id, a name, a command, and projects or a projectSetting");
     await expect(loadPacks(sourceWith({ base: { ...base, t3ProjectScripts: [{ ...script, projectSetting: " " }] } }))).rejects.toThrow("t3ProjectScripts prepare: projectSetting must name a setting");
@@ -123,15 +123,15 @@ describe("loadPacks", () => {
 
   test("leaves T3's project settings to t3ProjectScripts", async () => {
     for (const key of ["projectSettingsOverrides", "projectScriptOverrides"]) {
-      await expect(loadPacks(sourceWith({ base: { ...base, config: [{ provider: "t3", key, value: {} }] } }))).rejects.toThrow(`config ${key}: T3 project settings hold Fleet's worktree scripts, so set those with t3ProjectScripts`);
+      await expect(loadPacks(sourceWith({ base: { ...base, config: [{ provider: "t3", key, value: {} }] } }))).rejects.toThrow(`config ${key}: T3 project settings hold Hedge's worktree scripts, so set those with t3ProjectScripts`);
     }
   });
 
   test("accepts a Claude MCP server only by name, with a server object", async () => {
-    const server = { provider: "claude", key: "mcpServers.metabase", value: { type: "stdio", command: "fleet" } };
+    const server = { provider: "claude", key: "mcpServers.metabase", value: { type: "stdio", command: "hedge" } };
     expect(loadPacks(sourceWith({ base: { ...base, config: [server] } }))).resolves.toHaveLength(1);
     expect(loadPacks(sourceWith({ base: { ...base, config: [{ ...server, key: "mcpServers", value: { metabase: server.value } }] } }))).rejects.toThrow("config mcpServers: a Claude MCP server key names one server, such as mcpServers.<name>");
-    expect(loadPacks(sourceWith({ base: { ...base, config: [{ ...server, value: "fleet" }] } }))).rejects.toThrow("config mcpServers.metabase: a Claude MCP server must be an object, such as { \"type\": \"stdio\", \"command\": ... }");
+    expect(loadPacks(sourceWith({ base: { ...base, config: [{ ...server, value: "hedge" }] } }))).rejects.toThrow("config mcpServers.metabase: a Claude MCP server must be an object, such as { \"type\": \"stdio\", \"command\": ... }");
   });
 
   test("accepts an interactive human step only with a command", async () => {
@@ -157,17 +157,17 @@ describe("loadPacks", () => {
     await expect(loadPacks(sourceWith({ base: { ...base, handlers: [handler, handler] } }))).rejects.toThrow("handlers review-bot is declared twice");
   });
 
-  test("takes the fleet pr words a pr-command handler runs, and subcommands on no other seam", async () => {
+  test("takes the hedge pr words a pr-command handler runs, and subcommands on no other seam", async () => {
     const pr = { seam: "pr-command", path: "lib/pr.ts" };
     await expect(loadPacks(sourceWith({ base: { ...base, handlers: [{ ...pr, subcommands: ["queue-wait", "ownerless"] }] } }))).resolves.toHaveLength(1);
-    await expect(loadPacks(sourceWith({ base: { ...base, handlers: [pr] } }))).rejects.toThrow("handlers pr-command: needs subcommands, the fleet pr words it runs");
-    await expect(loadPacks(sourceWith({ base: { ...base, handlers: [{ ...pr, subcommands: [] }] } }))).rejects.toThrow("handlers pr-command: needs subcommands, the fleet pr words it runs");
+    await expect(loadPacks(sourceWith({ base: { ...base, handlers: [pr] } }))).rejects.toThrow("handlers pr-command: needs subcommands, the hedge pr words it runs");
+    await expect(loadPacks(sourceWith({ base: { ...base, handlers: [{ ...pr, subcommands: [] }] } }))).rejects.toThrow("handlers pr-command: needs subcommands, the hedge pr words it runs");
     await expect(loadPacks(sourceWith({ base: { ...base, handlers: [{ ...pr, subcommands: ["Queue wait"] }] } }))).rejects.toThrow("handlers pr-command: each subcommand must be lowercase words joined by dashes");
     await expect(loadPacks(sourceWith({ base: { ...base, handlers: [{ seam: "review-bot", path: "lib/bot.ts", subcommands: ["x"] }] } }))).rejects.toThrow("handlers review-bot: only a pr-command handler takes subcommands");
   });
 
   test("accepts a job that runs always only without a time, a T3 runner, or a task", async () => {
-    const service = { id: "listen", command: ["fleet", "listen"], schedule: { every: "always" as const } };
+    const service = { id: "listen", command: ["hedge", "listen"], schedule: { every: "always" as const } };
     const task = { prompt: "Listen.", projectSetting: "base.project", modelRole: "worker", workspaceStrategy: "worktree", runtimeMode: "auto" };
     expect((await loadPacks(sourceWith({ base: { ...base, jobs: [service] } })))[0]?.manifest.jobs?.[0]).toEqual(service);
     expect(loadPacks(sourceWith({ base: { ...base, jobs: [{ ...service, schedule: { every: "always", at: "03:00" } }] } }))).rejects.toThrow("jobs listen: a job that runs always has no schedule.at");
@@ -210,7 +210,7 @@ describe("loadPacks", () => {
       [{ steps: [null] }, "steps[0] must be an object"],
       [{ guides: [{ guide: "../../escape", path: "g.md" }] }, "guide must be lowercase words joined by dashes"],
       [{ steps: [{ id: "cli", run: ["true"], plans: ["gemini"] }] }, "steps cli: plans must list claude, codex, or both"],
-      [{ jobs: [{ ...base.jobs[0], oncePerFleet: "yes" }] }, "oncePerFleet must be true or false"],
+      [{ jobs: [{ ...base.jobs[0], oncePerHedge: "yes" }] }, "oncePerHedge must be true or false"],
       [{ files: [{ path: "hook.ts" }] }, "files [0]: needs a path and a target"],
       [{ files: [{ path: "hook.ts", target: ".hook.ts", workflow: "nope" }] }, "files .hook.ts names unknown workflow nope"],
       [{ models: { gemini: [] } }, "models must map claude, codex, or both to rows"],

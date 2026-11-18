@@ -11,8 +11,8 @@ describe("engineShellCommand", () => {
   test.each(["match$&engine", "two$$dollars", "quote's"])("runs the launcher of an engine at a path holding %s", (name) => {
     const root = join(temp.make("engine-"), name);
     mkdirSync(root);
-    writeFileSync(join(root, "fleet"), 'printf "%s" "$*"\n');
-    const shell = Bun.spawnSync(["sh", "-c", engineShellCommand("fleet login --web", root)]);
+    writeFileSync(join(root, "hedge"), 'printf "%s" "$*"\n');
+    const shell = Bun.spawnSync(["sh", "-c", engineShellCommand("hedge login --web", root)]);
     expect({ code: shell.exitCode, output: shell.stdout.toString() }).toEqual({ code: 0, output: "login --web" });
   });
 });

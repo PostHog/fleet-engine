@@ -6,7 +6,7 @@ import { git, isolateGit, tempDirs } from "./git.ts";
 export const repoRoot = join(import.meta.dir, "..", "..");
 export const onLinuxHost = test.if(process.platform === "linux");
 
-const systemTools = ["sh", "env", "id", "cat", "mkdir", "mktemp", "rm", "chmod", "dirname", "sed", "grep", "head", "install", "tar", "gzip", "git", "bun", "sha256sum", "tr", "tail", "ls", "cp", "mv", "basename", "sleep", "python3", "date"];
+const systemTools = ["sh", "env", "id", "cat", "mkdir", "mktemp", "rm", "chmod", "dirname", "sed", "grep", "head", "install", "tar", "gzip", "git", "bun", "sha256sum", "tr", "tail", "ls", "cp", "mv", "ln", "basename", "sleep", "python3", "date"];
 
 type SandboxOptions = { without?: string[]; brewInstaller?: string; t3Failures?: number; releasesFeed?: string; t3App?: boolean };
 export type Sandbox = { root: string; bin: string; home: string; log: string; stub: (name: string, body: string) => void; failDownloads: (pattern: string, times: number) => void; stallDownloads: (pattern: string, times: number) => void };
@@ -25,7 +25,7 @@ export function getShHarness() {
   afterAll(() => shared.cleanup());
   beforeAll(() => {
     engine.repo = shared.make("engine-repo-");
-    for (const path of ["src", "packs", "fleet", "package.json", "bun.lock", ".gitignore", "presets.json"]) cpSync(join(repoRoot, path), join(engine.repo, path), { recursive: true });
+    for (const path of ["src", "packs", "hedge", "package.json", "bun.lock", ".gitignore", "presets.json"]) cpSync(join(repoRoot, path), join(engine.repo, path), { recursive: true });
     git(engine.repo, "init", "-q", "-b", "main");
     git(engine.repo, "add", ".");
     git(engine.repo, "commit", "-q", "-m", "engine");
@@ -101,13 +101,13 @@ esac`);
 
   function profile() {
     const dir = temp.make("profile-");
-    writeFileSync(join(dir, "fleet.json"), JSON.stringify({ schema: 1, engine: { repo: "PostHog/fleet-engine", ref: "v0.1.0", channel: "release" }, sources: [], packs: [], plan: "both", settings: {}, workflows: {} }, null, 2));
+    writeFileSync(join(dir, "hedge.json"), JSON.stringify({ schema: 1, engine: { repo: "PostHog/fleet-engine", ref: "v0.1.0", channel: "release" }, sources: [], packs: [], plan: "both", settings: {}, workflows: {} }, null, 2));
     return dir;
   }
 
   function getSh(box: Sandbox, args: string[], options: { env?: Record<string, string>; cwd?: string } = {}) {
     const result = Bun.spawnSync(["sh", join(repoRoot, "get.sh"), ...args], {
-      env: { PATH: box.bin, HOME: box.home, FLEET_ENGINE_REPO: engine.repo, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", ...options.env },
+      env: { PATH: box.bin, HOME: box.home, HEDGE_ENGINE_REPO: engine.repo, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", ...options.env },
       cwd: options.cwd,
       stdin: "ignore",
     });

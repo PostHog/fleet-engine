@@ -25,7 +25,7 @@ const signalExit = (signal: NodeJS.Signals) => 128 + (constants.signals[signal] 
 export async function runProof({ home, pr, kind, command, cwd, env, print, io = {} }: ProofRun): Promise<number> {
   const owed = proofKind(kind);
   if (owed === "ui-walk") throw new Error(uiWalkRule);
-  const refuse = (problem: string, code: number) => { print(redactSecrets(`fleet proof run: ${problem}; nothing saved`)); return code; };
+  const refuse = (problem: string, code: number) => { print(redactSecrets(`hedge proof run: ${problem}; nothing saved`)); return code; };
   const git: GitRead = (args, at) => gitRead(args, at, env);
   const root = await git(["rev-parse", "--show-toplevel"], cwd);
   const before = root.ok ? await treeState(root.text, git) : undefined;
@@ -38,7 +38,7 @@ export async function runProof({ home, pr, kind, command, cwd, env, print, io = 
   for (const signal of forwarded) signals.on(signal, onSignal);
   let spool: string | undefined;
   try {
-    spool = await mkdtemp(join(env.TMPDIR || tmpdir(), "fleet-proof-run-"));
+    spool = await mkdtemp(join(env.TMPDIR || tmpdir(), "hedge-proof-run-"));
     const outcome = await capture(command, cwd, env, join(spool, "spool"), io, cancel);
     if (cancel.signal) return refuse(`the run was stopped by ${cancel.signal}`, signalExit(cancel.signal));
     if ("cannotStart" in outcome) return refuse(`cannot start ${command[0]}: ${outcome.cannotStart}`, 127);
@@ -46,7 +46,7 @@ export async function runProof({ home, pr, kind, command, cwd, env, print, io = 
     if (outcome.signal) return refuse(`the command was stopped by ${outcome.signal}`, signalExit(outcome.signal));
     if (outcome.code !== 0) return refuse(`the command ended with exit ${outcome.code}`, outcome.code);
     if (!outcome.bytes.length) return refuse("no output to save", 1);
-    if (outcome.bytes.includes(0)) return refuse("binary output: save the file with `fleet proof save`", 1);
+    if (outcome.bytes.includes(0)) return refuse("binary output: save the file with `hedge proof save`", 1);
     const after = await treeState(root.text, git);
     if (!after) return refuse("cannot read HEAD and the status of this checkout with Git after the run", 1);
     if (after.head !== before.head) return refuse(`HEAD moved from ${before.head.slice(0, 7)} to ${after.head.slice(0, 7)} during the run`, 1);

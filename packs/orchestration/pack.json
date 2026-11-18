@@ -29,7 +29,7 @@
   "settings": [
     {
       "key": "orchestration.tracker",
-      "question": "Which repo's issues hold your maps? Leave it empty to use your context repo, or your Fleet profile repo when you have none.",
+      "question": "Which repo's issues hold your maps? Leave it empty to use your context repo, or your Hedge profile repo when you have none.",
       "type": "string",
       "optional": true,
       "ask": "never",
@@ -49,7 +49,7 @@
     },
     {
       "key": "orchestration.rolloutLog",
-      "question": "Which file logs your rollouts, one JSON line per stage, so fleet lessons can name holds and rollbacks? ~/ is allowed.",
+      "question": "Which file logs your rollouts, one JSON line per stage, so hedge lessons can name holds and rollbacks? ~/ is allowed.",
       "type": "string",
       "default": "",
       "ask": "never",
@@ -237,12 +237,12 @@
   "files": [
     {
       "path": "hooks/ask-guard.ts",
-      "target": ".config/fleet/hooks/Stop/ask-guard.ts",
+      "target": ".config/hedge/hooks/Stop/ask-guard.ts",
       "workflow": "question-guard"
     },
     {
       "path": "hooks/ask-guard.ts",
-      "target": ".config/fleet/hooks/PreToolUse/ask-guard.ts",
+      "target": ".config/hedge/hooks/PreToolUse/ask-guard.ts",
       "workflow": "question-guard"
     }
   ],
@@ -267,7 +267,7 @@
         "devbox",
         "hub"
       ],
-      "oncePerFleet": true
+      "oncePerHedge": true
     },
     {
       "id": "signal-loop",
@@ -289,7 +289,7 @@
         "devbox",
         "hub"
       ],
-      "oncePerFleet": true
+      "oncePerHedge": true
     },
     {
       "id": "pr-digest",
@@ -311,7 +311,7 @@
         "devbox",
         "hub"
       ],
-      "oncePerFleet": true
+      "oncePerHedge": true
     }
   ],
   "subcommands": {

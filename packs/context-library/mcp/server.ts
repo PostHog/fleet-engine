@@ -66,7 +66,7 @@ export function answer(server: Server, request: Request): object | undefined {
   if (id === undefined) return undefined;
   if (method === "initialize") {
     const asked = String(params.protocolVersion ?? "");
-    return { id, result: { protocolVersion: versions.includes(asked) ? asked : versions[0], capabilities: { tools: {} }, serverInfo: { name: "fleet-context", version: "1" } } };
+    return { id, result: { protocolVersion: versions.includes(asked) ? asked : versions[0], capabilities: { tools: {} }, serverInfo: { name: "hedge-context", version: "1" } } };
   }
   if (method === "ping") return { id, result: {} };
   if (method === "tools/list") return { id, result: { tools: [tool] } };

@@ -48,11 +48,11 @@ export function resolveEngine(sources: AvailableSource[], fields: Partial<Profil
   return resolve(profile, machine, sources);
 }
 
-export function engineSteps(engineRoot: string, fleet: (args: string[]) => Promise<number>, other: Runner = async () => 0): Runner {
-  const launcher = join(engineRoot, "fleet");
+export function engineSteps(engineRoot: string, hedge: (args: string[]) => Promise<number>, other: Runner = async () => 0): Runner {
+  const launcher = join(engineRoot, "hedge");
   return async (command) => {
     if (command[0] !== "/bin/sh" || command[1] !== launcher) return other(command);
-    return existsSync(join(engineRoot, "packs/base/commands", `${command[2]}.ts`)) ? 0 : fleet(command.slice(2));
+    return existsSync(join(engineRoot, "packs/base/commands", `${command[2]}.ts`)) ? 0 : hedge(command.slice(2));
   };
 }
 

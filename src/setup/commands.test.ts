@@ -33,15 +33,15 @@ test.if(process.platform === "linux")("a command that runs past its time limit r
   }
 }, 4000);
 
-test.if(process.platform === "linux")("a command with a time limit ends with everything it started when Fleet is interrupted or terminated", async () => {
+test.if(process.platform === "linux")("a command with a time limit ends with everything it started when Hedge is interrupted or terminated", async () => {
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     const fifo = await fifoIn(temp.make("exec-"));
     const script = `import { realMachine } from ${JSON.stringify(join(import.meta.dir, "commands.ts"))}; await realMachine.exec(${JSON.stringify(holdOutputOpen(fifo))}, { timeoutMs: 600000 });`;
-    const fleet = Bun.spawn(["bun", "-e", script], { stdout: "ignore", stderr: "ignore" });
+    const hedge = Bun.spawn(["bun", "-e", script], { stdout: "ignore", stderr: "ignore" });
     const holder = await holderPid(fifo);
     try {
-      fleet.kill(signal);
-      await fleet.exited;
+      hedge.kill(signal);
+      await hedge.exited;
       expect({ signal, ended: await ended(holder) }).toEqual({ signal, ended: 0 });
     } finally {
       try {

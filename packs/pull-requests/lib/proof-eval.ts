@@ -65,7 +65,7 @@ async function scoreCase(miss: Miss, io: EvalIO): Promise<CaseResult> {
 }
 
 async function inWorktree<T>(checkout: string, commit: string, run: Run, work: (tree: string) => Promise<T>) {
-  const tree = join(await mkdtemp(join(tmpdir(), "fleet-proof-eval-")), "checkout");
+  const tree = join(await mkdtemp(join(tmpdir(), "hedge-proof-eval-")), "checkout");
   const added = run(["git", "-c", "core.hooksPath=/dev/null", "worktree", "add", "--detach", "--quiet", tree, commit]);
   try {
     if (added.code !== 0) throw new Error(`cannot check out ${short(commit)} in ${checkout} (${firstLine(added.stderr)})`);

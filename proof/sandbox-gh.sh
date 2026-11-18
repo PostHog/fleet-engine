@@ -1,15 +1,15 @@
 #!/bin/sh
 # A sandbox gh for the fresh-Linux-user proof: a signed-in GitHub account
-# fleet-proof whose repos are bare repos under the proof's work folder.
+# hedge-proof whose repos are bare repos under the proof's work folder.
 # fresh-linux.sh installs it with the two paths below filled in.
 #
-#   gh <the calls fleet setup, fleet apply, and install.sh make>
+#   gh <the calls hedge setup, hedge apply, and install.sh make>
 set -eu
 
 state=__STATE__
 engine_git=__ENGINE_GIT__
-login=fleet-proof
-email=fleet-proof@users.noreply.github.com
+login=hedge-proof
+email=hedge-proof@users.noreply.github.com
 scopes="'repo', 'read:org', 'admin:public_key', 'admin:ssh_signing_key', 'workflow'"
 
 printf '%s: gh %s\n' "$(id -un)" "$*" >>"$state/calls.log"
@@ -21,7 +21,7 @@ refuse() {
 
 keys() {
   file="$state/keys-$1"
-  [ "$2" = ".[].key" ] || refuse "fleet-proof sandbox gh: api user keys only answers --jq .[].key"
+  [ "$2" = ".[].key" ] || refuse "hedge-proof sandbox gh: api user keys only answers --jq .[].key"
   cat "$file"
 }
 
@@ -58,7 +58,7 @@ api() {
     user/ssh_signing_keys) keys signing "$jq" ;;
     user/memberships/orgs/*) refuse "HTTP 404: Not Found (https://api.github.com/$path)" ;;
     repos/PostHog/fleet-engine/contents/*) contents "$path" ;;
-    *) refuse "fleet-proof sandbox gh: api $path is not part of the proof" ;;
+    *) refuse "hedge-proof sandbox gh: api $path is not part of the proof" ;;
   esac
 }
 
@@ -75,13 +75,13 @@ repo() {
     create)
       [ ! -e "$state/remotes/$name.git" ] || refuse "GraphQL: Name already exists on this account (createRepository)"
       git init -q --bare -b main "$state/remotes/$name.git"
-      echo "✓ Created repository $name on GitHub (fleet-proof sandbox)" ;;
-    *) refuse "fleet-proof sandbox gh: repo $1 is not part of the proof" ;;
+      echo "✓ Created repository $name on GitHub (hedge-proof sandbox)" ;;
+    *) refuse "hedge-proof sandbox gh: repo $1 is not part of the proof" ;;
   esac
 }
 
 ssh_key() {
-  [ "${1:-}" = add ] || refuse "fleet-proof sandbox gh: ssh-key ${1:-} is not part of the proof"
+  [ "${1:-}" = add ] || refuse "hedge-proof sandbox gh: ssh-key ${1:-} is not part of the proof"
   file=$2
   type=authentication
   shift 2
@@ -92,20 +92,20 @@ ssh_key() {
     esac
   done
   cut -d' ' -f1-2 "$file" >>"$state/keys-$type"
-  echo "✓ Public key added to your account (fleet-proof sandbox)"
+  echo "✓ Public key added to your account (hedge-proof sandbox)"
 }
 
 case "${1:-}" in
-  --version) echo "gh version 0.0.0 (fleet-proof sandbox)" ;;
+  --version) echo "gh version 0.0.0 (hedge-proof sandbox)" ;;
   auth)
     case "${2:-}" in
-      status) printf 'github.com\n  ✓ Logged in to github.com account %s (fleet-proof sandbox)\n  - Active account: true\n  - Token scopes: %s\n' "$login" "$scopes" ;;
+      status) printf 'github.com\n  ✓ Logged in to github.com account %s (hedge-proof sandbox)\n  - Active account: true\n  - Token scopes: %s\n' "$login" "$scopes" ;;
       setup-git) ;;
-      *) refuse "fleet-proof sandbox gh: auth ${2:-} is not part of the proof" ;;
+      *) refuse "hedge-proof sandbox gh: auth ${2:-} is not part of the proof" ;;
     esac ;;
   api) shift; api "$@" ;;
   repo) shift; repo "$@" ;;
   ssh-key) shift; ssh_key "$@" ;;
-  pr) [ "${2:-}" = list ] || refuse "fleet-proof sandbox gh: pr ${2:-} is not part of the proof"; echo 0 ;;
-  *) refuse "fleet-proof sandbox gh: $* is not part of the proof" ;;
+  pr) [ "${2:-}" = list ] || refuse "hedge-proof sandbox gh: pr ${2:-} is not part of the proof"; echo 0 ;;
+  *) refuse "hedge-proof sandbox gh: $* is not part of the proof" ;;
 esac

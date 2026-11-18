@@ -2,14 +2,14 @@ import { createHash, randomUUID } from "node:crypto";
 import { copyFile, lstat, mkdir, readFile, readlink, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
-// A conflict note explains what an unmanaged existing file loses when Fleet adopts it.
+// A conflict note explains what an unmanaged existing file loses when Hedge adopts it.
 export type DesiredFile = { target: string; conflict?: string } & ({ source: string } | { content: string });
 type RecordEntry = { kind: "link"; source: string } | { kind: "file"; hash: string };
 type State = { version: 1; groups: Record<string, Record<string, RecordEntry>> };
 export type Action = { target: string; operation: "create" | "keep" | "replace" | "remove" | "conflict"; reason?: string; owner?: string };
-/** retire: targets that a setup taken over with release wrote, and that this Fleet replaced. Fleet removes each one that is still what that setup wrote. */
+/** retire: targets that a setup taken over with release wrote, and that this Hedge replaced. Hedge removes each one that is still what that setup wrote. */
 export type Choices = { adopt?: string[]; skip?: string[]; hold?: string[]; release?: string[]; retire?: string[] };
-const statePath = ".local/state/fleet/state.json";
+const statePath = ".local/state/hedge/state.json";
 const digest = (text: string) => createHash("sha256").update(text).digest("hex");
 
 export function inside(root: string, path: string): string {
@@ -57,15 +57,15 @@ async function readState(home: string): Promise<State> {
   const path = inside(home, statePath);
   const info = await stat(path);
   if (!info) return { version: 1, groups: {} };
-  if (!info.isFile() || info.isSymbolicLink()) throw new Error("Fleet state must be a regular file");
+  if (!info.isFile() || info.isSymbolicLink()) throw new Error("Hedge state must be a regular file");
   const value = JSON.parse(await readFile(path, "utf8")) as State;
-  if (value.version !== 1 || !value.groups || typeof value.groups !== "object") throw new Error("Invalid Fleet state");
+  if (value.version !== 1 || !value.groups || typeof value.groups !== "object") throw new Error("Invalid Hedge state");
   for (const entries of Object.values(value.groups)) {
-    if (!entries || typeof entries !== "object") throw new Error("Invalid Fleet group");
+    if (!entries || typeof entries !== "object") throw new Error("Invalid Hedge group");
     for (const [target, entry] of Object.entries(entries)) {
       inside(home, target);
-      if (!entry || (entry.kind !== "link" && entry.kind !== "file")) throw new Error("Invalid Fleet ownership entry");
-      if (entry.kind === "link" ? typeof entry.source !== "string" : typeof entry.hash !== "string") throw new Error("Invalid Fleet ownership value");
+      if (!entry || (entry.kind !== "link" && entry.kind !== "file")) throw new Error("Invalid Hedge ownership entry");
+      if (entry.kind === "link" ? typeof entry.source !== "string" : typeof entry.hash !== "string") throw new Error("Invalid Hedge ownership value");
     }
   }
   return value;
@@ -82,15 +82,15 @@ function record(file: DesiredFile): RecordEntry {
   return "source" in file ? { kind: "link", source: resolve(file.source) } : { kind: "file", hash: digest(file.content) };
 }
 
-// Skipped targets leave the group: Fleet neither writes nor tracks them.
-// Held targets stay in the group as they are: Fleet neither writes nor forgets them.
+// Skipped targets leave the group: Hedge neither writes nor tracks them.
+// Held targets stay in the group as they are: Hedge neither writes nor forgets them.
 export async function plan(home: string, files: DesiredFile[], group = "core", { adopt = [], skip = [], hold = [], release = [], retire = [] }: Choices = {}): Promise<Action[]> {
   const state = await readState(home);
   for (const name of release) {
-    if (name === group) throw new Error(`nothing to adopt from ${name}: that is the name of this Fleet`);
-    if (!Object.hasOwn(state.groups, name)) throw new Error(`nothing to adopt from ${name}: Fleet's state names no other setup by that name`);
+    if (name === group) throw new Error(`nothing to adopt from ${name}: that is the name of this Hedge`);
+    if (!Object.hasOwn(state.groups, name)) throw new Error(`nothing to adopt from ${name}: Hedge's state names no other setup by that name`);
     for (const kept of hold) {
-      if (coversAny(state.groups[name]!, [kept, await linkedFolder(home, kept)])) throw new Error(`Fleet keeps ${kept} as it is in this run, so it cannot take over ${name} yet. Run fleet apply --adopt-from ${name} again once it can apply ${kept}.`);
+      if (coversAny(state.groups[name]!, [kept, await linkedFolder(home, kept)])) throw new Error(`Hedge keeps ${kept} as it is in this run, so it cannot take over ${name} yet. Run hedge apply --adopt-from ${name} again once it can apply ${kept}.`);
     }
   }
   const previous = state.groups[group] ?? {};
@@ -99,7 +99,7 @@ export async function plan(home: string, files: DesiredFile[], group = "core", {
   const actions: Action[] = [];
   for (const file of files) {
     inside(home, file.target);
-    if (file.target === ".local/state/fleet" || file.target.startsWith(".local/state/fleet/") || statePath.startsWith(`${file.target}/`)) throw new Error("A managed target cannot replace Fleet state");
+    if (file.target === ".local/state/hedge" || file.target.startsWith(".local/state/hedge/") || statePath.startsWith(`${file.target}/`)) throw new Error("A managed target cannot replace Hedge state");
     if (files.some((other) => other !== file && other.target.startsWith(`${file.target}/`))) throw new Error(`Overlapping targets: ${file.target}`);
   }
   const folders = new Map<string, string | undefined>();
@@ -147,7 +147,7 @@ export async function plan(home: string, files: DesiredFile[], group = "core", {
     if (!(await stat(inside(home, target)))) continue;
     actions.push(await matches(inside(home, target), state.groups[name]![target]!)
       ? { target, operation: "remove" }
-      : { target, operation: "keep", reason: `it changed after the ${name} setup wrote it, and Fleet no longer writes it` });
+      : { target, operation: "keep", reason: `it changed after the ${name} setup wrote it, and Hedge no longer writes it` });
   }
   for (const target of adopt) if (!targets.has(target) && !hold.includes(target)) throw new Error(`Adoption target is not in this plan: ${target}`);
   return actions;
@@ -162,7 +162,7 @@ export async function install(home: string, files: DesiredFile[], group = "core"
   await mkdir(stateDirectory, { recursive: true, mode: 0o700 });
   const lock = resolve(stateDirectory, "lock");
   try { await mkdir(lock); } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error(`Another Fleet operation holds ${lock}. Remove it only if that operation has stopped.`);
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error(`Another Hedge operation holds ${lock}. Remove it only if that operation has stopped.`);
     throw error;
   }
   try {
@@ -171,7 +171,7 @@ export async function install(home: string, files: DesiredFile[], group = "core"
     if (conflicts.length) throw new Error(`Installation stopped. Resolve, adopt, or skip: ${conflicts.map((a) => a.target).join(", ")}`);
     const state = await readState(home);
     const run = `${new Date().toISOString().replaceAll(":", "-")}-${randomUUID()}`;
-    const backupRoot = `.local/state/fleet/backups/${run}`;
+    const backupRoot = `.local/state/hedge/backups/${run}`;
     const completed: Array<{ path: string; backup?: string; created: boolean; folder?: boolean }> = [];
     const nextEntries: Record<string, RecordEntry> = {};
     const moveAside = async (target: string) => {

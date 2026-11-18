@@ -1,4 +1,4 @@
-export const jobsFolder = ".local/state/fleet/jobs";
+export const jobsFolder = ".local/state/hedge/jobs";
 
 export const launcherTarget = (id: string) => `${jobsFolder}/${id}.sh`;
 export const logTarget = (id: string) => `${jobsFolder}/${id}.log`;
@@ -6,7 +6,7 @@ export const agentCopyTarget = (id: string) => `${jobsFolder}/${id}.plist`;
 
 export const quote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
 
-const session = '[ -r "$HOME/.config/fleet/session.sh" ] && . "$HOME/.config/fleet/session.sh"';
+const session = '[ -r "$HOME/.config/hedge/session.sh" ] && . "$HOME/.config/hedge/session.sh"';
 
 export function launcherScript(command: string[], path: string, log: string, settings?: string) {
   const stamp = settings === undefined ? [] : [`# settings ${settings}`];

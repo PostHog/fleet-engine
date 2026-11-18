@@ -6,30 +6,30 @@ as an error rate or a lag, and the agent pages you when it fires, so you can
 undo the change. Nobody on the on-call rotation is paged, and no incident is
 declared.
 
-`fleet page` sends one alert event to your own incident.io HTTP alert
+`hedge page` sends one alert event to your own incident.io HTTP alert
 source. The alert route on that source escalates to your user directly.
 
 **The route is the only thing that limits the page to you.** The command
-knows no people. When someone changes the route, `fleet page` pages whoever
+knows no people. When someone changes the route, `hedge page` pages whoever
 the route names. Check the route before you rely on it.
 
 The workflow, `page-owner`, starts off. Turn it on with
-`fleet packs --add incident-io --workflows page-owner=on`. Its
+`hedge packs --add incident-io --workflows page-owner=on`. Its
 [setup note](../packs/incident-io/SETUP.md) walks through the incident.io
-side. While the workflow is off, `fleet page` refuses to send, and the
+side. While the workflow is off, `hedge page` refuses to send, and the
 saved source stays. With a hub, the hub's copy of your profile decides. To
-stop all pages at once, turn the workflow off, then run `fleet update` on the
-hub. Otherwise the hub takes the change at its next `fleet update`.
+stop all pages at once, turn the workflow off, then run `hedge update` on the
+hub. Otherwise the hub takes the change at its next `hedge update`.
 
 ## Send and withdraw a page
 
 ```sh
-fleet page --key checkout-rollout-errors \
+hedge page --key checkout-rollout-errors \
   --title "Checkout rollout: errors over the tripwire" \
   --description "Undo: switch the rollout flag off. The panel is in the link." \
   --source-url "https://dashboards.example/checkout"
 
-fleet page --key checkout-rollout-errors --resolve
+hedge page --key checkout-rollout-errors --resolve
 ```
 
 - `--key` is the deduplication key, and it is required. incident.io treats
@@ -38,7 +38,7 @@ fleet page --key checkout-rollout-errors --resolve
 - `--resolve` sends status `resolved` for the key. The route's auto-cancel
   withdraws the page.
 - A value that starts with a dash goes after an equals sign, such as
-  `--description="-5% errors"`. Without it, `fleet page` refuses the value, so
+  `--description="-5% errors"`. Without it, `hedge page` refuses the value, so
   a flag such as `--dry-run` is never taken as text.
 - `--dry-run` checks the input and the saved source, prints the event with
   the token hidden, and sends nothing.
@@ -53,10 +53,10 @@ from your own notification rules in the incident.io app.
 
 ## Where the token lives
 
-`fleet page setup <source URL> < <token file>` saves the URL and the token
-in the pack's secret store, `~/.config/fleet/secrets/incident-io/source`,
-which only you can read. Fleet refuses a secret file that other users can
-read, or that is a link. `fleet page` also
+`hedge page setup <source URL> < <token file>` saves the URL and the token
+in the pack's secret store, `~/.config/hedge/secrets/incident-io/source`,
+which only you can read. Hedge refuses a secret file that other users can
+read, or that is a link. `hedge page` also
 refuses a saved URL that is not
 `https://api.incident.io/v2/alert_events/http/<id>`. Plain `http` to a
 loopback address is allowed too, for tests against a fake incident.io on the
@@ -68,16 +68,16 @@ source id, also not in an error that incident.io sends back.
 
 ## With a hub
 
-`fleet page` is a hub command. With a hub, it always runs on the hub, so the
-token lives in one place. On a node or a Mac, `fleet page <flags>` runs on
-the hub over SSH and prints the hub's answer. `fleet page setup` sends the
+`hedge page` is a hub command. With a hub, it always runs on the hub, so the
+token lives in one place. On a node or a Mac, `hedge page <flags>` runs on
+the hub over SSH and prints the hub's answer. `hedge page setup` sends the
 token to the hub on SSH standard input, never on a command line. Rotating
 the token changes one file. A hub never forwards the command again.
 
 With Mac only, the command and the token stay on the Mac.
 
 **The hub is a single point of failure.** When SSH cannot reach the hub,
-`fleet page` exits 1 and says that ssh to the hub exited 255. When the hub
+`hedge page` exits 1 and says that ssh to the hub exited 255. When the hub
 answers SSH but hangs, the command does not finish. An agent that must not
 miss a page treats either as a failed page: it sends it once more, then
 tells you another way, such as a Slack message. The pack's instructions tell

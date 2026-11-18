@@ -9,7 +9,7 @@ type Email = { email: string; primary: boolean; verified: boolean; visibility: s
 const keyLists: Record<KeyType, string> = { authentication: "user/keys", signing: "user/ssh_signing_keys" };
 const publicKeyLine = /^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(?:256|384|521)) [A-Za-z0-9+/]+={0,2}(?: [^\r\n]*)?$/;
 
-const unreadable = "GitHub answered with something Fleet cannot read";
+const unreadable = "GitHub answered with something Hedge cannot read";
 
 function parse<T>(text: string, valid: (value: unknown) => boolean): T | undefined {
   try {

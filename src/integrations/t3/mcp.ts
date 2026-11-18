@@ -31,7 +31,7 @@ export async function openMcp(origin: string, token: string, timeoutMs: number, 
       throw new Error(`T3 did not answer at ${origin}/mcp: ${(error as Error).message}`);
     } finally { clear(); }
   };
-  const initialized = await post("initialize", { jsonrpc: "2.0", id: 0, method: "initialize", params: { protocolVersion, capabilities: {}, clientInfo: { name: "fleet", version: "1" } } });
+  const initialized = await post("initialize", { jsonrpc: "2.0", id: 0, method: "initialize", params: { protocolVersion, capabilities: {}, clientInfo: { name: "hedge", version: "1" } } });
   const sessionId = initialized.headers.get("mcp-session-id");
   if (initialized.status === 403) throw new Error("Linked environments is off on this machine. Turn it on in T3 Code's Settings → Labs.");
   if (initialized.status !== 200 || !sessionId) throw new Error(`T3 refused an MCP session (HTTP ${initialized.status})`);

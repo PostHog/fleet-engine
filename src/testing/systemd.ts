@@ -18,10 +18,10 @@ export function fakeSystemd() {
     return { code: 0, stdout: "" };
   };
   const service = (home: string, id: string) => {
-    const unit = `fleet-${id}.service`;
+    const unit = `hedge-${id}.service`;
     const parts = [existsSync(join(home, ".config/systemd/user", unit)), units.get(unit)?.active === true, units.get(unit)?.enabled === true];
     return parts.every(Boolean) ? "running" : parts.some(Boolean) ? "partly removed" : "gone";
   };
-  const started = (id: string) => starts.get(`fleet-${id}.service`) ?? 0;
+  const started = (id: string) => starts.get(`hedge-${id}.service`) ?? 0;
   return { run, service, started };
 }

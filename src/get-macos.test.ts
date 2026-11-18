@@ -8,7 +8,7 @@ const { temp, engine, sandbox, profile, getSh } = getShHarness();
 
 function loggingEngine(box: Sandbox) {
   const dir = temp.make("fake-engine-");
-  writeFileSync(join(dir, "fleet"), `if [ -t 0 ]; then where=tty; else where=pipe; fi\necho "fleet $* stdin=$where" >> "${box.log}"\n`);
+  writeFileSync(join(dir, "hedge"), `if [ -t 0 ]; then where=tty; else where=pipe; fi\necho "hedge $* stdin=$where" >> "${box.log}"\n`);
   git(dir, "init", "-q", "-b", "main");
   git(dir, "add", ".");
   git(dir, "commit", "-q", "-m", "fake engine");
@@ -19,20 +19,20 @@ describe("get.sh", () => {
   onLinuxHost("on macOS without the T3 Code app, installs Homebrew and the app, then applies the profile", () => {
     const box = sandbox("Darwin");
     const dir = profile();
-    const result = getSh(box, ["--ref", "main", "--profile", dir], { env: { FLEET_ENGINE_REPO: loggingEngine(box) } });
+    const result = getSh(box, ["--ref", "main", "--profile", dir], { env: { HEDGE_ENGINE_REPO: loggingEngine(box) } });
     expect(result.code).toBe(0);
     const calls = result.calls.split("\n");
     expect(result.calls).toContain("Homebrew/install");
     expect(calls).toContain("brew install --cask t3-code");
     expect(calls.filter((call) => call.startsWith("brew install ") && !call.includes("--cask"))).toEqual([]);
     expect(result.calls).toContain("t3 installer channel=nightly");
-    expect(calls).toContain(`fleet apply --profile ${dir} stdin=pipe`);
+    expect(calls).toContain(`hedge apply --profile ${dir} stdin=pipe`);
   });
 
   onLinuxHost("under curl | sh, gives the Homebrew installer the terminal so it can ask for the password", () => {
     const box = sandbox("Darwin");
     const command = `printf 'piped script\\n' | sh ${join(repoRoot, "get.sh")} --ref v0.1.0 --install-only`;
-    const env = { PATH: box.bin, HOME: box.home, SHELL: "/bin/sh", FLEET_ENGINE_REPO: engine.repo, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
+    const env = { PATH: box.bin, HOME: box.home, SHELL: "/bin/sh", HEDGE_ENGINE_REPO: engine.repo, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
     const result = Bun.spawnSync([Bun.which("script") ?? "script", "-qec", command, "/dev/null"], { env, stdin: "ignore" });
     expect(result.exitCode).toBe(0);
     expect(readFileSync(box.log, "utf8")).toContain("brew installer stdin=tty");
@@ -48,7 +48,7 @@ describe("get.sh", () => {
     expect(result.output).toContain("Installing the Command Line Tools. Finish the window that opens; this script waits.");
     const calls = result.calls.split("\n");
     expect(calls.slice(0, 5)).toEqual(["uname -s", "xcode-select -p", "xcode-select --install", "xcode-select -p", "sleep 5"]);
-    expect(readFileSync(join(box.home, ".local/state/fleet/logs/install-timings"), "utf8")).toMatch(/^tools \d+ needed-you$/m);
+    expect(readFileSync(join(box.home, ".local/state/hedge/logs/install-timings"), "utf8")).toMatch(/^tools \d+ needed-you$/m);
     const passed = calls.indexOf("xcode-select -p", 4);
     expect(passed).toBeGreaterThanOrEqual(0);
     expect(passed).toBeLessThan(calls.findIndex((call) => call.startsWith("curl ")));
@@ -61,7 +61,7 @@ describe("get.sh", () => {
     expect(result.output).not.toContain("Installing Homebrew");
     expect(result.calls).not.toContain("Homebrew/install");
     expect(result.calls).not.toContain("brew ");
-    expect(readFileSync(join(box.home, ".local/state/fleet/logs/install-timings"), "utf8")).toMatch(/^tools \d+$/m);
+    expect(readFileSync(join(box.home, ".local/state/hedge/logs/install-timings"), "utf8")).toMatch(/^tools \d+$/m);
   });
 
   onLinuxHost.each([
@@ -72,9 +72,9 @@ describe("get.sh", () => {
     const result = getSh(box, ["--ref", "v0.1.0", "--install-only"]);
     expect(result.code).toBe(1);
     expect(result.calls).toContain(` ${url} -o `);
-    expect(result.output).toContain(`Fleet: ${refusal}`);
+    expect(result.output).toContain(`Hedge: ${refusal}`);
     expect(result.calls).not.toContain("brew ");
-    expect(existsSync(join(box.home, ".local/share/fleet/engine"))).toBe(false);
+    expect(existsSync(join(box.home, ".local/share/hedge/engine"))).toBe(false);
   });
 
   onLinuxHost.each([
@@ -93,25 +93,25 @@ describe("get.sh", () => {
     box.stub("shasum", `[ "$1 $2" = "-a 256" ] && exec ${Bun.which("sha256sum") ?? "/usr/bin/sha256sum"} "$3"`);
     const result = getSh(box, ["--ref", "v0.1.0", "--install-only"]);
     expect(result.calls).toMatch(/^shasum -a 256 .*gh\.zip$/m);
-    expect(result.output).toContain("Fleet: gh checksum mismatch.");
+    expect(result.output).toContain("Hedge: gh checksum mismatch.");
   });
 
   onLinuxHost("on macOS stops when the Homebrew installer leaves no brew on PATH", () => {
     const box = sandbox("Darwin", { brewInstaller: "exit 0" });
     const result = getSh(box, ["--ref", "v0.1.0", "--install-only"]);
     expect(result.code).toBe(1);
-    expect(result.output).toContain("Fleet: Homebrew installed, but brew is not on PATH.");
+    expect(result.output).toContain("Hedge: Homebrew installed, but brew is not on PATH.");
     expect(result.calls).not.toContain("brew install");
-    expect(existsSync(join(box.home, ".local/share/fleet/engine"))).toBe(false);
+    expect(existsSync(join(box.home, ".local/share/hedge/engine"))).toBe(false);
   });
 
-  onLinuxHost("under curl | sh, hands fleet setup the terminal so it can ask its questions", () => {
+  onLinuxHost("under curl | sh, hands hedge setup the terminal so it can ask its questions", () => {
     const box = sandbox("Darwin");
     const fakeEngine = loggingEngine(box);
     const command = `printf 'piped script\\n' | sh ${join(repoRoot, "get.sh")} --ref main -- --preset starter`;
-    const env = { PATH: box.bin, HOME: box.home, SHELL: "/bin/sh", FLEET_ENGINE_REPO: fakeEngine, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
+    const env = { PATH: box.bin, HOME: box.home, SHELL: "/bin/sh", HEDGE_ENGINE_REPO: fakeEngine, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
     const result = Bun.spawnSync([Bun.which("script") ?? "script", "-qec", command, "/dev/null"], { env, stdin: "ignore" });
     expect(result.exitCode).toBe(0);
-    expect(readFileSync(box.log, "utf8").split("\n")).toContain("fleet setup --preset starter stdin=tty");
+    expect(readFileSync(box.log, "utf8").split("\n")).toContain("hedge setup --preset starter stdin=tty");
   });
 });

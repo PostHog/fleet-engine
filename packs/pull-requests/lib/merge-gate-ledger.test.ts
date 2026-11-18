@@ -8,7 +8,7 @@ import { checkout, cleanFixtures, ledgerDecisions, reviewHead } from "./proof-te
 
 afterEach(cleanFixtures);
 
-const ledgerFile = (home: string) => join(home, ".local/state/fleet/decisions.jsonl");
+const ledgerFile = (home: string) => join(home, ".local/state/hedge/decisions.jsonl");
 const events = (home: string): Record<string, unknown>[] =>
   existsSync(ledgerFile(home)) ? readFileSync(ledgerFile(home), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
 
@@ -17,13 +17,13 @@ test("each gate result, a failure and a pass, lands in the decision ledger at HE
   await pr.commit("feature.txt", "new\n");
   await reviewHead(pr);
   const head = await pr.git("rev-parse", "HEAD");
-  const failed = await pr.fleet("gate");
+  const failed = await pr.hedge("gate");
   expect(failed.code).toBe(1);
   expect(failed.output).not.toContain("merge gate:");
   expect(events(pr.home).filter((event) => event.type === "gate")).toEqual([expect.objectContaining({ commit: head, passed: false })]);
 
-  await pr.fleet("require", "--none", "--reason", "docs only");
-  const passed = await pr.fleet("gate");
+  await pr.hedge("require", "--none", "--reason", "docs only");
+  const passed = await pr.hedge("gate");
   expect(passed.code).toBe(0);
   expect(passed.output).toContain("merge gate: pass recorded in the decision ledger");
   expect(passed.output.split("\n").at(-1)).toStartWith("gate: pass");
@@ -32,7 +32,7 @@ test("each gate result, a failure and a pass, lands in the decision ledger at HE
 
 test("the ledger keeps a well-formed gate pass, drops a malformed one, and decisions ignore both", async () => {
   const home = join(await checkout().then((pr) => pr.home), "ledger");
-  mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
+  mkdirSync(join(home, ".local/state/hedge"), { recursive: true });
   const pass = { type: "gate", repository: "example/product", pr: 42, commit: "a".repeat(40), passed: true, machine: "box", at: "2026-11-16T08:00:00Z" };
   const { passed: _, ...unsure } = pass;
   const broken = [{ ...pass, commit: "abc123" }, { ...pass, pr: 0 }, { ...pass, repository: "nobody" }, { ...pass, machine: "" }, { ...pass, passed: "yes" }, unsure];
@@ -79,22 +79,22 @@ test("a gate run that throws after a pass at the same head is shared, so another
   const pr = await checkout();
   await pr.commit("feature.txt", "new\n");
   await reviewHead(pr);
-  await pr.fleet("require", "--none", "--reason", "docs only");
+  await pr.hedge("require", "--none", "--reason", "docs only");
   const head = await pr.git("rev-parse", "HEAD");
   const other = join(tmpdir(), `merge-gate-other-${process.pid}-${Date.now()}`);
-  mkdirSync(join(other, ".local/state/fleet"), { recursive: true });
-  writeFileSync(join(other, ".local/state/fleet/settings.json"), "{}");
+  mkdirSync(join(other, ".local/state/hedge"), { recursive: true });
+  writeFileSync(join(other, ".local/state/hedge/settings.json"), "{}");
   const github = { pull: async () => ({ head, base: "main", defaultBranch: "main", open: true }), pullFor: async () => undefined };
   const mergeThere = async () => {
-    writeFileSync(join(other, ".local/state/fleet/decisions.jsonl"), readFileSync(ledgerFile(pr.home), "utf8"));
-    return mergeGate({ tool_name: "Bash", tool_input: { command: "gh pr merge 42 --repo example/product" }, cwd: "/" }, { home: other, env: { FLEET_SETTINGS: undefined }, github });
+    writeFileSync(join(other, ".local/state/hedge/decisions.jsonl"), readFileSync(ledgerFile(pr.home), "utf8"));
+    return mergeGate({ tool_name: "Bash", tool_input: { command: "gh pr merge 42 --repo example/product" }, cwd: "/" }, { home: other, env: { HEDGE_SETTINGS: undefined }, github });
   };
   try {
-    expect((await pr.fleet("gate")).code).toBe(0);
+    expect((await pr.hedge("gate")).code).toBe(0);
     expect(await mergeThere()).toBeUndefined();
     pr.clock.now = new Date(pr.clock.now.getTime() + 60_000);
     rmSync(join(pr.home, ".agents/guides/coding-standards.md"));
-    await expect(pr.fleet("gate")).rejects.toThrow("coding-standards.md is missing or empty");
+    await expect(pr.hedge("gate")).rejects.toThrow("coding-standards.md is missing or empty");
     expect((await mergeThere())?.hookSpecificOutput.permissionDecisionReason).toContain("has not passed at the head of example/product#42");
   } finally { rmSync(other, { recursive: true, force: true }); }
 });
@@ -103,10 +103,10 @@ test("a gate result in the ledger carries the time its run started, the order th
   const pr = await checkout();
   await pr.commit("feature.txt", "new\n");
   await reviewHead(pr);
-  await pr.fleet("require", "--none", "--reason", "docs only");
+  await pr.hedge("require", "--none", "--reason", "docs only");
   const start = pr.clock.now.getTime();
   let reads = 0;
   Object.defineProperty(pr.clock, "now", { get: () => new Date(start + 60_000 * reads++), configurable: true });
-  expect((await pr.fleet("gate")).code).toBe(0);
+  expect((await pr.hedge("gate")).code).toBe(0);
   expect(events(pr.home).filter((event) => event.type === "gate").at(-1)).toMatchObject({ passed: true, at: new Date(start).toISOString() });
 });

@@ -565,7 +565,7 @@ export function mergedOnGitHub(branch: string, worktree: string): boolean {
 export type PruneContext = { home: string; env: Record<string, string | undefined>; floorGigabytes: number };
 
 export function pruneOptions(args: string[], log: (line: string) => void, { home, env, floorGigabytes }: PruneContext): { options: PruneOptions; auto: AutoOptions | null } {
-  const state = join(env.XDG_STATE_HOME ?? join(home, ".local/state"), "fleet");
+  const state = join(env.XDG_STATE_HOME ?? join(home, ".local/state"), "hedge");
   const options: PruneOptions = {
     worktreeRoot: join(home, ".t3/worktrees"), statePath: t3StatePath(join(home, ".t3/userdata")), now: Date.now(),
     repos: [], minIdleHours: 6, unownedIdleHours: 24, agentIdleHours: 24, dryRun: false, fetch: true, log,

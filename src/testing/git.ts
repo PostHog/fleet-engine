@@ -32,7 +32,7 @@ export async function spawnGit(dir: string, ...args: string[]) {
 export function tempDirs() {
   const dirs: string[] = [];
   return {
-    make(prefix = "fleet-test-") {
+    make(prefix = "hedge-test-") {
       const dir = mkdtempSync(join(tmpdir(), prefix));
       dirs.push(dir);
       return dir;
@@ -73,7 +73,7 @@ function restore(entries: Entry[], from: string, to: string) {
 export function template(build: (dir: string) => unknown) {
   let ready: Promise<{ from: string; entries: Entry[] }> | undefined;
   const prepare = async () => {
-    const from = mkdtempSync(join(tmpdir(), "fleet-template-"));
+    const from = mkdtempSync(join(tmpdir(), "hedge-template-"));
     try {
       await build(from);
       return { from, entries: snapshot(from) };

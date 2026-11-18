@@ -43,8 +43,8 @@ type MachineDirs = { home: string; root: string; profileDir: string };
 function machineWith(owners: string, signerKey: string, dirs: Dirs = temp) {
   const home = dirs.make("home-");
   const settings: Record<string, unknown> = { "guards.person": "Robin", "guards.owners": owners, "guards.signers": signerKey };
-  mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
-  writeFileSync(join(home, ".local/state/fleet/settings.json"), `${JSON.stringify(settings, null, 2)}\n`);
+  mkdirSync(join(home, ".local/state/hedge"), { recursive: true });
+  writeFileSync(join(home, ".local/state/hedge/settings.json"), `${JSON.stringify(settings, null, 2)}\n`);
   mkdirSync(join(home, "bin"));
   writeFileSync(join(home, "bin/ssh"), `#!/bin/sh\nprintf '%s\\n' "$*" >> ${join(home, "ssh.log")}\nexit 1\n`, { mode: 0o755 });
   return machineAt({ home, root: dirs.make("root-"), profileDir: dirs.make("profile-") }, settings, dirs);
@@ -52,19 +52,19 @@ function machineWith(owners: string, signerKey: string, dirs: Dirs = temp) {
 
 function machineAt({ home, root, profileDir }: MachineDirs, settings: Record<string, unknown>, dirs: Dirs) {
   const lines: string[] = [];
-  const fleet = (...args: string[]) => {
+  const hedge = (...args: string[]) => {
     lines.length = 0;
     const code = allowlistCommand(args, { settings, profileDir, root, print: (line) => lines.push(line) });
     return { code, output: lines.join("\n") };
   };
   const sign = (key: string) => {
     const list = join(dirs.make("sign-"), "list");
-    writeFileSync(list, `${fleet("text").output}\n`);
-    expect(run(["ssh-keygen", "-q", "-Y", "sign", "-f", key, "-n", "fleet-git-allowlist", list]).code).toBe(0);
+    writeFileSync(list, `${hedge("text").output}\n`);
+    expect(run(["ssh-keygen", "-q", "-Y", "sign", "-f", key, "-n", "hedge-git-allowlist", list]).code).toBe(0);
     mkdirSync(join(profileDir, "guards"), { recursive: true });
     renameSync(`${list}.sig`, signatureFile(profileDir));
   };
-  const staged = join(home, ".local/state/fleet/git-allowlist");
+  const staged = join(home, ".local/state/hedge/git-allowlist");
   const install = () => run(["sh", join(staged, "install.sh"), "install", root]);
   const sshLog = join(home, "ssh.log");
   const ssh = join(home, "bin/ssh");
@@ -89,11 +89,11 @@ function machineAt({ home, root, profileDir }: MachineDirs, settings: Record<str
     const network = [...proxied, ...(existsSync(sshLog) ? readFileSync(sshLog, "utf8").trim().split("\n") : [])];
     return { code, stderr, network };
   };
-  const refusedByFleet = async (url: string) => {
+  const refusedByHedge = async (url: string) => {
     const { code, stderr, network } = await lsRemote(url);
     return { refused: code !== 0 && stderr.includes("not on the signed Git allowlist. Stop and ask Robin."), network };
   };
-  return { home, root, profileDir, settings, fleet, sign, staged, install, lsRemote, refusedByFleet };
+  return { home, root, profileDir, settings, hedge, sign, staged, install, lsRemote, refusedByHedge };
 }
 
 type Machine = ReturnType<typeof machineAt>;
@@ -102,7 +102,7 @@ function installed(owners: string, dirs: Dirs = temp) {
   const { key, publicKey } = newKey(dirs);
   const machine = machineWith(owners, publicKey, dirs);
   machine.sign(key);
-  machine.fleet("stage", machine.staged);
+  machine.hedge("stage", machine.staged);
   expect(machine.install().code).toBe(0);
   return machine;
 }
@@ -127,10 +127,10 @@ function installedCopy(owners: string) {
     }
   }
   const systemConfig = readFileSync(join(copies.root, "etc/gitconfig"), "utf8");
-  expect(systemConfig).toContain(join(copies.root, "etc/fleet/git-allowlist.gitconfig"));
+  expect(systemConfig).toContain(join(copies.root, "etc/hedge/git-allowlist.gitconfig"));
   expect(systemConfig).not.toContain(source.root);
-  expect(readFileSync(join(copies.root, "etc/fleet/git-allowlist.gitconfig"), "utf8")).toContain(join(copies.root, "usr/local/bin/fleet-git-ssh"));
-  return machineAt(copies, JSON.parse(readFileSync(join(copies.home, ".local/state/fleet/settings.json"), "utf8")), temp);
+  expect(readFileSync(join(copies.root, "etc/hedge/git-allowlist.gitconfig"), "utf8")).toContain(join(copies.root, "usr/local/bin/hedge-git-ssh"));
+  return machineAt(copies, JSON.parse(readFileSync(join(copies.home, ".local/state/hedge/settings.json"), "utf8")), temp);
 }
 
 const contents = (dir: string) =>
@@ -143,12 +143,12 @@ describe("the signed Git allowlist workflow", () => {
   const plan = (workflows: Record<string, boolean>, machine = devbox) =>
     resolveEngine([engine, ...skillSources(temp.make("skills-"), engine)], { packs: ["guards"], workflows, settings: { "guards.owners": "acme", "guards.signers": "ssh-ed25519 AAAA test" } }, machine);
 
-  test("asks a person to install the list as root on a Linux devbox, and probes it with fleet guards allowlist", () => {
+  test("asks a person to install the list as root on a Linux devbox, and probes it with hedge guards allowlist", () => {
     expect(plan({}).human).toEqual([]);
     const step = plan({ "git-allowlist": true }).human.find((item) => item.id === "git-allowlist");
-    expect(step?.command).toContain("sudo sh ~/.local/state/fleet/git-allowlist/install.sh");
-    expect(step?.probe).toEqual(["fleet", "guards", "allowlist", "--check"]);
-    expect(step?.left).toEqual(["fleet", "guards", "allowlist", "--left"]);
+    expect(step?.command).toContain("sudo sh ~/.local/state/hedge/git-allowlist/install.sh");
+    expect(step?.probe).toEqual(["hedge", "guards", "allowlist", "--check"]);
+    expect(step?.left).toEqual(["hedge", "guards", "allowlist", "--left"]);
     expect(step?.interactive).toBe(true);
     expect(plan({ "git-allowlist": true }, mac).human).toEqual([]);
   });
@@ -178,7 +178,7 @@ describe("Git on a machine with the signed list installed", () => {
       "GitHub.com:acme/app": { refused: false, network: ["-o SendEnv=GIT_PROTOCOL GitHub.com git-upload-pack 'acme/app'"] },
       "ssh://git@ssh.github.com:443/acme/app": { refused: false, network: ["-o SendEnv=GIT_PROTOCOL -p 443 git@ssh.github.com git-upload-pack '/acme/app'"] },
     };
-    for (const url of Object.keys(expected)) reached[url] = await machine.refusedByFleet(url);
+    for (const url of Object.keys(expected)) reached[url] = await machine.refusedByHedge(url);
     expect(reached).toEqual(expected);
   });
 
@@ -199,7 +199,7 @@ describe("Git on a machine with the signed list installed", () => {
       "ssh://gitlab.example:2222/evil/app",
     ];
     const outcomes: Record<string, unknown> = {};
-    for (const url of urls) outcomes[url] = await machine.refusedByFleet(url);
+    for (const url of urls) outcomes[url] = await machine.refusedByHedge(url);
     expect(outcomes).toEqual(Object.fromEntries(urls.map((url) => [url, { refused: true, network: [] }])));
   });
 
@@ -210,67 +210,67 @@ describe("Git on a machine with the signed list installed", () => {
   });
 });
 
-describe("fleet guards allowlist", () => {
+describe("hedge guards allowlist", () => {
   test("prints the exact text to sign and says how to sign it until the profile holds a signature", () => {
     const { publicKey } = newKey();
     const machine = machineWith("acme, octo-org", publicKey);
-    expect(machine.fleet("text")).toEqual({ code: 0, output: "acme\nocto-org" });
-    const unsigned = machine.fleet();
+    expect(machine.hedge("text")).toEqual({ code: 0, output: "acme\nocto-org" });
+    const unsigned = machine.hedge();
     expect(unsigned.code).toBe(1);
     expect(unsigned.output).toContain("not verified");
     expect(unsigned.output).toContain("ssh-keygen -Y sign");
-    expect(() => machine.fleet("stage", machine.staged)).toThrow("was not staged");
+    expect(() => machine.hedge("stage", machine.staged)).toThrow("was not staged");
   });
 
   test("a signed list installs and then passes the doctor probe", () => {
     const { key, publicKey } = newKey();
     const machine = machineWith("acme, octo-org", publicKey);
     machine.sign(key);
-    expect(machine.fleet()).toEqual({ code: 0, output: expect.stringContaining("verified.\nSystem: not installed.") });
-    expect(machine.fleet("--check").code).toBe(1);
-    expect(machine.fleet("--left").code).toBe(1);
-    expect(machine.fleet("stage", machine.staged).code).toBe(0);
+    expect(machine.hedge()).toEqual({ code: 0, output: expect.stringContaining("verified.\nSystem: not installed.") });
+    expect(machine.hedge("--check").code).toBe(1);
+    expect(machine.hedge("--left").code).toBe(1);
+    expect(machine.hedge("stage", machine.staged).code).toBe(0);
     expect(machine.install()).toMatchObject({ code: 0, stdout: "Git allowlist: on." });
-    expect(machine.fleet("--check").code).toBe(0);
+    expect(machine.hedge("--check").code).toBe(0);
     const withoutSettings = (mode: string) => allowlistCommand([mode], { settings: {}, profileDir: undefined, root: machine.root, print: () => {} });
     expect(() => withoutSettings("--check")).toThrow();
     expect(withoutSettings("--left")).toBe(0);
-    const list = join(machine.root, "etc/fleet/git-allowlist");
+    const list = join(machine.root, "etc/hedge/git-allowlist");
     chmodSync(list, 0o000);
     expect(withoutSettings("--left")).toBe(0);
     chmodSync(list, 0o644);
-    chmodSync(join(machine.root, "etc/fleet"), 0o000);
+    chmodSync(join(machine.root, "etc/hedge"), 0o000);
     const blind = withoutSettings("--left");
-    chmodSync(join(machine.root, "etc/fleet"), 0o755);
+    chmodSync(join(machine.root, "etc/hedge"), 0o755);
     expect(blind).toBe(process.getuid?.() === 0 ? 0 : 3);
     expect(run(["sh", join(machine.staged, "install.sh"), "remove", machine.root]).code).toBe(0);
     expect(withoutSettings("--left")).toBe(1);
   });
 
   test.each([
-    ["the installed Git config is emptied", (root: string) => writeFileSync(join(root, "etc/fleet/git-allowlist.gitconfig"), "")],
+    ["the installed Git config is emptied", (root: string) => writeFileSync(join(root, "etc/hedge/git-allowlist.gitconfig"), "")],
     ["the installed Git config refuses a listed owner", (root: string) => {
-      const config = join(root, "etc/fleet/git-allowlist.gitconfig");
+      const config = join(root, "etc/hedge/git-allowlist.gitconfig");
       writeFileSync(config, readFileSync(config, "utf8").split("\n").filter((line) => !line.includes("github.com/acme/")).join("\n"));
     }],
-    ["the blocked-remote helper is not executable", (root: string) => chmodSync(join(root, "usr/local/bin/git-remote-fleet-blocked"), 0o644)],
+    ["the blocked-remote helper is not executable", (root: string) => chmodSync(join(root, "usr/local/bin/git-remote-hedge-blocked"), 0o644)],
     ["the installed Git config no longer checks SSH", (root: string) => {
-      const config = join(root, "etc/fleet/git-allowlist.gitconfig");
+      const config = join(root, "etc/hedge/git-allowlist.gitconfig");
       writeFileSync(config, readFileSync(config, "utf8").replace(/\[core\]\n\s*sshCommand = .*\n/, ""));
     }],
-    ["the SSH check is gone", (root: string) => rmSync(join(root, "usr/local/bin/fleet-git-ssh"))],
-    ["the pinned signers hold another key", (root: string) => writeFileSync(join(root, "etc/fleet/git-allowlist-signers"), `fleet-allowlist namespaces="fleet-git-allowlist" ${newKey().publicKey}`)],
+    ["the SSH check is gone", (root: string) => rmSync(join(root, "usr/local/bin/hedge-git-ssh"))],
+    ["the pinned signers hold another key", (root: string) => writeFileSync(join(root, "etc/hedge/git-allowlist-signers"), `hedge-allowlist namespaces="hedge-git-allowlist" ${newKey().publicKey}`)],
   ])("the doctor probe fails when %s", (_, breakInstall) => {
     const machine = installedCopy("acme");
-    expect(machine.fleet("--check").code).toBe(0);
+    expect(machine.hedge("--check").code).toBe(0);
     breakInstall(machine.root);
-    expect(machine.fleet("--check").code).toBe(1);
-    expect(machine.fleet().output).not.toContain("System: installed.");
+    expect(machine.hedge("--check").code).toBe(1);
+    expect(machine.hedge().output).not.toContain("System: installed.");
   });
 
   test("the doctor probe ignores the Git config of the repository it runs in", () => {
     const machine = installedCopy("acme");
-    const rules = join(machine.root, "etc/fleet/git-allowlist.gitconfig");
+    const rules = join(machine.root, "etc/hedge/git-allowlist.gitconfig");
     const saved = join(temp.make("saved-"), "rules.gitconfig");
     writeFileSync(saved, readFileSync(rules, "utf8"));
     writeFileSync(rules, "");
@@ -280,20 +280,20 @@ describe("fleet guards allowlist", () => {
     const here = process.cwd();
     process.chdir(repo);
     try {
-      expect(machine.fleet("--check").code).toBe(1);
+      expect(machine.hedge("--check").code).toBe(1);
     } finally {
       process.chdir(here);
     }
   });
 
-  test.each(["etc/fleet", "etc/fleet/git-allowlist-signers", "etc/fleet/git-allowlist", "usr/local/bin/git-remote-fleet-blocked", "usr/local/bin/fleet-git-ssh", "etc/gitconfig"])("the root step refuses a symbolic link at %s and writes nothing", (target) => {
+  test.each(["etc/hedge", "etc/hedge/git-allowlist-signers", "etc/hedge/git-allowlist", "usr/local/bin/git-remote-hedge-blocked", "usr/local/bin/hedge-git-ssh", "etc/gitconfig"])("the root step refuses a symbolic link at %s and writes nothing", (target) => {
     const { key, publicKey } = newKey();
     const machine = machineWith("acme", publicKey);
     machine.sign(key);
-    machine.fleet("stage", machine.staged);
+    machine.hedge("stage", machine.staged);
     const elsewhere = temp.make("agent-owned-");
     const pointed = join(elsewhere, "target");
-    if (target === "etc/fleet") mkdirSync(pointed);
+    if (target === "etc/hedge") mkdirSync(pointed);
     else writeFileSync(pointed, "agent-owned\n");
     mkdirSync(dirname(join(machine.root, target)), { recursive: true });
     symlinkSync(pointed, join(machine.root, target));
@@ -309,46 +309,46 @@ describe("fleet guards allowlist", () => {
     const { key, publicKey } = newKey();
     const machine = machineWith("acme", publicKey);
     machine.sign(key);
-    machine.fleet("stage", machine.staged);
+    machine.hedge("stage", machine.staged);
     expect(machine.install().code).toBe(0);
     const gh = (command: string) => guard({ tool_name: "Bash", tool_input: { command } }, machine.home, machine.root)?.hookSpecificOutput.permissionDecisionReason;
 
     machine.settings["guards.owners"] = "acme, newcomer";
-    writeFileSync(join(machine.home, ".local/state/fleet/settings.json"), JSON.stringify(machine.settings));
+    writeFileSync(join(machine.home, ".local/state/hedge/settings.json"), JSON.stringify(machine.settings));
     expect(gh("gh pr view -R newcomer/app 1")).toContain("`newcomer` is not one of the GitHub owners");
-    expect(machine.fleet("--check").code).toBe(1);
+    expect(machine.hedge("--check").code).toBe(1);
 
     machine.sign(key);
-    expect(machine.fleet("--check").code).toBe(1);
-    machine.fleet("stage", machine.staged);
+    expect(machine.hedge("--check").code).toBe(1);
+    machine.hedge("stage", machine.staged);
     expect(machine.install().code).toBe(0);
     expect(gh("gh pr view -R newcomer/app 1")).toBeUndefined();
-    expect(machine.fleet("--check").code).toBe(0);
+    expect(machine.hedge("--check").code).toBe(0);
   });
 
   test("the root step refuses a list that another key signed once signers are pinned, and changes nothing", async () => {
     const first = newKey();
     const machine = machineWith("acme", first.publicKey);
     machine.sign(first.key);
-    machine.fleet("stage", machine.staged);
+    machine.hedge("stage", machine.staged);
     expect(machine.install().code).toBe(0);
 
     const other = newKey();
     writeFileSync(join(machine.staged, "git-allowlist"), "acme\nevil\n");
-    writeFileSync(join(machine.staged, "git-allowlist-signers"), `fleet-allowlist namespaces="fleet-git-allowlist" ${other.publicKey}`);
+    writeFileSync(join(machine.staged, "git-allowlist-signers"), `hedge-allowlist namespaces="hedge-git-allowlist" ${other.publicKey}`);
     rmSync(join(machine.staged, "git-allowlist.sig"));
-    expect(run(["ssh-keygen", "-q", "-Y", "sign", "-f", other.key, "-n", "fleet-git-allowlist", join(machine.staged, "git-allowlist")]).code).toBe(0);
+    expect(run(["ssh-keygen", "-q", "-Y", "sign", "-f", other.key, "-n", "hedge-git-allowlist", join(machine.staged, "git-allowlist")]).code).toBe(0);
     const refused = machine.install();
     expect(refused.code).toBe(1);
     expect(refused.stderr).toContain("does not verify");
-    expect(readFileSync(join(machine.root, "etc/fleet/git-allowlist"), "utf8")).toBe("acme\n");
-    expect(await machine.refusedByFleet("https://github.com/evil/app")).toEqual({ refused: true, network: [] });
+    expect(readFileSync(join(machine.root, "etc/hedge/git-allowlist"), "utf8")).toBe("acme\n");
+    expect(await machine.refusedByHedge("https://github.com/evil/app")).toEqual({ refused: true, network: [] });
   });
 
   test("the root step turns the list off again", async () => {
     const machine = installedCopy("acme");
     expect(run(["sh", join(machine.staged, "install.sh"), "remove", machine.root])).toMatchObject({ code: 0, stdout: "Git allowlist: off." });
-    expect(await machine.refusedByFleet("https://github.com/evil/app")).toEqual({ refused: false, network: ["CONNECT github.com:443 HTTP/1.1"] });
-    expect(machine.fleet("--check").code).toBe(1);
+    expect(await machine.refusedByHedge("https://github.com/evil/app")).toEqual({ refused: false, network: ["CONNECT github.com:443 HTTP/1.1"] });
+    expect(machine.hedge("--check").code).toBe(1);
   });
 });

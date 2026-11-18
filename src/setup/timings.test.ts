@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isolateGit, tempDirs } from "../testing/git.ts";
 import { runSteps, type Step } from "./runner.ts";
-import { scripted, fakeMachine, fleetSetup } from "./testing.ts";
+import { scripted, fakeMachine, hedgeSetup } from "./testing.ts";
 import { installLogPath, timingsPath, type Timings } from "./timings.ts";
 
 isolateGit();
@@ -17,7 +17,7 @@ describe("setup timings", () => {
   test("records each step, which ones needed the person, and prints the time to a usable machine", async () => {
     const home = temp.make("home-");
     const box = fakeMachine(home, { github: 3 }, { startedAt: start });
-    const result = await fleetSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""], box);
+    const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""], box);
     expect(result.code).toBe(0);
     const saved = timings(home);
     expect(saved.started).toBe("2026-11-11T10:00:00.000Z");
@@ -42,10 +42,10 @@ describe("setup timings", () => {
   test("starts the clock when get.sh started, and lists its phases first", async () => {
     const home = temp.make("home-");
     const epoch = start / 1000;
-    mkdirSync(join(home, ".local/state/fleet/logs"), { recursive: true });
+    mkdirSync(join(home, ".local/state/hedge/logs"), { recursive: true });
     writeFileSync(installLogPath(home), `start ${epoch - 200}\ntools ${epoch - 80} needed-you\nt3 ${epoch - 30}\nengine ${epoch - 10}\npackages ${epoch - 5}\n`);
     const box = fakeMachine(home, {}, { startedAt: start });
-    const result = await fleetSetup(home, ["--non-interactive", "--preset", "starter", "--plan", "claude"], [], box);
+    const result = await hedgeSetup(home, ["--non-interactive", "--preset", "starter", "--plan", "claude"], [], box);
     expect(result.code).toBe(0);
     const saved = timings(home);
     expect(saved.started).toBe("2026-11-11T09:56:40.000Z");
@@ -61,9 +61,9 @@ describe("setup timings", () => {
 
   test("ignores an install log from an earlier install", async () => {
     const home = temp.make("home-");
-    mkdirSync(join(home, ".local/state/fleet/logs"), { recursive: true });
+    mkdirSync(join(home, ".local/state/hedge/logs"), { recursive: true });
     writeFileSync(installLogPath(home), `start ${start / 1000 - 3 * 3600}\ntools ${start / 1000 - 3 * 3600 + 10}\n`);
-    const result = await fleetSetup(home, ["--non-interactive", "--preset", "starter", "--plan", "claude"], [], fakeMachine(home, {}, { startedAt: start }));
+    const result = await hedgeSetup(home, ["--non-interactive", "--preset", "starter", "--plan", "claude"], [], fakeMachine(home, {}, { startedAt: start }));
     expect(result.code).toBe(0);
     expect(timings(home).started).toBe("2026-11-11T10:00:00.000Z");
     expect(timings(home).steps.some((step) => step.id.startsWith("install:"))).toBe(false);
@@ -72,12 +72,12 @@ describe("setup timings", () => {
   test("a run without a person counts each open step as needing the person, and the next run keeps the same start", async () => {
     const home = temp.make("home-");
     const box = fakeMachine(home, { claude: 5 }, { startedAt: start });
-    const first = await fleetSetup(home, ["--non-interactive", "--preset", "starter", "--plan", "claude"], [], box);
+    const first = await hedgeSetup(home, ["--non-interactive", "--preset", "starter", "--plan", "claude"], [], box);
     expect(first.code).toBe(2);
     expect(timings(home).usable).toBeNull();
     expect(timings(home).steps.find((step) => step.id === "claude")).toMatchObject({ blocked: true, outcome: "unanswered" });
 
-    const second = await fleetSetup(home, ["--non-interactive", "--preset", "starter", "--plan", "claude"], [], fakeMachine(home, {}, { startedAt: start + 90_000 }));
+    const second = await hedgeSetup(home, ["--non-interactive", "--preset", "starter", "--plan", "claude"], [], fakeMachine(home, {}, { startedAt: start + 90_000 }));
     expect(second.code).toBe(0);
     const saved = timings(home);
     expect(saved.started).toBe("2026-11-11T10:00:00.000Z");
@@ -88,25 +88,25 @@ describe("setup timings", () => {
 
   test("records a step that failed, with its error; a failed final check comes after the machine is usable", async () => {
     const home = temp.make("home-");
-    const result = await fleetSetup(home, ["--non-interactive", "--preset", "starter", "--plan", "claude"], [], fakeMachine(home, {}, { startedAt: start }), undefined, 1);
+    const result = await hedgeSetup(home, ["--non-interactive", "--preset", "starter", "--plan", "claude"], [], fakeMachine(home, {}, { startedAt: start }), undefined, 1);
     expect(result.code).toBe(1);
     const saved = timings(home);
     expect(saved.usable).toBe("2026-11-11T10:00:00.000Z");
-    expect(saved.steps.at(-1)).toMatchObject({ id: "check", outcome: "failed", error: expect.stringContaining("fleet doctor found something to fix") });
+    expect(saved.steps.at(-1)).toMatchObject({ id: "check", outcome: "failed", error: expect.stringContaining("hedge doctor found something to fix") });
   });
 
   test("keeps the timings readable only by the person", async () => {
     const home = temp.make("home-");
-    expect((await fleetSetup(home, ["--non-interactive", "--preset", "starter", "--plan", "claude"], [], fakeMachine(home, {}, { startedAt: start }))).code).toBe(0);
+    expect((await hedgeSetup(home, ["--non-interactive", "--preset", "starter", "--plan", "claude"], [], fakeMachine(home, {}, { startedAt: start }))).code).toBe(0);
     expect(statSync(timingsPath(home)).mode & 0o777).toBe(0o600);
   });
 
   test("running a finished setup again leaves its record as it was", async () => {
     const home = temp.make("home-");
     const args = ["--non-interactive", "--preset", "starter", "--plan", "claude"];
-    expect((await fleetSetup(home, args, [], fakeMachine(home, {}, { startedAt: start }))).code).toBe(0);
+    expect((await hedgeSetup(home, args, [], fakeMachine(home, {}, { startedAt: start }))).code).toBe(0);
     const first = readFileSync(timingsPath(home), "utf8");
-    expect((await fleetSetup(home, args, [], fakeMachine(home, {}, { startedAt: start + 3_600_000 }))).code).toBe(0);
+    expect((await hedgeSetup(home, args, [], fakeMachine(home, {}, { startedAt: start + 3_600_000 }))).code).toBe(0);
     expect(readFileSync(timingsPath(home), "utf8")).toBe(first);
   });
 });

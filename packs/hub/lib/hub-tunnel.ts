@@ -12,8 +12,8 @@ export type MacTunnel = {
   run: Run; fetch: Fetch; sleep(ms: number): Promise<void>; print(line: string): void;
 };
 
-export const tunnelLabel = "com.fleet.hub-tunnel";
-const marker = "<!-- Managed by Fleet hub tunnel. -->";
+export const tunnelLabel = "com.hedge.hub-tunnel";
+const marker = "<!-- Managed by Hedge hub tunnel. -->";
 const healthTries = 10;
 const escape = (value: string) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 const string = (value: string) => `<string>${escape(value)}</string>`;
@@ -73,8 +73,8 @@ export async function hubTunnel(mode: MacTunnelMode, mac: MacTunnel): Promise<nu
   if (mode === "left") return (await readOwned(mac.home, agentPath(mac), marker, "hub tunnel")) !== undefined || (mac.platform === "darwin" && (await agentLoaded(mac))) ? 0 : 1;
   const ports = forwardedPorts(mac);
   if (!ports.length) return withoutTunnel(mode, mac);
-  if (mac.platform !== "darwin") throw new Error("Only a Mac opens its own hub tunnel. The hub opens the devbox tunnels with fleet ssh-tunnels.");
-  if (mac.uid === 0) throw new Error("Run fleet hub-tunnel as the person who runs the agents, not root.");
+  if (mac.platform !== "darwin") throw new Error("Only a Mac opens its own hub tunnel. The hub opens the devbox tunnels with hedge ssh-tunnels.");
+  if (mac.uid === 0) throw new Error("Run hedge hub-tunnel as the person who runs the agents, not root.");
   const agent = agentPath(mac);
   const domain = `gui/${mac.uid}`;
   const loaded = () => agentLoaded(mac);
@@ -82,10 +82,10 @@ export async function hubTunnel(mode: MacTunnelMode, mac: MacTunnel): Promise<nu
   if (mode === "remove") return await removeAgent(mac), mac.print("Hub tunnel: removed. This Mac no longer forwards ports to the hub."), 0;
   if (mode === "plan") return mac.print(`Hub tunnel plan: write ${agent} and load it at login. It forwards ${forwards}.`), 0;
   if (mode === "install") await install(mac, ports, agent, domain, loaded);
-  else await requireInstalled(mac.home, [wantedAgent(mac, ports, agent)], marker, "hub tunnel", "fleet hub-tunnel install");
-  if (!(await loaded())) throw new Error("The launch agent is not loaded. Run fleet hub-tunnel install.");
+  else await requireInstalled(mac.home, [wantedAgent(mac, ports, agent)], marker, "hub tunnel", "hedge hub-tunnel install");
+  if (!(await loaded())) throw new Error("The launch agent is not loaded. Run hedge hub-tunnel install.");
   for (let attempt = 1; mac.gateway && !(await answers(mac)); attempt++) {
-    if (attempt === healthTries) throw new Error(`127.0.0.1:${gatewayPort} does not reach the MCP gateway on ${mac.alias}. Check ~/Library/Logs/fleet-hub-tunnel.log, and run coder login if the session expired.`);
+    if (attempt === healthTries) throw new Error(`127.0.0.1:${gatewayPort} does not reach the MCP gateway on ${mac.alias}. Check ~/Library/Logs/hedge-hub-tunnel.log, and run coder login if the session expired.`);
     await mac.sleep(1000);
   }
   mac.print(`Hub tunnel: forwards ${forwards} from login.`);
@@ -95,7 +95,7 @@ export async function hubTunnel(mode: MacTunnelMode, mac: MacTunnel): Promise<nu
 function wantedAgent(mac: MacTunnel, ports: number[], agent: string): Managed {
   hubWorkspace(mac.alias);
   if (!mac.coder) throw new Error("Install the Coder CLI first, then run coder login.");
-  return { path: agent, content: agentPlist(mac.coder, mac.alias, ports, join(mac.home, "Library/Logs/fleet-hub-tunnel.log")) };
+  return { path: agent, content: agentPlist(mac.coder, mac.alias, ports, join(mac.home, "Library/Logs/hedge-hub-tunnel.log")) };
 }
 
 const agentTarget = (mac: MacTunnel) => `gui/${mac.uid}/${tunnelLabel}`;
@@ -110,10 +110,10 @@ async function removeAgent(mac: MacTunnel) {
   await rm(agent, { force: true });
 }
 
-/** With nothing to forward, the doctor fails while an agent Fleet wrote is still on disk or loaded, and install and remove take it away. */
+/** With nothing to forward, the doctor fails while an agent Hedge wrote is still on disk or loaded, and install and remove take it away. */
 async function withoutTunnel(mode: MacTunnelMode, mac: MacTunnel) {
   const left = (await readOwned(mac.home, agentPath(mac), marker, "hub tunnel")) !== undefined || (mac.platform === "darwin" && (await agentLoaded(mac)));
-  if (left && mode === "doctor") throw new Error(`The hub tunnel should go. ${nothingToForward} Run fleet hub-tunnel install to remove it.`);
+  if (left && mode === "doctor") throw new Error(`The hub tunnel should go. ${nothingToForward} Run hedge hub-tunnel install to remove it.`);
   if (left && (mode === "install" || mode === "remove")) await removeAgent(mac);
   return mac.print(`Hub tunnel: not needed. ${nothingToForward}`), 0;
 }

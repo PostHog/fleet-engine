@@ -14,7 +14,7 @@ export type RefreshOptions = {
 /** Per source: the commit whose files a refresh applied. */
 type State = { applied: Record<string, string> };
 
-const statePath = (home: string) => join(home, ".local", "state", "fleet", "refresh.json");
+const statePath = (home: string) => join(home, ".local", "state", "hedge", "refresh.json");
 
 /** Returns 1 when something needs a person: a failed fetch, local edits, a rewritten branch, or a failed apply. */
 export async function refresh(options: RefreshOptions): Promise<number> {
@@ -44,7 +44,7 @@ async function refreshBranches(branches: SourceRef[], options: RefreshOptions) {
     const result = await advanceSource(ref, options.cache, from);
     switch (result.state) {
       case "busy":
-        options.print(`${ref.name}: another Fleet run works in its cache, so the next refresh takes it.`);
+        options.print(`${ref.name}: another Hedge run works in its cache, so the next refresh takes it.`);
         continue;
       case "edited":
         flag(result.say);

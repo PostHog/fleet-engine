@@ -6,7 +6,7 @@ export type ClaudeWrapperContext = { home: string; print: (line: string) => void
 
 const defaultBinaries = ["", "claude"];
 
-export const wrapperPath = (home: string) => join(home, ".config/fleet/recovery/claude");
+export const wrapperPath = (home: string) => join(home, ".config/hedge/recovery/claude");
 
 const wrapperFiles = [{ name: "claude", mode: 0o755 }, { name: "claude-reset.ts", mode: 0o644 }];
 const packBin = join(import.meta.dir, "../bin");
@@ -34,7 +34,7 @@ function installWrapper(home: string) {
 
 export async function claudeWrapperCommand(args: string[], context: ClaudeWrapperContext): Promise<number> {
   const [mode] = args;
-  if (args.length !== 1 || (mode !== "bind" && mode !== "check")) return context.print("Usage: fleet claude-wrapper bind|check"), 2;
+  if (args.length !== 1 || (mode !== "bind" && mode !== "check")) return context.print("Usage: hedge claude-wrapper bind|check"), 2;
   const wrapper = wrapperPath(context.home);
   return withT3Session(async (client) => {
     const unbound = claudeInstances(await readProviderInstances(client)).filter(([id, instance]) => {
@@ -46,15 +46,15 @@ export async function claudeWrapperCommand(args: string[], context: ClaudeWrappe
     });
     const installed = wrapperInstalled(context.home);
     if (mode === "check") {
-      if (!installed) context.print("Fleet's Claude wrapper is missing or out of date. Run fleet apply.");
-      for (const [id] of unbound) context.print(`${id}: T3 runs Claude without Fleet's reset wrapper. Run fleet apply.`);
+      if (!installed) context.print("Hedge's Claude wrapper is missing or out of date. Run hedge apply.");
+      for (const [id] of unbound) context.print(`${id}: T3 runs Claude without Hedge's reset wrapper. Run hedge apply.`);
       return unbound.length || !installed ? 1 : 0;
     }
     if (!installed) installWrapper(context.home);
     for (const [id, instance] of unbound) {
       await upsertProviderInstance(client, id, { ...instance, config: { ...instance.config, binaryPath: wrapper } });
       if ((await readProviderInstances(client))[id]?.config?.binaryPath !== wrapper) throw new Error(`T3 did not take the reset wrapper for ${id}`);
-      context.print(`${id}: T3 runs Claude through Fleet's reset wrapper.`);
+      context.print(`${id}: T3 runs Claude through Hedge's reset wrapper.`);
     }
     return 0;
   }, { ...context.session, scopes: settingsScopes });

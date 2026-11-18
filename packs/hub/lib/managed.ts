@@ -38,14 +38,14 @@ export async function requireInstalled(home: string, files: Managed[], marker: s
   if (differing.length) throw new Error(`These ${what} files differ from what install writes now: ${differing.join(", ")}. Run ${fix}.`);
 }
 
-/** The files at paths that Fleet wrote and that are still there. A file Fleet did not write stops it, so nothing removes it. */
+/** The files at paths that Hedge wrote and that are still there. A file Hedge did not write stops it, so nothing removes it. */
 export async function ownedFiles(home: string, paths: string[], marker: string, what: string): Promise<string[]> {
   const owned: string[] = [];
   for (const path of paths) if ((await readOwned(home, path, marker, what)) !== undefined) owned.push(path);
   return owned;
 }
 
-/** Stops, disables and deletes the user units that Fleet wrote at paths, then reloads systemd once. */
+/** Stops, disables and deletes the user units that Hedge wrote at paths, then reloads systemd once. */
 export async function removeUnits(home: string, paths: string[], marker: string, what: string, run: Run): Promise<void> {
   const owned = await ownedFiles(home, paths, marker, what);
   for (const path of owned) {

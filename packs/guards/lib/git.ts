@@ -15,23 +15,23 @@ const commitOptionalLetters = "Su";
 const commitValued = new Set(["--message", "--file", "--author", "--date", "--template", "--reuse-message", "--reedit-message", "--fixup", "--squash", "--trailer", "--cleanup", "--pathspec-from-file"]);
 const pushValued = new Set(["--repo", "-o", "--push-option", "--receive-pack", "--exec"]);
 
-const hooksReason = (person: string) => "Fleet blocked this command: it skips the Git hooks, which run the repository's checks. "
+const hooksReason = (person: string) => "Hedge blocked this command: it skips the Git hooks, which run the repository's checks. "
   + `Let them run: fix what they report, then commit or push with hooks on. If a hook is broken, stop and ask ${person}.`;
 
-const mainReason = (target: string, slug: string, upstream: boolean, person: string) => `Fleet blocked this command: it pushes to \`${target}\` of ${slug}`
+const mainReason = (target: string, slug: string, upstream: boolean, person: string) => `Hedge blocked this command: it pushes to \`${target}\` of ${slug}`
   + (upstream ? `, because the branch tracks \`${target}\` and push.default is upstream,` : "")
   + " and that repository takes changes through pull requests. Push to your own branch: `git push -u origin HEAD:refs/heads/<branch>`. "
   + `If this repository takes pushes to ${target}, stop and ask ${person} to add ${slug} to guards.main-push-repos.`;
 
-const forceReason = (person: string) => "Fleet blocked this command: it force-pushes without a lease, which can drop commits someone else pushed. "
+const forceReason = (person: string) => "Hedge blocked this command: it force-pushes without a lease, which can drop commits someone else pushed. "
   + "Use `git push --force-with-lease=<branch>:<expected sha> origin <branch>`, without a `+` on the refspec. "
   + `If you need to overwrite the branch anyway, stop and ask ${person}.`;
 
-const burstReason = (count: number, person: string) => `Fleet blocked this command: it force-pushes ${count} branches at once, `
+const burstReason = (count: number, person: string) => `Hedge blocked this command: it force-pushes ${count} branches at once, `
   + "and bursts like that make GitHub fail many CI runs at startup. "
   + `Push in batches of at most ${largestForcePush} branches, about a minute apart. If that does not fit, stop and ask ${person}.`;
 
-const aliasReason = (person: string) => "Fleet blocked this command: `gh stack alias` makes a wrapper command that hides gh stack pushes from this guard. "
+const aliasReason = (person: string) => "Hedge blocked this command: `gh stack alias` makes a wrapper command that hides gh stack pushes from this guard. "
   + `Run \`gh stack\` itself. If you need the alias, stop and ask ${person}.`;
 
 export const githubSlug = (url: string) => url.match(/github\.com[:/]+([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i)?.slice(1, 3).join("/");

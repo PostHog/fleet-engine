@@ -20,7 +20,7 @@ export type LanesIo = {
 type Lane = { ticket: Ticket; threadId: string };
 type TurnMessage = { type?: string; text?: string | null };
 
-const usage = "Usage: fleet lanes <map URL | owner/repo#number> [--stall minutes]";
+const usage = "Usage: hedge lanes <map URL | owner/repo#number> [--stall minutes]";
 const dispatchMarker = "<!-- orchestration-wayfinder-dispatch -->";
 const settledStatuses = ["completed", "idle"];
 const defaultStallMinutes = 30;

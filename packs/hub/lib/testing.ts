@@ -26,7 +26,7 @@ export function fakeMachine(home: string, fields: Partial<Machine> = {}) {
     peers: ["my-hub", "devbox-2"],
     devboxes: ["devbox-1", "devbox-2"],
     codex: false,
-    settings: readBoxSettings({ FLEET_SETTINGS: JSON.stringify(boxSettings) }),
+    settings: readBoxSettings({ HEDGE_SETTINGS: JSON.stringify(boxSettings) }),
     onPeer: async (alias, command) => {
       calls.push(`peer ${alias}: ${command}`);
       return ok;
@@ -52,7 +52,7 @@ export const box = (name: string, status = "running", fields: { id?: string; tem
   ({ name, id: `ws-${name}`, template: "linux-box", status, lastUsedAt: "2026-10-28T07:00:00Z", ...fields });
 
 export function writePool(home: string, pool: { free?: string[]; refreshing?: string[]; boxes: Record<string, Entry> }) {
-  writeHome(home, { ".config/fleet/box-pool.json": JSON.stringify({ free: [], ...pool }) });
+  writeHome(home, { ".config/hedge/box-pool.json": JSON.stringify({ free: [], ...pool }) });
 }
 
 export const registryOf = (home: string) => JSON.parse(readFileSync(poolFile(home), "utf8")) as { free: string[]; boxes: Record<string, Entry> };
@@ -121,8 +121,8 @@ export function stubBin(dir: string, names: string[]) {
 }
 
 export function linkedHere(home: string, environmentId = "env-1") {
-  writeHome(home, { ".config/fleet/boxes/box-lane.json": JSON.stringify({ environmentId, port: 21000 }) });
-  return join(home, ".config/fleet/boxes/box-lane.json");
+  writeHome(home, { ".config/hedge/boxes/box-lane.json": JSON.stringify({ environmentId, port: 21000 }) });
+  return join(home, ".config/hedge/boxes/box-lane.json");
 }
 
 export function appeared(path: string): Promise<void> {

@@ -6,20 +6,20 @@ import { loadPacks } from "../pack/manifest.ts";
 import type { FetchedSource, SourceRef } from "../pack/types.ts";
 import { isolateGit, spawnGit, tempDirs } from "../testing/git.ts";
 import { profilePath } from "./profile.ts";
-import { engineRoot, fakeMachine, fleetSetup, githubRepo, machineFile, pushedAnswers, savedAnswers, scripted } from "./testing.ts";
+import { engineRoot, fakeMachine, hedgeSetup, githubRepo, machineFile, pushedAnswers, savedAnswers, scripted } from "./testing.ts";
 
 isolateGit();
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
 
-const onMac = (home: string, args: string[], replies: string[] = []) => fleetSetup(home, args, replies, fakeMachine(home), undefined, 0, "darwin");
+const onMac = (home: string, args: string[], replies: string[] = []) => hedgeSetup(home, args, replies, fakeMachine(home), undefined, 0, "darwin");
 
 async function grownProfile() {
   const home = temp.make("home-");
   expect((await onMac(home, ["--non-interactive", "--preset", "starter", "--plan", "claude", "--devbox", "skip"])).code).toBe(0);
   const io = scripted([]);
   const packs = (args: string[]) => main(["packs", ...args], { home, engineRoot, platform: "darwin", print: io.terminal.print, terminal: io.terminal, apply: async () => 0, setup: { machine: fakeMachine(home).machine } });
-  expect(await packs(["--add", "communication", "--add", "hub", "--workflows", "pr-digest=on", "--set", "hub.alias=coder.fleet-hub"])).toBe(0);
+  expect(await packs(["--add", "communication", "--add", "hub", "--workflows", "pr-digest=on", "--set", "hub.alias=coder.hedge-hub"])).toBe(0);
   return home;
 }
 
@@ -36,14 +36,14 @@ async function packsAfterSetup() {
   };
 }
 
-describe("fleet packs --add memory", () => {
+describe("hedge packs --add memory", () => {
   test("creates the private memory repo, as setup does, and points memory.repo at it", async () => {
     const { home, packs } = await packsAfterSetup();
     const added = await packs(["--add", "memory"]);
     expect(added.code).toBe(0);
-    expect(added.output).toContain("✓ Created the private repo nora/fleet-memory");
-    expect(existsSync(githubRepo(home, "nora/fleet-memory"))).toBe(true);
-    expect(await pushedAnswers(home)).toMatchObject({ packs: ["pull-requests", "memory"], settings: { "memory.repo": "nora/fleet-memory" } });
+    expect(added.output).toContain("✓ Created the private repo nora/hedge-memory");
+    expect(existsSync(githubRepo(home, "nora/hedge-memory"))).toBe(true);
+    expect(await pushedAnswers(home)).toMatchObject({ packs: ["pull-requests", "memory"], settings: { "memory.repo": "nora/hedge-memory" } });
   });
 
   test("reuses the memory repo the profile names when the pack comes back", async () => {
@@ -52,7 +52,7 @@ describe("fleet packs --add memory", () => {
     expect((await packs(["--remove", "memory"])).code).toBe(0);
     const back = await packs(["--add", "memory"]);
     expect(back.output).toContain("✓ Reusing your repo nora/custom-notes");
-    expect(existsSync(githubRepo(home, "nora/fleet-memory"))).toBe(false);
+    expect(existsSync(githubRepo(home, "nora/hedge-memory"))).toBe(false);
     expect(await pushedAnswers(home)).toMatchObject({ packs: ["pull-requests", "memory"], settings: { "memory.repo": "nora/custom-notes" } });
   });
 
@@ -60,7 +60,7 @@ describe("fleet packs --add memory", () => {
     const { home, packs } = await packsAfterSetup();
     const result = await packs(["--add", "memory", "--remove", "memory"], { createFails: "nora" });
     expect(result.code).toBe(0);
-    expect(existsSync(githubRepo(home, "nora/fleet-memory"))).toBe(false);
+    expect(existsSync(githubRepo(home, "nora/hedge-memory"))).toBe(false);
     expect((await pushedAnswers(home)).packs).toEqual(["pull-requests"]);
   });
 
@@ -75,11 +75,11 @@ describe("fleet packs --add memory", () => {
 
   test("refuses a public memory repo and changes nothing", async () => {
     const { home, packs } = await packsAfterSetup();
-    await spawnGit(home, "init", "-q", "--bare", githubRepo(home, "nora/fleet-memory"));
+    await spawnGit(home, "init", "-q", "--bare", githubRepo(home, "nora/hedge-memory"));
     const before = savedAnswers(home);
-    const result = await packs(["--add", "memory"], { publicRepos: ["nora/fleet-memory"] });
+    const result = await packs(["--add", "memory"], { publicRepos: ["nora/hedge-memory"] });
     expect(result.code).toBe(1);
-    expect(result.output).toContain("fleet: nora/fleet-memory is not private, and agents write notes about you there. Make it private, or name a private repo with --set memory.repo=<owner/name>.");
+    expect(result.output).toContain("hedge: nora/hedge-memory is not private, and agents write notes about you there. Make it private, or name a private repo with --set memory.repo=<owner/name>.");
     expect(savedAnswers(home)).toEqual(before);
     expect(await pushedAnswers(home)).toEqual(before);
   });
@@ -107,7 +107,7 @@ describe("fleet packs --add memory", () => {
     const before = savedAnswers(home);
     for (const url of ["https://github.com/nora/public-notes.git", "https://GitHub.com/nora/public-notes.git", "https://github.com:443/nora/public-notes", "http://www.github.com/nora/public-notes/", "ssh://git@github.com:22/nora/public-notes.git", "git@GITHUB.COM:nora/public-notes.git", "github.com:nora/public-notes"]) {
       const result = await packs(["--add", "memory", "--set", `memory.repo=${url}`], { publicRepos: ["nora/public-notes"] });
-      expect({ url, code: result.code, refused: result.output.includes("fleet: nora/public-notes is not private") }).toEqual({ url, code: 1, refused: true });
+      expect({ url, code: result.code, refused: result.output.includes("hedge: nora/public-notes is not private") }).toEqual({ url, code: 1, refused: true });
     }
     expect(await pushedAnswers(home)).toEqual(before);
   });
@@ -118,7 +118,7 @@ describe("fleet packs --add memory", () => {
     const url = "https://github.com/nora/notes/tree/main";
     const result = await packs(["--add", "memory", "--set", `memory.repo=${url}`]);
     expect(result.code).toBe(1);
-    expect(result.output).toContain(`fleet: ${url} is on GitHub, but Fleet cannot read its owner/name. Set memory.repo=<owner/name>.`);
+    expect(result.output).toContain(`hedge: ${url} is on GitHub, but Hedge cannot read its owner/name. Set memory.repo=<owner/name>.`);
     expect(await pushedAnswers(home)).toEqual(before);
   });
 
@@ -127,13 +127,13 @@ describe("fleet packs --add memory", () => {
     const before = savedAnswers(home);
     const result = await packs(["--add", "memory"], { createFails: "nora" });
     expect(result.code).toBe(1);
-    expect(result.output).toContain("fleet: gh repo create failed: GraphQL: you cannot create repos in nora");
+    expect(result.output).toContain("hedge: gh repo create failed: GraphQL: you cannot create repos in nora");
     expect(savedAnswers(home)).toEqual(before);
     expect(await pushedAnswers(home)).toEqual(before);
   });
 });
 
-describe("a second fleet setup", () => {
+describe("a second hedge setup", () => {
   test("with no flags keeps the profile's packs, Hub pack, and workflows", async () => {
     const home = await grownProfile();
     await onMac(home, ["--non-interactive"]);
@@ -160,7 +160,7 @@ async function withTeamSwitch() {
   mkdirSync(join(team, "packs/posthog"), { recursive: true });
   writeFileSync(join(team, "packs/posthog/pack.json"), JSON.stringify({ schema: 1, name: "posthog", summary: "Team rules.", workflows: [{ id: "team-reviews", name: "Team reviews", default: true, sentence: "Agents ask the team for reviews." }] }));
   const fetched = async (ref: SourceRef): Promise<FetchedSource> => ({ ref, dir: team, packs: await loadPacks(team) });
-  expect((await fleetSetup(home, ["--non-interactive", "--preset", "starter", "--workflows", "team-reviews=off", "--plan", "claude", "--devbox", "skip"], [], fakeMachine(home, {}, { org: true }), fetched)).code).toBe(0);
+  expect((await hedgeSetup(home, ["--non-interactive", "--preset", "starter", "--workflows", "team-reviews=off", "--plan", "claude", "--devbox", "skip"], [], fakeMachine(home, {}, { org: true }), fetched)).code).toBe(0);
   expect(await pushedAnswers(home)).toMatchObject({ packs: ["pull-requests", "posthog"], workflows: { "team-reviews": false } });
   return home;
 }
@@ -168,24 +168,24 @@ async function withTeamSwitch() {
 describe("a rerun that changes picks", () => {
   test("after a stop before the GitHub sign-in, --remove applies to the saved packs, not to the default preset", async () => {
     const home = temp.make("home-");
-    expect((await fleetSetup(home, ["--non-interactive", "--preset", "starter", "--plan", "claude"], [], fakeMachine(home, { github: 1 }))).code).toBe(2);
+    expect((await hedgeSetup(home, ["--non-interactive", "--preset", "starter", "--plan", "claude"], [], fakeMachine(home, { github: 1 }))).code).toBe(2);
     expect(machineFile(home).setup.draft.packs).toEqual(["pull-requests"]);
-    const resumed = await fleetSetup(home, ["--non-interactive", "--remove", "pull-requests", "--plan", "claude", "--devbox", "skip"]);
-    expect(resumed.output).not.toContain("fleet setup:");
+    const resumed = await hedgeSetup(home, ["--non-interactive", "--remove", "pull-requests", "--plan", "claude", "--devbox", "skip"]);
+    expect(resumed.output).not.toContain("hedge setup:");
     expect(await pushedAnswers(home)).toMatchObject({ packs: [] });
   });
 
   test("keeps a team workflow switch while the team's pack cannot be fetched", async () => {
     const home = await withTeamSwitch();
     const offline = async (ref: SourceRef): Promise<FetchedSource> => ({ ref, error: "offline" });
-    await fleetSetup(home, ["--non-interactive", "--add", "communication"], [], fakeMachine(home, {}, { org: true }), offline);
+    await hedgeSetup(home, ["--non-interactive", "--add", "communication"], [], fakeMachine(home, {}, { org: true }), offline);
     expect(await pushedAnswers(home)).toMatchObject({ packs: ["pull-requests", "posthog", "communication"], workflows: { "team-reviews": false } });
   });
 
   test("one by one keeps the profile's workflow switches", async () => {
     const home = temp.make("home-");
-    expect((await fleetSetup(home, ["--non-interactive", "--preset", "starter", "--add", "guards", "--workflows", "package-age=on", "--plan", "claude", "--devbox", "skip"])).code).toBe(0);
-    const edited = await fleetSetup(home, ["--add", "communication"], ["e", "4", ...Array(16).fill("")]);
+    expect((await hedgeSetup(home, ["--non-interactive", "--preset", "starter", "--add", "guards", "--workflows", "package-age=on", "--plan", "claude", "--devbox", "skip"])).code).toBe(0);
+    const edited = await hedgeSetup(home, ["--add", "communication"], ["e", "4", ...Array(16).fill("")]);
     expect(edited.code).toBe(0);
     expect(await pushedAnswers(home)).toMatchObject({ packs: expect.arrayContaining(["pull-requests", "guards", "communication"]), workflows: { "package-age": true } });
   });
@@ -193,55 +193,55 @@ describe("a rerun that changes picks", () => {
 
 async function newMachineWithProfile() {
   const home = temp.make("home-");
-  expect((await fleetSetup(home, ["--non-interactive", "--preset", "starter", "--add", "guards", "--workflows", "package-age=on", "--plan", "claude", "--devbox", "skip"])).code).toBe(0);
+  expect((await hedgeSetup(home, ["--non-interactive", "--preset", "starter", "--add", "guards", "--workflows", "package-age=on", "--plan", "claude", "--devbox", "skip"])).code).toBe(0);
   return forgetMachine(home);
 }
 
 function forgetMachine(home: string) {
-  rmSync(join(home, ".config/fleet"), { recursive: true });
+  rmSync(join(home, ".config/hedge"), { recursive: true });
   rmSync(profilePath(home), { recursive: true });
   return home;
 }
 
-describe("fleet setup on a new machine whose profile repo exists", () => {
+describe("hedge setup on a new machine whose profile repo exists", () => {
   test("with no flags keeps the profile's packs and workflows", async () => {
     const home = await newMachineWithProfile();
-    const result = await fleetSetup(home, [], Array(8).fill(""));
+    const result = await hedgeSetup(home, [], Array(8).fill(""));
     expect(result.code).toBe(0);
     expect(await pushedAnswers(home)).toMatchObject({ packs: ["pull-requests", "guards"], workflows: { "package-age": true }, plan: "claude" });
   });
 
   test("with --add changes only the pack it names", async () => {
     const home = await newMachineWithProfile();
-    expect((await fleetSetup(home, ["--non-interactive", "--add", "communication", "--devbox", "skip"])).code).toBe(0);
+    expect((await hedgeSetup(home, ["--non-interactive", "--add", "communication", "--devbox", "skip"])).code).toBe(0);
     expect(await pushedAnswers(home)).toMatchObject({ packs: ["pull-requests", "guards", "communication"], workflows: { "package-age": true }, plan: "claude" });
   });
 
   test("keeps the plan a run before the GitHub sign-in already set with --plan", async () => {
     const home = await newMachineWithProfile();
     const args = ["--non-interactive", "--preset", "starter", "--plan", "codex", "--devbox", "skip"];
-    expect((await fleetSetup(home, args, [], fakeMachine(home, { github: 1 }))).code).toBe(2);
-    expect((await fleetSetup(home, args)).code).toBe(0);
+    expect((await hedgeSetup(home, args, [], fakeMachine(home, { github: 1 }))).code).toBe(2);
+    expect((await hedgeSetup(home, args)).code).toBe(0);
     expect(await pushedAnswers(home)).toMatchObject({ packs: ["pull-requests"], plan: "codex" });
   });
 
   test("keeps the plan a stopped run set with --plan when the next run leaves it out", async () => {
     const home = await newMachineWithProfile();
-    expect((await fleetSetup(home, ["--non-interactive", "--plan", "codex", "--devbox", "skip"], [], fakeMachine(home, { github: 1 }))).code).toBe(2);
-    expect((await fleetSetup(home, ["--non-interactive", "--devbox", "skip"])).code).toBe(0);
+    expect((await hedgeSetup(home, ["--non-interactive", "--plan", "codex", "--devbox", "skip"], [], fakeMachine(home, { github: 1 }))).code).toBe(2);
+    expect((await hedgeSetup(home, ["--non-interactive", "--devbox", "skip"])).code).toBe(0);
     expect(await pushedAnswers(home)).toMatchObject({ packs: ["pull-requests", "guards"], plan: "codex" });
   });
 
   test("takes the profile's plan when no run named one", async () => {
     const home = await newMachineWithProfile();
-    expect((await fleetSetup(home, ["--non-interactive", "--devbox", "skip"], [], fakeMachine(home, { github: 1 }))).code).toBe(2);
-    expect((await fleetSetup(home, ["--non-interactive", "--devbox", "skip"])).code).toBe(0);
+    expect((await hedgeSetup(home, ["--non-interactive", "--devbox", "skip"], [], fakeMachine(home, { github: 1 }))).code).toBe(2);
+    expect((await hedgeSetup(home, ["--non-interactive", "--devbox", "skip"])).code).toBe(0);
     expect(await pushedAnswers(home)).toMatchObject({ packs: ["pull-requests", "guards"], plan: "claude" });
   });
 
   test("keeps a workflow switch of a team source the person is no longer a member of", async () => {
     const home = forgetMachine(await withTeamSwitch());
-    expect((await fleetSetup(home, ["--non-interactive", "--add", "communication", "--devbox", "skip"])).code).toBe(0);
+    expect((await hedgeSetup(home, ["--non-interactive", "--add", "communication", "--devbox", "skip"])).code).toBe(0);
     expect(await pushedAnswers(home)).toMatchObject({ packs: ["pull-requests", "posthog", "communication"], workflows: { "team-reviews": false } });
   });
 });

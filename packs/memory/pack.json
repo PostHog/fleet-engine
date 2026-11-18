@@ -64,7 +64,7 @@
   "files": [
     {
       "path": "hooks/memory-cap.ts",
-      "target": ".config/fleet/hooks/PreToolUse/memory-cap.ts",
+      "target": ".config/hedge/hooks/PreToolUse/memory-cap.ts",
       "plans": [
         "claude",
         "both"
@@ -73,12 +73,12 @@
     },
     {
       "path": "hooks/memory-index.ts",
-      "target": ".config/fleet/hooks/SessionStart/memory-index.ts",
+      "target": ".config/hedge/hooks/SessionStart/memory-index.ts",
       "workflow": "shared-memory"
     },
     {
       "path": "hooks/memory-recall.ts",
-      "target": ".config/fleet/hooks/PreToolUse/memory-recall.ts",
+      "target": ".config/hedge/hooks/PreToolUse/memory-recall.ts",
       "workflow": "shared-memory"
     }
   ],
@@ -86,7 +86,7 @@
     {
       "id": "memory-sync",
       "command": [
-        "fleet",
+        "hedge",
         "memory-sync"
       ],
       "schedule": {

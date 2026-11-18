@@ -4,7 +4,7 @@ Read this when the person picks the incident.io pack, in step 6 with Mac
 only or in step 9 with a hub.
 
 An agent that watches a change they name pages them, and only them, through
-their own incident.io alert source, with `fleet page`. The alert route on
+their own incident.io alert source, with `hedge page`. The alert route on
 that source decides who is paged, so most of the setup is in incident.io.
 With Mac only, the token lives on the Mac. With a hub, it lives on the hub,
 and every other machine pages through it.
@@ -29,7 +29,7 @@ explains how it works and its risks. Tell them the risks before step 3.
    them.
 3. **The alert source.** Ask them to open
    <https://app.incident.io/~/on-call/alert-routes/sources/create?source_type=http>
-   and create an **HTTP** source named for this, such as "Fleet page". Ask
+   and create an **HTTP** source named for this, such as "Hedge page". Ask
    them to keep its URL, `https://api.incident.io/v2/alert_events/http/<id>`,
    and its token for step 5.
 4. **The alert route.** Ask them to open
@@ -39,7 +39,7 @@ explains how it works and its risks. Tell them the risks before step 3.
      escalation path or a schedule that includes the rotation. Without this,
      the alert pages nobody.
    - **Auto-cancel escalations when the alert resolves: on**, so
-     `fleet page --resolve` withdraws the page.
+     `hedge page --resolve` withdraws the page.
    - **Create incidents: off.** The route must never declare an incident.
    - **Send alerts to Slack: off.** Check that neither the route nor the
      source posts to a Slack channel.
@@ -49,12 +49,12 @@ explains how it works and its risks. Tell them the risks before step 3.
    theirs:
 
    ```sh
-   fleet page setup '<source URL>' < <token file>
+   hedge page setup '<source URL>' < <token file>
    rm -f <token file>
-   fleet page --key setup-check --title "Setup check" --dry-run
+   hedge page --key setup-check --title "Setup check" --dry-run
    ```
 
-   With a hub, run it after the hub's `fleet update`. The command runs on
+   With a hub, run it after the hub's `hedge update`. The command runs on
    the hub, and the token travels on SSH standard input only. The dry run
    checks the saved source, and from another machine the SSH hop to the
    hub. It sends nothing.
@@ -72,6 +72,6 @@ explains how it works and its risks. Tell them the risks before step 3.
    When they ask for one, send it, and withdraw it once they confirm:
 
    ```sh
-   fleet page --key setup-check --title "Setup check" --description "A test page they asked for."
-   fleet page --key setup-check --resolve
+   hedge page --key setup-check --title "Setup check" --description "A test page they asked for."
+   hedge page --key setup-check --resolve
    ```

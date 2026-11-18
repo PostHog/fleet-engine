@@ -82,7 +82,7 @@ test("a role the model table lacks fails with a sentence that names it", async (
 });
 
 test("without T3 on the machine, a start fails with a sentence that says T3 is not running", async () => {
-  const home = mkdtempSync(join(tmpdir(), "fleet-no-t3-"));
+  const home = mkdtempSync(join(tmpdir(), "hedge-no-t3-"));
   cleanups.push(() => rmSync(home, { recursive: true, force: true }));
   await expect(t3Threads(models, { home }).start({ ...request, key: "k" })).rejects.toThrow(/^T3 is not running on this machine: .* Start T3 Code, then try again\.$/);
 });
@@ -100,15 +100,15 @@ test("a thread that started counts as started when revoking its T3 session fails
 });
 
 function writeReport(home: string, providers: Record<string, string>, checkedAt = new Date().toISOString()) {
-  mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
-  writeFileSync(join(home, ".local/state/fleet/provider-availability.json"), JSON.stringify({ checkedAt, providers }));
+  mkdirSync(join(home, ".local/state/hedge"), { recursive: true });
+  writeFileSync(join(home, ".local/state/hedge/provider-availability.json"), JSON.stringify({ checkedAt, providers }));
 }
 
 test("a start whose model role maps to an exhausted provider is refused with a sentence, and the other provider still starts", async () => {
   const stub = await t3();
   writeReport(stub.home, { claude: "exhausted", codex: "available" });
   const threads = t3Threads(models, { home: stub.home });
-  await expect(threads.start({ ...request, key: "k" })).rejects.toThrow(/^Fleet did not start "Slack: the build is red": claude, the provider of the implementation model claude-big, has spent its quota \(fleet providers checked .*\)\. Wait until fleet providers says claude is available, or start it on another model\.$/);
+  await expect(threads.start({ ...request, key: "k" })).rejects.toThrow(/^Hedge did not start "Slack: the build is red": claude, the provider of the implementation model claude-big, has spent its quota \(hedge providers checked .*\)\. Wait until hedge providers says claude is available, or start it on another model\.$/);
   expect(stub.threads).toEqual([]);
   expect((await threads.start({ ...request, key: "k2", modelRole: "lookup" })).id).toBe("thread-1");
 });

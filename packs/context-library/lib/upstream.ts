@@ -6,13 +6,13 @@ import type { Library } from "./config.ts";
 
 export const upstreamFile = (home: string) => join(upstreamsDir(home), "context.json");
 export const serverScript = join(import.meta.dir, "../mcp/main.ts");
-const target = "/fleet-context";
+const target = "/hedge-context";
 
 export function contextUpstream(library: Pick<Library, "path" | "url">): LocalUpstream {
   return {
     kind: "local", name: "context", title: "Context library", script: serverScript,
     mounts: [{ source: library.path, target }],
-    env: { FLEET_CONTEXT_LIBRARY: target, ...(library.url ? { FLEET_CONTEXT_URL: library.url } : {}) },
+    env: { HEDGE_CONTEXT_LIBRARY: target, ...(library.url ? { HEDGE_CONTEXT_URL: library.url } : {}) },
   };
 }
 
@@ -30,7 +30,7 @@ export function upstreamCommand(action: string | undefined, library: Library, ho
   }
   if (action === "doctor") {
     if (Bun.deepEquals(declared(home), want)) return 0;
-    print(`Context library: ${upstreamFile(home)} does not declare the context search for ${library.path}. Run: fleet context upstream install`);
+    print(`Context library: ${upstreamFile(home)} does not declare the context search for ${library.path}. Run: hedge context upstream install`);
     return 1;
   }
   if (action === "remove") {

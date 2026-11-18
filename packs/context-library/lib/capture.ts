@@ -15,7 +15,7 @@ const gatewayTools = [
   "slack-slack_read_canvas", "slack-slack_read_thread", "slack-slack_read_file", "slack-slack_read_user_profile",
   "google-drive-fetch", "google-drive-get_document_text", "google-drive-get_file_metadata", "google-drive-get_presentation_text",
   "wispr-flow-resolve_share_link", "wispr-flow-get_meeting", "wispr-flow-search_meetings",
-].map((tool) => `mcp__fleet-hub__${tool}`);
+].map((tool) => `mcp__hedge-hub__${tool}`);
 const fileTools = ["Read", "Write", "Edit", "Glob", "Grep"];
 
 function permissionRules(cwd: string, source: string) {
@@ -24,7 +24,7 @@ function permissionRules(cwd: string, source: string) {
 }
 
 export function captureAgent(row: ModelRow, command = "claude"): Agent {
-  if (row.provider !== "claude") throw new Error(`fleet context add runs a Claude agent without a shell, and the survey row of your model table names ${row.model}. Give the survey row a Claude model.`);
+  if (row.provider !== "claude") throw new Error(`hedge context add runs a Claude agent without a shell, and the survey row of your model table names ${row.model}. Give the survey row a Claude model.`);
   return async (prompt, cwd, source) => {
     const child = Bun.spawn(
       [command, "-p", "--model", row.model, "--effort", row.effort, "--no-session-persistence", "--permission-mode", "dontAsk",
@@ -65,7 +65,7 @@ ${input.startedAt ? `${wisprStep(input.startedAt)}\n` : ""}2. Read \`${catalogNa
    ---
    \`\`\`
 
-   Keep \`source\` exactly as given: Fleet finds the document again by it.
+   Keep \`source\` exactly as given: Hedge finds the document again by it.
 4. Write the body condensed, never as a copy: decisions and their reasons, the problems named, action items with their owners and dates, open questions, and the links that matter. Use simple technical English. Leave out passwords, tokens, and keys.
 5. Write only that one file. Change no other file.
 6. End your answer with one last line: \`NOTE: <path>\`.${input.startedAt ? " Put the \`WISPR:\` line from step 1b right before it." : ""}

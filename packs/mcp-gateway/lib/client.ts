@@ -10,13 +10,13 @@ export type Fetch = (input: string | URL | Request, init?: RequestInit) => Promi
 
 export const gatewayPort = 3317;
 export const localGatewayUrl = `http://127.0.0.1:${gatewayPort}/mcphub`;
-export const gatewayGroup = "fleet";
-export const grantHint = "Run fleet apply on this machine to pull its key from the hub.";
-const invalidClient = `~/.config/fleet/mcphub.client.json is not a key from your hub. ${grantHint}`;
+export const gatewayGroup = "hedge";
+export const grantHint = "Run hedge apply on this machine to pull its key from the hub.";
+const invalidClient = `~/.config/hedge/mcphub.client.json is not a key from your hub. ${grantHint}`;
 
 export class GatewayClientError extends Error {}
 
-export const clientPath = (home: string) => join(home, ".config/fleet/mcphub.client.json");
+export const clientPath = (home: string) => join(home, ".config/hedge/mcphub.client.json");
 
 export function browserGatewayUrl(settings: GatewaySettings) {
   return settings.httpsHost && settings.relayPort ? `https://${settings.httpsHost}:${settings.relayPort}/mcphub` : localGatewayUrl;
@@ -57,7 +57,7 @@ export async function saveGatewayClient(home: string, value: unknown, settings: 
   const client = validClient(value, settings);
   const path = clientPath(home);
   await refuseLinks(home, path, "MCP gateway key path");
-  await mkdir(join(home, ".config/fleet"), { recursive: true, mode: 0o700 });
+  await mkdir(join(home, ".config/hedge"), { recursive: true, mode: 0o700 });
   await writePrivateFile(path, `${JSON.stringify(client)}\n`);
 }
 
@@ -87,9 +87,9 @@ export async function syncClientFile(home: string, stored: string | undefined, s
 
 export async function checkGateway(home: string, stored: string | undefined, fetch: Fetch): Promise<{ ok: boolean; line: string }> {
   if (stored === undefined) return { ok: false, line: `This machine has no MCP gateway key. ${grantHint}` };
-  if ((await fileClient(home))?.token !== stored) return { ok: false, line: "~/.config/fleet/mcphub.client.json does not hold this machine's MCP gateway key. Run: fleet apply" };
+  if ((await fileClient(home))?.token !== stored) return { ok: false, line: "~/.config/hedge/mcphub.client.json does not hold this machine's MCP gateway key. Run: hedge apply" };
   const health = await fetch(`http://127.0.0.1:${gatewayPort}/health`, { signal: AbortSignal.timeout(5000) }).catch(() => undefined);
   return health?.ok
     ? { ok: true, line: `The MCP gateway at ${localGatewayUrl} answers.` }
-    : { ok: false, line: `The MCP gateway at ${localGatewayUrl} does not answer. On the hub, run: fleet mcp-gateway doctor` };
+    : { ok: false, line: `The MCP gateway at ${localGatewayUrl} does not answer. On the hub, run: hedge mcp-gateway doctor` };
 }

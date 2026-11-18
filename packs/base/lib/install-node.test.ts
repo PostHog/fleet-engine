@@ -70,7 +70,7 @@ describe("install-node.sh", () => {
     const box = await machine(arch);
     expect(await box.install()).toMatchObject({ code: 0 });
     for (const name of ["node", "npm", "npx"]) expect(await runs(box.home, name)).toBe(`${name} ${version} ${target}`);
-    expect(readlinkSync(join(box.home, ".local/bin/npx"))).toBe(join(box.home, `.local/share/fleet/node/node-v${version}-${target}/bin/npx`));
+    expect(readlinkSync(join(box.home, ".local/bin/npx"))).toBe(join(box.home, `.local/share/hedge/node/node-v${version}-${target}/bin/npx`));
     expect(box.downloads()).toEqual([expect.stringContaining(`https://nodejs.org/dist/v${version}/node-v${version}-${target}.tar.gz`)]);
   });
 
@@ -93,10 +93,10 @@ describe("install-node.sh", () => {
     expect(result.code).not.toBe(0);
     expect(result.stderr).toContain("checksum");
     expect(existsSync(join(box.home, ".local/bin/node"))).toBe(false);
-    expect(existsSync(join(box.home, ".local/share/fleet/node"))).toBe(false);
+    expect(existsSync(join(box.home, ".local/share/hedge/node"))).toBe(false);
   });
 
-  onLinux("keeps a node, npm or npx in ~/.local/bin that Fleet did not put there", async () => {
+  onLinux("keeps a node, npm or npx in ~/.local/bin that Hedge did not put there", async () => {
     const box = await machine("x86_64");
     mkdirSync(join(box.home, ".local/bin"), { recursive: true });
     stub(join(box.home, ".local/bin"), "npm", "echo mine");
@@ -110,7 +110,7 @@ describe("install-node.sh", () => {
     expect((await box.install()).code).toBe(0);
     for (const name of ["node", "npx"]) {
       rmSync(join(box.home, ".local/bin", name));
-      symlinkSync(join(box.home, `.local/share/fleet/node/node-v1.0.0-linux-x64/bin/${name}`), join(box.home, ".local/bin", name));
+      symlinkSync(join(box.home, `.local/share/hedge/node/node-v1.0.0-linux-x64/bin/${name}`), join(box.home, ".local/bin", name));
     }
     expect(await box.install()).toMatchObject({ code: 0 });
     expect(await runs(box.home, "node")).toBe(`node ${version} linux-x64`);
@@ -126,7 +126,7 @@ describe("install-node.sh", () => {
     expect(await runs(box.home, "npx")).toBe(`npx ${version} linux-x64`);
   });
 
-  onLinux("names a broken npx in ~/.local/bin that Fleet did not put there, and keeps it", async () => {
+  onLinux("names a broken npx in ~/.local/bin that Hedge did not put there, and keeps it", async () => {
     const box = await machine("x86_64");
     mkdirSync(join(box.home, ".local/bin"), { recursive: true });
     stub(join(box.home, ".local/bin"), "npx", "exit 42");

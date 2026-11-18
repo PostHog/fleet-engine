@@ -16,7 +16,7 @@ export const runSsh: Ssh = async (host, command, stdin, timeoutMs = 20_000) => {
 };
 
 export function isHub(home: string) {
-  try { return (JSON.parse(readFileSync(join(home, ".config/fleet/machine.json"), "utf8")) as { role?: unknown }).role === "hub"; }
+  try { return (JSON.parse(readFileSync(join(home, ".config/hedge/machine.json"), "utf8")) as { role?: unknown }).role === "hub"; }
   catch { return false; }
 }
 
@@ -25,5 +25,5 @@ export function remoteHub(home: string, env: Env) {
   return hub && !isHub(home) ? hub : undefined;
 }
 
-export const fleetOnHub = (hub: string, args: string[]) => onHub(hub, args).at(-1)!;
+export const hedgeOnHub = (hub: string, args: string[]) => onHub(hub, args).at(-1)!;
 

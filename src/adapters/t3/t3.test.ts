@@ -5,7 +5,7 @@ import type { ConfigEntry, ModelRow, Owned, PackJob, Plan, T3ProjectScript } fro
 import { apply, check } from "../../reconciler/apply.ts";
 import { tempDirs } from "../../testing/git.ts";
 import { engineAdapters } from "../index.ts";
-import type { FleetTask } from "../jobs/adapter.ts";
+import type { HedgeTask } from "../jobs/adapter.ts";
 import { jobsAdapter } from "../jobs/adapter.ts";
 import type { CommandRunner } from "../run.ts";
 import { t3Adapter } from "./adapter.ts";
@@ -32,9 +32,9 @@ const loop: Owned<PackJob> = {
   task: { prompt: "Run the quality-loop skill.", projectSetting: "orchestration.loopProject", modelRole: "implementation", workspaceStrategy: "worktree", runtimeMode: "full-access", project },
 };
 
-const wantedTask: FleetTask = {
-  id: "fleet:quality-loop",
-  title: "Fleet: quality-loop",
+const wantedTask: HedgeTask = {
+  id: "hedge:quality-loop",
+  title: "Hedge: quality-loop",
   prompt: "Run the quality-loop skill.",
   enabled: true,
   schedule: { type: "fixed_time", timeOfDay: "02:30" },
@@ -75,7 +75,7 @@ const write = (home: string, target: string, value: unknown) => {
   mkdirSync(join(home, target, ".."), { recursive: true });
   writeFileSync(join(home, target), `${JSON.stringify(value, null, 2)}\n`);
 };
-const backups = (home: string) => (existsSync(join(home, ".local/state/fleet/backups")) ? readdirSync(join(home, ".local/state/fleet/backups")) : []);
+const backups = (home: string) => (existsSync(join(home, ".local/state/hedge/backups")) ? readdirSync(join(home, ".local/state/hedge/backups")) : []);
 
 type Link = { environmentId: string; label: string; status: "reachable" | "unreachable" | "expired"; lastError: string | null };
 type StoredTask = Record<string, unknown> & { id: string; enabled: boolean };
@@ -232,7 +232,7 @@ describe("T3 settings while T3 Code is stopped", () => {
       defaultThreadEnvMode: "worktree",
       sidebarAutoSettleAfterDays: 3,
     });
-    expect(result.findings).toContainEqual({ id: `kept:${settingsFile}`, pack: "engine", say: `Kept your storageCleanup in ${settingsFile}. Run fleet apply --adopt ${settingsFile} to take Fleet's value.` });
+    expect(result.findings).toContainEqual({ id: `kept:${settingsFile}`, pack: "engine", say: `Kept your storageCleanup in ${settingsFile}. Run hedge apply --adopt ${settingsFile} to take Hedge's value.` });
     expect(result.actions).toEqual([{ target: settingsFile, operation: "replace", reason: "set defaultThreadEnvMode, sidebarAutoSettleAfterDays" }]);
   });
 
@@ -248,17 +248,17 @@ describe("T3 settings while T3 Code is stopped", () => {
     expect(backups(home)).toEqual(saved);
   });
 
-  test("keeps a key the user changed after Fleet set it", async () => {
+  test("keeps a key the user changed after Hedge set it", async () => {
     const home = temp.make("home-");
     await seed(plan("linux", base), home);
     write(home, settingsFile, { ...read(home, settingsFile), sidebarAutoSettleAfterDays: 10 });
     const result = await seed(plan("linux", [entry("defaultThreadEnvMode", "worktree"), entry("sidebarAutoSettleAfterDays", 5), base[2]!]), home);
     expect(read(home, settingsFile).sidebarAutoSettleAfterDays).toBe(10);
-    expect(result.findings).toEqual([{ id: `kept:${settingsFile}`, pack: "engine", say: `Kept your sidebarAutoSettleAfterDays in ${settingsFile}. Run fleet apply --adopt ${settingsFile} to take Fleet's value.` }]);
+    expect(result.findings).toEqual([{ id: `kept:${settingsFile}`, pack: "engine", say: `Kept your sidebarAutoSettleAfterDays in ${settingsFile}. Run hedge apply --adopt ${settingsFile} to take Hedge's value.` }]);
     expect(result.actions).toEqual([]);
   });
 
-  test("--adopt takes Fleet's value over the user's", async () => {
+  test("--adopt takes Hedge's value over the user's", async () => {
     const home = temp.make("home-");
     write(home, settingsFile, { defaultThreadEnvMode: "local" });
     await seed(plan("linux", base), home, { adopt: [settingsFile] });
@@ -274,8 +274,8 @@ describe("T3 settings while T3 Code is stopped", () => {
     expect(read(home, settingsFile)).toEqual({ theme: "dark", defaultThreadEnvMode: "worktree", sidebarAutoSettleAfterDays: 3 });
     expect(result.actions).toEqual([{ target: settingsFile, operation: "replace", reason: "remove storageCleanup" }]);
     const latest = backups(home).sort().at(-1)!;
-    expect(readFileSync(join(home, ".local/state/fleet/backups", latest, settingsFile), "utf8")).toBe(before);
-    expect(read(home, ".config/fleet/t3-settings.json")[settingsFile].map((field: { path: string[] }) => field.path)).toEqual([["defaultThreadEnvMode"], ["sidebarAutoSettleAfterDays"]]);
+    expect(readFileSync(join(home, ".local/state/hedge/backups", latest, settingsFile), "utf8")).toBe(before);
+    expect(read(home, ".config/hedge/t3-settings.json")[settingsFile].map((field: { path: string[] }) => field.path)).toEqual([["defaultThreadEnvMode"], ["sidebarAutoSettleAfterDays"]]);
   });
 
   test("sets the nightly update channel in desktop-settings.json on the Mac only", async () => {
@@ -293,7 +293,7 @@ describe("T3 settings while T3 Code is stopped", () => {
     write(home, desktopFile, { updateChannel: "latest", updateChannelConfiguredByUser: true });
     const result = await seed(plan("darwin", []), home);
     expect(read(home, desktopFile)).toEqual({ updateChannel: "latest", updateChannelConfiguredByUser: true });
-    expect(result.findings).toEqual([{ id: `kept:${desktopFile}`, pack: "engine", say: `Kept your updateChannel in ${desktopFile}. Run fleet apply --adopt ${desktopFile} to take Fleet's value.` }]);
+    expect(result.findings).toEqual([{ id: `kept:${desktopFile}`, pack: "engine", say: `Kept your updateChannel in ${desktopFile}. Run hedge apply --adopt ${desktopFile} to take Hedge's value.` }]);
   });
 
   test("keeps a channel the user picked when T3 leaves the build's default channel out", async () => {
@@ -311,7 +311,7 @@ describe("T3 settings while T3 Code is stopped", () => {
     write(home, settingsFile, { storageCleanup: { logsAfterDays: 14 } });
     const result = await seed(plan("linux", [cleanup(7)]), home);
     expect(read(home, settingsFile).storageCleanup).toEqual({ logsAfterDays: 14 });
-    expect(result.findings).toEqual([{ id: `kept:${settingsFile}`, pack: "engine", say: `Kept your storageCleanup in ${settingsFile}. Run fleet apply --adopt ${settingsFile} to take Fleet's value.` }]);
+    expect(result.findings).toEqual([{ id: `kept:${settingsFile}`, pack: "engine", say: `Kept your storageCleanup in ${settingsFile}. Run hedge apply --adopt ${settingsFile} to take Hedge's value.` }]);
   });
 
   test("adds a nested setting that the file lacks while T3 is stopped", async () => {
@@ -325,7 +325,7 @@ describe("T3 settings while T3 Code is stopped", () => {
   test("writes no T3 setting through the Provider config record", async () => {
     const home = temp.make("home-");
     await seed(plan("linux", base), home);
-    expect(existsSync(join(home, ".config/fleet/provider-fields.json"))).toBe(false);
+    expect(existsSync(join(home, ".config/hedge/provider-fields.json"))).toBe(false);
   });
 });
 
@@ -377,7 +377,7 @@ describe("T3 adapter with a running server", () => {
     const { server, adapter } = setup({ settings: { storageCleanup: { worktreeOnMerge: false, logsAfterDays: 14, browserArtifactsAfterDays: 7 } } });
     const report = await apply(plan("linux", [entry("storageCleanup", { logsAfterDays: 7, worktreeOnMerge: true })]), { home, adapters: [adapter] });
     expect(server.tags()).not.toContain("server.updateSettings");
-    expect(report.findings).toContainEqual({ id: `kept:${settingsFile}`, pack: "engine", say: `Kept your storageCleanup in ${settingsFile}. Run fleet apply --adopt ${settingsFile} to take Fleet's value.` });
+    expect(report.findings).toContainEqual({ id: `kept:${settingsFile}`, pack: "engine", say: `Kept your storageCleanup in ${settingsFile}. Run hedge apply --adopt ${settingsFile} to take Hedge's value.` });
   });
 
   test("treats a default T3 left out of the file as unchanged, and updates the setting", async () => {
@@ -407,7 +407,7 @@ describe("T3 adapter with a running server", () => {
     const home = temp.make("home-");
     const { adapter } = setup({ ignorePatch: true });
     const report = await apply(plan("linux", base.slice(0, 1)), { home, adapters: [adapter] });
-    expect(report.findings).toContainEqual({ id: "t3:settings", pack: "engine", say: "T3 Code did not take defaultThreadEnvMode. Run fleet apply again; if it stays, set it in T3 Code's settings.", repair: "apply" });
+    expect(report.findings).toContainEqual({ id: "t3:settings", pack: "engine", say: "T3 Code did not take defaultThreadEnvMode. Run hedge apply again; if it stays, set it in T3 Code's settings.", repair: "apply" });
   });
 
   test("adds a ~/ project once, under the user's home", async () => {
@@ -433,7 +433,7 @@ describe("T3 adapter with a running server", () => {
     const { server, commands, adapter } = setup();
     const jobs = jobsAdapter({ run: commands.run, engineRoot: engine, t3: adapter.tasks });
     await apply(plan("linux", [], [loop]), { home, adapters: [adapter, jobs] });
-    expect(server.state.tasks.get("fleet:quality-loop")).toMatchObject({ projectId: "project-0", enabled: true });
+    expect(server.state.tasks.get("hedge:quality-loop")).toMatchObject({ projectId: "project-0", enabled: true });
     await apply(plan("linux", [], [loop]), { home, adapters: [adapter, jobs] });
     expect(server.tags().filter((tag) => tag === "scheduledTasks.upsert")).toHaveLength(1);
   });
@@ -444,7 +444,7 @@ describe("T3 adapter with a running server", () => {
     const report = await apply(plan("linux", base, [loop]), { home, adapters: [adapter] });
     expect(await adapter.tasks()).toBeUndefined();
     expect(read(home, settingsFile).defaultThreadEnvMode).toBe("worktree");
-    expect(report.findings).toContainEqual({ id: "t3:projects", pack: "engine", say: `T3 Code is not running, so ${project} waits to be added as a project. The next fleet apply after T3 Code starts adds it.`, repair: "apply" });
+    expect(report.findings).toContainEqual({ id: "t3:projects", pack: "engine", say: `T3 Code is not running, so ${project} waits to be added as a project. The next hedge apply after T3 Code starts adds it.`, repair: "apply" });
   });
 
   test("reports expired and unreachable links without failing the apply", async () => {
@@ -465,10 +465,10 @@ describe("T3 adapter with a running server", () => {
 });
 
 describe("T3 project scripts", () => {
-  const prepare: Owned<T3ProjectScript> = { id: "prepare", name: "Prepare worktree", command: "fleet prepare --fast", projects: ["/work/app"], pack: "team" };
+  const prepare: Owned<T3ProjectScript> = { id: "prepare", name: "Prepare worktree", command: "hedge prepare --fast", projects: ["/work/app"], pack: "team" };
   const lint = { id: "lint", name: "Lint", command: "pnpm lint", icon: "lint", runOnWorktreeCreate: false };
   const userSetup = { id: "setup", name: "Setup", command: "pnpm install", icon: "configure", runOnWorktreeCreate: true };
-  const ours = { id: "fleet-team-prepare", name: "Prepare worktree", icon: "configure", command: "/bin/sh '/opt/fleet-engine/fleet' prepare --fast", runOnWorktreeCreate: true, async: false };
+  const ours = { id: "hedge-team-prepare", name: "Prepare worktree", icon: "configure", command: "/bin/sh '/opt/fleet-engine/hedge' prepare --fast", runOnWorktreeCreate: true, async: false };
   const withScripts = (scripts: Array<Owned<T3ProjectScript>>, base = plan("linux", [])): Plan => ({ ...base, engineRoot: engine, t3ProjectScripts: scripts });
   const updates = (server: ReturnType<typeof fakeServer>) => server.tags().filter((tag) => tag === "server.updateSettings").length;
 
@@ -478,17 +478,26 @@ describe("T3 project scripts", () => {
 
     const added = await apply(withScripts([prepare]), { home, adapters: [adapter] });
     expect(server.state.settings.projectSettingsOverrides).toEqual({ "project-0": { defaultAutoPull: true, defaultProjectScripts: [ours, lint] } });
-    expect(added.actions).toContainEqual({ target: "t3 project /work/app", operation: "replace", reason: "add script fleet-team-prepare" });
+    expect(added.actions).toContainEqual({ target: "t3 project /work/app", operation: "replace", reason: "add script hedge-team-prepare" });
 
     await apply(withScripts([prepare]), { home, adapters: [adapter] });
     expect(updates(server)).toBe(1);
 
     const removed = await apply(withScripts([]), { home, adapters: [adapter] });
     expect(server.state.settings.projectSettingsOverrides).toEqual({ "project-0": { defaultAutoPull: true } });
-    expect(removed.actions).toContainEqual({ target: "t3 project /work/app", operation: "replace", reason: "remove script fleet-team-prepare" });
+    expect(removed.actions).toContainEqual({ target: "t3 project /work/app", operation: "replace", reason: "remove script hedge-team-prepare" });
   });
 
-  test("chains the project's own worktree script after Fleet's, because T3 Code runs only the first, and leaves it in place", async () => {
+  test("removes the script that Hedge put on a project before the rename, whose id starts with fleet-", async () => {
+    const home = temp.make("home-");
+    const { server, adapter } = setup({ projects: ["/work/app"], settings: { projectSettingsFolded: true, defaultProjectScripts: [lint], projectSettingsOverrides: { "project-0": { defaultProjectScripts: [{ ...ours, id: "fleet-team-prepare" }, lint] } } } });
+
+    await apply(withScripts([prepare]), { home, adapters: [adapter] });
+
+    expect(server.state.settings.projectSettingsOverrides).toEqual({ "project-0": { defaultProjectScripts: [ours, lint] } });
+  });
+
+  test("chains the project's own worktree script after Hedge's, because T3 Code runs only the first, and leaves it in place", async () => {
     const home = temp.make("home-");
     const { server, adapter } = setup({ projects: ["/work/app"], settings: { projectSettingsOverrides: {} } });
     server.state.projects[0]!.scripts = [userSetup, lint];
@@ -518,7 +527,7 @@ describe("T3 project scripts", () => {
     expect(Object.keys(server.state.settings.projectSettingsOverrides as object)).toEqual(["project-0"]);
   });
 
-  test("keeps Fleet's script while a pack source cannot be fetched", async () => {
+  test("keeps Hedge's script while a pack source cannot be fetched", async () => {
     const home = temp.make("home-");
     const { server, adapter } = setup({ projects: ["/work/app"], settings: { projectSettingsOverrides: {} } });
     await apply(withScripts([prepare]), { home, adapters: [adapter] });
@@ -547,7 +556,7 @@ describe("T3 project scripts", () => {
     const broken = withScripts([{ ...prepare, projectSetting: "team.checkout" }]);
     broken.settings = { "team.checkout": "app" };
     const report = await apply(broken, { home, adapters: [adapter] });
-    expect(report.findings).toContainEqual({ id: "t3:script-setting:fleet-team-prepare", pack: "engine", say: 'The setting team.checkout is "app", not an absolute path or a path under ~/, so the worktree script fleet-team-prepare skips it. Fix it with fleet set team.checkout=<path>.', repair: "human" });
+    expect(report.findings).toContainEqual({ id: "t3:script-setting:hedge-team-prepare", pack: "engine", say: 'The setting team.checkout is "app", not an absolute path or a path under ~/, so the worktree script hedge-team-prepare skips it. Fix it with hedge set team.checkout=<path>.', repair: "human" });
     expect(Object.keys(server.state.settings.projectSettingsOverrides as object)).toEqual(["project-0"]);
   });
 
@@ -560,7 +569,7 @@ describe("T3 project scripts", () => {
     const report = await apply(withScripts([named]), { home, adapters: [adapter] });
     expect(commands.calls.filter((line) => line.startsWith("t3 project add"))).toEqual([`t3 project add ${home}/app`]);
     expect(report.actions).toContainEqual({ target: "t3 project ~/app", operation: "create" });
-    expect(report.findings).toContainEqual({ id: "t3:project:~/app", pack: "engine", say: "Fleet added the T3 project ~/app, because the team pack's Prepare worktree script runs in it. To keep it removed, turn off the team pack." });
+    expect(report.findings).toContainEqual({ id: "t3:project:~/app", pack: "engine", say: "Hedge added the T3 project ~/app, because the team pack's Prepare worktree script runs in it. To keep it removed, turn off the team pack." });
     expect(server.state.settings.projectSettingsOverrides).toEqual({ "project-0": { defaultProjectScripts: [ours] } });
     await apply(withScripts([named]), { home, adapters: [adapter] });
     expect(commands.calls.filter((line) => line.startsWith("t3 project add")).length).toBe(1);
@@ -576,7 +585,7 @@ describe("T3 project scripts", () => {
 
     const back = await apply(withScripts([named]), { home, adapters: [adapter] });
     expect(back.actions).toContainEqual({ target: "t3 project ~/app", operation: "create" });
-    expect(back.findings).toContainEqual({ id: "t3:project:~/app", pack: "engine", say: "Fleet added the T3 project ~/app, because the team pack's Prepare worktree script runs in it. To keep it removed, turn off the team pack." });
+    expect(back.findings).toContainEqual({ id: "t3:project:~/app", pack: "engine", say: "Hedge added the T3 project ~/app, because the team pack's Prepare worktree script runs in it. To keep it removed, turn off the team pack." });
     expect(server.state.settings.projectSettingsOverrides).toEqual({ "project-0": { defaultProjectScripts: [ours] }, "project-1": { defaultProjectScripts: [ours] } });
 
     const settled = await apply(withScripts([named]), { home, adapters: [adapter] });
@@ -589,7 +598,7 @@ describe("T3 project scripts", () => {
     mkdirSync(join(home, "app"), { recursive: true });
     const { adapter } = setup({ settings: { projectSettingsFolded: true, projectSettingsOverrides: {} } });
     const report = await apply(withScripts([{ ...prepare, projects: ["~/app"], workflow: "worktrees" }]), { home, adapters: [adapter] });
-    expect(report.findings).toContainEqual({ id: "t3:project:~/app", pack: "engine", say: "Fleet added the T3 project ~/app, because the team pack's Prepare worktree script runs in it. To keep it removed, turn off the worktrees workflow." });
+    expect(report.findings).toContainEqual({ id: "t3:project:~/app", pack: "engine", say: "Hedge added the T3 project ~/app, because the team pack's Prepare worktree script runs in it. To keep it removed, turn off the worktrees workflow." });
   });
 
   test("names every script and task that needs a folder, so turning them all off keeps its project removed", async () => {
@@ -599,7 +608,7 @@ describe("T3 project scripts", () => {
     const lintApp: Owned<T3ProjectScript> = { id: "lint", name: "Lint", command: "pnpm lint", projects: ["~/app"], pack: "tools", workflow: "checks" };
     const job = { ...loop, task: { ...loop.task!, project: "~/app" } };
     const report = await apply(withScripts([{ ...prepare, projects: ["~/app"] }, lintApp], plan("linux", [], [job])), { home, adapters: [adapter] });
-    expect(report.findings.filter((item) => item.id === "t3:project:~/app")).toEqual([{ id: "t3:project:~/app", pack: "engine", say: "Fleet added the T3 project ~/app, because the orchestration pack's quality-loop task, the team pack's Prepare worktree script and the tools pack's Lint script run in it. To keep it removed, turn off the orchestration pack, the team pack and the checks workflow." }]);
+    expect(report.findings.filter((item) => item.id === "t3:project:~/app")).toEqual([{ id: "t3:project:~/app", pack: "engine", say: "Hedge added the T3 project ~/app, because the orchestration pack's quality-loop task, the team pack's Prepare worktree script and the tools pack's Lint script run in it. To keep it removed, turn off the orchestration pack, the team pack and the checks workflow." }]);
   });
 
   test("knows a script folder reached through a symlink as the project T3 lists under the other path", async () => {
@@ -623,21 +632,21 @@ describe("T3 project scripts", () => {
   test("waits while T3 Code is not running, and doctor names the missing script without writing", async () => {
     const home = temp.make("home-");
     const stopped = await apply(withScripts([prepare]), { home, adapters: [setup({ up: false }).adapter] });
-    expect(stopped.findings).toContainEqual({ id: "t3:scripts", pack: "engine", say: "T3 Code is not running, so the worktree script fleet-team-prepare waits. The next fleet apply after T3 Code starts adds it.", repair: "apply" });
+    expect(stopped.findings).toContainEqual({ id: "t3:scripts", pack: "engine", say: "T3 Code is not running, so the worktree script hedge-team-prepare waits. The next hedge apply after T3 Code starts adds it.", repair: "apply" });
 
     const { server, adapter } = setup({ projects: ["/work/app"], settings: { projectSettingsOverrides: {} } });
     const report = await check(withScripts([prepare]), { home, adapters: [adapter], run: async () => 0 });
-    expect(report.findings).toContainEqual({ id: "t3:script:/work/app", pack: "engine", say: "T3 Code needs the worktree script fleet-team-prepare on /work/app.", repair: "apply" });
+    expect(report.findings).toContainEqual({ id: "t3:script:/work/app", pack: "engine", say: "T3 Code needs the worktree script hedge-team-prepare on /work/app.", repair: "apply" });
     expect(updates(server)).toBe(0);
   });
 
   test("asks for a newer T3 Code when the server keeps no project settings, and reports a script T3 did not take", async () => {
     const home = temp.make("home-");
     const old = await apply(withScripts([prepare]), { home, adapters: [setup({ projects: ["/work/app"] }).adapter] });
-    expect(old.findings).toContainEqual({ id: "t3:scripts", pack: "engine", say: "This T3 Code keeps no project settings, so Fleet cannot add the worktree script fleet-team-prepare. Update T3 Code, then run fleet apply.", repair: "human" });
+    expect(old.findings).toContainEqual({ id: "t3:scripts", pack: "engine", say: "This T3 Code keeps no project settings, so Hedge cannot add the worktree script hedge-team-prepare. Update T3 Code, then run hedge apply.", repair: "human" });
 
     const refused = await apply(withScripts([prepare]), { home, adapters: [setup({ projects: ["/work/app"], settings: { projectSettingsOverrides: {} }, ignorePatch: true }).adapter] });
-    expect(refused.findings).toContainEqual({ id: "t3:script:/work/app", pack: "engine", say: "T3 Code did not take the worktree scripts for /work/app. Run fleet apply again.", repair: "apply" });
+    expect(refused.findings).toContainEqual({ id: "t3:script:/work/app", pack: "engine", say: "T3 Code did not take the worktree scripts for /work/app. Run hedge apply again.", repair: "apply" });
   });
 });
 
@@ -649,8 +658,8 @@ describe("T3 tasks client", () => {
     const client = t3Tasks(server.server, home, { plan: plan("linux", [], [loop]), run });
     await client.upsert(wantedTask);
     expect(server.calls.find((call) => call.tag === "scheduledTasks.upsert")?.payload).toEqual({
-      id: "fleet:quality-loop",
-      title: "Fleet: quality-loop",
+      id: "hedge:quality-loop",
+      title: "Hedge: quality-loop",
       prompt: "Run the quality-loop skill.",
       enabled: true,
       schedule: { type: "fixed_time", timeOfDay: "02:30" },
@@ -662,8 +671,8 @@ describe("T3 tasks client", () => {
     });
     expect(await client.list()).toEqual([wantedTask]);
     expect(server.calls).toContainEqual({ tag: "scheduledTasks.subscribe", payload: {} });
-    await client.setEnabled("fleet:quality-loop", false);
-    expect(server.calls.at(-1)).toEqual({ tag: "scheduledTasks.setEnabled", payload: { id: "fleet:quality-loop", enabled: false } });
+    await client.setEnabled("hedge:quality-loop", false);
+    expect(server.calls.at(-1)).toEqual({ tag: "scheduledTasks.setEnabled", payload: { id: "hedge:quality-loop", enabled: false } });
   });
 
   test("finds a task's project that T3 lists under the other side of a symlink, and lists the task unchanged", async () => {
@@ -676,7 +685,7 @@ describe("T3 tasks client", () => {
       const job = { ...loop, task: { ...loop.task!, project: `~/${named}` } };
       const client = t3Tasks(server.server, home, { plan: plan("linux", [], [job]), run });
       await client.upsert({ ...wantedTask, project: `~/${named}` });
-      expect(server.state.tasks.get("fleet:quality-loop")?.projectId).toBe("project-0");
+      expect(server.state.tasks.get("hedge:quality-loop")?.projectId).toBe("project-0");
       expect(await client.list()).toEqual([{ ...wantedTask, project: `~/${named}` }]);
     }
   });
@@ -687,7 +696,7 @@ describe("T3 tasks client", () => {
     const { run } = runner(server);
     const client = t3Tasks(server.server, home, { plan: plan("linux", [], [loop]), run });
     await client.upsert(wantedTask);
-    const stored = server.state.tasks.get("fleet:quality-loop")!;
+    const stored = server.state.tasks.get("hedge:quality-loop")!;
     server.state.tasks.set(stored.id, { ...stored, modelSelection: { instanceId: "claude", model: "big" } });
     expect((await client.list())[0]).not.toEqual(wantedTask);
   });
@@ -698,7 +707,7 @@ describe("T3 tasks client", () => {
     const { run } = runner(server);
     const client = t3Tasks(server.server, home, { plan: plan("linux", [], [loop]), run });
     await client.upsert(wantedTask);
-    const stored = server.state.tasks.get("fleet:quality-loop")!;
+    const stored = server.state.tasks.get("hedge:quality-loop")!;
     expect(stored.workspaceStrategy).toEqual({ type: "worktree", baseRef: "origin/main", startFromOrigin: true });
     server.state.tasks.set(stored.id, { ...stored, workspaceStrategy: { type: "worktree", baseRef: "feature/old", startFromOrigin: false } });
     expect((await client.list())[0]).not.toEqual(wantedTask);
@@ -720,7 +729,7 @@ describe("T3 tasks client", () => {
     const { run } = runner(server, { originHead: undefined, refs: ["refs/remotes/origin/master"] });
     const client = t3Tasks(server.server, home, { plan: plan("linux", [], [loop]), run });
     await client.upsert(wantedTask);
-    expect(server.state.tasks.get("fleet:quality-loop")?.workspaceStrategy).toEqual({ type: "worktree", baseRef: "origin/master", startFromOrigin: true });
+    expect(server.state.tasks.get("hedge:quality-loop")?.workspaceStrategy).toEqual({ type: "worktree", baseRef: "origin/master", startFromOrigin: true });
   });
 
   test("bases a worktree on the primary remote's default branch when there is no origin", async () => {
@@ -729,7 +738,7 @@ describe("T3 tasks client", () => {
     const { run } = runner(server, { remotes: ["mirror", "backup"], originHead: "mirror/develop", refs: ["refs/remotes/mirror/develop", "refs/heads/main"] });
     const client = t3Tasks(server.server, home, { plan: plan("linux", [], [loop]), run });
     await client.upsert(wantedTask);
-    expect(server.state.tasks.get("fleet:quality-loop")?.workspaceStrategy).toEqual({ type: "worktree", baseRef: "mirror/develop", startFromOrigin: true });
+    expect(server.state.tasks.get("hedge:quality-loop")?.workspaceStrategy).toEqual({ type: "worktree", baseRef: "mirror/develop", startFromOrigin: true });
     expect(await client.list()).toEqual([wantedTask]);
   });
 
@@ -766,7 +775,7 @@ describe("T3 tasks client", () => {
     ];
     const client = t3Tasks(server.server, home, { plan: plan("linux", [], [loop], models), run });
     await client.upsert(wantedTask);
-    expect(server.state.tasks.get("fleet:quality-loop")?.modelSelection).toEqual(selection);
+    expect(server.state.tasks.get("hedge:quality-loop")?.modelSelection).toEqual(selection);
     expect(await client.list()).toEqual([wantedTask]);
   });
 });
@@ -813,10 +822,10 @@ describe("T3 on Linux", () => {
     const down = setup({}, { t3: false, installFailures: 3 });
     const failed = await apply(plan("linux", []), { home: temp.make("home-"), adapters: [down.adapter] });
     expect(down.commands.state.installerVersions).toHaveLength(3);
-    expect(failed.findings).toContainEqual({ id: "t3:cli", pack: "engine", say: "T3 Code did not install (exit 1). Run fleet apply again.", repair: "apply" });
+    expect(failed.findings).toContainEqual({ id: "t3:cli", pack: "engine", say: "T3 Code did not install (exit 1). Run hedge apply again.", repair: "apply" });
   });
 
-  test("writes Fleet's settings before it installs t3 or its service, so T3 Code's first start reads them", async () => {
+  test("writes Hedge's settings before it installs t3 or its service, so T3 Code's first start reads them", async () => {
     const home = temp.make("home-");
     const { server, commands } = setup({ up: false }, { t3: false, service: "not installed" });
     const seen: Array<{ line: string; settings: unknown }> = [];
@@ -850,7 +859,7 @@ describe("T3 on Linux", () => {
   });
 
   describe("base.t3TimeZone", () => {
-    const dropInFile = ".config/systemd/user/t3code.service.d/fleet-timezone.conf";
+    const dropInFile = ".config/systemd/user/t3code.service.d/hedge-timezone.conf";
     const zoned = (zone: string, os: "darwin" | "linux" = "linux"): Plan => ({ ...plan(os, []), settings: { "base.t3TimeZone": zone } });
     const zoneFindings = (report: { findings: { id: string; say: string; repair?: string }[] }) => report.findings.filter((item) => item.id === "t3:timezone");
 
@@ -904,12 +913,12 @@ describe("T3 on Linux", () => {
       writeFileSync(join(home, dropInFile), "[Service]\nEnvironment=TZ=Asia/Tokyo\nNice=5\n");
       const report = await apply(zoned("Europe/Berlin"), { home, adapters: [adapter] });
       expect(readFileSync(join(home, dropInFile), "utf8")).toBe("[Service]\nEnvironment=TZ=Asia/Tokyo\nNice=5\n");
-      expect(zoneFindings(report)).toEqual([expect.objectContaining({ repair: "human", say: expect.stringContaining("is not Fleet's") })]);
+      expect(zoneFindings(report)).toEqual([expect.objectContaining({ repair: "human", say: expect.stringContaining("is not Hedge's") })]);
       await apply(zoned(""), { home, adapters: [adapter] });
       expect(readFileSync(join(home, dropInFile), "utf8")).toBe("[Service]\nEnvironment=TZ=Asia/Tokyo\nNice=5\n");
     });
 
-    test("keeps a drop-in that an older Fleet wrote when the setting is empty, and never changes it", async () => {
+    test("keeps a drop-in that an older Hedge wrote when the setting is empty, and never changes it", async () => {
       const home = temp.make("home-");
       const { commands, adapter } = setup();
       const older = "[Service]\nEnvironment=TZ=Europe/Berlin\n";
@@ -923,7 +932,7 @@ describe("T3 on Linux", () => {
       expect(zoneFindings(same)).toEqual([]);
       const other = await apply(zoned("America/New_York"), { home, adapters: [adapter] });
       expect(readFileSync(join(home, dropInFile), "utf8")).toBe(older);
-      expect(zoneFindings(other)).toEqual([expect.objectContaining({ repair: "human", say: expect.stringContaining("is not Fleet's") })]);
+      expect(zoneFindings(other)).toEqual([expect.objectContaining({ repair: "human", say: expect.stringContaining("is not Hedge's") })]);
       await apply(zoned(""), { home, adapters: [adapter] });
       expect(readFileSync(join(home, dropInFile), "utf8")).toBe(older);
       expect(commands.calls).not.toContain("systemctl --user daemon-reload");
@@ -1106,7 +1115,7 @@ describe("T3 on Linux", () => {
     test("leaves a drop-in it cannot read alone, and says so", async () => {
       const home = temp.make("home-");
       const { token, commands, adapter } = withToken();
-      const theirs = "[Service]\nEnvironmentFile=%h/.config/fleet/box-claude-token.env\n";
+      const theirs = "[Service]\nEnvironmentFile=%h/.config/hedge/box-claude-token.env\n";
       mkdirSync(join(home, ".config/systemd/user/t3code.service.d"), { recursive: true });
       writeFileSync(join(home, dropInFile), theirs);
       chmodSync(join(home, dropInFile), 0o000);
@@ -1155,7 +1164,7 @@ describe("T3 on Linux", () => {
     test("leaves a drop-in with other content alone", async () => {
       const home = temp.make("home-");
       const { commands, adapter } = withToken();
-      const theirs = "[Service]\nEnvironmentFile=%h/.config/fleet/box-claude-token.env\n";
+      const theirs = "[Service]\nEnvironmentFile=%h/.config/hedge/box-claude-token.env\n";
       mkdirSync(join(home, ".config/systemd/user/t3code.service.d"), { recursive: true });
       writeFileSync(join(home, dropInFile), theirs);
       await apply(plan("linux", []), { home, adapters: [adapter] });
@@ -1182,7 +1191,7 @@ describe("T3 on Linux", () => {
     expect(report.findings).toContainEqual({
       id: "t3:service",
       pack: "engine",
-      say: "T3 Code cannot run as a service: systemd's user manager does not answer (systemctl --user). Log in to this machine in a normal session, or install your system's systemd user-session support, then run fleet apply.",
+      say: "T3 Code cannot run as a service: systemd's user manager does not answer (systemctl --user). Log in to this machine in a normal session, or install your system's systemd user-session support, then run hedge apply.",
       repair: "human",
     });
   });

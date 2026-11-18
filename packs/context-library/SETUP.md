@@ -33,12 +33,12 @@ thread's start, such as the recording of a huddle, and folds its decisions and
 action items into the same note. When the meeting's Wispr notes are not ready
 yet, it looks once more 30 minutes later.
 
-After the note is saved, Fleet sends its context to the open T3 threads that
+After the note is saved, Hedge sends its context to the open T3 threads that
 need it, on every linked machine. A router agent without tools, on the survey
 row of the model table, reads the note and the list of open top-level threads,
 picks at most 8, a conductor before its lanes, and writes each a message with
-only the facts it needs. Fleet frames each message as information, not
+only the facts it needs. Hedge frames each message as information, not
 instructions. The ephemeral reply links each thread that got it. Later replies
 only update the note; Wispr notes that arrive late go out once more, with only
-what is new. `fleet context share <note> [--dry-run]` and
-`fleet context add <url> --share` do the same by hand.
+what is new. `hedge context share <note> [--dry-run]` and
+`hedge context add <url> --share` do the same by hand.

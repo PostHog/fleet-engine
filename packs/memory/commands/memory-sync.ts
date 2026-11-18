@@ -11,9 +11,9 @@ export function memoryUrl(repo: string) {
 
 export async function syncMemory(env: Record<string, string | undefined> = Bun.env) {
   const repo = stringSetting("memory.repo", env);
-  if (!repo) throw new Error("memory.repo is empty. Set it with fleet set memory.repo=<owner>/<repo>.");
+  if (!repo) throw new Error("memory.repo is empty. Set it with hedge set memory.repo=<owner>/<repo>.");
   const subtree = stringSetting("memory.subtree", env);
-  const child = Bun.spawn(["sh", join(import.meta.dir, "../sync/sync.sh")], { stdio: ["inherit", "inherit", "inherit"], env: { ...env, FLEET_MEMORY_URL: memoryUrl(repo), FLEET_MEMORY_SUBTREE: subtree } });
+  const child = Bun.spawn(["sh", join(import.meta.dir, "../sync/sync.sh")], { stdio: ["inherit", "inherit", "inherit"], env: { ...env, HEDGE_MEMORY_URL: memoryUrl(repo), HEDGE_MEMORY_SUBTREE: subtree } });
   const code = await child.exited;
   const home = env.HOME ?? homedir();
   try {
@@ -26,4 +26,4 @@ export async function syncMemory(env: Record<string, string | undefined> = Bun.e
   return code;
 }
 
-if (import.meta.main) await runCommand(() => syncMemory(), "fleet memory-sync");
+if (import.meta.main) await runCommand(() => syncMemory(), "hedge memory-sync");

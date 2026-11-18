@@ -64,7 +64,7 @@ function slack() {
   const server = Bun.serve({
     port: 0,
     async fetch(request) {
-      if (new URL(request.url).pathname !== "/mcphub/mcp/fleet") return new Response(null, { status: 404 });
+      if (new URL(request.url).pathname !== "/mcphub/mcp/hedge") return new Response(null, { status: 404 });
       if (request.headers.get("authorization") !== `Bearer ${key}`) return new Response(null, { status: 401 });
       const session = request.headers.get("mcp-session-id") ?? "";
       if (request.method === "DELETE") return new Response(null, { status: state.sessions.delete(session) ? 200 : 404 });

@@ -16,16 +16,16 @@ type Env = Record<string, string | undefined>;
 export type ContextDeps = { env: Env; home: string; print: (line: string) => void; git: Git; agent: () => Agent; today: () => string; share: (owner: string) => ShareDeps };
 
 export const usage = `usage:
-  fleet context search <word>... [--all]   Rank the library's documents; --all adds superseded ones
-  fleet context add <url> [--share] [--note <why>]
+  hedge context search <word>... [--all]   Rank the library's documents; --all adds superseded ones
+  hedge context add <url> [--share] [--note <why>]
                                             Save a Slack thread, canvas, Google Doc, meeting, or page as a note;
                                             --share also sends its context to the open threads that need it
-  fleet context share <note> [--dry-run]    Send a saved note's context to the open threads that need it
-  fleet context related <prompt>            Show what the prompt hook would show for this prompt
-  fleet context catalog                     Rewrite CATALOG.md in the library checkout
-  fleet context topics                      List topics with three or more documents and whether their hub is stale
-  fleet context sync                        Clone the library, or fast-forward it; fails while local changes block that
-  fleet context upstream install|doctor|remove  Declare the library's search to the hub's MCP gateway`;
+  hedge context share <note> [--dry-run]    Send a saved note's context to the open threads that need it
+  hedge context related <prompt>            Show what the prompt hook would show for this prompt
+  hedge context catalog                     Rewrite CATALOG.md in the library checkout
+  hedge context topics                      List topics with three or more documents and whether their hub is stale
+  hedge context sync                        Clone the library, or fast-forward it; fails while local changes block that
+  hedge context upstream install|doctor|remove  Declare the library's search to the hub's MCP gateway`;
 
 export async function contextCommand(args: string[], deps: ContextDeps): Promise<number> {
   const [mode, ...rest] = args;
@@ -106,6 +106,6 @@ if (import.meta.main) {
       today: () => new Date().toISOString().slice(0, 10),
       share: (owner) => t3ShareDeps({ owner, host: hostname(), route: routerAgent(modelFor("survey")), skip: Bun.env.T3CODE_THREAD_ID ? [Bun.env.T3CODE_THREAD_ID] : [] }),
     }),
-    "fleet context",
+    "hedge context",
   );
 }

@@ -2,7 +2,7 @@
 set -eu
 
 fail() {
-  printf 'fleet install-node: %s\n' "$1" >&2
+  printf 'hedge install-node: %s\n' "$1" >&2
   exit 1
 }
 
@@ -27,9 +27,9 @@ for tool in curl sha256sum tar; do
 done
 
 name="node-v$version-$target"
-share="$HOME/.local/share/fleet/node"
-mkdir -p "$HOME/.local/share/fleet" "$HOME/.local/bin" || fail "could not create $HOME/.local/share/fleet."
-work=$(mktemp -d "$HOME/.local/share/fleet/node-new.XXXXXX")
+share="$HOME/.local/share/hedge/node"
+mkdir -p "$HOME/.local/share/hedge" "$HOME/.local/bin" || fail "could not create $HOME/.local/share/hedge."
+work=$(mktemp -d "$HOME/.local/share/hedge/node-new.XXXXXX")
 trap 'rm -rf "$work"; rm -f "$HOME/.local/bin/"*.new.$$' EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
@@ -55,6 +55,6 @@ for tool in node npm npx; do
   point "$HOME/.local/bin/$tool" "$share/$name/bin/$tool"
 done
 for tool in node npx; do
-  "$HOME/.local/bin/$tool" --version >/dev/null 2>&1 || fail "$HOME/.local/bin/$tool does not run. If Fleet did not put it there, fix it or move it away, then run fleet apply."
+  "$HOME/.local/bin/$tool" --version >/dev/null 2>&1 || fail "$HOME/.local/bin/$tool does not run. If Hedge did not put it there, fix it or move it away, then run hedge apply."
 done
 echo "Node.js: $version in $share/$name."

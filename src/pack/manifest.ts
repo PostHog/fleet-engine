@@ -79,7 +79,7 @@ const efforts = ["low", "medium", "high", "xhigh", "max"];
 function scopeProblem(item: Record<string, unknown>) {
   if (item.on !== undefined && !isListOf(item.on, oses)) return "on must list darwin or linux";
   if (item.roles !== undefined && !isListOf(item.roles, roles)) return "roles must list mac, devbox, linux, hub, or solo";
-  if (item.oncePerFleet !== undefined && typeof item.oncePerFleet !== "boolean") return "oncePerFleet must be true or false";
+  if (item.oncePerHedge !== undefined && typeof item.oncePerHedge !== "boolean") return "oncePerHedge must be true or false";
   if (item.plans !== undefined && !isListOf(item.plans, plans)) return "plans must list claude, codex, or both";
   if (item.workflow !== undefined && typeof item.workflow !== "string") return "workflow must be an id";
   if (item.unless !== undefined && !isStrings(item.unless)) return "unless must list workflow ids";
@@ -93,7 +93,7 @@ const filled = (value: unknown) => typeof value === "string" && value.trim().len
 export function configEntryProblem(item: unknown) {
   if (!isRecord(item)) return "must be an object";
   if (!providers.includes(item.provider as string) || typeof item.key !== "string") return "needs a provider and a key";
-  if (item.provider === "t3" && t3ProjectKeys.includes(item.key)) return "T3 project settings hold Fleet's worktree scripts, so set those with t3ProjectScripts";
+  if (item.provider === "t3" && t3ProjectKeys.includes(item.key)) return "T3 project settings hold Hedge's worktree scripts, so set those with t3ProjectScripts";
   if (item.provider === "claude" && item.key === "mcpServers") return "a Claude MCP server key names one server, such as mcpServers.<name>";
   if (item.provider === "claude" && item.key.startsWith("mcpServers.") && !isRecord(item.value)) return 'a Claude MCP server must be an object, such as { "type": "stdio", "command": ... }';
   return scopeProblem(item);
@@ -226,7 +226,7 @@ function checkShapes(raw: Record<string, unknown>, fail: (message: string) => ne
     need(filled(item.path), `${label}: needs a path`);
     if (item.seam !== "pr-command") need(item.subcommands === undefined, `${label}: only a pr-command handler takes subcommands`);
     else {
-      need(isStrings(item.subcommands) && item.subcommands.length > 0, `${label}: needs subcommands, the fleet pr words it runs`);
+      need(isStrings(item.subcommands) && item.subcommands.length > 0, `${label}: needs subcommands, the hedge pr words it runs`);
       need((item.subcommands as string[]).every((word) => packName.test(word)), `${label}: each subcommand must be lowercase words joined by dashes`);
     }
     filters(item, label);

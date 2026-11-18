@@ -6,7 +6,7 @@ import { checkout, cleanFixtures, graded, hubAt, type Checkout } from "./proof-t
 afterEach(cleanFixtures);
 
 const idIn = (output: string) => /\[(d-[0-9a-f]+)\]/.exec(output)![1]!;
-const ledgerFile = (pr: Checkout) => join(pr.home, ".local/state/fleet/decisions.jsonl");
+const ledgerFile = (pr: Checkout) => join(pr.home, ".local/state/hedge/decisions.jsonl");
 const on = (pr: Checkout, day: string, time = "10:00") => { pr.clock.now = new Date(`${day}T${time}:00Z`); };
 const decideAlone = (pr: Checkout, decisionClass: string, question: string) => pr.decide("record", "--mark", "🤖", "--class", decisionClass, "--pr", "example/product#42", "--question", question, "--answer", "Go ahead", "--rejected", "Ask the user", "--reason", "Small change");
 const reverse = (pr: Checkout, id: string, day: string, words: string, ...more: string[]) => pr.decide("reverse", id, "--words", `${day} "${words}"`, "--thread", "thread-1", ...more);
@@ -62,7 +62,7 @@ test("one answer lifts one brake, even when two machines lift two classes with i
     return ssh(host, command, stdin);
   };
 
-  await expect(lift(pr, "design", "2026-10-21", "Lift both")).rejects.toThrow("Not lifted: another lift used that answer first, or the brake changed while Fleet recorded it. One answer lifts one brake; ask the user again");
+  await expect(lift(pr, "design", "2026-10-21", "Lift both")).rejects.toThrow("Not lifted: another lift used that answer first, or the brake changed while Hedge recorded it. One answer lifts one brake; ask the user again");
   await expect(decideAlone(pr, "design", "Third design call?")).rejects.toThrow("The design class is braked");
   expect((await decideAlone(pr, "status", "Third status call?")).code).toBe(0);
   await expect(lift(pr, "design", "2026-10-21", "Lift both")).rejects.toThrow("That message already lifted the status brake");
@@ -210,12 +210,12 @@ test("one answer either lifts a brake or records a decision, never both, even wh
   expect((await pr.decide("list", "--class", "design")).output).not.toContain(`2026-10-21 "Lift the brake"`);
 });
 
-test("fleet proof receipt records only a comment on the PR it names", async () => {
+test("hedge proof receipt records only a comment on the PR it names", async () => {
   const pr = await checkout();
   pr.githubComment(11, "the-user", "Proofs at HEAD: live-run passed.", "2026-10-25T13:00:00Z");
   pr.githubComment(12, "the-user", "Proofs at HEAD: live-run passed.", "2026-10-25T13:00:00Z", 43);
-  await expect(pr.fleet("receipt", "--comment", "https://github.com/example/product/pull/43#issuecomment-12")).rejects.toThrow("The comment https://github.com/example/product/pull/43#issuecomment-12 is on example/product#43, not on example/product#42");
-  expect((await pr.fleet("receipt", "--comment", "https://github.com/example/product/pull/42#issuecomment-11")).output).toBe("receipt: https://github.com/example/product/pull/42#issuecomment-11");
+  await expect(pr.hedge("receipt", "--comment", "https://github.com/example/product/pull/43#issuecomment-12")).rejects.toThrow("The comment https://github.com/example/product/pull/43#issuecomment-12 is on example/product#43, not on example/product#42");
+  expect((await pr.hedge("receipt", "--comment", "https://github.com/example/product/pull/42#issuecomment-11")).output).toBe("receipt: https://github.com/example/product/pull/42#issuecomment-11");
 });
 test("one answer of the user's reverses one decision, and an answer already recorded as a decision reverses none", async () => {
   const pr = await checkout();
@@ -254,7 +254,7 @@ test("when two machines reverse two decisions with one answer at once, the one t
   };
 
   await expect(reverse(pr, second, "2026-10-21", "Undo that one")).rejects.toThrow(`Not reversed: That answer already reversed decision ${first}`);
-  const events = readFileSync(join(pr.home, "hub-home/.local/state/fleet/decisions.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  const events = readFileSync(join(pr.home, "hub-home/.local/state/hedge/decisions.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
   expect(events.filter((event) => event.type === "void" && event.id === second)).toEqual([]);
   expect((await pr.decide("list", "--live")).output).toContain(second);
 });
@@ -292,14 +292,14 @@ test("when the hub drops a reversal's void for older readers, running the same r
   const ssh = pr.hub.ssh!;
   let dropped = false;
   pr.hub.ssh = async (host, command, stdin) => {
-    if (!dropped && stdin?.includes('"type":"void"')) { dropped = true; return { code: 255, stdout: "", stderr: "ssh: connect to host fleet-hub port 22: Connection refused\n" }; }
+    if (!dropped && stdin?.includes('"type":"void"')) { dropped = true; return { code: 255, stdout: "", stderr: "ssh: connect to host hedge-hub port 22: Connection refused\n" }; }
     return ssh(host, command, stdin);
   };
-  const voids = () => readFileSync(join(pr.home, "hub-home/.local/state/fleet/decisions.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line)).filter((event) => event.type === "void" && event.id === id);
+  const voids = () => readFileSync(join(pr.home, "hub-home/.local/state/hedge/decisions.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line)).filter((event) => event.type === "void" && event.id === id);
 
   await expect(reverse(pr, id, "2026-10-21", "Undo that one")).rejects.toThrow();
   expect(voids()).toEqual([]);
-  expect((await reverse(pr, id, "2026-10-21", "Undo that one")).output).toContain(`Fleet wrote the void of the reversal of ${id} for older readers`);
+  expect((await reverse(pr, id, "2026-10-21", "Undo that one")).output).toContain(`Hedge wrote the void of the reversal of ${id} for older readers`);
   expect(voids()).toEqual([{ type: "void", id, reason: 'reversed by the user: 2026-10-21 "Undo that one"', at: "2026-10-21T10:00:00.000Z" }]);
   await expect(reverse(pr, id, "2026-10-21", "Undo that one")).rejects.toThrow(`Decision ${id} is already reversed, on 2026-10-21`);
 });

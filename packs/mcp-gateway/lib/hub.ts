@@ -28,11 +28,11 @@ type McpHubSettings = { mcpServers: Record<string, ServerSettings>; systemConfig
 
 export type Container = { Config: { Labels?: Record<string, string>; Env?: string[] }; Image: string; State: { Running: boolean }; Mounts?: Array<{ Source?: string; Destination: string }> };
 
-export const container = "fleet-mcphub";
+export const container = "hedge-mcphub";
 const loopback = "http://127.0.0.1:3317";
 const secret = () => randomBytes(32).toString("base64url");
 
-export const dataDir = (home: string) => join(home, ".local/share/fleet-mcphub");
+export const dataDir = (home: string) => join(home, ".local/share/hedge-mcphub");
 const settingsPath = (home: string) => join(dataDir(home), "data/mcp_settings.json");
 
 export async function must(hub: Pick<Hub, "run">, command: string[], options?: { cwd?: string; input?: string }) {
@@ -44,7 +44,7 @@ export async function must(hub: Pick<Hub, "run">, command: string[], options?: {
 export async function ownedContainer(hub: Pick<Hub, "run">) {
   const inspection = await hub.run(["docker", "container", "inspect", container]);
   const current = inspection.code === 0 ? (JSON.parse(inspection.stdout) as Container[])[0] : undefined;
-  if (current && current.Config.Labels?.["org.fleet.service"] !== "mcphub") throw new Error(`Keep unmanaged Docker container ${container}. Review it before installation.`);
+  if (current && current.Config.Labels?.["org.hedge.service"] !== "mcphub") throw new Error(`Keep unmanaged Docker container ${container}. Review it before installation.`);
   return current;
 }
 
@@ -61,7 +61,7 @@ function settingsFor(existing: string | undefined, baseUrl: string) {
       mcpServers: {},
       users: [],
       systemConfig: { install: { baseUrl }, routing: { enableBearerAuth: true, skipAuth: false }, oauthServer: { enabled: false } },
-      bearerKeys: [{ id: "fleet-management", name: "Fleet local management", token: secret(), enabled: true, kind: "system", accessType: "all" }],
+      bearerKeys: [{ id: "hedge-management", name: "Hedge local management", token: secret(), enabled: true, kind: "system", accessType: "all" }],
       prompts: [],
       resources: [],
     }, null, 2)}\n`;
@@ -101,12 +101,12 @@ async function readSettings(home: string): Promise<McpHubSettings | undefined> {
 
 async function installedSettings(hub: Hub) {
   const settings = await readSettings(hub.home);
-  if (!settings) throw new Error("MCPHub is not installed. Run: fleet apply");
+  if (!settings) throw new Error("MCPHub is not installed. Run: hedge apply");
   return settings;
 }
 
 function api(hub: Hub, settings: McpHubSettings) {
-  const token = settings.bearerKeys.find((key) => key.id === "fleet-management")?.token;
+  const token = settings.bearerKeys.find((key) => key.id === "hedge-management")?.token;
   return async <T>(path: string, method = "GET", body?: unknown): Promise<T> => {
     const response = await hub.fetch(`${loopback}/mcphub/api/${path}`, {
       method,
@@ -143,7 +143,7 @@ function narrowed(entry: Entry, tools: string[]): Entry {
   return { ...kept, tools, ...(kept.pinnedTools && { pinnedTools: kept.pinnedTools.filter((tool) => tools.includes(tool)) }) };
 }
 
-/** Puts every server into the Fleet group, and narrows the entry of each declared upstream with an allowlist to its tools. */
+/** Puts every server into the Hedge group, and narrows the entry of each declared upstream with an allowlist to its tools. */
 export async function syncGatewayGroup(call: Api, home: string) {
   const tools = new Map((await declaredUpstreams(home)).flatMap((upstream) => (upstream.kind === "oauth" && upstream.tools ? [[upstream.name, upstream.tools] as const] : [])));
   const { servers, group, missing } = await groupGap(call);
@@ -151,7 +151,7 @@ export async function syncGatewayGroup(call: Api, home: string) {
     const allowed = tools.get(entryName(server));
     return allowed ? narrowed(server, allowed) : server;
   };
-  if (!group) return void (await call("groups", "POST", { name: gatewayGroup, description: "Every server, for Fleet's machine keys", servers: servers.map((server) => entry(server.name)) }));
+  if (!group) return void (await call("groups", "POST", { name: gatewayGroup, description: "Every server, for Hedge's machine keys", servers: servers.map((server) => entry(server.name)) }));
   const kept = group.servers.map(entry);
   if (missing.length || kept.some((server, index) => !Bun.deepEquals(server, group.servers[index]))) await call(`groups/${encodeURIComponent(group.id)}`, "PUT", { servers: [...kept, ...missing.map(entry)] });
 }
@@ -169,7 +169,7 @@ export async function issueKey(machine: string, hub: Hub) {
   const settings = await installedSettings(hub);
   const call = api(hub, settings);
   await syncGatewayGroup(call, hub.home);
-  const name = `Fleet ${machine}`;
+  const name = `Hedge ${machine}`;
   let key = settings.bearerKeys.find((item) => item.name === name && item.enabled);
   if (!key) key = await call<BearerKey>("auth/keys", "POST", { name, kind: "system", accessType: "groups", allowedGroups: [gatewayGroup] });
   else if (key.accessType !== "groups" || !key.allowedGroups?.includes(gatewayGroup)) {
@@ -184,18 +184,18 @@ const shownStatus = (server: ServerState, config: ServerSettings | undefined) =>
 
 export async function doctor(hub: Hub): Promise<boolean> {
   const settings = await readSettings(hub.home);
-  if (!settings) return hub.print("MCPHub is not installed. Run: fleet apply"), false;
+  if (!settings) return hub.print("MCPHub is not installed. Run: hedge apply"), false;
   const wanted = browserGatewayUrl(hub.gateway);
-  if (settings.systemConfig.install.baseUrl !== wanted) return hub.print(`MCPHub answers at ${settings.systemConfig.install.baseUrl}, not ${wanted}. Run: fleet apply`), false;
+  if (settings.systemConfig.install.baseUrl !== wanted) return hub.print(`MCPHub answers at ${settings.systemConfig.install.baseUrl}, not ${wanted}. Run: hedge apply`), false;
   const health = await hub.fetch(`${loopback}/health`, { signal: AbortSignal.timeout(5000) }).catch(() => undefined);
-  if (!health?.ok) return hub.print("MCPHub does not answer on 127.0.0.1:3317. Run: fleet mcp-gateway restart"), false;
+  if (!health?.ok) return hub.print("MCPHub does not answer on 127.0.0.1:3317. Run: hedge mcp-gateway restart"), false;
   const open = await hub.fetch(`${localGatewayUrl}/mcp`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}", signal: AbortSignal.timeout(5000) });
   let ok = open.status === 401;
   if (!ok) hub.print("MCPHub accepts calls without a key. Check routing.skipAuth in its settings.");
   hub.print(`MCPHub dashboard: ${settings.systemConfig.install.baseUrl}/`);
   const { servers, missing } = await groupGap(api(hub, settings));
   for (const server of servers) hub.print(`${server.name}: ${shownStatus(server, settings.mcpServers[server.name])}, ${server.tools?.length ?? 0} tools`);
-  if (missing.length) ok = false, hub.print(`The ${gatewayGroup} group lacks ${missing.join(", ")}. Run: fleet apply`);
+  if (missing.length) ok = false, hub.print(`The ${gatewayGroup} group lacks ${missing.join(", ")}. Run: hedge apply`);
   return ok;
 }
 
@@ -203,7 +203,7 @@ export async function reconnect(server: string, hub: Hub) {
   const settings = await installedSettings(hub);
   if (!Object.hasOwn(settings.mcpServers, server)) throw new Error(`Name a configured upstream server: ${Object.keys(settings.mcpServers).join(", ")}.`);
   await api(hub, settings)(`servers/${encodeURIComponent(server)}/reload`, "POST");
-  hub.print(`MCPHub reconnected ${server}. If it needs a sign-in, run: fleet mcp-gateway sign-in`);
+  hub.print(`MCPHub reconnected ${server}. If it needs a sign-in, run: hedge mcp-gateway sign-in`);
 }
 
 export async function signIn(hub: Hub) {
@@ -212,14 +212,14 @@ export async function signIn(hub: Hub) {
   const handWaiting = [...byHand].filter((name) => settings.mcpServers[name] && !loopbackSignedIn(settings.mcpServers[name] as Record<string, unknown>));
   const waiting = Object.entries(settings.mcpServers).flatMap(([name, config]) => (!byHand.has(name) && config.oauth?.pendingAuthorization?.authorizationUrl ? [[name, config.oauth.pendingAuthorization.authorizationUrl] as const] : []));
   if (!waiting.length && !handWaiting.length) return hub.print("No upstream server waits for a sign-in.");
-  for (const name of handWaiting) hub.print(`${name}: on the hub, run: fleet mcp-gateway sign-in ${name}`);
+  for (const name of handWaiting) hub.print(`${name}: on the hub, run: hedge mcp-gateway sign-in ${name}`);
   if (!waiting.length) return;
   hub.print(`On your computer, keep this running while you sign in: coder port-forward ${hub.hubName().replace(/^coder\./, "")} --tcp ${gatewayPort}`);
   for (const [name, url] of waiting) hub.print(`${name}: ${url}`);
 }
 
 export async function restart(hub: Hub) {
-  if (!(await ownedContainer(hub))) throw new Error("MCPHub is not installed. Run: fleet apply");
+  if (!(await ownedContainer(hub))) throw new Error("MCPHub is not installed. Run: hedge apply");
   await must(hub, ["docker", "restart", container]);
   hub.print("MCPHub restarted. Upstream sign-ins stay on disk.");
 }

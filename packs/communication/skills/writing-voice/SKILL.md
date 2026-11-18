@@ -5,9 +5,9 @@ description: The user's writing voice. Use when drafting anything the user sends
 
 # Writing voice
 
-This is Fleet's neutral starting voice.
+This is Hedge's neutral starting voice.
 
-**For the user, not the agent:** To make this voice yours, copy this folder to `overrides/skills/writing-voice/` in your profile repo. Keep the folder name. Add `"overrides": { "skills": ["overrides/skills/writing-voice"] }` to `fleet.json` and run `fleet apply`. Your copy then replaces this one. In your copy, delete this paragraph, edit the rules, and add examples of your writing under `## Examples`.
+**For the user, not the agent:** To make this voice yours, copy this folder to `overrides/skills/writing-voice/` in your profile repo. Keep the folder name. Add `"overrides": { "skills": ["overrides/skills/writing-voice"] }` to `hedge.json` and run `hedge apply`. Your copy then replaces this one. In your copy, delete this paragraph, edit the rules, and add examples of your writing under `## Examples`.
 
 ## Rules
 

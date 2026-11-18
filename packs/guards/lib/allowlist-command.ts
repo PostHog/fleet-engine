@@ -5,15 +5,15 @@ import { allowedSigners, listText, parseOwners, systemPaths, verify, type Verdic
 
 export type AllowlistInputs = { settings: Record<string, unknown>; profileDir?: string; root: string; print: (line: string) => void };
 
-const usage = "usage: fleet guards allowlist [text | stage <folder> | --check | --left]";
+const usage = "usage: hedge guards allowlist [text | stage <folder> | --check | --left]";
 const installScript = join(import.meta.dir, "../system/install.sh");
 
-/** The profile keeps the signature beside fleet.json, so every machine of the profile installs the same signed list. */
+/** The profile keeps the signature beside hedge.json, so every machine of the profile installs the same signed list. */
 export const signatureFile = (profileDir: string) => join(profileDir, "guards/git-allowlist.sig");
 
 function signedList(inputs: AllowlistInputs) {
   const owners = parseOwners(String(inputs.settings["guards.owners"] ?? ""));
-  if (owners.length === 0) throw new Error("guards.owners names no owner. Set it with fleet set guards.owners=<owner>,<owner>.");
+  if (owners.length === 0) throw new Error("guards.owners names no owner. Set it with hedge set guards.owners=<owner>,<owner>.");
   const signers = allowedSigners(String(inputs.settings["guards.signers"] ?? ""));
   if (!signers) throw new Error("guards.signers names no signing key. Set it to the SSH public key that signs the list.");
   if (!inputs.profileDir) throw new Error("this machine has no profile, which holds the list's signature.");
@@ -21,7 +21,7 @@ function signedList(inputs: AllowlistInputs) {
 }
 
 function verifyWith(list: ReturnType<typeof signedList>): Verdict {
-  const work = mkdtempSync(join(tmpdir(), "fleet-allowlist-"));
+  const work = mkdtempSync(join(tmpdir(), "hedge-allowlist-"));
   try {
     writeFileSync(join(work, "signers"), list.signers);
     return verify(list.text, list.signature, join(work, "signers"));
@@ -32,12 +32,12 @@ function verifyWith(list: ReturnType<typeof signedList>): Verdict {
 
 const readOr = (path: string) => (existsSync(path) ? readFileSync(path, "utf8") : undefined);
 
-const probeOwner = "fleet_probe";
+const probeOwner = "hedge_probe";
 const sshUser = "git";
 const blockedForms = [`https://github.com/${probeOwner}/x`, `${sshUser}@github.com:${probeOwner}/x`, `ssh://${sshUser}@github.com/${probeOwner}/x`, `github.com:${probeOwner}/x`, `https::https://github.com/${probeOwner}/x`];
 
 function systemGit(root: string, args: string[]) {
-  const outside = mkdtempSync(join(tmpdir(), "fleet-allowlist-probe-"));
+  const outside = mkdtempSync(join(tmpdir(), "hedge-allowlist-probe-"));
   try {
     const env = { HOME: outside, PATH: process.env.PATH ?? "/usr/bin:/bin", GIT_CONFIG_SYSTEM: systemPaths(root).gitconfig, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CEILING_DIRECTORIES: dirname(outside) };
     return Bun.spawnSync(["git", ...args], { cwd: outside, env, stdout: "pipe", stderr: "ignore", timeout: 10_000 }).stdout.toString().trim();
@@ -51,7 +51,7 @@ const remoteFor = (root: string, url: string) => systemGit(root, ["ls-remote", "
 function refuses(command: string[]) {
   try {
     const refused = Bun.spawnSync(command, { stdout: "ignore", stderr: "pipe", timeout: 10_000 });
-    return refused.exitCode !== 0 && refused.stderr.toString().includes("Fleet blocked Git access");
+    return refused.exitCode !== 0 && refused.stderr.toString().includes("Hedge blocked Git access");
   } catch {
     return false;
   }
@@ -64,7 +64,7 @@ function installedState(root: string, text: string) {
   if (installed !== text) return "installed with another list";
   const signed = verify(installed, paths.signature, paths.signers);
   if (!signed.ok) return `installed, but the installed list does not verify against ${paths.signers}: ${signed.reason}`;
-  const open = blockedForms.find((url) => remoteFor(root, url) !== `fleet-blocked::${url}`);
+  const open = blockedForms.find((url) => remoteFor(root, url) !== `hedge-blocked::${url}`);
   if (open) return `installed, but Git does not refuse ${open}`;
   const shut = parseOwners(installed).find((owner) => remoteFor(root, `https://github.com/${owner}/x`) !== `https://github.com/${owner}/x`);
   if (shut) return `installed, but Git refuses the listed owner ${shut}`;
@@ -81,7 +81,7 @@ function stage(list: ReturnType<typeof signedList>, folder: string) {
   copyFileSync(installScript, join(folder, "install.sh"));
 }
 
-/** Exits 0 while an installed list is here, 1 once it is gone, and 3 (cannot tell) when Fleet cannot look. It reads no content, since root owns the list. */
+/** Exits 0 while an installed list is here, 1 once it is gone, and 3 (cannot tell) when Hedge cannot look. It reads no content, since root owns the list. */
 function listLeft(path: string): number {
   try {
     lstatSync(path);
@@ -108,7 +108,7 @@ export function allowlistCommand(args: string[], inputs: AllowlistInputs): numbe
     return 0;
   }
   inputs.print(`Git allowlist from guards.owners: ${list.owners.join(", ")}`);
-  inputs.print(verdict.ok ? `Signature ${list.signature}: verified.` : `Signature ${list.signature}: not verified, because ${verdict.reason}. Sign the exact text of fleet guards allowlist text with a key from guards.signers: fleet guards allowlist text > list && ssh-keygen -Y sign -f <your key> -n fleet-git-allowlist list, then save list.sig as ${list.signature}.`);
+  inputs.print(verdict.ok ? `Signature ${list.signature}: verified.` : `Signature ${list.signature}: not verified, because ${verdict.reason}. Sign the exact text of hedge guards allowlist text with a key from guards.signers: hedge guards allowlist text > list && ssh-keygen -Y sign -f <your key> -n hedge-git-allowlist list, then save list.sig as ${list.signature}.`);
   inputs.print(`System: ${installed}.`);
   return verdict.ok ? 0 : 1;
 }

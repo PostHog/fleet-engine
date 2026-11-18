@@ -112,23 +112,23 @@ export async function runPackCommand(command: string, args: string[], env: Recor
   return { stdout, stderr, code };
 }
 
-export async function fleetMachine(home: string, settings: Record<string, unknown>, origin?: string): Promise<string> {
+export async function hedgeMachine(home: string, settings: Record<string, unknown>, origin?: string): Promise<string> {
   const profile = join(home, "profile");
-  const sources = skillSources(join(home, ".local/share/fleet/sources"), await engineSource());
+  const sources = skillSources(join(home, ".local/share/hedge/sources"), await engineSource());
   for (const source of sources) await mkdir(join(source.dir, ".git"), { recursive: true });
   await mkdir(profile, { recursive: true });
   const engine = { repo: "acme/fleet-engine", ref: "main", channel: "track" };
-  await writeFile(join(profile, "fleet.json"), JSON.stringify({ schema: 1, engine, sources: sources.map((source) => source.ref), packs: ["pull-requests", "orchestration"], plan: "both", settings, workflows: {} }));
+  await writeFile(join(profile, "hedge.json"), JSON.stringify({ schema: 1, engine, sources: sources.map((source) => source.ref), packs: ["pull-requests", "orchestration"], plan: "both", settings, workflows: {} }));
   await spawnGit(profile, "init", "-q");
   if (origin) await spawnGit(profile, "remote", "add", "origin", origin);
-  await mkdir(join(home, ".config/fleet"), { recursive: true });
-  await writeFile(join(home, ".config/fleet/machine.json"), JSON.stringify({ schema: 1, role: "linux", profileDir: profile }));
+  await mkdir(join(home, ".config/hedge"), { recursive: true });
+  await writeFile(join(home, ".config/hedge/machine.json"), JSON.stringify({ schema: 1, role: "linux", profileDir: profile }));
   return profile;
 }
 
-export async function runFleet(args: string[], env: Record<string, string>): Promise<CommandResult> {
-  const { FLEET_SETTINGS, FLEET_PROFILE_DIR, ...inherited } = Bun.env;
-  const child = Bun.spawn(["sh", join(import.meta.dir, "../../../fleet"), ...args], { env: { ...inherited, ...env }, stdout: "pipe", stderr: "pipe" });
+export async function runHedge(args: string[], env: Record<string, string>): Promise<CommandResult> {
+  const { HEDGE_SETTINGS, HEDGE_PROFILE_DIR, ...inherited } = Bun.env;
+  const child = Bun.spawn(["sh", join(import.meta.dir, "../../../hedge"), ...args], { env: { ...inherited, ...env }, stdout: "pipe", stderr: "pipe" });
   const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
   return { stdout, stderr, code };
 }

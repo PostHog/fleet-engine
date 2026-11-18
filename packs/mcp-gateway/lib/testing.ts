@@ -24,8 +24,8 @@ export function fakeMcpHub(fields: Partial<FakeMcpHub> = {}): FakeMcpHub {
 
 function keyOf(state: FakeMcpHub) {
   if (!state.home) return managementToken;
-  const settings = JSON.parse(readFileSync(join(state.home, ".local/share/fleet-mcphub/data/mcp_settings.json"), "utf8")) as { bearerKeys: Array<{ id: string; token: string }> };
-  return settings.bearerKeys.find((key) => key.id === "fleet-management")!.token;
+  const settings = JSON.parse(readFileSync(join(state.home, ".local/share/hedge-mcphub/data/mcp_settings.json"), "utf8")) as { bearerKeys: Array<{ id: string; token: string }> };
+  return settings.bearerKeys.find((key) => key.id === "hedge-management")!.token;
 }
 
 const toolsOf = (state: FakeMcpHub, name: string) => Array.from({ length: state.toolCounts[name] ?? 2 }, () => ({}));
@@ -96,19 +96,19 @@ export function fakeRun(answer: (call: RunCall) => Partial<RunResult> = () => ({
 }
 
 export function writeMcpHubSettings(home: string, settings: Record<string, unknown> = {}) {
-  const dir = join(home, ".local/share/fleet-mcphub/data");
+  const dir = join(home, ".local/share/hedge-mcphub/data");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "mcp_settings.json"), JSON.stringify({
     mcpServers: { tickets: {}, "calendar": {} },
     systemConfig: { install: { baseUrl: "http://127.0.0.1:3317/mcphub" } },
-    bearerKeys: [{ id: "fleet-management", name: "Fleet local management", token: managementToken, enabled: true, kind: "system", accessType: "all" }],
+    bearerKeys: [{ id: "hedge-management", name: "Hedge local management", token: managementToken, enabled: true, kind: "system", accessType: "all" }],
     ...settings,
   }));
 }
 
 export function writeMachineFile(home: string, role: string) {
-  mkdirSync(join(home, ".config/fleet"), { recursive: true });
-  writeFileSync(join(home, ".config/fleet/machine.json"), JSON.stringify({ schema: 1, role }));
+  mkdirSync(join(home, ".config/hedge"), { recursive: true });
+  writeFileSync(join(home, ".config/hedge/machine.json"), JSON.stringify({ schema: 1, role }));
 }
 
 export function fakeHub(home: string, fields: Partial<Hub> = {}): Hub & { printed: string[] } {
@@ -130,7 +130,7 @@ export function fakeHub(home: string, fields: Partial<Hub> = {}): Hub & { printe
   };
 }
 
-export const environmentOf = (home: string) => readFileSync(join(home, ".local/share/fleet-mcphub/runtime.env"), "utf8").split("\n").filter(Boolean);
+export const environmentOf = (home: string) => readFileSync(join(home, ".local/share/hedge-mcphub/runtime.env"), "utf8").split("\n").filter(Boolean);
 const mounts = (command: string[]) => command.flatMap((arg, index) => (command[index - 1] === "-v" ? [{ Source: arg.split(":")[0]!, Destination: arg.split(":")[1]! }] : []));
 
 export type FakeContainer = { Config: { Labels: Record<string, string>; Env: string[] }; Image: string; State: { Running: boolean }; Mounts: Array<{ Source?: string; Destination: string }> };
@@ -144,7 +144,7 @@ export function dockerHost(home: string, start?: FakeContainer) {
     if (noun === "image" && verb === "inspect") return { stdout: JSON.stringify([{ Id: `sha256:${call.command[3]}` }]) };
     if (noun === "run") {
       const labels = Object.fromEntries(call.command.flatMap((arg, index) => (call.command[index - 1] === "--label" ? [arg.split("=")] : [])));
-      container = { Config: { Labels: { ...labels, "org.fleet.patch": "1.1.0-elicitation" }, Env: [...environmentOf(home), "PATH=/usr/local/bin"] }, Image: `sha256:${call.command.at(-2)}`, State: { Running: true }, Mounts: mounts(call.command) };
+      container = { Config: { Labels: { ...labels, "org.hedge.patch": "1.1.0-elicitation" }, Env: [...environmentOf(home), "PATH=/usr/local/bin"] }, Image: `sha256:${call.command.at(-2)}`, State: { Running: true }, Mounts: mounts(call.command) };
     }
     if (noun === "stop") container!.State.Running = false;
     if (noun === "rm") container = undefined;

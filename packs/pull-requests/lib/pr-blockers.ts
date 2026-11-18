@@ -10,7 +10,7 @@ type PullRequest = { headRefOid: string; isDraft: boolean; mergeable: string; me
 type Blockers = { head: string; failing: string[]; pending: string[]; conflict: boolean; behind: boolean; unknown: boolean; people: string[] };
 type Sighting = { head: string; signature: string; at: string };
 
-const usage = "Usage: fleet pr blockers --repo <owner/repo> --pr <number> [--record]";
+const usage = "Usage: hedge pr blockers --repo <owner/repo> --pr <number> [--record]";
 const failedConclusions = new Set(["FAILURE", "TIMED_OUT", "CANCELLED", "STARTUP_FAILURE"]);
 const failedStates = new Set(["FAILURE", "ERROR"]);
 const pendingStates = new Set(["PENDING", "EXPECTED"]);

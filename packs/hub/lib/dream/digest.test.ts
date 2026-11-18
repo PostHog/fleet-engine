@@ -25,7 +25,7 @@ const assistant = (cwd: string, content: unknown[], minutes: number, id = `m-${m
   ({ type: "assistant", sessionId: "s-1", cwd, timestamp: hourAgo(minutes), message: { id, role: "assistant", model: "claude-test", content, ...(usage ? { usage } : {}) } });
 
 test("a Claude digest keeps the person's words, the agent's replies, failed tools, skills, memory reads and writes, and the effort before the first edit", () => {
-  const home = temp.make("fleet-dream-");
+  const home = temp.make("hedge-dream-");
   const cwd = join(home, "dev/app");
   const path = claudeSession(home, cwd, [
     user(cwd, "<system-reminder>ignore me</system-reminder>Fix the login bug", 0),
@@ -50,14 +50,14 @@ test("a Claude digest keeps the person's words, the agent's replies, failed tool
 });
 
 test("a Claude digest clips a long message and says how much it left out", () => {
-  const home = temp.make("fleet-dream-");
+  const home = temp.make("hedge-dream-");
   const cwd = join(home, "dev/app");
   const digest = digestClaude(claudeSession(home, cwd, [user(cwd, "x".repeat(2500), 0)]), "devbox-1", home, {});
   expect(digest.entries[0]!.text).toBe(`${"x".repeat(2000)} […500 more]`);
 });
 
 test("a Codex digest reads its session, model, tokens, messages, failed commands, and memory edits, and skips its injected instructions", () => {
-  const home = temp.make("fleet-dream-");
+  const home = temp.make("hedge-dream-");
   const cwd = join(home, ".t3/worktrees/shop/t3-1");
   const lines = [
     { type: "session_meta", payload: { id: "c-1", cwd } },
@@ -96,7 +96,7 @@ test("parseSince reads days, hours, and ISO times, and defaults to two days", ()
 });
 
 test("local digests leave out sessions without the person's words, the dream's own sessions, and entries before the cutoff", () => {
-  const home = temp.make("fleet-dream-");
+  const home = temp.make("hedge-dream-");
   const cwd = join(home, "dev/app");
   claudeSession(home, cwd, [user(cwd, "old words", -2000), user(cwd, "new words", 0)], "s-1");
   claudeSession(home, cwd, [{ ...assistant(cwd, [{ type: "text", text: "no user" }], 0), sessionId: "s-2" }], "s-2");
@@ -107,7 +107,7 @@ test("local digests leave out sessions without the person's words, the dream's o
 });
 
 test("a digest that the dream sends to analysts and the memory repo carries no token from the session", () => {
-  const home = temp.make("fleet-dream-");
+  const home = temp.make("hedge-dream-");
   const cwd = join(home, "dev/app");
   const token = `ghp_${"a1".repeat(18)}`;
   claudeSession(home, cwd, [user(cwd, `Use this token: ${token}`, 0), assistant(cwd, [{ type: "text", text: `Saved ${token} for later.` }], 1)]);
@@ -118,7 +118,7 @@ test("a digest that the dream sends to analysts and the memory repo carries no t
 });
 
 test("digest output adds the saved box digests since the cutoff and deletes those older than 30 days", () => {
-  const home = temp.make("fleet-dream-");
+  const home = temp.make("hedge-dream-");
   const env = {};
   const inbox = inboxDir(home, env);
   writeHome(home, { [join(inbox.slice(home.length + 1), "box-a-1.jsonl")]: "{\"session\":\"fresh\"}\n", [join(inbox.slice(home.length + 1), "box-b-1.jsonl")]: "{\"session\":\"stale\"}\n", [join(inbox.slice(home.length + 1), "box-c-1.jsonl")]: "{\"session\":\"gone\"}\n" });
@@ -130,11 +130,11 @@ test("digest output adds the saved box digests since the cutoff and deletes thos
 });
 
 test("saving a box's digests keeps what the box printed, and a box that fails or prints nothing leaves nothing", async () => {
-  const home = temp.make("fleet-dream-");
+  const home = temp.make("hedge-dream-");
   const { coder, calls } = fakeCoder({ ssh: async (box, command) => (calls.push({ box, command }), { code: 0, stdout: box === "box-a" ? "{\"session\":\"s\"}\n" : "", stderr: "" }) });
   await saveBoxDigests(coder, "box-a", home, {}, () => now);
   await saveBoxDigests(coder, "box-b", home, {}, () => now);
-  expect(calls.map((call) => call.command)).toEqual(Array(2).fill('sh "$HOME/.local/share/fleet/engine/fleet" dream digest --since 30d'));
+  expect(calls.map((call) => call.command)).toEqual(Array(2).fill('sh "$HOME/.local/share/hedge/engine/hedge" dream digest --since 30d'));
   expect(readdirSync(inboxDir(home, {}))).toEqual([`box-a-${now}.jsonl`]);
   expect(readFileSync(join(inboxDir(home, {}), `box-a-${now}.jsonl`), "utf8")).toBe("{\"session\":\"s\"}\n");
   const broken = fakeCoder({ ssh: async () => { throw new Error("no route"); } });
@@ -143,8 +143,8 @@ test("saving a box's digests keeps what the box printed, and a box that fails or
 
 test("with Dream on, the sweep saves an idle box's digests before it stops the box; with Dream off it saves nothing", async () => {
   for (const dream of [true, false]) {
-    const home = temp.make("fleet-dream-");
-    const env = { FLEET_SETTINGS: JSON.stringify({ ...boxSettings, ...(dream ? { "hub.dreamSessions": 150 } : {}) }) };
+    const home = temp.make("hedge-dream-");
+    const env = { HEDGE_SETTINGS: JSON.stringify({ ...boxSettings, ...(dream ? { "hub.dreamSessions": 150 } : {}) }) };
     const order: string[] = [];
     const { machine } = fakeMachine(home);
     writePool(home, { boxes: { "box-lane": { id: "ws-box-lane" } } });
@@ -168,8 +168,8 @@ test("with Dream on, the sweep saves an idle box's digests before it stops the b
 });
 
 test("with Dream on, a release saves the box's digests before the box leaves", async () => {
-  const home = temp.make("fleet-dream-");
-  const env = { FLEET_SETTINGS: JSON.stringify({ ...boxSettings, "hub.dreamSessions": 150 }) };
+  const home = temp.make("hedge-dream-");
+  const env = { HEDGE_SETTINGS: JSON.stringify({ ...boxSettings, "hub.dreamSessions": 150 }) };
   const { machine } = fakeMachine(home);
   const order: string[] = [];
   const { coder, done } = fakeCoder({
@@ -205,7 +205,7 @@ const credentialShapes = [
 ] as const;
 
 test("a digest redacts headers, OAuth tokens, secret assignments, and URL passwords before it clips or serializes them", () => {
-  const home = temp.make("fleet-dream-");
+  const home = temp.make("hedge-dream-");
   const cwd = join(home, "dev/app");
   const words = credentialShapes.map(([text]) => text).join("\n");
   const atClip = `${"x".repeat(2000 - "postgres://admin:hunter2pw".length)}postgres://admin:hunter2pw@db.example.com/app`;
@@ -225,7 +225,7 @@ test("a digest redacts headers, OAuth tokens, secret assignments, and URL passwo
 });
 
 test("redaction leaves ordinary text as it is", () => {
-  const home = temp.make("fleet-dream-");
+  const home = temp.make("hedge-dream-");
   const cwd = join(home, "dev/app");
   const ordinary = [
     "The token count was 900, and the auth flow uses OAuth with Bearer tokens.",
@@ -238,7 +238,7 @@ test("redaction leaves ordinary text as it is", () => {
 });
 
 test("a resumed dream session stays out even when its opening prompt is older than the cutoff", () => {
-  const home = temp.make("fleet-dream-");
+  const home = temp.make("hedge-dream-");
   const cwd = join(home, ".t3/scratch/a");
   claudeSession(home, cwd, [user(cwd, "Follow the dream skill with the run directory /x.", -2000), user(cwd, "Drop change 2", 0)]);
   expect(localDigests(home, "devbox-1", now - 86_400_000, {})).toEqual([]);
@@ -255,7 +255,7 @@ test("parseSince refuses a time with anything after it, such as a shell substitu
 const fake = (...pieces: string[]) => pieces.join("");
 
 test("a digest redacts the decoded tool input, the decoded tool result, and an error result before it clips them", () => {
-  const home = temp.make("fleet-dream-");
+  const home = temp.make("hedge-dream-");
   const cwd = join(home, "dev/app");
   const keyBlock = `${fake("-----BEGIN", " RSA PRI", "VATE KEY-----")}\n${fake("MIIEow", "Fake42body", "x7Q2l9Zk")}\n${fake("-----END", " RSA PRI", "VATE KEY-----")}`;
   const sts = `CREDENTIALS\t${fake("ASIA", "ZZZZ", "FAKE", "9876", "5432")}\t2026-11-05T05:10:00Z\t${fake("wJalr", "FAKEsecret", "Fake44")}\t${fake("IQoJb3", "FAKEtoken", "Fake45")}`;
@@ -279,7 +279,7 @@ test("a digest redacts the decoded tool input, the decoded tool result, and an e
 });
 
 test("a digest carries every third-round shape through redaction and leaves ordinary code alone", () => {
-  const home = temp.make("fleet-dream-");
+  const home = temp.make("hedge-dream-");
   const cwd = join(home, "dev/app");
   const hunter = fake("hun", "ter");
   const jwt = fake("eyJ", "hbGciOiJIUzI1NiJ9", ".", "eyJzdWIiOiJGYWtlNDIifQ", ".", "c2lnRmFrZTQy");
@@ -297,7 +297,7 @@ test("a digest carries every third-round shape through redaction and leaves ordi
 });
 
 test("final finding 1: a digest redacts every cookie of a quoted header in a tool call and in a failed tool's output", () => {
-  const home = temp.make("fleet-dream-");
+  const home = temp.make("hedge-dream-");
   const cwd = join(home, "dev/app");
   const cookies = [fake("theme", "=light"), fake("sessionid=", "fakeSession42"), fake("csrftoken=", "fakeCsrf43")].join("; ");
   claudeSession(home, cwd, [
@@ -312,7 +312,7 @@ test("final finding 1: a digest redacts every cookie of a quoted header in a too
 });
 
 test("final finding 2: a digest redacts numbers and booleans under secret names, and keeps its own token counts", () => {
-  const home = temp.make("fleet-dream-");
+  const home = temp.make("hedge-dream-");
   const cwd = join(home, "dev/app");
   const pin = fake("8675", "309");
   const code = fake("9876", "54321");
@@ -333,10 +333,10 @@ test("final finding 2: a digest redacts numbers and booleans under secret names,
   ]);
 });
 
-test("final finding 3: with FLEET_MEMORY_DIR set, both parsers record reads and writes in that checkout, so collect keeps the memory fresh", async () => {
-  const home = temp.make("fleet-dream-");
+test("final finding 3: with HEDGE_MEMORY_DIR set, both parsers record reads and writes in that checkout, so collect keeps the memory fresh", async () => {
+  const home = temp.make("hedge-dream-");
   const memory = join(home, "notes/memory");
-  const env = { FLEET_MEMORY_DIR: memory };
+  const env = { HEDGE_MEMORY_DIR: memory };
   const cwd = join(home, "dev/app");
   writeHome(home, {
     "notes/memory/MEMORY.md": "# Memory\n- [Rule](tech/rule.md)\n- [Tip](tech/tip.md)\n",
@@ -363,7 +363,7 @@ test("final finding 3: with FLEET_MEMORY_DIR set, both parsers record reads and 
   expect([codex.memoryReads, codex.memoryWrites]).toEqual([["tech/tip.md"], ["tech/rule.md"]]);
   const git = async () => ({ code: 0, stdout: "", stderr: "" });
   await collect("1d", { home, env, self: "devbox-1", now: () => now, peers: [], onPeer: git, boxes: () => undefined, git, say: () => {} });
-  const usage = JSON.parse(readFileSync(join(home, ".local/state/fleet/dream/usage.json"), "utf8"));
+  const usage = JSON.parse(readFileSync(join(home, ".local/state/hedge/dream/usage.json"), "utf8"));
   expect(Object.keys(usage).sort()).toEqual(["tech/new.md", "tech/rule.md", "tech/tip.md"]);
   expect(budget(memory, usage, now).filter((problem) => problem.problem.startsWith("stale"))).toEqual([]);
 });
@@ -375,12 +375,12 @@ async function collectAndAnalyze(home: string) {
   const run = await collect("1d", { home, env: {}, self: "devbox-1", now: () => now, peers: [], onPeer: git, boxes: () => undefined, git, say: () => {} });
   const prompts: string[] = [];
   await analyze(run, { home, env: {}, limit: 10, jobs: 1, say: () => {}, analyst: async (item) => (prompts.push(render(item)), { taskType: "fix", findings: [] }) });
-  const state = join(home, ".local/state/fleet/dream");
+  const state = join(home, ".local/state/hedge/dream");
   return { prompts, stored: filesUnder(state).map((path) => readFileSync(path, "utf8")).join("\n") };
 }
 
 test("recheck finding 1: folded and multi-line quoted headers stay hidden from a tool call and a failed tool's output to the analyst", async () => {
-  const home = temp.make("fleet-dream-");
+  const home = temp.make("hedge-dream-");
   const cwd = join(home, "dev/app");
   const folded = fake("sessionid=", "fakeFolded", "99117");
   const response = fake("fake", "Digest", "77118");
@@ -406,7 +406,7 @@ test("recheck finding 1: folded and multi-line quoted headers stay hidden from a
 });
 
 test("recheck finding 2: a number array under a secret name in a failed tool's output stays hidden from the analyst", async () => {
-  const home = temp.make("fleet-dream-");
+  const home = temp.make("hedge-dream-");
   const cwd = join(home, "dev/app");
   const pin = fake("8675", "309");
   const other = fake("1234", "5678");
@@ -424,7 +424,7 @@ test("recheck finding 2: a number array under a secret name in a failed tool's o
 });
 
 test("final recheck: a string inside a secret container ends only at its own quote, so a quote of the other kind cannot end the redaction early", async () => {
-  const home = temp.make("fleet-dream-");
+  const home = temp.make("hedge-dream-");
   const cwd = join(home, "dev/app");
   const pin = fake("8675", "309");
   claudeSession(home, cwd, [
@@ -444,7 +444,7 @@ test("recheck finding 3: token counts that are not a finite, non-negative number
   const secret = fake("fake", "Token", "88227");
   const malformed: Array<[string, string]> = [["a string", JSON.stringify(`PASSWORD=${secret}`)], ["an object", JSON.stringify({ password: secret })], ["infinity", "1e999"], ["a negative count", "-5"]];
   for (const [label, value] of malformed) {
-    const home = temp.make("fleet-dream-");
+    const home = temp.make("hedge-dream-");
     const cwd = join(home, "dev/app");
     const codexLines = [
       JSON.stringify({ type: "session_meta", payload: { id: "c-1", cwd } }),
@@ -458,7 +458,7 @@ test("recheck finding 3: token counts that are not a finite, non-negative number
     const { stored } = await collectAndAnalyze(home);
     expect([label, stored.includes(secret)]).toEqual([label, false]);
   }
-  const home = temp.make("fleet-dream-");
+  const home = temp.make("hedge-dream-");
   const cwd = join(home, "dev/app");
   claudeSession(home, cwd, [
     user(cwd, "Fix it", 0),

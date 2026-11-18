@@ -73,7 +73,7 @@ export type SentMessage = { threadId: string; messageId: string; delivery: "queu
 
 export async function sendMessage(client: T3Client, thread: ShellThread, text: string): Promise<SentMessage> {
   if (thread.archivedAt) throw new Error(`Thread ${thread.id} is archived. Unarchive it before you send it a message.`);
-  const messageId = `fleet-thread-send:${randomUUID()}`;
+  const messageId = `hedge-thread-send:${randomUUID()}`;
   const delivery = thread.activeRunId ? "queued" : "started";
   await client.call("orchestration.dispatchCommand", {
     type: "message.dispatch", commandId: messageId, messageId, threadId: thread.id, text, attachments: [],

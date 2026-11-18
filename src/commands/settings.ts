@@ -5,7 +5,7 @@ import { activePacks, type ChangeContext, manifests, saveAndApply } from "./chan
 
 /** Lists the settings of the packs that are on, with where each value comes from. */
 export function settingsCommand(args: string[], context: Pick<ChangeContext, "plan" | "packs" | "profile" | "print">): number {
-  if (args.length) throw new FlagError("usage: fleet settings. Change a setting with fleet set <pack.key>=<value>.");
+  if (args.length) throw new FlagError("usage: hedge settings. Change a setting with hedge set <pack.key>=<value>.");
   const packs = listedSettings(activePacks(context));
   if (!packs.length) return context.print("The packs you have on have no settings."), 0;
   for (const manifest of packs) {
@@ -16,7 +16,7 @@ export function settingsCommand(args: string[], context: Pick<ChangeContext, "pl
     }
   }
   context.print("");
-  context.print("Change one with fleet set <pack.key>=<value>.");
+  context.print("Change one with hedge set <pack.key>=<value>.");
   return 0;
 }
 
@@ -30,15 +30,15 @@ function listedSettings(manifests: PackManifest[]) {
 
 function shown(setting: PackSetting, context: Pick<ChangeContext, "plan" | "packs" | "profile" | "print">) {
   const value = context.plan.settings[setting.key];
-  if (value === undefined) return context.plan.unanswered.some((item) => item.key === setting.key) ? "not set yet, Fleet needs it" : "not set";
+  if (value === undefined) return context.plan.unanswered.some((item) => item.key === setting.key) ? "not set yet, Hedge needs it" : "not set";
   if (setting.key in context.profile.settings) return String(value);
   if (contextValue(setting, context.profile.settings, context.plan.settings["context.path"]) !== undefined) return `${String(value)} (from context.repo)`;
   return `${String(value)} (default)`;
 }
 
-/** Changes settings: fleet set pack.key=value... */
+/** Changes settings: hedge set pack.key=value... */
 export async function setCommand(args: string[], context: ChangeContext): Promise<number> {
-  if (!args.length) throw new FlagError("usage: fleet set <pack.key>=<value>...");
+  if (!args.length) throw new FlagError("usage: hedge set <pack.key>=<value>...");
   const settings = manifests(context).flatMap((manifest) => (manifest.settings ?? []).map((setting) => ({ ...setting, pack: manifest.name })));
   const on = new Set(activePacks(context).map((manifest) => manifest.name));
   const values: Record<string, SettingValue> = {};
@@ -48,11 +48,11 @@ export async function setCommand(args: string[], context: ChangeContext): Promis
     if (at <= 0) throw new FlagError(`${arg}: write it as pack.key=value`);
     const key = arg.slice(0, at);
     const setting = settings.find((item) => item.key === key);
-    if (!setting) throw new FlagError(`${key}: no pack has this setting. See them with fleet settings.`);
+    if (!setting) throw new FlagError(`${key}: no pack has this setting. See them with hedge settings.`);
     values[key] = parseSettingValue(setting, arg.slice(at + 1));
     if (!on.has(setting.pack)) off.add(setting.pack);
   }
   const code = await saveAndApply(context, { settings: values }, Object.keys(values).join(", "));
-  for (const pack of off) context.print(`The ${pack} pack is off, so its setting waits until you turn it on with fleet packs --add ${pack}.`);
+  for (const pack of off) context.print(`The ${pack} pack is off, so its setting waits until you turn it on with hedge packs --add ${pack}.`);
   return code;
 }

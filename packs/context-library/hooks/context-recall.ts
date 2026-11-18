@@ -44,7 +44,7 @@ export function relatedContext(input: PromptInput, home: string): string | undef
   if (!docs.length) return undefined;
   const whose = library.owner ? `${library.owner}'s` : "your";
   const lines = docs.map((doc) => `- ${join(library.path, doc.path)}: ${doc.title}${[doc.type, doc.date].filter(Boolean).length ? ` (${[doc.type, doc.date].filter(Boolean).join(", ")})` : ""}`);
-  return [`Related context from ${whose} library, matched on this prompt. Open a document before you act on its topic; \`fleet context search <words>\` finds more.`, ...lines].join("\n");
+  return [`Related context from ${whose} library, matched on this prompt. Open a document before you act on its topic; \`hedge context search <words>\` finds more.`, ...lines].join("\n");
 }
 
 export const hook: Hook = async (provider, readInput, home) => {

@@ -8,7 +8,7 @@
 - Report outcomes as they are. When a test fails or a step was skipped, say so.
 - Put each question for me in your final message, after your last tool call, or ask it with your harness's question tool. T3 Code folds the text you write between tool calls, so I do not see a question there.
 - Wait in one call that blocks until the event, such as `gh run watch <id> --exit-status`. Never poll across turns: every turn rereads the whole context.
-- On a devbox, run installs, builds, typechecks, and test suites with `fleet heavy -- <command>`. It checks free disk first and caps how many heavy commands run at once. A waiting command prints its place in the queue; `fleet heavy --holders` shows which jobs hold the slots and which wait.
+- On a devbox, run installs, builds, typechecks, and test suites with `hedge heavy -- <command>`. It checks free disk first and caps how many heavy commands run at once. A waiting command prints its place in the queue; `hedge heavy --holders` shows which jobs hold the slots and which wait.
 - Name the model and effort on every subagent or worker you start. Cast it from the model table below. An omitted model inherits mine.
 
 ## Guides

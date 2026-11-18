@@ -106,10 +106,10 @@ describe("the Hub pack", () => {
       return { jobs: result.jobs.filter((job) => job.pack === "hub" && job.workflow === "boxes").map((job) => `${job.id}: ${job.command.join(" ")} every ${job.schedule.every}${job.schedule.at ? ` at ${job.schedule.at}` : ""}`), human: result.human.filter((step) => step.pack === "hub" && step.workflow === "boxes").map((step) => step.id) };
     };
     expect(items(hub)).toEqual({
-      jobs: ["box-sweep: fleet box sweep every 15m", "box-nightly: fleet box nightly every 1d at 02:47", "box-restore: fleet box restore every 5m"],
+      jobs: ["box-sweep: hedge box sweep every 15m", "box-nightly: hedge box nightly every 1d at 02:47", "box-restore: hedge box restore every 5m"],
       human: ["box-claude-token"],
     });
-    expect(items(devbox)).toEqual({ jobs: ["box-restore: fleet box restore every 5m"], human: [] });
+    expect(items(devbox)).toEqual({ jobs: ["box-restore: hedge box restore every 5m"], human: [] });
     expect(items(mac)).toEqual({ jobs: [], human: [] });
     expect(items(hub, { workflows: { boxes: false } })).toEqual({ jobs: [], human: [] });
     expect(plan({ packs: ["hub"] }, hub).jobs.filter((job) => job.pack === "hub" && job.workflow === "boxes")).toEqual([]);
@@ -122,33 +122,33 @@ describe("the Hub pack", () => {
       ...result.checks.filter((item) => item.pack === "hub").map((item) => `check ${item.id}: ${item.run.join(" ")}`),
     ];
     const team = (fields: Partial<Profile>, machine: MachineFile) => resolveEngine([...sources, coderTeam()], { settings: answers, packs: ["hub", "posthog"], ...fields }, machine);
-    const planned = ["job devbox-grants: fleet box grants every 1d at 02:47", "check coder-session: fleet box session"];
+    const planned = ["job devbox-grants: hedge box grants every 1d at 02:47", "check coder-session: hedge box session"];
     expect(items(team({}, hub))).toEqual(planned);
     expect(items(team({ workflows: { boxes: false } }, hub))).toEqual(planned);
     expect(items(withBoxes({}, hub))).toEqual(planned);
     expect(items(team({ workflows: { "devbox-tokens": false } }, hub))).toEqual([]);
     expect(items(team({}, devbox))).toEqual([]);
     expect(items(plan({ packs: ["hub"] }, hub))).toEqual([]);
-    expect(withBoxes({}, hub).jobs.find((job) => job.id === "box-nightly")?.command).toEqual(["fleet", "box", "nightly"]);
+    expect(withBoxes({}, hub).jobs.find((job) => job.id === "box-nightly")?.command).toEqual(["hedge", "box", "nightly"]);
   });
 
   test("plans the nightly secret sweep on every machine, as a machine without a hub keeps its own store", () => {
     const sweeps = (machine: MachineFile) => plan({ packs: ["hub"] }, machine).jobs.filter((job) => job.id === "secret-sweep").map((job) => `${job.command.join(" ")} every ${job.schedule.every} at ${job.schedule.at}`);
-    expect(sweeps({ schema: 1, role: "hub" })).toEqual(["fleet secret sweep every 1d at 02:47"]);
-    expect(sweeps(devbox)).toEqual(["fleet secret sweep every 1d at 02:47"]);
-    expect(sweeps(mac)).toEqual(["fleet secret sweep every 1d at 02:47"]);
+    expect(sweeps({ schema: 1, role: "hub" })).toEqual(["hedge secret sweep every 1d at 02:47"]);
+    expect(sweeps(devbox)).toEqual(["hedge secret sweep every 1d at 02:47"]);
+    expect(sweeps(mac)).toEqual(["hedge secret sweep every 1d at 02:47"]);
   });
 
-  test("fleet doctor on the hub names the fix when Coder rejects the hub's Coder session", async () => {
+  test("hedge doctor on the hub names the fix when Coder rejects the hub's Coder session", async () => {
     const hub: MachineFile = { schema: 1, role: "hub" };
     const home = temp.make("hub-session-");
-    for (const dir of [".config/fleet", ".config/coderv2"]) mkdirSync(join(home, dir), { recursive: true });
-    writeFileSync(join(home, ".config/fleet/machine.json"), JSON.stringify({ schema: 1, role: "hub" }));
+    for (const dir of [".config/hedge", ".config/coderv2"]) mkdirSync(join(home, dir), { recursive: true });
+    writeFileSync(join(home, ".config/hedge/machine.json"), JSON.stringify({ schema: 1, role: "hub" }));
     writeFileSync(join(home, ".config/coderv2/session"), `${["Ab3dE6gH9k", "x".repeat(22)].join("-")}\n`);
     const rejecting = (async () => Response.json({ message: "API key expired." }, { status: 401 })) as unknown as typeof fetch;
     const { machine } = fakeMachine(home, { self: "my-hub", isHub: true });
     const coder = new Coder({ home, env: {}, coderUrl: "https://coder.example.com", template: "linux", fetch: rejecting });
-    const run = async (command: string[]) => (command.join(" ").endsWith("fleet box session") ? boxCommand(["session"], { machine: () => { throw new Error("Boxes is off."); }, coder: () => coder, tokens: () => ({ here: machine, hub: "my-hub", coder }), print: machine.print, readStdin: async () => "", hooks: {} }) : 0);
+    const run = async (command: string[]) => (command.join(" ").endsWith("hedge box session") ? boxCommand(["session"], { machine: () => { throw new Error("Boxes is off."); }, coder: () => coder, tokens: () => ({ here: machine, hub: "my-hub", coder }), print: machine.print, readStdin: async () => "", hooks: {} }) : 0);
     const report = await check(resolveEngine([...sources, coderTeam()], { settings: answers, packs: ["hub", "posthog"], workflows: { "linked-hub": false } }, hub), { home, adapters: [], run });
     const finding = report.findings.find((item) => item.id === "check:coder-session");
     expect(report.ok).toBe(false);
@@ -164,7 +164,7 @@ describe("the Hub pack", () => {
         ...result.checks.filter((check) => check.pack === "hub" && check.workflow === "disk-watch").map((check) => `check ${check.id}: ${check.run.join(" ")}`),
       ];
     };
-    expect(items(hub)).toEqual(["job disk-watch: fleet disk-watch every 15m"]);
+    expect(items(hub)).toEqual(["job disk-watch: hedge disk-watch every 15m"]);
     expect(items(hub, { "disk-watch": false })).toEqual([]);
     expect(items(devbox)).toEqual([]);
     expect(items(mac)).toEqual([]);
@@ -178,18 +178,18 @@ describe("the Hub pack", () => {
     ]);
   });
 
-  test("the Claude token step tells the person to paste into fleet box token, and its probe passes only for a token file with mode 0600", () => {
+  test("the Claude token step tells the person to paste into hedge box token, and its probe passes only for a token file with mode 0600", () => {
     const step = withBoxes({}, { schema: 1, role: "hub" }).human.find((item) => item.id === "box-claude-token")!;
     expect(step).toMatchObject({ command: "claude setup-token", interactive: true, workflow: "boxes" });
-    expect(step.say).toContain("fleet box token");
+    expect(step.say).toContain("hedge box token");
     const home = temp.make("hub-token-");
     const probe = () => Bun.spawnSync(step.probe, { env: { HOME: home, PATH: "/usr/bin:/bin" } }).exitCode;
     expect(probe()).not.toBe(0);
-    mkdirSync(join(home, ".config/fleet"), { recursive: true });
-    writeFileSync(join(home, ".config/fleet/box-claude-token"), "sk-test\n", { mode: 0o644 });
-    chmodSync(join(home, ".config/fleet/box-claude-token"), 0o644);
+    mkdirSync(join(home, ".config/hedge"), { recursive: true });
+    writeFileSync(join(home, ".config/hedge/box-claude-token"), "sk-test\n", { mode: 0o644 });
+    chmodSync(join(home, ".config/hedge/box-claude-token"), 0o644);
     expect(probe()).not.toBe(0);
-    chmodSync(join(home, ".config/fleet/box-claude-token"), 0o600);
+    chmodSync(join(home, ".config/hedge/box-claude-token"), 0o600);
     expect(probe()).toBe(0);
   });
 });
@@ -208,13 +208,13 @@ describe("the Dream workflow", () => {
   });
 
   test("plans the nightly job only on the hub, and only while Dream is on", () => {
-    expect(dreamJobs(plan(dreamOn, hub))).toEqual(["dream: fleet dream run every 1d at 04:10"]);
+    expect(dreamJobs(plan(dreamOn, hub))).toEqual(["dream: hedge dream run every 1d at 04:10"]);
     expect(dreamJobs(plan(dreamOn, devbox))).toEqual([]);
     expect(dreamJobs(plan(dreamOn, mac))).toEqual([]);
     expect(dreamJobs(plan({ ...dreamOn, workflows: {} }, hub))).toEqual([]);
   });
 
-  test("gives fleet commands its session limit only while Dream is on, which is how the box hook knows to save digests", () => {
+  test("gives hedge commands its session limit only while Dream is on, which is how the box hook knows to save digests", () => {
     expect(plan(dreamOn, hub).settings["hub.dreamSessions"]).toBe(150);
     expect(plan({ ...dreamOn, workflows: {} }, hub).settings["hub.dreamSessions"]).toBeUndefined();
   });
@@ -224,9 +224,9 @@ describe("the Dream workflow", () => {
     expect(plan({ ...dreamOn, packs: ["hub"] }, hub).settings["memory.repo"]).toBeUndefined();
   });
 
-  test("ships the dream and fleet-hub skills with the Hub pack, which has no skills bound to a workflow", () => {
-    const skills = (result: Plan) => result.files.map((file) => file.target).filter((target) => /^\.agents\/skills\/(dream|fleet-hub)$/.test(target)).sort();
-    expect(skills(plan(dreamOn, hub))).toEqual([".agents/skills/dream", ".agents/skills/fleet-hub"]);
+  test("ships the dream and hedge-hub skills with the Hub pack, which has no skills bound to a workflow", () => {
+    const skills = (result: Plan) => result.files.map((file) => file.target).filter((target) => /^\.agents\/skills\/(dream|hedge-hub)$/.test(target)).sort();
+    expect(skills(plan(dreamOn, hub))).toEqual([".agents/skills/dream", ".agents/skills/hedge-hub"]);
     expect(skills(plan({ packs: [] }, hub))).toEqual([]);
   });
 });
@@ -242,7 +242,7 @@ describe("the Own-account balancing workflow", () => {
     config: result.config.filter((entry) => entry.workflow === "own-account-balancing").map((entry) => `${entry.provider}:${entry.key}`),
   });
   const nothing = { jobs: [], steps: [], checks: [], config: [] };
-  const codexRoute = ["codex:model_provider", "codex:model_providers.fleet-proxy"];
+  const codexRoute = ["codex:model_provider", "codex:model_providers.hedge-proxy"];
 
   test("is off by default, needs only the hub, and its risk quotes the Anthropic terms word for word", () => {
     const workflow = manifest().workflows!.find((item) => item.id === "own-account-balancing")!;
@@ -267,7 +267,7 @@ describe("the Own-account balancing workflow", () => {
 
   test("with it on, the hub gets the proxy, its balancer, and the route; a devbox gets only the route; the Mac gets nothing", () => {
     const route = { checks: ["cli-proxy-client", "cli-proxy-codex"], config: ["claude:env.ANTHROPIC_BASE_URL", "claude:apiKeyHelper", ...codexRoute] };
-    expect(proxyItems(plan(balancing, hub))).toEqual({ jobs: ["cli-proxy-balance: fleet cli-proxy-balance every 5m"], steps: ["cli-proxy"], ...route });
+    expect(proxyItems(plan(balancing, hub))).toEqual({ jobs: ["cli-proxy-balance: hedge cli-proxy-balance every 5m"], steps: ["cli-proxy"], ...route });
     expect(proxyItems(plan(balancing, devbox))).toEqual({ jobs: [], steps: [], ...route });
     expect(proxyItems(plan(balancing, mac))).toEqual(nothing);
     expect(plan(balancing, hub).settings["hub.proxyAccounts"]).toBe(2);
@@ -284,26 +284,26 @@ describe("the Own-account balancing workflow", () => {
   test("the hub runs the proxy and its balancer on every plan, the Codex plan included", () => {
     for (const ai of ["claude", "codex", "both"] as const) {
       const items = proxyItems(plan({ ...balancing, plan: ai }, hub));
-      expect([items.steps, items.jobs]).toEqual([["cli-proxy"], ["cli-proxy-balance: fleet cli-proxy-balance every 5m"]]);
+      expect([items.steps, items.jobs]).toEqual([["cli-proxy"], ["cli-proxy-balance: hedge cli-proxy-balance every 5m"]]);
     }
   });
 
-  test("the planned Codex provider is the table the route switch recognizes as Fleet's own", () => {
-    expect(plan(balancing, devbox).config.find((entry) => entry.key === "model_providers.fleet-proxy")?.value).toEqual(codexProviderTable);
+  test("the planned Codex provider is the table the route switch recognizes as Hedge's own", () => {
+    expect(plan(balancing, devbox).config.find((entry) => entry.key === "model_providers.hedge-proxy")?.value).toEqual(codexProviderTable);
   });
 
   test("a devbox on the both plan gets a Codex config that uses the proxy's Responses route and reads the client key from its private file; a Mac gets none", async () => {
     const codexConfig = async (machine: MachineFile) => {
-      const home = temp.make("fleet-codex-route-");
+      const home = temp.make("hedge-codex-route-");
       const result = plan({ ...balancing, plan: "both" }, machine);
       const report = await apply({ ...result, config: result.config.filter((entry) => entry.pack === "hub"), steps: [], checks: result.checks.filter((check) => check.pack === "hub"), jobs: [], human: [] }, { home, adapters: [providerConfigAdapter()], run: async () => 0 });
       expect(report.ok).toBe(true);
       return existsSync(join(home, ".codex/config.toml")) ? parse(readFileSync(join(home, ".codex/config.toml"), "utf8")) : undefined;
     };
     expect(await codexConfig(devbox)).toEqual({
-      model_provider: "fleet-proxy",
+      model_provider: "hedge-proxy",
       model_providers: {
-        "fleet-proxy": { name: "Fleet CLI proxy", base_url: "http://127.0.0.1:8317/v1", wire_api: "responses", auth: { command: "/bin/sh", args: ["-c", "cat \"$HOME/.config/fleet/cli-proxy.key\""] } },
+        "hedge-proxy": { name: "Hedge CLI proxy", base_url: "http://127.0.0.1:8317/v1", wire_api: "responses", auth: { command: "/bin/sh", args: ["-c", "cat \"$HOME/.config/hedge/cli-proxy.key\""] } },
       },
     });
     expect(await codexConfig(mac)).toBeUndefined();
@@ -311,15 +311,15 @@ describe("the Own-account balancing workflow", () => {
 
   test("sends Claude Code to the loopback proxy, and keeps the client key out of the settings: Claude reads it from a private file", () => {
     const config = plan(balancing, devbox).config.filter((entry) => entry.workflow === "own-account-balancing");
-    expect(Object.fromEntries(config.filter((entry) => entry.provider === "claude").map((entry) => [entry.key, entry.value]))).toEqual({ "env.ANTHROPIC_BASE_URL": "http://127.0.0.1:8317", apiKeyHelper: "cat \"$HOME/.config/fleet/cli-proxy.key\"" });
+    expect(Object.fromEntries(config.filter((entry) => entry.provider === "claude").map((entry) => [entry.key, entry.value]))).toEqual({ "env.ANTHROPIC_BASE_URL": "http://127.0.0.1:8317", apiKeyHelper: "cat \"$HOME/.config/hedge/cli-proxy.key\"" });
     expect(config.map((entry) => entry.pack)).toEqual(["hub", "hub", "hub", "hub"]);
   });
 
   test("each provider's route waits for its own check, so one provider down never moves the other", () => {
     const waits = Object.fromEntries(plan({ ...balancing, plan: "both" }, devbox).config.filter((entry) => entry.workflow === "own-account-balancing").map((entry) => [`${entry.provider}:${entry.key}`, entry.after]));
-    expect(waits).toEqual({ "claude:env.ANTHROPIC_BASE_URL": "cli-proxy-client", "claude:apiKeyHelper": "cli-proxy-client", "codex:model_provider": "cli-proxy-codex", "codex:model_providers.fleet-proxy": "cli-proxy-codex" });
+    expect(waits).toEqual({ "claude:env.ANTHROPIC_BASE_URL": "cli-proxy-client", "claude:apiKeyHelper": "cli-proxy-client", "codex:model_provider": "cli-proxy-codex", "codex:model_providers.hedge-proxy": "cli-proxy-codex" });
     const checks = plan({ ...balancing, plan: "both" }, devbox).checks.filter((check) => check.workflow === "own-account-balancing");
-    expect(checks.map((check) => check.run.join(" "))).toEqual(["fleet cli-proxy check", "fleet cli-proxy check codex"]);
+    expect(checks.map((check) => check.run.join(" "))).toEqual(["hedge cli-proxy check", "hedge cli-proxy check codex"]);
   });
 
   describe("apply while the proxy is down", () => {
@@ -330,13 +330,13 @@ describe("the Own-account balancing workflow", () => {
       const machine: ProxyMachine = { home, uid: 1000, user: "me", devboxes: [], release: { version: "", url: "", sha256: "" }, run: async () => ({ code: 0, stdout: "", stderr: "" }), fetch, now: () => 0, sleep: async () => {}, readStdin: async () => "", randomKey: () => key, print: () => {} };
       return async (command: string[]) => {
         const words = command.join(" ");
-        if (words.endsWith("fleet cli-proxy check codex")) return cliProxy("check", machine, "codex");
-        return words.endsWith("fleet cli-proxy check") ? cliProxy("check", machine) : 0;
+        if (words.endsWith("hedge cli-proxy check codex")) return cliProxy("check", machine, "codex");
+        return words.endsWith("hedge cli-proxy check") ? cliProxy("check", machine) : 0;
       };
     };
     const homeWith = (files: Record<string, string> = {}) => {
-      const home = temp.make("fleet-route-gate-");
-      for (const [path, text] of Object.entries({ ".config/fleet/cli-proxy.key": `${key}\n`, ...files })) {
+      const home = temp.make("hedge-route-gate-");
+      for (const [path, text] of Object.entries({ ".config/hedge/cli-proxy.key": `${key}\n`, ...files })) {
         mkdirSync(join(home, path, ".."), { recursive: true });
         writeFileSync(join(home, path), text);
       }
@@ -363,28 +363,28 @@ describe("the Own-account balancing workflow", () => {
     });
 
     test("also removes the Claude settings that connect wrote before any apply", async () => {
-      const home = homeWith({ ".claude/settings.json": JSON.stringify({ model: "opus", env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: 'cat "$HOME/.config/fleet/cli-proxy.key"' }) });
+      const home = homeWith({ ".claude/settings.json": JSON.stringify({ model: "opus", env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: 'cat "$HOME/.config/hedge/cli-proxy.key"' }) });
       const { claude, reports } = await applied(home, "down");
       expect(claude).toEqual({ model: "opus" });
       expect(reports[1]!.actions).toEqual([]);
     });
 
     test("removes the settings that connect wrote even while a pack source cannot be fetched", async () => {
-      const connected = { model: "opus", env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: 'cat "$HOME/.config/fleet/cli-proxy.key"' };
+      const connected = { model: "opus", env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: 'cat "$HOME/.config/hedge/cli-proxy.key"' };
       const { claude, reports } = await applied(homeWith({ ".claude/settings.json": JSON.stringify(connected) }), "down", 2, offline);
       expect(claude).toEqual({ model: "opus" });
       expect(reports[1]!.actions).toEqual([]);
     });
 
     test("removes the Codex settings that connect wrote even while a pack source cannot be fetched", async () => {
-      const connected = { model: "gpt-6.1-sol", model_provider: "fleet-proxy", model_providers: { "fleet-proxy": codexProviderTable } };
+      const connected = { model: "gpt-6.1-sol", model_provider: "hedge-proxy", model_providers: { "hedge-proxy": codexProviderTable } };
       const { codex, reports } = await applied(homeWith({ ".codex/config.toml": stringify(connected) }), "down", 2, offline);
       expect(codex).toEqual({ model: "gpt-6.1-sol" });
       expect(reports[1]!.actions).toEqual([]);
     });
 
     test("keeps a key helper of your own that reads a file beside the proxy key", async () => {
-      const mine = { apiKeyHelper: 'my-helper --cache "$HOME/.config/fleet/cli-proxy.key-cache"' };
+      const mine = { apiKeyHelper: 'my-helper --cache "$HOME/.config/hedge/cli-proxy.key-cache"' };
       const { claude } = await applied(homeWith({ ".claude/settings.json": JSON.stringify(mine) }), "down");
       expect(claude).toEqual(mine);
     });
@@ -396,18 +396,18 @@ describe("the Own-account balancing workflow", () => {
       expect(reports[1]!.actions).toEqual([]);
     });
 
-    test("a Fleet provider table you edited away from the proxy keeps Codex off the proxy on every apply", async () => {
-      const mine = { model_provider: "fleet-proxy", model_providers: { "fleet-proxy": { name: "Mine" } } };
+    test("a Hedge provider table you edited away from the proxy keeps Codex off the proxy on every apply", async () => {
+      const mine = { model_provider: "hedge-proxy", model_providers: { "hedge-proxy": { name: "Mine" } } };
       const { reports, codex } = await applied(homeWith({ ".codex/config.toml": stringify(mine) }), both, 4);
       expect(codex.model_providers).toEqual(mine.model_providers);
-      expect(codex.model_provider).toBe("fleet-proxy");
+      expect(codex.model_provider).toBe("hedge-proxy");
       expect(reports.slice(1).map((report) => report.actions)).toEqual([[], [], []]);
     });
 
     test("a proxy that answers routes both", async () => {
       const { claude, codex } = await applied(homeWith(), both);
-      expect(claude.apiKeyHelper).toBe("cat \"$HOME/.config/fleet/cli-proxy.key\"");
-      expect(codex.model_provider).toBe("fleet-proxy");
+      expect(claude.apiKeyHelper).toBe("cat \"$HOME/.config/hedge/cli-proxy.key\"");
+      expect(codex.model_provider).toBe("hedge-proxy");
     });
   });
 });

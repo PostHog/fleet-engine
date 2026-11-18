@@ -10,8 +10,8 @@ afterEach(() => temp.cleanup());
 
 function homeWith(settings: Record<string, unknown>) {
   const home = temp.make("home-");
-  mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
-  writeFileSync(join(home, ".local/state/fleet/settings.json"), JSON.stringify({ "guards.person": "Robin", ...settings }));
+  mkdirSync(join(home, ".local/state/hedge"), { recursive: true });
+  writeFileSync(join(home, ".local/state/hedge/settings.json"), JSON.stringify({ "guards.person": "Robin", ...settings }));
   return home;
 }
 

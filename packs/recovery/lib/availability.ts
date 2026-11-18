@@ -17,7 +17,7 @@ const keyPattern = /^([0-9a-f]{64})\n?$/;
 
 export async function providersCommand(args: string[], context: ProvidersContext): Promise<number> {
   const json = args.length === 1 && args[0] === "--json";
-  if (args.length && !json) return context.print("Usage: fleet providers [--json]"), 2;
+  if (args.length && !json) return context.print("Usage: hedge providers [--json]"), 2;
   const report = await currentAvailability(context);
   if (json) context.print(JSON.stringify(report, null, 2));
   else for (const provider of providers) context.print(`${provider}: ${report.providers[provider]} (checked ${report.checkedAt})`);
@@ -38,7 +38,7 @@ export async function currentAvailability(context: ProbeContext): Promise<Availa
 }
 
 function proxyKey(home: string): string | undefined {
-  try { return keyPattern.exec(readFileSync(join(home, ".config/fleet/cli-proxy.key"), "utf8"))?.[1]; }
+  try { return keyPattern.exec(readFileSync(join(home, ".config/hedge/cli-proxy.key"), "utf8"))?.[1]; }
   catch { return undefined; }
 }
 

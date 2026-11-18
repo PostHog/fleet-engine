@@ -75,7 +75,7 @@ export class ToolRefusal extends Error {
 }
 
 export async function startT3Stub(fixture: T3Fixture): Promise<T3Stub> {
-  const home = await mkdtemp(join(tmpdir(), "fleet-t3-"));
+  const home = await mkdtemp(join(tmpdir(), "hedge-t3-"));
   const userdata = join(home, ".t3", "userdata");
   await mkdir(userdata, { recursive: true });
   if (fixture.resolutions) writeT3EventStore(join(userdata, "statev2.sqlite"), fixture.resolutions);

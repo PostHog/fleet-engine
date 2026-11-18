@@ -31,7 +31,7 @@ export function sameFamilyRow(author: Family, env: Record<string, string | undef
 
 export function securityRow(env: Record<string, string | undefined>): ModelRow | undefined {
   const row = modelTable(env).find((candidate) => candidate.role === "security");
-  const model = env.FLEET_PROOF_SECURITY_MODEL;
+  const model = env.HEDGE_PROOF_SECURITY_MODEL;
   if (!model) return row;
   return { ...(row ?? { role: "security", work: "Deep security review", effort: "xhigh" }), provider: model.startsWith("claude") ? "claude" : "codex", model };
 }
@@ -41,7 +41,7 @@ export type ModelAnswer = { ok: true; text: string; model: string; usage?: Usage
 export type ModelRequest = { prompt: string; cwd: string; readable?: string[]; images?: string[]; schema?: object; started?: (pid: number) => Promise<void> };
 export type Role = "arbiter" | "reviewer" | "judge" | "eval-judge";
 
-const prefixes: Record<Role, string> = { arbiter: "FLEET_REVIEW_ARBITER", reviewer: "FLEET_PROOF_REVIEWER", judge: "FLEET_PROOF_JUDGE", "eval-judge": "FLEET_PROOF_EVAL_JUDGE" };
+const prefixes: Record<Role, string> = { arbiter: "HEDGE_REVIEW_ARBITER", reviewer: "HEDGE_PROOF_REVIEWER", judge: "HEDGE_PROOF_JUDGE", "eval-judge": "HEDGE_PROOF_EVAL_JUDGE" };
 const prefixOf = (role: Role) => prefixes[role];
 
 export function modelLabel(role: Role, row: ModelRow, env: Record<string, string | undefined>, pinned = false) {
@@ -54,16 +54,16 @@ export async function askModel(role: Role, row: ModelRow, request: ModelRequest,
   const replacement = env[prefix];
   const model = modelLabel(role, row, env, pinned);
   const timeout = Number(env[`${prefix}_TIMEOUT_MS`]) || limit;
-  const scratch = await mkdtemp(join(tmpdir(), "fleet-proof-model-"));
+  const scratch = await mkdtemp(join(tmpdir(), "hedge-proof-model-"));
   try {
     const output = join(scratch, "answer.txt");
     const command = replacement ? ["sh", "-c", replacement] : await modelCommand(role, { ...row, model }, request, scratch, output);
     const lean = replacement ? undefined : row.provider;
-    const limits = { timeout, grace: graceOf(env.FLEET_PROOF_QUOTA_GRACE_MS), events: lean !== undefined };
+    const limits = { timeout, grace: graceOf(env.HEDGE_PROOF_QUOTA_GRACE_MS), events: lean !== undefined };
     const spawnEnv = lean === "claude" ? leanClaudeEnv(env.HOME ?? homedir(), env) : env;
     let answer = await spawnWithLimit(command, request, spawnEnv, limits);
     if (answer.transient) {
-      await Bun.sleep(retryDelayOf(env.FLEET_PROOF_RETRY_DELAY_MS));
+      await Bun.sleep(retryDelayOf(env.HEDGE_PROOF_RETRY_DELAY_MS));
       answer = await spawnWithLimit(command, request, spawnEnv, limits);
       if (answer.transient) return { ok: false, cause: `${answer.cause} (after a retry)`, model };
     }

@@ -13,7 +13,7 @@ const deny = (reason: string): Denial => ({ hookSpecificOutput: { hookEventName:
 type GateSettings = { person: string; exempt: string[]; text: string };
 
 function gateSettings(home: string): GateSettings {
-  const file = join(home, ".local/state/fleet/settings.json");
+  const file = join(home, ".local/state/hedge/settings.json");
   if (!existsSync(file)) return { person: fallbackPerson, exempt: [], text: "{}" };
   const text = readFileSync(file, "utf8");
   const settings = JSON.parse(text) as Record<string, unknown>;
@@ -28,7 +28,7 @@ function shellCommand(input: Record<string, unknown> = {}) {
   return typeof command === "string" ? command : "";
 }
 
-/** Refuses an enqueue or merge until `fleet proof gate` passed at the head of each open layer of the PR's stack, or the person's gate override covers that head. */
+/** Refuses an enqueue or merge until `hedge proof gate` passed at the head of each open layer of the PR's stack, or the person's gate override covers that head. */
 export async function mergeGate(call: ToolCall, where: Where): Promise<Denial | undefined> {
   let settings: GateSettings | undefined;
   let problem = "";
@@ -36,8 +36,8 @@ export async function mergeGate(call: ToolCall, where: Where): Promise<Denial | 
   catch (error) { problem = (error as Error).message; }
   const intent = mergeIntent(call, shellCommand(call.tool_input), settings?.exempt ?? [], where.intent ?? realIntentIO);
   if (!intent.refusal && !intent.targets.length) return undefined;
-  if (!settings) return deny(`Fleet blocked this merge: the merge gate could not read its settings (${problem}), so it cannot tell which repositories skip the gate. Fix that file.`);
-  const env = { ...where.env, FLEET_SETTINGS: where.env.FLEET_SETTINGS ?? settings.text };
+  if (!settings) return deny(`Hedge blocked this merge: the merge gate could not read its settings (${problem}), so it cannot tell which repositories skip the gate. Fix that file.`);
+  const env = { ...where.env, HEDGE_SETTINGS: where.env.HEDGE_SETTINGS ?? settings.text };
   const io = where.gate ?? { ...realGateIO(where.home, env), ...where.github };
   const refusal = await beforeDeadline(() => mergeGateRisk(intent, io, settings.person), where.deadline);
   return refusal ? deny(refusal) : undefined;
@@ -46,7 +46,7 @@ export async function mergeGate(call: ToolCall, where: Where): Promise<Denial | 
 async function answer(input: string, home: string): Promise<Denial | undefined> {
   let call: ToolCall;
   try { call = JSON.parse(input); }
-  catch { return deny("Fleet blocked this call: the merge gate could not read the hook input, which is not JSON."); }
+  catch { return deny("Hedge blocked this call: the merge gate could not read the hook input, which is not JSON."); }
   return mergeGate(call, { home, env: Bun.env });
 }
 

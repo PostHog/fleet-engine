@@ -8,13 +8,13 @@ import { inside } from "../../files/install.ts";
 import { linkOnPath, readState, withLock, writeWithBackups, type Write } from "../provider-config/store.ts";
 import { skipOtherHome, spawnRunner, type CommandRunner } from "../run.ts";
 import { cronLine, cronSafe, reconcileCrontab } from "./cron.ts";
-import { labelPrefix, plist } from "./launchd.ts";
+import { labelPrefix, legacyLabelPrefix, plist } from "./launchd.ts";
 import { engineCommand } from "../../reconciler/engine-command.ts";
 import { agentCopyTarget, jobsFolder, launcherScript, launcherTarget, logTarget } from "./launcher.ts";
 import { cronExpression, isService, isTimed, launchdTimer, t3Schedule, type T3Schedule, type TimedJob } from "./schedule.ts";
-import { systemdSafe, unit, unitName, unitTarget } from "./systemd.ts";
+import { legacyUnitPrefix, systemdSafe, unit, unitName, unitsFolder, unitTarget } from "./systemd.ts";
 
-export type FleetTask = {
+export type HedgeTask = {
   id: string;
   title: string;
   prompt: string;
@@ -26,11 +26,12 @@ export type FleetTask = {
   runtimeMode: NonNullable<PackJob["task"]>["runtimeMode"];
 };
 
-export type T3Tasks = { list(): Promise<FleetTask[]>; upsert(task: FleetTask): Promise<void>; setEnabled(id: string, enabled: boolean): Promise<void> };
+export type T3Tasks = { list(): Promise<HedgeTask[]>; upsert(task: HedgeTask): Promise<void>; setEnabled(id: string, enabled: boolean): Promise<void> };
 
 export type JobsOptions = { run?: CommandRunner; accountHome?: () => Promise<string | undefined>; engineRoot?: string; uid?: number; t3?: () => Promise<T3Tasks | undefined> };
 
-export const taskPrefix = "fleet:";
+export const taskPrefix = "hedge:";
+const legacyTaskPrefix = "fleet:";
 const notFound = 113;
 const jobId = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
@@ -126,7 +127,7 @@ async function reconcileCron(jobs: TimedJob[], scripts: Scripts, { home, dryRun,
   if (!changes.added.length && !changes.changed.length && !changes.removed.length) return true;
   const written = await run(["crontab", "-"], { input: changes.text });
   if (written.code !== 0) return result.findings.push({ id: "jobs:cron", pack: "engine", say: `Could not write your crontab (exit ${written.code}).`, repair: "apply" }), false;
-  const kept = new Set([...changes.text.matchAll(/# fleet:([A-Za-z0-9._-]+)$/gm)].map((match) => match[1]!));
+  const kept = new Set([...changes.text.matchAll(/# hedge:([A-Za-z0-9._-]+)$/gm)].map((match) => match[1]!));
   for (const id of new Set(changes.removed)) if (!kept.has(id) && !keep.has(id)) await removeLauncher(home, id);
   result.actions.push({ target: "crontab", operation: "replace", reason: all.map((finding) => finding.say).join(" ") });
   return true;
@@ -143,7 +144,7 @@ async function reconcileLaunchd(jobs: Array<Owned<PackJob>>, scripts: Scripts, {
   const written = async (id: string) => (jobId.test(id) ? await readState(home, agentCopyTarget(id)).catch(() => undefined) : undefined);
   const foreign = async (name: string, id: string, text: string | undefined, wanted?: string, pack = "engine") => {
     if (text === undefined || text === wanted || text === (await written(id))) return false;
-    result.findings.push({ id: `job:${id}`, pack, say: `Left Library/LaunchAgents/${name} alone: Fleet did not write it, or it changed since. Move it away, then run fleet apply.`, repair: "human" });
+    result.findings.push({ id: `job:${id}`, pack, say: `Left Library/LaunchAgents/${name} alone: Hedge did not write it, or it changed since. Move it away, then run hedge apply.`, repair: "human" });
     return true;
   };
   const removeCopy = async (id: string) => {
@@ -159,10 +160,20 @@ async function reconcileLaunchd(jobs: Array<Owned<PackJob>>, scripts: Scripts, {
     const after = await state(label);
     if (after === "absent") return true;
     const id = typeof job === "string" ? job : job.id;
-    const say = after === "loaded" ? `launchd did not stop the ${id} job, so Fleet left its agent as it is.` : `Could not check that launchd stopped the ${id} job (${after}), so Fleet left its agent as it is.`;
+    const say = after === "loaded" ? `launchd did not stop the ${id} job, so Hedge left its agent as it is.` : `Could not check that launchd stopped the ${id} job (${after}), so Hedge left its agent as it is.`;
     result.findings.push({ id: `job:${id}`, pack: typeof job === "string" ? "engine" : job.pack, say, repair: "apply" });
     return false;
   };
+  if (!dryRun && !outage) {
+    for (const name of (await readdir(agents).catch(() => [] as string[])).filter((item) => item.startsWith(legacyLabelPrefix) && item.endsWith(".plist"))) {
+      const label = name.slice(0, -".plist".length);
+      const id = label.slice(legacyLabelPrefix.length);
+      const text = await readFile(join(agents, name), "utf8").catch(() => undefined);
+      if (!jobId.test(id) || text === undefined || text !== (await written(id)) || !(await stop(id, label))) continue;
+      await rm(join(agents, name), { force: true });
+      result.actions.push({ target: `Library/LaunchAgents/${name}`, operation: "remove" });
+    }
+  }
   for (const job of jobs) {
     const label = `${labelPrefix}${job.id}`;
     const name = `${label}.plist`;
@@ -222,12 +233,27 @@ async function reconcileSystemd(jobs: Array<Owned<PackJob>>, scripts: Scripts, {
   const ready = new Set<string>();
   const done: Systemd = { running: ready, removeMoved: async () => {} };
   const say = (job: { id: string; pack: string } | string, text: string, repair: Finding["repair"]) => result.findings.push({ id: `job:${typeof job === "string" ? job : job.id}`, pack: typeof job === "string" ? "engine" : job.pack, say: text, repair });
-  const foreign = (job: { id: string; pack: string } | string) => say(job, `Left ${unitTarget(typeof job === "string" ? job : job.id)} alone: Fleet did not write it, or it changed since. Move it away, then run fleet apply.`, "human");
-  const unreachable = (output: { code: number; stderr?: string }) => (result.findings.push({ id: "jobs:systemd", pack: "engine", say: `Could not reach systemd's user manager (${reason(output)}), so services were not changed. Log in to this machine in a normal session, then run fleet apply.`, repair: "human" }), done);
+  const foreign = (job: { id: string; pack: string } | string) => say(job, `Left ${unitTarget(typeof job === "string" ? job : job.id)} alone: Hedge did not write it, or it changed since. Move it away, then run hedge apply.`, "human");
+  const unreachable = (output: { code: number; stderr?: string }) => (result.findings.push({ id: "jobs:systemd", pack: "engine", say: `Could not reach systemd's user manager (${reason(output)}), so services were not changed. Log in to this machine in a normal session, then run hedge apply.`, repair: "human" }), done);
   const linked = Boolean(await linkOnPath(home, jobsFolder));
   const copies = linked ? [] : (await readdir(inside(home, jobsFolder)).catch(() => [] as string[])).filter((name) => name.endsWith(".service")).map((name) => name.slice(0, -".service".length));
   const gone = copies.filter((id) => jobId.test(id) && !jobs.some((job) => job.id === id) && (!outage || gated.has(id)));
   if (jobs.length && !systemdSafe(home)) return result.findings.push({ id: "jobs:systemd", pack: "engine", say: `Left services alone: systemd cannot run scripts from ${JSON.stringify(home)}, which holds a line break.`, repair: "human" }), done;
+  if (!dryRun && !linked && !outage) {
+    for (const name of (await readdir(inside(home, unitsFolder)).catch(() => [] as string[])).filter((item) => item.startsWith(legacyUnitPrefix) && item.endsWith(".service"))) {
+      const id = name.slice(legacyUnitPrefix.length, -".service".length);
+      if (!jobId.test(id)) continue;
+      const [text, copy] = [await read(`${unitsFolder}/${name}`), await read(copyTarget(id))];
+      if (typeof text !== "string" || text !== copy) continue;
+      const stopped = await systemctl("disable", "--now", name);
+      if (stopped.code !== 0) {
+        say(id, `systemd did not stop the old ${name} job (${reason(stopped)}), so Hedge left it as it is.`, "apply");
+        continue;
+      }
+      await rm(inside(home, `${unitsFolder}/${name}`), { force: true });
+      result.actions.push({ target: `${unitsFolder}/${name}`, operation: "remove" });
+    }
+  }
   const plans: Array<{ job: Owned<PackJob>; script: Write; content: string; current?: string; copy?: string; reload: boolean; restart: boolean; enable: boolean; pending: boolean; marked?: string }> = [];
   for (const job of jobs) {
     const script = scripts.get(job.id)!;
@@ -270,7 +296,7 @@ async function reconcileSystemd(jobs: Array<Owned<PackJob>>, scripts: Scripts, {
       const present = (await read(unitTarget(id))) !== undefined;
       const stopped = present ? await systemctl("disable", "--now", unitName(id)) : await stopLoaded(id);
       if (stopped.code !== 0) {
-        say(id, `systemd did not stop the ${id} job (${reason(stopped)}), so Fleet left its unit as it is.`, "apply");
+        say(id, `systemd did not stop the ${id} job (${reason(stopped)}), so Hedge left its unit as it is.`, "apply");
         continue;
       }
       if (present) {
@@ -291,7 +317,7 @@ async function reconcileSystemd(jobs: Array<Owned<PackJob>>, scripts: Scripts, {
   };
   const reloadNow = async () => {
     const reloaded = await systemctl("daemon-reload");
-    if (reloaded.code !== 0) result.findings.push({ id: "jobs:systemd", pack: "engine", say: `systemd did not reload its units (${reason(reloaded)}). Run fleet apply again.`, repair: "apply" });
+    if (reloaded.code !== 0) result.findings.push({ id: "jobs:systemd", pack: "engine", say: `systemd did not reload its units (${reason(reloaded)}). Run hedge apply again.`, repair: "apply" });
     return reloaded.code === 0;
   };
   done.removeMoved = async () => void ((await remove(later)) && (await reloadNow()));
@@ -313,23 +339,23 @@ async function reconcileSystemd(jobs: Array<Owned<PackJob>>, scripts: Scripts, {
 async function reconcileTasks(plan: Plan, client: T3Tasks | undefined, { dryRun, result, outage, gated }: Context) {
   const jobs = plan.jobs.filter(isTimed).filter((job) => job.runner === "t3" && job.task);
   if (!client) {
-    for (const job of jobs) result.findings.push({ id: `task:${job.id}`, pack: job.pack, say: `The ${job.id} task waits for T3 Code to run. The next fleet apply after T3 Code starts adds it.`, repair: "apply" });
+    for (const job of jobs) result.findings.push({ id: `task:${job.id}`, pack: job.pack, say: `The ${job.id} task waits for T3 Code to run. The next hedge apply after T3 Code starts adds it.`, repair: "apply" });
     return;
   }
-  let existing: FleetTask[];
+  let existing: HedgeTask[];
   try {
     existing = await client.list();
   } catch (error) {
-    result.findings.push({ id: "tasks:t3", pack: "engine", say: `Could not read T3 Code's scheduled tasks: ${(error as Error).message}. Run fleet apply again.`, repair: "apply" });
+    result.findings.push({ id: "tasks:t3", pack: "engine", say: `Could not read T3 Code's scheduled tasks: ${(error as Error).message}. Run hedge apply again.`, repair: "apply" });
     return;
   }
   for (const job of jobs) {
     const task = job.task!;
     if (task.project === undefined) {
-      result.findings.push({ id: `task:${job.id}`, pack: job.pack, say: `The ${job.id} task needs a project. Set it with fleet set ${task.projectSetting}=<path>.`, repair: "human" });
+      result.findings.push({ id: `task:${job.id}`, pack: job.pack, say: `The ${job.id} task needs a project. Set it with hedge set ${task.projectSetting}=<path>.`, repair: "human" });
       continue;
     }
-    const wanted: FleetTask = { id: `${taskPrefix}${job.id}`, title: `Fleet: ${job.id}`, prompt: task.prompt, enabled: true, schedule: t3Schedule(job.schedule), project: task.project, modelRole: task.modelRole, workspaceStrategy: task.workspaceStrategy, runtimeMode: task.runtimeMode };
+    const wanted: HedgeTask = { id: `${taskPrefix}${job.id}`, title: `Hedge: ${job.id}`, prompt: task.prompt, enabled: true, schedule: t3Schedule(job.schedule), project: task.project, modelRole: task.modelRole, workspaceStrategy: task.workspaceStrategy, runtimeMode: task.runtimeMode };
     const current = existing.find((item) => item.id === wanted.id);
     if (current && Bun.deepEquals(current, wanted)) continue;
     if (dryRun) {
@@ -345,7 +371,7 @@ async function reconcileTasks(plan: Plan, client: T3Tasks | undefined, { dryRun,
     result.actions.push({ target: `t3 task ${wanted.id}`, operation: current ? "replace" : "create" });
   }
   for (const task of existing) {
-    if ((outage && !gated.has(task.id.slice(taskPrefix.length))) || !task.id.startsWith(taskPrefix) || !task.enabled || jobs.some((job) => `${taskPrefix}${job.id}` === task.id)) continue;
+    if ((outage && !gated.has(task.id.slice(taskPrefix.length))) || ![taskPrefix, legacyTaskPrefix].some((prefix) => task.id.startsWith(prefix)) || !task.enabled || jobs.some((job) => `${taskPrefix}${job.id}` === task.id)) continue;
     if (dryRun) {
       result.findings.push(needs(task.id.slice(taskPrefix.length), "turned off", "task"));
       continue;

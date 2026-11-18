@@ -16,10 +16,10 @@ export type Box = { name: string; id: string; template: string; status: string; 
 export type Capture = (argv: string[], options: { env?: Env; stdin?: string; timeoutMs: number; inherit?: boolean }) => Promise<Result>;
 export type Timer = (ms: number, fire: () => void) => () => void;
 export type CoderOptions = { home: string; env: Env; coderUrl: string; template: string; capture?: Capture; fetch?: typeof fetch };
-export type SessionSource = "environment" | "fleet" | "cli" | "none";
+export type SessionSource = "environment" | "hedge" | "cli" | "none";
 export type SessionKey = { rejected: true } | { rejected: false; expiresAt: number; lifetimeMs: number };
 
-const sessionFiles = [["fleet", ".config/fleet/coder-session", ".config/fleet/coder-url"], ["cli", ".config/coderv2/session", ".config/coderv2/url"]] as const;
+const sessionFiles = [["hedge", ".config/hedge/coder-session", ".config/hedge/coder-url"], ["cli", ".config/coderv2/session", ".config/coderv2/url"]] as const;
 const sessionLimitMs = 10_000;
 
 export function slugFor(name: string): string {
@@ -52,7 +52,7 @@ export const orphanGraceSeconds = 10;
 function holdingLocks(argv: string[], locks: number[], timeoutMs: number): string[] {
   if (!locks.length) return argv;
   const closed = locks.map((_, index) => `${index + 3}>&-`).join(" ");
-  return ["timeout", "-s", "KILL", String(Math.ceil(timeoutMs / 1000) + orphanGraceSeconds), "/bin/sh", "-c", `exec "$@" ${closed}`, "fleet-box-lock", ...argv];
+  return ["timeout", "-s", "KILL", String(Math.ceil(timeoutMs / 1000) + orphanGraceSeconds), "/bin/sh", "-c", `exec "$@" ${closed}`, "hedge-box-lock", ...argv];
 }
 
 export function captureWith(timer: Timer): Capture {
@@ -112,7 +112,7 @@ export class Coder {
     if (!/^[\x21-\x7e]+$/.test(token)) throw new Error("the session token has a character that cannot go in a request, such as a line break");
     const response = await this.fetch(`${this.env.CODER_URL}/api/v2/users/me/keys/${encodeURIComponent(token.split("-")[0]!)}`, { signal: limit(timeoutMs), redirect: "manual", headers: { "Coder-Session-Token": token } });
     if (response.status === 401) return { rejected: true };
-    if (response.status >= 300 && response.status < 400) throw new Error(`Coder answered ${response.status} with a redirect, so Fleet did not send the session to another address`);
+    if (response.status >= 300 && response.status < 400) throw new Error(`Coder answered ${response.status} with a redirect, so Hedge did not send the session to another address`);
     if (!response.ok) throw new Error(`Coder answered ${response.status}`);
     const key = (await response.json().catch(() => undefined)) as { expires_at?: unknown; lifetime_seconds?: unknown } | undefined;
     const expiresAt = typeof key?.expires_at === "string" ? Date.parse(key.expires_at) : NaN;
@@ -134,7 +134,7 @@ export class Coder {
   private async download(timeoutMs: number): Promise<string | undefined> {
     const target = join(this.home, ".local/bin/coder");
     if (existsSync(target)) return target;
-    if (!this.env.CODER_URL) throw new Error("No coder CLI and no Coder address. Set hub.coderUrl with fleet set.");
+    if (!this.env.CODER_URL) throw new Error("No coder CLI and no Coder address. Set hub.coderUrl with hedge set.");
     const arch = process.arch === "arm64" ? "arm64" : "amd64";
     mkdirSync(dirname(target), { recursive: true });
     const partial = join(dirname(target), `.coder.${crypto.randomUUID()}`);
@@ -176,7 +176,7 @@ export class Coder {
     const { id, parameters: known } = await this.activeTemplate(signal);
     const copied = await this.api<Array<{ name: string; value: string }>>(`/api/v2/workspacebuilds/${(await this.workspace(from, signal)).latest_build.id}/parameters`, undefined, signal);
     const parameters = new Map(copied.filter((parameter) => known.includes(parameter.name)).map((parameter) => [parameter.name, parameter.value]));
-    const overrides: Record<string, string | undefined> = { disk_size: String(diskGigabytes), auto_start_app: "false", clone_source_instance_id: "", dotfiles_branch: this.env.FLEET_BOX_DOTFILES_BRANCH };
+    const overrides: Record<string, string | undefined> = { disk_size: String(diskGigabytes), auto_start_app: "false", clone_source_instance_id: "", dotfiles_branch: this.env.HEDGE_BOX_DOTFILES_BRANCH };
     for (const [key, value] of Object.entries(overrides)) if (value !== undefined && known.includes(key)) parameters.set(key, value);
     const rich_parameter_values = [...parameters].map(([key, value]) => ({ name: key, value }));
     const created = await this.api<{ id: string }>("/api/v2/users/me/workspaces", { method: "POST", body: { name, template_id: id, rich_parameter_values, ttl_ms: idleStopMs } }, signal);
@@ -186,7 +186,7 @@ export class Coder {
   private async activeTemplate(signal?: AbortSignal): Promise<{ id: string; versionId: string; parameters: string[] }> {
     const templates = await this.api<Array<{ id: string; name: string; active_version_id: string }>>("/api/v2/templates", undefined, signal);
     const found = templates.find((candidate) => candidate.name === this.template);
-    if (!found) throw new Error(`Coder has no ${this.template} template. Set hub.boxTemplate with fleet set.`);
+    if (!found) throw new Error(`Coder has no ${this.template} template. Set hub.boxTemplate with hedge set.`);
     const parameters = await this.api<Array<{ name: string }>>(`/api/v2/templateversions/${found.active_version_id}/rich-parameters`, undefined, signal);
     return { id: found.id, versionId: found.active_version_id, parameters: parameters.map((parameter) => parameter.name) };
   }
@@ -215,7 +215,7 @@ export class Coder {
         return;
       } catch (error) {
         if (signal.aborted) throw error;
-        console.error(`Fleet box: workspace ${id} keeps its template version: ${(error as Error).message}`);
+        console.error(`Hedge box: workspace ${id} keeps its template version: ${(error as Error).message}`);
       }
     }
     await this.api(path, { method: "POST", body: { transition: "start" } }, signal);
@@ -280,11 +280,11 @@ type Token = { id: string; token_name: string; expires_at: string };
 export type GrantOptions = { ifExpiring: boolean; now: number; onDevbox(target: string, command: string, stdin?: string): Promise<Result>; print(line: string): void };
 
 export async function grant(coder: { env: Env; token(args: string[]): Promise<string> }, target: string, options: GrantOptions): Promise<number> {
-  const prefix = `fleet-${target}-`;
+  const prefix = `hedge-${target}-`;
   const ours = (token: string) => token.startsWith(prefix) && /^\d{12}-[0-9a-f]{4}$/.test(token.slice(prefix.length));
   const tokens = (JSON.parse(await coder.token(["list", "-o", "json"])) as Token[]).filter((token) => ours(token.token_name));
   if (options.ifExpiring) {
-    const keyId = (await options.onDevbox(target, "cut -d- -f1 ~/.config/fleet/coder-session 2>/dev/null")).stdout.trim();
+    const keyId = (await options.onDevbox(target, "cut -d- -f1 ~/.config/hedge/coder-session 2>/dev/null")).stdout.trim();
     const installed = tokens.find((token) => token.id === keyId);
     if (installed && Date.parse(installed.expires_at) - options.now > tokenRenewWithinMs) {
       options.print(`${installed.token_name}: still valid until ${installed.expires_at}`);
@@ -294,7 +294,7 @@ export async function grant(coder: { env: Env; token(args: string[]): Promise<st
   const name = `${prefix}${new Date(options.now).toISOString().replace(/\D/g, "").slice(0, 12)}-${crypto.randomUUID().slice(0, 4)}`;
   const token = (await coder.token(["create", "--name", name, "--lifetime", tokenLifetime, ...tokenScopes.flatMap((scope) => ["--scope", scope])])).trim();
   const write = async (file: string, content: string) => {
-    const install = `umask 077 && mkdir -p ~/.config/fleet && t=$(mktemp ~/.config/fleet/.${file}.XXXXXX) && cat > "$t" && chmod 600 "$t" && mv -f "$t" ~/.config/fleet/${file}`;
+    const install = `umask 077 && mkdir -p ~/.config/hedge && t=$(mktemp ~/.config/hedge/.${file}.XXXXXX) && cat > "$t" && chmod 600 "$t" && mv -f "$t" ~/.config/hedge/${file}`;
     const pushed = await options.onDevbox(target, install, `${content}\n`);
     if (pushed.code !== 0) throw new Error(`Cannot write ${file} on ${target}: ${pushed.stderr.trim()}`);
   };
@@ -318,7 +318,7 @@ export async function checkSession(coder: Pick<Coder, "env" | "sessionFrom" | "s
   const login = `coder login ${url}`;
   const fix = {
     environment: `Set CODER_SESSION_TOKEN to a fresh token, or unset it and run ${login} on the hub.`,
-    fleet: `Write a fresh Coder token to ~/.config/fleet/coder-session, or remove that file and run ${login} on the hub.`,
+    hedge: `Write a fresh Coder token to ~/.config/hedge/coder-session, or remove that file and run ${login} on the hub.`,
     cli: `Run ${login} on the hub to sign in again.`,
   }[coder.sessionFrom];
   let key: SessionKey | undefined;
@@ -328,7 +328,7 @@ export async function checkSession(coder: Pick<Coder, "env" | "sessionFrom" | "s
     const token = coder.env.CODER_SESSION_TOKEN ?? "";
     const message = error instanceof DOMException && error.name === "TimeoutError" ? "it timed out" : (error as Error).message;
     const reason = token ? message.split(token).join("<session token>") : message;
-    return options.print(`Cannot reach Coder at ${url} to check the hub's Coder session: ${reason}. Check the address and the network, then run fleet box session again.`), 1;
+    return options.print(`Cannot reach Coder at ${url} to check the hub's Coder session: ${reason}. Check the address and the network, then run hedge box session again.`), 1;
   }
   if (!key || key.rejected) return options.print(`Coder rejects the hub's Coder session: it expired or was removed. ${fix}`), 1;
   const at = new Date(key.expiresAt).toISOString();

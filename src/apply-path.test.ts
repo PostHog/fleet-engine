@@ -17,7 +17,7 @@ function importGraph(entries: string[]) {
   return [...reached].map((file) => relative(engineRoot, file)).sort();
 }
 
-test("no module that fleet apply or the memory hooks load calls spawnSync, which can spin forever beside an async child", () => {
+test("no module that hedge apply or the memory hooks load calls spawnSync, which can spin forever beside an async child", () => {
   const modules = importGraph(applyPathEntries);
   expect(modules).toEqual(expect.arrayContaining(["src/adapters/run.ts", "src/adapters/t3/session.ts", "src/adapters/identity/adapter.ts", "packs/memory/lib/notes.ts"]));
   expect(modules.filter((module) => readFileSync(join(engineRoot, module), "utf8").includes("spawnSync"))).toEqual([]);

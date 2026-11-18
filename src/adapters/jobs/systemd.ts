@@ -1,5 +1,6 @@
 export const unitsFolder = ".config/systemd/user";
-export const unitName = (id: string) => `fleet-${id}.service`;
+export const unitName = (id: string) => `hedge-${id}.service`;
+export const legacyUnitPrefix = "fleet-";
 export const unitTarget = (id: string) => `${unitsFolder}/${unitName(id)}`;
 
 export const systemdSafe = (path: string) => !/[\n\r]/.test(path);
@@ -9,7 +10,7 @@ const quote = (value: string) => `"${value.replaceAll("\\", "\\\\").replaceAll('
 export function unit(id: string, script: string) {
   return [
     "[Unit]",
-    `Description=Fleet: ${id}`,
+    `Description=Hedge: ${id}`,
     "After=network-online.target",
     "",
     "[Service]",

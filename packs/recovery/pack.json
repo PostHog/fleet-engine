@@ -1,10 +1,10 @@
 {
   "schema": 1,
   "name": "recovery",
-  "summary": "Threads that stop on a usage limit or a provider outage continue once the provider answers again, and fleet providers says which provider has capacity.",
+  "summary": "Threads that stop on a usage limit or a provider outage continue once the provider answers again, and hedge providers says which provider has capacity.",
   "day": "A thread that hits your plan's usage limit or a provider outage at night goes on by itself once your provider has capacity again, and a thread that keeps failing reaches you as one alert thread.",
-  "cost": "While a thread waits on a limit or an outage, Fleet sends one small request per provider through the hub's proxy, at most every five minutes.",
-  "risk": "Fleet sends continue messages to stopped threads without you in the room.",
+  "cost": "While a thread waits on a limit or an outage, Hedge sends one small request per provider through the hub's proxy, at most every five minutes.",
+  "risk": "Hedge sends continue messages to stopped threads without you in the room.",
   "workflows": [
     {
       "id": "provider-recovery",
@@ -21,7 +21,7 @@
     {
       "id": "recover",
       "command": [
-        "fleet",
+        "hedge",
         "recover"
       ],
       "schedule": {
@@ -38,12 +38,12 @@
     {
       "id": "claude-wrapper",
       "run": [
-        "fleet",
+        "hedge",
         "claude-wrapper",
         "bind"
       ],
       "check": [
-        "fleet",
+        "hedge",
         "claude-wrapper",
         "check"
       ],

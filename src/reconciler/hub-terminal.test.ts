@@ -17,9 +17,9 @@ function node(ssh?: string) {
   const home = temp.make("home-");
   const profile = temp.make("profile-");
   const bin = temp.make("bin-");
-  writeFileSync(join(profile, "fleet.json"), JSON.stringify({ schema: 1, engine: { repo: "example/engine", ref: "main", channel: "track" }, sources: [], packs: ["mcp-gateway"], plan: "codex", settings: {}, workflows: {}, hub: "hub-1", devboxes: ["node-2"] }));
-  mkdirSync(join(home, ".config/fleet"), { recursive: true });
-  writeFileSync(join(home, ".config/fleet/machine.json"), JSON.stringify({ schema: 1, role: "devbox", coder: true, name: "node-2", profileDir: profile }));
+  writeFileSync(join(profile, "hedge.json"), JSON.stringify({ schema: 1, engine: { repo: "example/engine", ref: "main", channel: "track" }, sources: [], packs: ["mcp-gateway"], plan: "codex", settings: {}, workflows: {}, hub: "hub-1", devboxes: ["node-2"] }));
+  mkdirSync(join(home, ".config/hedge"), { recursive: true });
+  writeFileSync(join(home, ".config/hedge/machine.json"), JSON.stringify({ schema: 1, role: "devbox", coder: true, name: "node-2", profileDir: profile }));
   if (ssh) writeFileSync(join(bin, "ssh"), `#!/bin/sh\necho $$ > "$HOME/ssh.pid"\n${ssh}\n`, { mode: 0o755 });
   leftovers.push(join(home, "ssh.pid"), join(home, "held.pid"));
   const env = { HOME: home, PATH: ssh ? `${bin}:/usr/bin:/bin` : bin };
@@ -35,23 +35,23 @@ onLinux("a hub command typed on a node hands ssh this terminal: its input, its o
 
 onLinux("a hub command passes a stop signal on to ssh and waits for it", async () => {
   const { home, env, args } = node(`trap 'kill $held; echo stopped > "$HOME/stopped"; exit 143' TERM; sleep 600 & held=$!; echo $held > "$HOME/held.pid"; echo ready; wait $held`);
-  const fleet = Bun.spawn(args, { env, stdout: "pipe", stderr: "pipe" });
-  const reader = fleet.stdout.getReader();
+  const hedge = Bun.spawn(args, { env, stdout: "pipe", stderr: "pipe" });
+  const reader = hedge.stdout.getReader();
   let seen = "";
   while (!seen.includes("ready\n")) {
     const { value, done } = await reader.read();
     if (done) break;
     seen += new TextDecoder().decode(value);
   }
-  fleet.kill("SIGTERM");
-  expect(await fleet.exited).toBe(143);
+  hedge.kill("SIGTERM");
+  expect(await hedge.exited).toBe(143);
   expect(readFileSync(join(home, "stopped"), "utf8")).toBe("stopped\n");
 });
 
 onLinux("a hub command passes on a stop signal that arrives while ssh starts", async () => {
   const { home, env, args } = node(`trap 'kill -KILL $! 2>/dev/null; echo stopped > "$HOME/stopped"; exit 143' TERM; kill -TERM $PPID; sleep 600 & wait $!`);
-  const fleet = Bun.spawn(args, { env, stdout: "ignore", stderr: "ignore" });
-  expect(await fleet.exited).toBe(143);
+  const hedge = Bun.spawn(args, { env, stdout: "ignore", stderr: "ignore" });
+  expect(await hedge.exited).toBe(143);
   expect(readFileSync(join(home, "stopped"), "utf8")).toBe("stopped\n");
 });
 

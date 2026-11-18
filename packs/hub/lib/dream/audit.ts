@@ -166,6 +166,6 @@ export async function audit(run: string, io: AuditIo): Promise<string> {
   const complete = !failed.length && changed.length <= io.limit;
   writeFileSync(statePath, JSON.stringify(complete ? { audited: head, checked: {} } : { audited: since, checked }), { mode: 0o600 });
   writeFileSync(join(run, "audit.md"), report(run, since, changed.length, io.limit, results, failed, recheck(state, checkout, io.now())), { mode: 0o600 });
-  io.say(`Fleet dream: audited ${results.length} of ${changed.length} notes written since the last audit. Audit: ${join(run, "audit.md")}`);
+  io.say(`Hedge dream: audited ${results.length} of ${changed.length} notes written since the last audit. Audit: ${join(run, "audit.md")}`);
   return run;
 }

@@ -13,7 +13,7 @@ const outageError = /\bapi_error_5\d\d\b|\b(?:500|502|503|504|529)\b|auth_unavai
 type Sweep = { client: Pick<T3Client, "call">; context: RecoverContext; availability: () => Promise<Availability>; failed: boolean };
 
 export async function recoverCommand(args: string[], context: RecoverContext): Promise<number> {
-  if (args.length) return context.print("Usage: fleet recover"), 2;
+  if (args.length) return context.print("Usage: hedge recover"), 2;
   const failed = await withT3Session(async (client) => {
     const now = context.now();
     const threads = await listLocalThreads(client);
@@ -29,7 +29,7 @@ export async function recoverCommand(args: string[], context: RecoverContext): P
 async function continueLimited(sweep: Sweep, thread: StoppedThread) {
   const provider = await availableProvider(sweep, thread);
   if (!provider) return;
-  const sent = await send(sweep, thread, { threadId: thread.id, runId: thread.latestRunId!, commandId: `fleet-limit-resume:${thread.id}:${thread.latestRunId}`, continuesRun: thread.lastErrorClass === "usage_limit" });
+  const sent = await send(sweep, thread, { threadId: thread.id, runId: thread.latestRunId!, commandId: `hedge-limit-resume:${thread.id}:${thread.latestRunId}`, continuesRun: thread.lastErrorClass === "usage_limit" });
   if (sent) sweep.context.print(`${label(thread)}: continued after a usage limit; ${provider} is available.`);
 }
 
@@ -51,7 +51,7 @@ async function sweepOutages(sweep: Sweep, threads: StoppedThread[], now: number)
     const waitFrom = Math.max(Date.parse(thread.latestRunCompletedAt ?? "") || 0, Date.parse(kept.triedAt ?? "") || 0);
     if (now < waitFrom + firstOutageWaitMs * 2 ** kept.tries || !(await availableProvider(sweep, thread))) continue;
     const tries = kept.tries + 1;
-    if (!(await send(sweep, thread, { threadId: thread.id, runId: thread.latestRunId!, commandId: `fleet-outage-resume:${thread.id}:${thread.latestRunId}:${tries}`, continuesRun: false }))) continue;
+    if (!(await send(sweep, thread, { threadId: thread.id, runId: thread.latestRunId!, commandId: `hedge-outage-resume:${thread.id}:${thread.latestRunId}:${tries}`, continuesRun: false }))) continue;
     next.threads[thread.id] = { tries, triedAt: new Date(now).toISOString() };
     sweep.context.print(`${label(thread)}: retried after a provider error, try ${tries} of ${maxOutageTries}.`);
   }

@@ -33,7 +33,7 @@ type Query =
   | { kind: "thread"; threadId: string; words: boolean };
 type Request = { query: Query; host?: string; local: boolean; json: boolean };
 
-const usage = "Usage: fleet activity [host] [--local] [--thread id [--words] | --since time | --open] [--limit count] [--json]";
+const usage = "Usage: hedge activity [host] [--local] [--thread id [--words] | --since time | --open] [--limit count] [--json]";
 const threadIdPattern = /^[a-zA-Z0-9][a-zA-Z0-9:._%-]{0,511}$/;
 const latestMessageCap = 1000;
 

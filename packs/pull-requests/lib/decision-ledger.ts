@@ -35,7 +35,7 @@ export { HubUnreachable, type Env, type Ssh, type SshResult };
 export type Ledger = { read(): Promise<LedgerEvent[]>; append(...events: LedgerEvent[]): Promise<void> };
 const lines = (events: LedgerEvent[]) => events.map((event) => JSON.stringify(event) + "\n").join("");
 
-const relativePath = ".local/state/fleet/decisions.jsonl";
+const relativePath = ".local/state/hedge/decisions.jsonl";
 export const ledgerPath = (home: string) => join(home, relativePath);
 
 const isText = (value: unknown): value is string => typeof value === "string";

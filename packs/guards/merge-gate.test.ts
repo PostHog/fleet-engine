@@ -187,7 +187,7 @@ describe("the gate pass each layer needs", () => {
   test("no gate run or a failed gate refuses it and names the gate command at the full head and whom to ask", async () => {
     const refusal = await risk(one(9), gate());
     expect(refusal).toContain("has not passed at the head of example/product#9");
-    expect(refusal).toContain(`fleet proof gate --repo example/product --pr 9 --commit ${head}`);
+    expect(refusal).toContain(`hedge proof gate --repo example/product --pr 9 --commit ${head}`);
     expect(refusal).toContain("ask Robin with the question tool");
   });
 
@@ -265,8 +265,8 @@ describe("the gate pass each layer needs", () => {
 function homeIn(settings?: unknown) {
   const home = temp.make("home-");
   if (settings !== undefined) {
-    mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
-    writeFileSync(join(home, ".local/state/fleet/settings.json"), typeof settings === "string" ? settings : JSON.stringify(settings));
+    mkdirSync(join(home, ".local/state/hedge"), { recursive: true });
+    writeFileSync(join(home, ".local/state/hedge/settings.json"), typeof settings === "string" ? settings : JSON.stringify(settings));
   }
   return home;
 }
@@ -287,7 +287,7 @@ describe("the PreToolUse hook", () => {
   test("the gate runs on this machine count by their latest result at the head", async () => {
     const home = homeWith({ "guards.person": "Robin" });
     const github = { pull: async (_repository: string, pr: number) => pulls[pr], pullFor: async () => undefined };
-    const where = { home, env: { FLEET_SETTINGS: undefined }, github, intent: io };
+    const where = { home, env: { HEDGE_SETTINGS: undefined }, github, intent: io };
     const merge = () => mergeGate(call("gh pr merge 9 --repo example/product"), where);
     const run = async (code: number) => (await startGateRun(home, { repository: "example/product", pr: 9, commit: head }))({ code, reason: code ? "CI is red" : "every proof is in" });
     expect(await merge()).toBeDefined();
@@ -295,19 +295,19 @@ describe("the PreToolUse hook", () => {
     expect(await merge()).toBeUndefined();
     await run(1);
     expect((await merge())?.hookSpecificOutput.permissionDecisionReason).toContain("has not passed");
-    writeFileSync(join(home, ".local/state/fleet/decisions.jsonl"), JSON.stringify(gatePass(9, head)) + "\n");
+    writeFileSync(join(home, ".local/state/hedge/decisions.jsonl"), JSON.stringify(gatePass(9, head)) + "\n");
     expect(await merge()).toBeDefined();
     await (await startGateRun(home, { repository: "example/product", pr: 9, commit: older }))({ code: 0, reason: "older head" });
     expect(await merge()).toBeDefined();
   });
 
-  test("outside the fleet CLI, the hook reads the decision ledger through its settings file, so a pass from another machine counts", async () => {
+  test("outside the hedge CLI, the hook reads the decision ledger through its settings file, so a pass from another machine counts", async () => {
     const home = homeWith({ "guards.person": "Robin" });
-    writeFileSync(join(home, ".local/state/fleet/decisions.jsonl"), JSON.stringify(gatePass(9, head)) + "\n");
+    writeFileSync(join(home, ".local/state/hedge/decisions.jsonl"), JSON.stringify(gatePass(9, head)) + "\n");
     const github = { pull: async (_repository: string, pr: number) => pulls[pr], pullFor: async () => undefined };
-    const where = { home, env: { FLEET_SETTINGS: undefined }, github, intent: io };
+    const where = { home, env: { HEDGE_SETTINGS: undefined }, github, intent: io };
     expect(await mergeGate(call("gh pr merge 9 --repo example/product"), where)).toBeUndefined();
-    writeFileSync(join(home, ".local/state/fleet/decisions.jsonl"), JSON.stringify(gatePass(9, older)) + "\n");
+    writeFileSync(join(home, ".local/state/hedge/decisions.jsonl"), JSON.stringify(gatePass(9, older)) + "\n");
     expect(await mergeGate(call("gh pr merge 9 --repo example/product"), where)).toBeDefined();
   });
 
@@ -331,7 +331,7 @@ test("the merge-gate workflow installs the hook, and the installed script refuse
   const engine = await engineSource();
   const plan = (on: boolean) => resolveEngine([engine, ...skillSources(temp.make("skills-"), engine)], { packs: ["guards"], workflows: { "merge-gate": on } }, devbox);
   const hookSource = (files: ({ target: string } & ({ source: string } | { content: string }))[]) => {
-    const file = files.find((item) => item.target === ".config/fleet/hooks/PreToolUse/merge-gate.ts");
+    const file = files.find((item) => item.target === ".config/hedge/hooks/PreToolUse/merge-gate.ts");
     return file && "source" in file ? file.source : undefined;
   };
   expect(hookSource(plan(false).files)).toBeUndefined();
@@ -349,13 +349,13 @@ describe("the hook against GitHub, faked at the gh boundary, and real checkouts,
   const pull = (sha: string, base = "main", state = "open") => ({ head: { sha }, base: { ref: base, repo: { default_branch: "main" } }, state });
   const machine = (responses: Record<string, unknown>, passes: LedgerEvent[] = [], aliases: Record<string, string> = {}) => {
     const home = homeIn({ "guards.person": "Robin" });
-    writeFileSync(join(home, ".local/state/fleet/decisions.jsonl"), passes.map((event) => JSON.stringify(event)).join("\n") + "\n");
+    writeFileSync(join(home, ".local/state/hedge/decisions.jsonl"), passes.map((event) => JSON.stringify(event)).join("\n") + "\n");
     const bin = temp.make("bin-");
     writeFileSync(join(bin, "answers.json"), JSON.stringify(responses));
     writeFileSync(join(bin, "gh"), `#!${process.execPath}\nconst body = (await Bun.file(${JSON.stringify(join(bin, "answers.json"))}).json())[process.argv[4]];\n`
       + `process.stdout.write(body === undefined ? "HTTP/2.0 404 Not Found\\r\\n\\r\\n{}" : "HTTP/2.0 200 OK\\r\\n\\r\\n" + JSON.stringify(body));\nprocess.exit(body === undefined ? 1 : 0);\n`);
     chmodSync(join(bin, "gh"), 0o755);
-    const where = { home, env: { FLEET_SETTINGS: undefined, PATH: `${bin}:${process.env.PATH}` }, intent: { ...realIntentIO, ghRepo: undefined, aliases: () => aliases } };
+    const where = { home, env: { HEDGE_SETTINGS: undefined, PATH: `${bin}:${process.env.PATH}` }, intent: { ...realIntentIO, ghRepo: undefined, aliases: () => aliases } };
     const hook = async (command: string, cwd = "/") => (await mergeGate({ tool_name: "Bash", tool_input: { command }, cwd }, where))?.hookSpecificOutput.permissionDecisionReason;
     return Object.assign(hook, { home });
   };
@@ -472,7 +472,7 @@ describe("the hook against GitHub, faked at the gh boundary, and real checkouts,
     await newer({ code: 1, reason: "CI is red" });
     await older({ code: 0, reason: "pass" });
     expect(await hook("gh pr merge 9 --repo example/product")).toContain("has not passed");
-    appendFileSync(join(hook.home, ".local/state/fleet/decisions.jsonl"), JSON.stringify({ ...pass("example/product", 9, head), at: "2026-11-16T08:15:00Z" }) + "\n");
+    appendFileSync(join(hook.home, ".local/state/hedge/decisions.jsonl"), JSON.stringify({ ...pass("example/product", 9, head), at: "2026-11-16T08:15:00Z" }) + "\n");
     expect(await hook("gh pr merge 9 --repo example/product")).toBeUndefined();
     const later = await startGateRun(hook.home, identity, new Date("2026-11-16T08:20:00Z"));
     await later({ code: 0, reason: "pass" });

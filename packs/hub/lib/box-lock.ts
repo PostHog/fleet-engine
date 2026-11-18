@@ -13,19 +13,19 @@ export class LockBusy extends Error {}
 
 type Kind = { noun: string; operation: string; folder(home: string): string; file(name: string): string };
 
-export const boxLocks = (home: string) => join(home, ".local/state/fleet/box-locks");
-export const peerLocks = (home: string) => join(home, ".local/state/fleet/peer-locks");
+export const boxLocks = (home: string) => join(home, ".local/state/hedge/box-locks");
+export const peerLocks = (home: string) => join(home, ".local/state/hedge/peer-locks");
 
 const box: Kind = {
   noun: "box",
-  operation: "fleet box",
+  operation: "hedge box",
   folder: boxLocks,
   file: (name) => {
     if (!isBoxName(name)) throw new Error(`${name} is not a box, so it has no box lock.`);
     return name;
   },
 };
-const peer: Kind = { noun: "peer", operation: "fleet peers", folder: peerLocks, file: sshName };
+const peer: Kind = { noun: "peer", operation: "hedge peers", folder: peerLocks, file: sshName };
 
 const held = new AsyncLocalStorage<number[]>();
 export const heldLocks = (): number[] => held.getStore() ?? [];

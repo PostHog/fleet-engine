@@ -92,7 +92,7 @@ async function version(home: string) {
   return (await new Response(child.stdout).text()).trim();
 }
 
-const codexHome = (home: string) => join(home, ".local/share/fleet/codex");
+const codexHome = (home: string) => join(home, ".local/share/hedge/codex");
 
 describe("install-codex.sh", () => {
   onLinux.each([
@@ -144,7 +144,7 @@ describe("install-codex.sh", () => {
     await box.publish("rust-v10.1.0");
     const log = join(box.bin, "calls.log");
     writeFileSync(log, "");
-    const lock = join(box.home, ".local/share/fleet/codex.lock");
+    const lock = join(box.home, ".local/share/hedge/codex.lock");
     const held = (name: string) => `if ${realFlock} -n "${lock}" true; then echo "${name} free" >> "${log}"; else echo "${name} locked" >> "${log}"; fi`;
     stub(box.bin, "readlink", `${held("readlink")}\nexec ${realReadlink} "$@"`);
     stub(box.bin, "rm", `${held("rm")}\nexec ${Bun.which("rm") ?? "/bin/rm"} "$@"`);
@@ -182,7 +182,7 @@ describe("install-codex.sh", () => {
     expect(await install(box)).toMatchObject({ code: 0, stdout: "codex-cli 9.9.9 x86_64-unknown-linux-musl\n" });
     expect(readdirSync(final)).toEqual(["bin"]);
     expect(await version(box.home)).toBe("codex-cli 9.9.9 x86_64-unknown-linux-musl");
-    expect(readdirSync(join(box.home, ".local/share/fleet")).filter((name) => name.startsWith("codex-new."))).toEqual([]);
+    expect(readdirSync(join(box.home, ".local/share/hedge")).filter((name) => name.startsWith("codex-new."))).toEqual([]);
   });
 
   onLinux.each([["ls's default quoting", {}], ["QUOTING_STYLE=c", { QUOTING_STYLE: "c" }]] as const)("keeps a release while a session still runs from it, with %s", async (_quoting, env) => {
@@ -220,7 +220,7 @@ describe("install-codex.sh", () => {
     expect(await version(box.home)).toBe("codex-cli 9.9.9 x86_64-unknown-linux-musl");
     expect(readlinkSync(join(codexHome(box.home), "current"))).toBe(`releases/${tag}`);
     expect(readdirSync(join(box.home, ".local/bin"))).toEqual(["codex"]);
-    expect(readdirSync(join(box.home, ".local/share/fleet")).filter((name) => name.startsWith("codex-new."))).toEqual([]);
+    expect(readdirSync(join(box.home, ".local/share/hedge")).filter((name) => name.startsWith("codex-new."))).toEqual([]);
   });
 
   onLinux("removes its partial download when it is stopped", async () => {
@@ -228,7 +228,7 @@ describe("install-codex.sh", () => {
     writeFileSync(join(box.bin, "term-on-download"), "");
     const result = await install(box);
     expect(result.code).not.toBe(0);
-    expect(readdirSync(join(box.home, ".local/share/fleet"))).toEqual(["codex.lock"]);
+    expect(readdirSync(join(box.home, ".local/share/hedge"))).toEqual(["codex.lock"]);
     expect(existsSync(join(box.home, ".local/bin/codex"))).toBe(false);
   });
 
@@ -266,13 +266,13 @@ describe("install-codex.sh", () => {
     expect(existsSync(join(codexHome(box.home), "releases", tag))).toBe(false);
   });
 
-  onLinux("keeps a codex in ~/.local/bin that Fleet did not install", async () => {
+  onLinux("keeps a codex in ~/.local/bin that Hedge did not install", async () => {
     const box = await machine("x86_64", ["x86_64-unknown-linux-musl"]);
     mkdirSync(join(box.home, ".local/bin"), { recursive: true });
     writeFileSync(join(box.home, ".local/bin/codex"), "mine\n");
     const result = await install(box);
     expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain("Fleet did not install it");
+    expect(result.stderr).toContain("Hedge did not install it");
     expect(readFileSync(join(box.home, ".local/bin/codex"), "utf8")).toBe("mine\n");
   });
 
@@ -297,7 +297,7 @@ describe("install-codex.sh", () => {
     expect(readlinkSync(join(box.home, ".local/bin/codex"))).toBe(join(codexHome(box.home), "current/bin/codex"));
     expect(box.calls()).not.toContain("flock");
     expect(box.calls()).not.toContain("sha256sum");
-    expect(readdirSync(join(box.home, ".local/share/fleet")).sort()).toEqual(["codex", "codex.lock"]);
+    expect(readdirSync(join(box.home, ".local/share/hedge")).sort()).toEqual(["codex", "codex.lock"]);
   });
 
   onLinux("on an Apple silicon Mac whose shell runs under Rosetta, installs the arm64 package", async () => {
@@ -311,7 +311,7 @@ describe("install-codex.sh", () => {
   onLinux("on a Mac, waits for an install that holds the lock", async () => {
     const box = await machine("arm64", ["aarch64-apple-darwin"], { os: "Darwin" });
     onMac(box);
-    const share = join(box.home, ".local/share/fleet");
+    const share = join(box.home, ".local/share/hedge");
     mkdirSync(share, { recursive: true });
     const lock = join(share, "codex.lock");
     writeFileSync(lock, "");
@@ -341,7 +341,7 @@ describe("install-codex.sh", () => {
   onLinux("on a Mac, still holds the lock when descriptors 3 to 8 are already open", async () => {
     const box = await machine("arm64", ["aarch64-apple-darwin"], { os: "Darwin" });
     onMac(box);
-    const lock = join(box.home, ".local/share/fleet/codex.lock");
+    const lock = join(box.home, ".local/share/hedge/codex.lock");
     stub(box.bin, "curl", `if ${realFlock} -n "${lock}" true; then echo "curl free" >> "${join(box.bin, "calls.log")}"; fi\nexec ${join(box.bin, "curl.real")} "$@"`, join(box.bin, "curl.real"));
     const busy = Array.from({ length: 6 }, (_, index) => `${index + 3}</dev/null`).join(" ");
     const child = Bun.spawn(["/bin/sh", "-c", `exec ${busy}; exec /bin/sh "$0"`, script], { env: { HOME: box.home, PATH: `${box.bin}:${box.home}/.local/bin:/usr/bin:/bin` }, stdout: "pipe", stderr: "pipe" });
@@ -373,7 +373,7 @@ describe("install-codex.sh", () => {
     }
   });
 
-  onLinux("removes Fleet's earlier Bun install of Codex only when it shadows the new one", async () => {
+  onLinux("removes Hedge's earlier Bun install of Codex only when it shadows the new one", async () => {
     const box = await machine("x86_64", ["x86_64-unknown-linux-musl"]);
     const shim = join(box.home, ".bun/install/global/node_modules/@openai/codex/bin");
     mkdirSync(shim, { recursive: true });

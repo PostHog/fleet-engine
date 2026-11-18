@@ -6,7 +6,7 @@ export type Marks = Record<Park, string>;
 export type Parking = { waitSnoozeDays: number; timeZone: string };
 export type ClosingSettings = { marks: Marks; parking?: Parking };
 
-export const killSwitch = ".config/fleet/ask-guard.off";
+export const killSwitch = ".config/hedge/ask-guard.off";
 
 export const defaultMarks: Marks = { wait: "⏳", snooze: "💤", check: "🔕", done: "➡️" };
 
@@ -15,7 +15,7 @@ const markKeys: Marks = { wait: "orchestration.waitMark", snooze: "orchestration
 
 function snapshot(home: string): Record<string, unknown> {
   try {
-    const settings: unknown = JSON.parse(readFileSync(join(home, ".local/state/fleet/settings.json"), "utf8"));
+    const settings: unknown = JSON.parse(readFileSync(join(home, ".local/state/hedge/settings.json"), "utf8"));
     return typeof settings === "object" && settings !== null && !Array.isArray(settings) ? (settings as Record<string, unknown>) : {};
   } catch {
     return {};

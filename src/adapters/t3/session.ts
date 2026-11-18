@@ -61,7 +61,7 @@ function runCli(cli: Cli, argv: string[]) {
 }
 
 async function issueSession(cli: Cli) {
-  const issued = await runCli(cli, ["auth", "session", "issue", "--json", "--ttl", "5m", "--label", "fleet", "--subject", "fleet"]);
+  const issued = await runCli(cli, ["auth", "session", "issue", "--json", "--ttl", "5m", "--label", "hedge", "--subject", "hedge"]);
   if (issued.code !== 0) throw new Error("T3 Code did not issue a session");
   const session = JSON.parse(issued.stdout.slice(issued.stdout.indexOf("{"))) as { sessionId?: string; token?: string };
   if (!session.sessionId || !session.token) throw new Error("T3 Code issued an invalid session");
@@ -135,7 +135,7 @@ export const localT3Server: T3Server = {
     const runtime = runtimeOf(home);
     if (!runtime) throw new Error("T3 Code is not running");
     const cli = await serverCli(runtime.pid);
-    if (!cli) throw new Error(`Fleet cannot find the command of T3 Code's server process ${runtime.pid}`);
+    if (!cli) throw new Error(`Hedge cannot find the command of T3 Code's server process ${runtime.pid}`);
     const session = await issueSession(cli);
     let connection: ReturnType<typeof connect> | undefined;
     const socket = () => (connection ??= connect(runtime.origin, session.token));

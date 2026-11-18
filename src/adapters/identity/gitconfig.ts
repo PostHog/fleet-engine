@@ -2,9 +2,9 @@ import { join } from "node:path";
 import type { Identity } from "./github.ts";
 import type { Signer } from "./signers.ts";
 
-export const fleetGitconfig = ".config/fleet/gitconfig";
-export const allowedSigners = ".ssh/fleet-allowed-signers";
-export const includeBlock = `[include]\n\tpath = ~/${fleetGitconfig}\n`;
+export const hedgeGitconfig = ".config/hedge/gitconfig";
+export const allowedSigners = ".ssh/hedge-allowed-signers";
+export const includeBlock = `[include]\n\tpath = ~/${hedgeGitconfig}\n`;
 
 const value = (text: string) => `"${text.replace(/[\\"]/g, (character) => `\\${character}`).replaceAll("\n", "\\n")}"`;
 
@@ -30,12 +30,12 @@ export function gitconfig(home: string, identity: Identity, signer: Signer) {
   ].join("\n");
 }
 
-const fleetPath = new RegExp(`^\\s*path\\s*=\\s*~/${fleetGitconfig.replaceAll(".", "\\.")}\\s*$`);
+const hedgePath = new RegExp(`^\\s*path\\s*=\\s*~/${hedgeGitconfig.replaceAll(".", "\\.")}\\s*$`);
 const header = /^\s*\[/;
 
 export function withInclude(text = "") {
   const lines = text.split("\n");
-  const ours = (index: number) => fleetPath.test(lines[index]!) && lines[headerOf(lines, index)]?.trim().toLowerCase() === "[include]";
+  const ours = (index: number) => hedgePath.test(lines[index]!) && lines[headerOf(lines, index)]?.trim().toLowerCase() === "[include]";
   const count = lines.filter((_, index) => ours(index)).length;
   if (text.endsWith(includeBlock) && count === 1) return text;
   const emptied = new Set(lines.flatMap((_, index) => (ours(index) ? [headerOf(lines, index)] : [])));

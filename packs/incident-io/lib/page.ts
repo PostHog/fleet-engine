@@ -3,9 +3,9 @@ import type { Context } from "../../../src/sdk/index.ts";
 
 export const sourceSecret = "source";
 
-export const usage = `Usage: fleet page --key <key> --title <title> [--description <text>] [--source-url <url>] [--dry-run]
-       fleet page --key <key> --resolve [--title <title>] [--dry-run]
-       fleet page setup <alert source URL> < <token file>
+export const usage = `Usage: hedge page --key <key> --title <title> [--description <text>] [--source-url <url>] [--dry-run]
+       hedge page --key <key> --resolve [--title <title>] [--dry-run]
+       hedge page setup <alert source URL> < <token file>
 
 Sends one alert event to your incident.io HTTP alert source. The alert route on that
 source decides who is paged, not this command. Set it up to page only you.
@@ -27,7 +27,7 @@ It prints the HTTP status and incident.io's answer, never the token or the URL.
 Exit 0: incident.io accepted the event. 1: it did not, the source is not set up,
 the hub did not answer, or the page-owner workflow is off. 2: wrong input.`;
 
-const setupLine = "fleet page setup <alert source URL> < <token file>";
+const setupLine = "hedge page setup <alert source URL> < <token file>";
 
 type Source = { url: string; token: string };
 export type PageEvent = { title: string; status: "firing" | "resolved"; deduplication_key: string; description?: string; source_url?: string; metadata: Record<string, string> };
@@ -107,7 +107,7 @@ function eventOf(flags: Flags): PageEvent {
     deduplication_key: key,
     ...(description ? { description } : {}),
     ...(sourceUrl ? { source_url: sourceUrl } : {}),
-    metadata: { sent_by: "fleet page" },
+    metadata: { sent_by: "hedge page" },
   };
 }
 
@@ -129,7 +129,7 @@ async function send(source: Source, event: PageEvent, ctx: Context): Promise<num
       signal: AbortSignal.timeout(20_000),
     });
   } catch (error) {
-    ctx.print(`fleet page: not sent: ${redact((error as Error).message)}. ${retry}`);
+    ctx.print(`hedge page: not sent: ${redact((error as Error).message)}. ${retry}`);
     return 1;
   }
   const answer: unknown = await response.json().catch(() => undefined);
@@ -138,10 +138,10 @@ async function send(source: Source, event: PageEvent, ctx: Context): Promise<num
   const parts = [body.status, body.message, ...errors].filter((part) => typeof part === "string" || typeof part === "number").map((part) => redact(String(part)));
   const line = `HTTP ${response.status}${parts.length ? `: ${parts.join(": ")}` : ""}`;
   if (response.ok) {
-    ctx.print(`fleet page: ${event.status === "resolved" ? "resolved" : "sent"} ${event.deduplication_key}. ${line}`);
+    ctx.print(`hedge page: ${event.status === "resolved" ? "resolved" : "sent"} ${event.deduplication_key}. ${line}`);
     return 0;
   }
-  ctx.print(`fleet page: incident.io did not accept the event. ${line}. ${retry}`);
+  ctx.print(`hedge page: incident.io did not accept the event. ${line}. ${retry}`);
   return 1;
 }
 
@@ -153,7 +153,7 @@ async function setup(args: string[], ctx: Context): Promise<number> {
   const token = (await new Response(ctx.stdin()).text()).trim();
   if (!token || /\s/.test(token)) throw new InputError("standard input must hold the alert source token alone, on one line");
   await ctx.secrets.write(sourceSecret, `${JSON.stringify({ url, token })}\n`);
-  ctx.print('fleet page: saved the alert source. Check it with: fleet page --key setup-check --title "Setup check" --dry-run');
+  ctx.print('hedge page: saved the alert source. Check it with: hedge page --key setup-check --title "Setup check" --dry-run');
   return 0;
 }
 
@@ -166,14 +166,14 @@ export async function page(args: string[], ctx: Context): Promise<number> {
     const event = eventOf(flags);
     const source = await savedSource(ctx);
     if (!flags["dry-run"]) return await send(source, event, ctx);
-    ctx.print("fleet page: dry run, nothing sent. It would POST this to the saved alert source:");
+    ctx.print("hedge page: dry run, nothing sent. It would POST this to the saved alert source:");
     ctx.print("Authorization: Bearer [redacted]");
     ctx.print(JSON.stringify(event, null, 2));
     return 0;
   } catch (error) {
-    ctx.print(`fleet page: ${(error as Error).message}`);
+    ctx.print(`hedge page: ${(error as Error).message}`);
     if (!(error instanceof InputError)) return 1;
-    ctx.print("Run fleet page --help for the flags.");
+    ctx.print("Run hedge page --help for the flags.");
     return 2;
   }
 }

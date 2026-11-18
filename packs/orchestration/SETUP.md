@@ -4,14 +4,14 @@ Read this when the person picks the Orchestration pack.
 
 **Maps** and **side threads** work with defaults. A map is one issue that
 lists tickets; a conductor thread starts one worker thread per ticket. Maps
-live in the issues of their `fleet-profile` repo unless they name another
+live in the issues of their `hedge-profile` repo unless they name another
 repo with `--set orchestration.tracker=<owner/name>`.
 
 Three workflows run by themselves on a schedule and start off:
-`quality-loop`, `signal-loop`, and `pr-digest`. Each runs once per fleet, on
+`quality-loop`, `signal-loop`, and `pr-digest`. Each runs once per hedge, on
 the first node the profile lists, or on the hub when there is no node. They
 never run on the Mac. While that node is stopped, they do not run; take it out
-with `fleet devbox remove <host>` and they move to the next node. Each needs
+with `hedge devbox remove <host>` and they move to the next node. Each needs
 answers:
 
 | Setting | What to ask | Used by |
@@ -29,7 +29,7 @@ command, or, when they want the loops now, add the three answers as `--set`
 lines. Once a node runs, turn one on with its answers:
 
 ```sh
-fleet packs --workflows quality-loop=on --set orchestration.loopProject=<folder> --set orchestration.qualityArea=<paths> --set orchestration.ledgerRepo=<owner/name>
+hedge packs --workflows quality-loop=on --set orchestration.loopProject=<folder> --set orchestration.qualityArea=<paths> --set orchestration.ledgerRepo=<owner/name>
 ```
 
 ## Question guard
@@ -56,20 +56,20 @@ The send guard never traps an agent:
 - It denies a send once for each session, card, thread and message. Only the
   same message to the same thread again passes, for an agent whose message
   replaces what the card asks. A different message is denied again. It keeps
-  these records in `~/.local/state/fleet/ask-guard/`, and removes records
+  these records in `~/.local/state/hedge/ask-guard/`, and removes records
   older than one day when it writes a new one.
 - It lets the send pass on any error: when T3 cannot be read, when a T3 call
   does not answer within 3 seconds, when it cannot write its record, and when
   the send names another machine's `environmentId`. The hook makes three T3
   calls: it opens a session, reads the shell snapshot, and closes the session.
   So a send waits at most about 9 seconds.
-- While `~/.config/fleet/ask-guard.off` exists, every send passes. The prose
+- While `~/.config/hedge/ask-guard.off` exists, every send passes. The prose
   Stop check stays on.
 
 ### Proof check at Stop
 
 A T3 thread that owns an open PR is stopped once when it ends its turn while
-`fleet proof gate` has not passed at the PR's pushed head. The reason names the
+`hedge proof gate` has not passed at the PR's pushed head. The reason names the
 one step still owed, with the command for that PR:
 
 - push the local commits on the PR's branch, then run the gate;
@@ -80,14 +80,14 @@ one step still owed, with the command for that PR:
   HEAD continues;
 - run the gate at the pushed head, when no run is recorded there;
 - fix what the last gate run failed on, or, for exit 3, decide each gap by
-  tier with `fleet decision record`, or ask the person.
+  tier with `hedge decision record`, or ask the person.
 
 It checks each open PR the thread owns whose repository is the `origin` of the
 thread's checkout. A subagent thread owns nothing while the thread it belongs
 to is open. A fork owns its own PRs and those of its subagents. Each run of
-`fleet proof gate` records its exit code and first failure line for the commit
+`hedge proof gate` records its exit code and first failure line for the commit
 it judges, as its own numbered file under
-`~/.local/state/fleet/proof/<owner>/<name>/<pr>/gate-record/<commit>/`, with
+`~/.local/state/hedge/proof/<owner>/<name>/<pr>/gate-record/<commit>/`, with
 the repository name in lower case. The run writes the file when it starts, as
 a failure, and replaces it with its result when it ends. The check reads the
 newest file, so an older run that ends late never replaces a newer result,
@@ -97,7 +97,7 @@ call. It trusts `origin/<branch>` as the pushed head.
 
 The stop passes when any of these holds:
 
-- `~/.config/fleet/ask-guard.off` exists. It turns off the send guard and this
+- `~/.config/hedge/ask-guard.off` exists. It turns off the send guard and this
   check;
 - a stop hook already continued this turn (`stop_hook_active`), so the check
   blocks at most once per turn;
@@ -115,8 +115,8 @@ The stop passes when any of these holds:
   failed yet;
 - the thread was delegated from another machine;
 - the hook runs in a model session that another one started, such as a review
-  a lane runs with `codex exec`. The model sessions that Fleet starts (the
-  judge, reviewers, the arbiter, the eval judge, and `fleet context add`) get
+  a lane runs with `codex exec`. The model sessions that Hedge starts (the
+  judge, reviewers, the arbiter, the eval judge, and `hedge context add`) get
   no `T3CODE_THREAD_ID`, so the check never runs in them;
 - any read fails, or the check takes longer than 10 seconds. At the deadline
   it stops the git and `ps` commands it started, and the hook process exits

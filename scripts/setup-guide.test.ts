@@ -8,7 +8,7 @@ import { sourceCache } from "../src/setup/setup.ts";
 import { profilePath } from "../src/setup/profile.ts";
 import { devboxesOf } from "../packs/hub/lib/machine.ts";
 import { cliFixtures } from "../src/testing/cli.ts";
-import { fakeMachine, fleetSetup, savedAnswers } from "../src/setup/testing.ts";
+import { fakeMachine, hedgeSetup, savedAnswers } from "../src/setup/testing.ts";
 import { isolateGit, tempDirs } from "../src/testing/git.ts";
 import { needsHubPacks, prefersHubPacks } from "../src/setup/defaults.ts";
 import { promptLabels, startPrompt } from "../page/model.ts";
@@ -44,19 +44,19 @@ function packRows() {
   return [...guide().matchAll(/^\| `([a-z-]+)` \| ([^|]+) \| ([^|]+) \| ([^|]+) \|$/gm)].map((match) => ({ name: match[1]!, summary: match[2]!, note: match[4]! }));
 }
 
-async function fleetCommands() {
+async function hedgeCommands() {
   let usage = "";
   await main(["help"], { home: "/nonexistent", engineRoot: root, platform: "darwin", print: (line) => (usage += `${line}\n`) });
   const commandFiles = (dir: string) => (existsSync(join(dir, "commands")) ? readdirSync(join(dir, "commands")).filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts")).map((name) => name.slice(0, -3)) : []);
   const shipped = (await loadPacks(root)).flatMap(({ dir, code }) => [...Object.keys(code?.commands ?? {}), ...commandFiles(dir)]);
-  return new Set(["help", ...shipped, ...[...usage.matchAll(/^ {2}fleet ([a-z][a-z-]*)/gm)].map((match) => match[1])]);
+  return new Set(["help", ...shipped, ...[...usage.matchAll(/^ {2}hedge ([a-z][a-z-]*)/gm)].map((match) => match[1])]);
 }
 
 describe("the agent setup guide", () => {
-  test("runs only fleet commands that exist", async () => {
-    const known = await fleetCommands();
+  test("runs only hedge commands that exist", async () => {
+    const known = await hedgeCommands();
     const code = [guide(), ...notePaths().map((path) => readFileSync(join(root, path), "utf8"))].flatMap(codeIn);
-    const used = code.flatMap((span) => [...span.matchAll(/\bfleet ([a-z][a-z-]*)\b/g)].map((match) => match[1]));
+    const used = code.flatMap((span) => [...span.matchAll(/\bhedge ([a-z][a-z-]*)\b/g)].map((match) => match[1]));
     expect(used.length).toBeGreaterThan(0);
     expect(used.filter((command) => !known.has(command!))).toEqual([]);
   });
@@ -75,22 +75,22 @@ describe("the agent setup guide", () => {
     expect(keys.filter((key) => !settings.has(key))).toEqual([]);
   });
 
-  test("its fleet setup command sets up each preset to the end without asking the person anything", async () => {
-    const command = guide().match(/^fleet setup (.+)$/m);
+  test("its hedge setup command sets up each preset to the end without asking the person anything", async () => {
+    const command = guide().match(/^hedge setup (.+)$/m);
     expect(command).not.toBeNull();
     for (const preset of presets()) {
       const home = temp.make("home-");
       const args = command![1]!.replace("<id>", preset.id).replace("<claude|codex|both>", "both").split(" ");
-      const result = await fleetSetup(home, args, [], fakeMachine(home), undefined, 0, "darwin");
+      const result = await hedgeSetup(home, args, [], fakeMachine(home), undefined, 0, "darwin");
       expect({ code: result.code, prompts: result.prompts, packs: savedAnswers(home).packs }).toEqual({ code: 0, prompts: [], packs: preset.packs });
     }
   });
 
-  test("its fleet setup command finishes in one run while the person signs in to GitHub, Claude, and ChatGPT in the browser", async () => {
-    const command = guide().match(/^fleet setup (.+)$/m)![1]!;
+  test("its hedge setup command finishes in one run while the person signs in to GitHub, Claude, and ChatGPT in the browser", async () => {
+    const command = guide().match(/^hedge setup (.+)$/m)![1]!;
     const home = temp.make("home-");
     const args = command.replace("<id>", "everyday").replace("<claude|codex|both>", "both").split(" ");
-    const result = await fleetSetup(home, args, [], fakeMachine(home, { github: 5, claude: 3, chatgpt: 4 }), undefined, 0, "darwin");
+    const result = await hedgeSetup(home, args, [], fakeMachine(home, { github: 5, claude: 3, chatgpt: 4 }), undefined, 0, "darwin");
     expect(result.code).toBe(0);
     expect(result.output).toContain("✓ Ready to use. Start a new thread in T3 Code now.");
   });
@@ -139,22 +139,22 @@ describe("the agent setup guide", () => {
     expect(codeIn(hubStep())).toContain("coder schedule stop <name> manual");
   });
 
-  test("with a hub and a node, checks each workspace with a fleet doctor that sets the guide's PATH over SSH", () => {
-    expect(codeIn(hubStep())).toContain(`ssh coder.<name> 'export PATH="${guidePath}"; fleet doctor'\n`);
+  test("with a hub and a node, checks each workspace with a hedge doctor that sets the guide's PATH over SSH", () => {
+    expect(codeIn(hubStep())).toContain(`ssh coder.<name> 'export PATH="${guidePath}"; hedge doctor'\n`);
   });
 
   test("with a hub and a node, says how to add a node later", () => {
     expect(words(hubStep())).toContain("To add a node later, when the load grows, run items 3, 4, 5 and 9 above again with the next node name and a 500 GB disk");
   });
 
-  test("with a hub and a node, installs Fleet on the hub, names it the hub there, turns the hub packs on, and only then adds the node", () => {
+  test("with a hub and a node, installs Hedge on the hub, names it the hub there, turns the hub packs on, and only then adds the node", () => {
     const code = codeIn(hubStep()).join("\n");
     const order = [
-      code.indexOf("fleet devbox add %s\\n' 'coder.<hub>'"),
-      code.indexOf(`ssh coder.<hub> 'export PATH="${guidePath}"; fleet hub here'`),
-      code.indexOf("fleet packs --add hub --workflows mcp-gateway=off"),
-      code.indexOf(`ssh coder.<hub> 'export PATH="${guidePath}"; fleet update'`),
-      code.indexOf("fleet devbox add %s\\n' 'coder.<node>'"),
+      code.indexOf("hedge devbox add %s\\n' 'coder.<hub>'"),
+      code.indexOf(`ssh coder.<hub> 'export PATH="${guidePath}"; hedge hub here'`),
+      code.indexOf("hedge packs --add hub --workflows mcp-gateway=off"),
+      code.indexOf(`ssh coder.<hub> 'export PATH="${guidePath}"; hedge update'`),
+      code.indexOf("hedge devbox add %s\\n' 'coder.<node>'"),
     ];
     expect(order.every((at) => at >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
@@ -221,8 +221,8 @@ describe("the agent setup guide", () => {
     expect(codeIn(hubStep())).toContain('CODER_SESSION_TOKEN="$(cat <file>)" coder login <coder address>\n');
   });
 
-  test("explains a workflow in one plain line the first time it tells the person what Fleet is, whatever they know", () => {
-    const show = words(guide().slice(guide().indexOf("## 3. Show what Fleet is"), guide().indexOf("## 4. Where Fleet runs")));
+  test("explains a workflow in one plain line the first time it tells the person what Hedge is, whatever they know", () => {
+    const show = words(guide().slice(guide().indexOf("## 3. Show what Hedge is"), guide().indexOf("## 4. Where Hedge runs")));
     expect(show).toContain("A **workflow** is one way of working that agents follow, such as a draft pull request for every fix.");
     expect(show.indexOf("**workflow**")).toBeLessThan(show.indexOf("**pack**"));
   });
@@ -236,15 +236,15 @@ describe("the agent setup guide", () => {
     }
   });
 
-  test("when the person takes Fleet's version of a kept file, the old file is in the backup folder the guide names", async () => {
-    const backups = codeIn(guide()).find((code) => code.startsWith("~/.local/state/fleet/backups"));
+  test("when the person takes Hedge's version of a kept file, the old file is in the backup folder the guide names", async () => {
+    const backups = codeIn(guide()).find((code) => code.startsWith("~/.local/state/hedge/backups"));
     const home = temp.make("home-");
     mkdirSync(join(home, ".codex"), { recursive: true });
     writeFileSync(join(home, ".codex/AGENTS.md"), "my own codex rules\n");
-    const kept = await cli.fleet(["apply", "--profile", cli.profileDir()], home);
-    const adopt = kept.output.match(/Run (fleet apply --adopt \S+) to take Fleet's version/)?.[1];
-    expect(adopt).toBe("fleet apply --adopt .codex/AGENTS.md");
-    expect((await cli.fleet([...adopt!.split(" ").slice(1), "--profile", cli.profileDir()], home)).code).toBe(0);
+    const kept = await cli.hedge(["apply", "--profile", cli.profileDir()], home);
+    const adopt = kept.output.match(/Run (hedge apply --adopt \S+) to take Hedge's version/)?.[1];
+    expect(adopt).toBe("hedge apply --adopt .codex/AGENTS.md");
+    expect((await cli.hedge([...adopt!.split(" ").slice(1), "--profile", cli.profileDir()], home)).code).toBe(0);
     const folder = backups!.replace("~", home).replace(/\/$/, "");
     expect(readdirSync(folder).map((run) => readFileSync(join(folder, run, ".codex/AGENTS.md"), "utf8"))).toEqual(["my own codex rules\n"]);
   });
@@ -252,41 +252,41 @@ describe("the agent setup guide", () => {
   test("rules moved to the profile's About me file reach the agents after the packs' rules", async () => {
     expect(words(guide())).toContain("to the \"About me\" file in their profile, which agents read after the packs' rules");
     const home = temp.make("home-");
-    expect((await cli.fleet(["apply", "--profile", cli.profileDir([], "# About me\n\nI like small diffs.\n")], home)).code).toBe(0);
-    expect(readFileSync(join(home, ".claude/rules/fleet.md"), "utf8")).toContain("I like small diffs.");
+    expect((await cli.hedge(["apply", "--profile", cli.profileDir([], "# About me\n\nI like small diffs.\n")], home)).code).toBe(0);
+    expect(readFileSync(join(home, ".claude/rules/hedge.md"), "utf8")).toContain("I like small diffs.");
   });
 
   test("a second setup without --preset, as the guide says, reuses the profile and keeps its packs, workflows, and settings", async () => {
     const step1 = words(guide().slice(guide().indexOf("## 1. Check the Mac"), guide().indexOf("## 2. Ask everything in one call")));
     expect(step1).toContain("In the step 7 command, leave out `--preset`, and name only what changes with `--add`, `--remove`, and `--workflows`.");
-    const command = guide().match(/^fleet setup (.+)$/m)![1]!.replace("<claude|codex|both>", "both");
+    const command = guide().match(/^hedge setup (.+)$/m)![1]!.replace("<claude|codex|both>", "both");
     const home = temp.make("home-");
     const box = fakeMachine(home);
-    const first = await fleetSetup(home, [...command.replace("<id>", "everyday").split(" "), "--add", "guards", "--workflows", "package-age=on", "--set", "orchestration.tracker=nora/maps"], [], box, undefined, 0, "darwin");
-    const again = await fleetSetup(home, [...command.replace("--preset <id> ", "").split(" "), "--add", "memory"], [], box, undefined, 0, "darwin");
+    const first = await hedgeSetup(home, [...command.replace("<id>", "everyday").split(" "), "--add", "guards", "--workflows", "package-age=on", "--set", "orchestration.tracker=nora/maps"], [], box, undefined, 0, "darwin");
+    const again = await hedgeSetup(home, [...command.replace("--preset <id> ", "").split(" "), "--add", "memory"], [], box, undefined, 0, "darwin");
     expect({ first: first.code, again: again.code }).toEqual({ first: 0, again: 0 });
-    expect(again.output).toContain("Reusing your repo nora/fleet-profile");
+    expect(again.output).toContain("Reusing your repo nora/hedge-profile");
     expect(savedAnswers(home).packs).toEqual([...presets().find((preset) => preset.id === "everyday")!.packs, "guards", "memory"]);
     expect(savedAnswers(home).workflows["package-age"]).toBe(true);
     expect(savedAnswers(home).settings["orchestration.tracker"]).toBe("nora/maps");
   });
 
-  test("the guide's cleanup runs fleet devbox remove, and a host it takes out of the profile leaves the hub's list of machines", () => {
-    expect(words(hubStep())).toContain("Run `fleet devbox remove coder.<old name>` on this Mac. It takes the old host out of their profile");
+  test("the guide's cleanup runs hedge devbox remove, and a host it takes out of the profile leaves the hub's list of machines", () => {
+    expect(words(hubStep())).toContain("Run `hedge devbox remove coder.<old name>` on this Mac. It takes the old host out of their profile");
     const home = temp.make("home-");
     const profile = profilePath(home);
     mkdirSync(profile, { recursive: true });
-    const save = (devboxes: string[]) => writeFileSync(join(profile, "fleet.json"), JSON.stringify({ schema: 1, hub: "coder.hub", devboxes }));
+    const save = (devboxes: string[]) => writeFileSync(join(profile, "hedge.json"), JSON.stringify({ schema: 1, hub: "coder.hub", devboxes }));
     save(["coder.hub", "coder.old-node", "coder.node"]);
-    expect(devboxesOf({ FLEET_PROFILE_DIR: profile }, home)).toContain("coder.old-node");
+    expect(devboxesOf({ HEDGE_PROFILE_DIR: profile }, home)).toContain("coder.old-node");
     save(["coder.hub", "coder.node"]);
-    expect(devboxesOf({ FLEET_PROFILE_DIR: profile }, home)).toEqual(["coder.hub", "coder.node"]);
+    expect(devboxesOf({ HEDGE_PROFILE_DIR: profile }, home)).toEqual(["coder.hub", "coder.node"]);
   });
 
   test("adds the profile as a T3 Code project at the folder where setup keeps it, under the name the habits use", () => {
     const add = codeIn(guide()).find((code) => code.startsWith("t3 project add "))?.trim();
-    expect(add).toBe(`t3 project add --title fleet-profile ${profilePath("~")}`);
-    expect(words(guide().slice(guide().indexOf("## 10. Hand over")))).toContain("open a thread in the `fleet-profile` project");
+    expect(add).toBe(`t3 project add --title hedge-profile ${profilePath("~")}`);
+    expect(words(guide().slice(guide().indexOf("## 10. Hand over")))).toContain("open a thread in the `hedge-profile` project");
   });
 
   test("fetches only files that are in the repo", () => {

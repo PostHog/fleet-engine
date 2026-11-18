@@ -6,7 +6,7 @@ import { isKeptForBoxes } from "../../../src/hub/names.ts";
 import { LockBusy, lockBox, tryLockBox, userWaitMs, withBoxLock, type HeldLock, type LockOptions } from "./box-lock.ts";
 import { assertBox, boxMarkerPath, boxNameFor, claudeTokenPath, handOver, hubForward, link, linkFile, recordedEnvironment, restoreForward, startUnit, stopUnit, t3Port, unitOf, unlink, type BoxCoder } from "./links.ts";
 import type { Box } from "./coder.ts";
-import { quote, remoteFleet, type Machine } from "./machine.ts";
+import { quote, remoteHedge, type Machine } from "./machine.ts";
 import { writePrivateFile } from "../../mcp-gateway/lib/client.ts";
 import { readT3Threads, threadsOwningPrs } from "../../pull-requests/lib/pr-owners.ts";
 import type { ShellThread } from "../../base/lib/t3/index.ts";
@@ -27,9 +27,9 @@ const transitional = new Set(["pending", "starting", "stopping", "canceling", "d
 const servingIdleAfterMs = 24 * 3_600_000;
 const busyLifeMs = 2 * 3_600_000;
 const linkFreshMs = 21 * 86_400_000;
-const machineFileCheck = "test -f ~/.config/fleet/machine.json";
+const machineFileCheck = "test -f ~/.config/hedge/machine.json";
 
-const claimRecord = (claim: string) => `mkdir -p ~/.config/fleet && printf '%s\\n' ${quote(claim)} > ~/.config/fleet/box-claim && { [ -e ~/${boxMarkerPath} ] || [ -L ~/${boxMarkerPath} ] || : > ~/${boxMarkerPath}; }`;
+const claimRecord = (claim: string) => `mkdir -p ~/.config/hedge && printf '%s\\n' ${quote(claim)} > ~/.config/hedge/box-claim && { [ -e ~/${boxMarkerPath} ] || [ -L ~/${boxMarkerPath} ] || : > ~/${boxMarkerPath}; }`;
 const restartT3 = [
   "systemctl --user restart t3code.service",
   `for i in $(seq 60); do curl -fs http://127.0.0.1:${t3Port}/.well-known/t3/environment > /dev/null && break; sleep 1; done`,
@@ -40,19 +40,19 @@ const straight = `straight() {
   while [ -n "$rest" ]; do
     path=$path/\${rest%%/*}
     case $rest in */*) rest=\${rest#*/} ;; *) rest= ;; esac
-    if [ -L "$path" ]; then echo "Fleet box: will not $2: $path is a symlink" >&2; return 1; fi
+    if [ -L "$path" ]; then echo "Hedge box: will not $2: $path is a symlink" >&2; return 1; fi
   done
 }`;
 const probe = `probe() {
   path=$HOME rest=\${1#"$HOME"/}
   while :; do
-    if [ ! -d "$path" ] || [ ! -x "$path" ]; then echo "Fleet box: cannot search $path" >&2; return 2; fi
+    if [ ! -d "$path" ] || [ ! -x "$path" ]; then echo "Hedge box: cannot search $path" >&2; return 2; fi
     [ -n "$rest" ] || break
     path=$path/\${rest%%/*}
     case $rest in */*) rest=\${rest#*/} ;; *) rest= ;; esac
     if [ ! -e "$path" ] && [ ! -L "$path" ]; then return 1; fi
   done
-  if [ ! -r "$path" ]; then echo "Fleet box: cannot list $path" >&2; return 2; fi
+  if [ ! -r "$path" ]; then echo "Hedge box: cannot list $path" >&2; return 2; fi
 }`;
 const claudeSignIn = [
   straight,
@@ -62,7 +62,7 @@ const claudeSignIn = [
   '  straight "$dir" "$refusal" || exit 1',
   '  (umask 077 && mkdir -p "$dir") || exit 1',
   '  straight "$conf" "$refusal" || exit 1',
-  '  if [ -d "$conf" ]; then echo "Fleet box: will not $refusal: $conf is a folder" >&2; exit 1; fi',
+  '  if [ -d "$conf" ]; then echo "Hedge box: will not $refusal: $conf is a folder" >&2; exit 1; fi',
   '  new=$(mktemp "$dir/.claude-token.XXXXXX") || exit 1',
   String.raw`  { printf '[Service]\nEnvironment="CLAUDE_CODE_OAUTH_TOKEN='; tr -d '\n' < "$token"; printf '"\n'; } > "$new" || { rm -f "$new"; exit 1; }`,
   '  if [ -f "$conf" ] && cmp -s "$new" "$conf"; then rm -f "$new"; else mv -fT "$new" "$conf" && systemctl --user daemon-reload && changed=1; fi',
@@ -85,7 +85,7 @@ clear_in() {
     base=\${entry##*/}
     for keep in "$@"; do [ "$base" = "$keep" ] && continue 2; done
     if [ -L "$entry" ]; then rm -f -- "$entry" || cleared=1; continue; fi
-    if [ "$(cd -P -- "\${entry%/*}" && pwd -P)" != "$real" ]; then echo "Fleet box: will not clear $entry: it is outside $root" >&2; return 1; fi
+    if [ "$(cd -P -- "\${entry%/*}" && pwd -P)" != "$real" ]; then echo "Hedge box: will not clear $entry: it is outside $root" >&2; return 1; fi
     rm -rf -- "$entry" || cleared=1
   done
   return $cleared
@@ -93,7 +93,7 @@ clear_in() {
 
 export function recycleScript(keepDirs: string[]): string {
   return [
-    "systemctl --user stop fleet-heavy.slice 2>/dev/null",
+    "systemctl --user stop hedge-heavy.slice 2>/dev/null",
     clearHelpers,
     "failed=0",
     'clear_in "$HOME/.t3/scratch" || failed=1',
@@ -104,16 +104,16 @@ export function recycleScript(keepDirs: string[]): string {
     "  done",
     'elif [ $? = 2 ]; then failed=1; fi',
     `clear_in "$HOME/dev" ${keepDirs.map(quote).join(" ")} || failed=1`,
-    "rm -f ~/.config/fleet/box-claim || failed=1",
+    "rm -f ~/.config/hedge/box-claim || failed=1",
     '[ "$failed" = 0 ]',
   ].join("\n");
 }
 
 const claimLine = (here: Machine, label: string, by: string, claim: string) => `${claim} ${label} by ${by} at ${new Date(here.now()).toISOString()}`;
-const readClaim = "cut -d' ' -f1 ~/.config/fleet/box-claim 2>/dev/null";
+const readClaim = "cut -d' ' -f1 ~/.config/hedge/box-claim 2>/dev/null";
 const readClaimLine = `${probe}
-f="$HOME/.config/fleet/box-claim"
-if probe "$HOME/.config/fleet"; then
+f="$HOME/.config/hedge/box-claim"
+if probe "$HOME/.config/hedge"; then
   if [ -e "$f" ] || [ -L "$f" ]; then cat -- "$f"; fi
 else
   [ $? = 1 ]
@@ -179,7 +179,7 @@ async function waitReady(coder: BoxCoder, here: Machine, box: Workspace): Promis
 async function waitForApply(coder: BoxCoder, here: Machine, box: string): Promise<void> {
   const { left } = budget(here, applyLimitMs);
   while (left() <= 0 || (await coder.ssh(box, machineFileCheck, undefined, left())).code !== 0) {
-    if (left() <= 0) throw new Error(`${box} did not finish fleet apply within ${applyLimitMs / 60_000} minutes: it has no ~/.config/fleet/machine.json. Read its Coder startup log.`);
+    if (left() <= 0) throw new Error(`${box} did not finish hedge apply within ${applyLimitMs / 60_000} minutes: it has no ~/.config/hedge/machine.json. Read its Coder startup log.`);
     await here.sleep(Math.min(5000, left()));
   }
 }
@@ -204,7 +204,7 @@ function stopwatch(here: Machine, box: string, label: string, source: "pool" | "
       last = here.now();
     },
     done(ok: boolean) {
-      const log = join(here.home, ".local/state/fleet/box-spawn.jsonl");
+      const log = join(here.home, ".local/state/hedge/box-spawn.jsonl");
       mkdirSync(dirname(log), { recursive: true });
       appendFileSync(log, `${JSON.stringify({ at: new Date(began).toISOString(), box, label, source, ok, seconds: Math.round((here.now() - began) / 1000), steps })}\n`);
     },
@@ -212,8 +212,8 @@ function stopwatch(here: Machine, box: string, label: string, source: "pool" | "
 }
 
 function signInNotes(here: Machine, box: string): void {
-  if (!existsSync(join(here.home, claudeTokenPath))) here.say(`Claude is not signed in on ${box}. On the hub, make a token with claude setup-token, paste it into fleet box token, and spawn again.`);
-  if (here.codex) here.say(`Codex on ${box} needs its own sign-in: fleet box run ${box} -- codex login --device-auth`);
+  if (!existsSync(join(here.home, claudeTokenPath))) here.say(`Claude is not signed in on ${box}. On the hub, make a token with claude setup-token, paste it into hedge box token, and spawn again.`);
+  if (here.codex) here.say(`Codex on ${box} needs its own sign-in: hedge box run ${box} -- codex login --device-auth`);
 }
 
 export function ownership(boxes: Box[], here: Machine): { owned: Box[]; skipped: Box[] } {
@@ -226,16 +226,16 @@ const skippedLine = (box: string) => `${box}: skipped, not a box this pool made`
 const otherWorkspace = (box: string) => `Coder has another workspace named ${box} now, not the one the pool made. Nothing changed.`;
 
 async function checkGatewayOn(coder: BoxCoder, here: Machine, box: string): Promise<void> {
-  let checked = await coder.ssh(box, remoteFleet("run mcp-gateway/mcp-gateway-client"), undefined, gatewayCheckLimitMs);
+  let checked = await coder.ssh(box, remoteHedge("run mcp-gateway/mcp-gateway-client"), undefined, gatewayCheckLimitMs);
   for (let attempt = 1; checked.code !== 0 && attempt < gatewayChecks; attempt++) {
     await here.sleep(5000);
-    checked = await coder.ssh(box, remoteFleet("run mcp-gateway/mcp-gateway-client"), undefined, gatewayCheckLimitMs);
+    checked = await coder.ssh(box, remoteHedge("run mcp-gateway/mcp-gateway-client"), undefined, gatewayCheckLimitMs);
   }
-  if (checked.code !== 0) here.say(`${box} cannot reach the hub's MCP gateway yet (${lastLine(checked) || `exit ${checked.code}`}). Check it with fleet box run ${box} -- fleet run mcp-gateway/mcp-gateway-client`);
+  if (checked.code !== 0) here.say(`${box} cannot reach the hub's MCP gateway yet (${lastLine(checked) || `exit ${checked.code}`}). Check it with hedge box run ${box} -- hedge run mcp-gateway/mcp-gateway-client`);
 }
 
 function finish(here: Machine, box: string, environmentId: string, unlinked: string[]) {
-  if (unlinked.length) here.say(`not linked on ${unlinked.join(", ")}; run fleet box link ${box} there`);
+  if (unlinked.length) here.say(`not linked on ${unlinked.join(", ")}; run hedge box link ${box} there`);
   signInNotes(here, box);
   here.print(`${box} ${environmentId}`);
 }
@@ -273,7 +273,7 @@ async function setUpPooled(coder: BoxCoder, here: Machine, lane: Lane, box: Work
       await here.run(["systemctl", "--user", "try-restart", t3]);
       await restoreForward(coder, here, box.name);
     }
-    const relink = `r=~/.config/fleet/boxes/${box.name}.json && if test -n "$(find "$r" -mtime -21 2>/dev/null)"; then systemctl --user try-restart ${t3}; else ${remoteFleet(`box link ${box.name}`)}; fi`;
+    const relink = `r=~/.config/hedge/boxes/${box.name}.json && if test -n "$(find "$r" -mtime -21 2>/dev/null)"; then systemctl --user try-restart ${t3}; else ${remoteHedge(`box link ${box.name}`)}; fi`;
     const unlinked = await onEvery(here, peersFor(here, lane.devbox), relink);
     if (gateway) await checkGatewayOn(coder, here, box.name);
     watch.step("link");
@@ -322,7 +322,7 @@ async function spawnNew(coder: BoxCoder, here: Machine, lane: Lane, box: string)
   try {
     await waitReady(coder, here, workspace);
     watch.step("create");
-    here.say(`${box} is up; wait for fleet apply on it`);
+    here.say(`${box} is up; wait for hedge apply on it`);
     await waitForApply(coder, here, box);
     watch.step("apply");
     await sameWorkspace(coder, workspace);
@@ -333,7 +333,7 @@ async function spawnNew(coder: BoxCoder, here: Machine, lane: Lane, box: string)
     if ((await coder.ssh(box, `bash -lc ${quote(setUpScript(claimLine(here, lane.label, lane.by, claim)))}`)).code !== 0) throw new Error(`Setting up ${box} failed: T3 did not answer after its restart.`);
     watch.step("setup");
     const environmentId = await link(coder, here, box);
-    const unlinked = await onEvery(here, peersFor(here, lane.devbox), remoteFleet(`box link ${box}`));
+    const unlinked = await onEvery(here, peersFor(here, lane.devbox), remoteHedge(`box link ${box}`));
     if (gateway) await checkGatewayOn(coder, here, box);
     watch.step("link");
     watch.done(true);
@@ -344,7 +344,7 @@ async function spawnNew(coder: BoxCoder, here: Machine, lane: Lane, box: string)
     watch.done(false);
     await change(here, (pool) => registry.settle(pool, box, id));
     await stopUnit(here, unitOf(box, "hub"));
-    here.say(`kept ${box} without forwards to look into the failure; the hub's sweep stops it once idle. Delete it with fleet box release ${box} --delete.`);
+    here.say(`kept ${box} without forwards to look into the failure; the hub's sweep stops it once idle. Delete it with hedge box release ${box} --delete.`);
     throw error;
   }
 }
@@ -358,8 +358,8 @@ export async function spawn(coder: BoxCoder, here: Machine, name: string | undef
 
 async function unfinishedWorkOn(coder: BoxCoder, box: Workspace): Promise<string | undefined> {
   const status = await statusById(coder, box.id);
-  if (status !== "running") return `it is ${status}, so its threads cannot be checked. Start it with fleet box start ${box.name} first`;
-  const answer = await coder.ssh(box.name, remoteFleet("box threads"));
+  if (status !== "running") return `it is ${status}, so its threads cannot be checked. Start it with hedge box start ${box.name} first`;
+  const answer = await coder.ssh(box.name, remoteHedge("box threads"));
   if (answer.code !== 0) return `it did not list its threads (exit ${answer.code}: ${(answer.stderr || answer.stdout).trim()})`;
   const unfinished = answer.stdout.trim();
   if (unfinished) return `these threads still run, wait for an answer, or own an open PR:\n${unfinished.split("\n").map((thread) => `  ${thread}`).join("\n")}\nFinish or stop them, and hand over their PRs, first`;
@@ -371,7 +371,7 @@ type Finish = { stillDoomed: () => Promise<boolean>; devbox?: string };
 async function finishRelease(coder: BoxCoder, here: Machine, box: Workspace, how: registry.Leaving, owned: boolean, { stillDoomed, devbox }: Finish): Promise<number> {
   const peers = peersFor(here, devbox);
   const hub = `${unitOf(box.name, "hub")}.service`;
-  const spare = () => (here.say(`kept ${box.name}: it started again while it was being released. Link it again with fleet box link ${box.name}.`), 1);
+  const spare = () => (here.say(`kept ${box.name}: it started again while it was being released. Link it again with hedge box link ${box.name}.`), 1);
   if (how === "pool") {
     await onEvery(here, peers, `systemctl --user stop ${hub} 2>/dev/null; true`);
     await stopUnit(here, unitOf(box.name, "hub"));
@@ -384,7 +384,7 @@ async function finishRelease(coder: BoxCoder, here: Machine, box: Workspace, how
     }
     await change(here, (pool) => registry.leave(pool, box.name, box.id, "delete"));
   }
-  const linked = await onEvery(here, peers, `${remoteFleet(`box unlink ${box.name}`)}; unlinked=$?; systemctl --user stop ${hub} 2>/dev/null; exit $unlinked`);
+  const linked = await onEvery(here, peers, `${remoteHedge(`box unlink ${box.name}`)}; unlinked=$?; systemctl --user stop ${hub} 2>/dev/null; exit $unlinked`);
   if (!(await unlink(here, box.name))) linked.push(here.self);
   await stopUnit(here, unitOf(box.name, "hub"));
   if (!(await stillDoomed())) return spare();
@@ -392,7 +392,7 @@ async function finishRelease(coder: BoxCoder, here: Machine, box: Workspace, how
   if (owned) await change(here, (pool) => registry.forget(pool, box.name, box.id));
   here.say(`deleted ${box.name}`);
   if (!linked.length) return 0;
-  here.say(`still linked on ${linked.join(", ")}; run fleet box unlink ${box.name} there`);
+  here.say(`still linked on ${linked.join(", ")}; run hedge box unlink ${box.name} there`);
   return 1;
 }
 
@@ -433,7 +433,7 @@ async function sweepOne(coder: BoxCoder, here: Machine, name: string, hooks: Box
     return;
   }
   if (live.status !== "running") return;
-  const answer = await coder.ssh(name, remoteFleet("box idle"), undefined, idleCheckLimitMs);
+  const answer = await coder.ssh(name, remoteHedge("box idle"), undefined, idleCheckLimitMs);
   if (answer.code === 0) {
     await hooks.stopping?.(name);
     await stopById(coder, here, box);
@@ -501,7 +501,7 @@ async function bringUp(coder: BoxCoder, here: Machine, box: string, devbox: stri
     if (entry?.claiming) return await resume(coder, here, workspace, entry.claim, devbox ?? here.self);
     if (!taken) return true;
     await sameWorkspace(coder, workspace);
-    const recorded = await coder.ssh(box, claimRecord(claimLine(here, "fleet box start", devbox ?? here.self, taken.claim)));
+    const recorded = await coder.ssh(box, claimRecord(claimLine(here, "hedge box start", devbox ?? here.self, taken.claim)));
     if (recorded.code !== 0) throw new Error(`Cannot record the claim on ${box}: ${recorded.stderr.trim()}`);
     return true;
   } finally {
@@ -516,7 +516,7 @@ export async function release(coder: BoxCoder, here: Machine, box: string, { for
   const kept = (reason: string) => (here.say(`kept ${box}: ${reason}`), 1);
   if (!force) {
     const status = (await liveBox(coder, box))?.status ?? "gone";
-    if (status !== "running") return kept(`it is ${status}, so its threads cannot be checked. Start it with fleet box start ${box} first, or release it with --force.`);
+    if (status !== "running") return kept(`it is ${status}, so its threads cannot be checked. Start it with hedge box start ${box} first, or release it with --force.`);
   }
   const expected = force ? undefined : (await coder.ssh(box, readClaim)).stdout.trim();
   return withBoxLock(here.home, box, lockWait(here, box, waitMs), async () => {
@@ -566,7 +566,7 @@ async function refreshOne(coder: BoxCoder, here: Machine, box: string, warm: str
     const record = linkFile(here, box);
     if (!existsSync(record) || here.now() - statSync(record).mtimeMs >= linkFreshMs) {
       await link(coder, here, box);
-      await onEvery(here, peersFor(here), remoteFleet(`box link ${box}`));
+      await onEvery(here, peersFor(here), remoteHedge(`box link ${box}`));
     }
     await sameWorkspace(coder, workspace);
     const warmed = await coder.ssh(box, `bash -lc ${quote(warm)}`, undefined, warmLimitMs);
@@ -646,10 +646,10 @@ export async function idle(here: Machine): Promise<number> {
   assertBox(here.workspace);
   const now = here.now();
   const bootedAt = now - Number(readFileSync("/proc/uptime", "utf8").split(" ")[0]) * 1000;
-  const claim = join(here.home, ".config/fleet/box-claim");
+  const claim = join(here.home, ".config/hedge/box-claim");
   const claimedAt = existsSync(claim) ? statSync(claim).mtimeMs : 0;
   const t3 = t3Activity(here.home, now);
-  const heavyTasks = Number((await here.run(["systemctl", "--user", "show", "fleet-heavy.slice", "-p", "TasksCurrent", "--value"])).stdout.trim());
+  const heavyTasks = Number((await here.run(["systemctl", "--user", "show", "hedge-heavy.slice", "-p", "TasksCurrent", "--value"])).stdout.trim());
   const quiet = isIdle(Math.max(bootedAt, claimedAt, t3.lastEventAt), heavyTasks > 0 || t3.turnRuns, here.settings.idleHours, now);
   here.print(quiet ? "idle" : "busy");
   return quiet ? 0 : 1;
@@ -695,7 +695,7 @@ export async function nightly(steps: NightlyStep[], here: Pick<Machine, "now" | 
 
 export async function saveToken(home: string, pasted: string): Promise<void> {
   const token = pasted.trim();
-  if (!token) throw new Error("No token on standard input. Run claude setup-token, then paste the token it prints into fleet box token.");
+  if (!token) throw new Error("No token on standard input. Run claude setup-token, then paste the token it prints into hedge box token.");
   const path = join(home, claudeTokenPath);
   await mkdir(dirname(path), { recursive: true });
   await writePrivateFile(path, `${token}\n`);

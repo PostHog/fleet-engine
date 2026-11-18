@@ -25,9 +25,9 @@ export type SetupOptions = {
   terminal: Terminal;
   machine?: Partial<Machine>;
   fetchSource?: (ref: SourceRef, cacheRoot: string) => Promise<FetchedSource>;
-  /** Runs fleet apply with this profile, leaving the skipped steps (pack/id) for a later apply, and prints its report. */
+  /** Runs hedge apply with this profile, leaving the skipped steps (pack/id) for a later apply, and prints its report. */
   apply?: (profileDir: string, skip?: string[]) => Promise<number>;
-  /** Runs fleet doctor with this profile and prints its report. */
+  /** Runs hedge doctor with this profile and prints its report. */
   doctor?: (profileDir: string) => Promise<number>;
   /** This machine's IANA time zone, which picks a setting's time-zone default. */
   timeZone?: string;
@@ -41,7 +41,7 @@ const answersChanged = ["profile", "apply", "apply-codex", "check"];
 
 const checked = (done: string[] = []) => done.some((id) => id === "check" || id.startsWith("check:"));
 
-export const sourceCache = (home: string) => join(home, ".local", "share", "fleet", "sources");
+export const sourceCache = (home: string) => join(home, ".local", "share", "hedge", "sources");
 
 export async function setup(args: string[], options: SetupOptions): Promise<number> {
   const clock = options.clock ?? Date;
@@ -81,7 +81,7 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
     }
   } catch (error) {
     if (!(error instanceof FlagError)) throw error;
-    terminal.print(`fleet setup: ${error.message}`);
+    terminal.print(`hedge setup: ${error.message}`);
     return 2;
   }
   const appliedWhole = checked(progress.done) && !progress.done.includes("apply-codex");
@@ -140,7 +140,7 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
   });
   const applyProfile = async (skip: string[]) => {
     if (!machine.profileDir || !options.apply) throw new Error("no profile to apply yet");
-    if ((await options.apply(machine.profileDir, skip)) !== 0) throw new Error("fleet apply could not set up this machine. Fix what it says above, then run fleet setup again.");
+    if ((await options.apply(machine.profileDir, skip)) !== 0) throw new Error("hedge apply could not set up this machine. Fix what it says above, then run hedge setup again.");
     const applied = await loadMachine(options.home);
     if (applied) Object.assign(machine, { role: applied.role }, applied.name ? { name: applied.name } : {});
   };
@@ -152,7 +152,7 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
       minutes: 3,
       kind: "auto",
       async run() {
-        terminal.print(`▶ ${title}: fleet apply installs your packs`);
+        terminal.print(`▶ ${title}: hedge apply installs your packs`);
         await applyProfile(codexOnly);
       },
     };
@@ -162,7 +162,7 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
       minutes: 1,
       kind: "auto",
       async run() {
-        terminal.print("▶ Install Codex: fleet apply installs what only Codex needs");
+        terminal.print("▶ Install Codex: hedge apply installs what only Codex needs");
         await applyProfile([]);
       },
     };
@@ -239,13 +239,13 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
     return 0;
   } catch (error) {
     if (error instanceof FlagError) {
-      terminal.print(`fleet setup: ${error.message}`);
+      terminal.print(`hedge setup: ${error.message}`);
       return 2;
     }
     if (!(error instanceof Stopped)) throw error;
     const next = steps().find((step) => !progress.done.includes(step.id));
     terminal.print("");
-    terminal.print(`Stopped. Run fleet setup again to pick up${next ? ` at ${next.title}` : ""}.`);
+    terminal.print(`Stopped. Run hedge setup again to pick up${next ? ` at ${next.title}` : ""}.`);
     return 130;
   }
 }
@@ -313,7 +313,7 @@ function bootstrapStep(terminal: Terminal, has: Machine["has"]): Step {
     kind: "auto",
     async run() {
       const missing = ["git", "gh", "bun", "t3"].filter((tool) => !has(tool));
-      if (missing.length) throw new Error(`${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} missing. Install them with get.sh, then run fleet setup again.`);
+      if (missing.length) throw new Error(`${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} missing. Install them with get.sh, then run hedge setup again.`);
       terminal.print("  ✓ Git, gh, Bun and T3 Code are installed");
     },
   };
@@ -361,9 +361,9 @@ export async function loadCatalog(engineRoot: string, team: SourceRef[], home: s
 
 function printNeeds(terminal: Terminal, steps: Step[], open: string[]) {
   terminal.print("");
-  terminal.print("fleet setup --non-interactive needs these answers and sign-ins. Add the answers to the command and run it again:");
+  terminal.print("hedge setup --non-interactive needs these answers and sign-ins. Add the answers to the command and run it again:");
   for (const step of steps.filter((item) => open.includes(item.id))) {
     if (step.kind === "question") terminal.print(`  --set ${step.id.replace(/^setting:/, "")}=<value>   ${step.title}`);
-    else terminal.print(`  ${step.title}: do it once in a terminal, then run fleet setup again`);
+    else terminal.print(`  ${step.title}: do it once in a terminal, then run hedge setup again`);
   }
 }

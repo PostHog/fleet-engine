@@ -32,12 +32,12 @@ export const testRows = (): SecretRow[] => [
   { name: "send-us", provider: projectKey("12"), scope: "email:write", project: "12", region: "us", settings: "https://example.com/settings", env: ["EXAMPLE_API_KEY"] },
   { name: "send-eu", provider: projectKey("34"), scope: "email:write", project: "34", region: "eu", settings: "https://example.com/settings", env: ["EXAMPLE_API_KEY"] },
   { name: "sandbox-login", provider: { name: "example-login" }, scope: "the sandbox project only", project: "Sandbox", settings: "https://example.com/users", env: ["LOGIN_EMAIL", "LOGIN_PASSWORD"] },
-  { name: "chat-app", provider: { name: "chat-app" }, scope: "the chat app's tokens", settings: "https://example.com/apps", env: ["CHAT_APP_TOKEN", "CHAT_BOT_TOKEN"], file: { path: ".config/fleet/chat-app.json", format: "json", fields: { appToken: "CHAT_APP_TOKEN", botToken: "CHAT_BOT_TOKEN" }, renew: "the steps in the chat pack's setup" } },
-  { name: "speech", provider: { name: "speech" }, scope: "text to speech", settings: "https://example.com/keys", env: ["SPEECH_API_KEY"], file: { path: ".config/fleet/speech.env", format: "env", renew: "a 0600 ~/.config/fleet/speech.env with SPEECH_API_KEY=…" } },
-  { name: "pager", provider: { name: "pager" }, scope: "one alert source", settings: "https://example.com/alerts", env: ["PAGER_URL", "PAGER_TOKEN"], file: { path: ".config/fleet/pager.env", format: "env", renew: "fleet page setup" } },
+  { name: "chat-app", provider: { name: "chat-app" }, scope: "the chat app's tokens", settings: "https://example.com/apps", env: ["CHAT_APP_TOKEN", "CHAT_BOT_TOKEN"], file: { path: ".config/hedge/chat-app.json", format: "json", fields: { appToken: "CHAT_APP_TOKEN", botToken: "CHAT_BOT_TOKEN" }, renew: "the steps in the chat pack's setup" } },
+  { name: "speech", provider: { name: "speech" }, scope: "text to speech", settings: "https://example.com/keys", env: ["SPEECH_API_KEY"], file: { path: ".config/hedge/speech.env", format: "env", renew: "a 0600 ~/.config/hedge/speech.env with SPEECH_API_KEY=…" } },
+  { name: "pager", provider: { name: "pager" }, scope: "one alert source", settings: "https://example.com/alerts", env: ["PAGER_URL", "PAGER_TOKEN"], file: { path: ".config/hedge/pager.env", format: "env", renew: "hedge page setup" } },
 ];
 
-export const newHome = () => { const home = mkdtempSync(join(tmpdir(), "fleet-secret-")); homes.push(home); return home; };
+export const newHome = () => { const home = mkdtempSync(join(tmpdir(), "hedge-secret-")); homes.push(home); return home; };
 
 export function filesUnder(path: string): string[] {
   if (!existsSync(path)) return [];
@@ -49,11 +49,11 @@ const olderOps = ["put", "deliver", "off", "on", "list"];
 export const hubSettings = JSON.stringify({ "hub.alias": "hub" });
 export const text = (shown: string | Uint8Array) => typeof shown === "string" ? shown : Buffer.from(shown).toString("utf8");
 
-export function fleet({ words = [] as ThreadWord[], rows = testRows() as SecretRow[] | "injected", handlers = undefined as Record<string, string> | undefined } = {}) {
+export function hedge({ words = [] as ThreadWord[], rows = testRows() as SecretRow[] | "injected", handlers = undefined as Record<string, string> | undefined } = {}) {
   const hubHome = newHome();
   const devHome = newHome();
-  mkdirSync(join(hubHome, ".config/fleet"), { recursive: true });
-  writeFileSync(join(hubHome, ".config/fleet/machine.json"), JSON.stringify({ role: "hub" }));
+  mkdirSync(join(hubHome, ".config/hedge"), { recursive: true });
+  writeFileSync(join(hubHome, ".config/hedge/machine.json"), JSON.stringify({ role: "hub" }));
   const clock = { now: new Date("2026-11-13T10:00:00Z") };
   const printed: string[] = [];
   const commands: string[] = [];
@@ -61,7 +61,7 @@ export function fleet({ words = [] as ThreadWord[], rows = testRows() as SecretR
   const hooks: { whileHearing?: () => Promise<unknown>; beforeAppend?: () => void; write?: WriteBytes } = {};
   const write: WriteBytes = (file, bytes, offset) => (hooks.write ?? ((at, all, from) => writeSync(at, all, from)))(file, bytes, offset);
   const threadWords = async () => { const step = hooks.whileHearing; hooks.whileHearing = undefined; await step?.(); return words; };
-  const env = (machine: string) => ({ FLEET_SETTINGS: hubSettings, CODER_WORKSPACE_NAME: machine, T3CODE_THREAD_ID: "lane-thread", ...handlers ? { FLEET_HANDLERS: JSON.stringify(handlers) } : {} });
+  const env = (machine: string) => ({ HEDGE_SETTINGS: hubSettings, CODER_WORKSPACE_NAME: machine, T3CODE_THREAD_ID: "lane-thread", ...handlers ? { HEDGE_HANDLERS: JSON.stringify(handlers) } : {} });
   const context = (home: string, machine: string): SecretContext => ({
     home, env: env(machine), now: () => clock.now, threadWords, out: (shown) => printed.push(text(shown)), err: (shown) => printed.push(text(shown)), ssh,
     write, appendLog: (path, line, writer) => { const step = hooks.beforeAppend; hooks.beforeAppend = undefined; step?.(); appendToLog(path, line, writer); }, ...rows === "injected" ? {} : { rows },

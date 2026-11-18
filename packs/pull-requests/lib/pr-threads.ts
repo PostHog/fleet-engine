@@ -9,7 +9,7 @@ type Comment = { author: Author; url: string; reactions?: { nodes: { user: { log
 type GraphThread = { id: string; isResolved: boolean; path: string; line: number | null; originalLine: number | null; comments: Page<Comment> };
 type Thread = { id: string; kind: "bot" | "human"; answered: boolean; location: string; url: string };
 
-const usage = "Usage: fleet pr bot-threads|blockers --repo <owner/repo> --pr <number> [--resolve] [--fixed <thread URL>]... | [--record]";
+const usage = "Usage: hedge pr bot-threads|blockers --repo <owner/repo> --pr <number> [--resolve] [--fixed <thread URL>]... | [--record]";
 const knownBots = new Set(["coderabbitai", "greptile-apps", "posthog-bot", "trunk-io", "github-actions", "dependabot", "renovate", "vercel", "codecov"]);
 
 const commentFields = "pageInfo { hasNextPage endCursor } nodes { url author { __typename login } reactions(content: THUMBS_UP, first: 20) { nodes { user { login } } } }";

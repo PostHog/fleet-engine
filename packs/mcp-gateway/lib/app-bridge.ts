@@ -13,11 +13,11 @@ type Waiter = { resolve: (result: any) => void; reject: (error: Error) => void }
 const versions = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 const home = process.env.CODEX_HOME;
 if (!home) throw new Error("Set CODEX_HOME to the app bridge's own Codex home.");
-const app = process.env.FLEET_APP ? (parseUpstream(JSON.parse(process.env.FLEET_APP)) as CodexApp) : slack;
-if (app.kind !== "codex-app") throw new Error("Set FLEET_APP to a Codex app upstream.");
-const timeout = Number(process.env.FLEET_CODEX_TIMEOUT_MS ?? 300000);
+const app = process.env.HEDGE_APP ? (parseUpstream(JSON.parse(process.env.HEDGE_APP)) as CodexApp) : slack;
+if (app.kind !== "codex-app") throw new Error("Set HEDGE_APP to a Codex app upstream.");
+const timeout = Number(process.env.HEDGE_CODEX_TIMEOUT_MS ?? 300000);
 const config = await readFile(join(home, "config.toml"), "utf8").catch(() => "");
-const backend = spawn(process.env.FLEET_CODEX_BIN ?? "codex", backendArguments(config, app), { stdio: ["pipe", "pipe", "ignore"] });
+const backend = spawn(process.env.HEDGE_CODEX_BIN ?? "codex", backendArguments(config, app), { stdio: ["pipe", "pipe", "ignore"] });
 
 const toBackend = new Map<Id, Waiter & { timer: ReturnType<typeof setTimeout> }>();
 const toAgent = new Map<Id, Waiter>();
@@ -48,7 +48,7 @@ function call(method: string, params: unknown) {
 }
 
 function askAgent(method: string, params: unknown) {
-  const id = `fleet-${++asked}`;
+  const id = `hedge-${++asked}`;
   return new Promise<any>((resolve, reject) => {
     toAgent.set(id, { resolve, reject });
     reply({ id, method, params });
@@ -86,7 +86,7 @@ async function discover() {
       found.set(name, { ...tool, name, ...(tool.description && { description: describe(app, tool.description) }) });
     }
   }
-  if (!found.size) throw new Error(`The ${app.title} app is not connected to the bridge's ChatGPT sign-in. On the hub, run: fleet mcp-gateway sign-in ${app.name}`);
+  if (!found.size) throw new Error(`The ${app.title} app is not connected to the bridge's ChatGPT sign-in. On the hub, run: hedge mcp-gateway sign-in ${app.name}`);
   return catalog = found;
 }
 
@@ -106,7 +106,7 @@ async function invoke(id: Id, params: { name: string; arguments?: Record<string,
 async function handle(message: Message) {
   await ready;
   const params = message.params ?? {};
-  if (message.method === "initialize") return { protocolVersion: versions.includes(params.protocolVersion) ? params.protocolVersion : versions[0], capabilities: { tools: {} }, serverInfo: { name: `fleet-${app.name}`, version: "1" } };
+  if (message.method === "initialize") return { protocolVersion: versions.includes(params.protocolVersion) ? params.protocolVersion : versions[0], capabilities: { tools: {} }, serverInfo: { name: `hedge-${app.name}`, version: "1" } };
   if (message.method === "ping") return {};
   if (message.method === "tools/list") return { tools: [...(await discover()).values()] };
   if (message.method === "tools/call") {
@@ -117,7 +117,7 @@ async function handle(message: Message) {
   throw Object.assign(new Error(`Method not found: ${message.method}`), { code: -32601 });
 }
 
-const ready = call("initialize", { clientInfo: { name: `fleet-${app.name}-bridge`, version: "1" }, capabilities: { experimentalApi: true } }).then(() => tell({ method: "initialized", params: {} }));
+const ready = call("initialize", { clientInfo: { name: `hedge-${app.name}-bridge`, version: "1" }, capabilities: { experimentalApi: true } }).then(() => tell({ method: "initialized", params: {} }));
 
 createInterface({ input: process.stdin }).on("line", (line) => {
   let message: Message;

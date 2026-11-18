@@ -10,7 +10,7 @@ const lockStaleMs = 2 * 60_000;
 const lockWaitMs = 60_000;
 const realClock: Clock = { now: Date.now, sleep: (ms) => Bun.sleep(ms) };
 
-export const poolFile = (home: string) => join(home, ".config/fleet/box-pool.json");
+export const poolFile = (home: string) => join(home, ".config/hedge/box-pool.json");
 
 function entryOf(raw: Entry): Entry {
   return { id: raw.id, ...(raw.claim === undefined ? {} : { claim: raw.claim }), ...(raw.claiming ? { claiming: true as const } : {}), ...(raw.leaving ? { leaving: raw.leaving } : {}) };

@@ -22,7 +22,7 @@ function prompt() {
 }
 
 describe("the README", () => {
-  test("opens with a picture of Fleet that is in the repo", () => {
+  test("opens with a picture of Hedge that is in the repo", () => {
     const text = readme();
     const picture = text.match(/<img src="([^"]+)"/);
     expect(picture).not.toBeNull();

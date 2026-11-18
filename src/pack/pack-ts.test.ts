@@ -46,35 +46,35 @@ describe("a pack.ts", () => {
     expect(agents && "content" in agents ? agents.content : "").toContain("# Twin\n\n- Greet the person once a day.\n");
   });
 
-  test("is listed by fleet packs and by the page builder", async () => {
-    const { fleet, lines } = machineWith({ twin: cpTwin });
-    expect(await fleet("apply", "--profile", "<profile>")).toBe(0);
-    expect(await fleet("packs")).toBe(0);
+  test("is listed by hedge packs and by the page builder", async () => {
+    const { hedge, lines } = machineWith({ twin: cpTwin });
+    expect(await hedge("apply", "--profile", "<profile>")).toBe(0);
+    expect(await hedge("packs")).toBe(0);
     expect(lines).toContain("  ✓ twin  The hub greets you once you pick a greeting.");
     const page = await pageData({ audience: "posthog", team: (await twin("ts")).packs });
     expect(page.packs.find((pack) => pack.name === "twin")).toMatchObject({ title: "Twin", summary: "The hub greets you once you pick a greeting." });
   });
 
-  test("ships commands named like properties that every object has, and fleet knows no such command elsewhere", async () => {
-    const named = { one: (dir: string) => writeFileSync(join(dir, "pack.ts"), `export default { sdk: 1, name: "one", summary: "A pack.", register(fleet) { fleet.command("toString", { summary: "Show.", run: async () => 3 }); fleet.command("constructor", { summary: "Build.", run: async () => 4 }); } };\n`) };
+  test("ships commands named like properties that every object has, and hedge knows no such command elsewhere", async () => {
+    const named = { one: (dir: string) => writeFileSync(join(dir, "pack.ts"), `export default { sdk: 1, name: "one", summary: "A pack.", register(hedge) { hedge.command("toString", { summary: "Show.", run: async () => 3 }); hedge.command("constructor", { summary: "Build.", run: async () => 4 }); } };\n`) };
     const withNames = machineWith(named);
-    expect(await withNames.fleet("apply", "--profile", "<profile>")).toBe(0);
-    expect(await withNames.fleet("packs")).toBe(0);
+    expect(await withNames.hedge("apply", "--profile", "<profile>")).toBe(0);
+    expect(await withNames.hedge("packs")).toBe(0);
     expect(withNames.lines).toContain("  ✓ one  A pack.");
-    expect([await withNames.fleet("toString"), await withNames.fleet("constructor")]).toEqual([3, 4]);
+    expect([await withNames.hedge("toString"), await withNames.hedge("constructor")]).toEqual([3, 4]);
     const without = machineWith({ twin: cpTwin });
-    expect(await without.fleet("apply", "--profile", "<profile>")).toBe(0);
-    expect([await without.fleet("toString"), without.lines.at(-1)?.split("\n")[0]]).toEqual([2, "fleet: unknown command toString"]);
+    expect(await without.hedge("apply", "--profile", "<profile>")).toBe(0);
+    expect([await without.hedge("toString"), without.lines.at(-1)?.split("\n")[0]]).toEqual([2, "hedge: unknown command toString"]);
   });
 
   test("names the pack to turn on for a command of a pack.ts that is off", async () => {
-    const { fleet, lines } = machineWith({ one: (dir) => writeFileSync(join(dir, "pack.ts"), `export default { sdk: 1, name: "one", title: "One Tools", summary: "A pack.", register(fleet) { fleet.command("hello", { summary: "Greet.", run: async () => 0 }); } };\n`) }, []);
-    expect(await fleet("apply", "--profile", "<profile>")).toBe(0);
-    expect([await fleet("hello"), lines.at(-1)]).toEqual([2, "fleet hello comes from the One Tools pack, which is off. Turn it on with fleet packs."]);
+    const { hedge, lines } = machineWith({ one: (dir) => writeFileSync(join(dir, "pack.ts"), `export default { sdk: 1, name: "one", title: "One Tools", summary: "A pack.", register(hedge) { hedge.command("hello", { summary: "Greet.", run: async () => 0 }); } };\n`) }, []);
+    expect(await hedge("apply", "--profile", "<profile>")).toBe(0);
+    expect([await hedge("hello"), lines.at(-1)]).toEqual([2, "hedge hello comes from the One Tools pack, which is off. Turn it on with hedge packs."]);
   });
 });
 
-const baseSteps = new Set((JSON.parse(readFileSync(join(repoRoot, "packs/base/pack.json"), "utf8")).steps as Array<{ run: string[] }>).flatMap(({ run }) => (run[0] === "fleet" ? [run[1]!] : [])));
+const baseSteps = new Set((JSON.parse(readFileSync(join(repoRoot, "packs/base/pack.json"), "utf8")).steps as Array<{ run: string[] }>).flatMap(({ run }) => (run[0] === "hedge" ? [run[1]!] : [])));
 
 const cpTwin = (dir: string) => cpSync(join(fixtures, "twin-ts/packs/twin"), dir, { recursive: true });
 
@@ -86,7 +86,7 @@ function machineWith(packs: Record<string, (dir: string) => void>, enabled = Obj
     write(join(engine, "packs", name));
   }
   const profile = temp.make("profile-");
-  writeFileSync(join(profile, "fleet.json"), JSON.stringify({ schema: 1, engine: { repo: "example/engine", ref: "main", channel: "track" }, sources: [], packs: enabled, plan: "both", settings: {}, workflows: {} }));
+  writeFileSync(join(profile, "hedge.json"), JSON.stringify({ schema: 1, engine: { repo: "example/engine", ref: "main", channel: "track" }, sources: [], packs: enabled, plan: "both", settings: {}, workflows: {} }));
   const home = temp.make("home-");
   const bin = temp.make("bin-");
   for (const agent of ["claude", "codex"]) {
@@ -94,19 +94,19 @@ function machineWith(packs: Record<string, (dir: string) => void>, enabled = Obj
     chmodSync(join(bin, agent), 0o755);
   }
   const lines: string[] = [];
-  const launcher = join(engine, "fleet");
+  const launcher = join(engine, "hedge");
   const options = { home, engineRoot: engine, platform: "linux" as const, env: {}, print: (line: string) => lines.push(line) };
-  const runFleetStepsOnly = async (command: string[]): Promise<number> => (command[1] === launcher && !baseSteps.has(command[2]!) ? await main(command.slice(2), { ...options, print: () => {}, run: runFleetStepsOnly }) : 0);
-  const fleet = async (...args: string[]) => {
+  const runHedgeStepsOnly = async (command: string[]): Promise<number> => (command[1] === launcher && !baseSteps.has(command[2]!) ? await main(command.slice(2), { ...options, print: () => {}, run: runHedgeStepsOnly }) : 0);
+  const hedge = async (...args: string[]) => {
     const path = process.env.PATH;
     process.env.PATH = `${bin}:${path}`;
     try {
-      return await main(args.map((arg) => (arg === "<profile>" ? profile : arg)), { ...options, run: runFleetStepsOnly });
+      return await main(args.map((arg) => (arg === "<profile>" ? profile : arg)), { ...options, run: runHedgeStepsOnly });
     } finally {
       process.env.PATH = path;
     }
   };
-  return { fleet, lines };
+  return { hedge, lines };
 }
 
 describe("loading a pack.ts", () => {
@@ -119,7 +119,7 @@ describe("loading a pack.ts", () => {
     for (const [name, text] of Object.entries(json)) writeFileSync(join(dir, "packs", name, "pack.json"), text);
     return dir;
   }
-  const pack = (name: string, register: string) => `export default { sdk: 1, name: "${name}", summary: "A pack.", register(fleet) { ${register} } };\n`;
+  const pack = (name: string, register: string) => `export default { sdk: 1, name: "${name}", summary: "A pack.", register(hedge) { ${register} } };\n`;
 
   test("loads from a source path relative to the working directory", async () => {
     const packs = await loadPacks(relative(process.cwd(), join(fixtures, "twin-ts")));
@@ -133,35 +133,35 @@ describe("loading a pack.ts", () => {
 
   test("refuses a handle that another pack made", async () => {
     const dir = source({
-      a: pack("a", `globalThis.twinHandle = fleet.workflow({ id: "a-flow", name: "A", sentence: "A.", default: false });`),
-      b: pack("b", `fleet.service({ when: globalThis.twinHandle, id: "b-run", run: async () => {} });`),
+      a: pack("a", `globalThis.twinHandle = hedge.workflow({ id: "a-flow", name: "A", sentence: "A.", default: false });`),
+      b: pack("b", `hedge.service({ when: globalThis.twinHandle, id: "b-run", run: async () => {} });`),
     });
     await expect(loadPacks(dir)).rejects.toThrow("service b-run names a workflow that the b pack did not declare");
   });
 
   test("refuses a handle that was never declared", async () => {
-    const dir = source({ one: pack("one", `fleet.workflow({ id: "one-flow", name: "One", sentence: "One.", default: false, settings: [{}] });`) });
+    const dir = source({ one: pack("one", `hedge.workflow({ id: "one-flow", name: "One", sentence: "One.", default: false, settings: [{}] });`) });
     await expect(loadPacks(dir)).rejects.toThrow("workflow one-flow names a setting that the one pack did not declare");
   });
 
   test("refuses a handle of another kind than the field takes", async () => {
-    const dir = source({ one: pack("one", `const flow = fleet.workflow({ id: "one-flow", name: "One", sentence: "One.", default: false }); fleet.service({ after: flow, id: "one-run", run: async () => {} });`) });
+    const dir = source({ one: pack("one", `const flow = hedge.workflow({ id: "one-flow", name: "One", sentence: "One.", default: false }); hedge.service({ after: flow, id: "one-run", run: async () => {} });`) });
     await expect(loadPacks(dir)).rejects.toThrow("service one-run names a check that the one pack did not declare");
   });
 
-  test.each(["fleet one 'setup'", "fleet one setup ~/token", "fleet one setup $TOKEN", "fleet one setup && fleet apply", "one setup", "fleet one\nsetup", "fleet one  setup", "fleet one\tsetup"])("refuses a repair command that a shell would change or that is not a fleet command: %s", async (command) => {
-    const dir = source({ one: pack("one", `fleet.check({ id: "one-saved", say: "Save it.", test: async () => true, repair: { ask: "Save it.", command: ${JSON.stringify(command)} } });`) });
-    await expect(loadPacks(dir)).rejects.toThrow("check one-saved: repair.command must be fleet and plain words of letters, digits, and . _ / = : @ -, with one space between words, so a shell passes it as written and Fleet knows it when you run it");
+  test.each(["hedge one 'setup'", "hedge one setup ~/token", "hedge one setup $TOKEN", "hedge one setup && hedge apply", "one setup", "hedge one\nsetup", "hedge one  setup", "hedge one\tsetup"])("refuses a repair command that a shell would change or that is not a hedge command: %s", async (command) => {
+    const dir = source({ one: pack("one", `hedge.check({ id: "one-saved", say: "Save it.", test: async () => true, repair: { ask: "Save it.", command: ${JSON.stringify(command)} } });`) });
+    await expect(loadPacks(dir)).rejects.toThrow("check one-saved: repair.command must be hedge and plain words of letters, digits, and . _ / = : @ -, with one space between words, so a shell passes it as written and Hedge knows it when you run it");
   });
 
   test("loads a pack whose register reads the pack's own fields through this", async () => {
-    const dir = source({ one: `export default { sdk: 1, name: "one", summary: "A pack.", register(fleet) { fleet.setting({ key: \`\${this.name}.color\`, type: "string", question: "Which color?" }); } };\n` });
+    const dir = source({ one: `export default { sdk: 1, name: "one", summary: "A pack.", register(hedge) { hedge.setting({ key: \`\${this.name}.color\`, type: "string", question: "Which color?" }); } };\n` });
     const [loaded] = await loadPacks(dir);
     expect(loaded?.manifest.settings?.map((setting) => setting.key)).toEqual(["one.color"]);
   });
 
   test("refuses a register that is async, because what it declares after an await would be lost", async () => {
-    const dir = source({ one: `export default { sdk: 1, name: "one", summary: "A pack.", async register(fleet) { await Promise.resolve(); fleet.setting({ key: "one.color", type: "string", question: "Which color?" }); } };\n` });
+    const dir = source({ one: `export default { sdk: 1, name: "one", summary: "A pack.", async register(hedge) { await Promise.resolve(); hedge.setting({ key: "one.color", type: "string", question: "Which color?" }); } };\n` });
     await expect(loadPacks(dir)).rejects.toThrow("register returned a promise; declare everything before it returns");
   });
 
@@ -171,7 +171,7 @@ describe("loading a pack.ts", () => {
   });
 
   test("refuses a recorded manifest that today's validation refuses", async () => {
-    const dir = source({ one: pack("one", `fleet.setting({ key: "other.color", type: "string", question: "Which color?" });`) });
+    const dir = source({ one: pack("one", `hedge.setting({ key: "other.color", type: "string", question: "Which color?" });`) });
     await expect(loadPacks(dir)).rejects.toThrow("setting other.color must start with one.");
   });
 });

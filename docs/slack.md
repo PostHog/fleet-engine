@@ -19,17 +19,17 @@ custom emoji that your workspace must have. To use another emoji, such as
 `:eye:`, run:
 
 ```sh
-fleet set slack.emoji=eye
+hedge set slack.emoji=eye
 ```
 
 Give the emoji's name, with or without the colons: `eye` and `:eye:` are the
 same. Names such as `+1` and `thumbsup` work. A reaction with a skin tone, such
 as `:thumbsup::skin-tone-2:`, counts as `thumbsup`. A value with a space or a
 colon inside it is not an emoji name: the trigger does not start, and its log
-and `fleet slack-trigger check` say why.
+and `hedge slack-trigger check` say why.
 
-`fleet set` applies the change, and the running trigger starts again with the
-new emoji. The hub takes the change at its next `fleet update`.
+`hedge set` applies the change, and the running trigger starts again with the
+new emoji. The hub takes the change at its next `hedge update`.
 
 ## Choose the nodes
 
@@ -37,7 +37,7 @@ By default the trigger starts threads where it runs, on the hub. To start them
 on your nodes instead, the devboxes that stay on, name them by their SSH names:
 
 ```sh
-fleet set slack.nodes="devbox-1 devbox-2"
+hedge set slack.nodes="devbox-1 devbox-2"
 ```
 
 The trigger takes them in turn. Each node needs the Slack pack, which every
@@ -47,9 +47,9 @@ names a box, stops the trigger, and its log says which.
 
 ## How it works
 
-The trigger runs all the time as a Fleet service, `fleet run
-slack/slack-trigger`: a systemd user service `fleet-slack-trigger` on Linux, or
-the launchd agent `dev.fleet.slack-trigger` on a Mac. Fleet installs it only
+The trigger runs all the time as a Hedge service, `hedge run
+slack/slack-trigger`: a systemd user service `hedge-slack-trigger` on Linux, or
+the launchd agent `dev.hedge.slack-trigger` on a Mac. Hedge installs it only
 after you save your Slack app. It runs on your hub when the Hub pack is
 on. Without the Hub pack, it runs on your only machine, when your profile lists
 no devboxes and the machine is not a devbox. A profile that two machines share
@@ -69,12 +69,12 @@ sends each event within a second, and no address is public.
    it, add an `incident` row to `overrides.models` in your profile. When T3
    does not offer the row's tier for the model, the thread starts on the
    standard tier. Through the hub's proxy, T3 offers `ultrafast` once the
-   proxy serves Fleet's Codex catalog (`fleet cli-proxy catalog`). The thread
+   proxy serves Hedge's Codex catalog (`hedge cli-proxy catalog`). The thread
    starts:
    - with `slack.nodes` set, on those nodes in turn, over SSH with
-     `fleet slack-trigger launch`, in a scratch folder on the node's T3 Code;
+     `hedge slack-trigger launch`, in a scratch folder on the node's T3 Code;
    - otherwise, with the Boxes workflow of the Hub pack on, on the next box
-     from the pool (`fleet box spawn`);
+     from the pool (`hedge box spawn`);
    - otherwise, in a scratch folder on this machine's T3 Code.
 
    The prompt quotes the Slack thread as data. Only your message is the task,
@@ -83,25 +83,25 @@ sends each event within a second, and no address is public.
    see, with the thread's link on `app.t3.codes`.
 4. A failed launch retries every minute for a day, with the same command ID,
    so T3 starts one thread even when an answer got lost. On a box, the retries
-   go to the same box, and Fleet releases that box when it gives up. On nodes,
+   go to the same box, and Hedge releases that box when it gives up. On nodes,
    a launch retries on the next node only when SSH could not connect, or the
    node's disk was below the start floor. Any other failure, such as a dropped
    connection or a launch that ran past its 300 s limit, retries on the same
    node, because T3 there may have the thread already. You get one ephemeral
    reply about it.
 
-`~/.local/state/fleet/slack/slack-trigger.json` keeps the handled messages for 31
+`~/.local/state/hedge/slack/slack-trigger.json` keeps the handled messages for 31
 days, so each message starts one thread, and the next node in turn, so a
 restart does not start over with the first node. The log is
-`~/.local/state/fleet/jobs/slack-trigger.log`.
+`~/.local/state/hedge/jobs/slack-trigger.log`.
 
 ## Set up the Slack app
 
 Each person makes their own app. Its name, `T3Code - <name>`, comes from your
-Git name, which Fleet sets from your GitHub account.
+Git name, which Hedge sets from your GitHub account.
 
-`fleet setup` walks you through it when you turn on Start a thread from Slack.
-To do it later, or again, run `fleet slack-trigger setup` on the machine that
+`hedge setup` walks you through it when you turn on Start a thread from Slack.
+To do it later, or again, run `hedge slack-trigger setup` on the machine that
 runs the trigger:
 
 1. Open the link it shows. It makes the app from the manifest in your
@@ -112,21 +112,21 @@ runs the trigger:
    approve it.
 4. Copy the **User OAuth Token**, and paste it. It starts with `xoxp-`.
 
-The terminal does not show what you paste. Fleet checks each token with Slack,
+The terminal does not show what you paste. Hedge checks each token with Slack,
 and checks that the user token is yours. Then it saves both tokens in the Slack
-pack's secret store, `~/.config/fleet/secrets/slack/app`, readable only by
+pack's secret store, `~/.config/hedge/secrets/slack/app`, readable only by
 you, and applies your profile, which installs the trigger. A running trigger
 checks the saved app every minute. When it changes, the trigger finishes the
 launches it already started, stops, and the service starts it again with the
-new tokens. `fleet setup --non-interactive` skips this step and lists it as
+new tokens. `hedge setup --non-interactive` skips this step and lists it as
 still needed.
 
-`fleet doctor` lists the setup as a To do until a Slack app that the trigger
+`hedge doctor` lists the setup as a To do until a Slack app that the trigger
 can use is saved. When you remove the saved app, the trigger stops, writes the
 To do once to its log, and waits until a Slack app is saved again. The next
-`fleet apply` removes the trigger.
-`fleet slack-trigger check` checks with Slack that the saved user token is
-yours. `fleet slack-trigger manifest` prints the manifest itself.
+`hedge apply` removes the trigger.
+`hedge slack-trigger check` checks with Slack that the saved user token is
+yours. `hedge slack-trigger manifest` prints the manifest itself.
 
 To mention the app in a channel, invite it there first. Messages and reactions
 work in every channel you are in, without the app.

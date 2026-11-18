@@ -8,7 +8,7 @@ import type { T3Rpc } from "./port.ts";
 
 export const settingsTarget = ".t3/userdata/settings.json";
 export const desktopTarget = ".t3/userdata/desktop-settings.json";
-export const recordTarget = ".config/fleet/t3-settings.json";
+export const recordTarget = ".config/hedge/t3-settings.json";
 
 type Options = { adopt: string[]; dryRun: boolean; outage: boolean; rpc?: T3Rpc };
 
@@ -44,7 +44,7 @@ export async function reconcileSettings(plan: Plan, home: string, options: Optio
       current = before === undefined ? {} : json.decode(before);
     } catch (error) {
       if (old.length) next[target] = old;
-      result.findings.push(finding(`kept:${target}`, `Kept ${target} as it is: Fleet cannot read it (${(error as Error).message}). Fix the file, then run fleet apply.`, "human"));
+      result.findings.push(finding(`kept:${target}`, `Kept ${target} as it is: Hedge cannot read it (${(error as Error).message}). Fix the file, then run hedge apply.`, "human"));
       continue;
     }
     if (target === desktopTarget && current.updateChannelConfiguredByUser === true && current.updateChannel === undefined && !options.adopt.includes(target)) {
@@ -90,11 +90,11 @@ function heldBefore(field: Field, effective: Document): Field[] {
 }
 
 function keptFinding(target: string, merged: Reconciled, result: AdapterResult) {
-  if (merged.kept.length) result.findings.push(finding(`kept:${target}`, `Kept your ${merged.kept.join(", ")} in ${target}. Run fleet apply --adopt ${target} to take Fleet's value.`));
+  if (merged.kept.length) result.findings.push(finding(`kept:${target}`, `Kept your ${merged.kept.join(", ")} in ${target}. Run hedge apply --adopt ${target} to take Hedge's value.`));
 }
 
 async function throughServer(rpc: T3Rpc, merged: Reconciled, effective: Document, dryRun: boolean, result: AdapterResult): Promise<Field[]> {
-  if (merged.removed.length) result.findings.push(finding("t3:dropped", `Fleet no longer sets ${merged.removed.join(", ")} in T3 Code. T3 Code keeps the current value; change it in T3 Code's settings if you like.`));
+  if (merged.removed.length) result.findings.push(finding("t3:dropped", `Hedge no longer sets ${merged.removed.join(", ")} in T3 Code. T3 Code keeps the current value; change it in T3 Code's settings if you like.`));
   const key = (field: Field) => field.path[0]!;
   const changed = merged.applied.filter((field) => !holds(effective[key(field)], field.value));
   if (!changed.length) return [];
@@ -104,6 +104,6 @@ async function throughServer(rpc: T3Rpc, merged: Reconciled, effective: Document
   const missing = changed.filter((field) => !holds(after[key(field)], field.value));
   const taken = changed.filter((field) => !missing.includes(field));
   if (taken.length) result.actions.push({ target: "t3 settings", operation: "replace", reason: `set ${taken.map(key).join(", ")}` });
-  if (missing.length) result.findings.push(finding("t3:settings", `T3 Code did not take ${missing.map(key).join(", ")}. Run fleet apply again; if it stays, set it in T3 Code's settings.`, "apply"));
+  if (missing.length) result.findings.push(finding("t3:settings", `T3 Code did not take ${missing.map(key).join(", ")}. Run hedge apply again; if it stays, set it in T3 Code's settings.`, "apply"));
   return missing;
 }

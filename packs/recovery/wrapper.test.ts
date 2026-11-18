@@ -22,7 +22,7 @@ beforeAll(async () => (engine = await engineSource()));
 const wrapper = join(import.meta.dir, "bin/claude");
 const recorded = join(import.meta.dir, "fixtures/limited-stream.jsonl");
 const key = "cd".repeat(32);
-const fleetKeyHelper = 'cat "$HOME/.config/fleet/cli-proxy.key"';
+const hedgeKeyHelper = 'cat "$HOME/.config/hedge/cli-proxy.key"';
 
 function limitingProxy(retryAfter: string | undefined) {
   const asked: string[] = [];
@@ -58,7 +58,7 @@ describe("the Claude reset wrapper", () => {
     const proxy = limitingProxy("3600");
     const before = Date.now() / 1000;
     const { lines, code } = await runWrapper(["-p", "go", "--output-format", "stream-json", "--model", "claude-test-1"], {
-      HOME: dir, FLEET_CLAUDE_EXECUTABLE: fakeClaude(dir, recorded), ANTHROPIC_BASE_URL: proxy.url, ANTHROPIC_AUTH_TOKEN: key,
+      HOME: dir, HEDGE_CLAUDE_EXECUTABLE: fakeClaude(dir, recorded), ANTHROPIC_BASE_URL: proxy.url, ANTHROPIC_AUTH_TOKEN: key,
     });
     expect(code).toBe(1);
     expect(proxy.asked).toEqual(["/v1/messages/count_tokens claude-test-1"]);
@@ -73,23 +73,23 @@ describe("the Claude reset wrapper", () => {
 
   test("reads the proxy key from the file the proxy route uses", async () => {
     const dir = temp.make("claude-");
-    mkdirSync(join(dir, ".config/fleet"), { recursive: true });
-    writeFileSync(join(dir, ".config/fleet/cli-proxy.key"), `${key}\n`);
+    mkdirSync(join(dir, ".config/hedge"), { recursive: true });
+    writeFileSync(join(dir, ".config/hedge/cli-proxy.key"), `${key}\n`);
     mkdirSync(join(dir, ".claude"), { recursive: true });
     const proxy = limitingProxy("120");
-    writeFileSync(join(dir, ".claude/settings.json"), JSON.stringify({ env: { ANTHROPIC_BASE_URL: proxy.url }, apiKeyHelper: fleetKeyHelper }));
-    const { lines } = await runWrapper(["--output-format=stream-json"], { HOME: dir, FLEET_CLAUDE_EXECUTABLE: fakeClaude(dir, recorded), FLEET_CLI_PROXY_URL: proxy.url });
+    writeFileSync(join(dir, ".claude/settings.json"), JSON.stringify({ env: { ANTHROPIC_BASE_URL: proxy.url }, apiKeyHelper: hedgeKeyHelper }));
+    const { lines } = await runWrapper(["--output-format=stream-json"], { HOME: dir, HEDGE_CLAUDE_EXECUTABLE: fakeClaude(dir, recorded), HEDGE_CLI_PROXY_URL: proxy.url });
     expect(lines.map((line) => (JSON.parse(line) as { type: string }).type)).toContain("rate_limit_event");
   });
 
-  test("sends the Fleet key file only to Fleet's proxy, whatever key helper the settings name", async () => {
+  test("sends the Hedge key file only to Hedge's proxy, whatever key helper the settings name", async () => {
     const dir = temp.make("claude-");
-    mkdirSync(join(dir, ".config/fleet"), { recursive: true });
-    writeFileSync(join(dir, ".config/fleet/cli-proxy.key"), `${key}\n`);
+    mkdirSync(join(dir, ".config/hedge"), { recursive: true });
+    writeFileSync(join(dir, ".config/hedge/cli-proxy.key"), `${key}\n`);
     mkdirSync(join(dir, ".claude"), { recursive: true });
     const other = limitingProxy("120");
-    writeFileSync(join(dir, ".claude/settings.json"), JSON.stringify({ env: { ANTHROPIC_BASE_URL: other.url }, apiKeyHelper: fleetKeyHelper }));
-    const { lines } = await runWrapper(["--output-format", "stream-json", "--settings", '{"apiKeyHelper":"cat ~/.other-key"}'], { HOME: dir, FLEET_CLAUDE_EXECUTABLE: fakeClaude(dir, recorded) });
+    writeFileSync(join(dir, ".claude/settings.json"), JSON.stringify({ env: { ANTHROPIC_BASE_URL: other.url }, apiKeyHelper: hedgeKeyHelper }));
+    const { lines } = await runWrapper(["--output-format", "stream-json", "--settings", '{"apiKeyHelper":"cat ~/.other-key"}'], { HOME: dir, HEDGE_CLAUDE_EXECUTABLE: fakeClaude(dir, recorded) });
     expect(lines).toEqual((await Bun.file(recorded).text()).trim().split("\n"));
     expect(other.asked).toEqual([]);
   });
@@ -110,7 +110,7 @@ describe("the Claude reset wrapper", () => {
     const path = join(dir, "claude");
     writeFileSync(path, "#!/bin/sh\nkill -ABRT $$\n");
     chmodSync(path, 0o755);
-    expect((await runWrapper(["-p", "go"], { HOME: dir, FLEET_CLAUDE_EXECUTABLE: path })).code).toBe(134);
+    expect((await runWrapper(["-p", "go"], { HOME: dir, HEDGE_CLAUDE_EXECUTABLE: path })).code).toBe(134);
   });
 
   test("passes the stream through untouched when Claude knows the reset, the proxy names none, or the output is not a stream", async () => {
@@ -120,11 +120,11 @@ describe("the Claude reset wrapper", () => {
     writeFileSync(native, `{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":${resetsAt}},"session_id":"session-1"}\n${await Bun.file(recorded).text()}`);
     const proxy = limitingProxy(undefined);
     const env = { HOME: dir, ANTHROPIC_BASE_URL: proxy.url, ANTHROPIC_AUTH_TOKEN: key };
-    const knows = await runWrapper(["--output-format", "stream-json"], { ...env, FLEET_CLAUDE_EXECUTABLE: fakeClaude(dir, native) });
+    const knows = await runWrapper(["--output-format", "stream-json"], { ...env, HEDGE_CLAUDE_EXECUTABLE: fakeClaude(dir, native) });
     expect(knows.lines).toEqual((await Bun.file(native).text()).trim().split("\n"));
-    const silent = await runWrapper(["--output-format", "stream-json"], { ...env, FLEET_CLAUDE_EXECUTABLE: fakeClaude(dir, recorded) });
+    const silent = await runWrapper(["--output-format", "stream-json"], { ...env, HEDGE_CLAUDE_EXECUTABLE: fakeClaude(dir, recorded) });
     expect(silent.lines).toEqual((await Bun.file(recorded).text()).trim().split("\n"));
-    const text = await runWrapper(["-p", "go"], { ...env, FLEET_CLAUDE_EXECUTABLE: fakeClaude(dir, recorded, 0) });
+    const text = await runWrapper(["-p", "go"], { ...env, HEDGE_CLAUDE_EXECUTABLE: fakeClaude(dir, recorded, 0) });
     expect([text.code, text.lines]).toEqual([0, (await Bun.file(recorded).text()).trim().split("\n")]);
     expect(proxy.asked).toEqual(["/v1/messages/count_tokens claude-test-1"]);
   });
@@ -147,7 +147,7 @@ async function t3With(providerInstances: Record<string, Instance>) {
   const home = temp.make("home-");
   const lines: string[] = [];
   const run = (mode: string) => claudeWrapperCommand([mode], { home, print: (line) => lines.push(line), session: { home: stub.home } });
-  return { settings, run, lines, wrapperPath: join(home, ".config/fleet/recovery/claude") };
+  return { settings, run, lines, wrapperPath: join(home, ".config/hedge/recovery/claude") };
 }
 
 describe("how the wrapper starts Claude for T3", () => {
@@ -163,7 +163,7 @@ describe("how the wrapper starts Claude for T3", () => {
     const cwd = join(dir, "project");
     mkdirSync(cwd);
     project?.(cwd);
-    const child = Bun.spawn([wrapper, ...args], { cwd, env: { PATH: Bun.env.PATH ?? "", HOME: dir, FLEET_CLAUDE_EXECUTABLE: recordingClaude(dir), ...env }, timeout: 4000 });
+    const child = Bun.spawn([wrapper, ...args], { cwd, env: { PATH: Bun.env.PATH ?? "", HOME: dir, HEDGE_CLAUDE_EXECUTABLE: recordingClaude(dir), ...env }, timeout: 4000 });
     expect(await child.exited).toBe(0);
     const argv = readFileSync(join(dir, "argv"), "utf8").trimEnd().split("\n");
     const settingsAt = argv.indexOf("--settings");
@@ -211,7 +211,7 @@ describe("how the wrapper starts Claude for T3", () => {
   });
 });
 
-describe("fleet claude-wrapper", () => {
+describe("hedge claude-wrapper", () => {
   test("binds T3's default Claude to the wrapper and keeps the instance's other config", async () => {
     const t3 = await t3With({
       claudeAgent: { driver: "claudeAgent", displayName: "Claude", config: { binaryPath: "", customModels: ["claude-test-1"] } },
@@ -232,16 +232,16 @@ describe("fleet claude-wrapper", () => {
     expect(statSync(t3.wrapperPath).mode & 0o111).not.toBe(0);
     const dir = temp.make("claude-");
     const passThrough = [0, (await Bun.file(recorded).text()).trim().split("\n")];
-    const ran = await runWrapper(["-p", "go"], { HOME: dir, FLEET_CLAUDE_EXECUTABLE: fakeClaude(dir, recorded, 0) }, t3.wrapperPath);
+    const ran = await runWrapper(["-p", "go"], { HOME: dir, HEDGE_CLAUDE_EXECUTABLE: fakeClaude(dir, recorded, 0) }, t3.wrapperPath);
     expect([ran.code, ran.lines]).toEqual(passThrough);
     for (const spoil of [() => writeFileSync(join(t3.wrapperPath, "../claude-reset.ts"), "old"), () => chmodSync(t3.wrapperPath, 0o644)]) {
       spoil();
       expect(await t3.run("check")).toBe(1);
-      expect(t3.lines).toContain("Fleet's Claude wrapper is missing or out of date. Run fleet apply.");
+      expect(t3.lines).toContain("Hedge's Claude wrapper is missing or out of date. Run hedge apply.");
       expect(await t3.run("bind")).toBe(0);
       expect(await t3.run("check")).toBe(0);
     }
-    const repaired = await runWrapper(["-p", "go"], { HOME: dir, FLEET_CLAUDE_EXECUTABLE: fakeClaude(dir, recorded, 0) }, t3.wrapperPath);
+    const repaired = await runWrapper(["-p", "go"], { HOME: dir, HEDGE_CLAUDE_EXECUTABLE: fakeClaude(dir, recorded, 0) }, t3.wrapperPath);
     expect([repaired.code, repaired.lines]).toEqual(passThrough);
   });
 
@@ -268,7 +268,7 @@ describe("fleet claude-wrapper", () => {
   test("is part of provider recovery for Claude plans", () => {
     const sources = () => [engine, ...skillSources(temp.make("skills-"), engine)];
     const plan = resolveEngine(sources(), { packs: ["hub", "recovery"], workflows: { "provider-recovery": true } }, devbox);
-    expect(plan.steps).toContainEqual(expect.objectContaining({ id: "claude-wrapper", run: ["fleet", "claude-wrapper", "bind"], check: ["fleet", "claude-wrapper", "check"] }));
+    expect(plan.steps).toContainEqual(expect.objectContaining({ id: "claude-wrapper", run: ["hedge", "claude-wrapper", "bind"], check: ["hedge", "claude-wrapper", "check"] }));
     const codex = resolveEngine(sources(), { packs: ["hub", "recovery"], workflows: { "provider-recovery": true }, plan: "codex" }, devbox);
     expect(codex.steps.some((step) => step.id === "claude-wrapper")).toBe(false);
   });

@@ -10,7 +10,7 @@ afterEach(() => temp.cleanup());
 
 function mac(fields: Partial<MacTunnel> & { loaded?: boolean; healthy?: number } = {}) {
   const { loaded = false, healthy = 1, ...overrides } = fields;
-  const home = fields.home ?? temp.make("fleet-mac-");
+  const home = fields.home ?? temp.make("hedge-mac-");
   const launchd = { running: loaded ? readIfThere(agent(home)) ?? "an agent loaded before" : undefined, starts: 0 };
   const target = `gui/501/${tunnelLabel}`;
   const fake = fakeRun((command) => {
@@ -46,28 +46,28 @@ function readIfThere(path: string) {
 const forwards = (plist: string | undefined) => [...(plist ?? "").matchAll(/<string>127\.0\.0\.1:(\d+):\d+<\/string>/g)].map((match) => Number(match[1]));
 
 test("the Mac's launch agent forwards only the MCP gateway port and the relay port from the hub, and never a proxy port", () => {
-  const plist = agentPlist("/opt/bin/coder", "my-hub", [3317, 60002], "/Users/me/Library/Logs/fleet-hub-tunnel.log");
+  const plist = agentPlist("/opt/bin/coder", "my-hub", [3317, 60002], "/Users/me/Library/Logs/hedge-hub-tunnel.log");
   const args = [...plist.matchAll(/<string>([^<]*)<\/string>/g)].map((match) => match[1]);
-  expect(args).toEqual([tunnelLabel, "/opt/bin/coder", "port-forward", "my-hub", "--tcp", "127.0.0.1:3317:3317", "--tcp", "127.0.0.1:60002:60002", "--disable-autostart", "/Users/me/Library/Logs/fleet-hub-tunnel.log", "/Users/me/Library/Logs/fleet-hub-tunnel.log"]);
+  expect(args).toEqual([tunnelLabel, "/opt/bin/coder", "port-forward", "my-hub", "--tcp", "127.0.0.1:3317:3317", "--tcp", "127.0.0.1:60002:60002", "--disable-autostart", "/Users/me/Library/Logs/hedge-hub-tunnel.log", "/Users/me/Library/Logs/hedge-hub-tunnel.log"]);
   expect(plist).toContain("<key>KeepAlive</key>\n  <true/>");
   expect(plist).not.toContain("8317");
   expect(agentPlist("/odd&<path>/coder", "my-hub", [3317, 60002], "/log")).toContain("<string>/odd&amp;&lt;path&gt;/coder</string>");
 });
 
-test("the agent's label is not one of the engine's job labels, so fleet apply never removes it as a stale job", () => {
-  expect(tunnelLabel.startsWith("dev.fleet.")).toBe(false);
+test("the agent's label is not one of the engine's job labels, so hedge apply never removes it as a stale job", () => {
+  expect(tunnelLabel.startsWith("dev.hedge.")).toBe(false);
 });
 
 test("install writes the agent with mode 600, loads it, points the gateway key at the tunnel, and waits for the gateway on the injected clock", async () => {
   const { deps, home, launchd, slept, printed } = mac({ healthy: 3 });
-  mkdirSync(join(home, ".config/fleet"), { recursive: true });
-  writeFileSync(join(home, ".config/fleet/mcphub.client.json"), JSON.stringify({ baseUrl: "https://hub.internal.example.com:60002/mcphub", token: "secret_token" }));
+  mkdirSync(join(home, ".config/hedge"), { recursive: true });
+  writeFileSync(join(home, ".config/hedge/mcphub.client.json"), JSON.stringify({ baseUrl: "https://hub.internal.example.com:60002/mcphub", token: "secret_token" }));
   expect(await hubTunnel("install", deps)).toBe(0);
-  expect(readFileSync(agent(home), "utf8")).toBe(agentPlist("/opt/bin/coder", "my-hub", [3317, 60002], join(home, "Library/Logs/fleet-hub-tunnel.log")));
+  expect(readFileSync(agent(home), "utf8")).toBe(agentPlist("/opt/bin/coder", "my-hub", [3317, 60002], join(home, "Library/Logs/hedge-hub-tunnel.log")));
   expect(modeOf(statSync(agent(home)))).toBe("600");
   expect(launchd.running).toBe(readFileSync(agent(home), "utf8"));
-  expect(JSON.parse(readFileSync(join(home, ".config/fleet/mcphub.client.json"), "utf8"))).toEqual({ baseUrl: "http://127.0.0.1:3317/mcphub", token: "secret_token" });
-  expect(modeOf(statSync(join(home, ".config/fleet/mcphub.client.json")))).toBe("600");
+  expect(JSON.parse(readFileSync(join(home, ".config/hedge/mcphub.client.json"), "utf8"))).toEqual({ baseUrl: "http://127.0.0.1:3317/mcphub", token: "secret_token" });
+  expect(modeOf(statSync(join(home, ".config/hedge/mcphub.client.json")))).toBe("600");
   expect(slept).toEqual([1000, 1000]);
   expect(printed.join("\n")).not.toContain("secret_token");
   expect(printed.at(-1)).toBe("Hub tunnel: forwards 127.0.0.1:3317 and 127.0.0.1:60002 to my-hub from login.");
@@ -91,7 +91,7 @@ test("the doctor fails with what to run when the gateway never answers through t
   const down = mac({ home, loaded: true, healthy: 99 });
   await expect(hubTunnel("doctor", down.deps)).rejects.toThrow("127.0.0.1:3317 does not reach the MCP gateway on my-hub");
   expect(down.slept).toHaveLength(9);
-  await expect(hubTunnel("doctor", mac().deps)).rejects.toThrow("Run fleet hub-tunnel install");
+  await expect(hubTunnel("doctor", mac().deps)).rejects.toThrow("Run hedge hub-tunnel install");
 });
 
 test("install refuses off a Mac, as root, without the Coder CLI, and with a bad hub name", async () => {
@@ -101,14 +101,14 @@ test("install refuses off a Mac, as root, without the Coder CLI, and with a bad 
   await expect(hubTunnel("install", mac({ alias: "-bad" }).deps)).rejects.toThrow("hub.alias");
 });
 
-test("install keeps a linked agent path and an agent Fleet did not write", async () => {
-  const home = temp.make("fleet-mac-");
-  const elsewhere = temp.make("fleet-elsewhere-");
+test("install keeps a linked agent path and an agent Hedge did not write", async () => {
+  const home = temp.make("hedge-mac-");
+  const elsewhere = temp.make("hedge-elsewhere-");
   mkdirSync(join(home, "Library"), { recursive: true });
   symlinkSync(elsewhere, join(home, "Library/LaunchAgents"));
   await expect(hubTunnel("install", mac({ home }).deps)).rejects.toThrow("Keep linked hub tunnel path");
   expect(existsSync(join(elsewhere, `${tunnelLabel}.plist`))).toBe(false);
-  const other = temp.make("fleet-mac-");
+  const other = temp.make("hedge-mac-");
   mkdirSync(join(other, "Library/LaunchAgents"), { recursive: true });
   writeFileSync(agent(other), "<plist>someone else's</plist>");
   await expect(hubTunnel("install", mac({ home: other }).deps)).rejects.toThrow("Keep unmanaged hub tunnel file");
@@ -117,7 +117,7 @@ test("install keeps a linked agent path and an agent Fleet did not write", async
 test("remove unloads and deletes the agent, and plan changes nothing", async () => {
   const { deps, home } = mac();
   await hubTunnel("install", deps);
-  const plan = mac({ home: temp.make("fleet-mac-") });
+  const plan = mac({ home: temp.make("hedge-mac-") });
   expect(await hubTunnel("plan", plan.deps)).toBe(0);
   expect(plan.launchd.running).toBeUndefined();
   expect(existsSync(join(plan.home, "Library"))).toBe(false);
@@ -127,16 +127,16 @@ test("remove unloads and deletes the agent, and plan changes nothing", async () 
   expect(existsSync(agent(home))).toBe(false);
 });
 
-test("remove keeps a linked LaunchAgents folder and an agent Fleet did not write, and unloads nothing", async () => {
-  const home = temp.make("fleet-mac-");
-  const elsewhere = temp.make("fleet-elsewhere-");
+test("remove keeps a linked LaunchAgents folder and an agent Hedge did not write, and unloads nothing", async () => {
+  const home = temp.make("hedge-mac-");
+  const elsewhere = temp.make("hedge-elsewhere-");
   writeFileSync(join(elsewhere, `${tunnelLabel}.plist`), agentPlist("/opt/bin/coder", "my-hub", [3317, 60002], "/log"));
   mkdirSync(join(home, "Library"), { recursive: true });
   symlinkSync(elsewhere, join(home, "Library/LaunchAgents"));
   const linked = mac({ home, loaded: true });
   await expect(hubTunnel("remove", linked.deps)).rejects.toThrow("Keep linked hub tunnel path");
   expect(existsSync(join(elsewhere, `${tunnelLabel}.plist`))).toBe(true);
-  const other = temp.make("fleet-mac-");
+  const other = temp.make("hedge-mac-");
   mkdirSync(join(other, "Library/LaunchAgents"), { recursive: true });
   writeFileSync(agent(other), `<plist><string>${tunnelLabel}</string></plist>`);
   const unmanaged = mac({ home: other, loaded: true });
@@ -145,12 +145,12 @@ test("remove keeps a linked LaunchAgents folder and an agent Fleet did not write
   expect([linked.launchd.running, unmanaged.launchd.running]).toEqual([readFileSync(join(elsewhere, `${tunnelLabel}.plist`), "utf8"), readFileSync(agent(other), "utf8")]);
 });
 
-test("the agent carries its ownership mark as a comment right after the XML declaration, and a plist that only quotes the label elsewhere is not Fleet's", async () => {
+test("the agent carries its ownership mark as a comment right after the XML declaration, and a plist that only quotes the label elsewhere is not Hedge's", async () => {
   const plist = agentPlist("/opt/bin/coder", "my-hub", [3317, 60002], "/log");
-  expect(plist.split("\n").slice(0, 2)).toEqual([`<?xml version="1.0" encoding="UTF-8"?>`, "<!-- Managed by Fleet hub tunnel. -->"]);
-  const home = temp.make("fleet-mac-");
+  expect(plist.split("\n").slice(0, 2)).toEqual([`<?xml version="1.0" encoding="UTF-8"?>`, "<!-- Managed by Hedge hub tunnel. -->"]);
+  const home = temp.make("hedge-mac-");
   mkdirSync(join(home, "Library/LaunchAgents"), { recursive: true });
-  const quoting = plist.replace("<!-- Managed by Fleet hub tunnel. -->\n", "").replace("</dict>", "  <key>Comment</key>\n  <string><!-- Managed by Fleet hub tunnel. --></string>\n</dict>");
+  const quoting = plist.replace("<!-- Managed by Hedge hub tunnel. -->\n", "").replace("</dict>", "  <key>Comment</key>\n  <string><!-- Managed by Hedge hub tunnel. --></string>\n</dict>");
   writeFileSync(agent(home), quoting);
   await expect(hubTunnel("install", mac({ home }).deps)).rejects.toThrow("Keep unmanaged hub tunnel file");
 });
@@ -160,7 +160,7 @@ test("the doctor fails when the owned agent differs from what install writes now
   await hubTunnel("install", deps);
   expect(await hubTunnel("doctor", mac({ home, loaded: true }).deps)).toBe(0);
   await expect(hubTunnel("doctor", mac({ home, loaded: true, relayPort: 60003 }).deps)).rejects.toThrow(agent(home));
-  await expect(hubTunnel("doctor", mac({ home, loaded: true, alias: "new-hub" }).deps)).rejects.toThrow("Run fleet hub-tunnel install");
+  await expect(hubTunnel("doctor", mac({ home, loaded: true, alias: "new-hub" }).deps)).rejects.toThrow("Run hedge hub-tunnel install");
   await expect(hubTunnel("doctor", mac({ home, loaded: true, coder: "/usr/local/bin/coder" }).deps)).rejects.toThrow(agent(home));
 });
 
@@ -175,12 +175,12 @@ test("a hub named by its Coder SSH name, as coder config-ssh writes it, forwards
 
 test("with hub HTTPS and without the MCP gateway the agent forwards only the relay port, and asks the gateway nothing", async () => {
   const { deps, home, launchd, printed } = mac({ gateway: false, healthy: 99 });
-  mkdirSync(join(home, ".config/fleet"), { recursive: true });
+  mkdirSync(join(home, ".config/hedge"), { recursive: true });
   const client = JSON.stringify({ baseUrl: "https://hub.internal.example.com:60002/mcphub", token: "secret_token" });
-  writeFileSync(join(home, ".config/fleet/mcphub.client.json"), client);
+  writeFileSync(join(home, ".config/hedge/mcphub.client.json"), client);
   expect(await hubTunnel("install", deps)).toBe(0);
   expect(forwards(launchd.running)).toEqual([60002]);
-  expect(readFileSync(join(home, ".config/fleet/mcphub.client.json"), "utf8")).toBe(client);
+  expect(readFileSync(join(home, ".config/hedge/mcphub.client.json"), "utf8")).toBe(client);
   expect(printed.at(-1)).toBe("Hub tunnel: forwards 127.0.0.1:60002 to my-hub from login.");
   expect(await hubTunnel("doctor", mac({ home, loaded: true, gateway: false, healthy: 99 }).deps)).toBe(0);
 });
@@ -194,11 +194,11 @@ test("with the MCP gateway and without hub HTTPS the agent forwards only the gat
 
 const notNeeded = "Hub tunnel: not needed. The MCP gateway is off and hub.httpsHost is empty, so this Mac forwards nothing to the hub.";
 
-test("without the MCP gateway or hub HTTPS the doctor fails while Fleet's agent is still there, and install takes it away", async () => {
+test("without the MCP gateway or hub HTTPS the doctor fails while Hedge's agent is still there, and install takes it away", async () => {
   const { deps, home } = mac();
   await hubTunnel("install", deps);
   const off = { gateway: false, httpsHost: undefined };
-  await expect(hubTunnel("doctor", mac({ home, loaded: true, ...off }).deps)).rejects.toThrow("The hub tunnel should go. The MCP gateway is off and hub.httpsHost is empty, so this Mac forwards nothing to the hub. Run fleet hub-tunnel install to remove it.");
+  await expect(hubTunnel("doctor", mac({ home, loaded: true, ...off }).deps)).rejects.toThrow("The hub tunnel should go. The MCP gateway is off and hub.httpsHost is empty, so this Mac forwards nothing to the hub. Run hedge hub-tunnel install to remove it.");
   const removing = mac({ home, loaded: true, ...off });
   expect(await hubTunnel("install", removing.deps)).toBe(0);
   expect(existsSync(agent(home))).toBe(false);
@@ -226,17 +226,17 @@ test("without the MCP gateway or hub HTTPS a Mac that never had the agent passes
 });
 
 async function hubTunnelCommand(profile: Record<string, unknown>, settings: Record<string, unknown> = {}) {
-  const dir = temp.make("fleet-profile-");
-  writeFileSync(join(dir, "fleet.json"), JSON.stringify({ schema: 1, packs: ["hub"], workflows: {}, ...profile }));
+  const dir = temp.make("hedge-profile-");
+  writeFileSync(join(dir, "hedge.json"), JSON.stringify({ schema: 1, packs: ["hub"], workflows: {}, ...profile }));
   const child = Bun.spawn(["bun", join(import.meta.dir, "../commands/hub-tunnel.ts"), "doctor"], {
-    env: { ...Bun.env, HOME: temp.make("fleet-mac-"), FLEET_PROFILE_DIR: dir, FLEET_SETTINGS: JSON.stringify({ "hub.alias": "coder.my-hub", "hub.relayPort": 60002, ...settings }) },
+    env: { ...Bun.env, HOME: temp.make("hedge-mac-"), HEDGE_PROFILE_DIR: dir, HEDGE_SETTINGS: JSON.stringify({ "hub.alias": "coder.my-hub", "hub.relayPort": 60002, ...settings }) },
     stdout: "pipe", stderr: "pipe",
   });
   const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
   return { code, output: `${stdout}${stderr}` };
 }
 
-test("fleet hub-tunnel reads from the profile whether the MCP gateway is on, which a profile with the Hub pack carries until its workflow is off, and from hub.httpsHost whether the relay is needed", async () => {
+test("hedge hub-tunnel reads from the profile whether the MCP gateway is on, which a profile with the Hub pack carries until its workflow is off, and from hub.httpsHost whether the relay is needed", async () => {
   const nothing = { code: 0, output: `${notNeeded}\n` };
   const tunnel = process.platform === "darwin" ? "hub tunnel" : "Only a Mac opens its own hub tunnel";
   expect(await hubTunnelCommand({ workflows: { "mcp-gateway": false } })).toEqual(nothing);
@@ -251,7 +251,7 @@ test("fleet hub-tunnel reads from the profile whether the MCP gateway is on, whi
   expect(relay.output).toContain(tunnel);
 });
 
-test("left reports a launch agent Fleet wrote or one that is loaded, and nothing once remove took it away", async () => {
+test("left reports a launch agent Hedge wrote or one that is loaded, and nothing once remove took it away", async () => {
   const { deps, home } = mac();
   await hubTunnel("install", deps);
   expect(await hubTunnel("left", deps)).toBe(0);

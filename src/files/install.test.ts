@@ -6,7 +6,7 @@ import { install, plan } from "./install.ts";
 
 const temporary: string[] = [];
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), "fleet-install-"));
+  const root = await mkdtemp(join(tmpdir(), "hedge-install-"));
   temporary.push(root);
   const home = join(root, "home");
   await mkdir(home);
@@ -37,7 +37,7 @@ test("one unmanaged conflict stops every target change", async () => {
   await expect(install(home, files)).rejects.toThrow("existing");
   expect(await readFile(join(home, "existing"), "utf8")).toBe("personal");
   await expect(lstat(join(home, "new"))).rejects.toThrow();
-  await expect(lstat(join(home, ".local/state/fleet/state.json"))).rejects.toThrow();
+  await expect(lstat(join(home, ".local/state/hedge/state.json"))).rejects.toThrow();
 });
 
 test("explicit adoption preserves the full replaced directory in a backup", async () => {
@@ -96,10 +96,10 @@ test("path traversal and linked parent directories cannot receive configuration"
   expect(await readFile(join(home, ".config/settings"), "utf8")).toBe("shared");
 });
 
-test("a folder link that Fleet installed gives way to the files it now writes inside it", async () => {
+test("a folder link that Hedge installed gives way to the files it now writes inside it", async () => {
   const { home, source } = await fixture();
-  await install(home, [{ target: "guides", source }], "fleet");
-  const result = await install(home, [{ target: "guides/new.md", content: "new guide" }], "fleet");
+  await install(home, [{ target: "guides", source }], "hedge");
+  const result = await install(home, [{ target: "guides/new.md", content: "new guide" }], "hedge");
   expect(await readFile(join(home, "guides/new.md"), "utf8")).toBe("new guide");
   expect(await readlink(join(result.backupRoot!, "guides"))).toBe(source);
   expect(await readFile(join(source, "SKILL.md"), "utf8")).toBe("A shared skill.\n");
@@ -112,11 +112,11 @@ test("adopting a file never moves a linked folder that holds another setup's fil
   await writeFile(join(outside, "other.md"), "theirs");
   await symlink(outside, join(home, "guides"));
   await install(home, [{ target: "kept", content: "core" }], "core");
-  const state = join(home, ".local/state/fleet/state.json");
+  const state = join(home, ".local/state/hedge/state.json");
   const owned = JSON.parse(await readFile(state, "utf8"));
   owned.groups.core["guides/other.md"] = { kind: "file", hash: owned.groups.core.kept.hash };
   await writeFile(state, JSON.stringify(owned));
-  await expect(install(home, [{ target: "guides/new.md", content: "new" }], "fleet", { adopt: ["guides/new.md"] })).rejects.toThrow("Resolve, adopt, or skip: guides/new.md");
+  await expect(install(home, [{ target: "guides/new.md", content: "new" }], "hedge", { adopt: ["guides/new.md"] })).rejects.toThrow("Resolve, adopt, or skip: guides/new.md");
   expect(await readlink(join(home, "guides"))).toBe(outside);
 });
 
@@ -127,14 +127,14 @@ test("taking over a setup that owns a file inside a linked folder moves that fol
   await writeFile(join(outside, "other.md"), "theirs");
   await symlink(outside, join(home, "guides"));
   await install(home, [{ target: "kept", content: "core" }], "core");
-  const state = join(home, ".local/state/fleet/state.json");
+  const state = join(home, ".local/state/hedge/state.json");
   const owned = JSON.parse(await readFile(state, "utf8"));
   owned.groups.core["guides/other.md"] = { kind: "file", hash: owned.groups.core.kept.hash };
   await writeFile(state, JSON.stringify(owned));
-  const result = await install(home, [{ target: "guides/new.md", content: "new" }], "fleet", { release: ["core"] });
+  const result = await install(home, [{ target: "guides/new.md", content: "new" }], "hedge", { release: ["core"] });
   expect(await readFile(join(home, "guides/new.md"), "utf8")).toBe("new");
   expect(await readlink(join(result.backupRoot!, "guides"))).toBe(outside);
-  expect(Object.keys(JSON.parse(await readFile(state, "utf8")).groups)).toEqual(["fleet"]);
+  expect(Object.keys(JSON.parse(await readFile(state, "utf8")).groups)).toEqual(["hedge"]);
 });
 
 test("a failed adoption puts a linked folder it moved aside back", async () => {
@@ -153,7 +153,7 @@ test("a failed adoption puts a linked folder it moved aside back", async () => {
 test("an operation failure rolls back earlier changes and keeps ownership state", async () => {
   const { home } = await fixture();
   await install(home, [{ target: "settings", content: "original" }]);
-  const state = join(home, ".local/state/fleet/state.json");
+  const state = join(home, ".local/state/hedge/state.json");
   const before = await readFile(state, "utf8");
   // A missing parent passes inspection. Creating the long filename then fails.
   await expect(install(home, [
@@ -167,12 +167,12 @@ test("an operation failure rolls back earlier changes and keeps ownership state"
 });
 
 
-test("managed targets cannot replace Fleet state through ancestors or aliases", async () => {
+test("managed targets cannot replace Hedge state through ancestors or aliases", async () => {
   const { home } = await fixture();
   await install(home, [{ target: "settings", content: "original" }]);
-  const state = join(home, ".local/state/fleet/state.json");
+  const state = join(home, ".local/state/hedge/state.json");
   const before = await readFile(state, "utf8");
-  for (const target of [".local", ".local/state", ".local/state/fleet", ".local/state/./fleet/state.json"]) {
+  for (const target of [".local", ".local/state", ".local/state/hedge", ".local/state/./hedge/state.json"]) {
     await expect(install(home, [
       { target: "settings", content: "updated" },
       { target, content: "would replace state" },

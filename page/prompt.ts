@@ -4,8 +4,8 @@ export const fmt = (text: string) => esc(text).replace(/`([^`]+)`/g, "<code>$1</
 
 export const t3Link = (prompt: string) => `https://app.t3.codes/new?prompt=${encodeURIComponent(prompt)}`;
 
-const pickLine = /^(- [^:]+: |Add th(?:is|ese) Fleet packs? to my setup with me: )(.*)$/;
-const commandLine = /^( +)(fleet packs --add .*)$/;
+const pickLine = /^(- [^:]+: |Add th(?:is|ese) Hedge packs? to my setup with me: )(.*)$/;
+const commandLine = /^( +)(hedge packs --add .*)$/;
 
 export function promptHtml(text: string, before: string[] = []) {
   return text

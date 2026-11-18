@@ -36,7 +36,7 @@
     },
     {
       "key": "guards.merge-gate-exempt",
-      "question": "Which GitHub repositories may agents merge without a fleet proof gate pass, as owner/name or owner/* separated by commas?",
+      "question": "Which GitHub repositories may agents merge without a hedge proof gate pass, as owner/name or owner/* separated by commas?",
       "type": "string",
       "optional": true,
       "ask": "never"
@@ -68,7 +68,7 @@
       "needs": [
         "gh"
       ],
-      "sentence": "An agent's Trunk enqueue or merge of a pull request waits until fleet proof gate passed at the head of each open layer of its stack, or you overrode the gate for that head.",
+      "sentence": "An agent's Trunk enqueue or merge of a pull request waits until hedge proof gate passed at the head of each open layer of its stack, or you overrode the gate for that head.",
       "risk": "An enqueue or merge waits up to 15 seconds while the gate reads GitHub and the decision ledger, and it is refused when either cannot be read. Repositories in guards.merge-gate-exempt skip the gate.",
       "settings": [
         "guards.merge-gate-exempt"
@@ -110,23 +110,23 @@
       "needs": [
         "gh"
       ],
-      "sentence": "Fleet installs GitHub's gh stack extension at a pinned version with a checked digest, and the push guard counts the branches a gh stack push sends."
+      "sentence": "Hedge installs GitHub's gh stack extension at a pinned version with a checked digest, and the push guard counts the branches a gh stack push sends."
     }
   ],
   "files": [
     {
       "path": "hooks/guards.ts",
-      "target": ".config/fleet/hooks/PreToolUse/guards.ts",
+      "target": ".config/hedge/hooks/PreToolUse/guards.ts",
       "workflow": "shell-guards"
     },
     {
       "path": "hooks/merge-gate.ts",
-      "target": ".config/fleet/hooks/PreToolUse/merge-gate.ts",
+      "target": ".config/hedge/hooks/PreToolUse/merge-gate.ts",
       "workflow": "merge-gate"
     },
     {
       "path": "system/t3-agent-scope-oom.conf",
-      "target": ".config/systemd/user/t3code-.scope.d/90-fleet-oom.conf",
+      "target": ".config/systemd/user/t3code-.scope.d/90-hedge-oom.conf",
       "on": [
         "linux"
       ],
@@ -134,7 +134,7 @@
     },
     {
       "path": "system/earlyoom.sh",
-      "target": ".local/share/fleet/guards/earlyoom.sh",
+      "target": ".local/share/hedge/guards/earlyoom.sh",
       "on": [
         "linux"
       ],
@@ -142,7 +142,7 @@
     },
     {
       "path": "system/install-gh-stack.sh",
-      "target": ".local/share/fleet/guards/install-gh-stack.sh",
+      "target": ".local/share/hedge/guards/install-gh-stack.sh",
       "workflow": "gh-stack"
     }
   ],
@@ -153,22 +153,22 @@
       "on": [
         "linux"
       ],
-      "say": "Install the signed Git allowlist as root. Fleet stages the list that verifies against guards.signers, and the root script checks the signature again before it writes /etc/fleet, the blocked-remote helper and the include in /etc/gitconfig.",
-      "command": "fleet guards allowlist stage ~/.local/state/fleet/git-allowlist && sudo sh ~/.local/state/fleet/git-allowlist/install.sh",
+      "say": "Install the signed Git allowlist as root. Hedge stages the list that verifies against guards.signers, and the root script checks the signature again before it writes /etc/hedge, the blocked-remote helper and the include in /etc/gitconfig.",
+      "command": "hedge guards allowlist stage ~/.local/state/hedge/git-allowlist && sudo sh ~/.local/state/hedge/git-allowlist/install.sh",
       "probe": [
-        "fleet",
+        "hedge",
         "guards",
         "allowlist",
         "--check"
       ],
       "left": [
-        "fleet",
+        "hedge",
         "guards",
         "allowlist",
         "--left"
       ],
       "interactive": true,
-      "undo": "Remove the Git allowlist as root: sudo sh ~/.local/state/fleet/git-allowlist/install.sh remove"
+      "undo": "Remove the Git allowlist as root: sudo sh ~/.local/state/hedge/git-allowlist/install.sh remove"
     },
     {
       "id": "earlyoom",
@@ -177,11 +177,11 @@
         "linux"
       ],
       "say": "Install earlyoom as root, so it stops a test or build at 10% free memory before T3 or the agents. It keeps an earlyoom config you wrote yourself.",
-      "command": "sudo sh ~/.local/share/fleet/guards/earlyoom.sh",
+      "command": "sudo sh ~/.local/share/hedge/guards/earlyoom.sh",
       "probe": [
         "sh",
         "-c",
-        "sh \"$HOME/.local/share/fleet/guards/earlyoom.sh\" --check"
+        "sh \"$HOME/.local/share/hedge/guards/earlyoom.sh\" --check"
       ],
       "interactive": true
     }
@@ -192,23 +192,23 @@
       "run": [
         "sh",
         "-c",
-        "sh \"$HOME/.local/share/fleet/guards/install-gh-stack.sh\""
+        "sh \"$HOME/.local/share/hedge/guards/install-gh-stack.sh\""
       ],
       "check": [
         "sh",
         "-c",
-        "sh \"$HOME/.local/share/fleet/guards/install-gh-stack.sh\" --check"
+        "sh \"$HOME/.local/share/hedge/guards/install-gh-stack.sh\" --check"
       ],
       "workflow": "gh-stack"
     },
     {
       "id": "package-age",
       "run": [
-        "fleet",
+        "hedge",
         "package-age"
       ],
       "check": [
-        "fleet",
+        "hedge",
         "package-age",
         "--check"
       ],

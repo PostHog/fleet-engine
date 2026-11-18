@@ -15,7 +15,7 @@ function tempDir(prefix: string) {
 }
 
 async function install(os: string, machine: string) {
-  const bin = tempDir("fleet-gitleaks-bin-");
+  const bin = tempDir("hedge-gitleaks-bin-");
   const tools: Record<string, string> = {
     uname: `[ "$1" = -s ] && echo ${os} || echo ${machine}`,
     curl: `while [ $# -gt 0 ]; do [ "$1" = -o ] && echo tampered > "$2"; shift; done`,
@@ -24,7 +24,7 @@ async function install(os: string, machine: string) {
     writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`);
     chmodSync(join(bin, name), 0o755);
   }
-  const target = join(tempDir("fleet-gitleaks-target-"), "bin");
+  const target = join(tempDir("hedge-gitleaks-target-"), "bin");
   const child = await spawnAsync(["sh", script, target], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
   return { code: child.exitCode, error: child.stderr, installed: existsSync(join(target, "gitleaks")) };
 }

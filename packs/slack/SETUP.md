@@ -24,7 +24,7 @@ and the Slack app step below runs on the hub.
       first line that this command prints:
 
       ```sh
-      fleet slack-trigger manifest
+      hedge slack-trigger manifest
       ```
 
       Give them the link, and ask them to pick their workspace and create
@@ -39,15 +39,15 @@ and the Slack app step below runs on the hub.
       first:
 
       ```sh
-      printf '%s\n%s\n' "$(cat <app token file>)" "$(cat <user token file>)" | fleet slack-trigger setup
+      printf '%s\n%s\n' "$(cat <app token file>)" "$(cat <user token file>)" | hedge slack-trigger setup
       ```
 
    With a hub, run both commands on the hub instead, after the hub's
-   `fleet update`:
+   `hedge update`:
 
    ```sh
-   ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; fleet slack-trigger manifest'
-   printf '%s\n%s\n' "$(cat <app token file>)" "$(cat <user token file>)" | ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; fleet slack-trigger setup'
+   ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge slack-trigger manifest'
+   printf '%s\n%s\n' "$(cat <app token file>)" "$(cat <user token file>)" | ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge slack-trigger setup'
    ```
 
    It checks each token with Slack, and keeps them where only they can
@@ -55,7 +55,7 @@ and the Slack app step below runs on the hub.
    with code 130 without saving either. Ask for that token again, and give
    both to setup again.
 
-   Without a secret prompt, run `fleet slack-trigger setup` in a Terminal
+   Without a secret prompt, run `hedge slack-trigger setup` in a Terminal
    window instead, as `ssh -t coder.<hub>` with a hub. It gives the link and
    asks for both tokens itself.
 

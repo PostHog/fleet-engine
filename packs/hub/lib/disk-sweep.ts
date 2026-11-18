@@ -13,7 +13,7 @@ const duMinutes = 5;
 const largestCount = 10;
 const megabyte = 1024 ** 2;
 const alertInodeShare = 0.05;
-const usage = "Usage: fleet disk-sweep [--dry-run] [--floor <gigabytes>] [--alert-floor <gigabytes>]";
+const usage = "Usage: hedge disk-sweep [--dry-run] [--floor <gigabytes>] [--alert-floor <gigabytes>]";
 
 type Trim = { path: string; limitBytes: number; keepBytes: number };
 
@@ -32,9 +32,9 @@ export type DiskSweepOptions = {
 };
 
 export function sweepCleaners(home: string, env: Env): Cleaner[] {
-  const launcher = join(env.FLEET_ENGINE_DIR ?? join(home, ".local/share/fleet/engine"), "fleet");
+  const launcher = join(env.HEDGE_ENGINE_DIR ?? join(home, ".local/share/hedge/engine"), "hedge");
   return [
-    { name: "fleet prune", tool: launcher, argv: ["sh", launcher, "prune"] },
+    { name: "hedge prune", tool: launcher, argv: ["sh", launcher, "prune"] },
     { name: "trim the T3 boot log", trim: { path: join(home, ".t3/userdata/logs/boot-service.log"), limitBytes: 100 * megabyte, keepBytes: 20 * megabyte } },
     { name: "pnpm store prune", tool: "pnpm", argv: ["pnpm", "store", "prune"] },
     { name: "uv cache prune", tool: "uv", argv: ["uv", "cache", "prune"] },

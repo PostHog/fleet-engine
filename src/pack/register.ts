@@ -1,4 +1,4 @@
-import type { Fleet, Pack, Scope as SdkScope, Setting } from "../sdk/index.ts";
+import type { Hedge, Pack, Scope as SdkScope, Setting } from "../sdk/index.ts";
 import type { ConfigEntry, HumanStep, PackCode, PackJob, PackSetting, Scope, ServedService, Workflow } from "./types.ts";
 
 export const isSecretName = (name: string) => /^[a-z0-9][a-z0-9.-]*$/.test(name);
@@ -6,7 +6,7 @@ export const isSecretName = (name: string) => /^[a-z0-9][a-z0-9.-]*$/.test(name)
 type Declared = { kind: "setting" | "workflow" | "check" | "service"; id: string };
 
 export function recordPack(exported: unknown): { manifest: Record<string, unknown>; code: PackCode } {
-  if (!isPack(exported)) throw new Error("pack.ts must export default { sdk: 1, name, summary, register(fleet) }");
+  if (!isPack(exported)) throw new Error("pack.ts must export default { sdk: 1, name, summary, register(hedge) }");
   const { register: _register, sdk: _sdk, ...fields } = exported;
   const unnamed = Object.keys(fields).filter((key) => !packFields.includes(key));
   if (unnamed.length) throw new Error(`pack.ts has fields the SDK does not name: ${unnamed.join(", ")}`);
@@ -40,10 +40,10 @@ export function recordPack(exported: unknown): { manifest: Record<string, unknow
   };
   const runnable = (id: string, label: string) => {
     if (code.services[id] || code.checks[id] || code.credentials[id]) throw new Error(`${label}: ${id} is declared twice`);
-    return ["fleet", "run", `${fields.name}/${id}`];
+    return ["hedge", "run", `${fields.name}/${id}`];
   };
 
-  const fleet: Fleet = {
+  const hedge: Hedge = {
     setting(def) {
       settings.push(def as PackSetting);
       return declare<Setting<never>>("setting", def.key);
@@ -82,8 +82,8 @@ export function recordPack(exported: unknown): { manifest: Record<string, unknow
     },
     check({ id, say, test, repair, ...scope }) {
       if (scope.after) throw new Error(`check ${id}: a check cannot wait for another check`);
-      if (repair?.command && !/^fleet( [A-Za-z0-9._\/=:@-]+)+$/.test(repair.command)) throw new Error(`check ${id}: repair.command must be fleet and plain words of letters, digits, and . _ / = : @ -, with one space between words, so a shell passes it as written and Fleet knows it when you run it`);
-      if (repair?.run && (repair.command || repair.interactive)) throw new Error(`check ${id}: a repair is a command a person runs or a run that Fleet runs, not both`);
+      if (repair?.command && !/^hedge( [A-Za-z0-9._\/=:@-]+)+$/.test(repair.command)) throw new Error(`check ${id}: repair.command must be hedge and plain words of letters, digits, and . _ / = : @ -, with one space between words, so a shell passes it as written and Hedge knows it when you run it`);
+      if (repair?.run && (repair.command || repair.interactive)) throw new Error(`check ${id}: a repair is a command a person runs or a run that Hedge runs, not both`);
       const ask = repair?.command ? say : [say, repair?.ask].filter(Boolean).join(" ");
       const probe = runnable(id, `check ${id}`);
       human.push({ id, say: ask, probe, ...(repair?.command ? { command: repair.command } : {}), ...(repair?.interactive ? { interactive: true as const } : {}), ...(repair?.run ? { repair: [...probe, "--repair"] } : {}), ...place(scope, `check ${id}`) });
@@ -92,7 +92,7 @@ export function recordPack(exported: unknown): { manifest: Record<string, unknow
       return declare("check", id);
     },
   };
-  const registered: unknown = exported.register(fleet);
+  const registered: unknown = exported.register(hedge);
   if (registered instanceof Promise) {
     registered.catch(() => {});
     throw new Error("register returned a promise; declare everything before it returns");
@@ -103,7 +103,7 @@ export function recordPack(exported: unknown): { manifest: Record<string, unknow
 const namedFields: Record<Exclude<keyof Pack, "sdk" | "register">, true> = { name: true, summary: true, title: true, day: true, cost: true, risk: true, requires: true, instructions: true };
 const packFields = Object.keys(namedFields);
 
-function isPack(value: unknown): value is { sdk: 1; name: string; register(fleet: Fleet): void } & Record<string, unknown> {
+function isPack(value: unknown): value is { sdk: 1; name: string; register(hedge: Hedge): void } & Record<string, unknown> {
   const pack = value as Record<string, unknown> | undefined;
   return typeof pack === "object" && pack !== null && pack.sdk === 1 && typeof pack.name === "string" && typeof pack.register === "function";
 }

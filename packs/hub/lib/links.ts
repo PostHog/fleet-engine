@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { tryLockBox } from "./box-lock.ts";
 import { slugFor, type Coder, type Result } from "./coder.ts";
 import { proxyPort, relayPortOf } from "./run.ts";
-import { quote, remoteFleet, type Machine, type PeerLinkInput, type PeerMachine } from "./machine.ts";
+import { quote, remoteHedge, type Machine, type PeerLinkInput, type PeerMachine } from "./machine.ts";
 import { GatewayClientError, gatewayPort, localGatewayUrl, readGatewayClient, writePrivateFile, type GatewaySettings } from "../../mcp-gateway/lib/client.ts";
 import { boxPrefix, isBoxName } from "../../../src/hub/names.ts";
 import { poolFile, recorded } from "./pool.ts";
@@ -16,15 +16,15 @@ type Target = { name: string; record: string; unit: string; forward(port: number
 
 export const t3Port = 3773;
 const answerLimitMs = 60_000;
-export const claudeTokenPath = ".config/fleet/box-claude-token";
-export const boxMarkerPath = ".config/fleet/box-marker";
-const gatewayClientPath = ".config/fleet/mcphub.client.json";
-const gatewayCredentialPath = ".config/fleet/secrets/mcp-gateway/credential.mcp-gateway";
-const proxyKeyPath = ".config/fleet/cli-proxy.key";
+export const claudeTokenPath = ".config/hedge/box-claude-token";
+export const boxMarkerPath = ".config/hedge/box-marker";
+const gatewayClientPath = ".config/hedge/mcphub.client.json";
+const gatewayCredentialPath = ".config/hedge/secrets/mcp-gateway/credential.mcp-gateway";
+const proxyKeyPath = ".config/hedge/cli-proxy.key";
 
 export const t3Of = (here: Pick<Machine, "home">) => join(here.home, ".local/bin/t3");
-export const linkFile = (here: Pick<Machine, "home">, box: string) => join(here.home, ".config/fleet/boxes", `${box}.json`);
-export const unitOf = (box: string, purpose: "hub" | "t3") => `fleet-box-${box}-${purpose}`;
+export const linkFile = (here: Pick<Machine, "home">, box: string) => join(here.home, ".config/hedge/boxes", `${box}.json`);
+export const unitOf = (box: string, purpose: "hub" | "t3") => `hedge-box-${box}-${purpose}`;
 export const pairCommand = (here: Pick<Machine, "self">) => `~/.local/bin/t3 pair --ttl 5m --label ${here.self} | sed -n 's/^Token: //p'`;
 
 export const boxNameFor = (name: string) => `${boxPrefix}${slugFor(name.startsWith(boxPrefix) ? name.slice(boxPrefix.length) : name)}`;
@@ -68,7 +68,7 @@ async function handOverGitHub(coder: Pick<Coder, "ssh">, here: Machine, box: str
 async function handOverProxy(coder: Pick<Coder, "ssh">, here: Machine, box: string): Promise<void> {
   const key = join(here.home, proxyKeyPath);
   if (!existsSync(key)) return here.say(`skip ~/${proxyKeyPath}: this machine has none`);
-  const connected = await coder.ssh(box, `umask 077 && ${remoteFleet("cli-proxy connect")}`, readFileSync(key, "utf8"));
+  const connected = await coder.ssh(box, `umask 077 && ${remoteHedge("cli-proxy connect")}`, readFileSync(key, "utf8"));
   if (connected.code !== 0) here.say(`${box} keeps its own sign-in: ${(connected.stderr || connected.stdout).trim()}`);
 }
 
@@ -83,7 +83,7 @@ export async function handOver(coder: Pick<Coder, "ssh">, here: Machine, box: st
 }
 
 function writeSession(here: Pick<Machine, "home">, env: Coder["env"]): string {
-  const path = join(here.home, ".config/fleet/box-coder.env");
+  const path = join(here.home, ".config/hedge/box-coder.env");
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const partial = `${path}.${crypto.randomUUID()}.partial`;
   writeFileSync(partial, `CODER_SESSION_TOKEN=${quote(env.CODER_SESSION_TOKEN ?? "")}\nCODER_URL=${quote(env.CODER_URL ?? "")}\n`, { mode: 0o600, flag: "wx" });
@@ -130,7 +130,7 @@ export function readRecord(path: string): Link | undefined {
   if (!found) return undefined;
   if (!found.isFile()) throw new Error(`Keep ${path}: it is not a regular file`);
   const record = (() => { try { return JSON.parse(readFileSync(path, "utf8")) as Partial<Link>; } catch { return {}; } })();
-  if (typeof record.environmentId !== "string" || !Number.isInteger(record.port)) throw new Error(`Keep ${path}: Fleet did not write it`);
+  if (typeof record.environmentId !== "string" || !Number.isInteger(record.port)) throw new Error(`Keep ${path}: Hedge did not write it`);
   return record as Link;
 }
 
@@ -221,7 +221,7 @@ export async function restoreForward(coder: Pick<Coder, "binary" | "env">, here:
 }
 
 function restorable(here: Machine): string[] {
-  const directory = join(here.home, ".config/fleet/boxes");
+  const directory = join(here.home, ".config/hedge/boxes");
   const linked = existsSync(directory) ? readdirSync(directory).filter((file) => file.endsWith(".json")).map((file) => file.slice(0, -".json".length)) : [];
   const held = here.isHub ? Object.keys(recorded(poolFile(here.home))).filter((box) => laneHolds(here, box)) : [];
   return [...new Set([...linked, ...held])].sort();

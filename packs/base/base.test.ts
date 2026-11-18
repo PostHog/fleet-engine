@@ -88,12 +88,12 @@ describe("the Base pack", () => {
     expect(plan("both").steps.map((step) => step.id).filter(isAgentCli)).toEqual(["claude-cli", "codex-cli"]);
     expect(plan("claude").steps.map((step) => step.id).filter(isAgentCli)).toEqual(["claude-cli"]);
     expect(plan("codex").steps.map((step) => step.id).filter(isAgentCli)).toEqual(["codex-cli"]);
-    expect(plan("both").steps.find((step) => step.id === "codex-cli")).toMatchObject({ run: ["fleet", "install-codex"], check: ["codex", "--version"] });
+    expect(plan("both").steps.find((step) => step.id === "codex-cli")).toMatchObject({ run: ["hedge", "install-codex"], check: ["codex", "--version"] });
   });
 
   test("installs Codex on Linux from its release package, which needs no Node", () => {
     const step = plan("both", devbox).steps.find((item) => item.id === "codex-cli");
-    expect(step).toMatchObject({ run: ["fleet", "install-codex"], check: ["codex", "--version"] });
+    expect(step).toMatchObject({ run: ["hedge", "install-codex"], check: ["codex", "--version"] });
     expect(step?.run).not.toContain("@openai/codex");
     expect(plan("both", devbox).commands["install-codex"]?.path).toEndWith("packs/base/commands/install-codex.ts");
   });
@@ -101,7 +101,7 @@ describe("the Base pack", () => {
   test("installs a pinned Node.js on Linux after the agent CLIs, so a skill runtime can start npx without a failed Node step holding back the rest of Base", () => {
     for (const ai of plans) {
       const steps = plan(ai, devbox).steps;
-      expect(steps.at(-1)).toMatchObject({ id: "node-runtime", run: ["fleet", "install-node"], check: ["npx", "--version"] });
+      expect(steps.at(-1)).toMatchObject({ id: "node-runtime", run: ["hedge", "install-node"], check: ["npx", "--version"] });
       expect(plan(ai, devbox).commands["install-node"]?.path).toEndWith("packs/base/commands/install-node.ts");
       expect(plan(ai).steps.map((step) => step.id)).not.toContain("node-runtime");
     }
@@ -116,15 +116,15 @@ describe("the Base pack", () => {
 
   test("links hooks everywhere and the heavy slice only on a devbox", () => {
     const linked = (result: Plan) => result.files.filter((item) => item.target.startsWith(".config/")).map((item) => item.target);
-    expect(linked(plan("both", devbox))).toContain(".config/systemd/user/fleet-heavy.slice");
-    expect(linked(plan("both"))).not.toContain(".config/systemd/user/fleet-heavy.slice");
-    expect(linked(plan("codex"))).not.toContain(".config/fleet/hooks/PreToolUse/name-a-model.ts");
-    for (const ai of plans) expect(linked(plan(ai))).toContain(".config/fleet/hooks/UserPromptSubmit/cast-the-reviewer.ts");
-    expect(linked(plan("claude"))).toEqual(expect.arrayContaining([".config/fleet/hooks/run.sh", ".config/fleet/hooks/PostToolUse/secret-guard.ts", ".config/fleet/hooks/PreToolUse/name-a-model.ts"]));
+    expect(linked(plan("both", devbox))).toContain(".config/systemd/user/hedge-heavy.slice");
+    expect(linked(plan("both"))).not.toContain(".config/systemd/user/hedge-heavy.slice");
+    expect(linked(plan("codex"))).not.toContain(".config/hedge/hooks/PreToolUse/name-a-model.ts");
+    for (const ai of plans) expect(linked(plan(ai))).toContain(".config/hedge/hooks/UserPromptSubmit/cast-the-reviewer.ts");
+    expect(linked(plan("claude"))).toEqual(expect.arrayContaining([".config/hedge/hooks/run.sh", ".config/hedge/hooks/PostToolUse/secret-guard.ts", ".config/hedge/hooks/PreToolUse/name-a-model.ts"]));
   });
 
   test("runs the update and prune jobs on every machine and keeps linked machines to devboxes", () => {
-    for (const machine of [mac, devbox]) expect(plan("both", machine).jobs.map((job) => job.id)).toEqual(["fleet-update", "agent-update", "source-refresh", "worktree-prune"]);
+    for (const machine of [mac, devbox]) expect(plan("both", machine).jobs.map((job) => job.id)).toEqual(["hedge-update", "agent-update", "source-refresh", "worktree-prune"]);
     expect(plan("both").workflows.find((workflow) => workflow.id === "linked-machines")).toMatchObject({ active: false, reason: "needs devbox" });
     expect(plan("both", devbox).config.some((entry) => entry.key === "linkedEnvironmentsEnabled")).toBe(true);
   });

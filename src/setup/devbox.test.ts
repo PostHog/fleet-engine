@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { isolateGit, tempDirs } from "../testing/git.ts";
 import { overSsh, pairing, profileForBox, sshHosts } from "./devbox.ts";
 import { claudeProbeTimeoutMs } from "./signins.ts";
-import { boxHome, deadEnvironmentToken, fakeMachine, fleetSetup, machineFile, onBox, remote } from "./testing.ts";
+import { boxHome, deadEnvironmentToken, fakeMachine, hedgeSetup, machineFile, onBox, remote } from "./testing.ts";
 
 isolateGit();
 const temp = tempDirs();
@@ -38,10 +38,10 @@ describe("the devbox over SSH", () => {
     expect(pairing("no server running")).toBeUndefined();
   });
 
-  test("installs Fleet on the chosen host, signs it in with the codes shown here, applies the profile, and links T3 Code both ways", async () => {
+  test("installs Hedge on the chosen host, signs it in with the codes shown here, applies the profile, and links T3 Code both ways", async () => {
     const home = homeWithHosts();
     const box = fakeMachine(home, { "box:github": 1, "box:claude": 1, "box:chatgpt": 2, "box:t3": 1 });
-    const result = await fleetSetup(home, ["--preset", "starter"], ["", "", "", "1"], box);
+    const result = await hedgeSetup(home, ["--preset", "starter"], ["", "", "", "1"], box);
     expect(result.code).toBe(0);
     expect(result.output).toContain("? Which SSH host is your devbox?");
     expect(result.output).toContain("  1) node-1");
@@ -53,7 +53,7 @@ describe("the devbox over SSH", () => {
     expect(onTheBox).toContainEqual(expect.stringMatching(/curl -fsSL \S+\/get\.sh -o "\$installer" && sh "\$installer" --ref main --install-only/));
     expect(onTheBox).toContain("gh auth login --hostname github.com --git-protocol https --web --scopes repo,read:org,admin:public_key,admin:ssh_signing_key,workflow");
     expect(onTheBox).toContain("gh auth setup-git");
-    expect(onTheBox).toContainEqual(expect.stringContaining(`gh repo clone https://github.com/nora/fleet-profile.git "$HOME/.local/share/fleet/profile" -- -q && sh "$HOME/.local/share/fleet/engine/get.sh" --ref main --profile "$HOME/.local/share/fleet/profile"`));
+    expect(onTheBox).toContainEqual(expect.stringContaining(`gh repo clone https://github.com/nora/hedge-profile.git "$HOME/.local/share/hedge/profile" -- -q && sh "$HOME/.local/share/hedge/engine/get.sh" --ref main --profile "$HOME/.local/share/hedge/profile"`));
     expect(onTheBox).toContain("codex login --device-auth");
     expect(onTheBox).toContain("t3 up --connect --yes --headless");
     expect(box.runs).toContainEqual({ command: ["ssh", "-t", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "node-1", expect.stringContaining("claude auth login")], input: true });
@@ -69,20 +69,20 @@ describe("the devbox over SSH", () => {
   test("links back from the devbox when T3 Connect is on here, and installs the engine of a tracking profile from main", async () => {
     const home = homeWithHosts();
     const box = fakeMachine(home, {}, { connectHere: true });
-    const result = await fleetSetup(home, ["--preset", "starter", "--devbox", "node-1"], ["", "", ""], box);
+    const result = await hedgeSetup(home, ["--preset", "starter", "--devbox", "node-1"], ["", "", ""], box);
     expect(result.code).toBe(0);
     expect(remote(box)).toContain("t3 environment link https://here.relay.example --pairing-code HERECODE --access full-access");
 
-    const dir = join(home, ".local/share/fleet/profile");
-    const file = JSON.parse(readFileSync(join(dir, "fleet.json"), "utf8"));
-    writeFileSync(join(dir, "fleet.json"), JSON.stringify({ ...file, engine: { ...file.engine, ref: "v0.1.0", channel: "track" } }));
+    const dir = join(home, ".local/share/hedge/profile");
+    const file = JSON.parse(readFileSync(join(dir, "hedge.json"), "utf8"));
+    writeFileSync(join(dir, "hedge.json"), JSON.stringify({ ...file, engine: { ...file.engine, ref: "v0.1.0", channel: "track" } }));
     expect((await profileForBox(box.machine, dir)).engineRef).toBe("main");
   });
 
   test("links the devbox at the tunnel hostname that t3 connect status prints, not at the shared relay", async () => {
     const home = homeWithHosts();
     const box = fakeMachine(home, {}, { cliPrintsTunnel: true });
-    const result = await fleetSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], box);
+    const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], box);
     expect(result.code).toBe(0);
     expect(box.calls.map((call) => call.command.join(" "))).toContain("t3 environment link https://box-1.relay.example --pairing-code BOXCODE --access full-access");
     expect(box.sessions()).toEqual([]);
@@ -91,7 +91,7 @@ describe("the devbox over SSH", () => {
   test("with a T3 CLI that prints no tunnel hostname, reads it from the T3 server there with a session it revokes and never shows", async () => {
     const home = homeWithHosts();
     const box = fakeMachine(home, {}, { connectHere: true });
-    const result = await fleetSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], box);
+    const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], box);
     expect(result.code).toBe(0);
     expect(box.calls.map((call) => call.command.join(" "))).toContain("t3 environment link https://box-1.relay.example --pairing-code BOXCODE --access full-access");
     expect(remote(box)).toContain("t3 environment link https://here.relay.example --pairing-code HERECODE --access full-access");
@@ -107,9 +107,9 @@ describe("the devbox over SSH", () => {
   test("stops before linking, and says to update T3 Code, when neither the T3 CLI nor its server gives the tunnel hostname", async () => {
     const home = homeWithHosts();
     const box = fakeMachine(home, {}, { serverWithoutLinkState: ["box"] });
-    const result = await fleetSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], box);
+    const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], box);
     expect(result.code).not.toBe(0);
-    expect(result.output).toContain("node-1 has no T3 Connect address yet. Update T3 Code on node-1, then run fleet setup again.");
+    expect(result.output).toContain("node-1 has no T3 Connect address yet. Update T3 Code on node-1, then run hedge setup again.");
     expect(box.calls.map((call) => call.command.join(" "))).not.toContainEqual(expect.stringContaining("t3 environment link"));
     expect(box.sessions().filter((session) => !session.revoked)).toEqual([]);
   });
@@ -128,17 +128,17 @@ describe("the devbox over SSH", () => {
   test("names the T3 Connect tunnel limit and the way out when the relay gave node-1 no tunnel", async () => {
     const home = nodeWithServiceLog(`${serverStart}${limitRefusal}[10:02:12.001] INFO (#12): Agent scopes are on\n`);
     const box = fakeMachine(home, {}, { tunnelStartsAfter: Number.POSITIVE_INFINITY });
-    const result = await fleetSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], box);
+    const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], box);
     expect(result.code).not.toBe(0);
-    expect(result.output).toContain("node-1 has no T3 Connect tunnel: T3 Code there says Relay managed tunnel limit reached: this account allows at most 3 tunnels. Free one: run t3 connect logout on a machine that no longer needs T3 Connect, or unlink it in T3 Connect. Then run systemctl --user restart t3code.service on node-1, and run fleet setup again.");
+    expect(result.output).toContain("node-1 has no T3 Connect tunnel: T3 Code there says Relay managed tunnel limit reached: this account allows at most 3 tunnels. Free one: run t3 connect logout on a machine that no longer needs T3 Connect, or unlink it in T3 Connect. Then run systemctl --user restart t3code.service on node-1, and run hedge setup again.");
     expect(result.output).not.toContain("Update T3 Code on node-1");
   });
 
   test("does not blame the tunnel limit that T3 Code on node-1 hit before its last restart", async () => {
     const home = nodeWithServiceLog(`${serverStart}${limitRefusal}${serverStart}[10:09:40.300] WARN (#12): Relay client exited; restarting\n`);
     const box = fakeMachine(home, {}, { tunnelStartsAfter: Number.POSITIVE_INFINITY });
-    const result = await fleetSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], box);
-    expect(result.output).toContain("node-1 has no T3 Connect address yet. Update T3 Code on node-1, then run fleet setup again.");
+    const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], box);
+    expect(result.output).toContain("node-1 has no T3 Connect address yet. Update T3 Code on node-1, then run hedge setup again.");
     expect(result.output).not.toContain("tunnel limit");
   });
 
@@ -156,15 +156,15 @@ describe("the devbox over SSH", () => {
   ])("never issues a T3 session for %s", async (_, server) => {
     const home = homeWithHosts();
     const box = fakeMachine(home, {}, server);
-    const result = await fleetSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], box);
-    expect(result.output).toContain("node-1 has no T3 Connect address yet. Update T3 Code on node-1, then run fleet setup again.");
+    const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], box);
+    expect(result.output).toContain("node-1 has no T3 Connect address yet. Update T3 Code on node-1, then run hedge setup again.");
     expect(box.sessions()).toEqual([]);
   });
 
   test("reads the tunnel from a T3 server that its record names in another spelling and at another port", async () => {
     const home = homeWithHosts();
     const box = fakeMachine(home, {}, { runtimeOrigin: "HTTP://127.0.0.1:52000/path?q=x" });
-    const result = await fleetSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], box);
+    const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], box);
     expect(result.code).toBe(0);
     expect(remote(box)).toContainEqual(expect.stringContaining("http://127.0.0.1:52000/api/connect/link-state"));
     expect(box.calls.map((call) => call.command.join(" "))).toContain("t3 environment link https://box-1.relay.example --pairing-code BOXCODE --access full-access");
@@ -176,7 +176,7 @@ describe("the devbox over SSH", () => {
   ])("never links a box whose T3 Connect is %s", async (_, boxConnect) => {
     const home = homeWithHosts();
     const box = fakeMachine(home, {}, { boxConnect, exits: { "box:t3": 0 } });
-    const result = await fleetSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], box);
+    const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], box);
     expect(result.output).toContain("but Link T3 Connect on node-1 still does not pass its check");
     expect(box.calls.map((call) => call.command.join(" "))).not.toContainEqual(expect.stringContaining("t3 environment link"));
     expect(box.sessions()).toEqual([]);
@@ -192,7 +192,7 @@ describe("the devbox over SSH", () => {
   ])("never issues a T3 session when T3CODE_HOME holds %s", async (_, t3Home) => {
     const home = homeWithHosts();
     const box = fakeMachine(home, {}, { t3Home: t3Home(home), connectHere: true });
-    const result = await fleetSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], box);
+    const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], box);
     expect(result.output).toContain("node-1 has no T3 Connect address yet.");
     expect(box.sessions()).toEqual([]);
     expect(box.calls.flatMap((call) => call.command).join(" ")).not.toContain(":6666");
@@ -201,12 +201,12 @@ describe("the devbox over SSH", () => {
   test("reads the T3 record under an absolute T3CODE_HOME, and none while a dev server moves T3's state", async () => {
     const home = homeWithHosts();
     const custom = fakeMachine(home, {}, { t3Home: join(home, "custom-t3") });
-    expect((await fleetSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], custom)).code).toBe(0);
+    expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], custom)).code).toBe(0);
     expect(remote(custom)).toContainEqual(expect.stringContaining("http://127.0.0.1:41773/api/connect/link-state"));
 
     const devHome = homeWithHosts();
     const dev = fakeMachine(devHome, {}, { devServerUrl: "http://127.0.0.1:5173" });
-    expect((await fleetSetup(devHome, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], dev)).output).toContain("node-1 has no T3 Connect address yet.");
+    expect((await hedgeSetup(devHome, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], dev)).output).toContain("node-1 has no T3 Connect address yet.");
     expect(dev.sessions()).toEqual([]);
   });
 
@@ -216,7 +216,7 @@ describe("the devbox over SSH", () => {
   ])("links the box through %s", async (_, server, tunnel, lookup) => {
     const home = homeWithHosts();
     const box = fakeMachine(home, {}, server);
-    const result = await fleetSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], box);
+    const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], box);
     expect(result.code).toBe(0);
     expect(box.calls.map((call) => call.command.join(" "))).toContain(`t3 environment link https://${tunnel} --pairing-code BOXCODE --access full-access`);
     if (lookup) expect(remote(box)).toContainEqual(expect.stringContaining(lookup));
@@ -225,7 +225,7 @@ describe("the devbox over SSH", () => {
   test("waits for a tunnel that is still starting after T3 Connect links", async () => {
     const home = homeWithHosts();
     const box = fakeMachine(home, {}, { tunnelStartsAfter: 3 });
-    const result = await fleetSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], box);
+    const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], box);
     expect(result.code).toBe(0);
     expect(box.calls.map((call) => call.command.join(" "))).toContain("t3 environment link https://box-1.relay.example --pairing-code BOXCODE --access full-access");
     expect(box.sessions().filter((session) => !session.revoked)).toEqual([]);
@@ -234,18 +234,18 @@ describe("the devbox over SSH", () => {
   test("says so when T3 Connect is on here but its tunnel address cannot be found, instead of calling it off", async () => {
     const home = homeWithHosts();
     const box = fakeMachine(home, {}, { connectHere: true, serverWithoutLinkState: ["here"] });
-    const result = await fleetSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], box);
+    const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], box);
     expect(result.code).toBe(0);
-    expect(result.output).toContain("T3 Connect is on here, but Fleet could not find this machine's tunnel address. Update T3 Code here, then run fleet setup again so node-1 links back.");
+    expect(result.output).toContain("T3 Connect is on here, but Hedge could not find this machine's tunnel address. Update T3 Code here, then run hedge setup again so node-1 links back.");
     expect(result.output).not.toContain("because T3 Connect is off here");
   });
 
   test("a skip, or no host in ~/.ssh/config, leaves a plan for this machine only", async () => {
     for (const home of [homeWithHosts(), temp.make("home-")]) {
       const box = fakeMachine(home);
-      const result = await fleetSetup(home, ["--preset", "starter", "--plan", "claude"], ["", "", ""], box);
+      const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", "", ""], box);
       expect(result.code).toBe(0);
-      expect(result.output).toContain("  ✓ No devbox for now. Add one later with fleet devbox add <host>.");
+      expect(result.output).toContain("  ✓ No devbox for now. Add one later with hedge devbox add <host>.");
       expect(remote(box)).toEqual([]);
       expect(machineFile(home).devboxes).toEqual([]);
     }
@@ -254,7 +254,7 @@ describe("the devbox over SSH", () => {
   test("a box whose Claude token from its environment is dead stops with how to refresh it, not with claude auth login", async () => {
     const home = homeWithHosts();
     const box = fakeMachine(home, {}, { claude: { "box:claude": deadEnvironmentToken } });
-    const result = await fleetSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], box);
+    const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], box);
     expect(result.output).toContain("The CLAUDE_CODE_OAUTH_TOKEN that node-1 gets from its environment is no longer valid");
     expect(result.output).toContain("hogli devbox:setup --configure-claude");
     expect(box.calls.find((call) => onBox(call.command) === "claude -p ok")?.timeoutMs).toBe(claudeProbeTimeoutMs);
@@ -264,27 +264,27 @@ describe("the devbox over SSH", () => {
   test("--devbox picks the host without asking, and a run without a person lists the box sign-ins it needs", async () => {
     const home = temp.make("home-");
     const box = fakeMachine(home, { "box:github": 1 });
-    const result = await fleetSetup(home, ["--non-interactive", "--preset", "starter", "--plan", "claude", "--devbox", "node-9"], [], box);
+    const result = await hedgeSetup(home, ["--non-interactive", "--preset", "starter", "--plan", "claude", "--devbox", "node-9"], [], box);
     expect(result.code).toBe(2);
-    expect(result.output).toContain("  Sign in to GitHub on node-9: do it once in a terminal, then run fleet setup again");
+    expect(result.output).toContain("  Sign in to GitHub on node-9: do it once in a terminal, then run hedge setup again");
     expect(remote(box)).toContainEqual(expect.stringContaining("--install-only"));
     expect(box.starts).toEqual([]);
   });
 
-  test("fleet setup refuses a devbox name the hub cannot use, or a pool box name, and its list of SSH hosts leaves them out", async () => {
+  test("hedge setup refuses a devbox name the hub cannot use, or a pool box name, and its list of SSH hosts leaves them out", async () => {
     for (const [host, says] of [
-      ["box-7", "fleet setup: box-7 is a pool box name. Names that start with box- are kept for the boxes the hub starts; give the devbox another SSH name."],
-      ["Node-1", "fleet setup: Node-1 is not a name the hub can use."],
+      ["box-7", "hedge setup: box-7 is a pool box name. Names that start with box- are kept for the boxes the hub starts; give the devbox another SSH name."],
+      ["Node-1", "hedge setup: Node-1 is not a name the hub can use."],
     ]) {
       const home = temp.make("home-");
       const box = fakeMachine(home);
-      const result = await fleetSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", host!], [], box);
+      const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", host!], [], box);
       expect(result.code).toBe(2);
       expect(result.output).toStartWith(says!);
       expect(remote(box)).toEqual([]);
     }
     const home = homeWithHosts("Host box-1 Node-2 node-3\n");
-    const result = await fleetSetup(home, ["--preset", "starter", "--plan", "claude"], ["", "", "1"], fakeMachine(home));
+    const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", "", "1"], fakeMachine(home));
     expect(result.output).toContain("  1) node-3");
     expect(result.output).not.toContain(") box-1");
     expect(result.output).not.toContain(") Node-2");

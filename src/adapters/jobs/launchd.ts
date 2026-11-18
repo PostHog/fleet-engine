@@ -1,6 +1,7 @@
 import type { LaunchdTimer } from "./schedule.ts";
 
-export const labelPrefix = "dev.fleet.";
+export const labelPrefix = "dev.hedge.";
+export const legacyLabelPrefix = "dev.fleet.";
 
 const escape = (value: string) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 const string = (value: string) => `<string>${escape(value)}</string>`;

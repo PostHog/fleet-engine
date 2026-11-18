@@ -42,7 +42,7 @@ export async function registerLoopbackClient(fetch: Fetch, upstream: OauthUpstre
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({
-      client_name: "Fleet MCP gateway", redirect_uris: [handCallback], token_endpoint_auth_method: "none",
+      client_name: "Hedge MCP gateway", redirect_uris: [handCallback], token_endpoint_auth_method: "none",
       grant_types: ["authorization_code", "refresh_token"], response_types: ["code"], ...(upstream.scopes && { scope: upstream.scopes.join(" ") }),
     }),
     signal: timeout(),
@@ -80,7 +80,7 @@ export async function signInLoopback(hub: Hub, upstream: OauthUpstream, readLine
   const path = `servers/${encodeURIComponent(upstream.name)}`;
   const config = (await call<{ config: Config }>(path)).config;
   const clientId = loopbackClientOf(config);
-  if (!clientId) throw new Error(`The MCP gateway has no OAuth client for ${upstream.title} yet. On the hub, run: fleet apply`);
+  if (!clientId) throw new Error(`The MCP gateway has no OAuth client for ${upstream.title} yet. On the hub, run: hedge apply`);
   const server = await authorizationServer(hub.fetch, upstream);
   const verifier = randomBytes(32).toString("base64url");
   const state = randomBytes(16).toString("base64url");

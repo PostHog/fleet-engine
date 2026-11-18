@@ -13,7 +13,7 @@ const branchHead = "1".repeat(40);
 const published = "2".repeat(40);
 
 function screenshot(name = "after.png", bytes: Buffer | string = png) {
-  const home = mkdtempSync(join(tmpdir(), "fleet-publish-"));
+  const home = mkdtempSync(join(tmpdir(), "hedge-publish-"));
   homes.push(home);
   const source = join(home, name);
   writeFileSync(source, bytes);
@@ -29,7 +29,7 @@ function fakeGitHub(target: { private: boolean; owner: string }) {
     calls.push({ path, body, method });
     if (path === "user") return { login: "octocat" };
     if (path === "repos/octocat/assets") return { permissions: { push: true }, private: target.private, default_branch: "main", owner: { login: target.owner } };
-    if (path.endsWith("/git/ref/heads/fleet-proof") || path.endsWith("/git/ref/heads/main")) return { object: { sha: branchHead } };
+    if (path.endsWith("/git/ref/heads/hedge-proof") || path.endsWith("/git/ref/heads/main")) return { object: { sha: branchHead } };
     if (path.includes("/contents/") && method === "GET") throw missing();
     if (path.includes("/contents/") && method === "PUT") return { commit: { sha: published } };
     throw missing();

@@ -3,7 +3,7 @@ import { sep } from "node:path";
 import { answeredAt, heardInThread } from "../../pull-requests/lib/decision-cli.ts";
 import { thisMachine } from "../../pull-requests/lib/decision-ledger.ts";
 import type { ThreadWords } from "../../pull-requests/lib/proof-answers.ts";
-import { fleetOnHub, HubUnreachable, remoteHub, runSsh, type Env, type Ssh } from "./hub-transport.ts";
+import { hedgeOnHub, HubUnreachable, remoteHub, runSsh, type Env, type Ssh } from "./hub-transport.ts";
 import { checkedRows, injectedRows, rowModules } from "./secret-rows.ts";
 import {
   currentOff, deliver, droppedLine, dropLane, dueLines, enableOptions, enableQuestion, failureOf, laneDays, laneReport, listLines, needLines, piecesOf, putValue, secretFilesDir, SecretRefusal, standingDays,
@@ -12,16 +12,16 @@ import {
 } from "./secret-store.ts";
 
 export const usage = `Usage:
-  fleet secret put <name> --file <request_secret file> [--expires <date>] [--why <why>]
-  fleet secret put <name> --file <request_secret file> --lane <key> --env <VAR> --why <why> (--expires <date> | --revoke <url>)
-  fleet secret drop --lane <key>
-  fleet secret sweep
-  fleet secret run <name>... -- <command> [args...]
-  fleet secret list [--due | --need <name>...]
-  fleet secret off <reason>
-  fleet secret on --words '<date> "<the user's words>"' --thread <id> [--message <id>]
+  hedge secret put <name> --file <request_secret file> [--expires <date>] [--why <why>]
+  hedge secret put <name> --file <request_secret file> --lane <key> --env <VAR> --why <why> (--expires <date> | --revoke <url>)
+  hedge secret drop --lane <key>
+  hedge secret sweep
+  hedge secret run <name>... -- <command> [args...]
+  hedge secret list [--due | --need <name>...]
+  hedge secret off <reason>
+  hedge secret on --words '<date> "<the user's words>"' --thread <id> [--message <id>]
 
-The secret store keeps each credential once, on the Fleet hub that the setting hub.alias names; other machines
+The secret store keeps each credential once, on the Hedge hub that the setting hub.alias names; other machines
 reach it over SSH. Without a hub, it lives on this machine. Packs and the profile declare its secrets.
 put stores a value from a request_secret file (delivery "file"), only from T3's secret-file directory, and deletes
 the file whatever happens. The file holds the value on one line, or one VAR=value line per variable of the secret.
@@ -91,9 +91,9 @@ const answer = (context: SecretContext, request: Request) => shownSafely(context
 async function answerUnchecked(context: SecretContext, request: Request): Promise<Answer> {
   const store = storeOf(context);
   try {
-    if (request.op === "off") { turnOff(store, request); return { ok: true, lines: ["The store is off: every read is refused until the user's words turn it on (fleet secret on)."] }; }
+    if (request.op === "off") { turnOff(store, request); return { ok: true, lines: ["The store is off: every read is refused until the user's words turn it on (hedge secret on)."] }; }
     if (request.op === "on") {
-      if ([request.question, request.answer, request.message, request.at].some((field) => typeof field !== "string")) return { ok: false, error: "The calling machine's fleet secret sends no answer to check. Run fleet update there, then fleet secret on again" };
+      if ([request.question, request.answer, request.message, request.at].some((field) => typeof field !== "string")) return { ok: false, error: "The calling machine's hedge secret sends no answer to check. Run hedge update there, then hedge secret on again" };
       turnOn(store, currentOff(store), request);
       return { ok: true, lines: [`The store is on again, by the user's words ${request.words} (thread ${request.thread}).`] };
     }
@@ -117,14 +117,14 @@ async function ask(context: SecretContext, request: Request): Promise<Answer> {
   const hub = remoteHub(context.home, context.env);
   if (!hub) return answer(context, request);
   const slow = request.op === "put" || request.op === "lane-put" || (request.op === "list" && request.need !== undefined);
-  const result = await (context.ssh ?? runSsh)(hub, fleetOnHub(hub, ["secret", "hub"]), JSON.stringify(request), slow ? slowCallMs : undefined);
-  if (result.code !== 0) throw new HubUnreachable(`the hub ${hub} did not answer (exit ${result.code}${result.code === sshFailed ? ", so SSH to it likely failed" : ""}). Its output is not shown, as it could hold a value; check it with ssh ${hub} fleet secret list`);
+  const result = await (context.ssh ?? runSsh)(hub, hedgeOnHub(hub, ["secret", "hub"]), JSON.stringify(request), slow ? slowCallMs : undefined);
+  if (result.code !== 0) throw new HubUnreachable(`the hub ${hub} did not answer (exit ${result.code}${result.code === sshFailed ? ", so SSH to it likely failed" : ""}). Its output is not shown, as it could hold a value; check it with ssh ${hub} hedge secret list`);
   try { return JSON.parse(result.stdout) as Answer; }
-  catch { throw new HubUnreachable(`the hub ${hub} sent no answer the store understands; run fleet update there`); }
+  catch { throw new HubUnreachable(`the hub ${hub} sent no answer the store understands; run hedge update there`); }
 }
 
 async function serve(context: SecretContext) {
-  if (remoteHub(context.home, context.env)) throw new UsageError("fleet secret hub runs only on the hub; other commands reach it themselves");
+  if (remoteHub(context.home, context.env)) throw new UsageError("hedge secret hub runs only on the hub; other commands reach it themselves");
   let request: Request;
   try { request = JSON.parse(await (context.stdin?.() ?? Bun.stdin.text())) as Request; }
   catch { context.out(JSON.stringify({ ok: false, error: "the request was not JSON" })); return 0; }
@@ -146,7 +146,7 @@ function noMore(args: string[]) {
 }
 
 const done = (context: SecretContext, reply: Answer) => {
-  if (!reply.ok) { context.err(`Fleet secret: ${reply.error}\n`); return 1; }
+  if (!reply.ok) { context.err(`Hedge secret: ${reply.error}\n`); return 1; }
   for (const line of reply.lines ?? []) context.out(`${line}\n`);
   return 0;
 };
@@ -173,7 +173,7 @@ function fileOptions(args: string[]) {
 }
 
 function guarded(context: SecretContext, values: string[]): SecretContext {
-  const safe = (write: SecretContext["out"]) => (text: string | Uint8Array) => write(typeof text === "string" ? unshown([text, "Fleet secret: refused, and the message would show part of the value\n", "Refused\n"], values) : text);
+  const safe = (write: SecretContext["out"]) => (text: string | Uint8Array) => write(typeof text === "string" ? unshown([text, "Hedge secret: refused, and the message would show part of the value\n", "Refused\n"], values) : text);
   return { ...context, out: safe(context.out), err: safe(context.err) };
 }
 
@@ -241,7 +241,7 @@ export function redactBytes(bytes: Buffer, secrets: Encoded[]) {
 }
 
 const plainLabel = "[redacted]";
-const withheld = Buffer.from("[fleet secret: a line of output was withheld, because its redaction would still show a stored value]\n");
+const withheld = Buffer.from("[hedge secret: a line of output was withheld, because its redaction would still show a stored value]\n");
 export const heldLimit = 64 * 1024;
 
 function cutOutside(bytes: Buffer, secrets: Encoded[], wanted: number) {
@@ -322,7 +322,7 @@ async function hearOn(args: string[], context: SecretContext) {
     if (word.source !== "question") throw new Error(`"${word.text}" is a message the user typed. Only their answer to your question tool turns the store on: ask them with it`);
     heard = { words, thread: word.thread, message: word.id, at: answeredAt(word), question: word.answered, answer: word.text };
   } catch (error) {
-    context.err(`Fleet secret: ${(error as Error).message}\n`);
+    context.err(`Hedge secret: ${(error as Error).message}\n`);
     return 1;
   }
   return done(context, await ask(context, { op: "on", ...heard }));
@@ -377,7 +377,7 @@ export async function secretCommand(args: string[], outer: SecretContext): Promi
     throw new UsageError(`Unknown command ${name}.\n${usage}`);
   } catch (error) {
     if (!(error instanceof UsageError || error instanceof HubUnreachable)) throw error;
-    context.err(`Fleet secret: ${error.message}\n`);
+    context.err(`Hedge secret: ${error.message}\n`);
     return error instanceof UsageError ? 2 : 1;
   }
 }

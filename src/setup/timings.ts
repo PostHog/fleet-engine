@@ -5,7 +5,7 @@ import type { StepKind } from "./runner.ts";
 
 export { timingsPath };
 /** get.sh writes this: a line "start <epoch s>", then one line "<phase> <epoch s when it ended> [needed-you]" per phase. */
-export const installLogPath = (home: string) => join(home, ".local/state/fleet/logs/install-timings");
+export const installLogPath = (home: string) => join(home, ".local/state/hedge/logs/install-timings");
 
 /** An install log older than this belongs to an earlier install, not to this setup. */
 const installLogMaxAgeMs = 2 * 3600 * 1000;
@@ -23,7 +23,7 @@ export type StepTiming = {
   error?: string;
 };
 
-/** The time from the start of the install to a machine the person can use, step by step. fleet setup writes it after each step. */
+/** The time from the start of the install to a machine the person can use, step by step. hedge setup writes it after each step. */
 export type Timings = {
   schema: 1;
   started: string;
