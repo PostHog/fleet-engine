@@ -13,7 +13,7 @@ import type { Run } from "../../mcp-gateway/lib/hub.ts";
 import { isKeptForBoxes } from "../../../src/hub/names.ts";
 import { waitsForPerson } from "../../../src/pack/types.ts";
 import { refreshCodexCatalog } from "./codex-catalog.ts";
-import { must, proxyPort, untilServed } from "./run.ts";
+import { must, proxyPort } from "./run.ts";
 
 export { proxyPort, proxyUrl };
 export type ProxyMode = "plan" | "install" | "doctor" | "accounts" | "catalog" | "connect" | "disconnect" | "check" | "remove" | "left";
@@ -297,6 +297,11 @@ const missingModel = {
   codex: `The proxy at ${proxyUrl} lists no Codex model. Add one of your own Codex subscriptions to the hub's proxy.`,
 };
 
+export const waitingLines = {
+  claude: `${missingModel.claude} Run hedge apply: it keeps Claude Code on its own sign-in until the proxy serves it.`,
+  codex: `${missingModel.codex} Run hedge apply: it keeps Codex on its own sign-in until the proxy serves it.`,
+};
+
 function unserved(models: string[] | string, provider: "claude" | "codex"): string | undefined {
   if (typeof models === "string") return models;
   return models.some(servedModel[provider]) ? undefined : missingModel[provider];
@@ -457,15 +462,13 @@ async function connect(machine: ProxyMachine): Promise<void> {
   await refuseLinks(machine.home, keyPath(machine.home), `${what} path`);
   await mkdir(dirname(keyPath(machine.home)), { recursive: true, mode: 0o700 });
   await writePrivateFile(keyPath(machine.home), `${key}\n`);
-  const waiting = unserved(models, "claude");
-  if (agent === "claude" && waiting) machine.print(`${waiting} Run hedge apply: it keeps Claude Code ${untilServed}`);
+  if (agent === "claude" && unserved(models, "claude")) machine.print(waitingLines.claude);
   else if (agent === "claude") {
     await sendClaude(machine.home, true);
     machine.print(`Claude Code uses your own-account proxy at ${proxyUrl} now. Restart open Claude Code sessions.`);
   }
   if (codex === undefined) return;
-  const missing = typeof codex === "string" ? undefined : unserved(models, "codex");
-  if (missing) return machine.print(`${missing} Run hedge apply: it keeps Codex ${untilServed}`);
+  if (typeof codex !== "string" && unserved(models, "codex")) return machine.print(waitingLines.codex);
   const failed = typeof codex === "string" ? codex : await sendCodex(machine.home, agent === "claude");
   if (failed) return machine.print(`${failed} Codex keeps its own sign-in.`);
   machine.print(`Codex uses your own-account proxy at ${proxyUrl} now. Restart open Codex sessions.`);

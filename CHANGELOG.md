@@ -18,19 +18,24 @@
   first `hedge apply` after the proxy serves an agent sends it there.
   Connect changes no agent settings in that case: `hedge apply` takes
   Hedge's route off an agent that the proxy no longer serves. When the hub
-  hands a box over while the proxy serves none of its agents, the hub shows
-  the box's line that it keeps its own sign-in. On the both plan, `hedge doctor` fails while a Codex
-  subscription works but the proxy serves no Codex model. A
-  proxy that is down, refuses the key, answers without a model list, or
-  runs a plugin Hedge did not install still fails `hedge doctor`.
+  hands a box over while the proxy serves none of its agents, the hub tells
+  you to run `hedge apply` on the box, so that the box uses its own sign-in
+  until the proxy serves it. On the both plan, `hedge doctor` fails while a
+  Codex subscription works but the proxy serves no Codex model. A proxy
+  that is down, refuses the key, answers without a model list, or runs a
+  plugin Hedge did not install still fails `hedge doctor`.
 - A pack check can name a `todo`: when its command exits 4, Hedge prints
   it as a `To do:` line, keeps the config that waits for the check out, and
   fails neither apply nor doctor. Apply runs such a check again after the
   steps, unless it passed or waited before them, and reports what it finds
   then. When it passes then, apply drops its old `Fix:` and writes the
   config that waits for it, so a hub whose proxy was stopped routes Claude
-  Code in one apply. `hedge doctor` reads one result of each check for both
-  the config and its line.
+  Code in one apply. That config pass replaces the lines of the first one,
+  so a Claude plugin that waited for Claude Code leaves no old `Fix:`. When
+  a step of the check's pack failed in that apply, the config stays out, so
+  a hub whose proxy step fails on a plugin Hedge did not install keeps
+  Claude Code on its own sign-in. `hedge doctor` reads one result of each
+  check for both the config and its line.
 
 ### Hedge is cloud only
 
