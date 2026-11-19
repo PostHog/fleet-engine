@@ -451,7 +451,7 @@ describe("saving to the context library", () => {
     expect(captures).toHaveLength(1);
   });
 
-  test("after hedge import-fleet, a capture that Fleet queued runs once, and an event that Fleet handled stays handled", async () => {
+  test("after hedge import-fleet, a capture that Fleet queued runs once, an event that Fleet handled stays handled, and a new event that failed to launch is tried again", async () => {
     const home = temp.make("home-");
     mkdirSync(join(home, ".local/state/fleet/slack"), { recursive: true });
     const queued = { trigger: { kind: "capture", channel: "C1", ts: "1794830407.564399" }, since: 0, commandId: "c" };
@@ -470,7 +470,9 @@ describe("saving to the context library", () => {
 
     expect(captures).toEqual(["2026-11-16T12:00:07.564Z"]);
     expect(launched).toEqual(["Slack: new after the import"]);
-    expect(Object.keys(JSON.parse(readFileSync(statePath(home), "utf8")).pending)).toEqual(["C1:1794830000.000200"]);
+    await retryPending(deps);
+    expect(launched).toEqual(["Slack: new after the import", "Slack: new after the import"]);
+    expect(captures).toEqual(["2026-11-16T12:00:07.564Z"]);
     expect(lstatSync(statePath(home)).mode & 0o777).toBe(0o600);
   });
 
