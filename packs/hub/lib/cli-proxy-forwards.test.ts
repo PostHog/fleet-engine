@@ -55,12 +55,12 @@ test("handing over connects a box to the proxy with the key on stdin only, under
   expect(skipped.calls.some((call) => call.command.includes("cli-proxy"))).toBe(false);
 });
 
-test("a box that cannot reach the proxy yet keeps its own sign-in, and the handover goes on", async () => {
+test("a box that cannot reach the proxy yet keeps its own sign-in, the hub names the command that hands over the same key again, and the handover goes on", async () => {
   const on = fakeMachine(temp.make("hedge-box-"), { settings: balancing, run: async () => ({ ...ok, code: 1 }) });
   writeHome(on.machine.home, { ".config/hedge/cli-proxy.key": `${clientKey}\n` });
   const { coder } = fakeCoder({ ssh: async (_box, command) => ({ ...ok, code: command.includes("cli-proxy connect") ? 1 : 0, stderr: "The proxy does not answer." }) });
   await handOver(coder, on.machine, "box-lane");
-  expect(on.lines).toContain("box-lane keeps its own sign-in: hedge cli-proxy connect exited 1 there. Run hedge cli-proxy check on box-lane to see why.");
+  expect(on.lines).toContain("box-lane keeps its own sign-in: hedge cli-proxy connect exited 1 there. To see why and hand over the same key again, run on the hub: hedge box run box-lane -- hedge cli-proxy connect < ~/.config/hedge/cli-proxy.key");
 
   const none = fakeMachine(temp.make("hedge-box-"), { settings: balancing, run: async () => ({ ...ok, code: 1 }) });
   await handOver(fakeCoder().coder, none.machine, "box-lane");
@@ -74,7 +74,7 @@ test("a failed handover prints the hub's own words with the exit code, and neith
     const { coder } = fakeCoder({ ssh: async (_box, command) => ({ ...ok, ...output, code: command.includes("cli-proxy connect") ? 3 : 0 }) });
     await handOver(coder, on.machine, "box-lane");
   }
-  expect(on.lines.filter((line) => line.startsWith("box-lane keeps"))).toEqual(Array(2).fill("box-lane keeps its own sign-in: hedge cli-proxy connect exited 3 there. Run hedge cli-proxy check on box-lane to see why."));
+  expect(on.lines.filter((line) => line.startsWith("box-lane keeps"))).toEqual(Array(2).fill("box-lane keeps its own sign-in: hedge cli-proxy connect exited 3 there. To see why and hand over the same key again, run on the hub: hedge box run box-lane -- hedge cli-proxy connect < ~/.config/hedge/cli-proxy.key"));
   expect(on.lines.join("\n")).not.toContain(clientKey);
   expect(on.lines.join("\n")).not.toContain("\u001b");
   expect(on.lines.join("\n")).not.toContain("refused");

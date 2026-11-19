@@ -732,12 +732,17 @@ describe("Codex plugins", () => {
     cli.installed.set(github, { version: "1.0.0", enabled: false });
     const kept = await apply(plan([wants()]), { home, adapters: [cli.adapter] });
     expect(kept.findings.map((finding) => finding.say)).toContainEqual(`Kept the Codex plugin ${github} as you left it: it is disabled now, and Hedge installed it enabled.`);
+    const yours = { id: `plugin:codex:${github}`, pack: "engine", say: `Kept the Codex plugin ${github}, which no pack enables any more, because it changed outside Hedge. It is yours now.` };
+    writeFileSync(join(home, codex), stringify({ plugins: { [github]: { enabled: false } } }));
+    const doctor = await check(plan(), { home, adapters: [cli.adapter] });
+    expect(doctor.findings).toEqual([yours]);
+    expect(doctor.ok).toBe(true);
     const released = await apply(plan(), { home, adapters: [cli.adapter] });
-    expect(released.findings).toContainEqual({ id: `plugin:codex:${github}`, pack: "engine", say: `Kept the Codex plugin ${github}, which no pack enables any more, because it changed outside Hedge. It is yours now.` });
-    expect(cli.changes()).toEqual([["codex", "plugin", "add", github, "--json"]]);
-    expect([...cli.installed.keys()]).toEqual([github]);
+    expect(released.findings).toContainEqual(yours);
     await apply(plan(), { home, adapters: [cli.adapter] });
-    expect(cli.changes()).toHaveLength(1);
+    expect(cli.changes()).toEqual([["codex", "plugin", "add", github, "--json"]]);
+    expect(Object.fromEntries(cli.installed)).toEqual({ [github]: { version: "1.0.0", enabled: false } });
+    expect(parse(readFileSync(join(home, codex), "utf8"))).toEqual({ plugins: { [github]: { enabled: false } } });
   });
 
   test("keeps the plugins Hedge installed while a pack source is out, and removes them once it is back", async () => {

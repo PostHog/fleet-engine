@@ -382,6 +382,25 @@ describe("a pack check that waits for the person", () => {
     expect(claude.installed).toEqual([{ id: context7, scope: "user" }]);
   });
 
+  test("that config waits for and that passes once a step ran keeps a Fix of the first pass for an operation the second pass skips", async () => {
+    const pool = installedPool();
+    pool.set(0);
+    const installed: Array<{ id: string; scope: string }> = [];
+    const claude: CommandRunner = async (command) => {
+      const words = command.slice(2).join(" ");
+      if (words === "list --json") return { code: 0, stdout: JSON.stringify(installed) };
+      if (words === "marketplace list --json") return { code: 0, stdout: JSON.stringify([{ name: "claude-plugins-official" }]) };
+      if (words === "marketplace update claude-plugins-official") return { code: 1, stdout: "", stderr: "network down" };
+      if (command[2] === "install") installed.push({ id: command[3]!, scope: "user" });
+      return { code: 0, stdout: "" };
+    };
+    const home = temp.make("home-");
+    const applied = await apply(plan({ files: [], checks, steps, config: [...config, plugin] }), { home, adapters: [providerConfigAdapter({ run: claude })], run: pool.run });
+    expect(applied.findings).toEqual([{ id: "plugin-marketplace:claude-plugins-official", pack: "engine", say: "Could not update the Claude plugin marketplace claude-plugins-official: network down.", repair: "apply" }]);
+    expect(installed).toEqual([{ id: context7, scope: "user" }]);
+    expect(settings(home).env).toEqual({ ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" });
+  });
+
   test("doctor reads one result of a check that config waits for, for both the config and the finding", async () => {
     const home = temp.make("home-");
     const options = { home, adapters: [providerConfigAdapter()], run: exitCodes({}) };

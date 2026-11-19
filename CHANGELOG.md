@@ -30,17 +30,25 @@
   steps, unless it passed or waited before them, and reports what it finds
   then. When it passes then, apply drops its old `Fix:` and writes the
   config that waits for it, so a hub whose proxy was stopped routes Claude
-  Code in one apply. That config pass replaces the lines of the first pass
-  that it reads again, so a Claude plugin that waited for Claude Code leaves
-  no old `Fix:`, and a notice such as "It is yours now" stays. When a step
-  of a pack fails, apply takes out the config that waits for a check of that
-  pack, also when the check passed before the step. So a hub whose proxy
-  step fails on a plugin Hedge did not install keeps Claude Code on its own
-  sign-in, even while the proxy runs. Apply still runs the check again and
-  reports what it finds. `hedge doctor` reads one result of each check for
-  both the config and its line.
+  Code in one apply. That config pass drops a line of the first pass only
+  when it says the same line again, or when the operation of that line now
+  succeeds. So a Claude plugin that waited for Claude Code leaves no old
+  `Fix:`, a notice such as "It is yours now" stays, and a `Fix:` for an
+  operation that the second pass skips, such as a marketplace update,
+  stays.
+- Config that waits for a check of a pack with steps in this apply waits
+  for those steps. Apply leaves its keys as they are until the steps ran,
+  then runs the check. It writes the config only when the steps passed and
+  the check passes then, and takes Hedge's value out when the check fails.
+  So a hub whose proxy step fails on a plugin Hedge did not install never
+  routes Claude Code to the proxy, not even while the step runs, and a
+  `hedge-proxy` Codex table of your own stays. A route that an earlier
+  apply wrote stays in place while the step runs. `hedge doctor` reads one
+  result of each check for both the config and its line.
 - When `hedge cli-proxy connect` fails on a box, the hub names the box and
-  the exit code. It never prints the box's output.
+  the exit code, and the command that hands over the same key again:
+  `hedge box run <box> -- hedge cli-proxy connect < ~/.config/hedge/cli-proxy.key`.
+  It never prints the box's output.
 - The notice that a Codex plugin is yours now no longer fails
   `hedge doctor`, as for a Claude plugin.
 
