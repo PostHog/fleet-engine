@@ -54,11 +54,15 @@
   runs no setup. `hedge retire-fleet --dry-run` names the same pieces. An
   engine from before `retire-fleet` took `--dry-run` is never asked to list
   them, so a preview at such a `--ref` stops nothing.
-- `hedge retire-fleet` and the check in `hedge apply` act only on a machine
-  with the Fleet engine install in `~/.local/share/fleet/engine`. On any
-  other machine, such as one that runs a private Fleet copy, retire stops
-  nothing and says that the machine has no Fleet engine install, and apply
-  does not wait for that copy's `fleet-*` units. They do not look up the
+- `hedge retire-fleet`, its dry run, and both checks in `hedge apply`, for
+  Fleet's jobs and for its `fleet:` T3 tasks, act only on a machine with a
+  Fleet engine install: `~/.local/share/fleet/engine`, or a custom
+  `FLEET_ENGINE_DIR` checkout that Fleet's `~/.local/bin/fleet` command runs.
+  They use the same test that `get.sh` uses, and `get.sh` points `fleet` at
+  Hedge only after retire, never in a preview. On any other machine, such as
+  one that runs a private Fleet copy, retire stops nothing and says that the
+  machine has no Fleet engine install, and apply does not wait for that
+  copy's `fleet-*` units or `fleet:` tasks. They do not look up the
   account's home folder there.
 - To go back to Fleet, follow "Go back to Fleet" in `SETUP.md`.
 - `hedge apply` starts nothing while a piece of Fleet still runs, or while it
@@ -80,9 +84,12 @@
 - `hedge update` keeps the engine's origin when the profile still names
   `PostHog/fleet-engine`, so a Hedge checkout never looks like Fleet's.
 - `hedge update` refuses an engine ref whose commit has no `hedge` launcher
-  before the checkout moves, and records nothing. It refuses to write or
-  remove its update notice when `~/.local/state/hedge` leads into Fleet's
-  state folder.
+  file before the checkout moves, and records nothing. A folder named
+  `hedge` does not count. It writes or removes its update notice only after
+  the engine moved, so a refused update leaves the notice as it was. It
+  refuses before anything moves when `~/.local/state/hedge`, with its links
+  resolved, leads into Fleet's state folder.
+- `hedge update` runs apply with the profile it pulled.
 - `hedge update` and `hedge refresh` use the Hedge copy of a profile that the
   machine file still names in a Fleet path, or refuse, before they pull.
 - Hedge operations that change the machine take an `flock` lock on
@@ -110,7 +117,9 @@
   `fleet-proxy` Codex provider of `fleet cli-proxy connect`, a T3 Claude
   instance bound to `~/.config/fleet/recovery/claude`, a gateway upstream
   marked "Added by Fleet", Node links in `~/.local/bin` that point into
-  `~/.local/share/fleet/node`, which Base links to Hedge's package, a Codex
+  `~/.local/share/fleet/node`, which Base's `node-runtime` step links to
+  Hedge's package, since its check `hedge install-node --check` fails while
+  they are there, a Codex
   install under
   `~/.local/share/fleet/codex` that Base and the nightly update move to
   Hedge's own, a `fleet-proof-receipt`
