@@ -121,19 +121,17 @@ describe("hedge apply", () => {
     });
   });
 
-  test("removes a stale proxy URL from Claude Code's settings, and doctor sees it first", async () => {
+  test("keeps a proxy URL in Claude Code's settings that Hedge has no record of, and doctor asks for no change to it", async () => {
     const home = temp.make("home-");
     mkdirSync(join(home, ".claude"), { recursive: true });
-    writeFileSync(join(home, ".claude/settings.json"), JSON.stringify({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317", ANTHROPIC_AUTH_TOKEN: "proxy-key" }, model: "opus" }));
+    const mine = { env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317", ANTHROPIC_AUTH_TOKEN: "proxy-key" }, model: "opus" };
+    writeFileSync(join(home, ".claude/settings.json"), JSON.stringify(mine));
     const profile = profileDir();
-    await hedge(["apply", "--profile", profile, "--dry-run"], home);
     const doctor = await hedge(["doctor", "--profile", profile], home);
-    expect(doctor.output).toMatch(/Fix: \.claude\/settings\.json needs an update: .*remove env\.ANTHROPIC_BASE_URL, env\.ANTHROPIC_AUTH_TOKEN\./);
+    expect(doctor.output).not.toContain("env.ANTHROPIC");
     const result = await hedge(["apply", "--profile", profile], home);
-    expect(result.output).toContain("replace .claude/settings.json");
-    const settings = JSON.parse(readFileSync(join(home, ".claude/settings.json"), "utf8"));
-    expect(settings.env).toBeUndefined();
-    expect(settings.model).toBe("opus");
+    expect(result.output).not.toContain("env.ANTHROPIC");
+    expect(JSON.parse(readFileSync(join(home, ".claude/settings.json"), "utf8"))).toMatchObject(mine);
   });
 
   test("keeps an unmanaged file and a local edit, and says so", async () => {
