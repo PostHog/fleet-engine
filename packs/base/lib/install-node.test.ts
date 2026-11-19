@@ -117,6 +117,21 @@ describe("install-node.sh", () => {
     expect(await runs(box.home, "npx")).toBe(`npx ${version} linux-x64`);
   });
 
+  onLinux("replaces the links that Fleet put in ~/.local/bin before the rename, so node, npm and npx run Hedge's package, also on a second run", async () => {
+    const box = await machine("x86_64");
+    const fleets = join(box.home, `.local/share/fleet/node/node-v${version}-linux-x64/bin`);
+    mkdirSync(fleets, { recursive: true });
+    mkdirSync(join(box.home, ".local/bin"), { recursive: true });
+    for (const name of ["node", "npm", "npx"]) {
+      stub(fleets, name, "echo fleet");
+      symlinkSync(join(fleets, name), join(box.home, ".local/bin", name));
+    }
+    expect(await box.install()).toMatchObject({ code: 0, stdout: `Node.js: ${version} in ${join(box.home, ".local/share/hedge/node")}/node-v${version}-linux-x64.\n` });
+    expect(await box.install()).toMatchObject({ code: 0 });
+    for (const name of ["node", "npm", "npx"]) expect(await runs(box.home, name)).toBe(`${name} ${version} linux-x64`);
+    expect(readFileSync(join(fleets, "node"), "utf8")).toContain("echo fleet");
+  });
+
   onLinux("installs Node.js when the node or npx on PATH is there but does not run", async () => {
     const box = await machine("x86_64");
     const broken = temp.make("broken-node-");
