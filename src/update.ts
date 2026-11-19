@@ -30,6 +30,12 @@ export async function readNotice(home: string): Promise<string | undefined> {
 
 export async function update(given: UpdateOptions): Promise<number> {
   const options = { ...given, print: (line: string) => given.print(withoutUserinfo(line)) };
+  const code = await moveEngine(options);
+  if (code !== 0 && options.platform === "darwin") options.print(hedgeOnMac);
+  return code;
+}
+
+async function moveEngine(options: UpdateOptions) {
   const origin = await ready(options);
   if (!origin) return 1;
   const before = (await git(options.engineDir, "rev-parse", "HEAD")).out;
@@ -136,9 +142,9 @@ async function installPackages(engineDir: string) {
 async function rollBack(options: UpdateOptions, before: string, installError: string) {
   const failed = `hedge update: could not install the engine's packages in ${options.engineDir}`;
   const restored = await git(options.engineDir, "checkout", "-q", "--force", "--detach", before);
-  const onMac = options.platform === "darwin";
-  if (!restored.ok) return options.print(`${failed}, and could not roll the engine back to ${before.slice(0, 7)}: ${restored.err}. ${onMac ? hedgeOnMac : "Run get.sh again to repair it."}\n${installError}`);
-  const repair = (await installPackages(options.engineDir)) === undefined ? "" : onMac ? ` ${hedgeOnMac}` : " Its packages did not install either, so run get.sh again to repair it.";
+  const repairHint = options.platform === "darwin" ? "" : ", so run get.sh again to repair it";
+  if (!restored.ok) return options.print(`${failed}, and could not roll the engine back to ${before.slice(0, 7)}: ${restored.err}${repairHint}.\n${installError}`);
+  const repair = (await installPackages(options.engineDir)) === undefined ? "" : ` Its packages did not install either${repairHint}.`;
   options.print(`${failed}, so the update was rolled back. The engine stays at ${before.slice(0, 7)}.${repair}\n${installError}`);
 }
 

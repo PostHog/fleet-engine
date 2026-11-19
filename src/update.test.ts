@@ -6,6 +6,7 @@ import { isolateGit, spawnGit, template, tempDirs } from "./testing/git.ts";
 import { spawnAsync } from "./testing/spawn.ts";
 import { noticePath, readNotice, update } from "./update.ts";
 import { main } from "./cli.ts";
+import { hedgeOnMac } from "./legacy.ts";
 
 isolateGit();
 const temp = tempDirs();
@@ -213,6 +214,15 @@ describe("hedge update", () => {
     expect(result.output).toContain("could not fetch the engine");
   });
 
+  test("on a Mac, an update whose engine fetch fails points once at the setup page and at the get.sh run that stops the old jobs", async () => {
+    const engineDir = await engineCheckout(await engineRemote(["v0.1.0"]), "v0.1.0");
+    await spawnGit(engineDir, "remote", "set-url", "origin", join(temp.make(), "gone"));
+    const result = await run(engineDir, { repo: "gone", ref: "v0.1.0", channel: "release" }, undefined, "darwin");
+    expect(result).toMatchObject({ code: 1, applied: 0 });
+    expect(result.output).toContain("could not fetch the engine");
+    expect(result.output.split(hedgeOnMac).length).toBe(2);
+  });
+
   test("refuses an engine checkout with local changes", async () => {
     const engineDir = await engineCheckout(await engineRemote(["v0.1.0", "v0.1.1"]), "v0.1.0");
     writeFileSync(join(engineDir, "VERSION"), "patched");
@@ -300,9 +310,10 @@ describe("hedge update", () => {
     const onMac = await run(engineDir, { repo: remote, ref: "v0.1.1", channel: "release" }, undefined, "darwin");
     expect(onMac.code).toBe(1);
     expect(onMac.output).not.toContain("run get.sh again to repair it");
-    expect(onMac.output).toContain(`so the update was rolled back. The engine stays at ${(await spawnGit(engineDir, "rev-parse", "HEAD")).slice(0, 7)}. Hedge now runs on cloud boxes, not on a Mac.`);
+    expect(onMac.output).toContain(`so the update was rolled back. The engine stays at ${(await spawnGit(engineDir, "rev-parse", "HEAD")).slice(0, 7)}. Its packages did not install either.\n`);
     expect(onMac.output).toContain("Set up your hub at https://posthog.github.io/hedge/#start.");
     expect(onMac.output).toContain("To stop the jobs of an earlier Fleet or Hedge on this Mac, run: curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh | sh");
+    expect(onMac.output.split(hedgeOnMac).length).toBe(2);
   });
 
   test("puts back the old engine's packages when the new engine's install fails halfway", async () => {
