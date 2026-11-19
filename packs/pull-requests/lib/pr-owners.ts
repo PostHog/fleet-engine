@@ -19,9 +19,31 @@ export function parseHandover(args: string[]): { pr: string; to: string } {
   return { pr, to };
 }
 
-export async function recordHandover(args: string[], home: string, from: string | undefined, now: Date): Promise<Handover> {
+export const listedThread = (threads: ShellThread[], id: string) => threads.find((thread) => thread.id === id);
+
+export function fullIdHint(threads: ShellThread[], id: string): string | undefined {
+  const matches = threads.filter((thread) => thread.id.endsWith(`:${id}`));
+  return matches.length === 1 ? matches[0]!.id : undefined;
+}
+
+export const linkedPullRequests = (thread: ShellThread) => (thread.pullRequests ?? []).filter((pr) => pr.source !== "stack-dismissed");
+const links = (thread: ShellThread, url: string) => linkedPullRequests(thread).some((link) => key(link.url) === key(url));
+
+export async function recordHandover(args: string[], home: string, from: string | undefined, now: Date, readThreads: () => Promise<ShellThread[] | undefined>): Promise<Handover> {
   const { pr, to } = parseHandover(args);
   if (!from) throw new Error("fleet pr handover runs inside a T3 thread: T3CODE_THREAD_ID names the thread that hands the PR over.");
+  const threads = await readThreads().catch(() => undefined);
+  if (!threads) throw new Error("fleet pr handover needs T3, and T3 did not answer; retry.");
+  const taker = listedThread(threads, to);
+  if (!taker) {
+    const full = fullIdHint(threads, to);
+    throw new Error(`T3 did not list thread ${to}. ${full ? `Hand the PR to its full id ${full}.` : "Hand the PR to the full id t3_thread_list shows."}`);
+  }
+  if (!live(taker)) throw new Error(`Thread ${to} is settled, archived, or deleted, so it cannot own the PR. Hand it to an open thread.`);
+  if (taker.id === from) throw new Error(`Thread ${to} is the thread that hands the PR over. Hand it to another open thread.`);
+  if (!links(taker, pr)) {
+    throw new Error(`Thread ${to} does not link ${pr} yet. Send it a message with t3_thread_send that hands the PR over and asks it to link the PR with link_pull_request, then run the handover again.`);
+  }
   const record: Handover = { pr: key(pr), from, to, at: now.toISOString() };
   await mkdir(dirname(handoverPath(home)), { recursive: true, mode: 0o700 });
   await appendFile(handoverPath(home), `${JSON.stringify(record)}\n`, { mode: 0o600 });
@@ -65,9 +87,9 @@ export function ownedPullRequests(threads: ShellThread[], id: string): ShellPull
   const root = rootOf(threads, target);
   if (root && threads.some((thread) => thread.id === root && live(thread))) return [];
   const family = threads.filter((thread) => thread.id === target.id || (rootOf(threads, thread) === target.id && live(thread)));
-  const others = new Set(threads.filter((thread) => live(thread) && !family.includes(thread)).flatMap((thread) => (thread.pullRequests ?? []).map((pr) => key(pr.url))));
-  const links = new Map(family.flatMap((thread) => thread.pullRequests ?? []).filter((pr) => seenOpen(pr.snapshot?.state)).map((pr) => [key(pr.url), pr]));
-  return [...links].filter(([known]) => !others.has(known)).map(([, pr]) => pr);
+  const others = new Set(threads.filter((thread) => live(thread) && !family.includes(thread)).flatMap((thread) => linkedPullRequests(thread).map((pr) => key(pr.url))));
+  const owned = new Map(family.flatMap(linkedPullRequests).filter((pr) => seenOpen(pr.snapshot?.state)).map((pr) => [key(pr.url), pr]));
+  return [...owned].filter(([known]) => !others.has(known)).map(([, pr]) => pr);
 }
 
 function handedOverBy(handovers: Handover[], threads: ShellThread[], id: string): Set<string> {
@@ -76,8 +98,7 @@ function handedOverBy(handovers: Handover[], threads: ShellThread[], id: string)
   const named = (value: string) => matchThread(threads, value, (thread) => thread.id);
   return new Set(handovers.filter(({ pr, from, to }) => {
     const taker = named(to);
-    return named(from) === settling && taker !== undefined && taker !== settling && live(taker)
-      && (taker.pullRequests ?? []).some((link) => key(link.url) === key(pr));
+    return named(from) === settling && taker !== undefined && taker !== settling && live(taker) && links(taker, pr);
   }).map(({ pr }) => key(pr)));
 }
 
@@ -85,6 +106,9 @@ export function unhandedLinks(threads: ShellThread[], id: string, handovers: Han
   const handed = handedOverBy(handovers, threads, id);
   return ownedLinks(threads, id).filter((url) => !handed.has(key(url)));
 }
+
+export const handOverFirst = "Or hand each over first: send the thread that takes it over a message with t3_thread_send that asks it to link the PR with link_pull_request, "
+  + "then run `fleet pr handover --pr <PR URL> --to <thread id>`, which counts only while that thread stays open and links the PR. Or close or merge the PR.";
 
 export async function settleRefusal(id: string, deps: OwnerDeps, person: string): Promise<string | undefined> {
   const open: string[] = [];
@@ -95,8 +119,7 @@ export async function settleRefusal(id: string, deps: OwnerDeps, person: string)
   if (!open.length) return undefined;
   return `Fleet blocked this settle: the thread owns open PR(s) ${open.join(", ")}, and no other open thread links them. `
     + `If ${person} parked them, snooze the thread until the park date instead. If they wait on someone else, snooze it until they move. `
-    + "Or hand each over first: the thread that takes it over links it with link_pull_request, and "
-    + "`fleet pr handover --pr <PR URL> --to <thread id>` counts only while the thread it names stays open and links the PR. Or close or merge the PR.";
+    + handOverFirst;
 }
 
 export async function prState(gh: Gh, url: string): Promise<string> {

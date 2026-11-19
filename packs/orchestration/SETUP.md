@@ -137,8 +137,10 @@ with:
 | `orchestration.doneMark` | ➡️ | is done, and the person may settle it. The hook changes nothing. |
 
 A line that ends on the done or the check mark is sent back once while the
-thread owns an open PR that no other open thread links. A handover counts only
-while the thread it names stays open and links the PR. The hook reads the
+thread owns an open PR that no other open thread links. `fleet pr handover`
+records a handover only to an open thread that links the PR, and a handover
+counts only while that thread stays open and links it. A link the thread
+dismissed from a stack does not count. The hook reads the
 PR links from T3's shell snapshot and makes no GitHub call.
 
 The hook leaves the thread alone when it is a child thread, was delegated from

@@ -444,6 +444,18 @@ test("when GitHub's GraphQL quota is spent and resets within 50 minutes, the che
   expect(t3.delivered).toEqual([{ threadId: "t-1", text: expect.stringContaining("(4 h)") }]);
 });
 
+test("a dry run never waits out a spent GraphQL quota, and fails at once", async () => {
+  const { hub, t3, at, pr, check, lines, slept, now } = await setup();
+  t3.shell.threads.push(localThread("t-1", "Export stack", [pr()]));
+  at(4);
+  hub.quota.fails = [1];
+  hub.quota.reset = () => now() + 20 * minute;
+  expect(await check(true)).toBe(false);
+  expect(slept).toEqual([]);
+  expect(lines.at(-1)).toContain("rate limit");
+  expect(t3.delivered).toEqual([]);
+});
+
 test.each([
   ["resets in more than 50 minutes", [1], 51, 0],
   ["is still spent after the one wait", [1, 2], 10, 1],
