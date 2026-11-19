@@ -103,10 +103,49 @@ function linksFromDisk() {
     link.setAttribute("href", link.getAttribute("href")!.replace(/\/(#.*)?$/, "/index.html$1"));
 }
 
+const calm = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const start = (video: HTMLVideoElement) => {
+  if (!calm()) video.play().catch(() => {});
+};
+
+function player(dialog: HTMLDialogElement) {
+  const video = dialog.querySelector("video")!;
+  document.addEventListener("click", (event) => {
+    const button = (event.target as Element).closest<HTMLButtonElement>("button[data-video]");
+    if (!button) return;
+    video.poster = button.dataset.poster!;
+    video.src = button.dataset.video!;
+    document.getElementById(dialog.getAttribute("aria-labelledby")!)!.textContent = button.dataset.title!;
+    dialog.showModal();
+    start(video);
+  });
+  dialog.querySelector(".player-close")!.addEventListener("click", () => dialog.close());
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog) dialog.close();
+  });
+  dialog.addEventListener("close", () => video.pause());
+}
+
+function clips() {
+  const videos = document.querySelectorAll<HTMLVideoElement>("video.clip");
+  if (!videos.length || calm() || !("IntersectionObserver" in window)) return;
+  const observer = new IntersectionObserver((entries) => {
+    for (const entry of entries.filter((item) => item.isIntersecting)) {
+      observer.unobserve(entry.target);
+      start(entry.target as HTMLVideoElement);
+    }
+  }, { threshold: 0.5 });
+  for (const video of videos) observer.observe(video);
+}
+
 const chooserForm = document.getElementById("chooser") as HTMLFormElement | null;
 const pickerForm = document.getElementById("picker") as HTMLFormElement | null;
 if (chooserForm && data) chooser(chooserForm, data);
 if (pickerForm && data) picker(pickerForm, data);
+const playerDialog = document.querySelector<HTMLDialogElement>("dialog.player");
+if (playerDialog) player(playerDialog);
+clips();
 copyButtons();
 selectLinks();
 linksFromDisk();

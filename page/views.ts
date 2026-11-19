@@ -1,4 +1,4 @@
-import { crew, logos, packCast, packGroups, scenes, teamRole, type Art, type Role, type Tone } from "./cast.ts";
+import { crew, logos, packCast, packGroups, packVideos, scenes, teamRole, type Art, type Role, type Tone } from "./cast.ts";
 import { packFlows } from "./flows.ts";
 import { brandIcons, packIcon, uiIcons } from "./icons.ts";
 import { logoMark } from "./logo.ts";
@@ -149,6 +149,27 @@ ${pageJson ? `<script id="hedge-data" type="application/json">${JSON.stringify(p
       ...pack.requires.map((name) => `<span class="tag">Adds ${esc(packOf(name).title)}</span>`),
     ].join("");
 
+  const videoPath = (root: string, file: string) => `${root}assets/video/${file}`;
+
+  const watchButton = (root: string, pack: PagePack) => {
+    const video = packVideos[pack.name];
+    if (!video) return "";
+    return `<button type="button" class="watch" data-video="${videoPath(root, video.file)}" data-poster="${videoPath(root, video.poster)}" data-title="${esc(pack.title)}">${uiIcons.play}Watch<span class="sr"> the ${esc(pack.title)} video</span> · ${Math.round(video.seconds)} s</button>`;
+  };
+
+  const player = `<dialog class="player" aria-labelledby="player-title">
+  <div class="player-in">
+    <div class="player-head"><h2 id="player-title"></h2><button type="button" class="btn small player-close">Close</button></div>
+    <video id="player-video" muted loop playsinline controls preload="none"></video>
+  </div>
+</dialog>`;
+
+  const videoSection = (root: string, pack: PagePack) => {
+    const video = packVideos[pack.name];
+    if (!video) return "";
+    return `<section class="band band-tight" aria-labelledby="video-h"><div class="wrap"><h2 id="video-h">Watch it work</h2><video class="clip" src="${videoPath(root, video.file)}" poster="${videoPath(root, video.poster)}" width="1280" height="720" muted loop playsinline controls preload="none" aria-label="${esc(pack.title)} explainer, a silent loop"></video></div></section>`;
+  };
+
   const packCard = (root: string, pack: PagePack) => {
     const role = roleOf(pack);
     const id = `pick-${pack.name}`;
@@ -157,7 +178,7 @@ ${pageJson ? `<script id="hedge-data" type="application/json">${JSON.stringify(p
       ? `<div class="pack-main">${name}</div>`
       : `<input class="sr" type="checkbox" name="pack" id="${id}" value="${esc(pack.name)}"><label class="pack-main" for="${id}">${name}<span class="check" aria-hidden="true"></span></label>`;
     return `<li class="pack-card${pack.always ? " fixed" : ""}">
-      ${stage(root, role.art, role.tone)}
+      ${stage(root, role.art, role.tone)}${watchButton(root, pack)}
       ${head}
       <p class="pack-line">${esc(role.line)}</p>
       <p class="pack-meta">${packTags(pack)}<a class="more" href="${esc(pack.name)}/" aria-label="${esc(pack.title)} details">Details${uiIcons.arrow}</a></p>
@@ -194,7 +215,8 @@ ${pageJson ? `<script id="hedge-data" type="application/json">${JSON.stringify(p
     </aside>
     <a class="btn btn-yellow jump" id="install-jump" href="#install" hidden></a>
   </form>
-</div></section>`;
+</div></section>
+${player}`;
     return frame({
       root,
       current: "packs",
@@ -236,6 +258,7 @@ ${pageJson ? `<script id="hedge-data" type="application/json">${JSON.stringify(p
   </div>
   ${stage(root, role.art, role.tone, true)}
 </div></section>
+${videoSection(root, pack)}
 ${flow ? `<section class="band band-tight" aria-labelledby="flow-h"><div class="wrap"><h2 id="flow-h">How it works</h2><ol class="flow">${flow.map((step) => `<li><span class="flow-step">${esc(step)}</span></li>`).join("")}</ol></div></section>` : ""}
 ${pack.workflows.length ? `<section class="band band-tight" aria-labelledby="wf-h"><div class="wrap"><h2 id="wf-h">Workflows</h2><ul class="wfs">${pack.workflows.map(workflowItem).join("")}</ul></div></section>` : ""}
 <section class="band band-tight" aria-label="Cost and risk"><div class="wrap facts">

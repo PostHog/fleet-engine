@@ -227,6 +227,64 @@ describe("the site build", () => {
     expect(held.length).toBeGreaterThan(15);
   });
 
+  const videoPacks = ["hub", "pull-requests", "orchestration", "memory", "slack"];
+  const watchOf = (card: string) => card.match(/<button type="button" class="watch" data-video="([^"]+)" data-poster="([^"]+)" data-title="([^"]+)">([\s\S]*?)<\/button>/);
+
+  test("the packs page shows a Watch control with the video's length on the card of each pack with a video, and opens it in one large player", () => {
+    const html = page("packs/index.html");
+    const cards = html.split('<li class="pack-card').slice(1);
+    const watched = cards.flatMap((card) => {
+      const watch = watchOf(card);
+      return watch ? [[card.match(/<a class="more" href="([a-z-]+)\/"/)![1], visibleText(watch[4]!).trim(), watch[1], watch[2]]] : [];
+    });
+    expect(watched).toEqual([
+      ["hub", "Watch the Hub video · 29 s", "../assets/video/hub.mp4", "../assets/video/hub.jpg"],
+      ["pull-requests", "Watch the Quality gates video · 29 s", "../assets/video/pull-requests.mp4", "../assets/video/pull-requests.jpg"],
+      ["orchestration", "Watch the Orchestration video · 30 s", "../assets/video/orchestration.mp4", "../assets/video/orchestration.jpg"],
+      ["memory", "Watch the Memory video · 29 s", "../assets/video/memory.mp4", "../assets/video/memory.jpg"],
+      ["slack", "Watch the Slack video · 20 s", "../assets/video/slack.mp4", "../assets/video/slack.jpg"],
+    ]);
+    for (const [, , video, poster] of watched) for (const target of [video!, poster!]) expect([target, posix.join("packs", target) in files]).toEqual([target, true]);
+    expect(html.match(/<dialog\b/g)).toHaveLength(1);
+    expect(html.match(/<video\b[^>]*>/g)).toEqual(['<video id="player-video" muted loop playsinline controls preload="none">']);
+  });
+
+  test("a pack's page with a video shows it large above How it works, with its poster, and no other page has a video", () => {
+    for (const pack of data.packs) {
+      const html = page(`packs/${pack.name}/index.html`);
+      const video = html.match(/<video\b[^>]*>/g);
+      if (!videoPacks.includes(pack.name)) {
+        expect([pack.name, video]).toEqual([pack.name, null]);
+        continue;
+      }
+      expect([pack.name, video]).toEqual([
+        pack.name,
+        [`<video class="clip" src="../../assets/video/${pack.name}.mp4" poster="../../assets/video/${pack.name}.jpg" width="1280" height="720" muted loop playsinline controls preload="none" aria-label="${pack.title} explainer, a silent loop">`],
+      ]);
+      const after = html.slice(html.indexOf("<video"));
+      expect([pack.name, after.includes('id="flow-h"') || after.includes('id="wf-h"')]).toEqual([pack.name, true]);
+    }
+    expect(page("index.html")).not.toMatch(/<video|assets\/video\//);
+  });
+
+  test("a build ships each video and poster its pages show, unchanged, and a pack without a video adds no file", async () => {
+    const videoDir = join(root, "page/video");
+    const team = await buildSite({ audience: "posthog", team: [teamPack()] });
+    const expected = videoPacks.flatMap((name) => [`assets/video/${name}.jpg`, `assets/video/${name}.mp4`]).toSorted();
+    for (const site of [files, team]) {
+      const shipped = Object.keys(site).filter((path) => path.startsWith("assets/video/"));
+      expect(shipped.toSorted()).toEqual(expected);
+      for (const path of shipped) expect([path, Buffer.from(site[path]!).equals(readFileSync(join(videoDir, posix.basename(path))))]).toEqual([path, true]);
+    }
+    expect(readdirSync(videoDir).filter((name) => name !== "README.md").map((name) => `assets/video/${name}`).toSorted()).toEqual(expected);
+  });
+
+  test("the video notes name every video and credit PostHog for the hedgehogs in them", () => {
+    const notes = readFileSync(join(root, "page/video/README.md"), "utf8");
+    expect(readdirSync(join(root, "page/video")).filter((name) => name !== "README.md" && !notes.includes(`\`${name}\``))).toEqual([]);
+    expect(notes).toContain("brand.posthog.com");
+  });
+
   test("a pack's page shows how the pack works in three to five short steps", () => {
     const flows = data.packs.flatMap((pack) => {
       const flow = page(`packs/${pack.name}/index.html`).match(/<ol class="flow">([\s\S]*?)<\/ol>/)?.[1];

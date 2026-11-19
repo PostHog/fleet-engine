@@ -17,11 +17,34 @@ afterEach(async () => {
   for (const window of open.splice(0)) await window.happyDOM.close();
 });
 
-type Visit = { from?: Window; files?: SiteFiles; url?: string };
+type Visit = { from?: Window; files?: SiteFiles; url?: string; motion?: "reduce" | "no-preference" };
 
-function visit(path: string, { from, files = site, url = `https://hedge.test/hedge-engine/${path.replace(/index\.html$/, "")}` }: Visit = {}) {
-  const window = new Window({ url, settings: { enableJavaScriptEvaluation: true, suppressInsecureJavaScriptEnvironmentWarning: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true } });
+type Watched = { callback: (entries: Array<{ target: unknown; isIntersecting: boolean }>) => void; targets: unknown[] };
+const watchers = new WeakMap<Window, Watched[]>();
+
+function visit(path: string, { from, files = site, url = `https://hedge.test/hedge-engine/${path.replace(/index\.html$/, "")}`, motion = "no-preference" }: Visit = {}) {
+  const window = new Window({ url, settings: { enableJavaScriptEvaluation: true, suppressInsecureJavaScriptEnvironmentWarning: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true, device: { prefersReducedMotion: motion } } });
   open.push(window);
+  const watched: Watched[] = [];
+  watchers.set(window, watched);
+  Object.assign(window, {
+    IntersectionObserver: class {
+      watch: Watched;
+      constructor(callback: Watched["callback"]) {
+        this.watch = { callback, targets: [] };
+        watched.push(this.watch);
+      }
+      observe(target: unknown) {
+        this.watch.targets.push(target);
+      }
+      unobserve(target: unknown) {
+        this.watch.targets = this.watch.targets.filter((item) => item !== target);
+      }
+      disconnect() {
+        this.watch.targets = [];
+      }
+    },
+  });
   if (from) carryStorage(from, window);
   window.document.addEventListener("click", (event) => {
     if ((event.target as unknown as Element).closest("a")) event.preventDefault();
@@ -158,5 +181,48 @@ describe("the Packs page in a browser", () => {
     const publicPacks = visit("packs/index.html", { from: team });
     expect(selected(publicPacks)).toEqual(["slack"]);
     expect(command(publicPacks)).toBe("hedge packs --add slack");
+  });
+});
+
+const video = (window: Window, selector: string) => window.document.querySelector(selector) as unknown as HTMLVideoElement;
+const dialog = (window: Window) => window.document.querySelector("dialog") as unknown as HTMLDialogElement;
+const watchButton = (window: Window, title: string) =>
+  [...window.document.querySelectorAll("button.watch")].find((button) => button.textContent!.includes(`the ${title} video`)) as unknown as HTMLButtonElement;
+const pathOf = (window: Window, url: string) => new URL(url, window.location.href).pathname;
+const scrollIntoView = (window: Window) => {
+  for (const watch of watchers.get(window)!) watch.callback(watch.targets.map((target) => ({ target, isIntersecting: true })));
+};
+
+describe("the pack videos in a browser", () => {
+  test("Watch on a card opens one large player that names the pack and plays its video, and closing it stops the video", () => {
+    const window = visit("packs/index.html");
+    expect(dialog(window).open).toBe(false);
+    watchButton(window, "Memory").click();
+    const player = video(window, "dialog video");
+    expect([dialog(window).open, window.document.getElementById(dialog(window).getAttribute("aria-labelledby")!)!.textContent]).toEqual([true, "Memory"]);
+    expect([pathOf(window, player.src), pathOf(window, player.poster), player.paused]).toEqual(["/hedge-engine/assets/video/memory.mp4", "/hedge-engine/assets/video/memory.jpg", false]);
+    expect(selected(window)).toEqual([]);
+    (window.document.querySelector("dialog button") as unknown as HTMLButtonElement).click();
+    expect([dialog(window).open, player.paused]).toEqual([false, true]);
+    watchButton(window, "Slack").click();
+    expect([pathOf(window, player.src), player.paused]).toEqual(["/hedge-engine/assets/video/slack.mp4", false]);
+    dialog(window).close();
+    expect(player.paused).toBe(true);
+  });
+
+  test("a visitor who asks for reduced motion gets the player and the pack page's video without autoplay", () => {
+    const packs = visit("packs/index.html", { motion: "reduce" });
+    watchButton(packs, "Orchestration").click();
+    expect([dialog(packs).open, video(packs, "dialog video").paused]).toEqual([true, true]);
+    const page = visit("packs/orchestration/index.html", { motion: "reduce" });
+    scrollIntoView(page);
+    expect(video(page, "video.clip").paused).toBe(true);
+  });
+
+  test("a pack page's video starts once it scrolls into view", () => {
+    const window = visit("packs/hub/index.html");
+    expect(video(window, "video.clip").paused).toBe(true);
+    scrollIntoView(window);
+    expect(video(window, "video.clip").paused).toBe(false);
   });
 });
