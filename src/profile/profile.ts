@@ -55,24 +55,33 @@ export async function saveAnswers(dir: string, answers: Partial<ProfileFile>, op
   if (options.push) await push(dir);
 }
 
-export async function pushAnswers(dir: string, answers: Partial<ProfileFile>, target: string[] = []) {
+export async function pushSetting(dir: string, key: string, value: unknown, target: string[]) {
   refuseLegacyPath(dir);
-  refuseLegacyPath(profileFile(dir));
-  const head = await run(dir, "git", "rev-parse", "--verify", "HEAD");
-  if (!head.ok) throw new ProfileError(`${dir}: has no commit to save answers on top of.`);
-  const name = basename(profileFile(dir));
-  const edited = await run(dir, "git", "diff", "--quiet", "HEAD", "--", name);
-  if (edited.code === 1) throw new ProfileError(`${dir}: ${name} has changes that are not committed. Commit or discard them, then try again.`);
-  if (!edited.ok) throw new ProfileError(`${dir}: could not compare ${name}: ${edited.stderr}`);
-  await commitAnswers(dir, answers);
-  const pushed = await run(dir, "git", "push", "-q", ...target);
-  if (pushed.ok) return;
-  if (!pushedBehind(pushed.stderr)) throw pushFailed(dir, pushed.stderr);
-  const dropped = await run(dir, "git", "reset", "-q", "--keep", head.stdout);
-  if (!dropped.ok) throw new ProfileError(`${dir}: could not take the changes another machine pushed: ${gitReason(dropped.stderr) ?? "git reset failed"}. Run git -C ${dir} pull --rebase, then try again.`);
-  await pullProfile(dir);
-  await commitAnswers(dir, answers);
-  await push(dir, target);
+  const path = profileFile(dir);
+  refuseLegacyPath(path);
+  const name = basename(path);
+  const edited = await run(dir, "git", "status", "--porcelain", "--", name);
+  if (!edited.ok) throw new ProfileError(`${dir}: could not check ${name}: ${edited.stderr}`);
+  if (edited.stdout) throw new ProfileError(`${dir}: ${name} has changes that are not committed. Commit or discard them, then try again.`);
+  const answers = { settings: { [key]: value } } as Partial<ProfileFile>;
+  const setting = async () => JSON.stringify(((await readJson(path))?.settings as Record<string, unknown> | undefined)?.[key]);
+  const pushOnTop = async () => {
+    const head = await run(dir, "git", "rev-parse", "--verify", "HEAD");
+    if (!head.ok) throw new ProfileError(`${dir}: has no commit to save answers on top of.`);
+    await commitAnswers(dir, answers);
+    const pushed = await run(dir, "git", "push", "-q", ...target);
+    if (pushed.ok) return true;
+    if (!pushedBehind(pushed.stderr)) throw pushFailed(dir, pushed.stderr);
+    const dropped = await run(dir, "git", "reset", "-q", "--keep", head.stdout);
+    if (!dropped.ok) throw new ProfileError(`${dir}: could not take back the answers it could not push: ${gitReason(dropped.stderr) ?? "git reset failed"}.`);
+    return false;
+  };
+  if (await pushOnTop()) return;
+  const before = await setting();
+  const pulled = await run(dir, "git", "pull", "-q", "--ff-only", "--no-rebase");
+  if (!pulled.ok) throw new ProfileError(`${dir}: could not take what another machine pushed: ${gitReason(pulled.stderr) ?? "git pull failed"}. Run git -C ${dir} pull --ff-only, then run the same command again.`);
+  if (before === (await setting()) && (await pushOnTop())) return;
+  throw new ProfileError(`${dir}: another machine saved your profile while this command ran. Run the same command again: it starts from the profile as it is now.`);
 }
 
 async function commitAnswers(dir: string, answers: Partial<ProfileFile>) {

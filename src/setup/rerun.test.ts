@@ -98,16 +98,45 @@ describe("hedge setup while another machine changes the profile", () => {
     expect((await pushedAnswers(home)).packs).toEqual(["guards"]);
   });
 
-  test("a rerun that removes a pack stops before it saves when another machine meanwhile added a pack that needs it", async () => {
+  test("a rerun checks its pack change against the packs another machine saved before it, and saves nothing", async () => {
     const home = temp.make("home-");
     expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""])).code).toBe(0);
     await changeElsewhere(home, (profile) => void (profile.packs = [...(profile.packs as string[]), "orchestration"]));
 
     const rerun = await hedgeSetup(home, ["--non-interactive", "--remove", "pull-requests"], []);
 
-    expect(rerun.code).toBe(1);
-    expect(rerun.output).toContain("another machine changed the packs in your profile while setup ran, and with this run's change Orchestration lacks Pull requests, which it needs. Add pull-requests, or remove orchestration, then run hedge setup again.");
+    expect(rerun.code).toBe(2);
+    expect(rerun.output).toContain("hedge setup: Orchestration needs Pull requests. Add pull-requests, or remove orchestration.");
     expect((await pushedAnswers(home)).packs).toEqual(["pull-requests", "orchestration"]);
+  });
+
+  test("a rerun stops before it saves when another machine saves the profile while it runs, and the same command run again keeps both changes", async () => {
+    const home = temp.make("home-");
+    expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""])).code).toBe(0);
+    const box = fakeMachine(home);
+    let changed = false;
+    const changing = {
+      ...box,
+      machine: {
+        ...box.machine,
+        async exec(command: string[], options?: Parameters<typeof box.machine.exec>[1]) {
+          if (!changed && command.join(" ") === "gh api user --jq .login") {
+            changed = true;
+            await changeElsewhere(home, (profile) => void (profile.packs = [...(profile.packs as string[]), "guards"]));
+          }
+          return box.machine.exec(command, options);
+        },
+      },
+    };
+    const args = ["--non-interactive", "--remove", "pull-requests"];
+
+    const stopped = await hedgeSetup(home, args, [], changing);
+
+    expect(stopped.code).toBe(1);
+    expect(stopped.output).toContain(`hedge: another machine saved your profile in ${profilePath(home)} while setup ran. Run the same hedge setup command again: it starts from the profile as it is now.`);
+    expect((await pushedAnswers(home)).packs).toEqual(["pull-requests", "guards"]);
+    expect((await hedgeSetup(home, args, [])).code).toBe(0);
+    expect((await pushedAnswers(home)).packs).toEqual(["guards"]);
   });
 
   test("an apply-only resume runs the steps of the plan that another machine saved after the stop", async () => {

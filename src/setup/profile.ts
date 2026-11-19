@@ -27,7 +27,7 @@ export type ProfileContext = {
   draft: Draft;
   current?: string;
   packs(): PackManifest[];
-  pulled?(dir: string): Promise<void>;
+  loaded?(): string | undefined;
   /** Called once hedge.json holds every answer and is pushed: the draft is no longer needed. */
   saved(dir: string): Promise<void>;
 };
@@ -119,7 +119,7 @@ export async function existingProfile(machine: Machine, home: string, packs: Pac
 async function makeProfile(context: ProfileContext) {
   const { terminal, machine, home, draft } = context;
   const { gh, login, exists, personal, org, team, dir, found } = await lookUp(machine, home, context.packs(), draft.packs ?? [], context.current);
-  if (found) await context.pulled?.(dir);
+  if (found && existsSync(profileFile(dir)) && context.loaded?.() !== undefined && readFileSync(profileFile(dir), "utf8") !== context.loaded()) throw new Error(changedMeanwhile(dir));
   const create = (repo: string, description: string) => machine.exec(["gh", "repo", "create", repo, "--private", "--description", description]);
   let profileRepo = found ?? team ?? personal;
   const saved = found ? savedSettings(dir) : {};
@@ -208,12 +208,18 @@ async function trackedOnOrigin(machine: Machine, dir: string) {
 export async function takeOrigin(machine: Machine, home: string, dir: string) {
   await knowGitHub(machine, home, dir);
   await git(machine, dir, "fetch", "-q", "origin");
-  if (!(await trackedOnOrigin(machine, dir))) return undefined;
-  const fetched = await machine.exec(["git", "-C", dir, "rev-parse", "--verify", "-q", "@{upstream}"]);
-  if (fetched.code !== 0) return undefined;
+  const merge = await trackedOnOrigin(machine, dir);
+  if (!merge) return undefined;
+  const fetched = await machine.exec(["git", "-C", dir, "rev-parse", "@{upstream}"]);
+  if (fetched.code !== 0) {
+    if ((await machine.exec(["git", "-C", dir, "rev-parse", "--verify", "-q", "HEAD"])).code !== 0) return undefined;
+    throw new Error(`could not find ${merge} of origin in ${dir} after fetching origin: ${lastLine(fetched.output)}. Run git -C ${dir} pull, then run hedge setup again.`);
+  }
   const merged = await machine.exec(["git", "-C", dir, "merge", "-q", "--ff-only", fetched.output.trim()]);
   return merged.code === 0 ? undefined : merged;
 }
+
+const changedMeanwhile = (dir: string) => `another machine saved your profile in ${dir} while setup ran. Run the same hedge setup command again: it starts from the profile as it is now.`;
 
 export async function saveTarget(machine: Machine, dir: string) {
   if ((await machine.exec(["git", "-C", dir, "rev-parse", "--verify", "-q", "HEAD"])).code !== 0) {

@@ -244,6 +244,19 @@ describe("hedge setup profile", () => {
     expect(await spawnGit(dotfiles, "show", "hub:about-me.md")).toBe("# Changed on another machine");
   });
 
+  test("stops before it applies when origin fetches no branch the checkout's branch tracks, and names why", async () => {
+    const home = temp.make("home-");
+    const { checkout } = await branchCheckout(home);
+    await spawnGit(checkout, "config", "remote.origin.fetch", "+refs/heads/main:refs/remotes/origin/main");
+    await spawnGit(checkout, "update-ref", "-d", "refs/remotes/origin/hub");
+
+    const rerun = await hedgeSetup(home, ["--non-interactive"], []);
+
+    expect(rerun.code).toBe(1);
+    expect(rerun.output).toContain(`hedge: could not find refs/heads/hub of origin in ${checkout} after fetching origin: fatal: upstream branch 'refs/heads/hub' not stored as a remote-tracking branch. Run git -C ${checkout} pull, then run hedge setup again.`);
+    expect(rerun.applied).toEqual([]);
+  });
+
   test("adds the host keys of github.com, not of the host gh uses by default, before it reaches a profile over SSH, and keeps the lines already there", async () => {
     const home = temp.make("home-");
     const { dotfiles } = await branchCheckout(home, "git@github.com:nora/dotfiles.git");
@@ -385,7 +398,8 @@ describe("hedge setup profile", () => {
     const home = temp.make("home-");
     expect((await hedgeSetup(home, starter, ["", ""])).code).toBe(0);
     await spawnGit(profilePath(home), "remote", "set-url", "origin", "https://github.com/nora/hedge-profile-public.git");
-    const rerun = await hedgeSetup(home, ["--set", "pull-requests.freeReviews=2"]);
+    writeFileSync(join(home, ".config/hedge/machine.json"), JSON.stringify({ schema: 1, role: "linux" }));
+    const rerun = await hedgeSetup(home, starter, ["", ""]);
     expect(rerun.code).toBe(1);
     expect(rerun.output).toContain(`hedge: ${profilePath(home)} is a clone of https://github.com/nora/hedge-profile-public.git, not nora/hedge-profile.`);
   });

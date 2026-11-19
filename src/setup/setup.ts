@@ -1,14 +1,14 @@
-import { existsSync } from "node:fs";
-import { profileFile } from "../legacy.ts";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { profileFile } from "../legacy.ts";
 import { loadPacks } from "../pack/manifest.ts";
 import { cachedSource, fetchSource } from "../pack/sources.ts";
 import type { AvailableSource, FetchedSource, MachineFile, Plan, Preset, Profile, SetupProgress, SourceRef } from "../pack/types.ts";
-import { loadMachine, loadProfile, pushAnswers, saveMachine, thisMachine } from "../profile/profile.ts";
+import { loadMachine, loadProfile, pushSetting, saveMachine, thisMachine } from "../profile/profile.ts";
 import { resolve } from "../reconciler/resolve.ts";
 import { defaultSources, engineRepo, makesOwnDevbox } from "./defaults.ts";
 import { FlagError, hasPicks, parseSetupFlags, type SetupFlags } from "./flags.ts";
-import { answered, packList, packsStep, picksFrom, title, plansStep, settingSteps, settingsFrom, unmetNeeds, waitsForTeams, type Catalog, type Draft, type QuestionContext } from "./questions.ts";
+import { answered, packList, packsStep, picksFrom, title, plansStep, settingSteps, settingsFrom, waitsForTeams, type Catalog, type Draft, type QuestionContext } from "./questions.ts";
 import { realMachine, type Machine } from "./commands.ts";
 import { humanStep, optionalStep, packSignIn, type HumanContext, type SignIn } from "./human.ts";
 import { devboxQuestion, devboxSteps, hubSteps, notTakenByHub, profileForBox, type DevboxContext } from "./devbox.ts";
@@ -52,22 +52,12 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
   let flags: SetupFlags;
   const machine: MachineFile = thisMachine(await loadMachine(options.home), options.platform, options.env ?? process.env);
   const unfinished = Boolean(machine.setup?.done.length) && !checked(machine.setup?.done);
+  const box: Machine = { ...realMachine, ...options.machine };
+  if (machine.profileDir) await fastForward(box, options.home, machine.profileDir);
   const progress = { done: machine.setup?.done ?? [], draft: machine.profileDir ? profileDraft(await loadProfile(machine.profileDir)) : withInferred(machine.setup ?? { done: [] }) };
-  let base: Draft | undefined = machine.profileDir ? structuredClone(progress.draft) : undefined;
-  const reread = async (dir: string) => {
-    if (!base || !existsSync(profileFile(dir))) return;
-    const fresh = profileDraft(await loadProfile(dir));
-    const draft = progress.draft;
-    const merged = onTop(fresh, base, draft);
-    const [unmet] = unmetNeeds(merged.packs ?? [], catalog);
-    if (unmet) throw new Error(`another machine changed the packs in your profile while setup ran, and with this run's change ${title(unmet.pack, catalog.packs)} lacks ${unmet.needs.map((name) => title(name, catalog.packs)).join(", ")}, which it needs. Add ${unmet.needs.join(", ")}, or remove ${unmet.pack}, then run hedge setup again.`);
-    for (const key of Object.keys(draft) as Array<keyof Draft>) delete draft[key];
-    Object.assign(draft, merged);
-    base = structuredClone(fresh);
-  };
+  let loaded = machine.profileDir ? await readFile(profileFile(machine.profileDir), "utf8") : undefined;
   const catalog = await loadCatalog(options.engineRoot, teamRefs(progress.draft), options.home);
   const remember = () => saveMachine(options.home, { ...machine, setup: machine.profileDir ? { done: progress.done } : { done: progress.done, ...withoutInferred(progress.draft) } });
-  const box: Machine = { ...realMachine, ...options.machine };
   const fetchTeam = (ref: SourceRef) => (options.fetchSource ?? fetchSource)(ref, sourceCache(options.home));
   if (progress.done.includes("github")) {
     catalog.teamsKnown = true;
@@ -136,7 +126,7 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
     const existing = await existingProfile(box, options.home, catalog.packs.map((pack) => pack.manifest), progress.draft.packs ?? catalog.teamPacks);
     if (!existing) return;
     const saved = profileDraft(existing);
-    base = structuredClone(saved);
+    loaded = await readFile(profileFile(existing.dir), "utf8");
     const sources = [...existing.sources, ...(progress.draft.sources ?? []).filter((ref) => !existing.sources.some((kept) => kept.name === ref.name))];
     await context.answer({ ...saved, ...(hasPicks(flags) ? picksFrom(flags, catalog, saved) : {}), plan: flags.plan ?? progress.draft.plan ?? saved.plan, sources, settings: { ...existing.settings, ...progress.draft.settings } });
   };
@@ -148,18 +138,16 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
     nonInteractive: flags.nonInteractive,
     draft: progress.draft,
     ...(machine.profileDir ? { current: machine.profileDir } : {}),
+    loaded: () => loaded,
     packs: () => catalog.packs.map((pack) => pack.manifest),
-    pulled: reread,
     async saved(dir) {
       machine.profileDir = dir;
-      base = structuredClone(progress.draft);
       await remember();
     },
   });
   const applyProfile = async (skip: string[]) => {
     if (!machine.profileDir || !options.apply) throw new Error("no profile to apply yet");
     await fastForward(box, options.home, machine.profileDir);
-    await reread(machine.profileDir);
     if ((await options.apply(machine.profileDir, skip)) !== 0) throw new Error("hedge apply could not set up this machine. Fix what it says above, then run hedge setup again.");
     const applied = await loadMachine(options.home);
     if (applied) Object.assign(machine, { role: applied.role }, applied.name ? { name: applied.name } : {});
@@ -205,12 +193,11 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
       ...step,
       async run() {
         const outcome = await step.run();
-        if (outcome !== "unanswered" && machine.profileDir) {
+        const key = step.id.slice("setting:".length);
+        const value = progress.draft.settings?.[key];
+        if (outcome !== "unanswered" && machine.profileDir && value !== undefined) {
           await fastForward(box, options.home, machine.profileDir);
-          await reread(machine.profileDir);
-          await pushAnswers(machine.profileDir, { settings: changedSettings(base?.settings, progress.draft.settings) }, await saveTarget(box, machine.profileDir));
-          base = structuredClone(progress.draft);
-          await reread(machine.profileDir);
+          await pushSetting(machine.profileDir, key, value, await saveTarget(box, machine.profileDir));
         }
         return outcome;
       },
@@ -332,36 +319,6 @@ function withoutInferred({ inferred, ...draft }: Draft): Pick<SetupProgress, "dr
   if (!inferred?.length) return { draft };
   const settings = Object.entries(draft.settings ?? {});
   return { draft: { ...draft, settings: Object.fromEntries(settings.filter(([key]) => !inferred.includes(key))) }, inferred: Object.fromEntries(settings.filter(([key]) => inferred.includes(key))) };
-}
-
-function overlay<T>(fresh: Record<string, T> | undefined, base: Record<string, T> | undefined, draft: Record<string, T> | undefined) {
-  const merged = { ...fresh };
-  for (const key of new Set([...Object.keys(base ?? {}), ...Object.keys(draft ?? {})])) {
-    if (JSON.stringify(base?.[key]) === JSON.stringify(draft?.[key])) continue;
-    if (draft && Object.hasOwn(draft, key)) merged[key] = draft[key]!;
-    else delete merged[key];
-  }
-  return merged;
-}
-
-function changedSettings(base: Draft["settings"], draft: Draft["settings"]) {
-  return Object.fromEntries(Object.entries(draft ?? {}).filter(([key, value]) => JSON.stringify(base?.[key]) !== JSON.stringify(value)));
-}
-
-function listChange<T>(fresh: T[] | undefined, base: T[] | undefined, draft: T[] | undefined, key: (item: T) => string): T[] | undefined {
-  if (JSON.stringify(base) === JSON.stringify(draft)) return fresh;
-  if (!fresh || !base || !draft) return draft;
-  const before = new Set(base.map(key));
-  const after = new Set(draft.map(key));
-  const kept = fresh.filter((item) => !before.has(key(item)) || after.has(key(item)));
-  const added = draft.filter((item) => !before.has(key(item)) && !kept.some((other) => key(other) === key(item)));
-  return [...kept, ...added];
-}
-
-function onTop(fresh: Draft, base: Draft, draft: Draft): Draft {
-  const packs = listChange(fresh.packs, base.packs, draft.packs, (name) => name);
-  const sources = listChange(fresh.sources, base.sources, draft.sources, (ref) => ref.name);
-  return { ...fresh, ...(packs ? { packs } : {}), ...(base.plan === draft.plan ? {} : { plan: draft.plan }), ...(sources ? { sources } : {}), settings: overlay(fresh.settings, base.settings, draft.settings), workflows: overlay(fresh.workflows, base.workflows, draft.workflows), ...(draft.inferred ? { inferred: draft.inferred } : {}) };
 }
 
 function profileDraft(profile: Profile): Draft {
