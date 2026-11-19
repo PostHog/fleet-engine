@@ -211,6 +211,15 @@ export function sourceOutage(plan: Plan) {
   return plan.packs.some((pack) => !pack.available && (pack.reason ?? "").startsWith("not found; unreachable"));
 }
 
+export async function recordWritten(home: string, target: string, fields: Field[]) {
+  await withLock(home, async () => {
+    const before = await readState(home, recordTarget);
+    const record = await readFieldRecord(home);
+    record[target] = [...(record[target] ?? []).filter((old) => !fields.some((field) => overlaps(field.path, old.path))), ...fields];
+    await writeWithBackups(home, [{ target: recordTarget, before, after: `${JSON.stringify(record, null, 2)}\n` }]);
+  });
+}
+
 export async function readFieldRecord(home: string, target = recordTarget): Promise<FieldRecord> {
   const text = await readState(home, target);
   if (text === undefined) return {};

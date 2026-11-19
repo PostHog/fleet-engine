@@ -310,6 +310,17 @@ describe("the Own-account balancing workflow", () => {
     expect(await codexConfig(mac)).toBeUndefined();
   });
 
+  test("after connect on a devbox, turning balancing off takes the Claude and Codex routes that connect wrote off at the next apply", async () => {
+    const { machine, home } = proxyMachine((prefix) => temp.make(prefix), { plan: "both" }, { models: ["claude-sonnet-5-5", "gpt-6.1-sol"] }, { role: "devbox" });
+    expect(await cliProxy("connect", machine)).toBe(0);
+    expect(parse(readFileSync(join(home, ".codex/config.toml"), "utf8"))).toEqual({ model_provider: "hedge-proxy", model_providers: { "hedge-proxy": codexProviderTable } });
+    const off = plan({ packs: ["hub"], plan: "both" }, devbox);
+    const report = await apply({ ...off, config: off.config.filter((entry) => entry.pack === "hub"), checks: [], steps: [], jobs: [], human: [] }, { home, adapters: [providerConfigAdapter()], run: async () => 0 });
+    expect(report.ok).toBe(true);
+    expect(parse(readFileSync(join(home, ".codex/config.toml"), "utf8"))).toEqual({});
+    expect(JSON.parse(readFileSync(join(home, ".claude/settings.json"), "utf8"))).toEqual({});
+  });
+
   test("sends Claude Code to the loopback proxy, and keeps the client key out of the settings: Claude reads it from a private file", () => {
     const config = plan(balancing, devbox).config.filter((entry) => entry.workflow === "own-account-balancing");
     expect(Object.fromEntries(config.filter((entry) => entry.provider === "claude").map((entry) => [entry.key, entry.value]))).toEqual({ "env.ANTHROPIC_BASE_URL": "http://127.0.0.1:8317", apiKeyHelper: "cat \"$HOME/.config/hedge/cli-proxy.key\"" });

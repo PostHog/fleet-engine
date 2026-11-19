@@ -12,6 +12,7 @@ import { refuseLinks, writePrivateFile, type Fetch } from "../../mcp-gateway/lib
 import type { Run } from "../../mcp-gateway/lib/hub.ts";
 import { isKeptForBoxes } from "../../../src/hub/names.ts";
 import { waitsForPerson } from "../../../src/pack/types.ts";
+import { recordWritten } from "../../../src/adapters/provider-config/adapter.ts";
 import { refreshCodexCatalog } from "./codex-catalog.ts";
 import { must, proxyPort } from "./run.ts";
 
@@ -348,8 +349,14 @@ export async function claudeRoute(home: string, on: boolean): Promise<(() => Pro
     if (settings.env && !Object.keys(env).length) delete settings.env;
     if (ownHelper(settings.apiKeyHelper)) delete settings.apiKeyHelper;
   }
-  if (JSON.stringify(settings) === before) return async () => {};
-  return () => replaceUnchanged(path, text, `${JSON.stringify(settings, null, 2)}\n`);
+  const own = async () => {
+    if (on) await recordWritten(home, ".claude/settings.json", [{ path: ["env", "ANTHROPIC_BASE_URL"], value: proxyUrl, pack: "hub" }, { path: ["apiKeyHelper"], value: keyHelper, pack: "hub" }]);
+  };
+  if (JSON.stringify(settings) === before) return own;
+  return async () => {
+    await own();
+    await replaceUnchanged(path, text, `${JSON.stringify(settings, null, 2)}\n`);
+  };
 }
 
 async function replaceUnchanged(path: string, before: string | undefined, after: string): Promise<void> {
@@ -445,7 +452,11 @@ async function codexRoute(home: string): Promise<string | (() => Promise<void>)>
   if (table !== undefined && !reachesProxy(table)) return ownTable(path);
   config.model_provider = codexProvider;
   config.model_providers = { ...providers, [codexProvider]: table ?? codexProviderTable };
-  return () => replaceUnchanged(path, text, `${stringify(config)}\n`);
+  const written = [{ path: ["model_provider"], value: codexProvider, pack: "hub" }, ...(table === undefined || Bun.deepEquals(table, codexProviderTable) ? [{ path: ["model_providers", codexProvider], value: codexProviderTable, pack: "hub" }] : [])];
+  return async () => {
+    await recordWritten(home, ".codex/config.toml", written);
+    await replaceUnchanged(path, text, `${stringify(config)}\n`);
+  };
 }
 
 async function sendCodex(home: string, besideClaude: boolean): Promise<string | undefined> {
