@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { startT3Stub, type T3Fixture, type T3Stub } from "../../base/lib/t3/testing.ts";
-import { runActivity } from "./activity.ts";
+import { readOpenWork, runActivity } from "./activity.ts";
 import { linkedEnvironment, linkedItem, linkedThread, linkedTools, minutesAgo, shellThread, type LinkedThreadFixture } from "./testing.ts";
 
 const command = join(import.meta.dir, "..", "commands", "activity.ts");
@@ -172,4 +172,14 @@ test("a thread that awaits a shell command or waits on another thread is busy, a
   const { output } = await activity(t3);
   const busy = output.split("\n").filter((line) => line.startsWith("  * ")).map((line) => line.split("Thread ").at(-1));
   expect(busy.sort()).toEqual(["mcp:awaits-shell", "mcp:waits-on-thread"]);
+});
+
+test("open work leaves out a PR link a thread or its subagent dismissed from a stack", async () => {
+  const link = (number: number, source = "agent") => ({ repository: "acme/app", number, url: `https://github.com/acme/app/pull/${number}`, source });
+  const shell = { projects: [], threads: [
+    shellThread("mcp:root", { pullRequests: [link(1, "stack-dismissed"), link(2)] }),
+    shellThread("mcp:kid", { lineage: { parentThreadId: "mcp:root", rootThreadId: "mcp:root" }, pullRequests: [link(3, "stack-dismissed"), link(4)] }),
+  ] };
+  const work = await readOpenWork({ getShell: async () => shell } as never);
+  expect(work.map((thread) => thread.pullRequests.map((pr) => pr.number))).toEqual([[2, 4]]);
 });

@@ -107,6 +107,7 @@ test("on a devbox, install maps hub.httpsHost to loopback in the hosts file once
 
 test("the hosts entry replaces its own old line, keeps an entry the person wrote, and the devbox doctor fails until it is there", async () => {
   expect(hostsWith("127.0.0.1 localhost\n127.0.0.1 old.example # hedge-hub-tunnel\n", host)).toBe(`127.0.0.1 localhost\n127.0.0.1 ${host} # hedge-hub-tunnel\n`);
+  expect(hostsWith(`127.0.0.1 localhost\n127.0.0.1 ${host} # fleet-hub-tunnel\n`, host)).toBe(`127.0.0.1 localhost\n127.0.0.1 ${host} # hedge-hub-tunnel\n`);
   expect(() => hostsWith(`10.1.2.3 ${host}\n`, host)).toThrow("Keep unmanaged hosts entry");
   const { deps } = machine("devbox");
   await expect(sshTunnels("doctor", deps)).rejects.toThrow(`does not map ${host}`);

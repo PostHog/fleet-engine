@@ -20,6 +20,19 @@ With the MCP gateway on, the hub also serves the library's search as the
 search. Until the hub's first sync clones the library, the gateway runs
 without the tool, and its upstream check says what it waits for.
 
+`hedge context add <url>` reads the source in code before an agent starts. A
+web page comes from a plain request. A Slack thread or canvas, a Google Doc,
+or a Wispr Flow link comes from one fixed tool of the hub's MCP gateway, so
+those links need the gateway key that `hedge apply` gives a machine. Then a
+Claude agent on the survey row turns the text into a note. It runs without
+tools, MCP servers, or settings files, in an empty folder, and sees only the
+source's text, the topics the library uses, and the note it updates. A page
+that tells it to read or send notes finds no note to read and no way out.
+Hedge writes the one note under `notes/` and refuses any other path. It keeps
+only the links that appear in what the agent read, turns images into plain
+links, escapes HTML, and shows code and diagram blocks as plain text, so
+opening the note sends nothing new to another host.
+
 With the Slack pack's trigger on, their own `:brain:` reaction on a Slack
 message saves its thread as a note. The reaction shows `:eyes:` while it runs
 and goes away once the note is saved. After that, the note updates by itself

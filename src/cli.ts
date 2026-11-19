@@ -31,7 +31,7 @@ import { become, canBecome, type Become } from "./runner/become.ts";
 import { trackCommand } from "./usage/usage.ts";
 import { asHedge } from "./reconciler/engine-command.ts";
 import { adoptLegacyEnv, fleetIsHedge, isOldJob, profileFile, renamedPath, underLegacyPath, withLegacyNames } from "./legacy.ts";
-import { importFleet } from "./import-fleet.ts";
+import { importFleet, isCopyOf } from "./import-fleet.ts";
 import { fleetAdapter, type FleetAdapter } from "./adapters/fleet/adapter.ts";
 
 /** env: the environment that tells a Coder workspace apart; tests pass their own. */
@@ -82,7 +82,7 @@ export async function main(argv: string[], options: CliOptions): Promise<number>
   if (Object.hasOwn(builtins, command)) trackCommand(options.home, command, rest, builtins[command]!, options.env ?? {}, options.interactive);
   try {
     if (command === "import-fleet") return await bringOverFleet(options);
-    if (command === "retire-fleet") return await retireFleet(options);
+    if (command === "retire-fleet") return await retireFleet(rest, options);
     if (command === "apply" || command === "doctor") return await reconcile(command, rest, options);
     if (command === "update") return await runUpdate(options);
     if (command === "refresh") return await runRefresh(rest, options);
@@ -113,8 +113,12 @@ async function bringOverFleet(options: CliOptions) {
 }
 
 /** get.sh runs this after import-fleet and before apply: it stops and turns off every piece of Fleet, keeps their files, and fails while one is not verified stopped. */
-async function retireFleet(options: CliOptions) {
-  const fleet = (options.adapters ?? engineAdapters)().find((adapter): adapter is FleetAdapter => adapter.name === "fleet") ?? fleetAdapter();
+const fleetOf = (options: CliOptions) => (options.adapters ?? engineAdapters)().find((adapter): adapter is FleetAdapter => adapter.name === "fleet") ?? fleetAdapter();
+
+async function retireFleet(args: string[], options: CliOptions) {
+  if (args.length > 1 || (args.length && args[0] !== "--dry-run")) return options.print("Usage: hedge retire-fleet [--dry-run]"), 2;
+  const fleet = fleetOf(options);
+  if (args.length) return listFleet(fleet, options);
   const fail = options.fail ?? options.print;
   const result = await fleet.retire(options.home, options.platform);
   if (!result) return options.print(`Hedge: left the jobs from before the rename alone, because ${options.home} is not your account's home folder.`), 0;
@@ -125,6 +129,14 @@ async function retireFleet(options: CliOptions) {
   for (const item of result.left) fail(`Hedge: ${item}. Hedge could not verify that it stopped.`);
   fail("Hedge: stop each one by hand, then run hedge retire-fleet again. Hedge starts nothing while Fleet still runs.");
   return 1;
+}
+
+/** What retire-fleet would stop, without changing anything. */
+async function listFleet(fleet: FleetAdapter, options: CliOptions) {
+  const held = await fleet.holds(options.home, options.platform);
+  for (const finding of held) options.print(`Hedge: ${finding.say}`);
+  if (!held.length) options.print("Hedge: nothing from before the rename runs.");
+  return 0;
 }
 
 /** Runs hedge setup and records its transcript. A failed step's message names hedge triage. */
@@ -167,6 +179,8 @@ async function reconcile(command: "apply" | "doctor", args: string[], options: C
   const flags = parseFlags(args);
   const doctor = command === "doctor";
   const preview = doctor || flags.dryRun;
+  const held = doctor ? [] : await fleetOf(options).holds(options.home, options.platform);
+  if (held.length && !flags.dryRun) return printReport({ ok: false, actions: [], findings: held, humanLeft: [] }, command, options.print, false), 1;
   const { plan, sources } = await loadPlan(options, flags.profile, { fetch: !preview, remember: !preview, inherit: preview });
   const adapters = (options.adapters ?? engineAdapters)();
   const issue: Issuer = (entries, node) => issueCredentials(entries, node, plan, sources, options);
@@ -176,6 +190,7 @@ async function reconcile(command: "apply" | "doctor", args: string[], options: C
     report.findings.push(...drifted);
     if (drifted.some((finding) => finding.repair)) report.ok = false;
   }
+  if (held.length) report.findings.unshift(...held), (report.ok = false);
   const notice = doctor ? await readNotice(options.home) : undefined;
   if (notice) report.findings.push({ id: "update:major", pack: "engine", say: notice });
   printReport(report, command, options.print, flags.dryRun);
@@ -471,11 +486,11 @@ function handlerSubcommands(plan: Plan) {
   return Object.fromEntries(Object.entries(plan.handlers).flatMap(([seam, handler]) => (handler.subcommands ? [[seam, handler.subcommands]] : [])));
 }
 
-/** A profile in a Fleet path from before the rename is never used: Hedge uses its Hedge copy, which get.sh makes, or refuses. */
+/** A profile in a Fleet path from before the rename is never used: Hedge uses its Hedge copy, which get.sh makes, or refuses. The copy counts only when it is a checkout of the same repository. */
 function hedgeProfile(options: CliOptions, dir: string): string {
   if (!underLegacyPath(options.home, dir)) return dir;
   const copy = renamedPath(options.home, dir);
-  if (!copy || underLegacyPath(options.home, copy) || !existsSync(profileFile(copy))) throw new Error(`${dir} is in a Fleet path from before the rename, so Hedge does not use it. Run get.sh to copy it, or pass --profile with a profile outside the Fleet paths.`);
+  if (!copy || underLegacyPath(options.home, copy) || !existsSync(profileFile(copy)) || !isCopyOf(dir, copy)) throw new Error(`${dir} is in a Fleet path from before the rename, so Hedge does not use it. Run get.sh to copy it, or pass --profile with a profile outside the Fleet paths.`);
   options.print(`Hedge: uses ${copy}, the copy of ${dir}, because ${dir} is in a Fleet path from before the rename.`);
   return copy;
 }

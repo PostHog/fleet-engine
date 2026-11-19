@@ -7,6 +7,7 @@ export type ClaudeWrapperContext = { home: string; print: (line: string) => void
 const defaultBinaries = ["", "claude"];
 
 export const wrapperPath = (home: string) => join(home, ".config/hedge/recovery/claude");
+const fleetWrapperPath = (home: string) => join(home, ".config/fleet/recovery/claude");
 
 const wrapperFiles = [{ name: "claude", mode: 0o755 }, { name: "claude-reset.ts", mode: 0o644 }];
 const packBin = join(import.meta.dir, "../bin");
@@ -40,7 +41,7 @@ export async function claudeWrapperCommand(args: string[], context: ClaudeWrappe
     const unbound = claudeInstances(await readProviderInstances(client)).filter(([id, instance]) => {
       const binary = String(instance.config?.binaryPath ?? "");
       if (binary === wrapper) return false;
-      if (defaultBinaries.includes(binary)) return true;
+      if (defaultBinaries.includes(binary) || binary === fleetWrapperPath(context.home)) return true;
       context.print(`${id}: kept your Claude binary ${binary}.`);
       return false;
     });

@@ -19,6 +19,9 @@ describe("the exit-status mask guard", () => {
     "git commit -m x; git push",
     'hedge proof gate --pr 1 > /tmp/gate.log 2>&1\necho "gate exit $?" >> /tmp/gate.log',
     "bash -c 'git push | tail -2'",
+    "fleet proof gate --pr 1 2>&1 | tail -20",
+    "hedge heavy -- git push | tail -3",
+    "fleet heavy -- git push | tail -3",
   ])("refuses a hidden exit status: %s", (command) => {
     expect(exitMaskRisk(command, "Robin")).toContain("hides the exit status");
   });

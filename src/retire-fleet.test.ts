@@ -187,6 +187,49 @@ describe("hedge retire-fleet", () => {
     expect(linux.systemd.units.has("hedge-watch.service")).toBe(false);
   });
 
+  test("leaves the old heavy slice alone: systemd shows a slice static, and it runs nothing by itself", async () => {
+    const linux = machine("linux");
+    mkdirSync(join(linux.home, ".config/systemd/user"), { recursive: true });
+    writeFileSync(join(linux.home, ".config/systemd/user/fleet-heavy.slice"), "[Slice]\nMemoryMax=50%\n");
+    linux.systemd.units.set("fleet-heavy.slice", { active: false, enabled: false });
+    linux.systemd.shown.set("fleet-heavy.slice", "LoadState=loaded\nActiveState=inactive\nUnitFileState=static\n");
+    linux.systemd.units.set("fleet-watch.service", { active: true, enabled: true });
+
+    const retired = await linux.hedge(["retire-fleet"]);
+
+    expect(retired.code).toBe(0);
+    expect(retired.output).toBe("Hedge: stopped and turned off the systemd unit fleet-watch.service from before the rename, and kept its files.");
+    expect(linux.systemd.calls.filter((call) => call.includes("fleet-heavy.slice") && !call.includes("list-units") && !call.includes("list-unit-files"))).toEqual([]);
+    expect(readFileSync(join(linux.home, ".config/systemd/user/fleet-heavy.slice"), "utf8")).toBe("[Slice]\nMemoryMax=50%\n");
+    expect((await linux.hedge(["apply", "--profile", profileDir(["watcher"])])).code).toBe(0);
+  });
+
+  test("on a machine without Fleet, neither retire nor apply needs the account's home folder", async () => {
+    const home = temp.make("home-");
+    const systemd = fakeSystemd();
+    const adapters = (): Adapter[] => [fleetAdapter({ run: systemd.run, accountHome: async () => undefined }), filesAdapter];
+    const hedge = async (args: string[]) => {
+      const lines: string[] = [];
+      const code = await main(args, { home, engineRoot: repoRoot, platform: "linux", env: {}, print: (line) => lines.push(line), run: async () => 0, adapters });
+      return { code, output: lines.join("\n") };
+    };
+
+    expect(await hedge(["retire-fleet"])).toEqual({ code: 0, output: "Hedge: nothing from before the rename runs." });
+    const applied = await hedge(["apply", "--profile", profileDir([])]);
+    expect(applied.output).not.toContain("fleet:home");
+    expect(applied.output).not.toContain("could not look up your account's home folder");
+    expect(applied.code).toBe(0);
+  });
+
+  test("with --dry-run, names each piece that still runs and stops nothing", async () => {
+    const linux = machine("linux");
+    linux.systemd.units.set("fleet-watch.service", { active: true, enabled: true });
+
+    expect(await linux.hedge(["retire-fleet", "--dry-run"])).toEqual({ code: 0, output: "Hedge: The systemd unit fleet-watch.service from before the rename still runs (it is active), so Hedge started nothing. Run hedge retire-fleet, then hedge apply." });
+    expect(linux.systemd.units.get("fleet-watch.service")).toEqual({ active: true, enabled: true });
+    expect(await linux.hedge(["retire-fleet", "--now"])).toEqual({ code: 2, output: "Usage: hedge retire-fleet [--dry-run]" });
+  });
+
   test("on a machine without Fleet, or with a HOME that is not the account's, stops nothing", async () => {
     const fresh = machine("linux", temp.make("home-"));
     fresh.systemd.units.set("fleet-own.service", { active: true, enabled: true });
@@ -203,7 +246,7 @@ describe("hedge retire-fleet", () => {
 });
 
 describe("hedge apply while Fleet still runs", () => {
-  const nothingWritten = (home: string) => !existsSync(join(home, ".local/state/hedge/state.json"));
+  const nothingWritten = (home: string) => !existsSync(join(home, ".local/state/hedge/state.json")) && !existsSync(join(home, ".config/hedge/machine.json"));
 
   test("on Linux, exits 1, writes and starts nothing, and names hedge retire-fleet; after retire, it starts the new unit", async () => {
     const linux = machine("linux");

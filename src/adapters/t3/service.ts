@@ -165,7 +165,7 @@ export async function reconcileService(run: CommandRunner, wait: Wait, user: str
   if (/Status: unavailable/.test(status.stdout)) return void result.findings.push(finding("service", "T3 Code says it cannot run as a service on this machine. It needs Linux with systemd.", "human"));
   if (dryRun) return void result.findings.push(finding("service", "T3 Code's service needs to be installed.", "apply"));
   const installed = await run(["t3", "service", "install"]);
-  if (installed.code !== 0) return void result.findings.push(finding("service", `t3 service install failed (exit ${installed.code}). Run it yourself to see why, then run hedge apply.`, "apply"));
+  if (installed.code !== 0) return void ((result.failed = true), result.findings.push(finding("service", `t3 service install failed (exit ${installed.code}). Run it yourself to see why, then run hedge apply.`, "apply")));
   result.actions.push({ target: "t3 service", operation: "create" });
 }
 

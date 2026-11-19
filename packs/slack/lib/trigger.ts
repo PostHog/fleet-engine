@@ -17,7 +17,7 @@ export type Owner = { name: string; slackUserId: string; emoji: string; captureE
 export type Trigger = { kind: "message" | "reaction" | "capture"; channel: string; ts: string };
 type Message = { user?: string; text?: string; ts: string; thread_ts?: string; files?: Array<{ id?: string; title?: string; filetype?: string; permalink?: string }> };
 export type Captured = { path: string; title: string; url: string; updated: boolean; text?: string; wispr?: string };
-export type Capture = (input: { source: string; material: string; startedAt: string }) => Promise<Captured>;
+export type Capture = (input: { source: string; material: string; canvases: string[]; startedAt: string }) => Promise<Captured>;
 export type Route = { host: string; id: string; title: string; message: string };
 export type Shared = { sent: (Route & { link?: string })[]; failed: { route: Route; error: string }[] };
 export type Share = (note: { title: string; url: string; text: string }, sentBefore: Route[]) => Promise<Shared>;
@@ -218,9 +218,10 @@ async function captureThread(channel: string, threadTs: string, capture: Capture
     const files = messages.flatMap((message) => message.files ?? []).filter((file) => file.id);
     const material = [
       await formatThread(deps.slack, messages),
-      ...(files.length ? ["", "Files in the thread (read each canvas with slack_read_canvas and its id):", ...files.map((file) => `- ${[file.id, file.filetype, file.title, file.permalink].filter(Boolean).join(" ")}`)] : []),
+      ...(files.length ? ["", "Files in the thread:", ...files.map((file) => `- ${[file.id, file.filetype, file.title, file.permalink].filter(Boolean).join(" ")}`)] : []),
     ].join("\n");
-    const saved = await capture({ source: permalink, material, startedAt: new Date(Number(threadTs) * 1000).toISOString() });
+    const canvases = [...new Set(files.filter((file) => file.filetype === "canvas" || file.filetype === "quip").map((file) => file.id!))].slice(0, 10);
+    const saved = await capture({ source: permalink, material, canvases, startedAt: new Date(Number(threadTs) * 1000).toISOString() });
     deps.log(`${key}: ${saved.updated ? "updated" : "saved"} ${saved.path}`);
     const latestTs = messages.reduce((latest, message) => (Number(message.ts) > Number(latest) ? message.ts : latest), threadTs);
     updateState(deps.statePath, (state) => {

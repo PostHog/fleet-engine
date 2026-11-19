@@ -106,7 +106,7 @@ async function installedSettings(hub: Hub) {
 }
 
 function api(hub: Hub, settings: McpHubSettings) {
-  const token = settings.bearerKeys.find((key) => key.id === "hedge-management")?.token;
+  const token = ["hedge-management", "fleet-management"].map((id) => settings.bearerKeys.find((key) => key.id === id)?.token).find(Boolean);
   return async <T>(path: string, method = "GET", body?: unknown): Promise<T> => {
     const response = await hub.fetch(`${loopback}/mcphub/api/${path}`, {
       method,

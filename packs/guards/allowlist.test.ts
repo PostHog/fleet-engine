@@ -268,6 +268,15 @@ describe("hedge guards allowlist", () => {
     expect(machine.hedge().output).not.toContain("System: installed.");
   });
 
+  test("the doctor probe accepts helpers that a root install from before the rename left, which say Fleet blocked Git access", () => {
+    const machine = installedCopy("acme");
+    for (const helper of ["usr/local/bin/git-remote-fleet-blocked", "usr/local/bin/fleet-git-ssh"]) {
+      const path = join(machine.root, helper);
+      writeFileSync(path, readFileSync(path, "utf8").replaceAll("Hedge blocked Git access", "Fleet blocked Git access"));
+    }
+    expect(machine.hedge("--check").code).toBe(0);
+  });
+
   test("the doctor probe ignores the Git config of the repository it runs in", () => {
     const machine = installedCopy("acme");
     const rules = join(machine.root, "etc/fleet/git-allowlist.gitconfig");

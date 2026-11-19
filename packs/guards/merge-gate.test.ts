@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { appendFileSync, chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Decision, LedgerEvent } from "../pull-requests/lib/decision-ledger.ts";
 import { tempDirs } from "../../src/testing/git.ts";
@@ -62,6 +63,15 @@ describe("which calls enqueue or merge", () => {
     ["gh say 7 -R example/product --body '/trunk merge'"],
     ["gh pr comment 7 --repo example/product --body '  /trunk merge'"],
     ["gh pr comment 7 --repo example/product --body $'Ready.\\r\\n/trunk merge'"],
+    ["printf '/trunk merge\\n' | gh pr comment 7 -R example/product -F /dev/stdin"],
+    ["printf '/trunk merge' | gh pr comment 7 -R example/product --body-file /dev/fd/0"],
+    ["printf '/trunk merge' | gh pr comment 7 -R example/product -F /proc/self/fd/0"],
+    ["cat payload.json | gh api repos/example/product/issues/7/comments --input /dev/stdin"],
+    ["printf '/trunk merge' | gh api repos/example/product/issues/7/comments -F body=@-"],
+    ["printf '/trunk merge' | gh api repos/example/product/issues/7/comments -F body=@/dev/stdin"],
+    ["gh pr merge 7 --repo example/product --squash --disable-auto=0"],
+    ["gh pr merge 7 --repo example/product --squash --disable-auto=f"],
+    ["gh pr merge 7 --repo example/product --squash --disable-auto=FALSE"],
     ["gh pr comment 7 --repo example/product --body \"$(echo /trunk merge)\""],
     ["gh pr comment 7 --repo example/product --body \"$(printf '/trunk merge')\""],
     ["B='/trunk merge'; gh pr comment 7 --repo example/product --body \"$B\""],
@@ -77,12 +87,17 @@ describe("which calls enqueue or merge", () => {
     ["gh pr comment 7 --repo example/product --body-file note.md"],
     ["gh pr comment 7 --repo example/product --body \"$(cat note.md) Ready for review.\""],
     ["gh pr merge 7 --repo example/product --disable-auto"],
+    ["gh pr merge 7 --repo example/product --disable-auto=1"],
+    ["gh pr merge 7 --repo example/product --disable-auto=True"],
     ["gh api repos/example/product/pulls/7/merge"],
     ["gh api repos/example/product/issues/7/comments"],
     ["gh pr view 7 --repo example/product"],
     ["gh pr comment 7 --repo own/tooling --body '/trunk merge'"],
     ["gh pr merge 7 --repo Example/Notes --squash"],
     ["curl -s https://api.github.com/repos/example/product/pulls/7/merge"],
+    ["curl -fsSL -H 'Accept: application/json' -o out.json https://api.github.com/repos/example/product/pulls/7/merge"],
+    ["curl -X GET https://api.github.com/repos/example/product/pulls/7/merge"],
+    ["wget -qO- --header='Accept: application/json' https://api.github.com/repos/example/product/pulls/7/merge"],
     ["gh pr comment 7 --repo example/product --body Owners=@octocat"],
     ["gh pr comment 7 --repo example/product --body 'Thanks, cc=@octocat'"],
     ["gh issue comment 7 --repo example/product -b x=@octocat"],
@@ -101,6 +116,13 @@ describe("which calls enqueue or merge", () => {
     ["curl -X PUT https://api.github.com/repos/example/product/pulls/7/merge", rawReason],
     ["curl -sXPUT https://api.github.com/repos/example/product/pulls/7/merge", rawReason],
     ["curl -sd '{}' https://api.github.com/repos/example/product/pulls/7/merge", rawReason],
+    ["curl -sd '{\"body\":\"/trunk merge\"}' https://api.github.com/repos/example/product/issues/7/comments", rawReason],
+    ["curl -s -d'{\"body\":\"/trunk merge\"}' https://api.github.com/repos/example/product/issues/7/comments", rawReason],
+    ["curl -s -XPUT https://api.github.com/repos/example/product/pulls/7/merge", rawReason],
+    ["curl -O -d x https://api.github.com/repos/example/product/pulls/7/merge", rawReason],
+    ["curl -X GET -X PUT https://api.github.com/repos/example/product/pulls/7/merge", rawReason],
+    ["wget --method=PUT https://api.github.com/repos/example/product/pulls/7/merge", rawReason],
+    ["wget -H --post-data='{\"body\":\"/trunk merge\"}' https://api.github.com/repos/example/product/issues/7/comments", rawReason],
     ["gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }'", graphqlReason],
     ["gh api graphql -f query='mutation { enablePullRequestAutoMerge(input: {pullRequestId: \"x\"}) { clientMutationId } }'", graphqlReason],
     ["gh api graphql -f query='mutation { addComment(input: {subjectId: \"x\", body: \"/trunk merge\"}) { clientMutationId } }'", graphqlReason],
@@ -108,6 +130,8 @@ describe("which calls enqueue or merge", () => {
     ["gh pr review 7 --repo example/product --comment -b '/trunk merge'", otherEndpointReason],
     ["env -S 'gh pr merge 7 -R example/product --squash'", splitStringReason],
     ["env --split-string='gh pr merge 7 -R example/product'", splitStringReason],
+    ["/usr/bin/env -S 'gh pr merge 7 -R example/product --squash'", splitStringReason],
+    ["env -uFOO -S'gh pr merge 7 -R example/product'", splitStringReason],
     ["gh x", shellAliasReason],
     ["gh c 7 --body '/trunk merge'", shellAliasReason],
     ["gh ready 7 -R example/product", shellAliasReason],
@@ -129,6 +153,9 @@ describe("which calls enqueue or merge", () => {
     expect(bash("(cd /tooling; true); gh pr merge 7", "/work")).toEqual({ targets: [target("example/product", 7)] });
     expect(bash("pushd /work/product && gh pr merge 7", "/tooling")).toEqual({ targets: [target("example/product", 7)] });
     expect(bash("pushd /tooling && popd && gh pr merge 7", "/work")).toEqual({ targets: [target("example/product", 7)] });
+    const checkoutRepo = (cwd: string) => cwd.startsWith(`${homedir()}/dev/product`) ? "example/product" : io.checkoutRepo(cwd);
+    const command = "cd ~/dev/product && gh pr merge 7 --squash";
+    expect(mergeIntent({ tool_name: "Bash", tool_input: { command }, cwd: "/tooling" }, command, exempt, { ...io, checkoutRepo })).toEqual({ targets: [target("example/product", 7)] });
   });
 
   test("a merge or enqueue that names no PR is refused, since the gate cannot check it", () => {
@@ -516,4 +543,13 @@ test("a payload swapped for a FIFO after the reader checked it is read from the 
 test("the merge-gate risk names the deadline the hook keeps", () => {
   const pack = JSON.parse(readFileSync(join(import.meta.dir, "pack.json"), "utf8")) as { workflows: { id: string; risk: string }[] };
   expect(pack.workflows.find((workflow) => workflow.id === "merge-gate")?.risk).toContain(`up to ${mergeGateDeadlineMs / 1000} seconds`);
+});
+
+describe("a piped comment body", () => {
+  test("needs a gate pass, and the refusal says why", async () => {
+    const piped = bash("cat notes.md | gh pr comment 9 -R example/product -F -");
+    expect(piped).toEqual({ targets: [target("example/product", 9)] });
+    expect(await risk(piped, gate())).toContain("A piped body cannot be read");
+    expect(await risk(bash("gh pr merge 9 -R example/product"), gate())).not.toContain("piped body");
+  });
 });

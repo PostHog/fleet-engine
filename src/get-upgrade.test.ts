@@ -89,4 +89,18 @@ describe("get.sh upgrades a machine that Fleet runs", () => {
     expect(machine.state()).toEqual({ ...emptySchedulers(), units: { "fleet-watch.service": running }, crontab: oldCron });
     expect(existsSync(join(machine.home, ".config/hedge/machine.json"))).toBe(false);
   });
+
+  onLinuxHost("a dry run without --profile names what still runs, runs no setup, and changes nothing", () => {
+    const machine = fleetMachine();
+
+    const result = machine.getSh(["--", "--dry-run"]);
+
+    expect(result.code).toBe(0);
+    expect(result.output).toContain("Hedge: The systemd unit fleet-watch.service from before the rename still runs (it is active)");
+    expect(result.output).toContain("The cron job nightly from before the rename still runs");
+    expect(result.output).toContain("A preview without --profile runs no setup.");
+    expect(result.output).not.toContain("unknown option");
+    expect(machine.state()).toEqual({ ...emptySchedulers(), units: { "fleet-watch.service": running }, crontab: oldCron });
+    expect(existsSync(join(machine.home, ".config/hedge"))).toBe(false);
+  });
 });

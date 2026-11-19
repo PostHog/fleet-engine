@@ -14,7 +14,8 @@ const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
 const opens = `(?:${escaped(receiptOpen)}|${escaped(legacyReceiptOpen)})`;
 const blockText = String.raw`${opens}\b[^>]*-->(?:(?!${opens})[\s\S])*?(?:${escaped(receiptClose)}|${escaped(legacyReceiptClose)})`;
 const blockAndBreak = new RegExp(String.raw`${blockText}(?:\r?\n){0,2}`, "g");
-const marker = /<!-- hedge-proof-receipt head=([0-9a-f]{40}) hash=([0-9a-f]+) -->/;
+const marker = /<!-- (?:hedge|fleet)-proof-receipt head=([0-9a-f]{40}) hash=([0-9a-f]+) -->/;
+const withCurrentMarkers = (body: string) => body.replaceAll(legacyReceiptOpen, receiptOpen).replaceAll(legacyReceiptClose, receiptClose);
 
 export function withoutReceipt(body: string) {
   const stripped = body.replace(blockAndBreak, "");
@@ -169,7 +170,8 @@ export async function screenshotFiles(summary: ProofSummary) {
 
 const count = (text: string, part: string) => text.split(part).length - 1;
 
-export function checkMarkers(body: string) {
+export function checkMarkers(written: string) {
+  const body = withCurrentMarkers(written);
   const [opens, closes] = [count(body, receiptOpen), count(body, receiptClose)];
   const start = body.indexOf(receiptOpen);
   const whole = start < 0 || new RegExp(`^${marker.source}`).test(body.slice(start));
@@ -251,7 +253,8 @@ function sectionOf(body: string, heading: string) {
   return { found, next };
 }
 
-export function placeReceipt(body: string, receipt: Receipt, heading: string): string {
+export function placeReceipt(written: string, receipt: Receipt, heading: string): string {
+  const body = withCurrentMarkers(written);
   const start = body.indexOf(receiptOpen);
   if (start >= 0) {
     const end = body.indexOf(receiptClose) + receiptClose.length;

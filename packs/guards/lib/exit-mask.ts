@@ -12,7 +12,7 @@ function gitSubcommand(args: string[]): string | undefined {
 }
 
 function statusMatters({ name, args: [first, second, ...rest] }: Command): string | undefined {
-  if (name === "hedge" && first === "proof" && ["gate", "review", "save"].includes(second ?? "")) return `hedge proof ${second}`;
+  if ((name === "hedge" || name === "fleet") && first === "proof" && ["gate", "review", "save"].includes(second ?? "")) return `${name} proof ${second}`;
   if (name === "git") {
     const subcommand = gitSubcommand([first, second, ...rest].filter((arg) => arg !== undefined));
     return subcommand === "push" || subcommand === "commit" ? `git ${subcommand}` : undefined;

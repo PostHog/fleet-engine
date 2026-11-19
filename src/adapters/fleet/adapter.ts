@@ -14,7 +14,8 @@ export type OldTasks = { list(): Promise<Array<{ id: string; enabled: boolean }>
 export type FleetOptions = { run?: CommandRunner; accountHome?: () => Promise<string | undefined>; uid?: number; tasks?: (home: string) => Promise<OldTasks | undefined> };
 /** retired: what retire stopped. left: each piece that is not verified stopped, with why. notes: what retire could not look at. */
 export type Retirement = { retired: string[]; left: string[]; notes: string[] };
-export type FleetAdapter = Adapter & { retire(home: string, platform: NodeJS.Platform): Promise<Retirement | undefined> };
+/** holds: what keeps hedge apply from starting anything, which apply asks before it loads the plan. */
+export type FleetAdapter = Adapter & { retire(home: string, platform: NodeJS.Platform): Promise<Retirement | undefined>; holds(home: string, platform: NodeJS.Platform): Promise<Finding[]> };
 
 const launchdPrefixes = ["dev.fleet.", "com.fleet."];
 const unitPrefix = "fleet-";
@@ -25,6 +26,9 @@ const notLoaded = 113;
 const cronMarker = /\s# fleet:([A-Za-z0-9._-]+)$/;
 
 const present = (path: string) => lstatSync(path, { throwIfNoEntry: false }) !== undefined;
+const hadFleet = (home: string) => legacyPaths.some(([before]) => present(join(home, before)));
+/** A slice runs nothing by itself, and it has no [Install] section, so systemd shows it static and turning it off would remove its file. */
+const passive = (unit: string) => unit.endsWith(".slice");
 const names = (folder: string, keep: (name: string) => boolean) => {
   try {
     return readdirSync(folder).filter(keep);
@@ -80,7 +84,7 @@ export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
 
   async function find(home: string, platform: NodeJS.Platform, tasks: OldTasks | undefined): Promise<Found> {
     const found: Found = { pieces: [], unclear: [], notes: [] };
-    if (!legacyPaths.some(([before]) => present(join(home, before)))) return found;
+    if (!hadFleet(home)) return found;
     const add = (kind: FleetPiece["kind"], name: string) => void (found.pieces.some((piece) => piece.kind === kind && piece.name === name) || found.pieces.push({ kind, name }));
     if (platform === "darwin") {
       for (const file of names(join(home, "Library/LaunchAgents"), (name) => launchdPrefixes.some((prefix) => name.startsWith(prefix)) && name.endsWith(".plist"))) add("launchd", file.slice(0, -".plist".length));
@@ -91,11 +95,11 @@ export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
         if (launchdPrefixes.some((prefix) => label.startsWith(prefix))) add("launchd", label);
       }
     } else {
-      const files = names(join(home, ".config/systemd/user"), (name) => name.startsWith(unitPrefix));
+      const files = names(join(home, ".config/systemd/user"), (name) => name.startsWith(unitPrefix) && !passive(name));
       const loaded = await run(["systemctl", "--user", "list-units", "--all", "--plain", "--no-legend", "--full", `${unitPrefix}*`]);
       if (loaded.code !== 0 && loaded.code !== 127 && files.length) found.unclear.push(`systemd's user manager did not answer (${why(loaded)})`);
       const installed = loaded.code === 0 ? await run(["systemctl", "--user", "list-unit-files", "--plain", "--no-legend", `${unitPrefix}*`]) : { code: 1, stdout: "" };
-      for (const name of [...files, ...lines(loaded.code === 0 ? loaded.stdout : ""), ...lines(installed.stdout)].map((line) => line.split(/\s+/)[0]!)) if (name.startsWith(unitPrefix)) add("systemd", name);
+      for (const name of [...files, ...lines(loaded.code === 0 ? loaded.stdout : ""), ...lines(installed.stdout)].map((line) => line.split(/\s+/)[0]!)) if (name.startsWith(unitPrefix) && !passive(name)) add("systemd", name);
       const table = await crontab();
       if (table.unclear) found.unclear.push(table.unclear);
       for (const id of table.lines.map(cronId)) if (id) add("cron", id);
@@ -193,10 +197,11 @@ export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
     async apply() {
       return { actions: [], findings: [] };
     },
-    async guard(plan, { home }) {
+    async holds(home, platform) {
+      if (!hadFleet(home)) return [];
       const skipped = await skipOtherHome("fleet", "the jobs from before the rename", home, options);
       if (skipped) return skipped.findings;
-      const { found, on } = await still(home, plan.os);
+      const { found, on } = await still(home, platform);
       const fix = "Run hedge retire-fleet, then hedge apply.";
       const findings: Finding[] = [
         ...on.map(({ piece, reason }) => ({ id: `fleet:${piece.name}`, pack: "engine", say: `The ${describe(piece)} from before the rename still runs (${reason}), so Hedge started nothing. ${fix}`, repair: "human" as const })),
@@ -205,6 +210,7 @@ export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
       return findings;
     },
     async retire(home, platform) {
+      if (!hadFleet(home)) return { retired: [], left: [], notes: [] };
       const skipped = await skipOtherHome("fleet", "the jobs from before the rename", home, options);
       if (skipped?.findings.length) throw new Error(skipped.findings[0]!.say);
       if (skipped) return undefined;
