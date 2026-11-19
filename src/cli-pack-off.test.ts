@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { main } from "./cli.ts";
 import { cliFixtures, repoRoot } from "./testing/cli.ts";
 import { tempDirs } from "./testing/git.ts";
-import { changeLedger, ledgerKey, readLedger } from "./reconciler/ledger.ts";
+import { changeLedger, readLedger } from "./reconciler/ledger.ts";
 
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
@@ -192,14 +192,26 @@ describe("the library's upstream from before the Context library pack joined Mem
     expect((await readLedger(home)).steps).toEqual([]);
   });
 
-  test("a declaration Hedge cannot read stays in the ledger and is reported", async () => {
+  test("a replacement declaration that names another server is kept, and its entry clears at the next apply", async () => {
     const { home, hedge } = await upgraded(["context-library"], { "context-library": false });
-    writeFileSync(declaration(home), "{");
-    for (const _ of [1, 2]) {
-      const applied = await hedge(["apply"]);
-      expect(applied.output).toContain("Hedge cannot tell whether step context-upstream of the memory pack still holds what it set, though its workflow context-library is off.");
-      expect(readFileSync(declaration(home), "utf8")).toBe("{");
-      expect((await readLedger(home)).steps.map(ledgerKey)).toEqual(["memory/context-upstream"]);
-    }
+    const replacement = JSON.stringify({ ...JSON.parse(readFileSync(declaration(home), "utf8")), name: "notes", title: "Notes" });
+    writeFileSync(declaration(home), replacement);
+    const applied = await hedge(["apply"]);
+    expect(applied.code).toBe(0);
+    expect(applied.output).not.toContain("context-upstream");
+    expect(readFileSync(declaration(home), "utf8")).toBe(replacement);
+    expect((await readLedger(home)).steps).toEqual([]);
   });
+
+  for (const content of ["{", "{}"]) {
+    test(`a declaration Hedge cannot read as an upstream (${content}) stays and is reported again by a second apply`, async () => {
+      const { home, hedge } = await upgraded(["context-library"], { "context-library": false });
+      writeFileSync(declaration(home), content);
+      for (const _ of [1, 2]) {
+        const applied = await hedge(["apply"]);
+        expect(applied.output).toContain("Hedge cannot tell whether step context-upstream of the memory pack still holds what it set, though its workflow context-library is off.");
+        expect(readFileSync(declaration(home), "utf8")).toBe(content);
+      }
+    });
+  }
 });
