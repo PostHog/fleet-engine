@@ -100,16 +100,18 @@ export const onBox = (command: string[]) => (command[0] === "ssh" ? command.at(-
  * takes every curl request which does not turn proxies off. The box's tunnel answers only after tunnelStartsAfter lookups, and the tunnel here only after hereTunnelStartsAfter.
  * Each box's T3 environment id is env-<host>, except on the hosts withoutT3, where T3 never ran.
  * T3 here lists hereLinks as its linked environments, and unlink forgets one, or fails with unlinkFails. T3 on the hub lists hubLinks. ssh never reaches the hosts named unreachable.
- * A box answers Coder's build info, and serves the Coder CLI, only at boxReachesCoderAt, this machine's address unless set, as this machine's deployment unless otherDeploymentAt names that address; coderRedirectsAt answers with a 302 sign-in redirect to valid build info instead, which a curl follows when told to or when it reads a ~/.curlrc that says location. Its agent address is boxAgentUrl, http://coder.internal/ unless set. coderLoginFails makes every sign-in there refuse the token. Here, coder tokens create and remove keep the list coderTokens returns, and coderTokenRemoveFails makes a removal fail. hedge peers link on the hub renews the node's link in the list T3 on the hub returns.
+ * This machine is signed in to Coder at coderAt, https://coder.example.com unless set. A box answers Coder's build info, and serves the Coder CLI, only at boxReachesCoderAt, this machine's address unless set, and its curl refuses any other protocol than HTTPS when told --proto =https. Its Coder CLI signs in with the session and url files in ~/.config/coderv2 when they hold a token this machine made and has not removed, and an address it reaches, unless coderRejectsToken. Here, coder tokens create and remove keep the list coderTokens returns, and coderTokenRemoveFails makes a removal fail. hedge peers link on the hub renews the node's link in the list T3 on the hub returns.
  * With node set, every other command on a box runs on a Node.
  */
-export function fakeMachine(home: string, polls: Partial<Record<SignInName, number>> = {}, options: { org?: boolean; createFails?: string; createFailsAfterMaking?: string; lookupFails?: string; publicRepos?: string[]; scopes?: string; failRun?: boolean; exits?: Partial<Record<SignInName, number>>; connectHere?: boolean; boxFiles?: Record<string, string>; hubDown?: boolean; hubUpdateFails?: string; boxCoderAt?: string; boxCoderSameUser?: boolean; claude?: Partial<Record<"claude" | "box:claude", ClaudeSignedIn>>; startedAt?: number; cliPrintsTunnel?: boolean; serverWithoutLinkState?: Array<"box" | "here">; runtimeOrigin?: string; runtimePid?: unknown; serverGone?: boolean; boxConnect?: { authenticated: unknown; linked: unknown }; hereConnect?: { desired?: unknown; authenticated?: unknown; linked?: unknown }; t3Home?: string; devServerUrl?: string; tunnelStartsAfter?: number; hereTunnelStartsAfter?: number; withoutT3?: string[]; hereLinks?: HereLink[]; unreachable?: string[]; unlinkFails?: string; hereStatusFailures?: number; installers?: Record<string, string>; installerEnv?: Record<string, string>; hubLinks?: HereLink[]; boxReachesCoderAt?: string; boxAgentUrl?: string; coderRedirectsAt?: string; otherDeploymentAt?: string; coderLoginFails?: boolean; coderTokenRemoveFails?: boolean; node?: Node } = {}) {
+export function fakeMachine(home: string, polls: Partial<Record<SignInName, number>> = {}, options: { org?: boolean; createFails?: string; createFailsAfterMaking?: string; lookupFails?: string; publicRepos?: string[]; scopes?: string; failRun?: boolean; exits?: Partial<Record<SignInName, number>>; connectHere?: boolean; boxFiles?: Record<string, string>; hubDown?: boolean; hubUpdateFails?: string; boxCoderAt?: string; boxCoderSameUser?: boolean; claude?: Partial<Record<"claude" | "box:claude", ClaudeSignedIn>>; startedAt?: number; cliPrintsTunnel?: boolean; serverWithoutLinkState?: Array<"box" | "here">; runtimeOrigin?: string; runtimePid?: unknown; serverGone?: boolean; boxConnect?: { authenticated: unknown; linked: unknown }; hereConnect?: { desired?: unknown; authenticated?: unknown; linked?: unknown }; t3Home?: string; devServerUrl?: string; tunnelStartsAfter?: number; hereTunnelStartsAfter?: number; withoutT3?: string[]; hereLinks?: HereLink[]; unreachable?: string[]; unlinkFails?: string; hereStatusFailures?: number; installers?: Record<string, string>; installerEnv?: Record<string, string>; hubLinks?: HereLink[]; boxReachesCoderAt?: string; coderAt?: string; coderRejectsToken?: boolean; coderTokenRemoveFails?: boolean; node?: Node } = {}) {
   const left: Record<SignInName, number> = { github: 0, claude: 0, chatgpt: 0, coder: 0, "box:github": 0, "box:claude": 0, "box:chatgpt": 0, "box:t3": 0, "box:coder": 0, ...polls };
   const started = new Set<SignInName>();
   const calls: Array<{ command: string[]; cwd?: string; timeoutMs?: number; input?: string }> = [];
   const coderSsh: string[] = [];
   const coderTokens = new Set<string>();
-  const reachesCoderAt = options.boxReachesCoderAt ?? "https://coder.example.com";
+  const tokenNames = new Map<string, string>();
+  const coderAt = options.coderAt ?? "https://coder.example.com";
+  const reachesCoderAt = options.boxReachesCoderAt ?? coderAt;
   const hubUpdates: string[] = [];
   const hubTook = new Set<string>();
   const credentials: Array<{ node: string; issued: boolean }> = [];
@@ -233,25 +235,25 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
     if (!prepared.has(host)) prepared.add(host), prepareNode(home, host, options.node!);
     return forReal(line, host, undefined, `${join(boxHome(home, host), ".local/bin")}:${nodeBin(home, host)}`, { BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: gitEnv.GIT_CONFIG_GLOBAL });
   };
-  let boxCoderAt = options.boxCoderAt ?? "https://coder.example.com";
-  let boxCoderUser = options.boxCoderAt && !options.boxCoderSameUser ? otherCoderUserId : coderUserId;
+  const boxCoderSession = (host: string) => {
+    const config = join(boxHome(home, host), ".config/coderv2");
+    const read = (name: string) => (existsSync(join(config, name)) ? readFileSync(join(config, name), "utf8") : undefined);
+    const [token, url] = [read("session"), read("url")];
+    if (token !== undefined && coderTokens.has(token) && !options.coderRejectsToken && url === reachesCoderAt) return { at: url, user: coderUserId };
+    return passes("box:coder") ? { at: options.boxCoderAt ?? coderAt, user: options.boxCoderAt && !options.boxCoderSameUser ? otherCoderUserId : coderUserId } : undefined;
+  };
   const box = async (line: string, input: string | undefined, host: string): Promise<ExecResult> => {
     const hub = await onTheHub(line, host);
     if (hub) return hub;
-    if (line === "coder whoami") return passes("box:coder") ? result(true, coderWhoami.replace("https://coder.example.com", boxCoderAt)) : result(false, "You are not logged in");
-    if (line === "coder whoami -o json") return passes("box:coder") ? result(true, coderWhoamiJson(boxCoderAt, boxCoderUser)) : result(false, "You are not logged in");
-    if (line.includes("/api/v2/buildinfo")) return forReal(line, host, input, coderNetwork(home, reachesCoderAt, options));
-    if (line.includes("/bin/coder-linux-")) return forReal(line, host, input, undefined, { PATH: `${coderNetwork(home, reachesCoderAt, options)}:/usr/bin:/bin` });
-    if (line.includes("CODER_AGENT_URL")) return forReal(line, host, input, undefined, { CODER_AGENT_URL: options.boxAgentUrl ?? "http://coder.internal/" });
+    const signedIn = boxCoderSession(host);
+    if (line === "coder whoami") return signedIn ? result(true, coderWhoami.replace("https://coder.example.com", signedIn.at)) : result(false, "You are not logged in");
+    if (line === "coder whoami -o json") return signedIn ? result(true, coderWhoamiJson(signedIn.at, signedIn.user)) : result(false, "You are not logged in");
+    if (line.includes("/api/v2/buildinfo")) return forReal(line, host, input, coderNetwork(home, reachesCoderAt));
+    if (line.includes("/bin/coder-linux-")) return forReal(line, host, input, undefined, { PATH: `${coderNetwork(home, reachesCoderAt)}:/usr/bin:/bin` });
+    if (line.includes("/coderv2")) return forReal(line, host, input);
     if (!options.node && line.includes(" doctor --profile ") && line.endsWith(" --to-do'")) return result(true, "[]\n");
-    if (line.includes('CODER_SESSION_TOKEN="$token" coder login ') && line.startsWith("sh -c ")) {
-      if (!line.includes("coder login --use-token-as-session ")) return result(false, "CODER_SESSION_TOKEN is set. Unset it, or pass --use-token-as-session to save it as your session.");
-      if (!line.includes(`coder login --use-token-as-session ${reachesCoderAt}'`)) return result(false, "error: dial tcp: i/o timeout");
-      if (input === `${coderToken}\n` && !options.coderLoginFails) (left["box:coder"] = 0), (boxCoderAt = reachesCoderAt), (boxCoderUser = coderUserId);
-      return result(passes("box:coder"), passes("box:coder") ? "Welcome to Coder, nora! You're authenticated." : "invalid token");
-    }
     if (line === "t3 environment list --json") return result(true, JSON.stringify(hubLinks.map((link) => ({ urls: [], access: "full-access", status: "reachable", ...link }))));
-    if (line === "coder config-ssh --yes") return passes("box:coder") ? (coderSsh.push(boxCoderAt), result(true, "Updated \"~/.ssh/config\"")) : result(false, "You are not logged in");
+    if (line === "coder config-ssh --yes") return signedIn ? (coderSsh.push(signedIn.at), result(true, "Updated \"~/.ssh/config\"")) : result(false, "You are not logged in");
     if (line.startsWith("gh auth status")) return ghStatus("box:github", scopes);
     if (line === "gh auth setup-git") return result(true);
     if (line === "claude auth status") return claudeStatus("box:claude");
@@ -282,11 +284,10 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
       if (line === "claude auth status") return claudeStatus("claude");
       if (line === "claude -p ok") return claudeReply("claude");
       if (line.startsWith("codex exec")) return result(passes("chatgpt"), "ok");
-      if (line === "coder whoami") return passes("coder") ? result(true, coderWhoami) : result(false, "You are not logged in");
-      if (line === "coder whoami -o json") return passes("coder") ? result(true, coderWhoamiJson("https://coder.example.com", coderUserId)) : result(false, "You are not logged in");
-      if (command[0] === "curl" && line.endsWith("/api/v2/buildinfo")) return command.at(-1)!.startsWith("https://coder.example.com/") ? result(true, `${coderBuildInfo("https://coder.example.com", hereDeployment)}\n200`) : { code: 28, output: "curl: (28) Connection timed out", stdout: "" };
-      if (line === "coder tokens create" || line.startsWith("coder tokens create --name ")) return passes("coder") ? (coderTokens.add(command[4] ?? "unnamed"), result(true, `${coderToken}\n`)) : result(false, "You are not logged in");
-      if (line.startsWith("coder tokens remove ")) return options.coderTokenRemoveFails ? result(false, "error: Coder did not answer") : result(coderTokens.delete(command[3]!), "");
+      if (line === "coder whoami") return passes("coder") ? result(true, coderWhoami.replace("https://coder.example.com", coderAt)) : result(false, "You are not logged in");
+      if (line === "coder whoami -o json") return passes("coder") ? result(true, coderWhoamiJson(coderAt, coderUserId)) : result(false, "You are not logged in");
+      if (line.startsWith("coder tokens create --name ")) return passes("coder") ? (tokenNames.set(command[4]!, coderToken), coderTokens.add(coderToken), result(true, `${coderToken}\n`)) : result(false, "You are not logged in");
+      if (line.startsWith("coder tokens remove ")) return options.coderTokenRemoveFails ? result(false, "error: Coder did not answer") : result(coderTokens.delete(tokenNames.get(command[3]!) ?? "") && tokenNames.delete(command[3]!), "");
       if (line === "hogli devbox:status") return result(devbox);
       if (line === "hogli devbox:start") return (devbox = true), result(true, "up");
       if (line === "gh api user --jq .login") return result(true, "nora\n");
@@ -339,29 +340,20 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
     },
     has: () => true,
   };
-  return { machine, clock, calls, starts, runs, sleeps, opened, coderSsh, coderTokens: () => [...coderTokens], hubUpdates, credentials, hubLinked, sessions: () => [...hereSessions, ...boxSessions], hereLinks: () => hereLinks, peerLinks };
+  return { machine, clock, calls, starts, runs, sleeps, opened, coderSsh, coderTokens: () => [...tokenNames.keys()], hubUpdates, credentials, hubLinked, sessions: () => [...hereSessions, ...boxSessions], hereLinks: () => hereLinks, peerLinks };
 }
 
-const hereDeployment = "8d3f1c2a-6b4e-4f7a-9e21-0c5d7b9a3e14";
-const otherDeployment = "2e9a7c41-5d3b-4c8f-a6e0-91b4f2d8c573";
 const renewedUntil = "2099-01-01T00:00:00.000Z";
 
-const coderBuildInfo = (dashboard: string, deployment: string) => JSON.stringify({ external_url: "https://github.com/coder/coder/commit/1d24629", version: "v2.37.4+1d24629", dashboard_url: dashboard, deployment_id: deployment });
-
-function coderNetwork(home: string, reach: string, options: { coderRedirectsAt?: string; otherDeploymentAt?: string }) {
+function coderNetwork(home: string, reach: string) {
   const bin = join(home, "coder-network");
   mkdirSync(bin, { recursive: true });
-  writeFileSync(join(bin, "coder-cli"), `#!/bin/sh\nprintf '%s\\n' "$@" > "$HOME/.coder-ran"\n`, { mode: 0o755 });
-  const at = (address: string) => `'${address}'`;
+  writeFileSync(join(bin, "coder-cli"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
   const lines = [
     "#!/bin/sh",
-    `follow=; [ "$1" = -q ] || ! grep -qsx location "$HOME/.curlrc" || follow=1`,
-    `out=; url=; prev=; for a; do if [ "$prev" = -o ]; then out=$a; else case "$a" in --location | -[!-]*L*) follow=1 ;; -*) ;; *) url=$a ;; esac; fi; prev=$a; done`,
-    `deployment='${hereDeployment}'`,
-    ...(options.otherDeploymentAt ? [`case "$url" in ${at(options.otherDeploymentAt)}/*) deployment='${otherDeployment}' ;; esac`] : []),
-    ...(options.coderRedirectsAt ? [`case "$url" in ${at(options.coderRedirectsAt)}/*) [ -z "$follow" ] || { printf '%s\\n200' '${coderBuildInfo(options.coderRedirectsAt, hereDeployment)}'; exit 0; }; printf '\\n302'; exit 0 ;; esac`] : []),
-    `case "$url" in ${at(reach)}/bin/coder-linux-*) cp '${join(bin, "coder-cli")}' "$out"; exit 0 ;; esac`,
-    `case "$url" in ${at(reach)}/*) printf '%s\\n200' "$(printf '%s' '${coderBuildInfo(reach, "DEPLOYMENT")}' | sed "s/DEPLOYMENT/$deployment/")"; exit 0 ;; esac`,
+    `out=; url=; prev=; https=; for a; do case "$prev" in -o) out=$a ;; --proto) [ "$a" != =https ] || https=1 ;; *) case "$a" in -*) ;; *) url=$a ;; esac ;; esac; prev=$a; done`,
+    `case "$url" in https://*) ;; *) [ -z "$https" ] || { echo "curl: (1) Protocol \"\${url%%:*}\" disabled" >&2; exit 1; } ;; esac`,
+    `case "$url" in '${reach}'/bin/coder-linux-*) cp '${join(bin, "coder-cli")}' "$out"; exit 0 ;; '${reach}'/api/v2/buildinfo) printf 200; exit 0 ;; esac`,
     `echo "curl: (28) Failed to connect to $url: Connection timed out" >&2`,
     "exit 28",
   ];
@@ -369,7 +361,7 @@ function coderNetwork(home: string, reach: string, options: { coderRedirectsAt?:
   return bin;
 }
 
-export type Node = { engineAt?: string; installs?: string; installFails?: boolean; olderEngine?: boolean; stepsFail?: boolean };
+export type Node = { engineAt?: string; installs?: string; installFails?: boolean; olderEngine?: boolean; stepsFail?: boolean; oldSystemd?: boolean; allowlist?: boolean };
 
 const thisCommit = () => Bun.spawnSync(["git", "-C", engineRoot, "rev-parse", "HEAD"]).stdout.toString().trim();
 
@@ -390,6 +382,8 @@ function prepareNode(home: string, host: string, node: Node) {
   flag("older-engine", node.olderEngine);
   flag("install-fails", node.installFails);
   flag("steps-fail", node.stepsFail);
+  flag("old-systemd", node.oldSystemd);
+  if (node.allowlist) writeFileSync(join(state, "allowlist"), "");
   writeFileSync(join(state, "installs-commit"), `${node.installs ?? thisCommit()}\n`);
   if (node.engineAt) {
     writeFileSync(join(state, "engine-commit"), `${node.engineAt}\n`);

@@ -26,6 +26,7 @@ const probe = async (command: string[]) => {
   const line = command.join(" ");
   if (line.endsWith("guards allowlist --check")) return holds("allowlist");
   if (line.includes("earlyoom.sh") && line.includes("--check")) return holds("earlyoom");
+  if (line.includes("systemctl --version")) return existsSync(join(state, "old-systemd")) ? 1 : 0;
   return 0;
 };
 

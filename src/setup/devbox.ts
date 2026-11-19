@@ -207,66 +207,36 @@ async function coderSession(machine: Machine): Promise<CoderSession | undefined>
 
 const sameCoderUser = (here: CoderSession, box: CoderSession | undefined) => box !== undefined && (here.userId && box.userId ? here.userId === box.userId : here.address === box.address);
 
-async function coderAddressOn(host: string, box: Machine, address: string, deployment: string) {
-  if ((await deploymentAt(box, address)) === deployment) return address;
-  const named = (await box.exec(["sh", "-c", 'printf %s "${CODER_AGENT_URL:-}"'])).stdout.trim();
-  const agent = named ? coderOrigin(named) : undefined;
-  if (named && !agent) throw new Error(`${host} names an agent address that is not a plain http or https address without a user, path or query, so Hedge does not use it. Check CODER_AGENT_URL on ${host}, then run hedge devbox add ${host} again.`);
-  const atAgent = agent !== undefined && agent !== address ? await deploymentAt(box, agent) : undefined;
-  if (atAgent === undefined) throw new Error(`${host} reaches Coder neither at ${address} nor at its own agent address${agent ? `, ${agent}` : ""}. Check the workspace's network, then run hedge devbox add ${host} again.`);
-  if (atAgent !== deployment) throw new Error(`${host}'s agent address, ${agent}, answers as another Coder deployment than ${address}, so Hedge sends no token there. Check the workspace's network, then run hedge devbox add ${host} again.`);
-  return agent!;
-}
+const coderConfig = `"\${CODER_CONFIG_DIR:-\${XDG_CONFIG_HOME:-$HOME/.config}/coderv2}"`;
 
-function coderOrigin(text: string) {
-  try {
-    const url = new URL(text);
-    const bare = ["http:", "https:"].includes(url.protocol) && url.hostname !== "" && !url.username && !url.password && url.pathname === "/" && !url.search && !url.hash;
-    return bare ? url.origin : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-async function deploymentAt(machine: Machine, address: string) {
-  const probe = await machine.exec(["curl", "-q", "-sS", "--max-time", "10", "-w", "\\n%{http_code}", `${address}/api/v2/buildinfo`]);
-  const lines = probe.stdout.split("\n");
-  if (probe.code !== 0 || lines.pop() !== "200") return undefined;
-  try {
-    const info = JSON.parse(lines.join("\n")) as { version?: unknown; deployment_id?: unknown };
-    return typeof info?.version === "string" && typeof info.deployment_id === "string" && info.deployment_id ? info.deployment_id : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/** Signs the workspace in to Coder with a new token from this machine, sent on standard input, then writes its SSH config, so it reaches every coder.<workspace> by name. A workspace already signed in as the same Coder user keeps its session, whatever address it reaches Coder by. */
+/** Signs the workspace in to Coder at this machine's own Coder address, with a new token written to the files its Coder CLI reads, sent on standard input over SSH and never in an HTTP request, then writes its SSH config, so it reaches the hub by its coder. name. A workspace already signed in as the same Coder user keeps its session, whatever address it reaches Coder by. */
 async function coderOnBox(host: string, box: Machine, here: Machine) {
   const session = await coderSession(here);
   if (!session) throw new Error(`Coder is not signed in on this machine. Run coder login <your Coder address> here, then hedge devbox add ${host} again.`);
-  if (!sameCoderUser(session, await coderSession(box))) {
-    const deployment = await deploymentAt(here, session.address);
-    if (!deployment) throw new Error(`Coder at ${session.address} did not tell this machine its deployment ID, so Hedge cannot check which Coder ${host} reaches. Check that Coder answers here, then run hedge devbox add ${host} again.`);
-    const address = await coderAddressOn(host, box, session.address, deployment);
-    const cli = `"$HOME/.local/bin/coder"`;
-    const download = `command -v coder >/dev/null || { case $(uname -m) in x86_64) a=amd64;; aarch64|arm64) a=arm64;; *) exit 1;; esac; mkdir -p "$HOME/.local/bin" && curl -fsSL ${quote(`${address}/bin/coder-linux-`)}"$a" -o ${cli} && chmod +x ${cli}; }`;
-    const installed = await box.exec(["sh", "-c", download]);
-    if (installed.code !== 0) throw new Error(`Hedge could not install the Coder CLI on ${host} from ${address}: ${installed.output.trim()}`);
-    if (!address.startsWith("https://")) throw new Error(`${host} reaches Coder only at its agent address, ${address}, which is plain HTTP, so Hedge sends no token there. Sign ${host} in yourself: run ssh -t ${host} ${quote(`${remotePath} coder login ${quote(address)}`)}, and paste a token from ${session.address}/cli-auth. Then run hedge devbox add ${host} again.`);
-    const name = `hedge-${Date.now().toString(36)}`;
-    const token = await here.exec(["coder", "tokens", "create", "--name", name]);
-    if (token.code !== 0 || !token.output.trim()) throw new Error(`Coder made no token for ${host}: ${token.output.trim()}`);
-    const login = `IFS= read -r token && CODER_SESSION_TOKEN="$token" coder login --use-token-as-session ${quote(address)}`;
-    const signedIn = await box.exec(["sh", "-c", login], { input: `${token.output.trim()}\n` });
-    if (signedIn.code !== 0) {
-      const removed = (await here.exec(["coder", "tokens", "remove", name])).code === 0;
-      const cleanup = removed ? "" : ` Hedge could not remove the token it made, ${name}. Remove it with coder tokens remove ${name}.`;
-      throw new Error(`Coder did not sign in on ${host}: ${signedIn.output.trim()}${cleanup}`);
-    }
-  }
+  if (!sameCoderUser(session, await coderSession(box))) await signInBox(host, box, here, session);
   const ssh = await box.exec(["coder", "config-ssh", "--yes"]);
   if (ssh.code !== 0) throw new Error(`coder config-ssh failed on ${host}: ${ssh.output.trim()}`);
 }
+
+async function signInBox(host: string, box: Machine, here: Machine, session: CoderSession) {
+  const { address } = session;
+  if (!(await reachesOverHttps(box, address))) throw new Error(`${host} does not reach Coder at ${address} over HTTPS, so Hedge makes no Coder token for it and sends none. Sign ${host} in to Coder yourself: install the Coder CLI there from your Coder deployment, run coder login there with an HTTPS address it reaches, and paste a token from ${address}/cli-auth. Then run hedge devbox add ${host} again.`);
+  const cli = `"$HOME/.local/bin/coder"`;
+  const download = `command -v coder >/dev/null || { case $(uname -m) in x86_64) a=amd64;; aarch64|arm64) a=arm64;; *) exit 1;; esac; mkdir -p "$HOME/.local/bin" && curl -q --proto =https -fsS --max-time 300 -o ${cli}.part ${quote(`${address}/bin/coder-linux-`)}"$a" && chmod +x ${cli}.part && mv -f ${cli}.part ${cli}; }`;
+  const installed = await box.exec(["sh", "-c", download]);
+  if (installed.code !== 0) throw new Error(`Hedge could not install the Coder CLI on ${host} from ${address}: ${installed.output.trim()}`);
+  const name = `hedge-${Date.now().toString(36)}`;
+  const token = await here.exec(["coder", "tokens", "create", "--name", name]);
+  if (token.code !== 0 || !token.output.trim()) throw new Error(`Coder made no token for ${host}: ${token.output.trim()}`);
+  const write = `umask 077 && d=${coderConfig} && mkdir -p "$d" && IFS= read -r token && printf %s ${quote(address)} > "$d/url.hedge" && printf %s "$token" > "$d/session.hedge" && mv -f "$d/url.hedge" "$d/url" && mv -f "$d/session.hedge" "$d/session"`;
+  const written = await box.exec(["sh", "-c", write], { input: `${token.stdout.trim()}\n` });
+  if (written.code === 0 && sameCoderUser(session, await coderSession(box))) return;
+  const removed = (await here.exec(["coder", "tokens", "remove", name])).code === 0;
+  const cleanup = removed ? "" : ` Hedge could not remove the token it made, ${name}. Remove it with coder tokens remove ${name}.`;
+  throw new Error(`Coder did not sign in on ${host} with the token Hedge wrote there${written.code === 0 ? "" : `: ${written.output.trim()}`}.${cleanup}`);
+}
+
+const reachesOverHttps = async (box: Machine, address: string) => address.startsWith("https://") && (await box.exec(["curl", "-q", "--proto", "=https", "-sS", "--max-time", "10", "-o", "/dev/null", "-w", "%{http_code}", `${address}/api/v2/buildinfo`])).stdout.trim() === "200";
 
 async function engineCurrent(box: Machine, context: DevboxContext) {
   const here = context.engineRoot && (await context.machine.exec(["git", "-C", context.engineRoot, "rev-parse", "HEAD"]));
@@ -285,14 +255,15 @@ async function applyProfile(box: Machine, host: string, context: DevboxContext) 
   const withEngine = `sh "${boxEngine}/hedge" apply --profile "${boxProfile}"`;
   const apply = (await engineCurrent(box, context)) ? withEngine : `sh "${boxEngine}/get.sh" --ref ${quote(engineRef)} --profile "${boxProfile}"`;
   const applied = (await box.run(["sh", "-c", `${userBus} ${clone} && ${apply}`])) === 0;
-  const left = await stepsLeft(box);
-  if (applied && left === olderEngine) return context.terminal.print(`  · ${host} runs an older Hedge, which cannot list the steps left for you. Run hedge doctor on ${host} to see them.`);
-  if (applied && left?.length === 0) return;
-  if (applied && left !== olderEngine && left?.length && context.leftForYou) {
-    context.leftForYou(left);
-    return context.terminal.print(`  · ${left.length === 1 ? "One step is" : `${left.length} steps are`} left for you on ${host}. Hedge lists ${left.length === 1 ? "it" : "them"} at the end and runs none of them.`);
+  const node = await stepsLeft(box);
+  if (applied && node === olderEngine) return context.terminal.print(`  · ${host} runs an older Hedge, which cannot list the steps left for you. Run hedge doctor on ${host} to see them.`);
+  const left = node === olderEngine ? undefined : node;
+  if (applied && left?.clean && !left.steps.length) return;
+  if (applied && left?.clean && context.leftForYou) {
+    context.leftForYou(left.steps);
+    return context.terminal.print(`  · ${left.steps.length === 1 ? "One step is" : `${left.steps.length} steps are`} left for you on ${host}. Hedge lists ${left.steps.length === 1 ? "it" : "them"} at the end and runs none of them.`);
   }
-  throw new Error(applyFailure(host, context, applied, left === olderEngine ? undefined : left));
+  throw new Error(applyFailure(host, context, applied, left));
 }
 
 const yourSteps = (host: string, left: LeftStep[]) => left.map((step) => `  · ${step.say}${step.command ? ` Run: ssh -t ${host} ${quote(`${remotePath} ${step.command}`)}` : ""}`);
@@ -300,18 +271,23 @@ const yourSteps = (host: string, left: LeftStep[]) => left.map((step) => `  · $
 export function printLeftForYou(terminal: Terminal, host: string, left: LeftStep[]) {
   if (!left.length) return;
   terminal.print("");
-  terminal.print(`Left for you on ${host}. Do each one, then run hedge doctor on ${host} to check:`);
+  terminal.print(`Left for you on ${host}:`);
   for (const line of yourSteps(host, left)) terminal.print(line);
+  terminal.print(`Do each one, then run hedge apply on ${host}.`);
 }
 
 const olderEngine = "older engine";
 
-async function stepsLeft(box: Machine): Promise<LeftStep[] | typeof olderEngine | undefined> {
+type NodeLeft = { steps: LeftStep[]; clean: boolean; said: string[] };
+
+async function stepsLeft(box: Machine): Promise<NodeLeft | typeof olderEngine | undefined> {
   const listed = await box.exec(["sh", "-c", `${userBus} sh "${boxEngine}/hedge" doctor --profile "${boxProfile}" --to-do`]);
-  if (listed.code !== 0) return listed.output.includes("hedge: unknown option --to-do") ? olderEngine : undefined;
+  if (listed.code !== 0 && listed.output.includes("hedge: unknown option --to-do")) return olderEngine;
+  if (listed.code !== 0 && listed.code !== 1) return undefined;
+  const lines = listed.stdout.trim().split("\n");
   try {
-    const steps: unknown = JSON.parse(listed.stdout.trim().split("\n").at(-1) ?? "");
-    return Array.isArray(steps) && steps.every(isLeftStep) ? steps : undefined;
+    const steps: unknown = JSON.parse(lines.at(-1) ?? "");
+    return Array.isArray(steps) && steps.every(isLeftStep) ? { steps, clean: listed.code === 0, said: lines.slice(0, -1).filter(Boolean) } : undefined;
   } catch {
     return undefined;
   }
@@ -319,12 +295,16 @@ async function stepsLeft(box: Machine): Promise<LeftStep[] | typeof olderEngine 
 
 const isLeftStep = (step: unknown): step is LeftStep => typeof step === "object" && step !== null && "say" in step && typeof step.say === "string" && (!("command" in step) || typeof step.command === "string");
 
-function applyFailure(host: string, context: DevboxContext, applied: boolean, left: LeftStep[] | undefined) {
+function applyFailure(host: string, context: DevboxContext, applied: boolean, left: NodeLeft | undefined) {
   const rerun = `then run ${again(context)} again.`;
-  if (!left?.length) return applied ? `Hedge could not read the steps left on ${host}. Run hedge doctor there and fix what it says, ${rerun}` : `The devbox could not apply your profile. Fix what it says above, ${rerun}`;
-  const yours = yourSteps(host, left);
-  const intro = applied ? `Your profile applied on ${host}, but steps are left for you there. Do each one, ${rerun}` : `The devbox could not apply your profile. Do what is left for you on ${host}, and fix what it says above, ${rerun}`;
-  return [`${intro} Left for you:`, ...yours].join("\n");
+  const steps = left?.steps ?? [];
+  const intro = !applied
+    ? steps.length ? `The devbox could not apply your profile. Do what is left for you on ${host}, and fix what it says above, ${rerun}` : `The devbox could not apply your profile. Fix what it says above, ${rerun}`
+    : !left ? `Hedge could not read the steps left on ${host}. Run hedge doctor there and fix what it says, ${rerun}`
+    : !left.clean ? `Your profile applied on ${host}, but hedge doctor there finds more than steps for you. Fix what it says, ${rerun}`
+    : `Your profile applied on ${host}, but steps are left for you there. Do each one, ${rerun}`;
+  const said = applied && left && !left.clean ? left.said.map((line) => `  ${line}`) : [];
+  return [intro, ...said, ...(steps.length ? ["Left for you:", ...yourSteps(host, steps)] : [])].join("\n");
 }
 
 /** Claude signs in on the box in an SSH terminal: its sign-in asks for a code that the person pastes. */

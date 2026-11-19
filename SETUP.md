@@ -639,19 +639,23 @@ creates no node ends at step 8 (see step 1).
    it says the hub has not linked the node yet, run
    `hedge peers link coder.<node>` on the hub.
 
-   When the node applied the profile and only steps for the person are
-   left, such as the Git allowlist, earlyoom or a key to paste, it goes on
-   with the sign-ins, T3 Connect and the link. At the end it lists those
-   steps once, each with its command. It runs none of them itself. Ask the
-   person to run each command, then run `hedge doctor` on the node. When
-   the apply fails for any other reason, it stops at the profile step. Fix
-   what it says, then run `hedge devbox add` again.
+   When the node applied the profile and `hedge doctor` there finds
+   nothing but steps for the person, such as the Git allowlist, earlyoom
+   or a key to paste, it goes on with the sign-ins, T3 Connect and the
+   link. At the end it lists those steps once, each with its command. It
+   runs none of them itself. Ask the person to run each command, then run
+   `hedge apply` on the node, so the jobs, steps and settings that wait on
+   those steps get installed. When the apply fails, or `hedge doctor`
+   finds anything else, it stops at the profile step. Fix what it says,
+   then run `hedge devbox add` again.
 
-   When the node reaches Coder only at a plain HTTP address, such as a node
-   in another region, `hedge devbox add` sends no Coder token there. It
-   prints the one `coder login` command the person runs on the node. Ask
-   them to run it, then run `hedge devbox add` again. It sends no token to
-   an address that reports another Coder deployment ID than the hub's.
+   It signs the node in to Coder only at the hub's own Coder address, the
+   one the hub's Coder CLI uses. It writes the new token straight into the
+   node's Coder CLI files over SSH. When the node does not reach that
+   address over HTTPS, it makes no token and sends none, and it stops with
+   the sign-in the person does on the node: install the Coder CLI there,
+   and run `coder login` with an HTTPS address the node reaches. Then run
+   `hedge devbox add` again.
 4. **Check.** Run the `hedge doctor` of step 8 on each node, and on the hub
    again. Explain each line as in step 8.
 

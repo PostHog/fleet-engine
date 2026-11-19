@@ -187,8 +187,8 @@ describe("hedge devbox add", () => {
     expect(await main(["devbox", "add", "coder.hedge-node-1"], { ...options, setup: { machine: box.machine } })).toBe(0);
     expect(io.output()).toContain("  ✓ Sign in to Coder on coder.hedge-node-1: done");
     expect(box.coderSsh).toEqual(["https://coder.example.com"]);
-    const login = box.calls.find((call) => onBox(call.command)?.includes("coder login"));
-    expect(login?.input).toBe(`${coderToken}\n`);
+    const written = box.calls.find((call) => onBox(call.command)?.includes("/coderv2"));
+    expect(written?.input).toBe(`${coderToken}\n`);
     expect(box.calls.flatMap((call) => call.command).join(" ")).not.toContain(coderToken);
     expect(io.output()).not.toContain(coderToken);
 

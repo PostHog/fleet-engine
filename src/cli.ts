@@ -191,7 +191,7 @@ async function reconcile(command: "apply" | "doctor", args: string[], options: C
   const adapters = (options.adapters ?? engineAdapters)();
   const issue: Issuer = (entries, node) => issueCredentials(entries, node, plan, sources, options);
   const report = doctor ? await check(plan, { home: options.home, adapters, run: options.run }) : await apply(plan, { home: options.home, adopt: flags.adopt, adoptFrom: flags.adoptFrom, skip: flags.skip, dryRun: flags.dryRun, adapters, run: options.run, issue, progress: options.print });
-  if (flags.toDo) return options.print(JSON.stringify(report.humanLeft.map(({ pack, id, say, command }) => ({ pack, id, say, ...(command ? { command } : {}) })))), 0;
+  if (flags.toDo) return printToDo(report, held, options.print);
   if (doctor) {
     const drifted = await drift(plan, report.humanLeft);
     report.findings.push(...drifted);
@@ -565,6 +565,14 @@ function printReport(report: Report, command: string, print: (line: string) => v
   if (command === "doctor") print(report.ok ? "Everything matches your profile." : "Run hedge apply to fix what Hedge can fix.");
   else if (dryRun) print(report.ok ? `Preview: ${changes.length} change${changes.length === 1 ? "" : "s"} to apply. Nothing was written.` : "Preview: Hedge could not apply your profile. Nothing was written.");
   else print(report.ok ? `Applied ${changes.length} change${changes.length === 1 ? "" : "s"}.` : "Hedge could not apply your profile.");
+}
+
+function printToDo(report: Report, held: Report["findings"], print: (line: string) => void) {
+  const yours = (finding: Report["findings"][number]) => report.humanLeft.some((step) => finding.id === `human:${step.id}` && finding.pack === step.pack);
+  const others = [...held, ...report.findings.filter((finding) => (finding.repair || finding.id.startsWith("kept:")) && !yours(finding))];
+  printFindings(others, print);
+  print(JSON.stringify(report.humanLeft.map(({ pack, id, say, command }) => ({ pack, id, say, ...(command ? { command } : {}) }))));
+  return others.length ? 1 : 0;
 }
 
 function printFindings(findings: Report["findings"], print: (line: string) => void) {
