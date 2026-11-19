@@ -250,22 +250,20 @@ describe("the agent setup guide", () => {
       { name: "scratch", type: "string", ephemeral: true, default_value: "x" },
     ]));
     const bin = fakeTools({
-      coder: `case "$*" in\n  "templates list -o json") cat "${fixtures}/templates.json" ;;\n  "whoami -o json") printf '[{"url":"https://coder.example.com"}]' ;;\n  "login token") echo login >> "${fixtures}/token-reads"; echo stored-session ;;\n  *) exit 1 ;;\nesac`,
-      curl: `for url; do :; done\ncat > "${fixtures}/header"\n[ "$url" = https://coder.example.com/api/v2/templateversions/v-active/rich-parameters ] || exit 22\nprintf '%s ' "$@" > "${fixtures}/curl-args"\ncat "${fixtures}/parameters.json"`,
+      coder: `case "$*" in\n  "templates list -o json") cat "${fixtures}/templates.json" ;;\n  "whoami -o json") printf '[{"url":"https://coder.example.com"}]' ;;\n  "login token") echo stored-session ;;\n  *) exit 1 ;;\nesac`,
+      curl: `for url; do :; done\n[ "$(cat)" = "Coder-Session-Token: $CODER_ACCEPTS" ] || exit 22\n[ "$url" = https://coder.example.com/api/v2/templateversions/v-active/rich-parameters ] || exit 22\nprintf '%s ' "$@" > "${fixtures}/curl-args"\ncat "${fixtures}/parameters.json"`,
     });
     const code = codeIn(step(5));
     expect(code).toContainEqual(expect.stringContaining("https://raw.githubusercontent.com/PostHog/hedge/main/scripts/template-parameters.sh -o ~/.cache/hedge-setup/template-parameters.sh"));
     const command = code.find((line) => line.startsWith("sh ~/.cache/hedge-setup/template-parameters.sh "))!.trim().replace("~/.cache/hedge-setup/template-parameters.sh", join(root, "scripts/template-parameters.sh")).replace("<template>", "dev");
     const env = { PATH: `${bin}:${process.env.PATH}`, HOME: fixtures };
 
-    const stored = await runShell(command, env);
-    const fromEnvironment = await runShell(command, { ...env, CODER_SESSION_TOKEN: "environment-session" });
+    const stored = await runShell(command, { ...env, CODER_ACCEPTS: "stored-session" });
+    const fromEnvironment = await runShell(command, { ...env, CODER_SESSION_TOKEN: "environment-session", CODER_ACCEPTS: "environment-session" });
 
     expect([stored.code, stored.stderr]).toEqual([0, ""]);
     expect(stored.stdout).toBe(["disk_size (Disk size): number, default 100", "region: string, default us-east-1, options us-east-1 | eu-central-1", "dotfiles_uri: string, mutable, no default", "jetbrains: bool, default false", "github_pat (GitHub): string, mutable, secret, default hidden", "ssh_key: string, default hidden", "scratch: string, ephemeral, default hidden", ""].join("\n"));
-    expect(fromEnvironment.stdout).toBe(stored.stdout);
-    expect(readFileSync(join(fixtures, "header"), "utf8")).toBe("Coder-Session-Token: environment-session\n");
-    expect(readFileSync(join(fixtures, "token-reads"), "utf8")).toBe("login\n");
+    expect([fromEnvironment.code, fromEnvironment.stdout]).toEqual([0, stored.stdout]);
     expect(readFileSync(join(fixtures, "curl-args"), "utf8")).not.toContain("session");
     expect(blocksIn(guide()).join("\n")).not.toContain("coder templates pull");
   });
