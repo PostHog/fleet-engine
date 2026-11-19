@@ -144,7 +144,7 @@ function fakeServer(options: { up?: boolean; settings?: Record<string, unknown>;
   return { state, calls, tags, server };
 }
 
-type Machine = { home?: string; t3?: boolean; service?: "installed" | "not installed" | "unavailable"; manager?: boolean; linger?: "yes" | "no" | ""; sudo?: boolean; originHead?: string; refs?: string[]; remotes?: string[]; gitBroken?: boolean; feed?: string; installFailures?: number; env?: Record<string, string>; reloadFailures?: number; restartFailures?: number; sudoRefusal?: string };
+type Machine = { home?: string; bus?: { runtime: string; address: string }; t3?: boolean; service?: "installed" | "not installed" | "unavailable"; manager?: boolean; linger?: "yes" | "no" | ""; sudo?: boolean; originHead?: string; refs?: string[]; remotes?: string[]; gitBroken?: boolean; feed?: string; installFailures?: number; env?: Record<string, string>; reloadFailures?: number; restartFailures?: number; sudoRefusal?: string };
 
 const releasesFeed = ["mobile-android-build%2F2.3.0%2Fabc", "v0.1.9-nightly.20990102.7", "v0.1.9-nightly.20990101.3"]
   .map((tag) => `<entry><link rel="alternate" type="text/html" href="https://github.com/pingdotgg/t3code/releases/tag/${tag}"/></entry>`)
@@ -191,7 +191,8 @@ function runner(server: ReturnType<typeof fakeServer>, machine: Machine = {}) {
     const command = withoutBus(whole);
     const line = command.join(" ");
     calls.push(line);
-    const onBus = (machine.env?.XDG_RUNTIME_DIR ?? busVars.XDG_RUNTIME_DIR) === "/run/user/1000" && (machine.env?.DBUS_SESSION_BUS_ADDRESS ?? busVars.DBUS_SESSION_BUS_ADDRESS) === "unix:path=/run/user/1000/bus";
+    const bus = machine.bus ?? { runtime: "/run/user/1000", address: "unix:path=/run/user/1000/bus" };
+    const onBus = (busVars.XDG_RUNTIME_DIR ?? machine.env?.XDG_RUNTIME_DIR) === bus.runtime && (busVars.DBUS_SESSION_BUS_ADDRESS ?? machine.env?.DBUS_SESSION_BUS_ADDRESS) === bus.address;
     const managerRuns = machine.manager !== false || state.lingering;
     if ((line.startsWith("systemctl --user ") || line.startsWith("t3 service ")) && !(onBus && managerRuns)) return { code: 1, stdout: "", stderr: "Failed to connect to bus: No medium found" };
     if (command[0] === "t3" && !state.t3) return { code: 127, stdout: "" };
@@ -1241,17 +1242,20 @@ describe("T3 on Linux", () => {
     const home = temp.make("home-");
     const { commands, adapter } = setup({}, { service: "not installed", manager: false, sudo: true });
     const report = await apply(plan("linux", []), { home, adapters: [adapter] });
-    expect(commands.state.service).toBe("installed");
-    expect((await onUserBus(commands.run, {}, 1000)(["t3", "service", "status"])).stdout).toContain("Status: installed");
+    const status = await commands.run(["env", "XDG_RUNTIME_DIR=/run/user/1000", "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus", "t3", "service", "status"]);
+    expect(status.stdout).toContain("Status: installed");
+    expect(commands.state.systemd.running).toBeDefined();
     expect(report.findings.map((item) => item.id)).not.toContain("t3:service");
     expect(report.actions.map((action) => action.target)).toContain("t3 linger");
   });
 
-  test("keeps the runtime folder and the bus address the session already has", async () => {
-    const run: CommandRunner = async (command) => ({ code: 0, stdout: command.join(" ") });
-    const { stdout } = await onUserBus(run, { XDG_RUNTIME_DIR: "/run/user/7", DBUS_SESSION_BUS_ADDRESS: "unix:path=/tmp/bus" }, 1000)(["systemctl", "--user", "daemon-reload"]);
-    expect(stdout).toBe("env XDG_RUNTIME_DIR=/run/user/7 DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/bus systemctl --user daemon-reload");
-    expect((await onUserBus(run, {}, 1000)(["t3", "--version"])).stdout).toBe("t3 --version");
+  test("keeps the runtime folder and the bus address the session already has, and starts the service on that bus", async () => {
+    const home = temp.make("home-");
+    const bus = { runtime: "/run/user/7", address: "unix:path=/tmp/bus" };
+    const { commands, adapter } = setup({}, { home, bus, service: "not installed", env: { XDG_RUNTIME_DIR: bus.runtime, DBUS_SESSION_BUS_ADDRESS: bus.address } });
+    const report = await apply(plan("linux", []), { home, adapters: [adapter] });
+    expect(commands.state.systemd.running).toBeDefined();
+    expect(report.findings.map((item) => item.id)).not.toContain("t3:service");
   });
 
   test("does not touch the service on the Mac", async () => {
