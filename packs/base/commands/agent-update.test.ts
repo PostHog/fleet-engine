@@ -33,6 +33,7 @@ test("updates the agent CLIs that Hedge installed", async () => {
 test.each([
   ["through its current release", "/home/me/.local/share/hedge/codex/current/bin/codex\n"],
   ["from the earlier single-folder layout", "/home/me/.local/share/hedge/codex/bin/codex\n"],
+  ["that Fleet installed before the rename", "/home/me/.local/share/fleet/codex/current/bin/codex\n"],
 ])("updates the Codex that Hedge installed from its release package %s", async (_layout, target) => {
   const { run, calls } = stub({ [hedgeCodex]: { code: 0, out: target }, [`sh ${codexInstaller}`]: { code: 0, out: "" }, "bun pm ls -g": { code: 0, out: "" } });
   expect((await updateAgents(run)).lines).toEqual(["Claude Code: not installed by Hedge, skipped.", "Codex: up to date.", "Codex from Bun: not installed by Hedge, skipped."]);

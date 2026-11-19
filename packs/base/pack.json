@@ -821,8 +821,9 @@
         "install-codex"
       ],
       "check": [
-        "codex",
-        "--version"
+        "sh",
+        "-c",
+        "case \"$(readlink \"$HOME/.local/bin/codex\")\" in \"$HOME\"/.local/share/fleet/*) exit 1 ;; esac; exec codex --version"
       ],
       "on": [
         "linux",

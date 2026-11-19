@@ -88,12 +88,12 @@ describe("the Base pack", () => {
     expect(plan("both").steps.map((step) => step.id).filter(isAgentCli)).toEqual(["claude-cli", "codex-cli"]);
     expect(plan("claude").steps.map((step) => step.id).filter(isAgentCli)).toEqual(["claude-cli"]);
     expect(plan("codex").steps.map((step) => step.id).filter(isAgentCli)).toEqual(["codex-cli"]);
-    expect(plan("both").steps.find((step) => step.id === "codex-cli")).toMatchObject({ run: ["hedge", "install-codex"], check: ["codex", "--version"] });
+    expect(plan("both").steps.find((step) => step.id === "codex-cli")).toMatchObject({ run: ["hedge", "install-codex"] });
   });
 
   test("installs Codex on Linux from its release package, which needs no Node", () => {
     const step = plan("both", devbox).steps.find((item) => item.id === "codex-cli");
-    expect(step).toMatchObject({ run: ["hedge", "install-codex"], check: ["codex", "--version"] });
+    expect(step).toMatchObject({ run: ["hedge", "install-codex"] });
     expect(step?.run).not.toContain("@openai/codex");
     expect(plan("both", devbox).commands["install-codex"]?.path).toEndWith("packs/base/commands/install-codex.ts");
   });

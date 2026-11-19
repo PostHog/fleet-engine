@@ -266,6 +266,27 @@ describe("install-codex.sh", () => {
     expect(existsSync(join(codexHome(box.home), "releases", tag))).toBe(false);
   });
 
+  onLinux("takes over the Codex that Fleet installed, keeps Fleet's copy, and apply's check fails until it does", async () => {
+    const box = await machine("x86_64", ["x86_64-unknown-linux-musl"]);
+    const fleets = join(box.home, ".local/share/fleet/codex");
+    mkdirSync(join(fleets, "releases/rust-v0.1.0/bin"), { recursive: true });
+    writeFileSync(join(fleets, "releases/rust-v0.1.0/bin/codex"), "#!/bin/sh\necho codex-cli 0.1.0\n");
+    chmodSync(join(fleets, "releases/rust-v0.1.0/bin/codex"), 0o755);
+    symlinkSync("releases/rust-v0.1.0", join(fleets, "current"));
+    mkdirSync(join(box.home, ".local/bin"), { recursive: true });
+    symlinkSync(join(fleets, "current/bin/codex"), join(box.home, ".local/bin/codex"));
+    const step = (JSON.parse(readFileSync(join(import.meta.dir, "../pack.json"), "utf8")).steps as Array<{ id: string; check: string[] }>).find((item) => item.id === "codex-cli")!;
+    const check = () => Bun.spawnSync(step.check, { env: { HOME: box.home, PATH: `${box.home}/.local/bin:/usr/bin:/bin` } }).exitCode;
+    const before = check();
+
+    const result = await install(box);
+
+    expect([before, result.code, check()]).toEqual([1, 0, 0]);
+    expect(readlinkSync(join(box.home, ".local/bin/codex"))).toBe(join(codexHome(box.home), "current/bin/codex"));
+    expect(await version(box.home)).toBe("codex-cli 9.9.9 x86_64-unknown-linux-musl");
+    expect(readFileSync(join(fleets, "releases/rust-v0.1.0/bin/codex"), "utf8")).toContain("0.1.0");
+  });
+
   onLinux("keeps a codex in ~/.local/bin that Hedge did not install", async () => {
     const box = await machine("x86_64", ["x86_64-unknown-linux-musl"]);
     mkdirSync(join(box.home, ".local/bin"), { recursive: true });
