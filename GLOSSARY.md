@@ -77,7 +77,7 @@ A devbox that stays on, where T3 threads do the work. The hub links the nodes an
 _Avoid_: Worker box
 
 **Hub**:
-The one cloud box that the profile's `hub` names, with `hedge hub here`. Setup starts on it. It runs the items placed on the hub, keeps the secrets, adds the nodes with `hedge devbox add`, and manages them.
+The one cloud box that the profile's `hub` names, with `hedge hub here`. Setup starts on it. It runs the items placed on the hub, keeps the pack secrets, such as the Slack, incident.io, and MCP gateway sign-ins, adds the nodes with `hedge devbox add`, and manages them.
 _Avoid_: Controller, master box
 
 ## Threads

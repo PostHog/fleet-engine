@@ -128,9 +128,9 @@ CODER_SESSION_TOKEN="$(cat <file>)" coder login <coder address>
 
 Without a secret prompt, run `coder login <coder address>` in a Terminal
 window, where it asks for the token itself. Coder is done when `coder whoami`
-passes. When they have no Coder deployment, tell them Hedge needs Linux boxes
-in the cloud that they reach over SSH, and point them at "Set it up by hand"
-in the README.
+passes. When they have no Coder deployment, stop: this setup needs Coder
+today. Plain Linux boxes over SSH are not supported yet. "Set it up by hand"
+in the README installs Hedge on one Linux box.
 
 **An earlier setup.** Run `coder list`. For each workspace whose name starts
 with `hedge-`, check whether Hedge runs there and whether it is the hub:

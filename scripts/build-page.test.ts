@@ -79,8 +79,13 @@ describe("the site build", () => {
   test("the landing page's first screen says that Hedge runs agents in the cloud, not on the Mac, and why", () => {
     const hero = visibleText(page("index.html").match(/<section class="hero">[\s\S]*?<\/section>/)![0]).replaceAll(" ,", ",");
     expect(hero).toContain(
-      "Hedge runs your agents in the cloud, not on your Mac. Always on. Agents keep working when you close your Mac or go to sleep. Secure. Agents run on isolated cloud boxes. Secrets stay on your hub. Your Mac stays clean. With you everywhere. Read and steer every thread from your Mac or your phone. Grows with your work. Add a node when you need more agents at once.",
+      "Hedge runs your agents in the cloud, not on your Mac. Always on. Agents keep working when you close your Mac or go to sleep. Secure. Agents run on isolated cloud boxes. The sign-ins and tokens of your packs stay on your hub. Your Mac stays clean. With you everywhere. Read and steer every thread from your Mac or your phone. Grows with your work. Add a node when you need more agents at once.",
     );
+  });
+
+  test("the landing page says the first setup runs from T3 Code on the Mac, and that the phone reads and steers once the boxes are linked", () => {
+    const lead = visibleText(page("index.html").match(/<header class="band-head"><p class="eyebrow">Get started<\/p>[\s\S]*?<\/header>/)![0]);
+    expect(lead).toContain("Paste it into T3 Code on your Mac. The first setup runs from there, because it creates the cloud boxes and reaches them over SSH. The agent sets up the cloud boxes, and installs nothing from Hedge on your Mac. Once the boxes are linked, read and steer them from your phone too.");
   });
 
   test("the landing page offers one setup, a hub and a node, with a switch for every default pack, all on, and the Hub pack always on", () => {

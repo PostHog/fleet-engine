@@ -1,12 +1,13 @@
 # <img src="docs/hedge-logo.svg" alt="" width="30" height="30"> PostHog Hedge
 
-<img src="docs/hedge.svg" alt="Your Mac and your phone run only the T3 Code app. It links to your nodes in the cloud, where agent threads work in their own worktrees. Your hub in the cloud links the nodes and keeps your secrets. Every cloud box reads the same private profile repo on GitHub." width="760">
+<img src="docs/hedge.svg" alt="Your Mac and your phone run only the T3 Code app. It links to your nodes in the cloud, where agent threads work in their own worktrees. Your hub in the cloud links the nodes and keeps the secrets of your packs. Every cloud box reads the same private profile repo on GitHub." width="760">
 
 **PostHog Hedge runs your coding agents in the cloud, not on your Mac.**
 
 - **Always on.** Agents keep working when you close your Mac or go to sleep.
-- **Secure.** Agents run on isolated cloud boxes. Secrets stay on your hub.
-  Your Mac stays clean.
+- **Secure.** Agents run on isolated cloud boxes. Pack secrets, such as your
+  Slack, incident.io, and MCP gateway sign-ins, stay on your hub. Your Mac
+  stays clean.
 - **With you everywhere.** Read and steer every thread from your Mac or your
   phone.
 - **Grows with your work.** Add a node when you need more agents at once.
@@ -19,12 +20,15 @@ Mac and your phone run only the T3 Code app. Hedge installs nothing on them.
 
 ## Getting started
 
-You need a Coder deployment where you can create workspaces, or other Linux
-boxes that you reach over SSH.
+You need a Coder deployment where you can create workspaces. The agent
+creates your boxes with the Coder CLI and reaches them over SSH, so the
+agent setup needs Coder today. Plain Linux boxes over SSH, without Coder,
+are not supported yet.
 
-1. **Download [T3 Code](https://t3.codes)** on your Mac or your phone, and open
-   it. Its Welcome page sets up one agent, Claude Code or Codex, and signs you
-   in.
+1. **Download [T3 Code](https://t3.codes)** on your Mac, and open it. Its
+   Welcome page sets up one agent, Claude Code or Codex, and signs you in.
+   The first setup runs there, because it needs the Coder CLI and SSH. Add
+   T3 Code on your phone once your boxes are linked, to read and steer them.
 2. **Sign in with T3 Connect.** In T3 Code, open **Settings → Sharing &
    access**, sign in, and turn on **T3 Connect**. It shows your hub and your
    nodes in T3 Code on your Mac and your phone.

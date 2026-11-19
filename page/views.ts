@@ -15,7 +15,7 @@ type Frame = { root: string; title: string; description: string; current?: "pack
 
 const pitch = [
   { head: "Always on.", line: "Agents keep working when you close your Mac or go to sleep." },
-  { head: "Secure.", line: "Agents run on isolated cloud boxes. Secrets stay on your hub. Your Mac stays clean." },
+  { head: "Secure.", line: "Agents run on isolated cloud boxes. The sign-ins and tokens of your packs stay on your hub. Your Mac stays clean." },
   { head: "With you everywhere.", line: "Read and steer every thread from your Mac or your phone." },
   { head: "Grows with your work.", line: "Add a node when you need more agents at once." },
 ];
@@ -126,7 +126,7 @@ ${pageJson ? `<script id="hedge-data" type="application/json">${JSON.stringify(p
   </div>
 </div></section>
 <section class="band band-pick" id="start" aria-labelledby="start-h"><div class="wrap">
-  <header class="band-head"><p class="eyebrow">Get started</p><h2 id="start-h">Start your hub and a node.</h2><p class="lead">Switch packs on or off. The prompt changes as you choose. Paste it into T3 Code on your Mac or your phone: the agent sets up the cloud boxes, and installs nothing from Hedge on your Mac.</p></header>
+  <header class="band-head"><p class="eyebrow">Get started</p><h2 id="start-h">Start your hub and a node.</h2><p class="lead">Switch packs on or off. The prompt changes as you choose. Paste it into T3 Code on your Mac. The first setup runs from there, because it creates the cloud boxes and reaches them over SSH. The agent sets up the cloud boxes, and installs nothing from Hedge on your Mac. Once the boxes are linked, read and steer them from your phone too.</p></header>
   <form id="chooser" class="chooser" autocomplete="off">
     ${box(root)}
     ${promptCard("start", "Your Getting started prompt", startPrompt(data, firstStart), startSteps)}
