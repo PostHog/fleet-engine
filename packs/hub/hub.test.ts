@@ -585,6 +585,16 @@ describe("the Own-account balancing workflow", () => {
       expect(route()).toBeUndefined();
     });
 
+    test("a job the Jobs adapter refuses and a provider record Hedge cannot read both reach the person, the job's reason first", async () => {
+      const { home, result, options } = runningHub("claude", { credentials: [{ provider: "claude" }] });
+      mkdirSync(join(home, ".config/hedge"), { recursive: true });
+      writeFileSync(join(home, ".config/hedge/provider-fields.json"), "{");
+      const badJob: Plan = { ...result, jobs: [{ id: "bad id", command: ["hedge", "box", "sweep"], schedule: { every: "always" }, pack: "hub" }] };
+      const failure = await apply(badJob, { ...options, adapters: [jobsAdapter(), providerConfigAdapter()] }).then(() => "", (error: Error) => error.message);
+      expect(failure).toStartWith("job id bad id of the hub pack may hold only");
+      expect(failure).toContain(" Hedge also could not set your provider settings: JSON Parse error");
+    });
+
     test("a plugin Hedge did not install that appears while the proxy step runs leaves no route when apply ends", async () => {
       const { home, result, route, hooks, options } = runningHub("claude", { credentials: [{ provider: "claude" }] });
       hooks.beforeInstall = () => {
