@@ -9,7 +9,9 @@ import { main } from "./cli.ts";
 import { filesAdapter, type Adapter } from "./reconciler/apply.ts";
 import { cliFixtures, repoRoot } from "./testing/cli.ts";
 import { tempDirs } from "./testing/git.ts";
-import { fakeCrontab, fakeDocker, fakeLaunchd, fakeTasks, runners } from "./testing/old-fleet.ts";
+import { fakeCrontab, fakeDocker, fakeLaunchd, fakeProcesses, fakeTasks, runners } from "./testing/old-fleet.ts";
+import { git } from "./testing/git.ts";
+import { holdLock } from "./lock.ts";
 import { fakeSystemd } from "./testing/systemd.ts";
 
 const temp = tempDirs();
@@ -22,7 +24,6 @@ function oldInstall(home = temp.make("home-")) {
   return home;
 }
 
-/** An engine whose watcher pack runs one service, so apply starts a hedge-watch unit or a dev.hedge.watch agent. */
 function engineWithService() {
   const root = temp.make("engine-");
   cpSync(join(repoRoot, "packs/base"), join(root, "packs/base"), { recursive: true });
@@ -31,11 +32,12 @@ function engineWithService() {
   return root;
 }
 
-/** T3 Code's state store, as T3 Code leaves it when its server stops. */
-function savedT3Tasks(home: string, tasks: Array<{ id: string; enabled: boolean }>) {
+function savedT3Tasks(home: string, tasks: Array<{ id: string; enabled: boolean }> | "no table") {
   mkdirSync(join(home, ".t3/userdata"), { recursive: true });
   const store = new Database(join(home, ".t3/userdata/statev2.sqlite"));
-  store.exec("pragma journal_mode=wal; create table scheduled_tasks (task_id text primary key, title text not null, enabled integer not null)");
+  store.exec("pragma journal_mode=wal; create table projects (id text primary key)");
+  if (tasks === "no table") return store.close();
+  store.exec("create table scheduled_tasks (task_id text primary key, title text not null, enabled integer not null)");
   for (const task of tasks) store.query("insert into scheduled_tasks values (?, ?, ?)").run(task.id, task.id, task.enabled ? 1 : 0);
   store.close();
 }
@@ -48,16 +50,41 @@ function machine(platform: NodeJS.Platform, home = oldInstall(), tasks?: FleetOp
   const docker = fakeDocker();
   const t3 = fakeTasks();
   const cron = fakeCrontab();
-  const run = runners(cron.run, systemd.run, launchd.run, docker.run);
-  const fleet = fleetAdapter({ run, uid: 501, accountHome: async () => home, tasks: tasks ?? (async () => t3.client) });
+  const processes = fakeProcesses();
+  const run = runners(cron.run, systemd.run, launchd.run, docker.run, processes.run);
+  const fleet = fleetAdapter({ run, uid: 501, accountHome: async () => home, tasks: tasks ?? (async () => t3.client), sleep: async () => {} });
   const adapters = (): Adapter[] => [fleet, filesAdapter, jobsAdapter({ run, engineRoot: repoRoot, uid: 501, accountHome: async () => home })];
   const engine = engineWithService();
+  const clock = { now: Date.now, sleep: async (_ms: number) => {} };
   const hedge = async (args: string[]) => {
     const lines: string[] = [];
-    const code = await main(args, { home, engineRoot: engine, platform, env: {}, print: (line) => lines.push(line), run: async () => 0, adapters });
+    const code = await main(args, { home, engineRoot: engine, platform, env: {}, print: (line) => lines.push(line), run: async () => 0, adapters, clock: { now: () => clock.now(), sleep: (ms) => clock.sleep(ms) } });
     return { code, output: lines.join("\n") };
   };
-  return { home, systemd, launchd, docker, t3, cron, hedge, fleet };
+  return { home, systemd, launchd, docker, t3, cron, processes, clock, hedge, fleet };
+}
+
+function packSource(home: string) {
+  const repo = temp.make("source-");
+  mkdirSync(join(repo, "packs/extra"), { recursive: true });
+  writeFileSync(join(repo, "packs/extra/pack.json"), JSON.stringify({ schema: 1, name: "extra", summary: "Extra." }));
+  git(repo, "init", "-q", "-b", "main");
+  git(repo, "add", ".");
+  git(repo, "commit", "-q", "-m", "extra");
+  const profile = profileDir(["watcher"]);
+  const answers = JSON.parse(readFileSync(join(profile, "hedge.json"), "utf8"));
+  writeFileSync(join(profile, "hedge.json"), JSON.stringify({ ...answers, sources: [{ name: "extra", repo, ref: "main" }] }));
+  const cacheLock = holdLock(join(home, ".local/share/hedge/sources/extra.lock"));
+  return { profile, release: () => cacheLock.release() };
+}
+
+function startsFleetDuringFetch(linux: ReturnType<typeof machine>) {
+  const { profile, release } = packSource(linux.home);
+  linux.clock.sleep = async () => {
+    linux.systemd.units.set("fleet-watch.service", { active: true, enabled: true });
+    release();
+  };
+  return profile;
 }
 
 describe("hedge retire-fleet", () => {
@@ -187,6 +214,68 @@ describe("hedge retire-fleet", () => {
     expect(linux.systemd.units.has("hedge-watch.service")).toBe(false);
   });
 
+  test("a T3 Code state store without a scheduled_tasks table holds no saved tasks, so retire and apply go on", async () => {
+    const home = oldInstall();
+    savedT3Tasks(home, "no table");
+    const linux = machine("linux", home, scheduledTasks(stoppedT3));
+    linux.systemd.units.set("fleet-watch.service", { active: true, enabled: true });
+
+    const retired = await linux.hedge(["retire-fleet"]);
+    const applied = await linux.hedge(["apply", "--profile", profileDir(["watcher"])]);
+
+    expect(retired.code).toBe(0);
+    expect(applied.code).toBe(0);
+    expect(linux.systemd.units.get("hedge-watch.service")).toEqual({ active: true, enabled: true });
+  });
+
+  test("when systemd does not list its unit files, retire exits 1 and apply starts nothing", async () => {
+    const linux = machine("linux");
+    linux.systemd.units.set("fleet-watch.service", { active: true, enabled: true });
+    linux.systemd.broken.add("list-unit-files");
+
+    const retired = await linux.hedge(["retire-fleet"]);
+    const applied = await linux.hedge(["apply", "--profile", profileDir(["watcher"])]);
+
+    expect(retired.code).toBe(1);
+    expect(retired.output).toContain("Hedge: systemd did not list its unit files (Failed to connect to bus: No such file or directory). Hedge could not verify that it stopped.");
+    expect(applied.code).toBe(1);
+    expect(applied.output).toContain("systemd did not list its unit files (Failed to connect to bus: No such file or directory), so Hedge cannot tell whether Fleet still runs, and started nothing.");
+    expect(linux.systemd.units.has("hedge-watch.service")).toBe(false);
+  });
+
+  test("stops an old job's command that cron started before retire, and leaves the other commands from the old engine alone", async () => {
+    const linux = machine("linux");
+    const engine = join(linux.home, ".local/share/fleet/engine");
+    linux.cron.table.text = `0 3 * * * /bin/sh '${linux.home}/.local/state/fleet/jobs/nightly.sh' # fleet:nightly\n`;
+    linux.processes.table.set(4242, { args: `/home/bin/bun ${engine}/src/cli.ts nightly` });
+    linux.processes.table.set(4243, { args: `/bin/sh ${engine}/fleet prune --auto` });
+    linux.processes.table.set(4300, { args: `/home/bin/bun ${engine}/packs/context-library/mcp/main.ts` });
+    linux.processes.table.set(4301, { args: `/home/bin/bun ${engine}/src/cli.ts heavy -- make test` });
+    linux.processes.table.set(4302, { args: "/usr/bin/vim notes.md" });
+
+    const retired = await linux.hedge(["retire-fleet"]);
+
+    expect(retired.code).toBe(0);
+    expect(retired.output).toContain("Hedge: stopped and turned off the running command fleet nightly (process 4242) from before the rename, and kept its files.");
+    expect(retired.output).toContain("Hedge: stopped and turned off the running command fleet prune --auto (process 4243) from before the rename, and kept its files.");
+    expect([...linux.processes.table.keys()]).toEqual([4300, 4301, 4302]);
+    expect(linux.cron.table.text).toBe("");
+  });
+
+  test("an old job's command that does not end fails retire, and apply starts nothing while it runs", async () => {
+    const linux = machine("linux");
+    linux.processes.table.set(4242, { args: `/home/bin/bun ${join(linux.home, ".local/share/fleet/engine")}/src/cli.ts nightly`, stubborn: true });
+
+    const retired = await linux.hedge(["retire-fleet"]);
+    const applied = await linux.hedge(["apply", "--profile", profileDir(["watcher"])]);
+
+    expect(retired.code).toBe(1);
+    expect(retired.output).toContain("Hedge: running command fleet nightly (process 4242): it has not ended. Hedge could not verify that it stopped.");
+    expect(applied.code).toBe(1);
+    expect(applied.output).toContain("The running command fleet nightly (process 4242) from before the rename still runs (it has not ended), so Hedge started nothing.");
+    expect(linux.systemd.units.has("hedge-watch.service")).toBe(false);
+  });
+
   test("leaves the old heavy slice alone: systemd shows a slice static, and it runs nothing by itself", async () => {
     const linux = machine("linux");
     mkdirSync(join(linux.home, ".config/systemd/user"), { recursive: true });
@@ -267,17 +356,11 @@ describe("hedge apply while Fleet still runs", () => {
     expect(linux.systemd.units.get("hedge-watch.service")).toEqual({ active: true, enabled: true });
   });
 
-  test("on Linux, checks again before it starts anything, so a Fleet unit that starts while Hedge loads the plan stops the apply", async () => {
+  test("on Linux, checks again before it starts anything, so a Fleet unit that starts while Hedge fetches a pack source stops the apply", async () => {
     const linux = machine("linux");
-    const firstCheck = linux.fleet.holds;
-    let checks = 0;
-    linux.fleet.holds = async (home, platform) => {
-      const held = await firstCheck(home, platform);
-      if (++checks === 1) linux.systemd.units.set("fleet-watch.service", { active: true, enabled: true });
-      return held;
-    };
+    const profile = startsFleetDuringFetch(linux);
 
-    const applied = await linux.hedge(["apply", "--profile", profileDir(["watcher"])]);
+    const applied = await linux.hedge(["apply", "--profile", profile]);
 
     expect(applied.code).toBe(1);
     expect(applied.output).toContain("The systemd unit fleet-watch.service from before the rename still runs (it is active), so Hedge started nothing. Run hedge retire-fleet, then hedge apply.");
@@ -285,22 +368,29 @@ describe("hedge apply while Fleet still runs", () => {
     expect(linux.systemd.units.has("hedge-watch.service")).toBe(false);
   });
 
-  test("on Linux, an apply --profile that a Fleet unit stops after the plan loads keeps the saved profile", async () => {
+  test("on Linux, an apply --profile that a Fleet unit stops while Hedge fetches a pack source keeps the saved profile", async () => {
     const linux = machine("linux");
     const saved = profileDir([]);
     expect((await linux.hedge(["apply", "--profile", saved])).code).toBe(0);
-    const firstCheck = linux.fleet.holds;
-    let checks = 0;
-    linux.fleet.holds = async (home, platform) => {
-      const held = await firstCheck(home, platform);
-      if (++checks === 1) linux.systemd.units.set("fleet-watch.service", { active: true, enabled: true });
-      return held;
-    };
+    const profile = startsFleetDuringFetch(linux);
 
-    const applied = await linux.hedge(["apply", "--profile", profileDir(["watcher"])]);
+    const applied = await linux.hedge(["apply", "--profile", profile]);
 
     expect(applied.code).toBe(1);
+    expect(applied.output).toContain("The systemd unit fleet-watch.service from before the rename still runs (it is active), so Hedge started nothing.");
     expect(JSON.parse(readFileSync(join(linux.home, ".config/hedge/machine.json"), "utf8")).profileDir).toBe(saved);
+  });
+
+  test("hedge doctor names each piece of Fleet that still runs and fails", async () => {
+    const linux = machine("linux");
+    expect((await linux.hedge(["apply", "--profile", profileDir([])])).code).toBe(0);
+    linux.systemd.units.set("fleet-watch.service", { active: true, enabled: true });
+
+    const checked = await linux.hedge(["doctor"]);
+
+    expect(checked.code).toBe(1);
+    expect(checked.output).toContain("To do: The systemd unit fleet-watch.service from before the rename still runs (it is active), so Hedge started nothing. Run hedge retire-fleet, then hedge apply.");
+    expect(checked.output).toContain("Run hedge apply to fix what Hedge can fix.");
   });
 
   test("on Linux, exits 1 when the new unit does not start after retire, and the old unit stays off", async () => {

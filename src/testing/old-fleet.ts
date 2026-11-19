@@ -80,6 +80,18 @@ export function fakeCrontab(text = "") {
   return { run, table };
 }
 
+export function fakeProcesses() {
+  const table = new Map<number, { args: string; stubborn?: boolean }>();
+  const run: CommandRunner = async (command) => {
+    if (command[0] === "ps") return { code: 0, stdout: [...table].map(([pid, item]) => `${String(pid).padStart(6)} ${item.args}\n`).join("") };
+    if (command[0] !== "kill") return { code: 127, stdout: "" };
+    const pid = Number(command.at(-1));
+    if (!table.get(pid)?.stubborn) table.delete(pid);
+    return { code: 0, stdout: "" };
+  };
+  return { run, table };
+}
+
 /** Sends each command to the first fake that knows its tool. */
 export const runners = (...fakes: CommandRunner[]): CommandRunner => async (command, options) => {
   for (const fake of fakes) {

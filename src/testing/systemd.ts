@@ -11,6 +11,7 @@ export function fakeSystemd() {
   const shown = new Map<string, string>();
   const fileless = new Set<string>();
   const failing = new Set<string>();
+  const broken = new Set<string>();
   const starts = new Map<string, number>();
   const calls: string[][] = [];
   const start = (unit: string) => {
@@ -24,6 +25,7 @@ export function fakeSystemd() {
     const [verb, ...rest] = command.slice(2);
     const unit = rest.at(-1)!;
     const state = units.get(unit) ?? { active: false, enabled: false };
+    if (broken.has(verb!)) return { code: 1, stdout: "", stderr: "Failed to connect to bus: No such file or directory\n" };
     if (verb === "list-units") return { code: 0, stdout: listed(unit).map((name) => `${name} loaded ${units.get(name)!.active ? "active running" : "inactive dead"} Fleet\n`).join("") };
     if (verb === "list-unit-files") {
       const files = listed(unit).filter((name) => !fileless.has(name)).map((name) => `${name} ${units.get(name)!.enabled ? "enabled" : "disabled"} enabled\n`);
@@ -47,5 +49,5 @@ export function fakeSystemd() {
     return parts.every(Boolean) ? "running" : parts.some(Boolean) ? "partly removed" : "gone";
   };
   const started = (id: string) => starts.get(`hedge-${id}.service`) ?? 0;
-  return { run, service, started, units, shown, fileless, failing, calls };
+  return { run, service, started, units, shown, fileless, failing, broken, calls };
 }

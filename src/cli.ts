@@ -179,8 +179,8 @@ async function reconcile(command: "apply" | "doctor", args: string[], options: C
   const doctor = command === "doctor";
   const preview = doctor || flags.dryRun;
   const holds = () => fleetOf(options).holds(options.home, options.platform);
-  const held = doctor ? [] : await holds();
-  if (held.length && !flags.dryRun) return printReport({ ok: false, actions: [], findings: held, humanLeft: [] }, command, options.print, false), 1;
+  const held = await holds();
+  if (held.length && !preview) return printReport({ ok: false, actions: [], findings: held, humanLeft: [] }, command, options.print, false), 1;
   const { plan, sources, remember } = await loadPlan(options, flags.profile, { fetch: !preview, inherit: preview });
   const stillHeld = preview ? [] : await holds();
   if (stillHeld.length) return printReport({ ok: false, actions: [], findings: stillHeld, humanLeft: [] }, command, options.print, false), 1;
