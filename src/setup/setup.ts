@@ -13,6 +13,7 @@ import { devboxQuestion, devboxSteps, hubSteps, notTakenByHub, profileForBox, ty
 import { doneScreen, finalCheck, repoName, runsByItself } from "./done.ts";
 import { readTimings, usableSeconds } from "../commands/triage-record.ts";
 import { existingProfile, profileStep } from "./profile.ts";
+import { knowGitHub } from "./known-hosts.ts";
 import { runSteps, type Step } from "./runner.ts";
 import { chatgptSignIn, claudeSignIn, githubSignIn, memberSources } from "./signins.ts";
 import { Stopped, type Terminal } from "./terminal.ts";
@@ -141,7 +142,7 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
   });
   const applyProfile = async (skip: string[]) => {
     if (!machine.profileDir || !options.apply) throw new Error("no profile to apply yet");
-    await fastForward(box, machine.profileDir);
+    await fastForward(box, options.home, machine.profileDir);
     if ((await options.apply(machine.profileDir, skip)) !== 0) throw new Error("hedge apply could not set up this machine. Fix what it says above, then run hedge setup again.");
     const applied = await loadMachine(options.home);
     if (applied) Object.assign(machine, { role: applied.role }, applied.name ? { name: applied.name } : {});
@@ -287,8 +288,9 @@ function setupSteps(context: QuestionContext, machine: MachineFile, options: Set
 
 const later = (step: Step): Step => ({ ...step, later: true });
 
-async function fastForward(box: Machine, dir: string) {
+async function fastForward(box: Machine, home: string, dir: string) {
   if ((await box.exec(["git", "-C", dir, "rev-parse", "--abbrev-ref", "@{upstream}"])).code !== 0) return;
+  await knowGitHub(box, home, dir);
   const pulled = await box.exec(["git", "-C", dir, "pull", "-q", "--ff-only"]);
   if (pulled.code !== 0) throw new Error(`could not take the new commits of your profile in ${dir}: ${pulled.output.trim().split("\n").at(-1)}. Run git -C ${dir} pull, then run hedge setup again.`);
 }

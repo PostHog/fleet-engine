@@ -6,6 +6,7 @@ import { bothChanged, loadProfile, saveAnswers } from "../profile/profile.ts";
 import type { Machine } from "./commands.ts";
 import { defaultSources, engineRepo } from "./defaults.ts";
 import { profileFile } from "../legacy.ts";
+import { knowGitHub } from "./known-hosts.ts";
 import type { Draft } from "./questions.ts";
 import type { Step } from "./runner.ts";
 import { Stopped, type Terminal } from "./terminal.ts";
@@ -102,7 +103,7 @@ async function lookUp(machine: Machine, home: string, packs: PackManifest[], pic
   let found: string | undefined;
   for (const repo of [inUse, team, personal, legacyTeam, `${login}/${legacyProfileRepoName}`]) if (!found && repo && (await exists(repo))) found = repo;
   if (found && !same(found, personal)) await requirePrivate(machine, found);
-  if (found) await checkout(machine, dir, found);
+  if (found) await checkout(machine, home, dir, found);
   return { gh, login, exists, personal, org, team, dir, found };
 }
 
@@ -140,7 +141,7 @@ async function makeProfile(context: ProfileContext) {
     terminal.print(`      git -C ${dir} remote set-url origin https://github.com/${team}.git`);
   }
 
-  if (!found) await checkout(machine, dir, profileRepo);
+  if (!found) await checkout(machine, home, dir, profileRepo);
   await git(machine, dir, "config", "user.name", login);
   await git(machine, dir, "config", "user.email", `${login}@users.noreply.github.com`);
   await startFiles(dir, context, same(profileRepo, team) ? org : undefined);
@@ -217,11 +218,12 @@ async function confirm({ terminal, nonInteractive }: ProfileContext, missing: st
   }
 }
 
-async function checkout(machine: Machine, dir: string, repo: string) {
+async function checkout(machine: Machine, home: string, dir: string, repo: string) {
   if (existsSync(join(dir, ".git"))) {
     const urls = (await machine.exec(["git", "-C", dir, "config", "--get-regexp", "^remote\\.origin\\.(push)?url$"])).output.trim().split("\n").map((line) => line.split(" ").slice(1).join(" "));
     const other = urls.find((url) => githubRepoOf(url)?.toLowerCase() !== repo.toLowerCase());
     if (other !== undefined) throw new Error(`${dir} is a clone of ${other || "nothing"}, not ${repo}. Move it away, then run hedge setup again.`);
+    await knowGitHub(machine, home, dir);
     await git(machine, dir, "fetch", "-q", "origin");
     const branch = await currentBranch(machine, dir);
     if (!(await published(machine, dir, branch))) return;

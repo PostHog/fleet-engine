@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadPacks } from "../pack/manifest.ts";
 import type { FetchedSource, SourceRef } from "../pack/types.ts";
 import { isolateGit, spawnGit, tempDirs } from "../testing/git.ts";
 import { defaultSources } from "./defaults.ts";
 import { profileGuide, profilePath } from "./profile.ts";
-import { fakeMachine, hedgeSetup, githubRepo, machineFile, pushedAnswers } from "./testing.ts";
+import { fakeMachine, hedgeSetup, githubHostKeys, githubRepo, machineFile, pushedAnswers } from "./testing.ts";
 
 isolateGit();
 const temp = tempDirs();
@@ -125,16 +125,23 @@ describe("hedge setup profile", () => {
     expect((await pushedAnswers(home, "acme/hedge-profile-nora")).packs).not.toContain("posthog");
   });
 
-  test("uses the profile checkout this machine applies and its branch, and leaves the profile's main alone", async () => {
-    const home = temp.make("home-");
+  async function branchCheckout(home: string, origin = "https://github.com/nora/dotfiles.git") {
     expect((await hedgeSetup(home, starter, ["", ""])).code).toBe(0);
     const dotfiles = githubRepo(home, "nora/dotfiles");
     await spawnGit(home, "clone", "-q", "--bare", githubRepo(home, "nora/hedge-profile"), dotfiles);
     await spawnGit(dotfiles, "branch", "hub", "main");
     const checkout = join(home, ".config/coderv2/dotfiles");
-    await spawnGit(home, "clone", "-q", "--config", `url.${join(home, "github-remotes")}/.insteadOf=https://github.com/`, "-b", "hub", "https://github.com/nora/dotfiles.git", checkout);
+    const remotes = `url.${join(home, "github-remotes")}/.insteadOf`;
+    await spawnGit(home, "clone", "-q", "--config", `${remotes}=https://github.com/`, "--config", `${remotes}=git@github.com:`, "-b", "hub", "https://github.com/nora/dotfiles.git", checkout);
+    await spawnGit(checkout, "remote", "set-url", "origin", origin);
     rmSync(profilePath(home), { recursive: true });
     writeFileSync(join(home, ".config/hedge/machine.json"), JSON.stringify({ schema: 1, role: "linux", profileDir: checkout }));
+    return { dotfiles, checkout };
+  }
+
+  test("uses the profile checkout this machine applies and its branch, and leaves the profile's main alone", async () => {
+    const home = temp.make("home-");
+    const { dotfiles, checkout } = await branchCheckout(home);
     const mainBefore = await spawnGit(dotfiles, "rev-parse", "main");
 
     const rerun = await hedgeSetup(home, ["--non-interactive", "--plan", "codex"], []);
@@ -146,6 +153,19 @@ describe("hedge setup profile", () => {
     expect((await pushedAnswers(home)).plan).toBe("claude");
     expect(machineFile(home).profileDir).toBe(checkout);
     expect(existsSync(profilePath(home))).toBe(false);
+  });
+
+  test("adds GitHub's host keys from gh api meta before it reaches a profile over SSH, and keeps the lines already there", async () => {
+    const home = temp.make("home-");
+    const { dotfiles } = await branchCheckout(home, "git@github.com:nora/dotfiles.git");
+    mkdirSync(join(home, ".ssh"));
+    writeFileSync(join(home, ".ssh/known_hosts"), "example.com ssh-ed25519 AAAAexample");
+
+    const rerun = await hedgeSetup(home, ["--non-interactive", "--plan", "codex"], []);
+
+    expect(rerun.code).toBe(0);
+    expect(readFileSync(join(home, ".ssh/known_hosts"), "utf8")).toBe(["example.com ssh-ed25519 AAAAexample", ...githubHostKeys.map((key) => `github.com ${key}`), ""].join("\n"));
+    expect(JSON.parse(await spawnGit(dotfiles, "show", "hub:hedge.json")).plan).toBe("codex");
   });
 
   test("uses the org repo when its creation reports a failure but the repo was made", async () => {

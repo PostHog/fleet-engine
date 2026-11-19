@@ -66,6 +66,9 @@ export const coderToken = ["hedge", "test", "coder", "token"].join("-");
 
 const hostKeyAdded = (host: string) => `Warning: Permanently added '${host}' (ED25519) to the list of known hosts.\n`;
 
+/** GitHub's SSH host keys, as gh api meta lists them. */
+export const githubHostKeys = [["ssh-ed25519", ["AAAA", "github", "ed"].join("")], ["ecdsa-sha2-nistp256", ["AAAA", "github", "ecdsa"].join("")]].map((words) => words.join(" "));
+
 export type HereLink = { environmentId: string; label: string };
 
 export const boxHome = (home: string, host: string) => join(home, "boxes", host);
@@ -270,6 +273,7 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
       if (line === "hogli devbox:status") return result(devbox);
       if (line === "hogli devbox:start") return (devbox = true), result(true, "up");
       if (line === "gh api user --jq .login") return result(true, "nora\n");
+      if (line === "gh api meta --jq .ssh_keys[]") return result(true, `${githubHostKeys.join("\n")}\n`);
       if (line.startsWith("gh repo view ") && existsSync(githubRepo(home, command[3]!)) && command[3]!.split("/")[0] === options.lookupFails) return result(false, "HTTP 502: Bad Gateway");
       if (line.startsWith("gh repo view ")) return existsSync(githubRepo(home, command[3]!)) ? result(true, line.endsWith("--json visibility --jq .visibility") ? `${options.publicRepos?.includes(command[3]!) ? "PUBLIC" : "PRIVATE"}\n` : "") : result(false, "Could not resolve to a Repository");
       if (line.startsWith("gh repo create ")) {
