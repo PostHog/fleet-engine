@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { AvailableSource } from "../../../src/pack/types.ts";
 import { spawnGit, tempDirs } from "../../../src/testing/git.ts";
 import { devbox, engineSource, resolveEngine, skillSources } from "../../../src/testing/packs.ts";
-import { formatCommands, formatEditedFile, type RunCommand } from "../lib/format-commands.ts";
+import { formatCommands, formatEditedFile, formatters, type RunCommand } from "../lib/format-commands.ts";
 import { budgetMs, formatAfterEdit, hook } from "./format-on-edit.ts";
 
 const temp = tempDirs();
@@ -35,7 +35,7 @@ const commandsAt = async (path: string) => (await commandsFor(path)).map((comman
 describe("the lint-staged commands for an edited file", () => {
   test("are the repository's formatter commands, matched as lint-staged matches, resolved to the installed formatter, with the file last", async () => {
     expect(await commandsFor("docs/guide.md")).toEqual([["/bin/prettier", "--write", "/repo/docs/guide.md"]]);
-    expect(await commandsAt("backend/models.py")).toEqual(["/bin/ruff check --fix", "/bin/ruff format", "/bin/black"]);
+    expect(await commandsAt("backend/models.py")).toEqual(["/bin/ruff check --fix --no-cache", "/bin/ruff format --no-cache", "/bin/black"]);
     expect(await commandsAt("web/app/run.ts")).toEqual(["/bin/biome check --write", "/bin/eslint --fix"]);
     expect(await commandsAt("web/app/manifest.tsx")).toEqual(["/bin/biome check --write", "/bin/eslint --fix", "/bin/prettier --write"]);
     expect(await commandsAt("src/main.go")).toEqual(["/bin/gofmt -w"]);
@@ -57,29 +57,13 @@ describe("the lint-staged commands for an edited file", () => {
     expect(await commandsAt(path)).toEqual(kept);
   });
 
-  test.each([
-    ["an output file", ["eslint --fix --output-file /home/me/.bashrc", "eslint --fix -o out.txt", "eslint --fix --output-file=out.txt", "stylelint --fix -o x"]],
-    ["a plugin", ["prettier --write --plugin=./x.mjs", "prettier --write --plugin ./x.mjs", "dprint fmt --plugins https://example.com/x.json"]],
-    ["a config file", ["prettier --write -c x.mjs", "prettier --write --config x.mjs", "prettier --write --config=x.mjs", "ruff check --fix --config x.toml", "clang-format -i --style=file:../x"]],
-    ["any other option that reads or writes a file", ["eslint --fix --cache-location /tmp/x", "eslint --fix --rulesdir rules", "eslint --fix -f ./report.js", "gofmt -w -cpuprofile /tmp/x", "rustfmt --print-config default x.toml", "prettier --write --ignore-path=../x"]],
-    ["a path or a value with one", ["prettier --write ../outside", "prettier --write /etc/hosts", "eslint --fix --max-warnings=../x", "eslint --fix --max-warnings ./x", "black -l x.py"]],
-    ["a subcommand the formatter does not rewrite with", ["biome migrate --write", "ruff --fix", "taplo lint", "dprint upgrade"]],
-    ["quotes around an argument", ["prettier --write \"--plugin=./x.mjs\"", "prettier --write '--plugin=./x.mjs'"]],
-  ])("leave out a formatter given %s", async (_, commands) => {
-    expect(await formatCommands({ "*.ts": commands }, root, `${root}/a.ts`, installed)).toEqual([]);
-  });
-
-  test("keep a formatter's own flags and plain values", async () => {
-    const commands = ["eslint --fix --max-warnings=0", "eslint --fix --max-warnings 0", "black -l 100 -q", "shfmt -w -i 2", "clang-format -i --style=Google"];
-    expect((await formatCommands({ "*.ts": commands }, root, `${root}/a.ts`, installed)).map((command) => command.slice(0, -1).join(" "))).toEqual(commands.map((command) => `/bin/${command}`));
-  });
-
   test("leave out a formatter that is not installed", async () => {
     expect(await formatCommands({ "*.md": "prettier --write" }, root, `${root}/a.md`, async () => undefined)).toEqual([]);
   });
 
   test("run in order, stop when the time budget is spent, and keep each failure", async () => {
     const repo = await repository({ "lint-staged": { "*.ts": ["prettier --write", "eslint --fix", "biome check --write"] } });
+    writeFileSync(join(repo, "src/x.ts"), "x");
     let clock = 0;
     const ran: string[] = [];
     const run: RunCommand = async (command, _cwd, timeoutMs) => {
@@ -267,10 +251,10 @@ describe("the format-on-edit hook", () => {
     expect(existsSync(join(bin, "ran"))).toBe(false);
   });
 
-  test("never runs a formatter from a PATH entry inside the repository", async () => {
+  test.each(["tools", "..tools"])("never runs a formatter from a PATH entry inside the repository: %s", async (dir) => {
     const repo = await repository(undefined, { "*.ts": "biome check --write" });
-    tool(repo, "biome", marks(repo), "tools");
-    await withPath(join(repo, "tools"), () => edited(repo));
+    tool(repo, "biome", marks(repo), dir);
+    await withPath(join(repo, dir), () => edited(repo));
     expect(existsSync(join(repo, "ran"))).toBe(false);
   });
 
@@ -286,6 +270,62 @@ describe("the format-on-edit hook", () => {
       process.chdir(saved);
     }
     expect(existsSync(join(elsewhere, "ran"))).toBe(false);
+  });
+
+  async function installedRepo(commands: string[]) {
+    const repo = await repository(undefined, { "*.ts": commands });
+    for (const name of Object.keys(formatters)) tool(repo, name, `echo "$(basename "$0") $*" >> "${join(repo, "ran")}"`);
+    return repo;
+  }
+
+  test.each([
+    ["an output file", ["eslint --fix --output-file /home/me/.bashrc", "eslint --fix -o out.txt", "eslint --fix --output-file=out.txt", "stylelint --fix -o x"]],
+    ["a plugin", ["prettier --write --plugin=./x.mjs", "prettier --write --plugin ./x.mjs", "dprint fmt --plugins https://example.com/x.json"]],
+    ["a config file", ["prettier --write -c x.mjs", "prettier --write --config x.mjs", "prettier --write --config=x.mjs", "ruff check --fix --config x.toml", "clang-format -i --style=file:../x"]],
+    ["a cache, which can be a committed symlink out of the repository", ["eslint --fix --cache", "prettier --write --cache", "stylelint --fix --cache", "eslint --fix --cache-location /tmp/x"]],
+    ["any other option that reads or writes a file", ["eslint --fix --rulesdir rules", "eslint --fix -f ./report.js", "gofmt -w -cpuprofile /tmp/x", "rustfmt --print-config default x.toml", "prettier --write --ignore-path=../x"]],
+    ["a path or a value with one", ["prettier --write ../outside", "prettier --write /etc/hosts", "eslint --fix --max-warnings=../x", "eslint --fix --max-warnings ./x", "black -l x.py"]],
+    ["a subcommand the formatter does not rewrite with", ["biome migrate --write", "ruff --fix", "taplo lint", "dprint upgrade"]],
+    ["quotes around an argument", ["prettier --write \"--plugin=./x.mjs\"", "prettier --write '--plugin=./x.mjs'"]],
+  ])("never runs an installed formatter given %s", async (_, commands) => {
+    const repo = await installedRepo(commands);
+    await edited(repo);
+    expect(existsSync(join(repo, "ran"))).toBe(false);
+  });
+
+  test("runs installed formatters with their own flags and plain values, and Ruff without its cache", async () => {
+    const commands = ["eslint --fix --max-warnings=0", "eslint --fix --max-warnings 0", "black -l 100 -q", "shfmt -w -i 2", "clang-format -i --style=Google", "prettier --write --single-quote --print-width 100", "ruff format --line-length 88"];
+    const repo = await installedRepo(commands);
+    await edited(repo);
+    const file = join(repo, "src/x.ts");
+    expect(readFileSync(join(repo, "ran"), "utf8").trim().split("\n")).toEqual([...commands.slice(0, -1).map((command) => `${command} ${file}`), `ruff format --line-length 88 --no-cache ${file}`]);
+  });
+
+  test.each([
+    ["a committed symlink to a file outside the repository", (repo: string, outside: string) => symlinkSync(join(outside, "x.ts"), join(repo, "src/x.ts"))],
+    ["inside a committed directory symlink to outside the repository", (repo: string, outside: string) => symlinkSync(outside, join(repo, "src/linked"))],
+  ])("never formats an edited file that is %s", async (_, plant) => {
+    const repo = await repository(undefined, { "*.ts": "prettier --write" });
+    tool(repo, "prettier", marks(repo));
+    const outside = temp.make("outside-");
+    writeFileSync(join(outside, "x.ts"), "x");
+    plant(repo, outside);
+    const file = existsSync(join(repo, "src/linked")) ? join(repo, "src/linked/x.ts") : join(repo, "src/x.ts");
+    await formatAfterEdit({ tool_name: "Edit", tool_input: { file_path: file } });
+    expect(existsSync(join(repo, "ran"))).toBe(false);
+  });
+
+  test("never runs an installed formatter that resolves outside node_modules through a committed symlink", async () => {
+    const repo = await repository(undefined, { "*.ts": "prettier --write" });
+    const outside = temp.make("outside-");
+    tool(outside, "x.sh", marks(repo), ".");
+    mkdirSync(join(repo, "packages/tool/bin"), { recursive: true });
+    symlinkSync(join(outside, "x.sh"), join(repo, "packages/tool/bin/prettier"));
+    await spawnGit(repo, "add", "-f", "packages");
+    mkdirSync(join(repo, "node_modules/.bin"), { recursive: true });
+    symlinkSync("../../packages/tool/bin/prettier", join(repo, "node_modules/.bin/prettier"));
+    await edited(repo);
+    expect(existsSync(join(repo, "ran"))).toBe(false);
   });
 
   test.each([

@@ -2,8 +2,9 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { withDirectories } from "./directories.ts";
+import { ghGroups } from "./gh.ts";
 import { shortCluster } from "./kill.ts";
-import { commandsIn } from "./shell-words.ts";
+import { type Command, commandsIn } from "./shell-words.ts";
 
 export type Repo = { config: (key: string) => string | undefined; values: (key: string) => string[]; branch?: string; branches: string[]; refs: string[]; agents?: string; stack?: number };
 export type ReadRepo = (dir: string, selectors: string[]) => Repo | undefined;
@@ -131,6 +132,26 @@ function ghAliasHidesStack(name: string, args: string[]): boolean {
   if (action === "import") return true;
   if (action !== "set") return false;
   return expansion === undefined || args.some((arg) => /^(?:-s|--shell)(?:=|$)/.test(arg)) || /^!|\bstack\b/.test(expansion);
+}
+
+function ghAliases(env: ReadonlyMap<string, string>): Record<string, unknown> {
+  const configHome = env.get("XDG_CONFIG_HOME") ?? process.env.XDG_CONFIG_HOME;
+  const dir = env.get("GH_CONFIG_DIR") ?? process.env.GH_CONFIG_DIR ?? join(configHome || join(homedir(), ".config"), "gh");
+  try {
+    const config = Bun.YAML.parse(readFileSync(join(dir, "config.yml"), "utf8")) as { aliases?: Record<string, unknown> } | null;
+    return config?.aliases ?? {};
+  } catch {
+    return {};
+  }
+}
+
+function expandedGh({ args, env }: Command): string[] | undefined {
+  const [group] = operandsOf(args);
+  if (group === undefined || group === "stack" || ghGroups.has(group)) return args;
+  const expansion = ghAliases(env)[group];
+  if (typeof expansion !== "string") return args;
+  if (expansion.trimStart().startsWith("!")) return undefined;
+  return [...expansion.trim().split(/\s+/), ...args.slice(args.indexOf(group) + 1)];
 }
 
 function stackPushes(args: string[], repo: () => Repo | undefined): number {
@@ -316,8 +337,10 @@ export function gitRisk(command: string, cwd: string, person: string, mainPushRe
   };
   let forced = 0;
   for (const [call, directory] of withDirectories(commandsIn(command), cwd)) {
-    const stack = stackArgs(call.name, call.args);
-    if ((stack && makesAlias(stack)) || ghAliasHidesStack(call.name, call.args)) return aliasReason(person);
+    const called = call.name === "gh" ? expandedGh(call) : call.args;
+    if (called === undefined) return aliasReason(person);
+    const stack = stackArgs(call.name, called);
+    if ((stack && makesAlias(stack)) || ghAliasHidesStack(call.name, called)) return aliasReason(person);
     if (stack) forced += stackPushes(stack, () => repoAt(directory, []));
     if (call.name !== "git") continue;
     const { dir, selectors, settings, sub, args } = gitCall(call.args, directory, call.env);
