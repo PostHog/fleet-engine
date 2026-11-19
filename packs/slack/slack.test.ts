@@ -459,14 +459,18 @@ describe("saving to the context library", () => {
     const { deps, captures } = savedThread(["none"], { now: 1_000 }, home);
     const launched: string[] = [];
     deps.launch = async (request) => (launched.push(request.title), { failed: "no" });
+    const ownMessages: Record<string, string> = { "1794830000.000100": "handled by Fleet :t3code:", "1794830000.000200": "new after the import :t3code:" };
+    const slack = deps.slack;
+    deps.slack = async (method, args) => (method === "conversations.replies" && ownMessages[args.ts!] ? { messages: [{ user: ownerId, ts: args.ts!, text: ownMessages[args.ts!] }] } : slack(method, args));
 
     expect(await main(["import-fleet"], { home, engineRoot: repoRoot, platform: "linux", env: {}, print: () => {}, run: async () => 0 })).toBe(0);
     await retryPending(deps);
     await handleTrigger({ kind: "message", channel: "C1", ts: "1794830000.000100" }, deps);
+    await handleTrigger({ kind: "message", channel: "C1", ts: "1794830000.000200" }, deps);
 
     expect(captures).toEqual(["2026-11-16T12:00:07.564Z"]);
-    expect(launched).toEqual([]);
-    expect(JSON.parse(readFileSync(statePath(home), "utf8")).pending).toEqual({});
+    expect(launched).toEqual(["Slack: new after the import"]);
+    expect(Object.keys(JSON.parse(readFileSync(statePath(home), "utf8")).pending)).toEqual(["C1:1794830000.000200"]);
     expect(lstatSync(statePath(home)).mode & 0o777).toBe(0o600);
   });
 
