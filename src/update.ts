@@ -17,6 +17,10 @@ export type UpdateOptions = {
 
 type Version = { tag: string; parts: [number, number, number] };
 
+const releaseRefs = "refs/hedge/releases";
+export const releaseRefsAtHead = (engineDir: string) => ["git", "-C", engineDir, "for-each-ref", "--points-at", "HEAD", "--format=%(refname)", releaseRefs, "refs/tags"];
+export const releaseIn = (refs: string) => refs.split("\n").map((ref) => ref.trim().replace(/^refs\/(?:hedge\/releases|tags)\//, "")).find((tag) => parse(tag)?.tag === tag);
+
 export function noticePath(home: string) {
   return join(home, ".local", "state", "hedge", "update.json");
 }
@@ -40,9 +44,10 @@ async function moveEngine(options: UpdateOptions) {
   if (!origin) return 1;
   const before = (await git(options.engineDir, "rev-parse", "HEAD")).out;
   const moved = options.engine.channel === "track" ? await trackMain(options, origin.url) : await followRelease(options, origin.url, origin.switched);
-  if (!moved || !(await saveOrigin(options, origin))) return 1;
+  if (!moved) return 1;
   const failed = await installPackages(options.engineDir);
   if (failed !== undefined) return await rollBack(options, before, failed), 1;
+  if (!(await saveOrigin(options, origin))) return 1;
   const profileMoved = await pullProfile(options);
   const applied = await options.runApply();
   return applied === 0 && !profileMoved ? 1 : applied;
@@ -125,9 +130,10 @@ async function followRelease(options: UpdateOptions, url: string, switched: bool
 }
 
 async function checkOutRelease(options: UpdateOptions, url: string, target: Version) {
-  const fetched = await git(options.engineDir, "fetch", "-q", "--depth", "1", "--no-tags", "--force", url, `+refs/tags/${target.tag}:refs/tags/${target.tag}`);
+  const release = `${releaseRefs}/${target.tag}`;
+  const fetched = await git(options.engineDir, "fetch", "-q", "--depth", "1", "--no-tags", "--force", url, `+refs/tags/${target.tag}:${release}`);
   if (!fetched.ok) return options.print(`hedge update: could not fetch the engine: ${fetched.err}`), false;
-  const checkedOut = await git(options.engineDir, "checkout", "-q", "--detach", `refs/tags/${target.tag}`);
+  const checkedOut = await git(options.engineDir, "checkout", "-q", "--detach", release);
   if (!checkedOut.ok) return options.print(`hedge update: could not check out ${target.tag}: ${checkedOut.err}`), false;
   options.print(`Engine is at ${target.tag}.`);
   return true;

@@ -459,7 +459,12 @@ describe("hedge retire-fleet", () => {
     expect(linux.systemd.units.has("hedge-watch.service")).toBe(false);
   });
 
-  test("after a retire fails on a Fleet installer that outlives its agent-update job, the next retire and apply still see the installer, and leave Hedge's own installer alone", async () => {
+  const outlivingInstallers = [
+    { job: "agent-update", script: "packs/base/commands/agent-update.ts", installer: ["/usr/bin/node", "/home/bin/t3", "update", "--yes", "--channel", "nightly"], named: "agent-update: t3 update" },
+    { job: "engine update", script: "src/cli.ts update", installer: ["/home/.bun/bin/bun", "install", "--frozen-lockfile", "--production"], named: "update: bun install" },
+  ];
+
+  test.each(outlivingInstallers)("after a retire fails on a Fleet installer that outlives its $job job, the next retire and apply still see the installer, and leave Hedge's own installer alone", async ({ script, installer, named }) => {
     const home = oldInstall();
     const fleetEngine = join(home, ".local/share/fleet/engine");
     const proc = temp.make("proc-");
@@ -469,10 +474,11 @@ describe("hedge retire-fleet", () => {
       writeFileSync(join(proc, String(pid), "stat"), `${pid} (${argv[0]}) S ${ppid} ${pid} ${pid} 0`);
       writeFileSync(join(proc, String(pid), "environ"), engine ? `HOME=${home}\0FLEET_ENGINE_DIR=${engine}\0` : `HOME=${home}\0`);
     };
-    listed(4242, 1, ["/home/bin/bun", `${fleetEngine}/packs/base/commands/agent-update.ts`], fleetEngine);
-    listed(4250, 4242, ["/usr/bin/node", "/home/bin/t3", "update", "--yes", "--channel", "nightly"], fleetEngine);
-    listed(4260, 1, ["/usr/bin/node", "/home/bin/t3", "update", "--yes", "--channel", "nightly"], join(home, ".local/share/hedge/engine"));
-    listed(4270, 1, ["/usr/bin/node", "/home/bin/t3", "update", "--yes", "--channel", "nightly"]);
+    const [path, ...args] = script.split(" ");
+    listed(4242, 1, ["/home/bin/bun", `${fleetEngine}/${path}`, ...args], fleetEngine);
+    listed(4250, 4242, installer, fleetEngine);
+    listed(4260, 1, installer, join(home, ".local/share/hedge/engine"));
+    listed(4270, 1, installer);
     const signalled: number[][] = [];
     const jobEndsInstallerStays: CommandRunner = async (command) => {
       if (command[0] !== "kill") return { code: 127, stdout: "" };
@@ -488,9 +494,9 @@ describe("hedge retire-fleet", () => {
 
     expect(first.code).toBe(1);
     expect(second.code).toBe(1);
-    expect(second.output).toContain("Hedge: running command fleet agent-update: t3 update (process 4250): it has not ended.");
+    expect(second.output).toContain(`Hedge: running command fleet ${named} (process 4250): it has not ended.`);
     expect(applied.code).toBe(1);
-    expect(applied.output).toContain("The running command fleet agent-update: t3 update (process 4250) from before the rename still runs (it has not ended), so Hedge started nothing.");
+    expect(applied.output).toContain(`The running command fleet ${named} (process 4250) from before the rename still runs (it has not ended), so Hedge started nothing.`);
     expect(signalled.flat()).not.toContain(4260);
     expect(signalled.flat()).not.toContain(4270);
     expect(linux.systemd.units.has("hedge-watch.service")).toBe(false);

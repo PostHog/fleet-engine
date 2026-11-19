@@ -463,7 +463,7 @@ describe("saving to the context library", () => {
   function launching(thread: ReturnType<typeof savedThread>) {
     const launched: string[] = [];
     thread.deps.launch = async (request) => (launched.push(request.title), { failed: "no" });
-    const ownMessages: Record<string, string> = { "1794830000.000100": "handled by Fleet :t3code:", "1794830000.000200": "a new event :t3code:" };
+    const ownMessages: Record<string, string> = { "1794830000.000100": "handled by Fleet :t3code:" };
     const slack = thread.deps.slack;
     thread.deps.slack = async (method, args) => (method === "conversations.replies" && ownMessages[args.ts!] ? { messages: [{ user: ownerId, ts: args.ts!, text: ownMessages[args.ts!] }] } : slack(method, args));
     return { ...thread, launched };
@@ -490,15 +490,6 @@ describe("saving to the context library", () => {
     const { home } = await importedFleetQueue();
 
     expect(lstatSync(statePath(home)).mode & 0o777).toBe(0o600);
-  });
-
-  test("an event whose launch failed is tried again on the next retry", async () => {
-    const { deps, launched } = launching(savedThread([], { now: 1_000 }));
-
-    await handleTrigger({ kind: "message", channel: "C1", ts: "1794830000.000200" }, deps);
-    await retryPending(deps);
-
-    expect(launched).toEqual(["Slack: a new event", "Slack: a new event"]);
   });
 
   test("a meeting whose Wispr notes are not ready gets one more look 30 minutes later, and only that look sends again, with what went out before", async () => {

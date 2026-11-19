@@ -32,21 +32,25 @@ const jobChildren: ReadonlyArray<readonly string[]> = [["update"], ["agent-updat
 const jobOrChild = (argv: string[]) => oldJob(argv) ?? jobChildren.find((command) => command.every((word, index) => argv[index] === word));
 const codexInstaller = "/packs/base/lib/install-codex.sh";
 const interpreters = new Set([...shellPrograms, "node", "bun"]);
-const installerCommands: ReadonlyArray<readonly string[]> = [["claude", "update"], ["claude", "plugin"], ["codex", "plugin"], ["t3", "update"], ["t3", "doctor"], ["bun", "add", "-g", "@openai/codex@latest"]];
+const agentUpdateInstallers: ReadonlyArray<readonly string[]> = [["claude", "update"], ["claude", "plugin"], ["codex", "plugin"], ["t3", "update"], ["t3", "doctor"], ["bun", "add", "-g", "@openai/codex@latest"]];
+const installerCommands: ReadonlyArray<{ job: string; command: readonly string[] }> = [
+  ...agentUpdateInstallers.map((command) => ({ job: "agent-update", command })),
+  { job: "update", command: ["bun", "install", "--frozen-lockfile", "--production"] },
+];
 
 function installerIn(argv: string[]) {
   const starts = interpreters.has(basename(argv[0] ?? "")) ? [0, 1] : [0];
   for (const at of starts) {
     const words = [basename(argv[at] ?? ""), ...argv.slice(at + 1)];
-    const command = installerCommands.find((command) => command.every((word, index) => words[index] === word));
-    if (command) return command;
+    const installer = installerCommands.find(({ command }) => command.every((word, index) => words[index] === word));
+    if (installer) return installer;
   }
   return undefined;
 }
 
 function fleetInstaller(home: string, { argv, fleetEngine }: Running): string | undefined {
-  const command = fleetEngine?.startsWith("/") && underLegacyPath(home, fleetEngine) ? installerIn(argv) : undefined;
-  return command && `agent-update: ${command.slice(0, 2).join(" ")}`;
+  const installer = fleetEngine?.startsWith("/") && underLegacyPath(home, fleetEngine) ? installerIn(argv) : undefined;
+  return installer && `${installer.job}: ${installer.command.slice(0, 2).join(" ")}`;
 }
 
 function fleetJob(home: string, words: string[]): string | undefined {
