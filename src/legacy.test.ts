@@ -5,7 +5,7 @@ import { fleetAdapter } from "./adapters/fleet/adapter.ts";
 import { jobsAdapter } from "./adapters/jobs/adapter.ts";
 import type { CommandRunner } from "./adapters/run.ts";
 import { main } from "./cli.ts";
-import { fleetIsHedge, legacyPaths } from "./legacy.ts";
+import { fleetIsHedge, legacyPaths, underLegacyPath } from "./legacy.ts";
 import { filesAdapter, type Adapter } from "./reconciler/apply.ts";
 import { fakeLaunchd } from "./testing/old-fleet.ts";
 import { fakeSystemd } from "./testing/systemd.ts";
@@ -353,4 +353,12 @@ describe("FLEET_ variables from before the rename", () => {
     expect(fromOld.output).toContain(".agents/AGENTS.md needs to be updated.");
     expect(fromNew.output).not.toContain(".agents/AGENTS.md needs to be updated.");
   });
+});
+
+test("a path below a link into a Fleet path counts as a Fleet path, also when the path does not exist yet", () => {
+  const home = temp.make("home-");
+  mkdirSync(join(home, ".config/fleet"), { recursive: true });
+  symlinkSync(join(home, ".config/fleet"), join(home, "elsewhere"));
+  mkdirSync(join(home, "plain"));
+  expect([join(home, "elsewhere/new/hedge.json"), join(home, "elsewhere"), join(home, "plain/new/hedge.json")].map((path) => underLegacyPath(home, path))).toEqual([true, true, false]);
 });

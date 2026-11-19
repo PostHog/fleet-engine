@@ -1,5 +1,5 @@
 import { existsSync, realpathSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 export const profileFileName = "hedge.json";
 export const legacyProfileFileName = "fleet.json";
@@ -60,11 +60,14 @@ export function renamed(target: string): string | undefined {
   return match && `${match[1]}${target.slice(match[0].length)}`;
 }
 
-const real = (path: string) => {
+/** path with every link resolved, including the links above a part of it that does not exist yet. */
+const real = (path: string): string => {
+  const full = resolve(path);
   try {
-    return realpathSync(path);
+    return realpathSync(full);
   } catch {
-    return resolve(path);
+    const parent = dirname(full);
+    return parent === full ? full : join(real(parent), basename(full));
   }
 };
 

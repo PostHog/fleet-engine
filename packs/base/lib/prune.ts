@@ -344,9 +344,11 @@ function removeIfDecided(facts: Facts, verdict: Verdict, options: PruneOptions, 
   return removed.exitCode === 0 ? decided : failed(removed.stderr.toString().trim());
 }
 
-function fromBeforeTheRename(home: string, path: string): boolean {
+/** Why prune keeps path without looking inside it: the path, or its Git repository, is in a Fleet path from before the rename. */
+function fromBeforeTheRename(home: string, path: string): string | undefined {
+  if (underLegacyPath(home, path)) return "it is in a Fleet path from before the rename";
   const common = git(path, "rev-parse", "--path-format=absolute", "--git-common-dir");
-  return common.ok && underLegacyPath(home, common.out);
+  return common.ok && underLegacyPath(home, common.out) ? "its Git repository is in a Fleet path from before the rename" : undefined;
 }
 
 const device = (path: string) => { try { return statSync(path).dev; } catch { return -1; } };
@@ -397,8 +399,9 @@ export function prune(options: PruneOptions): Verdict[] {
   const root = resolve(options.worktreeRoot);
   const current: WithState = (facts, latest) => withState(facts, latest, facts.path.startsWith(`${root}/`));
   for (const path of listCandidates(root, state.projects, options.repos)) {
-    if (options.home !== undefined && fromBeforeTheRename(options.home, path)) {
-      verdicts.push({ path, remove: false, reason: "its Git repository is in a Fleet path from before the rename" });
+    const legacy = options.home === undefined ? undefined : fromBeforeTheRename(options.home, path);
+    if (legacy) {
+      verdicts.push({ path, remove: false, reason: legacy });
       options.log(`kept: ${path} (${verdicts.at(-1)!.reason})`);
       continue;
     }
