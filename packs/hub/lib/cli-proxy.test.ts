@@ -406,8 +406,25 @@ test("connect to a proxy that holds none of your subscriptions saves the key, ke
   expect(existsSync(keyFile(refused.home))).toBe(false);
 });
 
+test("connect again after the pool empties takes Hedge's routes off Claude Code and Codex, and keeps your own settings", async () => {
+  const { machine, home, printed } = client({ plan: "both" }, { models: [] });
+  connected(home);
+  codexRouted(home);
+  expect(await cliProxy("connect", machine)).toBe(0);
+  expect(readJson(settingsFile(home))).toEqual({ model: "opus", env: { MY_FLAG: "1" } });
+  expect(readCodex(home)).toEqual(mine);
+  expect(printed.join("\n")).toContain("Claude Code keeps its own sign-in.");
+  expect(printed.at(-1)).toEndWith("Codex keeps its own sign-in.");
+});
+
+test("connect refuses a model list it cannot read, and saves no key", async () => {
+  const refused = client({}, { modelList: '{"data":[null,{"id":7}]}' });
+  await expect(cliProxy("connect", refused.machine)).rejects.toThrow("answers without a model list. Nothing changed.");
+  expect(existsSync(keyFile(refused.home))).toBe(false);
+});
+
 test("a model list the proxy cannot give fails the check and the doctor, and never reads as an empty pool", async () => {
-  for (const modelList of ["not json", "{}", '{"data":null}']) {
+  for (const modelList of ["not json", "{}", '{"data":null}', '{"data":[null,{"id":7}]}', '{"data":[{"id":""}]}', '{"data":[{"id":"claude-sonnet-5-5"},{}]}']) {
     const routed = client({}, { modelList });
     connected(routed.home);
     expect(await cliProxy("check", routed.machine)).toBe(1);
@@ -416,6 +433,15 @@ test("a model list the proxy cannot give fails the check and the doctor, and nev
   const { machine, home } = hubMachine();
   await cliProxy("install", machine);
   await expect(cliProxy("doctor", hubMachine({ home }, { credentials: [], modelList: "not json" }).machine)).rejects.toThrow("answers without a model list");
+});
+
+test("on the both plan, the doctor fails while a Codex subscription works but the proxy serves no Codex model", async () => {
+  const { machine, home } = hubMachine({ plan: "both" });
+  await cliProxy("install", machine);
+  const claudeOnly = [{ provider: "claude" }, { provider: "claude" }];
+  await expect(cliProxy("doctor", hubMachine({ home, plan: "both" }, { credentials: [...claudeOnly, { provider: "codex" }], models: ["claude-sonnet-5-5"] }).machine)).rejects.toThrow("lists no Codex model");
+  expect(await cliProxy("doctor", hubMachine({ home, plan: "both" }, { credentials: [...claudeOnly, { provider: "codex", disabled: true }], models: ["claude-sonnet-5-5"] }).machine)).toBe(0);
+  expect(await cliProxy("doctor", hubMachine({ home, plan: "both" }, { credentials: [...claudeOnly, { provider: "codex" }], models: ["claude-sonnet-5-5", "gpt-6.1-sol"] }).machine)).toBe(0);
 });
 
 test("with hub.proxyAccounts at 0, the doctor and accounts pass with an empty pool, and the doctor still wants a model once the pool holds one", async () => {

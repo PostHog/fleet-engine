@@ -29,7 +29,6 @@ export function fakeProxy(proxy: Proxy = {}) {
   return { fetch, requests };
 }
 
-/** A ProxyMachine whose commands, CLIProxyAPI and its management API are fakes, with the state the proxy would hold. */
 export function proxyMachine(make: (prefix: string) => string, fields: Partial<ProxyMachine> = {}, proxy: Proxy = {}, options: { role?: string; checksum?: string } = {}) {
   const home = fields.home ?? roleHome(make("hedge-cli-proxy-"), options.role ?? "hub");
   const fake = fakeRun((command) => {

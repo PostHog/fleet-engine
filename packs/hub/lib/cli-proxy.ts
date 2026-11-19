@@ -222,7 +222,8 @@ async function doctor(machine: ProxyMachine, paths: Layout): Promise<void> {
   if (strategy !== "fill-first") throw new Error(`The proxy routes with ${strategy ?? "no strategy"}, not fill-first. Run hedge cli-proxy-balance to restore it.`);
   const { agent, count, short, expired, enabled } = await pool(machine, paths, managementKey);
   const models = await listModels(machine.fetch, key);
-  const reason = typeof models === "string" ? models : count ? unserved(models, agent) : undefined;
+  const pooledAgents: Agent[] = machine.plan === "both" ? ["claude", "codex"] : [agent];
+  const reason = typeof models === "string" ? models : pooledAgents.map((provider) => (enabled(provider) ? unserved(models, provider) : undefined)).find(Boolean);
   if (reason) throw new Error(reason);
   const beside = machine.plan === "both" ? ` and ${subscriptions(enabled("codex"), "codex")}` : "";
   const balancer = agent === "claude" ? "puts the one whose weekly quota resets first on top" : "frees each one whose quota cooldown its live usage disproves";
@@ -284,8 +285,9 @@ async function listModels(fetch: Fetch, key: string): Promise<string[] | string>
   if (!response) return silent;
   if (!response.ok) return `The proxy at ${proxyUrl} refuses this machine's key (HTTP ${response.status}).`;
   const body = (await response.json().catch(() => undefined)) as { data?: unknown } | undefined;
-  if (!Array.isArray(body?.data)) return `The proxy at ${proxyUrl} answers without a model list.`;
-  return (body.data as Array<{ id?: unknown } | null>).flatMap((model) => (typeof model?.id === "string" ? [model.id] : []));
+  const ids = Array.isArray(body?.data) ? (body.data as Array<{ id?: unknown } | null>).map((model) => model?.id) : undefined;
+  if (!ids?.every((id): id is string => typeof id === "string" && id.length > 0)) return `The proxy at ${proxyUrl} answers without a model list.`;
+  return ids;
 }
 
 const servedModel = { claude: (id: string) => id.includes("claude"), codex: (id: string) => id.startsWith("gpt-") };
@@ -454,13 +456,16 @@ async function connect(machine: ProxyMachine): Promise<void> {
   await mkdir(dirname(keyPath(machine.home)), { recursive: true, mode: 0o700 });
   await writePrivateFile(keyPath(machine.home), `${key}\n`);
   const waiting = unserved(models, "claude");
-  if (agent === "claude" && waiting) machine.print(`${waiting} Claude Code keeps its own sign-in. The first hedge apply after the proxy serves it sends Claude Code there.`);
-  else if (agent === "claude") {
+  if (agent === "claude" && waiting) {
+    await sendClaude(machine.home, false);
+    machine.print(`${waiting} Claude Code keeps its own sign-in. The first hedge apply after the proxy serves it sends Claude Code there.`);
+  } else if (agent === "claude") {
     await sendClaude(machine.home, true);
     machine.print(`Claude Code uses your own-account proxy at ${proxyUrl} now. Restart open Claude Code sessions.`);
   }
   if (codex === undefined) return;
   const unroutable = typeof codex === "string" ? codex : unserved(models, "codex");
+  if (unroutable && typeof codex !== "string") await sendCodexHome(machine.home);
   const failed = unroutable ?? (await sendCodex(machine.home, agent === "claude"));
   if (failed) return machine.print(`${failed} Codex keeps its own sign-in.`);
   machine.print(`Codex uses your own-account proxy at ${proxyUrl} now. Restart open Codex sessions.`);

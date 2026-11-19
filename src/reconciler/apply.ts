@@ -182,7 +182,6 @@ export async function apply(plan: Plan, options: { home: string; dryRun?: boolea
   return report;
 }
 
-/** Tests once the steps ran each check that can wait for the person and that the gate did not see pass or wait, such as a check that reads what a step installs. When it waits now, its To do replaces what the gate found. */
 async function waitingChecks(plan: Plan, run: Runner, gated: Array<[Owned<PackCheck>, number]>, findings: Finding[]): Promise<void> {
   for (const item of plan.checks.filter((check) => check.todo)) {
     const before = gated.find(([ran]) => ran === item)?.[1];

@@ -15,7 +15,10 @@
   proxy serves them. While the proxy answers but holds none of an agent's
   subscriptions, its route check is a `To do:` line, not a failure.
   `hedge cli-proxy connect` saves the key on a node in that case, so the
-  first `hedge apply` after the proxy serves an agent sends it there. A
+  first `hedge apply` after the proxy serves an agent sends it there. It
+  also takes Hedge's own route off an agent that the proxy no longer
+  serves. On the both plan, `hedge doctor` fails while a Codex
+  subscription works but the proxy serves no Codex model. A
   proxy that is down, refuses the key, answers without a model list, or
   runs a plugin Hedge did not install still fails `hedge doctor`.
 - A pack check can name a `todo`: when its command exits 4, Hedge prints
