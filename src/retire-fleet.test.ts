@@ -468,22 +468,32 @@ describe("hedge retire-fleet", () => {
     const home = oldInstall();
     const fleetEngine = join(home, ".local/share/fleet/engine");
     const proc = temp.make("proc-");
-    const listed = (pid: number, ppid: number, argv: string[], engine?: string) => {
-      mkdirSync(join(proc, String(pid)));
+    const table = new Map<number, { ppid: number; group: number; argv: string[]; engine?: string }>();
+    const listed = (pid: number, ppid: number, argv: string[], engine?: string, group = pid) => {
+      table.set(pid, { ppid, group, argv, engine });
+      mkdirSync(join(proc, String(pid)), { recursive: true });
       writeFileSync(join(proc, String(pid), "cmdline"), `${argv.join("\0")}\0`);
-      writeFileSync(join(proc, String(pid), "stat"), `${pid} (${argv[0]}) S ${ppid} ${pid} ${pid} 0`);
+      writeFileSync(join(proc, String(pid), "stat"), `${pid} (${argv[0]}) S ${ppid} ${group} ${group} 0`);
       writeFileSync(join(proc, String(pid), "environ"), engine ? `HOME=${home}\0FLEET_ENGINE_DIR=${engine}\0` : `HOME=${home}\0`);
     };
     const [path, ...args] = script.split(" ");
     listed(4242, 1, ["/home/bin/bun", `${fleetEngine}/${path}`, ...args], fleetEngine);
-    listed(4250, 4242, installer, fleetEngine);
+    listed(4250, 4242, installer, fleetEngine, 4242);
     listed(4260, 1, installer, join(home, ".local/share/hedge/engine"));
     listed(4270, 1, installer);
-    const signalled: number[][] = [];
+    const ignoresTerm = new Set([4250]);
+    const end = (pid: number) => {
+      table.delete(pid);
+      rmSync(join(proc, String(pid)), { recursive: true, force: true });
+      for (const [child, item] of table) if (item.ppid === pid) listed(child, 1, item.argv, item.engine, item.group);
+    };
     const jobEndsInstallerStays: CommandRunner = async (command) => {
       if (command[0] !== "kill") return { code: 127, stdout: "" };
-      signalled.push(command.slice(2).map(Number));
-      rmSync(join(proc, "4242"), { recursive: true, force: true });
+      const [, signal, ...targets] = command;
+      for (const target of targets.map(Number)) {
+        const hit = [...table].filter(([pid, item]) => (target < 0 ? item.group === -target : pid === target)).map(([pid]) => pid);
+        for (const pid of hit) if (signal !== "-TERM" || !ignoresTerm.has(pid)) end(pid);
+      }
       return { code: 0, stdout: "" };
     };
     const linux = machine("linux", home, undefined, { run: jobEndsInstallerStays, uid: process.getuid!(), sleep: async () => {}, processes: procProcesses(process.getuid!(), proc) });
@@ -497,8 +507,7 @@ describe("hedge retire-fleet", () => {
     expect(second.output).toContain(`Hedge: running command fleet ${named} (process 4250): it has not ended.`);
     expect(applied.code).toBe(1);
     expect(applied.output).toContain(`The running command fleet ${named} (process 4250) from before the rename still runs (it has not ended), so Hedge started nothing.`);
-    expect(signalled.flat()).not.toContain(4260);
-    expect(signalled.flat()).not.toContain(4270);
+    expect([...table.keys()].sort()).toEqual([4250, 4260, 4270]);
     expect(linux.systemd.units.has("hedge-watch.service")).toBe(false);
   });
 
