@@ -101,9 +101,10 @@ export function wisprStep(startedAt: string, meetings: Material["meetings"]): st
 
 const notePath = /^notes\/[a-z0-9][a-z0-9-]*\.md$/;
 const instructionFile = /^notes\/(agents|claude|gemini)\.md$/;
+const capturable = (path: string) => notePath.test(path) && !instructionFile.test(path);
 
 function newPath(worktree: string, wanted: string): string {
-  if (!notePath.test(wanted) || instructionFile.test(wanted)) throw new Error(`the capture named ${JSON.stringify(wanted)} instead of one note under notes/; nothing was saved`);
+  if (!capturable(wanted)) throw new Error(`the capture named ${JSON.stringify(wanted)} instead of one note under notes/; nothing was saved`);
   const folder = join(worktree, "notes");
   if (existsSync(folder) && !lstatSync(folder).isDirectory()) throw new Error("notes/ in the library is not a folder; nothing was saved");
   mkdirSync(folder, { recursive: true });
@@ -131,7 +132,7 @@ export async function capture(input: CaptureInput, deps: CaptureDeps): Promise<C
   await must(git, ["worktree", "add", "--quiet", "--detach", worktree, "origin/main"], root);
   try {
     const docs = readLibrary(worktree);
-    const found = docs.find((doc) => doc.source === input.source && notePath.test(doc.path));
+    const found = docs.find((doc) => doc.source === input.source && capturable(doc.path));
     const existing = found && { path: found.path, text: readFileSync(join(worktree, found.path), "utf8") };
     const topics = [...new Set(docs.flatMap((doc) => doc.topics))].sort();
     const draft = await deps.agent(capturePrompt(input, library, existing, deps.today(), material, topics));

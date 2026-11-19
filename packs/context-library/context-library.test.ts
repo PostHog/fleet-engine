@@ -301,6 +301,14 @@ describe("fleet context add", () => {
     expect(await pushedFiles(machine)).toEqual(["CATALOG.md", notePath, "research/billing.md"]);
   });
 
+  test("a note named like an agent's instructions that cites the same link stays as written", async () => {
+    const instructions = `---\ntitle: Rules\nsource: ${slackSource}\n---\n\nHand-written.\n`;
+    const machine = await library({ "notes/claude.md": instructions });
+    await fleetContext(machine, ["sync"]);
+    expect((await fleetContext(machine, ["add", slackSource], drafting(notePath, planning()))).code).toBe(0);
+    expect(await spawnGit(machine.root, "--git-dir", machine.remote, "show", "main:notes/claude.md")).toBe(instructions.trim());
+  });
+
   test("an update that finds nothing new keeps the note and pushes nothing", async () => {
     const machine = await library({ [notePath]: planning() });
     await fleetContext(machine, ["sync"]);
@@ -348,6 +356,8 @@ describe("fleet context add", () => {
       return "Standup summary";
     });
     expect((await readMaterial({ source: slackSource, material: "x", startedAt: "2026-11-16T12:00:07.000Z" }, partly.sources)).meetings).toEqual([{ id: "m-2", text: "Standup summary" }]);
+    const unread = fakeSources((call) => { if (call.tool === "get_meeting") throw new Error("gone"); return JSON.stringify({ meetings: [{ id: "m-1" }] }); });
+    expect((await readMaterial({ source: slackSource, material: "x", startedAt: "2026-11-16T12:00:07.000Z" }, unread.sources)).meetings).toBeUndefined();
     const quiet = fakeSources();
     await readMaterial({ source: slackSource, material: "x" }, quiet.sources);
     expect(quiet.calls).toEqual([]);
@@ -431,7 +441,7 @@ console.log(JSON.stringify({ type: "result", is_error: false, structured_output:
     const machine = await library({ "ideas.md": "# Ideas\n", [notePath]: other });
     await fleetContext(machine, ["sync"]);
     const strays: Array<[string, string]> = [
-      ...["../escape.md", "/tmp/escape.md", "notes/../ideas.md", "notes/sub/plan.md", "CATALOG.md", "ideas.md", "notes/Plan.md", "notes/.plan.md", "notes/plan.md.sh", "notes/plan.md\n", "notes\\plan.md", "notes/-plan.md", "notes/claude.md", "notes/agents.md", ""].map((path) => [path, planning()] as [string, string]),
+      ...["../escape.md", "/tmp/escape.md", "notes/../ideas.md", "notes/sub/plan.md", "CATALOG.md", "ideas.md", "notes/Plan.md", "notes/.plan.md", "notes/plan.md.sh", "notes/plan.md\n", "notes\\plan.md", "notes/-plan.md", "notes/claude.md", "notes/agents.md", "notes/gemini.md", ""].map((path) => [path, planning()] as [string, string]),
       ["notes/other-2026-11-11.md", planning().replace(slackSource, "https://example.com/other")],
       ["notes/other-2026-11-11.md", planning(`The key is ${secretToken}.`)],
     ];
@@ -471,6 +481,8 @@ console.log(JSON.stringify({ type: "result", is_error: false, structured_output:
       ["https://notes.wisprflow.ai/shared/abc", { route: "wispr-flow", tool: "resolve_share_link", args: { url: "https://notes.wisprflow.ai/shared/abc", view_transcript: {} } }],
       ["https://docs.google.com/document/d/e/2PACX-abc/pub", { page: "https://docs.google.com/document/d/e/2PACX-abc/pub" }],
       ["https://docs.google.com/presentation/d/e/2PACX-abc/pub", { page: "https://docs.google.com/presentation/d/e/2PACX-abc/pub" }],
+      ["https://docs.google.com/document/d/abc/pub", { page: "https://docs.google.com/document/d/abc/pub" }],
+      ["https://docs.google.com/presentation/d/abc/pub?start=false", { page: "https://docs.google.com/presentation/d/abc/pub?start=false" }],
       ["https://example.com/post", { page: "https://example.com/post" }],
       ["https://slack.com.example.com/archives/C1/p1794409358124319", { page: "https://slack.com.example.com/archives/C1/p1794409358124319" }],
     ];
@@ -494,8 +506,8 @@ console.log(JSON.stringify({ type: "result", is_error: false, structured_output:
     const { readPage } = await import("./lib/source.ts");
     const url = "https://example.com/plan";
     const answering = (body: string, type: string, status = 200) => async () => new Response(body, { status, headers: { "content-type": type } });
-    const html = `<html><head><title>Plan &amp; scope</title><script>steal()</script><style>p{}</style></head><body><p data-x="a>b">Load&nbsp;test &#x2192; ship&#0; &mdash; <a href="/spec?x=1&amp;y=2">the spec</a>, <a href="javascript:steal()">bad</a></p><!-- hidden --></body></html>`;
-    expect(await readPage(url, answering(html, "text/html; charset=utf-8"))).toBe("Plan & scope\nLoad test → ship — the spec (https://example.com/spec?x=1&y=2), bad");
+    const html = `<html><head><title>Plan &amp; scope</title><script>steal()</script><style>p{}</style></head><body><p data-x="a>b">Load&nbsp;test &#x2192; ship&#0; &mdash; <a href="/spec?x=1&amp;y=2">the spec</a>, <a href="javascript:steal()">bad</a> <a data-href="https://evil.example.com/" href="/real">real</a></p><!-- hidden --></body></html>`;
+    expect(await readPage(url, answering(html, "text/html; charset=utf-8"))).toBe("Plan & scope\nLoad test → ship — the spec (https://example.com/spec?x=1&y=2), bad real (https://example.com/real)");
     expect(await readPage(url, answering("# Notes", "text/markdown"))).toBe("# Notes");
     await expect(readPage(url, answering("x", "text/html", 404))).rejects.toThrow(`${url} answered HTTP 404`);
     await expect(readPage(url, answering("x", "application/pdf"))).rejects.toThrow("cannot read as text");
@@ -507,8 +519,12 @@ console.log(JSON.stringify({ type: "result", is_error: false, structured_output:
     const endless = async () => new Response(new ReadableStream({ pull: (controller) => { pulled++; controller.enqueue(new Uint8Array(1 << 20).fill(97)); } }), { headers: { "content-type": "text/plain" } });
     await expect(readPage("https://example.com/big", endless)).rejects.toThrow("is larger than 5 MB");
     expect(pulled).toBeLessThan(10);
-    const declared = async () => new Response("small", { headers: { "content-type": "text/plain", "content-length": String(6 << 20) } });
+    let cancelled = 0;
+    const declared = async () => new Response(new ReadableStream({ cancel: () => void cancelled++ }), { headers: { "content-type": "text/plain", "content-length": String(6 << 20) } });
     await expect(readPage("https://example.com/big", declared)).rejects.toThrow("is larger than 5 MB");
+    expect(cancelled).toBe(1);
+    const exact = async () => new Response(new Uint8Array(5 << 20).fill(97), { headers: { "content-type": "text/plain" } });
+    expect(await readPage("https://example.com/exact", exact)).toHaveLength(5 << 20);
   });
 
   test("follows a page's redirects only to other https sites by name, at most five", async () => {
@@ -526,8 +542,14 @@ console.log(JSON.stringify({ type: "result", is_error: false, structured_output:
       await expect(readPage("https://example.com/a", redirecting({ "https://example.com/a": target }))).rejects.toThrow("reads only https pages on a named public site");
     }
     await expect(readPage("https://localhost/x", redirecting({}))).rejects.toThrow("reads only https pages on a named public site");
-    const loop = Object.fromEntries(Array.from({ length: 7 }, (_, hop) => [`https://example.com/${hop}`, `https://example.com/${hop + 1}`]));
+    asked.length = 0;
+    const loop = Object.fromEntries(Array.from({ length: 6 }, (_, hop) => [`https://example.com/${hop}`, `https://example.com/${hop + 1}`]));
     await expect(readPage("https://example.com/0", redirecting(loop))).rejects.toThrow("redirected more than 5 times");
+    expect(asked).toHaveLength(6);
+    asked.length = 0;
+    expect(await readPage("https://example.com/1", redirecting(loop))).toBe("Moved here");
+    expect(asked).toHaveLength(6);
+    expect(await readPage("https://example.com./a", redirecting({ "https://example.com./a": "https://docs.example.org./c" }))).toBe("Moved here");
   });
 
   test("reads a gateway source through the hub's fleet group with the machine's key", async () => {

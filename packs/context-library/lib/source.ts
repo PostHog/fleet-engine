@@ -29,7 +29,7 @@ export function gatewayRead(source: string): GatewayRead | undefined {
     if (canvas && canvasId.test(canvas[1]!)) return { route: "slack", tool: "slack_read_canvas", args: { canvas_id: canvas[1] } };
     throw new Error(`${source} is neither a Slack thread nor a Slack canvas link`);
   }
-  if (url.hostname === "docs.google.com" && /^\/\w+\/d\/e\//.test(url.pathname)) return undefined;
+  if (url.hostname === "docs.google.com" && /^\/\w+\/d\/(?:e\/|[^/]+\/pub(?:html)?\/?$)/.test(url.pathname)) return undefined;
   if (url.hostname === "docs.google.com" && url.pathname.startsWith("/document/d/")) return { route: "google-drive", tool: "get_document_text", args: { document_url: source } };
   if (url.hostname === "docs.google.com" && url.pathname.startsWith("/presentation/d/")) return { route: "google-drive", tool: "get_presentation_text", args: { presentation_url: source } };
   if (url.hostname === "docs.google.com" || url.hostname === "drive.google.com") return { route: "google-drive", tool: "fetch", args: { url: source } };
@@ -61,7 +61,8 @@ async function meetingsAround(startedAt: string, sources: Sources): Promise<Meet
       ...(typeof meeting.share_link === "string" && /^https:\/\/notes\.wisprflow\.ai\/shared\/[\w-]+$/.test(meeting.share_link) && { link: meeting.share_link }),
       text: capped(await sources.call("wispr-flow", "get_meeting", { meeting_id: meeting.id, view_transcript: {} })),
     })));
-    return read.flatMap((meeting) => (meeting.status === "fulfilled" ? [meeting.value] : []));
+    const meetings = read.flatMap((meeting) => (meeting.status === "fulfilled" ? [meeting.value] : []));
+    return listed.length && !meetings.length ? undefined : meetings;
   } catch {
     return undefined;
   }
@@ -85,10 +86,12 @@ const blockTags = new RegExp(`<\\/?(?:p|div|br|li|tr|h[1-6]|title|section|articl
 const anyTag = new RegExp(`<${attributes}>`, "g");
 const links = new RegExp(`<a\\b(${attributes})>([\\s\\S]*?)<\\/a\\s*>`, "gi");
 
+const attribute = /([^\s"'=<>/]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g;
+
 function linkTarget(tag: string, base: string): string | undefined {
-  const href = /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i.exec(tag);
+  const href = [...tag.matchAll(attribute)].find((match) => match[1]!.toLowerCase() === "href");
   try {
-    const target = new URL(decoded(href?.[1] ?? href?.[2] ?? href?.[3] ?? ""), base);
+    const target = new URL(decoded(href?.[2] ?? href?.[3] ?? href?.[4] ?? ""), base);
     return href && /^https?:$/.test(target.protocol) ? target.href : undefined;
   } catch {
     return undefined;
@@ -111,14 +114,19 @@ export function pageText(html: string, base: string): string {
 }
 
 function namedPublicSite(url: URL): boolean {
-  const host = url.hostname.toLowerCase();
+  const host = url.hostname.toLowerCase().replace(/\.$/, "");
   const top = host.split(".").at(-1) ?? "";
   return url.protocol === "https:" && host.includes(".") && /^[a-z][a-z0-9-]*$/.test(top) && !["localhost", "local", "internal", "home", "lan", "corp", "intranet", "private"].includes(top);
 }
 
+const discard = (response: Response) => response.body?.cancel().catch(() => {});
+
 async function limitedText(response: Response, url: string): Promise<string> {
   const tooLarge = () => new Error(`${url} is larger than ${pageByteLimit >> 20} MB`);
-  if (Number(response.headers.get("content-length") ?? 0) > pageByteLimit) throw tooLarge();
+  if (Number(response.headers.get("content-length") ?? 0) > pageByteLimit) {
+    await discard(response);
+    throw tooLarge();
+  }
   const chunks: Uint8Array[] = [];
   let size = 0;
   for await (const chunk of response.body ?? []) {
@@ -136,14 +144,19 @@ export async function readPage(source: string, fetcher: Fetch = fetch): Promise<
     const response = await fetcher(url, { redirect: "manual", headers: { accept: "text/html, text/plain, text/markdown" }, signal: AbortSignal.timeout(60_000) });
     const location = response.headers.get("location");
     if (response.status >= 300 && response.status < 400 && location) {
+      await discard(response);
       if (hop === redirectLimit) throw new Error(`${source} redirected more than ${redirectLimit} times`);
       url = new URL(location, url).href;
       continue;
     }
-    if (!response.ok) throw new Error(`${url} answered HTTP ${response.status}`);
+    if (!response.ok) {
+      await discard(response);
+      throw new Error(`${url} answered HTTP ${response.status}`);
+    }
     const type = response.headers.get("content-type")?.toLowerCase() ?? "";
     if (type.includes("html")) return pageText(await limitedText(response, url), url);
     if (/^text\/|json|xml/.test(type)) return limitedText(response, url);
+    await discard(response);
     throw new Error(`${url} sent ${type || "no content type"}, which fleet context add cannot read as text`);
   }
 }
