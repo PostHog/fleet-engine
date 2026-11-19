@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { inside } from "../../files/install.ts";
 import type { Action, Finding, Plan, Provider } from "../../pack/types.ts";
-import type { Adapter, AdapterResult } from "../../reconciler/apply.ts";
+import { todoLines, type Adapter, type AdapterResult } from "../../reconciler/apply.ts";
 import { spawnRunner, type CommandRunner } from "../run.ts";
 import { codexHookTrust, isTrustOf } from "./codex-hooks.ts";
 import { checkPath, get, json, keyPath, overlaps, remove, same, samePath, set, toml, type Document, type Field, type Format } from "./fields.ts";
@@ -39,10 +39,15 @@ export function providerConfigAdapter(options: { run?: CommandRunner } = {}): Ad
       const gated = gatedKeys(plan);
       const reconcile = async () => {
         const { plugins, claudeEnabled, marketplaces, codexPlugins, ...result } = await reconcileFiles(plan, context.home, context.dryRun, context.adopt, outage, gated);
-        result.findings.push(...(await reconcilePlugins(plan, context.home, context.dryRun, run, { outage, accepted: plugins, claudeEnabled, marketplaces, acceptedCodex: codexPlugins })));
-        const servers = await reconcileServers(plan, context.home, { dryRun: context.dryRun, adopt: context.adopt.includes(claudeJson), outage, gated: gatedPath(gated, "claude"), run });
-        result.actions.push(...servers.actions);
-        result.findings.push(...servers.findings);
+        const written = result.findings.filter((finding) => finding.todo);
+        try {
+          result.findings.push(...(await reconcilePlugins(plan, context.home, context.dryRun, run, { outage, accepted: plugins, claudeEnabled, marketplaces, acceptedCodex: codexPlugins })));
+          const servers = await reconcileServers(plan, context.home, { dryRun: context.dryRun, adopt: context.adopt.includes(claudeJson), outage, gated: gatedPath(gated, "claude"), run });
+          result.actions.push(...servers.actions);
+          result.findings.push(...servers.findings);
+        } catch (error) {
+          throw written.length ? new Error(`${(error as Error)?.message ?? error}${todoLines(written)}`) : error;
+        }
         return result;
       };
       const result = context.dryRun ? await reconcile() : await withLock(context.home, reconcile);
@@ -165,7 +170,7 @@ function merge(target: Target, text: string | undefined, previous: Field[], want
       if (onRoute(field)) routeLeft.push(field.path);
     }
   }
-  const beside = route?.beside(current, routeLeft) ?? [];
+  const beside = (route?.beside(current, routeLeft) ?? []).filter((path) => !wanted.some((field) => overlaps(field.path, path)));
   for (const path of beside) {
     remove(current, path);
     removed.push(path.join("."));

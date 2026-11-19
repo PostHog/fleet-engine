@@ -155,7 +155,9 @@ the person's own subscriptions, never for someone else's.
   Connect only saves the key, and `hedge apply` writes the Claude and Codex
   settings. When the hub
   hands a box over, it sends the key, runs connect, then runs `hedge apply`
-  on the box, and says when an agent there keeps its own sign-in.
+  on the box. When that apply exits 0, the hub says when an agent there
+  keeps its own sign-in. When it exits nonzero, a timeout included, the hub
+  says only the exit code and `hedge box run <box> -- hedge apply`.
 - **When the proxy is down.** Hedge's Claude settings wait for
   `hedge cli-proxy check`, and its Codex settings wait for
   `hedge cli-proxy check codex`. Both checks only read. On the hub, both

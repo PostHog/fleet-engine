@@ -53,10 +53,12 @@
   that Hedge writes has a record, and turning balancing off takes it off
   at the next apply. When the hub hands a box over, it runs `hedge apply`
   on the box after connect, as one more SSH step with the same time limit
-  as the others. When that apply fails, the hub names the exit code and
-  `hedge box run <box> -- hedge apply`. When the apply shows that the proxy
-  lists no model for an agent, or that the agent cannot reach the proxy,
-  the hub says the agent there keeps its own sign-in.
+  as the others. When that apply exits nonzero, a timeout included, the
+  hub says only the exit code and `hedge box run <box> -- hedge apply`,
+  and nothing about the box's sign-in. Only after the apply exits 0 does
+  the hub read its proxy lines: when they show that the proxy lists no
+  model for an agent, or that the agent cannot reach the proxy, the hub
+  says the agent there keeps its own sign-in.
 - Hedge removes a Claude Code or Codex setting only when its own record
   says Hedge wrote it. It no longer removes a setting because it points
   at the proxy port 8317. So a Codex provider table of your own, of any
@@ -74,10 +76,15 @@
   names each removed setting, never its value, and says the agent now
   uses its own sign-in. The backup in `~/.local/state/hedge/backups`
   holds the file as it was. Only Hedge's own proxy values form the
-  route. A gateway and key helper from your profile are set and removed
-  one by one, as before.
-- When an adapter that runs before the steps fails, the error that apply
-  throws holds the `To do:` lines from the provider settings it wrote.
+  route. The cleanup removes only settings that no pack sets, so a key
+  helper your profile sets in the same apply stays and is recorded, and
+  a helper you edited at that key stays by the usual rules. A gateway
+  and key helper from your profile are set and removed one by one, as
+  before.
+- When an adapter that runs before the steps fails, or a later part of
+  the provider config step fails after the settings write, such as a
+  malformed `provider-plugins.json`, the error that apply throws holds
+  the `To do:` lines from the provider settings it wrote.
   `hedge doctor` reads one result of each check for both the config and
   its line.
 - When `hedge cli-proxy connect` fails on a box, the hub names the box and

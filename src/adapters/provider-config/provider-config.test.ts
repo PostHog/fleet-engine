@@ -99,6 +99,59 @@ describe("provider config", () => {
     expect((await apply(plan(), { home, adapters: adapters() })).actions).toEqual([]);
   });
 
+  test("switching from Hedge's Claude proxy to a profile's own key helper in one apply sets that helper and records it, and a helper you edited stays by the usual rules", async () => {
+    const home = temp.make("home-");
+    const route = [{ provider: "claude" as const, key: "env.ANTHROPIC_BASE_URL", value: "http://127.0.0.1:8317", pack: "hub" }, { provider: "claude" as const, key: "apiKeyHelper", value: 'cat "$HOME/.config/hedge/cli-proxy.key"', pack: "hub" }];
+    const helper = [{ provider: "claude" as const, key: "apiKeyHelper", value: "team-helper", pack: "team" }];
+    await apply(plan(route), { home, adapters: adapters() });
+
+    const switched = await apply(plan(helper), { home, adapters: adapters() });
+
+    expect(read(home, claude)).toEqual({ apiKeyHelper: "team-helper" });
+    expect(read(home, record)[claude]).toEqual([{ path: ["apiKeyHelper"], value: "team-helper", pack: "team" }]);
+    expect(switched.findings.map((finding) => finding.id)).not.toContain(`route:${claude}`);
+    expect((await apply(plan(helper), { home, adapters: adapters() })).actions).toEqual([]);
+
+    const edited = temp.make("home-");
+    await apply(plan(route), { home: edited, adapters: adapters() });
+    write(edited, claude, { ...read(edited, claude), apiKeyHelper: "my-helper", env: { ...read(edited, claude).env, ANTHROPIC_AUTH_TOKEN: "my-token" } });
+
+    const kept = await apply(plan(helper), { home: edited, adapters: adapters() });
+
+    expect(read(edited, claude)).toEqual({ apiKeyHelper: "my-helper" });
+    expect(kept.findings.map((finding) => finding.say)).toContain(`Kept your apiKeyHelper in ${claude}. Run hedge apply --adopt ${claude} to take Hedge's value.`);
+    expect(kept.findings.map((finding) => finding.say)).toContain(`Took Hedge's proxy route out of ${claude}, and with it your env.ANTHROPIC_AUTH_TOKEN, which only worked through that route. Claude Code now uses its own sign-in: sign in there if it asks.`);
+  });
+
+  test("takes an ANTHROPIC_API_KEY and a key helper you edited out with Hedge's proxy URL, and names both without their values", async () => {
+    const home = temp.make("home-");
+    const route = [{ provider: "claude" as const, key: "env.ANTHROPIC_BASE_URL", value: "http://127.0.0.1:8317", pack: "hub" }, { provider: "claude" as const, key: "apiKeyHelper", value: 'cat "$HOME/.config/hedge/cli-proxy.key"', pack: "hub" }];
+    await apply(plan(route), { home, adapters: adapters() });
+    write(home, claude, { ...read(home, claude), apiKeyHelper: "my-helper --secret", env: { ...read(home, claude).env, ANTHROPIC_API_KEY: "my-key" } });
+
+    const taken = await apply(plan(), { home, adapters: adapters() });
+
+    expect(read(home, claude)).toEqual({});
+    expect(taken.findings).toContainEqual({ id: `route:${claude}`, pack: "engine", say: `Took Hedge's proxy route out of ${claude}, and with it your apiKeyHelper, env.ANTHROPIC_API_KEY, which only worked through that route. Claude Code now uses its own sign-in: sign in there if it asks.`, todo: true });
+    expect(JSON.stringify(taken.findings)).not.toContain("my-key");
+    expect(JSON.stringify(taken.findings)).not.toContain("--secret");
+    expect((await apply(plan(), { home, adapters: adapters() })).actions).toEqual([]);
+  });
+
+  test("when the plugin step throws after the settings write, for a malformed provider-plugins.json, the error still holds the To do that names the token taken out with the route", async () => {
+    const home = temp.make("home-");
+    const route = [{ provider: "claude" as const, key: "env.ANTHROPIC_BASE_URL", value: "http://127.0.0.1:8317", pack: "hub" }, { provider: "claude" as const, key: "apiKeyHelper", value: 'cat "$HOME/.config/hedge/cli-proxy.key"', pack: "hub" }];
+    await apply(plan(route), { home, adapters: adapters() });
+    write(home, claude, { ...read(home, claude), env: { ...read(home, claude).env, ANTHROPIC_AUTH_TOKEN: "my-token" } });
+    write(home, pluginRecord, "{");
+
+    const error = (await apply(plan(), { home, adapters: adapters() }).catch((thrown: Error) => thrown)) as Error;
+
+    expect(read(home, claude)).toEqual({});
+    expect(error.message).toContain(`\nTo do: Took Hedge's proxy route out of ${claude}, and with it your env.ANTHROPIC_AUTH_TOKEN, which only worked through that route.`);
+    expect(error.message).not.toContain("my-token");
+  });
+
   test("a profile that drops its own Claude gateway takes only that gateway out, field by field as on the base: your token stays, and a gateway URL you edited stays", async () => {
     const home = temp.make("home-");
     const gateway = [{ provider: "claude" as const, key: "env.ANTHROPIC_BASE_URL", value: "https://gateway.example.com", pack: "team" }];

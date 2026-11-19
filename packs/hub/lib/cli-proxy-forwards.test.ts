@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "smol-toml";
 import { tempDirs } from "../../../src/testing/git.ts";
@@ -9,7 +9,8 @@ import hubPack from "../pack.json";
 import { handOver, hubForward } from "./links.ts";
 import { roleHome } from "./run-testing.ts";
 import { proxyOn, readBoxSettings, remoteHedge } from "./machine.ts";
-import { boxSettings, fakeCoder, fakeMachine, ok, writeHome } from "./testing.ts";
+import { captureWith, type Timer } from "./coder.ts";
+import { appeared, boxSettings, fakeCoder, fakeMachine, ok, writeHome } from "./testing.ts";
 import { tunnelUnit } from "./tunnels.ts";
 
 const temp = tempDirs();
@@ -152,19 +153,38 @@ test("a box handed over on the Codex plan sends Codex through the proxy with the
   expect(await cliProxy("check", box.machine, "codex")).toBe(0);
 });
 
-test("a handover whose hedge apply fails or times out on the box says so with the exit code and the command to see why, and goes on", async () => {
-  const box = proxyBox("claude", { models: ["claude-sonnet-5-5"] });
-  const { lines } = await handOverTo(box, async () => ({ code: 124, stdout: `To do: ${clientKey}`, stderr: "\u001b[2J" }));
-  expect(lines.filter((line) => line.startsWith("box-lane"))).toEqual(["box-lane may keep its own sign-in: hedge apply exited 124 there. To see why, run on the hub: hedge box run box-lane -- hedge apply"]);
-  expect(lines.join("\n")).not.toContain(clientKey);
+test("a box apply that exits nonzero makes the hub say only the exit code and the command to see why, never a proxy line from its output", async () => {
+  const proxy: Proxy = { models: ["claude-sonnet-5-5"] };
+  const box = proxyBox("claude", proxy);
+  const claudePlan = await balancingPlan((prefix) => temp.make(prefix), "claude");
+  const applyNow = hedgeApply(box.machine, () => claudePlan);
+  writeHome(box.home, { ".config/hedge/cli-proxy.key": `${clientKey}\n` });
+  expect((await applyNow()).code).toBe(0);
+  proxy.models = [];
+  writeHome(box.home, { ".config/hedge/provider-plugins.json": "{", ".claude/settings.json": JSON.stringify({ env: { ANTHROPIC_BASE_URL: proxyUrl, ANTHROPIC_AUTH_TOKEN: "my-token" }, apiKeyHelper: keyHelper }) });
+  const thrown = await applyNow();
+  expect(thrown.stderr).toContain("\nTo do: Took Hedge's proxy route out of .claude/settings.json");
+  const exit = (code: number) => [`box-lane: hedge apply exited ${code} there. To see why, run on the hub: hedge box run box-lane -- hedge apply`];
+  const said = async (run: () => Promise<{ code: number; stdout: string; stderr: string }>) => (await handOverTo(box, run)).lines.filter((line) => line.startsWith("box-lane"));
+  expect(await said(applyNow)).toEqual(exit(1));
+  expect(await said(async () => ({ ...ok, code: 1, stdout: `Fix: Step jobs of the base pack failed.\n${checkLine("cli-proxy-client", "todo")}\n` }))).toEqual(exit(1));
 });
 
-test("a box apply that exits nonzero for another step still has its proxy To do or Fix read, from either stream, before the hub names the exit code", async () => {
+test("a box apply that times out after it printed a proxy line makes the hub say only exit 124 and the command to see why", async () => {
   const box = proxyBox("claude", { models: ["claude-sonnet-5-5"] });
-  const exit = "box-lane may keep its own sign-in: hedge apply exited 1 there. To see why, run on the hub: hedge box run box-lane -- hedge apply";
-  const said = async (output: { stdout?: string; stderr?: string }) => (await handOverTo(box, async () => ({ ...ok, ...output, code: 1 }))).lines.filter((line) => line.startsWith("box-lane"));
-  expect(await said({ stdout: `Fix: Step jobs of the base pack failed.\n${checkLine("cli-proxy-client", "todo")}\n` })).toEqual(["box-lane: the proxy lists no Claude model yet, so Claude Code there keeps its own sign-in until the proxy serves it.", exit]);
-  expect(await said({ stderr: `hedge: job id bad id may hold only letters\n${checkLine("cli-proxy-codex", "say")}\n` })).toEqual(["box-lane: Codex there keeps its own sign-in, because it cannot reach your own-account proxy or the proxy is not safe to use. To see why, run on the hub: hedge box run box-lane -- hedge cli-proxy check codex", exit]);
+  const dir = temp.make("hedge-apply-");
+  writeFileSync(join(dir, "out"), `${checkLine("cli-proxy-client", "todo")}\n`);
+  writeFileSync(join(dir, "err"), `${checkLine("cli-proxy-codex", "say")}\n`);
+  writeFileSync(join(dir, "apply"), `#!/bin/sh\ncat ${dir}/out\ncat ${dir}/err >&2\necho up > ${dir}/ready.tmp && /bin/mv ${dir}/ready.tmp ${dir}/ready\nexec /bin/sleep 30\n`, { mode: 0o755 });
+  const fires: Array<() => void> = [];
+  const timer: Timer = (_ms, fire) => (fires.push(fire), () => {});
+  const timesOut = () => {
+    const result = captureWith(timer)([join(dir, "apply")], { timeoutMs: 1000 });
+    void appeared(join(dir, "ready")).then(() => fires.forEach((fire) => fire()));
+    return result;
+  };
+  const { lines } = await handOverTo(box, timesOut);
+  expect(lines.filter((line) => line.startsWith("box-lane"))).toEqual(["box-lane: hedge apply exited 124 there. To see why, run on the hub: hedge box run box-lane -- hedge apply"]);
 });
 
 test("a handover prints only the hub's own words, and only for an apply line that is exactly a proxy check's To do or Fix", async () => {

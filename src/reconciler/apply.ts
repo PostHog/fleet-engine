@@ -130,7 +130,7 @@ async function reconcile(plan: Plan, options: ApplyOptions): Promise<{ report: R
     const result = await adapter.apply(gated.plan, context).catch(async (error: unknown) => {
       const from = report.findings.length;
       const also = await configure().then(() => undefined, (second: unknown) => second);
-      const todos = report.findings.slice(from).filter((finding) => finding.todo).map((finding) => `\nTo do: ${finding.say}`).join("");
+      const todos = todoLines(report.findings.slice(from));
       if (also === undefined && !todos) throw error;
       throw new Error(`${String((error as Error)?.message ?? error)}${also === undefined ? "" : ` Hedge also could not set your provider settings: ${String((also as Error)?.message ?? also)}`}${todos}`);
     });
@@ -206,6 +206,8 @@ async function reconcile(plan: Plan, options: ApplyOptions): Promise<{ report: R
   await undo(items.filter((item) => item.cause !== "pack"));
   return configure();
 }
+
+export const todoLines = (findings: Finding[]) => findings.filter((finding) => finding.todo).map((finding) => `\nTo do: ${finding.say}`).join("");
 
 const waitsForCheck = (plan: Plan, entry: Plan["config"][number]) => entry.after !== undefined && !plan.human.some((step) => step.pack === entry.pack && step.id === entry.after);
 
