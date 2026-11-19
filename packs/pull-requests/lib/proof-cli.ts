@@ -18,7 +18,7 @@ import { runReceipt } from "./proof-receipt-command.ts";
 import { receiptBudget } from "./proof-receipt-page.ts";
 import { publisherSeam } from "./proof-receipt-publisher.ts";
 import { reviewPrompt } from "./proof-review.ts";
-import { leftOutNote, reviewRange } from "./proof-range.ts";
+import { reviewRange } from "./proof-range.ts";
 import { netDeltaIn, type Merged } from "./proof-delta.ts";
 import { cleanBaseMerge, mergeBase, pullRequestDetails, remotesOf, reviewTier, tierCeiling, tierLenses, topLevel, type ReviewTier } from "./proof-checkout.ts";
 import { arbiterOf, finalGate, requireHead, reviewLimit, type FinalGate } from "./proof-gate.ts";
@@ -463,7 +463,8 @@ receipt link once one is recorded. The gate's lines and hedge decision report co
 hedge proof review read the commit and said nothing about it. --commit is the reviewed commit that already held the
 problem. --finding says in one or two sentences what the reviewer should have flagged; record only a problem a
 person has checked. The CLI refuses a commit that no finished review of the PR read, because then no reviewer
-missed it. Each case keeps the diff range the review read, the PR title and description, and the source, as one
+missed it. Each case keeps the diff range the review read, the PR's base commit on GitHub, whose REVIEW.md rules
+eval reads, the PR title and description, and the source, as one
 JSON line in ${missesPath("~")}. hedge proof eval reruns the reviewer on every case. --introduced-by-fix marks a missed line
 that a review fix brought in, between the commit of the first panel round and HEAD.`,
     examples: [
@@ -480,12 +481,13 @@ that a review fix brought in, between the commit of the first panel round and HE
       const head = identity();
       const review = await reviewOfCommit(home, head);
       if (!review) throw new Error(`No finished review of ${head.repository}#${head.pr} read ${short(head.commit)}, so no reviewer missed it there. Pass --commit with the reviewed commit that held the problem`);
-      const base = review.merged?.reviewed ?? review.from ?? mergeBase(head, run);
+      const base = review.merged?.reviewed ?? review.from;
+      if (!base) throw new Error(`The review of ${short(head.commit)} recorded no range, so the diff it read cannot be rebuilt`);
       if (base === head.commit) throw new Error(`Cannot rebuild the diff the review read: the base of ${head.repository}#${head.pr} already contains ${short(head.commit)}`);
       const pr = pullRequestDetails(head, run);
       const miss = await recordMiss(home, {
         repo: head.repository, pr: head.pr, commit: head.commit, source, finding, file: options.get("--file"), line, url: options.get("--url"),
-        base, ...review.merged ? { mergedWith: review.merged.base } : {}, head: head.commit, scope: review.scope, round: review.label, reviewer: review.reviewer, title: pr.title, body: pr.body,
+        base, ...review.merged ? { mergedWith: review.merged.base } : {}, ...review.baseSha ? { baseSha: review.baseSha } : {}, head: head.commit, scope: review.scope, round: review.label, reviewer: review.reviewer, title: pr.title, body: pr.body,
         ...flags.has("--introduced-by-fix") ? { introducedByFix: true } : {},
       }, now?.() ?? new Date());
       print(JSON.stringify({ id: miss.id, repo: miss.repo, pr: miss.pr, commit: miss.commit, source: miss.source, round: miss.round, ...miss.introducedByFix ? { introducedByFix: true } : {}, path: missesPath(home) }));
@@ -521,9 +523,12 @@ round is --scope fixes, and a final read is --scope final; both take --base with
 review. The printed id names the round for review-finish and respond. A later round and a final read read only the net
 delta: their diff starts at their base merged with the base that HEAD contains, so a merge of the base adds nothing to
 read. The diff starts at the latest reviewed head merged with the base, and the reviewer gets all of it, a revert or a
-deleted file too. The base is the PR's base commit on GitHub, and each round records it. A final read of a HEAD whose
-net delta is empty is refused, unless --agent with your reason, or the user's --override, asks for it. A later round
-or final read whose net delta hedge cannot read is refused, with the command that recovers, such as a full read.
+deleted file too. The base is the PR's base commit on GitHub. Each round records it once, and its diff, its retries,
+and its REVIEW.md rules read that commit. A final read of a HEAD whose net delta is empty is refused, unless --agent
+with your reason, or the user's --override, asks for it. A later round or final read whose net delta hedge cannot read
+is refused, with the command that recovers, such as a full read, which names the user's --override once the review
+budget is spent. An unfinished round that an older Hedge reserved does not resume: hedge prints the command that
+starts a new one.
 A --scope full round reads from where HEAD branched from the PR's base commit on GitHub. A final read
 whose net delta is not empty runs even when the review budget is spent. After an arbiter escalation, the one final
 read that may still run names the stop it confirms in the "confirms" field of the printed JSON.
@@ -568,7 +573,14 @@ first and needs the hub; a round whose decision is recorded finishes without it.
   },
 };
 
-type SingleRound = { round: number | "final"; id: string; directory: string; scope: string; base?: string; from?: string; merged?: Merged; phase?: string };
+type SingleRound = { round: number | "final"; id: string; directory: string; scope: string; base?: string; from: string; merged?: Merged; baseSha: string; phase?: string };
+type Pending = { reservation: Reservation; directory: string };
+
+function resumable({ reservation, directory }: Pending) {
+  const { from, baseSha } = reservation;
+  if (from && baseSha && (reservation.scope === "full" || reservation.merged)) return { from, baseSha };
+  throw new Error(`Review ${basename(directory)} was reserved by an older Hedge, which recorded no merged start or base on GitHub, so it cannot resume. Start a new one with rm -rf '${directory.replaceAll("'", `'\\''`)}' && hedge proof review ${reservedOptions(reservation)}`);
+}
 
 async function runReview(options: Map<string, string>, head: ProofIdentity, context: CommandContext) {
   const { home, run } = context;
@@ -576,7 +588,7 @@ async function runReview(options: Map<string, string>, head: ProofIdentity, cont
   const pending = await unfinishedReview(home, head, "hedge");
   if (pending) requireSameRequest(pending, options, run);
   const reserved: SingleRound = pending
-    ? { round: pending.reservation.round, id: basename(pending.directory), directory: pending.directory, scope: pending.reservation.scope, base: pending.reservation.base, from: pending.reservation.from ?? rangeStart(pending.reservation.scope, pending.reservation.base, head, run), merged: pending.reservation.merged, phase: (pending.reservation as { phase?: string }).phase }
+    ? { round: pending.reservation.round, id: basename(pending.directory), directory: pending.directory, scope: pending.reservation.scope, base: pending.reservation.base, ...resumable(pending), merged: pending.reservation.merged, phase: (pending.reservation as { phase?: string }).phase }
     : await reserveHedgeReview(options, head, context);
   return roundStep(reserved.directory, context, async () => {
     if (await readPlan(reserved.directory) || await stagedPlan(reserved.directory)) throw new Error(`${reserved.directory} is an unfinished panel. Rerun it with the same hedge proof review --lens command, or wait for it with --wait`);
@@ -606,15 +618,15 @@ async function askReviewer(reserved: SingleRound, head: ProofIdentity, author: F
   const row = reviewerRow(author, env);
   const limit = numberSetting("pull-requests.reviewTimeoutMinutes", env) * 60_000;
   const rubric = await readRubric(home);
-  const from = reserved.from!;
+  const { from } = reserved;
   const pr = pullRequestDetails(head, run);
-  const { files, leftOut, diff } = reviewRange(run, { from, merged: reserved.merged }, head.commit, () => mergeBase(head, run));
-  const rules = reviewRules(files, pr.baseSha, run);
+  const { files, diff } = reviewRange(run, reserved, head.commit);
+  const rules = reviewRules(files, reserved.baseSha, run);
   const diffFile = join(reserved.directory, "diff.patch");
   await writeFile(diffFile, diff, { mode: 0o600 });
   const guide = reserved.round === "final" && (reserved.phase ?? "review") === "review" ? await panelGuideText(home) : undefined;
   const lens = guide && parseGuide(guide.text, guide.path).lenses.get("correctness")?.text;
-  const prompt = reviewPrompt({ scope: reserved.scope, from, commit: head.commit, diff, diffFile, note: leftOutNote(leftOut), crossFamily: familyOf(row) !== author, title: pr.title, body: pr.body, rubric, references: skillReferences(home), reviewRules: rules, lens });
+  const prompt = reviewPrompt({ scope: reserved.scope, from, commit: head.commit, diff, diffFile, crossFamily: familyOf(row) !== author, title: pr.title, body: pr.body, rubric, references: skillReferences(home), reviewRules: rules, lens });
   const answer = await askModel("reviewer", row, { prompt, cwd: topLevel(run) ?? cwd, readable: [join(home, ".agents/skills"), reserved.directory] }, env, limit);
   const label = reserved.round === "final" ? "The final read" : `Round ${reserved.round}`;
   if (!answer.ok && isQuotaExhausted(answer.cause)) {
@@ -643,6 +655,7 @@ async function reserveRound(options: Map<string, string>, head: ProofIdentity, c
   const base = options.has("--base") ? resolveCommit(options.get("--base")!, context.run) : undefined;
   const netDelta = netDeltaIn(context.run, () => remotesOf(head.repository, context.run));
   const baseSha = pullRequestDetails(head, context.run).baseSha;
+  if (!baseSha) throw new Error(`GitHub names no base commit of ${head.repository}#${head.pr}. Run the command again once GitHub answers`);
   const from = scope === "full" ? mergeBase(head, context.run, baseSha) : undefined;
   const { decision, ...permit } = await decisionOf(options, head, context);
   const tier = tierOf(head, context);
@@ -650,7 +663,7 @@ async function reserveRound(options: Map<string, string>, head: ProofIdentity, c
   const firstPanel = panel && !await panelCommit(context.home, head);
   const limits = firstPanel ? permit.limits : { ...permit.limits, ceiling: tierCeiling(tier, permit.limits.ceiling) };
   const reserved = await startReview(context.home, head, { scope, base, from, ...permit, limits, decision, phase: options.get("--phase"), cleanBaseMerge: cleanBaseMerge(head, context.run), netDelta, baseSha, capturedBy, lock: async (directory) => lockNewRound(directory, await context.lock()) });
-  return { ...reserved, scope, base, phase: options.get("--phase") };
+  return { ...reserved, from: reserved.from!, baseSha, scope, base, phase: options.get("--phase") };
 }
 
 async function unrecordedRound(options: Map<string, string>, head: ProofIdentity, context: CommandContext) {
@@ -660,7 +673,7 @@ async function unrecordedRound(options: Map<string, string>, head: ProofIdentity
   return { round: pending.reservation.round, id: basename(pending.directory), directory: pending.directory };
 }
 
-function requireSameRequest({ reservation, directory }: { reservation: Reservation; directory: string }, options: Map<string, string>, run: Run) {
+function requireSameRequest({ reservation, directory }: Pending, options: Map<string, string>, run: Run) {
   if (!reservation.decision || reservation.recorded) return;
   const reserved = reservedOptions(reservation);
   if (reserved !== requestedOptions(options, reservation, run)) throw new Error(`Review round ${basename(directory)} at this HEAD is reserved with ${reserved}, and its decision is not recorded yet. Run its command again with ${reserved} to record it, or remove ${directory} to drop it`);
@@ -707,8 +720,6 @@ async function recordRound(directory: string, context: CommandContext) {
   catch (error) { if (error instanceof AnswerTaken) await rm(directory, { recursive: true, force: true }); throw error; }
   await markRecorded(directory);
 }
-
-const rangeStart = (scope: string, base: string | undefined, head: ProofIdentity, run: Run) => scope === "full" ? mergeBase(head, run) : base;
 
 function tierOf(head: ProofIdentity, { run }: CommandContext): ReviewTier {
   let body: string | undefined;
@@ -808,20 +819,20 @@ async function startIdleLenses(directory: string, context: CommandContext) {
   return directory;
 }
 
-async function panelBriefs(reserved: { directory: string; from?: string; merged?: Merged }, head: ProofIdentity, lenses: Lens[], guide: PanelGuide, rubric: string, context: CommandContext) {
+async function panelBriefs(reserved: { directory: string; from: string; merged?: Merged; baseSha: string }, head: ProofIdentity, lenses: Lens[], guide: PanelGuide, rubric: string, context: CommandContext) {
   const { home, cwd, env, run } = context;
-  const from = reserved.from!;
+  const { from } = reserved;
   const pr = pullRequestDetails(head, run);
   const owed = await readOwed(home, head);
   const settled = (await reviewRecords(home, head)).filter((review) => review.responses).map((review) => `${review.label}:\n${review.responses!.trim()}`).join("\n\n");
-  const { files: changedFiles, leftOut, diff } = reviewRange(run, { from, merged: reserved.merged }, head.commit, () => mergeBase(head, run));
+  const { files: changedFiles, diff } = reviewRange(run, reserved, head.commit);
   const diffFile = join(reserved.directory, "diff.patch");
   await writeFile(diffFile, diff, { mode: 0o600 });
   const input = {
-    title: pr.title, body: pr.body, base: pr.baseRefName, from, commit: head.commit, diff, diffFile, note: leftOutNote(leftOut), settled,
+    title: pr.title, body: pr.body, base: pr.baseRefName, from, commit: head.commit, diff, diffFile, settled,
     owed: owed?.none ? `none (${owed.none.reason})` : owed?.kinds.join(", ") || "none recorded", rubric,
   };
-  const rules = reviewRules(changedFiles, pr.baseSha, run);
+  const rules = reviewRules(changedFiles, reserved.baseSha, run);
   const briefed = lenses.map((lens) => ({ ...lens, knowledge: [rules, lens.knowledge].filter(Boolean).join("\n\n") }));
   const plan: Plan = {
     lenses: lenses.map((lens) => ({ name: lens.name, title: lens.title, ...castOf(lens, env) })),
@@ -830,8 +841,9 @@ async function panelBriefs(reserved: { directory: string; from?: string; merged?
   return { plan, briefs: new Map(briefed.map((lens) => [lens.name, lensBrief(guide, lens, input)])) };
 }
 
-async function rerunPanel(pending: { directory: string; reservation: { scope: string; base?: string; from?: string; merged?: Merged } }, options: Map<string, string>, head: ProofIdentity, lenses: Lens[], guide: PanelGuide, context: CommandContext) {
+async function rerunPanel(pending: Pending, options: Map<string, string>, head: ProofIdentity, lenses: Lens[], guide: PanelGuide, context: CommandContext) {
   const { directory, reservation } = pending;
+  const start = resumable(pending);
   const plan = await readPlan(directory) ?? await stagedPlan(directory);
   if (!plan) throw new Error(`${directory} is reserved for one reviewer. Run hedge proof review without --lens to retry it`);
   const planned = plan.lenses.map((lens) => lens.name);
@@ -841,8 +853,7 @@ async function rerunPanel(pending: { directory: string; reservation: { scope: st
     await recordRound(directory, context);
     if (await readPlan(directory)) {
       const casts = new Map(lenses.map((lens) => [lens.name, castOf(lens, context.env)]));
-      const from = reservation.from ?? rangeStart(reservation.scope, reservation.base, head, context.run);
-      await requeueFailed(directory, casts, await panelBriefs({ directory, from, merged: reservation.merged }, head, lenses, guide, await readRubric(context.home), context));
+      await requeueFailed(directory, casts, await panelBriefs({ directory, ...start, merged: reservation.merged }, head, lenses, guide, await readRubric(context.home), context));
     }
     return startIdleLenses(directory, context);
   });

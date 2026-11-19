@@ -382,6 +382,6 @@ test("a review that another one overtakes while it weighs the budget backs out",
   await pr.hedge("review-finish", "--round", "final-1", "--reviewer", "gpt-6.1-sol", "findings.md");
   await writeFile(go, "go\n");
 
-  await expect(slow).rejects.toThrow("Review final-1 started while this one weighed the budget");
+  await expect(slow).rejects.toThrow("The reviews changed while this one weighed the budget. Run this command again to weigh them anew");
   expect(existsSync(join(pr.pullRequest, "reviews", "3"))).toBe(false);
 });

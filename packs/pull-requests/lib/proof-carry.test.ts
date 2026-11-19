@@ -124,6 +124,35 @@ test("a fixes round or final read refuses a net delta it cannot read and names t
   }
 });
 
+test("two arbiters that escalate at once save one stop: the later verdict sees the first stop and is dropped", async () => {
+  const { repo, reviewed } = reviewedApp();
+  await firstRound(repo, reviewed, major);
+  const limits = { free: 1, ceiling: 10 };
+  const fixed = repo.commit("Fix the count", { "src/app.ts": "export const app = 3;\n" });
+  const asked: (() => void)[] = [];
+  const together: Arbiter = (prompt) => new Promise((resolve) => {
+    asked.push(() => resolve(escalates(prompt)));
+    if (asked.length === 2) asked.forEach((answer) => answer());
+  });
+
+  const results = await Promise.allSettled([finalRead(repo, fixed, reviewed, together, limits), finalRead(repo, fixed, reviewed, together, limits)]);
+  const reasons = results.map((result) => result.status === "rejected" ? (result.reason as Error).message : "reserved");
+  expect(reasons.filter((reason) => reason.includes("The arbiter escalates"))).toHaveLength(1);
+  expect(reasons.filter((reason) => reason.includes("The reviews changed while the arbiter weighed them"))).toHaveLength(1);
+});
+
+test("a final read refused for a full read once the review budget is spent names the user's --override, not --agent", async () => {
+  const { repo, reviewed } = reviewedApp();
+  await firstRound(repo, reviewed, major);
+  const fixed = repo.commit("Fix the count", { "src/app.ts": "export const app = 3;\n" });
+  repo.github.base = repo.git("commit-tree", "HEAD^{tree}", "-m", "A base that GitHub rewrote").stdout;
+
+  const refused = await finalRead(repo, fixed, reviewed, unasked, { free: 10, ceiling: 1 }).catch((error: Error) => error.message);
+  expect(refused).toContain(`the PR's base on GitHub no longer holds ${short(repo.git("rev-parse", "main").stdout)}, the base that review stood on, so nothing carries. The review budget of 1 reviews is spent, so only the user's --override reads the whole PR again.`);
+  expect(refused).toContain(`When they choose "Run one more round", run hedge proof review --scope full with --override`);
+  expect(refused).not.toContain("--agent");
+});
+
 async function stopped(arbiter: Arbiter) {
   const { repo, reviewed } = reviewedApp();
   await firstRound(repo, reviewed, major);
@@ -317,7 +346,7 @@ test("after the base on GitHub drops what a review stood on, that review carries
   await noteNothing(pr);
 
   const rewound = `the PR's base on GitHub no longer holds ${short(dropped)}, the base that review stood on, so nothing carries. ${fullRead}`;
-  expect(await reviewLine(pr)).toBe(`review: HEAD not reviewed, last review covered ${short(reviewed)}; ${rewound}`);
+  expect(await reviewLine(pr)).toBe(`review: HEAD not reviewed, last review covered ${short(reviewed)}; ${rewound}, or with the user's --override once the review budget is spent`);
   await expect(pr.hedge("review", "--scope", "final", "--base", reviewed)).rejects.toThrow(`Cannot read what changed past ${short(reviewed)} and the base: ${rewound}`);
 });
 
@@ -377,6 +406,25 @@ test("a conflict never carries, a binary one that leaves no markers too, and its
   expect(brief).toContain("# Conflict in logo.bin: ");
 });
 
+test("the conflict brief quotes each git show argument, so a file name with a space, a $ and a quote reads as one word", async () => {
+  const pr = await checkout();
+  const name = "it's $HOME.txt";
+  await pr.advanceBase(name, "one\n");
+  await pr.git("merge", "-q", "--no-edit", "main");
+  const { reviewed, reviewer } = await panelReviewed(pr, { [name]: "two\n" });
+  await pr.advanceBase(name, "three\n");
+  await pr.git("merge", "-q", "main");
+  writeFileSync(join(pr.repository, name), "two and three\n");
+  await pr.git("add", name);
+  await pr.git("commit", "-q", "--no-edit");
+  reviewer.answer(covering(name));
+  await pr.hedge("review", "--scope", "final", "--base", reviewed);
+
+  const [, reviewedSide, baseSide] = /Read both sides with (.*) and (git show .*)\.\n/.exec(reviewer.prompts().at(-1)!)!;
+  const show = (command: string) => Bun.spawnSync(["sh", "-c", command!], { cwd: pr.repository, env: pr.env }).stdout.toString();
+  expect([show(reviewedSide!), show(baseSide!)]).toEqual(["two\n", "three\n"]);
+});
+
 test("a review that recorded no base, as the base version wrote it, carries nothing and asks for a final read, which runs", async () => {
   const pr = await checkout();
   const { reviewed, reviewer } = await panelReviewed(pr);
@@ -425,6 +473,66 @@ test("a fixes round after a final read starts at the final read's head, so its r
   expect(brief).toContain("-help\n+help more\n");
 });
 
+const failingReviewer = "cat >/dev/null; echo 'the reviewer broke' >&2; exit 3";
+
+for (const path of [["review", "--single"], ["review", "--lens", "correctness"]]) {
+  test(`${path.join(" ")} retried after the base on GitHub took in a PR commit reads the range and REVIEW.md of the base its round recorded`, async () => {
+    const pr = await checkout();
+    await pr.hedge("require", "--none", "--reason", "docs only");
+    await pr.advanceBase("REVIEW.md", "Check the recorded rule.\n");
+    await pr.git("merge", "-q", "--no-edit", "main");
+    const absorbed = await pr.commit("feature.txt", "greet\n");
+    await pr.commit("helper.txt", "help\n");
+    pr.env.HEDGE_PROOF_REVIEWER = failingReviewer;
+    await pr.hedge(...path).catch(() => undefined);
+    await pr.git("checkout", "-q", "main");
+    await pr.git("merge", "-q", "--ff-only", absorbed);
+    await pr.commit("REVIEW.md", "Check the moved rule.\n");
+    pr.githubBase(await pr.git("rev-parse", "HEAD"));
+    await pr.git("checkout", "-q", "feature");
+    const reviewer = fakeModel(pr, "REVIEWER", covering("feature.txt", "helper.txt"));
+
+    await pr.hedge(...path);
+    if (path.includes("--lens")) await pr.hedge("review", "--wait");
+    const brief = reviewer.prompts().at(-1)!;
+    expect(patchFiles(readPatch(pr, "1"))).toEqual(["feature.txt", "helper.txt"]);
+    expect(brief).toContain("Check the recorded rule.");
+    expect(brief).not.toContain("Check the moved rule.");
+  });
+}
+
+test("an unfinished final read that an older Hedge reserved without its merged start is refused with the command that starts a new one, which runs", async () => {
+  const pr = await checkout();
+  const { reviewed } = await panelReviewed(pr);
+  await pr.commit("feature.txt", "greet the member\n");
+  pr.env.HEDGE_PROOF_REVIEWER = failingReviewer;
+  await expect(pr.hedge("review", "--scope", "final", "--base", reviewed)).rejects.toThrow("stays reserved");
+  const round = join(pr.pullRequest, "reviews", "final-1");
+  const { merged, ...older } = JSON.parse(readFileSync(join(round, "round.json"), "utf8"));
+  expect(merged.reviewed).toBe(reviewed);
+  writeFileSync(join(round, "round.json"), JSON.stringify(older));
+
+  const refused = await pr.hedge("review", "--scope", "final", "--base", reviewed).catch((error: Error) => error.message);
+  const command = `rm -rf '${round}' && hedge proof review --scope final --base ${reviewed} --phase review`;
+  expect(refused).toBe(`Review final-1 was reserved by an older Hedge, which recorded no merged start or base on GitHub, so it cannot resume. Start a new one with ${command}`);
+  rmSync(round, { recursive: true });
+  fakeModel(pr, "REVIEWER", "No findings.\n");
+  expect((await pr.hedge("review", "--scope", "final", "--base", reviewed, "--phase", "review")).code).toBe(0);
+});
+
+test("a final read whose --base is a clean merge of a base GitHub never had reads from the latest reviewed head, so the merged commits stay in its patch", async () => {
+  const pr = await checkout();
+  const { reviewed } = await panelReviewed(pr);
+  pr.githubBase(await pr.git("rev-parse", "main"));
+  await pr.advanceBase("slipped.txt", "a base GitHub never had\n");
+  await pr.git("merge", "-q", "--no-edit", "main");
+  const merge = await pr.git("rev-parse", "HEAD");
+  await noteNothing(pr);
+
+  expect((await pr.hedge("review", "--scope", "final", "--base", merge)).code).toBe(0);
+  expect(patchFiles(readPatch(pr, "final-1"))).toEqual(["slipped.txt"]);
+});
+
 test("the gate fetches a PR base that the checkout lacks from a remote of the PR's repository, and carries nothing when it cannot fetch it", async () => {
   const pr = await checkout();
   const { reviewed } = await panelReviewed(pr);
@@ -464,21 +572,40 @@ for (const path of [["review", "--scope", "final"], ["review", "--lens", "correc
   });
 }
 
-test("a reviewer miss after a final read replays in hedge proof eval", async () => {
+const judgedMissed = "cat >/dev/null; echo 'NOT NAMED: the review names nothing'";
+
+test("a reviewer miss after a final read replays in hedge proof eval with the patch the reviewer read and the REVIEW.md of the PR's base", async () => {
   const pr = await checkout();
-  const { reviewed, reviewer } = await panelReviewed(pr);
+  await pr.advanceBase("REVIEW.md", "Check the base rule.\n");
+  await pr.git("merge", "-q", "--no-edit", "main");
+  const { reviewed, reviewer } = await panelReviewed(pr, { "REVIEW.md": "Check the PR rule.\n", "feature.txt": "greet\n" });
   await pr.advanceBase("base.md", "the base moves on\n");
   await pr.git("merge", "-q", "--no-edit", "main");
   await pr.commit("feature.txt", "greet the member\n");
   reviewer.answer("No findings.\n");
   await pr.hedge("review", "--scope", "final", "--base", reviewed);
   await pr.hedge("miss", "--source", "human", "--finding", "The greeting drops the member's name");
-  pr.env.HEDGE_PROOF_EVAL_JUDGE = "cat >/dev/null; echo 'NOT NAMED: the review names nothing'";
+  pr.env.HEDGE_PROOF_EVAL_JUDGE = judgedMissed;
 
   expect((await pr.hedge("eval")).output).toContain("example/product#42 (human): missed: the review names nothing");
   const replayed = reviewer.prompts().at(-1)!;
-  expect(replayed).toContain("-greet\n+greet the member");
-  expect(replayed).not.toContain("base.md");
+  expect(replayed).toContain(readPatch(pr, "final-1"));
+  expect(patchFiles(readPatch(pr, "final-1"))).toEqual(["feature.txt"]);
+  expect(replayed).toContain("Check the base rule.");
+  expect(replayed).not.toContain("Check the PR rule.");
+});
+
+test("a reviewer miss after a final read of a conflict replays HEAD against each side, as the reviewer read it", async () => {
+  const pr = await checkout();
+  const { reviewed, reviewer } = await conflicted(pr);
+  reviewer.answer(covering("logo.bin", list));
+  await pr.hedge("review", "--scope", "final", "--base", reviewed);
+  await pr.hedge("miss", "--source", "human", "--finding", "The list drops the reviewed side");
+  pr.env.HEDGE_PROOF_EVAL_JUDGE = judgedMissed;
+
+  expect((await pr.hedge("eval")).output).toContain("missed: the review names nothing");
+  expect(readPatch(pr, "final-1")).toContain("# Conflict in logo.bin: ");
+  expect(reviewer.prompts().at(-1)).toContain(readPatch(pr, "final-1"));
 });
 
 const missing = "0123456789abcdef0123456789abcdef01234567";
