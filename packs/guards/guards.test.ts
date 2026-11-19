@@ -66,7 +66,8 @@ async function preToolUseInstalled(home: string, provider: "claude" | "codex", c
 const hooksInProcess: Record<string, Hook> = { "guards.ts": guardsHook, "name-a-model.ts": nameAModelHook };
 
 async function hookProcess(path: string, provider: string, input: string, home: string): Promise<HookResult> {
-  const child = Bun.spawn([process.execPath, path, provider], { cwd: dirname(dirname(path)), env: { ...process.env, HOME: home }, stdin: new Blob([input]), stdout: "pipe", stderr: "pipe" });
+  const { GH_CONFIG_DIR: _gh, XDG_CONFIG_HOME: _xdg, ...inherited } = process.env;
+  const child = Bun.spawn([process.execPath, path, provider], { cwd: dirname(dirname(path)), env: { ...inherited, HOME: home }, stdin: new Blob([input]), stdout: "pipe", stderr: "pipe" });
   const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
   return { code, stdout, stderr };
 }

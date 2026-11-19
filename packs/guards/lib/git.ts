@@ -136,7 +136,7 @@ function ghAliasHidesStack(name: string, args: string[]): boolean {
 
 function ghAliases(env: ReadonlyMap<string, string>): Record<string, unknown> {
   const configHome = env.get("XDG_CONFIG_HOME") ?? process.env.XDG_CONFIG_HOME;
-  const dir = env.get("GH_CONFIG_DIR") ?? process.env.GH_CONFIG_DIR ?? join(configHome || join(homedir(), ".config"), "gh");
+  const dir = env.get("GH_CONFIG_DIR") || process.env.GH_CONFIG_DIR || join(configHome || join(homedir(), ".config"), "gh");
   try {
     const config = Bun.YAML.parse(readFileSync(join(dir, "config.yml"), "utf8")) as { aliases?: Record<string, unknown> } | null;
     return config?.aliases ?? {};
