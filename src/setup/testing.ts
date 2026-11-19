@@ -66,7 +66,7 @@ export const coderToken = ["hedge", "test", "coder", "token"].join("-");
 
 const hostKeyAdded = (host: string) => `Warning: Permanently added '${host}' (ED25519) to the list of known hosts.\n`;
 
-export type HereLink = { environmentId: string; label: string; status?: string };
+export type HereLink = { environmentId: string; label: string; status?: string; expiresAt?: string };
 
 export const boxHome = (home: string, host: string) => join(home, "boxes", host);
 
@@ -100,10 +100,10 @@ export const onBox = (command: string[]) => (command[0] === "ssh" ? command.at(-
  * takes every curl request which does not turn proxies off. The box's tunnel answers only after tunnelStartsAfter lookups, and the tunnel here only after hereTunnelStartsAfter.
  * Each box's T3 environment id is env-<host>, except on the hosts withoutT3, where T3 never ran.
  * T3 here lists hereLinks as its linked environments, and unlink forgets one, or fails with unlinkFails. T3 on the hub lists hubLinks. ssh never reaches the hosts named unreachable.
- * A box answers Coder's build info only at boxReachesCoderAt, this machine's address unless set; coderRedirectsAt answers with a 302 sign-in redirect instead. Its agent address is boxAgentUrl, http://coder.internal/ unless set. coderLoginFails makes every sign-in there refuse the token. Here, coder tokens create and remove keep the list coderTokens returns, and coderTokenRemoveFails makes a removal fail.
+ * A box answers Coder's build info, and serves the Coder CLI, only at boxReachesCoderAt, this machine's address unless set, as this machine's deployment unless otherDeploymentAt names that address; coderRedirectsAt answers with a 302 sign-in redirect to valid build info instead, which a curl follows when told to or when it reads a ~/.curlrc that says location. Its agent address is boxAgentUrl, http://coder.internal/ unless set. coderLoginFails makes every sign-in there refuse the token. Here, coder tokens create and remove keep the list coderTokens returns, and coderTokenRemoveFails makes a removal fail. hedge peers link on the hub renews the node's link in the list T3 on the hub returns.
  * With node set, every other command on a box runs on a Node.
  */
-export function fakeMachine(home: string, polls: Partial<Record<SignInName, number>> = {}, options: { org?: boolean; createFails?: string; createFailsAfterMaking?: string; lookupFails?: string; publicRepos?: string[]; scopes?: string; failRun?: boolean; exits?: Partial<Record<SignInName, number>>; connectHere?: boolean; boxFiles?: Record<string, string>; hubDown?: boolean; hubUpdateFails?: string; boxCoderAt?: string; boxCoderSameUser?: boolean; claude?: Partial<Record<"claude" | "box:claude", ClaudeSignedIn>>; startedAt?: number; cliPrintsTunnel?: boolean; serverWithoutLinkState?: Array<"box" | "here">; runtimeOrigin?: string; runtimePid?: unknown; serverGone?: boolean; boxConnect?: { authenticated: unknown; linked: unknown }; hereConnect?: { desired?: unknown; authenticated?: unknown; linked?: unknown }; t3Home?: string; devServerUrl?: string; tunnelStartsAfter?: number; hereTunnelStartsAfter?: number; withoutT3?: string[]; hereLinks?: HereLink[]; unreachable?: string[]; unlinkFails?: string; hereStatusFailures?: number; installers?: Record<string, string>; installerEnv?: Record<string, string>; hubLinks?: HereLink[]; boxReachesCoderAt?: string; boxAgentUrl?: string; coderRedirectsAt?: string; coderLoginFails?: boolean; coderTokenRemoveFails?: boolean; node?: Node } = {}) {
+export function fakeMachine(home: string, polls: Partial<Record<SignInName, number>> = {}, options: { org?: boolean; createFails?: string; createFailsAfterMaking?: string; lookupFails?: string; publicRepos?: string[]; scopes?: string; failRun?: boolean; exits?: Partial<Record<SignInName, number>>; connectHere?: boolean; boxFiles?: Record<string, string>; hubDown?: boolean; hubUpdateFails?: string; boxCoderAt?: string; boxCoderSameUser?: boolean; claude?: Partial<Record<"claude" | "box:claude", ClaudeSignedIn>>; startedAt?: number; cliPrintsTunnel?: boolean; serverWithoutLinkState?: Array<"box" | "here">; runtimeOrigin?: string; runtimePid?: unknown; serverGone?: boolean; boxConnect?: { authenticated: unknown; linked: unknown }; hereConnect?: { desired?: unknown; authenticated?: unknown; linked?: unknown }; t3Home?: string; devServerUrl?: string; tunnelStartsAfter?: number; hereTunnelStartsAfter?: number; withoutT3?: string[]; hereLinks?: HereLink[]; unreachable?: string[]; unlinkFails?: string; hereStatusFailures?: number; installers?: Record<string, string>; installerEnv?: Record<string, string>; hubLinks?: HereLink[]; boxReachesCoderAt?: string; boxAgentUrl?: string; coderRedirectsAt?: string; otherDeploymentAt?: string; coderLoginFails?: boolean; coderTokenRemoveFails?: boolean; node?: Node } = {}) {
   const left: Record<SignInName, number> = { github: 0, claude: 0, chatgpt: 0, coder: 0, "box:github": 0, "box:claude": 0, "box:chatgpt": 0, "box:t3": 0, "box:coder": 0, ...polls };
   const started = new Set<SignInName>();
   const calls: Array<{ command: string[]; cwd?: string; timeoutMs?: number; input?: string }> = [];
@@ -131,6 +131,7 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
   const claudeReply = (name: "claude" | "box:claude") => options.claude?.[name]?.reply ?? (passes(name) ? result(true, "ok") : claudeUnauthorized);
   const ghStatus = (name: SignInName, granted: string) => (passes(name) ? result(true, `github.com\n${granted}\n`) : result(false, "You are not logged in"));
   const hereLinks = [...(options.hereLinks ?? [])];
+  const hubLinks = [...(options.hubLinks ?? [])];
   const boxSessions: T3Session[] = [];
   const hereSessions: T3Session[] = [];
   const recorded = options.runtimeOrigin ?? "http://127.0.0.1:41773";
@@ -218,6 +219,8 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
     if (linked === undefined) return result(false, `unexpected on the hub: ${hedge}`);
     if (!hubTook.has(linked) || !passes("box:t3")) return result(false, `${linked}: not linked`);
     hubLinked.push(linked);
+    const renewed = { environmentId: `env-${linked}`, label: linked.replace(/^coder\./, ""), status: "reachable", expiresAt: renewedUntil };
+    hubLinks.splice(0, hubLinks.length, ...hubLinks.filter((link) => link.environmentId !== renewed.environmentId), renewed);
     return result(true, `linked ${linked}`);
   };
   const forReal = async (line: string, host: string, input?: string, bin?: string, env: Record<string, string> = {}): Promise<ExecResult> => {
@@ -237,7 +240,8 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
     if (hub) return hub;
     if (line === "coder whoami") return passes("box:coder") ? result(true, coderWhoami.replace("https://coder.example.com", boxCoderAt)) : result(false, "You are not logged in");
     if (line === "coder whoami -o json") return passes("box:coder") ? result(true, coderWhoamiJson(boxCoderAt, boxCoderUser)) : result(false, "You are not logged in");
-    if (line.includes("/api/v2/buildinfo")) return forReal(line, host, input, coderNetwork(home, reachesCoderAt, options.coderRedirectsAt));
+    if (line.includes("/api/v2/buildinfo")) return forReal(line, host, input, coderNetwork(home, reachesCoderAt, options));
+    if (line.includes("/bin/coder-linux-")) return forReal(line, host, input, undefined, { PATH: `${coderNetwork(home, reachesCoderAt, options)}:/usr/bin:/bin` });
     if (line.includes("CODER_AGENT_URL")) return forReal(line, host, input, undefined, { CODER_AGENT_URL: options.boxAgentUrl ?? "http://coder.internal/" });
     if (!options.node && line.includes(" doctor --profile ") && line.endsWith(" --to-do'")) return result(true, "[]\n");
     if (line.includes('CODER_SESSION_TOKEN="$token" coder login ') && line.startsWith("sh -c ")) {
@@ -246,7 +250,7 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
       if (input === `${coderToken}\n` && !options.coderLoginFails) (left["box:coder"] = 0), (boxCoderAt = reachesCoderAt), (boxCoderUser = coderUserId);
       return result(passes("box:coder"), passes("box:coder") ? "Welcome to Coder, nora! You're authenticated." : "invalid token");
     }
-    if (line === "t3 environment list --json") return result(true, JSON.stringify((options.hubLinks ?? []).map((link) => ({ urls: [], access: "full-access", status: "reachable", ...link }))));
+    if (line === "t3 environment list --json") return result(true, JSON.stringify(hubLinks.map((link) => ({ urls: [], access: "full-access", status: "reachable", ...link }))));
     if (line === "coder config-ssh --yes") return passes("box:coder") ? (coderSsh.push(boxCoderAt), result(true, "Updated \"~/.ssh/config\"")) : result(false, "You are not logged in");
     if (line.startsWith("gh auth status")) return ghStatus("box:github", scopes);
     if (line === "gh auth setup-git") return result(true);
@@ -280,6 +284,7 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
       if (line.startsWith("codex exec")) return result(passes("chatgpt"), "ok");
       if (line === "coder whoami") return passes("coder") ? result(true, coderWhoami) : result(false, "You are not logged in");
       if (line === "coder whoami -o json") return passes("coder") ? result(true, coderWhoamiJson("https://coder.example.com", coderUserId)) : result(false, "You are not logged in");
+      if (command[0] === "curl" && line.endsWith("/api/v2/buildinfo")) return command.at(-1)!.startsWith("https://coder.example.com/") ? result(true, `${coderBuildInfo("https://coder.example.com", hereDeployment)}\n200`) : { code: 28, output: "curl: (28) Connection timed out", stdout: "" };
       if (line === "coder tokens create" || line.startsWith("coder tokens create --name ")) return passes("coder") ? (coderTokens.add(command[4] ?? "unnamed"), result(true, `${coderToken}\n`)) : result(false, "You are not logged in");
       if (line.startsWith("coder tokens remove ")) return options.coderTokenRemoveFails ? result(false, "error: Coder did not answer") : result(coderTokens.delete(command[3]!), "");
       if (line === "hogli devbox:status") return result(devbox);
@@ -337,26 +342,34 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
   return { machine, clock, calls, starts, runs, sleeps, opened, coderSsh, coderTokens: () => [...coderTokens], hubUpdates, credentials, hubLinked, sessions: () => [...hereSessions, ...boxSessions], hereLinks: () => hereLinks, peerLinks };
 }
 
-function coderNetwork(home: string, reach: string, redirects: string | undefined) {
+const hereDeployment = "8d3f1c2a-6b4e-4f7a-9e21-0c5d7b9a3e14";
+const otherDeployment = "2e9a7c41-5d3b-4c8f-a6e0-91b4f2d8c573";
+const renewedUntil = "2099-01-01T00:00:00.000Z";
+
+const coderBuildInfo = (dashboard: string, deployment: string) => JSON.stringify({ external_url: "https://github.com/coder/coder/commit/1d24629", version: "v2.37.4+1d24629", dashboard_url: dashboard, deployment_id: deployment });
+
+function coderNetwork(home: string, reach: string, options: { coderRedirectsAt?: string; otherDeploymentAt?: string }) {
   const bin = join(home, "coder-network");
   mkdirSync(bin, { recursive: true });
-  const info = JSON.stringify({ external_url: "https://github.com/coder/coder/commit/1d24629", version: "v2.37.4+1d24629", dashboard_url: reach });
-  const redirect = redirects ? `\ncase "$url" in ${redirects}/*) printf '\\n302'; exit 0 ;; esac` : "";
-  writeFileSync(join(bin, "curl"), `#!/bin/sh\nfor url; do :; done${redirect}\ncase "$url" in ${reach}/*) printf '%s\\n200' '${info}'; exit 0 ;; esac\necho "curl: (28) Failed to connect to $url: Connection timed out" >&2\nexit 28\n`, { mode: 0o755 });
+  writeFileSync(join(bin, "coder-cli"), `#!/bin/sh\nprintf '%s\\n' "$@" > "$HOME/.coder-ran"\n`, { mode: 0o755 });
+  const at = (address: string) => `'${address}'`;
+  const lines = [
+    "#!/bin/sh",
+    `follow=; [ "$1" = -q ] || ! grep -qsx location "$HOME/.curlrc" || follow=1`,
+    `out=; url=; prev=; for a; do if [ "$prev" = -o ]; then out=$a; else case "$a" in --location | -[!-]*L*) follow=1 ;; -*) ;; *) url=$a ;; esac; fi; prev=$a; done`,
+    `deployment='${hereDeployment}'`,
+    ...(options.otherDeploymentAt ? [`case "$url" in ${at(options.otherDeploymentAt)}/*) deployment='${otherDeployment}' ;; esac`] : []),
+    ...(options.coderRedirectsAt ? [`case "$url" in ${at(options.coderRedirectsAt)}/*) [ -z "$follow" ] || { printf '%s\\n200' '${coderBuildInfo(options.coderRedirectsAt, hereDeployment)}'; exit 0; }; printf '\\n302'; exit 0 ;; esac`] : []),
+    `case "$url" in ${at(reach)}/bin/coder-linux-*) cp '${join(bin, "coder-cli")}' "$out"; exit 0 ;; esac`,
+    `case "$url" in ${at(reach)}/*) printf '%s\\n200' "$(printf '%s' '${coderBuildInfo(reach, "DEPLOYMENT")}' | sed "s/DEPLOYMENT/$deployment/")"; exit 0 ;; esac`,
+    `echo "curl: (28) Failed to connect to $url: Connection timed out" >&2`,
+    "exit 28",
+  ];
+  writeFileSync(join(bin, "curl"), `${lines.join("\n")}\n`, { mode: 0o755 });
   return bin;
 }
 
-/**
- * A node whose shell runs for real in its home, with stand-ins for sudo, gh,
- * curl, ssh and the engine. Its engine runs the real hedge apply and doctor
- * with the files adapter, and its system boundaries are files under ~/.node:
- * sudo -n runs a command as root unless the node asks a password, and the
- * Git allowlist and earlyoom hold once a root command made them. get.sh
- * checks the engine out at installs, this machine's commit unless set, and
- * fails before its packages when installFails. engineAt: an engine already
- * installed at that commit.
- */
-export type Node = { password?: boolean; engineAt?: string; installs?: string; installFails?: boolean };
+export type Node = { engineAt?: string; installs?: string; installFails?: boolean; olderEngine?: boolean };
 
 const thisCommit = () => Bun.spawnSync(["git", "-C", engineRoot, "rev-parse", "HEAD"]).stdout.toString().trim();
 
@@ -366,7 +379,7 @@ export const nodeHas = (home: string, host: string, state: string) => existsSync
 
 export const nodeEngine = (home: string, host: string) => {
   const read = (name: string) => (existsSync(join(nodeState(home, host), name)) ? readFileSync(join(nodeState(home, host), name), "utf8").trim() : "");
-  return { commit: read("engine-commit"), installs: read("installs").split("\n").filter(Boolean).length, runs: Bun.spawnSync(["sh", join(boxHome(home, host), ".local/bin/hedge"), "help"], { env: { ...process.env, HOME: boxHome(home, host) }, stdout: "ignore", stderr: "ignore" }).exitCode === 0 };
+  return { commit: read("engine-commit"), launcher: existsSync(join(boxHome(home, host), ".local/bin/hedge")) ? readFileSync(join(boxHome(home, host), ".local/bin/hedge"), "utf8") : "", runs: Bun.spawnSync(["sh", join(boxHome(home, host), ".local/bin/hedge"), "help"], { env: { ...process.env, HOME: boxHome(home, host) }, stdout: "ignore", stderr: "ignore" }).exitCode === 0 };
 };
 
 function prepareNode(home: string, host: string, node: Node) {
@@ -374,17 +387,17 @@ function prepareNode(home: string, host: string, node: Node) {
   const state = nodeState(home, host);
   mkdirSync(state, { recursive: true });
   const flag = (name: string, on: boolean | undefined) => (on ? writeFileSync(join(state, name), "") : rmSync(join(state, name), { force: true }));
-  flag("password", node.password);
+  flag("older-engine", node.olderEngine);
   flag("install-fails", node.installFails);
   writeFileSync(join(state, "installs-commit"), `${node.installs ?? thisCommit()}\n`);
   if (node.engineAt) {
     writeFileSync(join(state, "engine-commit"), `${node.engineAt}\n`);
     mkdirSync(join(box, ".local/bin"), { recursive: true });
-    writeFileSync(join(box, ".local/bin/hedge"), launcher, { mode: 0o755 });
+    writeFileSync(join(box, ".local/bin/hedge"), nodeLauncher, { mode: 0o755 });
   }
 }
 
-const launcher = `#!/bin/sh\n# Hedge\nexec sh "$HOME/.local/share/hedge/engine/hedge" "$@"\n`;
+export const nodeLauncher = `#!/bin/sh\n# Hedge\nexec sh "$HOME/.local/share/hedge/engine/hedge" "$@"\n`;
 
 function nodeBin(home: string, host: string) {
   const box = boxHome(home, host);
@@ -394,13 +407,13 @@ function nodeBin(home: string, host: string) {
   mkdirSync(engine, { recursive: true });
   const write = (path: string, body: string) => writeFileSync(path, `#!/bin/sh\nstate="$HOME/.node"\n${body}\n`, { mode: 0o755 });
   const git = Bun.which("git")!;
-  write(join(bin, "sudo"), `[ "$1" != -n ] || { shift; [ ! -f "$state/password" ] || { echo "sudo: a password is required" >&2; exit 1; }; }\ncase "$*" in *guards/earlyoom.sh) touch "$state/earlyoom"; exit 0 ;; esac\nSUDO_USER=$(id -un) exec "$@"`);
+  write(join(bin, "sudo"), `[ "$1" != -n ] || shift\ncase "$*" in *guards/earlyoom.sh) touch "$state/earlyoom"; exit 0 ;; esac\nSUDO_USER=$(id -un) exec "$@"`);
   write(join(bin, "git"), `[ "$1 $3 $4" = "-C rev-parse HEAD" ] && [ "$2" = "${engine}" ] && { cat "$state/engine-commit" 2>/dev/null; exit; }\nexec ${git} "$@"`);
   write(join(bin, "gh"), `[ "$1 $2" = "repo clone" ] && exec ${git} clone -q "${join(home, "github-remotes")}/\${3#https://github.com/}" "$4"`);
   write(join(bin, "ssh"), `echo "ssh: connect to host $1: Connection refused" >&2\nexit 255`);
   write(join(bin, "curl"), `out=; for a; do [ "$prev" = -o ] && out=$a; prev=$a; done\ncp "${join(engine, "get.sh")}" "$out"`);
   write(join(engine, "hedge"), `[ ! -f "$state/packages-missing" ] || { echo "error: Cannot find package 'smol-toml'" >&2; exit 1; }\nexec ${process.execPath} ${join(import.meta.dir, "fixtures/node-engine.ts")} "$@"`);
-  write(join(engine, "get.sh"), `engine="$HOME/.local/share/hedge/engine"\ncat "$state/installs-commit" > "$state/engine-commit"\ncat "$state/installs-commit" >> "$state/installs"\n[ ! -f "$state/install-fails" ] || { touch "$state/packages-missing"; echo "Hedge: could not install the engine's packages in $engine." >&2; exit 1; }\nrm -f "$state/packages-missing"\nmkdir -p "$HOME/.local/bin" && printf '%s' '${launcher}' > "$HOME/.local/bin/hedge" && chmod 755 "$HOME/.local/bin/hedge"\ncase " $* " in *" --install-only "*) exit 0 ;; esac\nwhile [ "$1" != --profile ]; do shift; done\nexec sh "$engine/hedge" apply "$@"`);
+  write(join(engine, "get.sh"), `engine="$HOME/.local/share/hedge/engine"\ncat "$state/installs-commit" > "$state/engine-commit"\n[ ! -f "$state/install-fails" ] || { touch "$state/packages-missing"; echo "Hedge: could not install the engine's packages in $engine." >&2; exit 1; }\nrm -f "$state/packages-missing"\nrm -rf "$engine/node_modules" && mkdir -p "$engine/node_modules" && touch "$engine/node_modules/.installed"\nmkdir -p "$HOME/.local/bin" && printf '%s' '${nodeLauncher}' > "$HOME/.local/bin/hedge" && chmod 755 "$HOME/.local/bin/hedge"\ncase " $* " in *" --install-only "*) exit 0 ;; esac\nwhile [ "$1" != --profile ]; do shift; done\nexec sh "$engine/hedge" apply "$@"`);
   return bin;
 }
 

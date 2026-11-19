@@ -27,14 +27,17 @@
 - Each page of the site carries its own script and styles, so a cached page
   always runs its own script.
 - `hedge devbox add` signs a node in to Coder at its own agent address when
-  the node cannot reach the hub's Coder address and the agent address uses
-  HTTPS. It sends no token over plain HTTP: then it names the one sign-in
-  the person does on the node. It removes the token of a failed sign-in, or
-  names the token and the command that removes it. After the node applies
-  the profile, it asks the node's `hedge doctor --to-do` which steps are
-  left, runs the ones that need only `sudo`, and lists the others for the
-  person once, at the end. The profile step stays open until none is left.
-  A rerun keeps a node engine that runs the hub's engine commit, when its
+  the node cannot reach the hub's Coder address, and the agent address
+  reports the same Coder deployment ID as the hub's Coder address and uses
+  HTTPS. It sends no token over plain HTTP: then it installs the Coder CLI
+  on the node and names the one sign-in the person does there. It removes
+  the token of a failed sign-in, or names the token and the command that
+  removes it. After the node applies the profile, it asks the node's
+  `hedge doctor --to-do` which steps are left, and ends with a list of
+  them, each with its command. It runs none of them itself. The profile
+  step stays open until none is left. A node with an older Hedge, which has
+  no `--to-do`, finishes the step and points to `hedge doctor` there. A
+  rerun keeps a node engine that runs the hub's engine commit, when its
   `hedge` command runs. When T3 Code on the hub reaches the node, it says
   so, and does not ask for `hedge peers link`.
 - `hedge doctor --to-do` prints the steps left for the person as JSON.

@@ -9,6 +9,11 @@ const holds = (name: string) => (existsSync(join(state, name)) ? 0 : 1);
 const args = process.argv.slice(2);
 const words = args.join(" ");
 
+if (existsSync(join(state, "older-engine")) && args.includes("--to-do")) {
+  console.error("hedge: unknown option --to-do");
+  process.exit(1);
+}
+
 if (words === "guards allowlist --check") process.exit(holds("allowlist"));
 if (words.startsWith("guards allowlist stage ")) {
   mkdirSync(args[3]!, { recursive: true });

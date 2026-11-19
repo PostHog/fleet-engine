@@ -639,15 +639,16 @@ creates no node ends at step 8 (see step 1).
    it says the hub has not linked the node yet, run
    `hedge peers link coder.<node>` on the hub.
 
-   On the node, it runs each setup step that needs only `sudo`, such as the
-   Git allowlist and earlyoom. When a step still needs the person, such as a
-   key to paste, it stops with a list of those steps and the command for
-   each. Ask them to run each command, then run `hedge devbox add` again.
+   When steps on the node are left for the person, such as the Git
+   allowlist, earlyoom or a key to paste, it stops with a list of those
+   steps and the command for each. It runs none of them itself. Ask the
+   person to run each command, then run `hedge devbox add` again.
 
    When the node reaches Coder only at a plain HTTP address, such as a node
    in another region, `hedge devbox add` sends no Coder token there. It
    prints the one `coder login` command the person runs on the node. Ask
-   them to run it, then run `hedge devbox add` again.
+   them to run it, then run `hedge devbox add` again. It sends no token to
+   an address that reports another Coder deployment ID than the hub's.
 4. **Check.** Run the `hedge doctor` of step 8 on each node, and on the hub
    again. Explain each line as in step 8.
 

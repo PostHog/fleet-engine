@@ -39,7 +39,7 @@ describe("hedge devbox add with a hub", () => {
     expect(await add("coder.hedge-node-2", down)).toBe(0);
     expect((await pushedAnswers(home)).devboxes).toEqual(["coder.hedge-node-1", "coder.hedge-node-2"]);
     expect(io.output()).toContain("· The hub, coder.hedge-hub, did not answer. It takes coder.hedge-node-2 at its next hedge update, or run hedge update there now.");
-    expect(io.output()).toEndWith(`· The hub, coder.hedge-hub, has not linked coder.hedge-node-2 in T3 Code yet. Its daily hedge peers renew links it, or run ssh coder.hedge-hub 'PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH"; hedge peers link coder.hedge-node-2' now.`);
+    expect(io.output()).toEndWith(`· The hub, coder.hedge-hub, has not linked coder.hedge-node-2 in T3 Code yet. To link it, run ssh coder.hedge-hub 'PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH"; hedge peers link coder.hedge-node-2' now.`);
 
     const failing = fakeMachine(home, {}, { hubUpdateFails: "hedge update: /home/nora/.local/share/hedge/engine has local changes." });
     expect(await add("coder.hedge-node-3", failing)).toBe(0);
