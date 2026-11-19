@@ -231,7 +231,7 @@ test("once the profile turns the panel off, the route check on the hub fails whi
   expect((await check())[0]).toBe(0);
 });
 
-test("once the profile turns the panel off, the route check on the hub fails while a dangling link sits at the panel's page or plugin", async () => {
+test("once the profile turns the panel off, the route check on the hub fails while a dangling link sits at the panel's page or plugin, and passes once you remove the link and run install as it says", async () => {
   for (const at of ["page", "plugin"] as const) {
     const { machine, home } = hub();
     await cliProxy("install", machine);
@@ -239,6 +239,9 @@ test("once the profile turns the panel off, the route check on the hub fails whi
     symlinkSync(join(home, "nowhere"), files(home)[at]);
     const run = hub({ home });
     expect(await cliProxy("check", run.machine)).toBe(1);
-    expect(run.printed.join("\n")).toContain(`The Proxy panel is off, but ${files(home)[at]} is still there`);
+    expect(run.printed.join("\n")).toContain(`${files(home)[at]} is a link, which Hedge does not follow or replace. Remove it, then run hedge cli-proxy install.`);
+    rmSync(files(home)[at]);
+    expect(await cliProxy("install", hub({ home }).machine)).toBe(0);
+    expect(await cliProxy("check", hub({ home }).machine)).toBe(0);
   }
 });

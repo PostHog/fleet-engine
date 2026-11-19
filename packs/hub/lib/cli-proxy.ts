@@ -263,6 +263,8 @@ async function accounts(machine: ProxyMachine, paths: Layout): Promise<number> {
 async function unsafe(machine: ProxyMachine, paths: Layout): Promise<string | undefined> {
   const others = await foreignPlugins(paths);
   if (others.length) return `Remove the plugins Hedge did not install: ${others.join(", ")}. While the Proxy panel is on, anyone with the management key can install plugins from CLIProxyAPI's plugin store, and the proxy runs them on the hub.`;
+  const linked = [paths.page, paths.plugin].filter((path) => lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink());
+  if (linked.length) return `${linked.join(" and ")} ${linked.length === 1 ? "is a link" : "are links"}, which Hedge does not follow or replace. Remove ${linked.length === 1 ? "it" : "them"}, then run hedge cli-proxy install.`;
   if (!machine.panel) {
     const left = [paths.page, paths.plugin].filter((path) => lstatSync(path, { throwIfNoEntry: false }));
     return left.length ? `The Proxy panel is off, but ${left.join(" and ")} ${left.length === 1 ? "is" : "are"} still there, so the proxy may still serve or run ${left.length === 1 ? "it" : "them"}. Run hedge cli-proxy install.` : undefined;
