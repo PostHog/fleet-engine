@@ -3,7 +3,7 @@ import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync,
 import { join } from "node:path";
 import { main } from "../../../src/cli.ts";
 import { tempDirs } from "../../../src/testing/git.ts";
-import { updateAgents } from "../commands/agent-update.ts";
+import { devbox, engineSource, resolveEngine } from "../../../src/testing/packs.ts";
 
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
@@ -286,22 +286,21 @@ describe("install-codex.sh", () => {
     return (await new Response(child.stdout).text()).trim();
   }
 
-  onLinux("hedge apply moves the Codex that Fleet installed to Hedge's release package and keeps Fleet's copy", async () => {
+  onLinux("hedge apply, with each command run in the box, moves the Codex that Fleet installed to Hedge's release package and keeps Fleet's copy", async () => {
     const box = await machine("x86_64", ["x86_64-unknown-linux-musl"]);
     rmSync(join(box.bin, "bun"));
     symlinkSync(process.execPath, join(box.bin, "bun"));
+    stub(box.bin, "npx", "echo 10.9.0");
     const fleets = fleetCodex(box.home);
     const path = `${box.bin}:${box.home}/.local/bin:/usr/bin:/bin`;
     const profile = temp.make("profile-");
     writeFileSync(join(profile, "hedge.json"), JSON.stringify({ schema: 1, engine: { repo: "PostHog/hedge", ref: "main", channel: "track" }, sources: [], packs: [], plan: "codex", settings: {}, workflows: {} }));
-    const ran: string[] = [];
     const lines: string[] = [];
-    const hedge = (args: string[]) => main(args, { home: box.home, engineRoot, platform: "linux", env: {}, print: (line) => lines.push(line), run: codexStepOnly });
-    const codexStepOnly = async (command: string[]) => {
-      if (command[1] === launcher && command[2] === "install-codex") return ran.push("install-codex"), await hedge(command.slice(2));
-      if (command[0] !== "sh" || !command.at(-1)?.includes("codex --version")) return 0;
-      const code = await Bun.spawn(command, { env: { HOME: box.home, PATH: path }, stdout: "ignore", stderr: "ignore" }).exited;
-      return ran.push(`check ${code}`), code;
+    const hedge = (args: string[]) => main(args, { home: box.home, engineRoot, platform: "linux", env: {}, print: (line) => lines.push(line), run: inTheBox });
+    const inTheBox = async (command: string[]) => {
+      if (command[0] === "/bin/sh" && command[1] === launcher) return hedge(command.slice(2));
+      if (!Bun.which(command[0]!, { PATH: path })) return 127;
+      return Bun.spawn(command, { env: { HOME: box.home, PATH: path }, stdout: "ignore", stderr: "ignore" }).exited;
     };
     const before = await codexOnPath(box.home, path);
     const saved = process.env.PATH;
@@ -314,24 +313,30 @@ describe("install-codex.sh", () => {
     }
 
     expect(applied).toBe(0);
-    expect(ran).toEqual(["check 1", "install-codex", "check 0"]);
     expect([before, await codexOnPath(box.home, path)]).toEqual(["codex-cli 0.1.0", "codex-cli 9.9.9 x86_64-unknown-linux-musl"]);
     expect(readlinkSync(join(box.home, ".local/bin/codex"))).toBe(join(codexHome(box.home), "current/bin/codex"));
     expect(readFileSync(join(fleets, "releases/rust-v0.1.0/bin/codex"), "utf8")).toContain("0.1.0");
   });
 
-  onLinux("the nightly update moves the Codex that Fleet installed to Hedge's release package", async () => {
+  onLinux("the scheduled nightly agent-update job, run at night, moves the Codex that Fleet installed to Hedge's release package", async () => {
     const box = await machine("x86_64", ["x86_64-unknown-linux-musl"]);
+    rmSync(join(box.bin, "bun"));
+    symlinkSync(process.execPath, join(box.bin, "bun"));
     fleetCodex(box.home);
     const path = `${box.bin}:${box.home}/.local/bin:/usr/bin:/bin`;
-    const run = async (command: string[]) => {
-      const child = Bun.spawn(command, { env: { HOME: box.home, PATH: path }, stdout: "pipe", stderr: "pipe" });
-      return { code: await child.exited, out: await new Response(child.stdout).text() };
-    };
+    const profile = temp.make("profile-");
+    writeFileSync(join(profile, "hedge.json"), JSON.stringify({ schema: 1, engine: { repo: "PostHog/hedge", ref: "main", channel: "track" }, sources: [], packs: [], plan: "codex", settings: {}, workflows: {} }));
+    mkdirSync(join(box.home, ".config/hedge"), { recursive: true });
+    writeFileSync(join(box.home, ".config/hedge/machine.json"), JSON.stringify({ schema: 1, role: "devbox", profileDir: profile }));
+    const job = resolveEngine([await engineSource()], { plan: "codex" }, devbox).jobs.find((item) => item.id === "agent-update")!;
+    expect(job.command.slice(0, 2)).toEqual(["hedge", "nightly"]);
+    const driver = join(temp.make("driver-"), "driver.ts");
+    writeFileSync(driver, `import { nightlyCommand } from ${JSON.stringify(join(import.meta.dir, "nightly.ts"))};\nprocess.exit(await nightlyCommand(JSON.parse(Bun.argv[2]), { home: Bun.argv[3], engineRoot: Bun.argv[4], now: () => new Date("2026-11-10T02:17:00Z") }));\n`);
 
-    const result = await updateAgents(run);
+    const nightly = Bun.spawn([process.execPath, driver, JSON.stringify(job.command.slice(2)), box.home, engineRoot], { env: { HOME: box.home, PATH: path }, stdout: "pipe", stderr: "pipe" });
+    const [out, code] = await Promise.all([new Response(nightly.stdout).text(), nightly.exited]);
 
-    expect(result).toEqual({ ok: true, lines: ["Claude Code: not installed by Hedge, skipped.", "Codex: up to date.", "Codex from Bun: not installed by Hedge, skipped."] });
+    expect({ code, codex: out.split("\n").find((line) => line.startsWith("Codex:")) }).toEqual({ code: 0, codex: "Codex: up to date." });
     expect(await codexOnPath(box.home, path)).toBe("codex-cli 9.9.9 x86_64-unknown-linux-musl");
     expect(readlinkSync(join(box.home, ".local/bin/codex"))).toBe(join(codexHome(box.home), "current/bin/codex"));
   });
