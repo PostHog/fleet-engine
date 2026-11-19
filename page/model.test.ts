@@ -32,6 +32,12 @@ const remoteCommands = (code: string) => [
   ...[...code.matchAll(/\bssh(?:\s+-\S+)*\s+[^\s'"]+\s+sh -s <<'(\w+)'\n([\s\S]*?)^\1$/gm)].map((match) => match[2]!),
 ];
 const unparsedSnippets = (codes: string[]) => codes.filter((code) => !parses(code) || !remoteCommands(code).every(parses));
+const sshSnippets = (note: string) =>
+  [
+    ...[...note.matchAll(/^( *)```sh\n([\s\S]*?)^ *```$/gm)].map((match) => match[2]!.replace(new RegExp(`^${match[1]!}`, "gm"), "")),
+    ...[...note.replace(/^ *```[\s\S]*?^ *```$/gm, "").matchAll(/`([^`\n]+)`/g)].map((match) => match[1]!),
+  ].filter((code) => /\bssh /.test(code));
+const withHub = (code: string, hub: string) => code.replace(/(\bssh (?:-t )?)[^\s`'"]*<hub>[^\s`'"]*/g, `$1${hub}`);
 
 async function hubWithHedge() {
   const home = temp.make("home-");
@@ -148,13 +154,19 @@ describe("the install prompt", () => {
     const text = installPrompt(data, everyPack());
     expect(step(text, "Find my hub")).toContain('The name after "The hub:" is the SSH name of the hub. In each SSH command of a note, put that whole name in place of the host that holds `<hub>`.');
     const notes = [...text.matchAll(/^ {3}- [^:]+: ~\/\.local\/share\/hedge\/engine\/(\S+)$/gm)].map((match) => readFileSync(join(root, match[1]!), "utf8"));
-    const commands = notes.flatMap((note) => [...[...note.matchAll(/^ *```sh\n([\s\S]*?)^ *```$/gm)].map((match) => match[1]!), ...[...note.replace(/^ *```[\s\S]*?^ *```$/gm, "").matchAll(/`([^`\n]+)`/g)].map((match) => match[1]!)]).filter((code) => /\bssh /.test(code));
-    const filled = commands.map((code) => code.replace(/(\bssh (?:-t )?)[^\s`'"]*<hub>[^\s`'"]*/g, `$1${hub}`));
+    const filled = notes.flatMap(sshSnippets).map((code) => withHub(code, hub));
     expect(filled.filter((code) => code.includes("<hub>"))).toEqual([]);
     expect(unparsedSnippets(filled)).toEqual([]);
     expect(filled.flatMap(remoteCommands).length).toBeGreaterThan(filled.length / 2);
     const dangling = `ssh ${hub} 'hedge doctor &&'`;
-    expect(unparsedSnippets([dangling, `ssh ${hub} sh -s <<'SCRIPT'\nhedge doctor &&\nSCRIPT\n`])).toHaveLength(2);
+    expect(unparsedSnippets([dangling])).toHaveLength(1);
+    const recovery = sshSnippets(readFileSync(join(root, "packs/recovery/SETUP.md"), "utf8"))
+      .map((code) => withHub(code, hub))
+      .find((code) => code.includes("sh -s <<'SCRIPT'"))!;
+    expect(filled).toContain(recovery);
+    expect(remoteCommands(recovery)).toHaveLength(1);
+    const brokenRecovery = recovery.replace(/^SCRIPT$/m, "hedge doctor &&\nSCRIPT");
+    expect([unparsedSnippets([recovery]), unparsedSnippets([brokenRecovery])]).toEqual([[], [brokenRecovery]]);
     const run = filled.map((code) => code.split("\n").filter((line) => !/^\s*#/.test(line)).join("\n"));
     const hosts = run.flatMap((code) => [...code.matchAll(/\bssh((?:\s+-\S+)*)\s+([^\s'"]+)/g)].map((match) => match[2]!));
     expect(hosts.length).toBe(run.join("\n").match(/\bssh\s/g)!.length);
