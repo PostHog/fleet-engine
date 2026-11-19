@@ -171,9 +171,13 @@ test("the doctor still fails with an empty pool while the proxy does not answer 
   await cliProxy("install", machine);
   const refused = hubMachine({ home }, { credentials: [], models: [], refuses: true });
   await expect(cliProxy("doctor", refused.machine)).rejects.toThrow(`The proxy at ${proxyUrl} refuses this machine's key (HTTP 401).`);
-  const silent = hubMachine({ home }, { credentials: [], models: [], down: true });
-  await expect(cliProxy("doctor", silent.machine)).rejects.toThrow();
-  expect(silent.requests.some((request) => request.path === "/v0/management/routing/strategy")).toBe(true);
+  const silent = hubMachine({ home }, { credentials: [], silentModels: true });
+  await expect(cliProxy("doctor", silent.machine)).rejects.toThrow(`The proxy at ${proxyUrl} does not answer.`);
+  for (const authFiles of [{}, { files: null }, { files: [{ name: "auth.json", disabled: false }] }, { files: [null] }]) {
+    const unreadable = hubMachine({ home }, { authFiles, models: [] });
+    await expect(cliProxy("doctor", unreadable.machine)).rejects.toThrow("a list of subscriptions that Hedge cannot read");
+    await expect(cliProxy("accounts", hubMachine({ home }, { authFiles }).machine)).rejects.toThrow("a list of subscriptions that Hedge cannot read");
+  }
   const installed = hubMachine({ home });
   const stopped = hubMachine({ home, run: async (command) => (command.includes("is-active") ? { code: 3, stdout: "", stderr: "inactive" } : installed.machine.run(command)) }, { credentials: [], models: [] });
   await expect(cliProxy("doctor", stopped.machine)).rejects.toThrow("is-active");

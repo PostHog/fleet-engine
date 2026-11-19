@@ -9,7 +9,7 @@ export const archive = "fake release archive";
 export const release = { version: "9.9.9", url: "https://example.com/proxy.tar.gz", sha256: new Bun.CryptoHasher("sha256").update(archive).digest("hex") };
 export const dataDir = (home: string) => join(home, ".local/share/hedge-cli-proxy");
 
-export type Proxy = { catalog?: unknown; registry?: unknown; strategy?: string; credentials?: Array<{ name?: string; auth_index?: string; provider: string; disabled?: boolean; status?: string; unavailable?: boolean; status_message?: string }>; models?: string[]; down?: boolean; refuses?: boolean; modelList?: string };
+export type Proxy = { catalog?: unknown; registry?: unknown; strategy?: string; credentials?: Array<{ name?: string; auth_index?: string; provider: string; disabled?: boolean; status?: string; unavailable?: boolean; status_message?: string }>; models?: string[]; down?: boolean; refuses?: boolean; modelList?: string; silentModels?: boolean; authFiles?: unknown };
 
 export function fakeProxy(proxy: Proxy = {}) {
   const requests: Array<{ path: string; method: string; auth: string }> = [];
@@ -20,9 +20,11 @@ export function fakeProxy(proxy: Proxy = {}) {
     if (proxy.catalog !== undefined && url.pathname.endsWith("/codex_client_models.json")) return Response.json(proxy.catalog);
     if (proxy.registry !== undefined && url.pathname.endsWith("/models.json")) return Response.json(proxy.registry);
     if (proxy.down || url.origin !== proxyUrl) throw new TypeError("connection refused");
+    if (url.pathname === "/v1/models" && proxy.silentModels) throw new TypeError("connection refused");
     if (url.pathname === "/v1/models" && proxy.modelList !== undefined) return new Response(proxy.modelList, { status: 200 });
     if (url.pathname === "/v1/models") return auth === `Bearer ${clientKey}` && !proxy.refuses ? Response.json({ data: (proxy.models ?? ["claude-sonnet-5-5"]).map((id) => ({ id })) }) : new Response("no", { status: 401 });
     if (url.pathname === "/v0/management/routing/strategy") return Response.json({ strategy: proxy.strategy ?? "fill-first" });
+    if (url.pathname === "/v0/management/auth-files" && proxy.authFiles !== undefined) return Response.json(proxy.authFiles);
     if (url.pathname === "/v0/management/auth-files") return Response.json({ files: proxy.credentials ?? [{ provider: "claude" }, { provider: "claude" }] });
     return new Response("missing", { status: 404 });
   };
