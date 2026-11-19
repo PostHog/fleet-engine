@@ -276,12 +276,13 @@ says what to do with a template parameter that holds one.
    ```
 
    It prints one line per parameter: its name, its type, and whether it
-   is `mutable`, `ephemeral`, or a `secret`. It prints a default value and
-   the allowed values only for a parameter that is not a secret. For a
-   secret, it prints only `has a default` or `no default`, because a
-   default can be a credential. It counts a parameter as a secret when its
-   name or description names a token, a key, a password, or another
-   credential, or when the form hides what you type.
+   is `mutable`, `ephemeral`, or a `secret`. It prints a default value only
+   for a number, a `bool`, or a parameter with a fixed list of allowed
+   values, and then prints that list too. For any other parameter it
+   prints only `default hidden` or `no default`, because free text can be
+   a credential, also when nothing names it one. It marks a parameter as a
+   secret when its name or description names a token, a key, a password,
+   or another credential.
 
    When the script fails, open the template's page in the Coder web app,
    `<coder address>/templates/<template>`, and ask the person to read you
@@ -301,6 +302,7 @@ says what to do with a template parameter that holds one.
    | The dotfiles branch, such as `dotfiles_branch` | Pass its default, mostly empty, which is the profile's default branch. Setup saves the answers to the branch the box checks out, so a box on another branch never changes the default branch. |
    | The region | Ask. |
    | Another parameter without a default | Ask. |
+   | Another parameter with a `default hidden` | Ask for the value to pass. The person reads the default on the template's page in the Coder web app. When it holds a credential, it is a secret. |
    | Another parameter with a default | Pass its default. |
 
    Ask every question of the table in one call.

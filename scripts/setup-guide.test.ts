@@ -235,16 +235,18 @@ describe("the agent setup guide", () => {
     expect([printed.code, printed.output]).toEqual([1, "x instance_type is not the value you passed. In the Coder web app, set it under Settings, Parameters, and submit.\nok hedge-hub runs and stays on\n"]);
   });
 
-  test("reads the parameters of the template's active version with the engine's script, prints no default of a secret, and keeps the session token off every command line", async () => {
+  test("reads the parameters of the template's active version with the engine's script, prints no free-text default, also of a secret with no label, and keeps the session token off every command line", async () => {
     const fixtures = temp.make("coder-");
     writeFileSync(join(fixtures, "templates.json"), JSON.stringify([{ Template: { name: "other", active_version_id: "v-other" } }, { Template: { name: "dev", active_version_id: "v-active" } }]));
     const credential = ["ghp", "fixture", "default", "credential"].join("-");
+    const key = ["fixture", "ssh", "key", "default"].join("-");
     writeFileSync(join(fixtures, "parameters.json"), JSON.stringify([
       { name: "disk_size", display_name: "Disk size", type: "number", mutable: false, default_value: "100", options: [] },
       { name: "region", type: "string", default_value: "us-east-1", options: [{ value: "us-east-1" }, { value: "eu-central-1" }] },
       { name: "dotfiles_uri", type: "string", mutable: true, default_value: "" },
+      { name: "jetbrains", type: "bool", default_value: "false" },
       { name: "github_pat", display_name: "GitHub", description: "A personal access token", type: "string", mutable: true, default_value: credential },
-      { name: "agent_config", description: "Settings", type: "string", default_value: "masked-fixture-default", styling: { mask_input: true }, options: [{ value: "masked-fixture-option" }] },
+      { name: "ssh_key", type: "string", default_value: key },
       { name: "scratch", type: "string", ephemeral: true, default_value: "x" },
     ]));
     const bin = fakeTools({
@@ -260,7 +262,7 @@ describe("the agent setup guide", () => {
     const fromEnvironment = await runShell(command, { ...env, CODER_SESSION_TOKEN: "environment-session" });
 
     expect([stored.code, stored.stderr]).toEqual([0, ""]);
-    expect(stored.stdout).toBe(["disk_size (Disk size): number, default 100", "region: string, default us-east-1, options us-east-1 | eu-central-1", "dotfiles_uri: string, mutable, no default", "github_pat (GitHub): string, mutable, secret, has a default", "agent_config: string, secret, has a default", "scratch: string, ephemeral, default x", ""].join("\n"));
+    expect(stored.stdout).toBe(["disk_size (Disk size): number, default 100", "region: string, default us-east-1, options us-east-1 | eu-central-1", "dotfiles_uri: string, mutable, no default", "jetbrains: bool, default false", "github_pat (GitHub): string, mutable, secret, default hidden", "ssh_key: string, default hidden", "scratch: string, ephemeral, default hidden", ""].join("\n"));
     expect(fromEnvironment.stdout).toBe(stored.stdout);
     expect(readFileSync(join(fixtures, "header"), "utf8")).toBe("Coder-Session-Token: environment-session\n");
     expect(readFileSync(join(fixtures, "token-reads"), "utf8")).toBe("login\n");

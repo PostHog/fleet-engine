@@ -31,17 +31,17 @@ printf '%s' "$parameters" | json '
   my $secret = qr/token|secret|passw|credential|api[_ -]?key|private[_ -]?key|\bkey\b|auth|cookie|session|\bpat\b/i;
   for my $parameter (@{ decode_json(join "", <STDIN>) }) {
     my $words = join " ", map { $_ // "" } @{$parameter}{qw(name display_name description description_plaintext)};
-    my $hidden = $words =~ $secret || ($parameter->{styling} && $parameter->{styling}{mask_input}) || ($parameter->{form_type} // "") eq "password";
-    my @facts = ($parameter->{type} // "string");
+    my $type = $parameter->{type} // "string";
+    my @options = map { $_->{value} } @{ $parameter->{options} // [] };
+    my @facts = ($type);
     push @facts, "mutable" if $parameter->{mutable};
     push @facts, "ephemeral" if $parameter->{ephemeral};
-    push @facts, "secret" if $hidden;
+    push @facts, "secret" if $words =~ $secret;
     my $default = $parameter->{default_value} // "";
     if ($parameter->{required} || $default eq "") { push @facts, "no default" }
-    elsif ($hidden) { push @facts, "has a default" }
-    else { $default =~ s/\n/\\n/g; push @facts, "default $default" }
-    my @options = map { $_->{value} } @{ $parameter->{options} // [] };
-    push @facts, "options " . join(" | ", @options) if @options && !$hidden;
+    elsif (@options || $type eq "number" || $type eq "bool") { $default =~ s/\n/\\n/g; push @facts, "default $default" }
+    else { push @facts, "default hidden" }
+    push @facts, "options " . join(" | ", @options) if @options;
     my $shown = $parameter->{display_name} && $parameter->{display_name} ne $parameter->{name} ? " ($parameter->{display_name})" : "";
     print "$parameter->{name}$shown: ", join(", ", @facts), "\n";
   }
