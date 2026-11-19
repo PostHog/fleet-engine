@@ -26,6 +26,17 @@ const notePaths = () => readdirSync(join(root, "packs")).map((pack) => join("pac
 
 const blocksIn = (text: string) => [...text.matchAll(/^ *```\w*\n([\s\S]*?)^ *```$/gm)].map((match) => match[1]!.replace(/^ +/gm, ""));
 
+function coderSubcommands(code: string) {
+  return code.split("\n").flatMap((line) => {
+    const words = (line.match(/"[^"]*"|'[^']*'|\S+/g) ?? []).map((word) => word.replace(/^["']|["']$/g, ""));
+    return words.flatMap((word, at) => {
+      if (word !== "coder") return [];
+      let next = at + 1;
+      while (words[next]?.startsWith("-")) next += words[next]!.includes("=") ? 1 : 2;
+      return words[next] ? [words[next]!] : [];
+    });
+  });
+}
 function codeIn(text: string) {
   const blocks = blocksIn(text);
   const spans = [...text.replace(/^ *```[\s\S]*?^ *```$/gm, "").matchAll(/`([^`\n]+)`/g)].map((match) => match[1]!);
@@ -194,7 +205,8 @@ describe("the agent setup guide", () => {
     const texts = [guide(), readFileSync(join(root, "docs/getting-started.md"), "utf8")];
     const wrappedSpans = (text: string) => [...text.replace(/^ *```[\s\S]*?^ *```$/gm, "").replace(/\s+/g, " ").matchAll(/`([^`]+)`/g)].map((match) => match[1]!);
     const commands = texts.flatMap((text) => [...codeIn(text), ...wrappedSpans(text)]);
-    expect(commands.filter((code) => /\bcoder\b[^\n`]*?\s["']?(?:update|restart|start)["']?\s+\S/.test(code))).toEqual([]);
+    expect(commands.filter((code) => coderSubcommands(code).some((name) => ["update", "restart", "start"].includes(name)))).toEqual([]);
+    expect(["coder start", "CODER_URL=x coder --url x 'restart' hub", "a && coder update hub", "coder create start --template dev", "coder schedule start hub"].map((code) => coderSubcommands(code))).toEqual([["start"], ["restart"], ["update"], ["create"], ["schedule"]]);
     for (const text of texts) expect(text.replace(/\s+/g, " ")).toContain("**Settings → Parameters**");
     const printed = fakeCoder(temp, { parameters: { instance_type: "m7g.xlarge" }, mutable: { instance_type: true } }).check(["instance_type=m7g.4xlarge"]);
     expect([printed.code, printed.output]).toEqual([1, "x instance_type is not the value you passed. In the Coder web app, set it under Settings, Parameters, and submit.\nok hedge-hub runs and stays on\n"]);

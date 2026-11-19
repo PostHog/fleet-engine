@@ -30,11 +30,11 @@ export function fakeCoder(temp: ReturnType<typeof tempDirs>, { parameters, mutab
   "login token") echo "${storedToken}" ;;
   *) exit 2 ;;
 esac`);
-  stub("curl", `[ "$1" = -q ] || { echo "curl read the curl config" >&2; exit 2; }
+  stub("curl", `for url; do :; done
+echo "$url" >> "${dir}/requests.log"
+[ "$1" = -q ] || { echo "curl read the curl config" >&2; exit 2; }
 IFS= read -r header
 [ "$header" = "Coder-Session-Token: ${token}" ] || { echo "curl: (22) 401" >&2; exit 22; }
-for url; do :; done
-echo "$url" >> "${dir}/requests.log"
 case "$url" in
   https://coder.test/api/v2/workspacebuilds/build-1/parameters) cat "${dir}/parameters.json" ;;
   https://coder.test/api/v2/templateversions/version-1/rich-parameters) cat "${dir}/rich-parameters.json"${templateTransferFails ? '; echo "curl: (18) transfer closed" >&2; exit 18' : ""} ;;

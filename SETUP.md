@@ -345,9 +345,9 @@ says what to do with a template parameter that holds one.
    lets change, ask the person to open the workspace in the Coder web app,
    go to **Settings → Parameters**, set the value you give them, and
    submit. Coder then builds the workspace again with that value. Never
-   change a parameter with the Coder CLI: `coder update` changes nothing
-   while the workspace uses the template's active version, and
-   `coder restart` can ask for a parameter and print its default, also a
+   change a parameter with the Coder CLI: its update command changes
+   nothing while the workspace uses the template's active version, and its
+   restart command can ask for a parameter and print its default, also a
    secret's. A parameter that the template does not let change, such
    as the disk size or the region, needs a new workspace: ask, then
    `coder delete <name>` and create it again, before setup touches it.
