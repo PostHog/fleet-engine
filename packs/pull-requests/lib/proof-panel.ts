@@ -314,7 +314,6 @@ export async function withRoundLock<T>(directory: string, lock: RoundLock, step:
 
 async function takeLock(directory: string, { owner, holder }: RoundLock) {
   const path = lockPath(directory);
-  let blocker: string | undefined;
   for (let attempt = 0; attempt < lockAttempts; attempt++) {
     if (await claimRound(directory, holder)) return;
     const text = await readSlot(path);
@@ -322,9 +321,8 @@ async function takeLock(directory: string, { owner, holder }: RoundLock) {
     const current = holderOf(text);
     if (current?.token === holder.token) return;
     if (!await stale(path, text, owner)) throw await busy(directory, current);
-    ({ blocker } = await reclaim(path, text, owner));
+    await reclaim(path, text, owner);
   }
-  if (blocker) throw new Error(`Cannot take over the lock ${path}: the takeover guard ${blocker} stays held. When no hedge proof command works on ${directory}, delete ${blocker}, then run this command again`);
   throw new Error(`Cannot take the lock ${path}: other commands keep taking it over. Run the command again`);
 }
 
@@ -376,7 +374,7 @@ export async function reclaimSlots(io: PanelIO) {
 
 async function reclaimStale(path: string, owner: LockOwner) {
   const text = await readSlot(path);
-  return text !== undefined && await stale(path, text, owner) && (await reclaim(path, text, owner)).taken;
+  return text !== undefined && await stale(path, text, owner) && await reclaim(path, text, owner);
 }
 
 async function stale(path: string, text: string, owner: LockOwner) {
@@ -393,33 +391,31 @@ async function olderThanGrace(path: string, now: Date) {
   return written !== undefined && now.getTime() - written > lockGrace;
 }
 
-type Guard = { lock?: string; dead: string[]; blocker?: string };
+const guardGenerations = 10;
 
-async function guard(path: string, text: string, holder: Holder, owner: LockOwner): Promise<Guard> {
+async function guard(path: string, text: string, holder: Holder, owner: LockOwner) {
   const first = `${path}.reclaim-${createHash("sha256").update(text).digest("hex").slice(0, 16)}`;
-  const dead: string[] = [];
-  let lock = first;
-  for (let attempt = 0; attempt < lockAttempts; attempt++) {
-    lock = dead.length ? `${first}.${dead.length + 1}` : first;
-    if (await claim(lock, holder)) return { lock, dead };
+  let generation = 1;
+  for (let attempt = 0; attempt < lockAttempts && generation <= guardGenerations; attempt++) {
+    const lock = generation === 1 ? first : `${first}.${generation}`;
+    if (await claim(lock, holder)) return lock;
     const current = await readSlot(lock);
     if (current === undefined) continue;
-    if (!await stale(lock, current, owner)) return { dead, blocker: lock };
-    dead.push(lock);
+    if (!await stale(lock, current, owner)) return undefined;
+    generation++;
   }
-  return { dead, blocker: lock };
+  return undefined;
 }
 
-async function reclaim(path: string, text: string, owner: LockOwner): Promise<{ taken: boolean; blocker?: string }> {
+async function reclaim(path: string, text: string, owner: LockOwner) {
   const holder = await holderFor(owner);
-  const { lock, dead, blocker } = await guard(path, text, holder, owner);
-  if (!lock) return { taken: false, blocker };
+  const lock = await guard(path, text, holder, owner);
+  if (!lock) return false;
   try {
-    if (await readSlot(path) !== text) return { taken: false };
+    if (await readSlot(path) !== text) return false;
     await stopReviewer(holderOf(text), owner);
     await rm(path, { force: true });
-    await Promise.all(dead.map((file) => rm(file, { force: true })));
-    return { taken: true };
+    return true;
   } finally { await release(lock, holder); }
 }
 

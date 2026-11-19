@@ -132,9 +132,7 @@
   so the budget is never counted short. A review that
   finds the lock held stops and names the holder. This lock, a round lock,
   and a panel slot follow one rule: hedge takes over the lock when the
-  process that holds it is gone. When a command that took over a lock
-  stopped midway, the next command takes over its takeover guard too; while
-  a live command holds that guard, the message names the guard file. A
+  process that holds it is gone. A
   final read takes the next free name in the reviews directory, so a
   leftover directory without `round.json` never blocks it.
 
