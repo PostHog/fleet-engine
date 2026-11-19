@@ -40,7 +40,6 @@ const signedOut = { claude: (server: string) => `${server}:\n  Scope: Dynamic co
 
 type Machine = { claude?: (server: string) => string; codexAuth?: string; convex?: boolean; env?: Record<string, string> };
 
-/** Runs the Integrations pack's own checks with fake claude and codex CLIs that print what the real ones print, and fails every other command without a process. */
 function checkRunner(home: string, machine: Machine, plan: Plan): Runner {
   const signIns = new Set(plan.checks.filter((item) => item.pack === "integrations").map((item) => JSON.stringify(item.run)));
   const bin = temp.make("bin-");
