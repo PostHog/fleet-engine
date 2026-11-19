@@ -231,6 +231,15 @@ describe("the devbox over SSH", () => {
     expect(box.sessions().filter((session) => !session.revoked)).toEqual([]);
   });
 
+  test("waits for this machine's tunnel that is still starting, then links back from the devbox", async () => {
+    const home = homeWithHosts();
+    const box = fakeMachine(home, {}, { connectHere: true, hereTunnelStartsAfter: 3 });
+    const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], box);
+    expect(result.code).toBe(0);
+    expect(box.peerLinks.box).toEqual(["https://here.relay.example"]);
+    expect(box.sessions().filter((session) => !session.revoked)).toEqual([]);
+  });
+
   test("stops when T3 Connect is on here but its tunnel address cannot be found, instead of calling it off", async () => {
     const home = homeWithHosts();
     const box = fakeMachine(home, {}, { connectHere: true, serverWithoutLinkState: ["here"] });

@@ -286,6 +286,12 @@ async function connectAddressWithin(machine: Machine): Promise<string | undefine
 
 const tunnelStartPolls = 15;
 
+export async function addressHere(machine: Machine): Promise<{ on: boolean; address?: string }> {
+  if (!(await linkedStatus(machine))) return { on: false };
+  const address = await connectAddressWithin(machine);
+  return address ? { on: true, address } : { on: true };
+}
+
 /** For T3 CLIs that do not print the tunnel hostname yet: asks the live T3 server on that machine with a short read-only session, and revokes the session after. */
 async function tunnelFromServer(machine: Machine): Promise<string | undefined> {
   const origin = await liveServerOrigin(machine);
@@ -374,9 +380,9 @@ async function linkBothWays(host: string, box: Machine, context: DevboxContext) 
   if (limit) throw new Error(`${host} has no T3 Connect tunnel: T3 Code there says ${limit}. Free one: run t3 connect logout on a machine that no longer needs T3 Connect, or unlink it in T3 Connect. Then run ${restartCommand} on ${host}, and run ${again(context)} again.`);
   if (!boxAddress) throw new Error(`${host} has no T3 Connect address yet. Update T3 Code on ${host}, then run ${again(context)} again.`);
   await link(box, host, boxAddress, context.machine, here);
-  const hereAddress = await connectAddress(context.machine);
-  if (hereAddress) await link(context.machine, here, hereAddress, box, host);
-  else if (await linkedStatus(context.machine)) throw new Error(`T3 Connect is on here, but Hedge could not find this machine's tunnel address. Update T3 Code here, then run ${again(context)} again so ${host} links back.`);
+  const connectHere = await addressHere(context.machine);
+  if (connectHere.address) await link(context.machine, here, connectHere.address, box, host);
+  else if (connectHere.on) throw new Error(`T3 Connect is on here, but Hedge could not find this machine's tunnel address. Update T3 Code here, then run ${again(context)} again so ${host} links back.`);
   else context.terminal.print(`  · ${host} does not link back to this machine, because T3 Connect is off here. Turn it on with t3 up --connect, and T3 Code on ${host} can pair with this machine.`);
 }
 

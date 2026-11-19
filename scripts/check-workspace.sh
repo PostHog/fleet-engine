@@ -24,6 +24,10 @@ fields=$(printf '%s' "$workspace" | NAME=$name json '
 read -r build version transition state deadline schedule <<FIELDS
 $fields
 FIELDS
+case $state in pending | starting | stopping | canceling)
+  echo "x $name is not ready: its latest build is a $transition that is $state. Wait until it ends, then run this check again."
+  exit 1 ;;
+esac
 url=$(coder whoami -o json | json 'my $me = decode_json(join "", <STDIN>); $me = $me->[0] if ref $me eq "ARRAY"; print $me->{url}')
 
 token() { if [ -n "${CODER_SESSION_TOKEN:-}" ]; then printf '%s\n' "$CODER_SESSION_TOKEN"; else coder login token; fi; }
@@ -48,10 +52,7 @@ printf '%s' "$parameters" | TEMPLATE=$template RESTART=$restart json '
   exit $bad;
 ' "$@" || status=1
 
-if [ "$state" = pending ] || [ "$state" = starting ] || [ "$state" = stopping ] || [ "$state" = canceling ]; then
-  echo "x $name is not ready: its latest build is a $transition that is $state. Wait until it ends, then run this check again."
-  status=1
-elif [ "$transition $state" != "start running" ]; then
+if [ "$transition $state" != "start running" ]; then
   echo "x $name does not run: its latest build is a $transition that is $state. $restart <parameter>=<value> --yes, with each parameter you passed, and check again."
   status=1
 elif [ "$schedule" = scheduled ]; then

@@ -15,7 +15,7 @@ describe("get.sh on macOS", () => {
     expect(readdirSync(box.home)).toEqual([]);
   });
 
-  function launchd(box: Sandbox, options: { failDisable?: string; keepRunning?: string } = {}) {
+  function launchd(box: Sandbox, options: { failDisable?: string[]; keepRunning?: string[] } = {}) {
     const loaded = join(box.root, "loaded");
     const disabled = join(box.root, "disabled");
     const agents = join(box.home, "Library/LaunchAgents");
@@ -23,8 +23,8 @@ describe("get.sh on macOS", () => {
     box.stub("launchctl", `label=\${2##*/}
 case "$1" in
   list) printf -- '-\\t0\\t%s\\n' $(cat "${loaded}") ;;
-  bootout) [ "$label" = "${options.keepRunning ?? ""}" ] && exit 5; grep -vx "$label" "${loaded}" > "${loaded}.new"; mv "${loaded}.new" "${loaded}" ;;
-  disable) [ "$label" = "${options.failDisable ?? ""}" ] && exit 1; echo "$label" >> "${disabled}" ;;
+  bootout) case " ${(options.keepRunning ?? []).join(" ")} " in *" $label "*) exit 5 ;; esac; grep -vx "$label" "${loaded}" > "${loaded}.new"; mv "${loaded}.new" "${loaded}" ;;
+  disable) case " ${(options.failDisable ?? []).join(" ")} " in *" $label "*) exit 1 ;; esac; echo "$label" >> "${disabled}" ;;
   print) grep -qx "$label" "${loaded}" || exit 113 ;;
   print-disabled) echo 'disabled services = {'; while read -r off; do printf '\\t"%s" => disabled\\n' "$off"; done < "${disabled}"; echo '}' ;;
 esac`);
@@ -39,7 +39,7 @@ esac`);
     return { loaded, agents, login };
   }
 
-  function earlierJobs(box: Sandbox, options: { failDisable?: string; keepRunning?: string } = {}) {
+  function earlierJobs(box: Sandbox, options: { failDisable?: string[]; keepRunning?: string[] } = {}) {
     const jobs = launchd(box, options);
     mkdirSync(jobs.agents, { recursive: true });
     for (const label of ["dev.fleet.nightly", "dev.hedge.update", "com.apple.other"]) writeFileSync(join(jobs.agents, `${label}.plist`), "<plist/>\n");
@@ -68,20 +68,28 @@ esac`);
     expect(jobs.login()).toEqual(["com.apple.other"]);
   });
 
-  onLinuxHost("still turns off each later job when launchd does not turn one off, then exits 1 and names each job that would start again at the next login", () => {
+  onLinuxHost("still turns off each later job when launchd does not stop or turn off two jobs, prints each command a job needs, then exits 1 and names each job once", () => {
     const box = sandbox("Darwin");
-    const jobs = earlierJobs(box, { failDisable: "dev.fleet.nightly" });
+    const jobs = earlierJobs(box, { keepRunning: ["com.fleet.mcphub"], failDisable: ["com.fleet.mcphub", "dev.fleet.nightly"] });
     const result = getSh(box, []);
     expect(result.code).toBe(1);
-    expect(result.output).toContain("Hedge: launchd still has the job dev.fleet.nightly of an earlier Fleet or Hedge turned on, so it starts again at the next login. Turn it off with: launchctl disable gui/");
-    expect(result.output).toContain("Hedge: stopped and turned off the launchd job dev.hedge.update of an earlier Fleet or Hedge, and kept its files.");
-    expect(result.output).toEndWith("Hedge: these launchd jobs of an earlier Fleet or Hedge are not off yet: dev.fleet.nightly. Run the commands above, then run get.sh again.\n");
-    expect(jobs.login()).toEqual(["com.apple.other", "dev.fleet.nightly"]);
+    const uid = result.output.match(/gui\/(\d+)\//)?.[1];
+    expect(result.output).toBe(
+      [
+        `Hedge: the launchd job com.fleet.mcphub of an earlier Fleet or Hedge still runs. Stop it with: launchctl bootout gui/${uid}/com.fleet.mcphub`,
+        `Hedge: launchd still has the job com.fleet.mcphub of an earlier Fleet or Hedge turned on, so it starts again at the next login. Turn it off with: launchctl disable gui/${uid}/com.fleet.mcphub`,
+        `Hedge: launchd still has the job dev.fleet.nightly of an earlier Fleet or Hedge turned on, so it starts again at the next login. Turn it off with: launchctl disable gui/${uid}/dev.fleet.nightly`,
+        "Hedge: stopped and turned off the launchd job dev.hedge.update of an earlier Fleet or Hedge, and kept its files.",
+        "Hedge: these launchd jobs of an earlier Fleet or Hedge are not off yet: com.fleet.mcphub, dev.fleet.nightly. Run the commands above, then run get.sh again.",
+        "",
+      ].join("\n"),
+    );
+    expect(jobs.login()).toEqual(["com.apple.other", "com.fleet.mcphub", "dev.fleet.nightly"]);
   });
 
   onLinuxHost("says so and exits 1 when a job of an earlier Fleet or Hedge does not stop", () => {
     const box = sandbox("Darwin");
-    earlierJobs(box, { keepRunning: "dev.hedge.update" });
+    earlierJobs(box, { keepRunning: ["dev.hedge.update"] });
     const result = getSh(box, []);
     expect(result.code).toBe(1);
     expect(result.output).toContain("Hedge: the launchd job dev.hedge.update of an earlier Fleet or Hedge still runs. Stop it with: launchctl bootout gui/");

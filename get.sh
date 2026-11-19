@@ -20,16 +20,21 @@ if [ "$(uname -s)" = Darwin ]; then
     target="gui/$uid/$label"
     launchctl bootout "$target" >/dev/null 2>&1 || :
     launchctl disable "$target" >/dev/null 2>&1 || :
+    off=yes
     loaded=0
     launchctl print "$target" >/dev/null 2>&1 || loaded=$?
     if [ "$loaded" -ne 113 ]; then
       printf 'Hedge: %s\n' "the launchd job $label of an earlier Fleet or Hedge still runs. Stop it with: launchctl bootout $target" >&2
-      not_off="$not_off${not_off:+, }$label"
-    elif ! launchctl print-disabled "gui/$uid" 2>/dev/null | grep -F "\"$label\" =>" | grep -Eq '=> (disabled|true)$'; then
+      off=
+    fi
+    if ! launchctl print-disabled "gui/$uid" 2>/dev/null | grep -F "\"$label\" =>" | grep -Eq '=> (disabled|true)$'; then
       printf 'Hedge: %s\n' "launchd still has the job $label of an earlier Fleet or Hedge turned on, so it starts again at the next login. Turn it off with: launchctl disable $target" >&2
-      not_off="$not_off${not_off:+, }$label"
-    else
+      off=
+    fi
+    if [ -n "$off" ]; then
       printf 'Hedge: %s\n' "stopped and turned off the launchd job $label of an earlier Fleet or Hedge, and kept its files." >&2
+    else
+      not_off="$not_off${not_off:+, }$label"
     fi
   done
   if [ -n "$not_off" ]; then

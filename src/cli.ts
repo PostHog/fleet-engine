@@ -58,6 +58,8 @@ const usage = `Hedge: one setup for T3 Code, agents, and your workflows
                      Change settings
   hedge devbox [add|remove <ssh host>]
                      List your devboxes, make an SSH host one, or remove one you replaced
+  hedge devbox address
+                     Print this machine's T3 Connect address
   hedge hub here [<ssh name>]
                      Make this machine the hub of your profile
   hedge hub status   Show this machine's name and the hub
@@ -70,7 +72,7 @@ const usage = `Hedge: one setup for T3 Code, agents, and your workflows
   hedge <command>    Run a command that one of your packs ships`;
 
 const changes = { packs: packsCommand, settings: settingsCommand, set: setCommand };
-const builtins: Record<string, string[]> = { apply: [], doctor: [], update: [], packs: [], settings: [], set: [], hub: ["here", "status"], devbox: ["add", "remove"], run: [], credential: [], setup: [], triage: [] };
+const builtins: Record<string, string[]> = { apply: [], doctor: [], update: [], packs: [], settings: [], set: [], hub: ["here", "status"], devbox: ["add", "remove", "address"], run: [], credential: [], setup: [], triage: [] };
 
 
 export async function main(argv: string[], options: CliOptions): Promise<number> {

@@ -631,26 +631,19 @@ person says yes, and it can go at once.
 T3 Code on the Mac and the phone reaches the hub and the nodes through T3
 Connect. Ask the person to open T3 Code's **Settings → Environments** and
 check that the hub and each node are listed. When one is missing, pair it
-through its T3 Connect address, as `hedge devbox add` links the boxes. Read
+through its T3 Connect address, as `hedge devbox add` links the boxes. Print
 the address on that box:
 
 ```sh
-ssh coder.<name> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; t3 connect status --json'
+ssh coder.<name> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge devbox address'
 ```
 
-The address is `https://` and its `tunnelHostname`. When `authenticated` or
-`linked` is not `true`, T3 Connect does not run there yet: start it on that
-box as in item 5 of step 7, give the person its sign-in link, and read the
-status again. When it is linked but has no `tunnelHostname`, the T3 Code on
-that box is too old to report its address. Stop, and make no token. Update
-T3 Code there, then read the status again:
-
-```sh
-ssh coder.<name> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge agent-update'
-```
-
-When it still has no `tunnelHostname`, tell the person that T3 Code on that
-box does not report its address yet, and pair it later. Make a pairing token
+It asks the T3 Code server that runs on that box, so it finds the address
+also when `t3 connect status` does not print it. When it says that T3
+Connect is off, start it on that box as in item 5 of step 7, give the person
+its sign-in link, and run it again. When it says that T3 Code gives no
+tunnel address, stop, and make no token. Tell the person that this box does
+not report its address yet, and pair it later. Make a pairing token
 only once you have the address:
 
 ```sh

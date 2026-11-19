@@ -228,23 +228,37 @@ describe("the agent setup guide", () => {
     expect(words(hubStep())).not.toContain("This step runs only on a first setup");
   });
 
-  test("pairs a box that T3 Code does not list through its T3 Connect address and a token made there, never the loopback pairing URL", () => {
-    const pairing = step(10);
-    const code = codeIn(pairing);
-    const status = code.indexOf(`ssh coder.<name> 'export PATH="${guidePath}"; t3 connect status --json'\n`);
+  async function boxAddress(box: (home: string) => ReturnType<typeof fakeMachine>) {
+    const home = temp.make("home-");
+    expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""])).code).toBe(0);
+    const command = codeIn(step(10)).map((line) => line.match(/^ssh coder\.<name> '[^']*; hedge (devbox address)'\n$/)?.[1]).find(Boolean);
+    const io = scripted([]);
+    const code = await main(command!.split(" "), { home, engineRoot: root, platform: "linux", print: io.terminal.print, terminal: io.terminal, setup: { machine: box(home).machine } });
+    return { code, output: io.output() };
+  }
+
+  test("pairs a box that T3 Code does not list through the address its live T3 server gives, also when t3 connect status prints none, and never through the loopback pairing URL", async () => {
+    const code = codeIn(step(10));
+    const address = code.indexOf(`ssh coder.<name> 'export PATH="${guidePath}"; hedge devbox address'\n`);
     const token = code.indexOf(`ssh coder.<name> 'export PATH="${guidePath}"; t3 pair --ttl 10m --label t3-app'\n`);
-    expect([status >= 0, status < token]).toEqual([true, true]);
-    expect(words(pairing)).toContain("The address is `https://` and its `tunnelHostname`.");
-    expect(words(pairing)).toContain("Never give the `Pairing URL` it prints");
+    expect([address >= 0, address < token]).toEqual([true, true]);
+    expect(await boxAddress((home) => fakeMachine(home, {}, { connectHere: true }))).toEqual({ code: 0, output: "https://here.relay.example" });
+    expect(words(step(10))).toContain("Give the person the address and the token after `Token:`.");
+    expect(words(step(10))).toContain("Never give the `Pairing URL` it prints");
   });
 
-  test("stops at a linked box without a tunnelHostname, updates T3 Code there, and makes a pairing token only once there is an address", () => {
+  test("stops where the address lookup says it found none, makes no token without an address, and sends no box through an update", async () => {
     const pairing = words(step(10));
-    expect(pairing).toContain("When `authenticated` or `linked` is not `true`, T3 Connect does not run there yet: start it on that box as in item 5 of step 7");
-    expect(pairing).toContain("When it is linked but has no `tunnelHostname`, the T3 Code on that box is too old to report its address. Stop, and make no token. Update T3 Code there, then read the status again:");
-    expect(codeIn(step(10))).toContain(`ssh coder.<name> 'export PATH="${guidePath}"; hedge agent-update'\n`);
-    expect(pairing).not.toContain("item 3 of step 9");
-    expect(pairing.indexOf("Make a pairing token only once you have the address")).toBeGreaterThan(pairing.indexOf("no `tunnelHostname`"));
+    const off = await boxAddress((home) => fakeMachine(home));
+    const none = await boxAddress((home) => fakeMachine(home, {}, { connectHere: true, serverWithoutLinkState: ["here"] }));
+    expect([off.code, none.code]).toEqual([1, 1]);
+    expect(off.output).toContain("T3 Connect is off");
+    expect(pairing).toContain("When it says that T3 Connect is off, start it on that box as in item 5 of step 7");
+    expect(none.output).toContain("gives no tunnel address");
+    expect(pairing).toContain("When it says that T3 Code gives no tunnel address, stop, and make no token. Tell the person that this box does not report its address yet, and pair it later.");
+    expect(pairing.indexOf("Make a pairing token only once you have the address")).toBeGreaterThan(pairing.indexOf("gives no tunnel address"));
+    expect(pairing).not.toContain("agent-update");
+    expect(pairing).not.toContain("tunnelHostname");
   });
 
   test("checks each workspace with a hedge doctor that sets the guide's PATH over SSH", () => {
