@@ -117,6 +117,9 @@ describe("the landing page in a browser", () => {
       const local = [...window.document.querySelectorAll("a")].map((link) => link.getAttribute("href")!).filter((href) => !/^(https?:|#)/.test(href));
       expect([path, local.length > 3, local.filter((href) => !/\/index\.html(#.*)?$/.test(href))]).toEqual([path, true, []]);
     }
+    const packs = visit("packs/index.html", { url: "file:///tmp/site/packs/index.html" });
+    watchButton(packs, "Memory").click();
+    expect(packs.document.querySelector("dialog a")!.getAttribute("href")).toBe("memory/index.html");
   });
 });
 
@@ -217,11 +220,12 @@ describe("the pack videos in a browser", () => {
     expect([dialog(window).open, player.paused, selected(window)]).toEqual([false, true, []]);
   });
 
-  test("closing the player, as Escape and Close both do, stops the video", () => {
+  test("the Close button closes the player and stops the video", () => {
     const window = visit("packs/index.html");
     watchButton(window, "Memory").click();
     expect(video(window, "dialog video").paused).toBe(false);
-    dialog(window).close();
+    (window.document.querySelector("dialog button") as unknown as HTMLButtonElement).click();
+    expect(dialog(window).open).toBe(false);
     expect(video(window, "dialog video").paused).toBe(true);
   });
 
