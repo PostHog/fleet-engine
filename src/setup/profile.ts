@@ -27,6 +27,7 @@ export type ProfileContext = {
   draft: Draft;
   current?: string;
   packs(): PackManifest[];
+  pulled?(dir: string): Promise<void>;
   /** Called once hedge.json holds every answer and is pushed: the draft is no longer needed. */
   saved(dir: string): Promise<void>;
 };
@@ -118,6 +119,7 @@ export async function existingProfile(machine: Machine, home: string, packs: Pac
 async function makeProfile(context: ProfileContext) {
   const { terminal, machine, home, draft } = context;
   const { gh, login, exists, personal, org, team, dir, found } = await lookUp(machine, home, context.packs(), draft.packs ?? [], context.current);
+  if (found) await context.pulled?.(dir);
   const create = (repo: string, description: string) => machine.exec(["gh", "repo", "create", repo, "--private", "--description", description]);
   let profileRepo = found ?? team ?? personal;
   const saved = found ? savedSettings(dir) : {};

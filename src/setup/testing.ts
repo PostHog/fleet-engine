@@ -251,7 +251,7 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
     if (line === "claude auth status") return claudeStatus("box:claude");
     if (line === "claude -p ok") return claudeReply("box:claude");
     if (line.includes("codex exec")) return result(codexReads("box:chatgpt", line), "ok");
-    if (line.includes("/config.toml")) return result(false, "cat: config.toml: No such file or directory");
+    if (line.includes('cat "${CODEX_HOME:-$HOME/.codex}/config.toml"')) return result(false, "cat: config.toml: No such file or directory");
     if (line.startsWith("sh -c 'if [ -f ")) return result(true, Object.entries(options.boxFiles ?? {}).map(([path, text]) => `=== file ${path}\n${text}\n`).join(""));
     if (line.includes("/.config/hedge/machine.json")) return forReal(line, host, input);
     if (line.includes("/userdata/logs/boot-service.log")) return forReal(line, host, input);

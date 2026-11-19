@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { profileFile } from "../legacy.ts";
 import { join } from "node:path";
 import { loadPacks } from "../pack/manifest.ts";
 import { cachedSource, fetchSource } from "../pack/sources.ts";
@@ -52,6 +54,16 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
   const machine: MachineFile = thisMachine(await loadMachine(options.home), options.platform, options.env ?? process.env);
   const unfinished = Boolean(machine.setup?.done.length) && !checked(machine.setup?.done);
   const progress = { done: machine.setup?.done ?? [], draft: machine.profileDir ? profileDraft(await loadProfile(machine.profileDir)) : withInferred(machine.setup ?? { done: [] }) };
+  let base: Draft | undefined = machine.profileDir ? structuredClone(progress.draft) : undefined;
+  const reread = async (dir: string) => {
+    if (!base || !existsSync(profileFile(dir))) return;
+    const fresh = profileDraft(await loadProfile(dir));
+    const draft = progress.draft;
+    const merged = onTop(fresh, base, draft);
+    for (const key of Object.keys(draft) as Array<keyof Draft>) delete draft[key];
+    Object.assign(draft, merged);
+    base = structuredClone(fresh);
+  };
   const catalog = await loadCatalog(options.engineRoot, teamRefs(progress.draft), options.home);
   const remember = () => saveMachine(options.home, { ...machine, setup: machine.profileDir ? { done: progress.done } : { done: progress.done, ...withoutInferred(progress.draft) } });
   const box: Machine = { ...realMachine, ...options.machine };
@@ -123,6 +135,7 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
     const existing = await existingProfile(box, options.home, catalog.packs.map((pack) => pack.manifest), progress.draft.packs ?? catalog.teamPacks);
     if (!existing) return;
     const saved = profileDraft(existing);
+    base = structuredClone(saved);
     const sources = [...existing.sources, ...(progress.draft.sources ?? []).filter((ref) => !existing.sources.some((kept) => kept.name === ref.name))];
     await context.answer({ ...saved, ...(hasPicks(flags) ? picksFrom(flags, catalog, saved) : {}), plan: flags.plan ?? progress.draft.plan ?? saved.plan, sources, settings: { ...existing.settings, ...progress.draft.settings } });
   };
@@ -135,14 +148,17 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
     draft: progress.draft,
     ...(machine.profileDir ? { current: machine.profileDir } : {}),
     packs: () => catalog.packs.map((pack) => pack.manifest),
+    pulled: reread,
     async saved(dir) {
       machine.profileDir = dir;
+      base = structuredClone(progress.draft);
       await remember();
     },
   });
   const applyProfile = async (skip: string[]) => {
     if (!machine.profileDir || !options.apply) throw new Error("no profile to apply yet");
     await fastForward(box, options.home, machine.profileDir);
+    await reread(machine.profileDir);
     if ((await options.apply(machine.profileDir, skip)) !== 0) throw new Error("hedge apply could not set up this machine. Fix what it says above, then run hedge setup again.");
     const applied = await loadMachine(options.home);
     if (applied) Object.assign(machine, { role: applied.role }, applied.name ? { name: applied.name } : {});
@@ -188,7 +204,12 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
       ...step,
       async run() {
         const outcome = await step.run();
-        if (outcome !== "unanswered" && machine.profileDir) await saveAnswers(machine.profileDir, { settings: progress.draft.settings ?? {} }, { push: true });
+        if (outcome !== "unanswered" && machine.profileDir) {
+          await fastForward(box, options.home, machine.profileDir);
+          await reread(machine.profileDir);
+          await saveAnswers(machine.profileDir, { settings: progress.draft.settings ?? {} }, { push: true });
+          base = structuredClone(progress.draft);
+        }
         return outcome;
       },
     }),
@@ -311,6 +332,21 @@ function withoutInferred({ inferred, ...draft }: Draft): Pick<SetupProgress, "dr
   if (!inferred?.length) return { draft };
   const settings = Object.entries(draft.settings ?? {});
   return { draft: { ...draft, settings: Object.fromEntries(settings.filter(([key]) => !inferred.includes(key))) }, inferred: Object.fromEntries(settings.filter(([key]) => inferred.includes(key))) };
+}
+
+function overlay<T>(fresh: Record<string, T> | undefined, base: Record<string, T> | undefined, draft: Record<string, T> | undefined) {
+  const merged = { ...fresh };
+  for (const key of new Set([...Object.keys(base ?? {}), ...Object.keys(draft ?? {})])) {
+    if (JSON.stringify(base?.[key]) === JSON.stringify(draft?.[key])) continue;
+    if (draft && Object.hasOwn(draft, key)) merged[key] = draft[key]!;
+    else delete merged[key];
+  }
+  return merged;
+}
+
+function onTop(fresh: Draft, base: Draft, draft: Draft): Draft {
+  const ours = (key: "packs" | "plan" | "sources") => JSON.stringify(base[key]) === JSON.stringify(draft[key]) ? {} : { [key]: draft[key] };
+  return { ...fresh, ...ours("packs"), ...ours("plan"), ...ours("sources"), settings: overlay(fresh.settings, base.settings, draft.settings), workflows: overlay(fresh.workflows, base.workflows, draft.workflows), ...(draft.inferred ? { inferred: draft.inferred } : {}) };
 }
 
 function profileDraft(profile: Profile): Draft {

@@ -59,6 +59,51 @@ describe("hedge setup after a stop", () => {
   });
 });
 
+describe("hedge setup while another machine changes the profile", () => {
+  async function changeElsewhere(home: string, change: (profile: Record<string, unknown>) => void) {
+    const elsewhere = temp.make("elsewhere-");
+    await spawnGit(elsewhere, "clone", "-q", githubRepo(home, "nora/hedge-profile"), "profile");
+    const file = join(elsewhere, "profile/hedge.json");
+    const profile = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+    change(profile);
+    writeFileSync(file, `${JSON.stringify(profile, null, 2)}\n`);
+    await spawnGit(join(elsewhere, "profile"), "commit", "-q", "-am", "change on another machine");
+    await spawnGit(join(elsewhere, "profile"), "push", "-q", "origin", "main");
+  }
+
+  test("a rerun that changes one answer keeps what another machine changed meanwhile", async () => {
+    const home = temp.make("home-");
+    expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""])).code).toBe(0);
+    await changeElsewhere(home, (profile) => {
+      profile.plan = "both";
+      profile.workflows = { ...(profile.workflows as object), "elsewhere-workflow": true };
+    });
+
+    const rerun = await hedgeSetup(home, ["--non-interactive", "--remove", "pull-requests"], []);
+
+    expect(rerun.code).toBe(0);
+    const pushed = await pushedAnswers(home);
+    expect([pushed.plan, pushed.workflows?.["elsewhere-workflow"], pushed.packs?.includes("pull-requests")]).toEqual(["both", true, false]);
+    expect(rerun.output).toContain("Sign in to ChatGPT");
+  });
+
+  test("an apply-only resume runs the steps of the plan that another machine saved after the stop", async () => {
+    const home = temp.make("home-");
+    const stopped = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""], undefined, undefined, 0, "linux", () => {
+      throw new Error("apply stopped");
+    });
+    expect(stopped.code).toBe(1);
+    await changeElsewhere(home, (profile) => void (profile.plan = "codex"));
+
+    const resumed = await hedgeSetup(home, [], [""]);
+
+    expect(resumed.code).toBe(0);
+    expect(resumed.output).toContain("Sign in to ChatGPT");
+    expect(resumed.output).not.toContain("Sign in to Claude");
+    expect((await pushedAnswers(home)).plan).toBe("codex");
+  });
+});
+
 describe("hedge packs --add memory", () => {
   test("creates the private memory repo, as setup does, and points memory.repo at it", async () => {
     const { home, packs } = await packsAfterSetup();
