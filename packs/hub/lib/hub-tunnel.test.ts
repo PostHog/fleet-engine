@@ -18,6 +18,7 @@ function mac(fields: Partial<MacTunnel> & { loaded?: boolean; healthy?: number; 
     const [tool, verb, domain, path] = command;
     if (tool !== "launchctl") return { code: 127 };
     if (verb !== "print") launchd.changes.push(`${verb} ${domain}`);
+    if (domain === legacyTarget && verb === "bootout") return (launchd.legacy = "absent"), { code: 0 };
     if (domain === legacyTarget && verb === "print") return { code: launchd.legacy === "unclear" ? 127 : launchd.legacy === "absent" ? 113 : 0 };
     if (verb === "bootstrap" && launchd.legacy !== "absent") throw new Error("launchd loaded the new hub tunnel while the one from before the rename still runs");
     if (verb === "print") return { code: domain === target && launchd.running !== undefined ? 0 : 113 };
@@ -276,7 +277,7 @@ test("install starts no new tunnel while the one from before the rename runs, an
   const { deps, home, launchd } = mac({ legacy: "loaded" });
   const legacy = legacyAgent(home);
   await expect(hubTunnel("install", deps)).rejects.toThrow("The hub tunnel from before the rename, com.fleet.hub-tunnel, still runs, so Hedge did not start the new one. Run hedge retire-fleet, then hedge hub-tunnel install.");
-  expect(launchd.changes).toEqual([]);
+  expect([launchd.legacy, launchd.running, launchd.starts]).toEqual(["loaded", undefined, 0]);
   expect(existsSync(agent(home))).toBe(false);
   expect(readFileSync(legacy.path, "utf8")).toBe(legacy.content);
 });
@@ -285,7 +286,7 @@ test("when launchctl cannot tell whether the old tunnel runs, install changes no
   const { deps, home, launchd } = mac({ legacy: "unclear" });
   legacyAgent(home);
   await expect(hubTunnel("install", deps)).rejects.toThrow("com.fleet.hub-tunnel, may still run (launchctl print exit 127), so Hedge did not start the new one.");
-  expect(launchd.changes).toEqual([]);
+  expect([launchd.legacy, launchd.running, launchd.starts]).toEqual(["unclear", undefined, 0]);
   expect(existsSync(agent(home))).toBe(false);
 });
 

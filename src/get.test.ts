@@ -28,7 +28,7 @@ describe("get.sh", () => {
     const box = sandbox("Linux");
     const result = getSh(box, ["--ref", "v0.1.0", "--install-only"]);
     expect(result.code).toBe(0);
-    expect(result.output).toEndWith("Hedge: Engine ready at v0.1.0 in " + join(box.home, ".local/share/hedge/engine") + ".\n");
+    expect(result.output).toEndWith("Hedge: Engine ready at v0.1.0 in " + join(box.home, ".local/share/hedge/engine") + ".\nHedge: nothing from before the rename runs.\n");
     expect(existsSync(join(box.home, ".local/bin/gh"))).toBe(true);
     expect(existsSync(join(box.home, ".config/hedge/machine.json"))).toBe(false);
   });
