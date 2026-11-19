@@ -105,17 +105,18 @@ const agentPath = (mac: Pick<MacTunnel, "home">) => join(mac.home, "Library/Laun
 
 const legacyLabel = "com.fleet.hub-tunnel";
 
-/** Stops and deletes the agent that Hedge wrote before the rename, so it does not hold the ports beside the new one. */
-async function removeLegacyAgent(mac: MacTunnel) {
-  const path = join(mac.home, "Library/LaunchAgents", `${legacyLabel}.plist`);
-  const content = await readIfThere(path);
+/** Stops and turns off the agent that Hedge wrote before the rename, so it does not hold the ports beside the new one. Its file stays. */
+async function retireLegacyAgent(mac: MacTunnel) {
+  const content = await readIfThere(join(mac.home, "Library/LaunchAgents", `${legacyLabel}.plist`));
   if (content === undefined || !ownedBy(content, marker)) return;
-  await mac.run(["launchctl", "bootout", `gui/${mac.uid}/${legacyLabel}`]);
-  await rm(path, { force: true });
+  const target = `gui/${mac.uid}/${legacyLabel}`;
+  const loaded = async () => (await mac.run(["launchctl", "print", target])).code === 0;
+  if ((await loaded()) && ((await mac.run(["launchctl", "bootout", target])).code !== 0 || (await loaded()))) throw new Error(`launchd did not stop the hub tunnel from before the rename, so Hedge did not start the new one. Run launchctl bootout ${target}, then hedge hub-tunnel install.`);
+  if ((await mac.run(["launchctl", "disable", target])).code !== 0) throw new Error(`launchd did not turn off the hub tunnel from before the rename, so Hedge did not start the new one. Run launchctl disable ${target}, then hedge hub-tunnel install.`);
 }
 
 async function removeAgent(mac: MacTunnel) {
-  await removeLegacyAgent(mac);
+  await retireLegacyAgent(mac);
   const agent = agentPath(mac);
   await readOwned(mac.home, agent, marker, "hub tunnel");
   if (await agentLoaded(mac)) await mac.run(["launchctl", "bootout", agentTarget(mac)]);
@@ -131,7 +132,7 @@ async function withoutTunnel(mode: MacTunnelMode, mac: MacTunnel) {
 }
 
 async function install(mac: MacTunnel, ports: number[], agent: string, domain: string, loaded: () => Promise<boolean>) {
-  await removeLegacyAgent(mac);
+  await retireLegacyAgent(mac);
   const changed = await changedFiles(mac.home, [wantedAgent(mac, ports, agent)], marker, "hub tunnel");
   if (changed.length) {
     if (await loaded()) await mac.run(["launchctl", "bootout", agentTarget(mac)]);

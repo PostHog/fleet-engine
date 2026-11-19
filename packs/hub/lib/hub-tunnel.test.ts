@@ -8,14 +8,18 @@ import { fakeRun, modeOf } from "./run-testing.ts";
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
 
-function mac(fields: Partial<MacTunnel> & { loaded?: boolean; healthy?: number } = {}) {
-  const { loaded = false, healthy = 1, ...overrides } = fields;
+function mac(fields: Partial<MacTunnel> & { loaded?: boolean; healthy?: number; legacy?: "loaded" | "stuck" } = {}) {
+  const { loaded = false, healthy = 1, legacy, ...overrides } = fields;
   const home = fields.home ?? temp.make("hedge-mac-");
-  const launchd = { running: loaded ? readIfThere(agent(home)) ?? "an agent loaded before" : undefined, starts: 0 };
+  const launchd = { running: loaded ? readIfThere(agent(home)) ?? "an agent loaded before" : undefined, starts: 0, legacy: legacy ?? "absent", legacyDisabled: false };
   const target = `gui/501/${tunnelLabel}`;
+  const legacyTarget = "gui/501/com.fleet.hub-tunnel";
   const fake = fakeRun((command) => {
     const [tool, verb, domain, path] = command;
     if (tool !== "launchctl") return { code: 127 };
+    if (domain === legacyTarget && verb === "print") return { code: launchd.legacy === "absent" ? 113 : 0 };
+    if (domain === legacyTarget && verb === "bootout") return launchd.legacy === "stuck" ? { code: 5 } : ((launchd.legacy = "absent"), { code: 0 });
+    if (domain === legacyTarget && verb === "disable") return (launchd.legacyDisabled = true), { code: 0 };
     if (verb === "print") return { code: domain === target && launchd.running !== undefined ? 0 : 113 };
     if (verb === "bootout" && domain === target && launchd.running !== undefined) return (launchd.running = undefined), { code: 0 };
     if (verb === "bootstrap" && domain === "gui/501" && path && launchd.running === undefined) return (launchd.running = readFileSync(path, "utf8")), launchd.starts++, { code: 0 };
@@ -261,19 +265,36 @@ test("left reports a launch agent Hedge wrote or one that is loaded, and nothing
   expect(await hubTunnel("left", mac({ loaded: true }).deps)).toBe(0);
 });
 
-test("install stops and deletes the agent that Hedge wrote before the rename, and keeps one it did not write", async () => {
-  const { deps, home, launchd } = mac();
-  const legacy = join(home, "Library/LaunchAgents/com.fleet.hub-tunnel.plist");
-  mkdirSync(dirname(legacy), { recursive: true });
-  writeFileSync(legacy, agentPlist("/opt/bin/coder", "my-hub", [3317, 60002], "/old.log").replace("Managed by Hedge", "Managed by Fleet"));
+const legacyAgent = (home: string) => {
+  const path = join(home, "Library/LaunchAgents/com.fleet.hub-tunnel.plist");
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, agentPlist("/opt/bin/coder", "my-hub", [3317, 60002], "/old.log").replace("Managed by Hedge", "Managed by Fleet"));
+  return { path, content: readFileSync(path, "utf8") };
+};
+
+test("install stops and turns off the agent that Hedge wrote before the rename and keeps its file, and leaves one it did not write alone", async () => {
+  const { deps, home, launchd } = mac({ legacy: "loaded" });
+  const legacy = legacyAgent(home);
   expect(await hubTunnel("install", deps)).toBe(0);
-  expect(existsSync(legacy)).toBe(false);
+  expect(readFileSync(legacy.path, "utf8")).toBe(legacy.content);
+  expect(launchd.legacy).toBe("absent");
+  expect(launchd.legacyDisabled).toBe(true);
   expect(launchd.running).toBe(readFileSync(agent(home), "utf8"));
 
-  const other = mac();
+  const other = mac({ legacy: "loaded" });
   const theirs = join(other.home, "Library/LaunchAgents/com.fleet.hub-tunnel.plist");
   mkdirSync(dirname(theirs), { recursive: true });
   writeFileSync(theirs, "<plist>someone else's</plist>\n");
   expect(await hubTunnel("install", other.deps)).toBe(0);
   expect(readFileSync(theirs, "utf8")).toBe("<plist>someone else's</plist>\n");
+  expect(other.launchd.legacy).toBe("loaded");
+});
+
+test("when the agent from before the rename does not stop, install keeps it and its file and starts no second tunnel beside it", async () => {
+  const { deps, home, launchd } = mac({ legacy: "stuck" });
+  const legacy = legacyAgent(home);
+  await expect(hubTunnel("install", deps)).rejects.toThrow("launchd did not stop the hub tunnel from before the rename, so Hedge did not start the new one. Run launchctl bootout gui/501/com.fleet.hub-tunnel, then hedge hub-tunnel install.");
+  expect(readFileSync(legacy.path, "utf8")).toBe(legacy.content);
+  expect(launchd.legacy).toBe("stuck");
+  expect(launchd.starts).toBe(0);
 });
