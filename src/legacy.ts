@@ -65,10 +65,16 @@ const real = (path: string): string => {
   }
 };
 
-export function underLegacyPath(home: string, path: string): boolean {
+function underHome(home: string, path: string, inside: (relative: string) => boolean): boolean {
   const homes = new Set([resolve(home), real(home)]);
-  return [resolve(path), real(path)].some((full) => [...homes].some((root) => full.startsWith(`${root}/`) && inLegacyPath(full.slice(root.length + 1))));
+  return [resolve(path), real(path)].some((full) => [...homes].some((root) => full.startsWith(`${root}/`) && inside(full.slice(root.length + 1))));
 }
+
+export const underLegacyPath = (home: string, path: string): boolean => underHome(home, path, inLegacyPath);
+
+const legacyEngine = ".local/share/fleet/engine";
+
+export const inLegacyEngine = (home: string, path: string): boolean => underHome(home, path, (relative) => relative === legacyEngine || relative.startsWith(`${legacyEngine}/`));
 
 export function renamedPath(home: string, path: string): string | undefined {
   for (const full of [resolve(path), real(path)])

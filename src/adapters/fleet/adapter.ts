@@ -3,7 +3,7 @@ import { lstatSync, readdirSync, readFileSync, readlinkSync, statSync } from "no
 import { basename, join } from "node:path";
 import type { Finding } from "../../pack/types.ts";
 import type { Adapter } from "../../reconciler/apply.ts";
-import { legacyPaths, oldJob, underLegacyPath } from "../../legacy.ts";
+import { inLegacyEngine, legacyPaths, oldJob, underLegacyPath } from "../../legacy.ts";
 import { skipOtherHome, spawnRunner, type CommandRunner } from "../run.ts";
 import { localT3Server } from "../t3/session.ts";
 import type { T3Server } from "../t3/port.ts";
@@ -49,7 +49,7 @@ function installerIn(argv: string[]) {
 }
 
 function fleetInstaller(home: string, { argv, fleetEngine, cwd }: Running): string | undefined {
-  const fromFleet = [fleetEngine, cwd].some((path) => path?.startsWith("/") && underLegacyPath(home, path));
+  const fromFleet = (fleetEngine?.startsWith("/") && underLegacyPath(home, fleetEngine)) || (cwd?.startsWith("/") && inLegacyEngine(home, cwd));
   const installer = fromFleet ? installerIn(argv) : undefined;
   return installer && `${installer.job}: ${installer.command.slice(0, 2).join(" ")}`;
 }

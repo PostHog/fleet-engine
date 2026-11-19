@@ -515,6 +515,31 @@ describe("hedge retire-fleet", () => {
     expect(linux.systemd.units.has("hedge-watch.service")).toBe(false);
   });
 
+  test("leaves alone a package install that a person runs in another folder under a Fleet path, such as a kept Fleet worktree, and apply starts", async () => {
+    const home = oldInstall();
+    const worktree = join(home, ".local/share/fleet/worktrees/engine-fix");
+    mkdirSync(worktree, { recursive: true });
+    const proc = temp.make("proc-");
+    mkdirSync(join(proc, "4280"));
+    writeFileSync(join(proc, "4280/cmdline"), "/home/.bun/bin/bun\0install\0--frozen-lockfile\0--production\0");
+    writeFileSync(join(proc, "4280/stat"), "4280 (bun) S 1 4280 4280 0");
+    writeFileSync(join(proc, "4280/environ"), `HOME=${home}\0`);
+    symlinkSync(worktree, join(proc, "4280/cwd"));
+    const signals: string[][] = [];
+    const recordsKills: CommandRunner = async (command) => (command[0] === "kill" && signals.push(command), { code: command[0] === "kill" ? 0 : 127, stdout: "" });
+    const linux = machine("linux", home, undefined, { run: recordsKills, uid: process.getuid!(), sleep: async () => {}, processes: procProcesses(process.getuid!(), proc) });
+
+    const retired = await linux.hedge(["retire-fleet"]);
+    const applied = await linux.hedge(["apply", "--profile", profileDir(["watcher"])]);
+
+    expect(retired.code).toBe(0);
+    expect(signals).toEqual([]);
+    expect(existsSync(join(proc, "4280"))).toBe(true);
+    expect(applied.output).not.toContain("process 4280");
+    expect(applied.code).toBe(0);
+    expect(linux.systemd.units.has("hedge-watch.service")).toBe(true);
+  });
+
   test("names an old job's command by its job and process only, so arguments that can hold a secret stay out of retire, apply and doctor", async () => {
     const linux = machine("linux");
     expect((await linux.hedge(["apply", "--profile", profileDir([])])).code).toBe(0);
