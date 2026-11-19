@@ -514,7 +514,7 @@ const answerItem = /^\s*(?:[-*]\s+)?(\d+)[.):]\s+\**(fixed|rejected|known)\b/i;
 const noFinding = /^(?:#.*|no findings\.?|findings:?|\(none\))$/i;
 
 const findingsBlock = /^\s*FINDINGS\b:?/;
-const testsBlock = /^\s*(?:#+\s*)?\**TESTS:?\**:?\s*$/;
+const testsBlock = /^\s*(?:#+\s*)?\**TESTS\b/;
 const listItem = /^\s*(?:[-*]|\d+[.)])\s+(.*)/;
 const severityField = /^\**(blocker|major|minor|nit)\**$/i;
 const severityShorthand = /^\**(?:minor|nit)(?:[,:]\**|\**[,:])\s/i;

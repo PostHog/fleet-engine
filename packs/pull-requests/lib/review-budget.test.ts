@@ -947,7 +947,7 @@ test("every TESTS item needs an answer and spends review budget whatever words i
   await expect(pr.hedge("review-start", "--scope", "fixes", "--base", base)).rejects.toThrow("The review budget of 4 reviews is spent");
 });
 
-test("a prose line that starts with TESTS is no TESTS heading, so a nit below it needs no answer and spends no review budget", async () => {
+async function fixesRoundWith(findings: string) {
   const pr = await checkout();
   pr.pullRequestState({ body: graded("non-critical", "medium") });
   pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 10, "pull-requests.reviewCeiling": 1 });
@@ -956,11 +956,39 @@ test("a prose line that starts with TESTS is no TESTS heading, so a nit below it
   const panel = await cannedPanel(pr, { design: minor, others: lensAnswer("(none)") });
   const fix = await pr.commit("feature.txt", "greet the member\n");
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", panel)).output).toContain(`"round":2`);
-  await finishWith(pr, "2", "TESTS pass under Bun.\n\n- nit: feature.txt:1 the greeting could be warmer\n");
+  await finishWith(pr, "2", findings);
   await pr.commit("feature.txt", "greet every member\n");
+  return { pr, fix };
+}
+
+test("a line that starts with TESTS opens a TESTS block as it did before, so a nit below a prose TESTS line needs an answer and spends review budget", async () => {
+  const { pr, fix } = await fixesRoundWith("TESTS pass under Bun.\n\n- nit: feature.txt:1 the greeting could be warmer\n");
+
+  expect((await pr.hedge("gate")).output).toContain("review: round 2 has unanswered findings 1;");
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", fix)).rejects.toThrow("The review budget of 1 reviews is spent");
+});
+
+test("a review with a prose TESTS line and then No findings. needs no answer and spends no review budget", async () => {
+  const { pr, fix } = await fixesRoundWith("TESTS pass under Bun.\n\nNo findings.\n");
 
   expect((await pr.hedge("gate")).output).not.toContain("has unanswered findings");
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", fix)).output).toContain(`"round":3`);
+});
+
+test("a saved answer to a major below a prose TESTS line stays on the major when the review ends with an Anchor check note", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: graded("non-critical", "medium") });
+  await pr.commit("feature.txt", "new\n");
+  await pr.hedge("require", "--none", "--reason", "fixture");
+  await pr.hedge("review-start", "--scope", "full");
+  const majorFinding = "- major | feature.txt:1 | the greeting drops the name | anchor: greet";
+  const findings = ["TESTS pass under Bun.", majorFinding, ...anchorCheck(["- 1 finding quotes no anchor."])].join("\n");
+  await finishWith(pr, "1", findings);
+  const saved = "2. fixed in 1a2b3c4: the greeting names the member.\n";
+  writeFileSync(join(pr.pullRequest, "reviews/1/responses.md"), saved);
+
+  expect(answeredFindings(findings, saved).findings.map(({ text, answer }) => [text, answer?.text])).toEqual([["- 1 finding quotes no anchor.", undefined], [majorFinding, saved.trim()]]);
+  expect((await pr.hedge("gate")).output).not.toContain("unanswered findings");
 });
 
 test("a panel lens's TESTS item after its COVERED list needs an answer though it starts with nit, while the lens's nit finding needs none", async () => {
@@ -971,6 +999,19 @@ test("a panel lens's TESTS item after its COVERED list needs an answer though it
   await cannedPanel(pr, { design: `${lensAnswer("- feature.txt:1 | nit | Design | a name reads plain | rename it | anchor: greet")}TESTS:\n- nit: feature.test.ts:3 asserts the call count of greet | rewrite\n`, others: lensAnswer("(none)") });
 
   expect((await pr.hedge("gate")).output).toContain("review: round 1 has unanswered findings 2;");
+});
+
+test("a panel lens's TESTS items under a ## TESTS: ## heading need an answer and spend review budget", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: graded("non-critical", "medium") });
+  pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 10, "pull-requests.reviewCeiling": 1 });
+  await pr.commit("feature.txt", "greet\n");
+  await pr.hedge("require", "--none", "--reason", "fixture");
+  const panel = await cannedPanel(pr, { design: `${lensAnswer("- feature.txt:1 | nit | Design | a name reads plain | rename it | anchor: greet")}## TESTS: ##\n- nit: feature.test.ts:3 asserts the call count of greet | rewrite\n`, others: lensAnswer("(none)") });
+  await pr.commit("feature.txt", "greet the member\n");
+
+  expect((await pr.hedge("gate")).output).toContain("review: round 1 has unanswered findings 2;");
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", panel)).rejects.toThrow("The review budget of 1 reviews is spent");
 });
 
 test("a review that lists only minor or nit items that lead with the severity and a comma or colon needs no answer and spends no review budget, while a minor that may be a major still does", async () => {
