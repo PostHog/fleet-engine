@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { main } from "../../../src/cli.ts";
 import { tempDirs } from "../../../src/testing/git.ts";
+import { getShHarness } from "../../../src/testing/get-sh.ts";
 
+const { sandbox } = getShHarness();
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
 const onLinux = test.skipIf(process.platform !== "linux");
@@ -56,8 +57,31 @@ async function machine(arch: string, options: { corrupt?: boolean } = {}) {
     const child = Bun.spawn(["/bin/sh", join(lib, "install-node.sh"), ...args], { env: { HOME: home, PATH: path }, stdout: "pipe", stderr: "pipe" });
     return { code: await child.exited, stdout: await new Response(child.stdout).text(), stderr: await new Response(child.stderr).text() };
   };
-  return { bin, home, calls, install, downloads: () => calls().split("\n").filter((line) => line.startsWith("curl ")) };
+  return { bin, home, lib, calls, install, downloads: () => calls().split("\n").filter((line) => line.startsWith("curl ")) };
 }
+
+function throughLauncher(box: Awaited<ReturnType<typeof machine>>) {
+  const engine = temp.make("engine-");
+  for (const path of ["src", "packs", "hedge", "package.json", "presets.json"]) cpSync(join(engineRoot, path), join(engine, path), { recursive: true });
+  symlinkSync(join(engineRoot, "node_modules"), join(engine, "node_modules"));
+  copyFileSync(join(box.lib, "node.release"), join(engine, "packs/base/lib/node.release"));
+  const tools = sandbox("Linux");
+  for (const name of ["node", "npx", "curl"]) rmSync(join(tools.bin, name));
+  copyFileSync(join(box.bin, "curl"), join(tools.bin, "curl"));
+  chmodSync(join(tools.bin, "curl"), 0o755);
+  symlinkSync(Bun.which("readlink")!, join(tools.bin, "readlink"));
+  const profile = temp.make("profile-");
+  writeFileSync(join(profile, "hedge.json"), JSON.stringify({ schema: 1, engine: { repo: "PostHog/hedge", ref: "main", channel: "track" }, sources: [], packs: [], plan: "both", settings: {}, workflows: {} }));
+  mkdirSync(join(box.home, ".config/hedge"), { recursive: true });
+  writeFileSync(join(box.home, ".config/hedge/machine.json"), JSON.stringify({ schema: 1, role: "devbox", profileDir: profile }));
+  return async (args: string[]) => {
+    const child = Bun.spawn(["sh", join(engine, "hedge"), ...args], { env: { HOME: box.home, PATH: tools.bin, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" }, stdout: "pipe", stderr: "pipe" });
+    const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    return { code, output: stdout + stderr };
+  };
+}
+
+const links = (home: string) => Object.fromEntries(["node", "npm", "npx"].map((name) => [name, readlinkSync(join(home, ".local/bin", name))]));
 
 function fleetNode(home: string) {
   const fleets = join(home, `.local/share/fleet/node/node-v${version}-linux-x64/bin`);
@@ -139,25 +163,31 @@ describe("install-node.sh", () => {
     expect(readFileSync(join(fleets, "node"), "utf8")).toContain("echo fleet");
   });
 
-  onLinux("hedge apply on a devbox runs the node-runtime step while node, npm and npx link into Fleet's package, and its check passes after", async () => {
+  onLinux("hedge install-node --check, run through the launcher while node, npm and npx link into Fleet's package, exits 1 and changes nothing", async () => {
     const box = await machine("x86_64");
     fleetNode(box.home);
-    mkdirSync(join(box.home, ".config/hedge"), { recursive: true });
-    writeFileSync(join(box.home, ".config/hedge/machine.json"), JSON.stringify({ schema: 1, role: "devbox" }));
-    const profile = temp.make("profile-");
-    writeFileSync(join(profile, "hedge.json"), JSON.stringify({ schema: 1, engine: { repo: "PostHog/hedge", ref: "main", channel: "track" }, sources: [], packs: [], plan: "both", settings: {}, workflows: {} }));
-    const ran: string[][] = [];
-    const run = async (command: string[]) => {
-      if (command[1] !== join(engineRoot, "hedge") || command[2] !== "install-node") return 0;
-      ran.push(command.slice(2));
-      return (await box.install(undefined, command.slice(3))).code;
-    };
+    const hedge = throughLauncher(box);
+    const before = links(box.home);
 
-    const code = await main(["apply", "--profile", profile], { home: box.home, engineRoot, platform: "linux", env: {}, print: () => {}, run });
+    const checked = await hedge(["install-node", "--check"]);
 
-    expect(code).toBe(0);
-    expect(ran).toEqual([["install-node", "--check"], ["install-node"], ["install-node", "--check"]]);
+    expect(checked.code).toBe(1);
+    expect(links(box.home)).toEqual(before);
+    expect(existsSync(join(box.home, ".local/share/hedge/node"))).toBe(false);
+    expect(box.downloads()).toEqual([]);
+  });
+
+  onLinux("hedge apply on a devbox, run through the launcher while node, npm and npx link into Fleet's package, leaves node, npm and npx running Hedge's package", async () => {
+    const box = await machine("x86_64");
+    const fleets = fleetNode(box.home);
+    const hedge = throughLauncher(box);
+
+    const applied = await hedge(["apply"]);
+
+    expect(applied.output).toContain("Applied");
+    expect(applied.code).toBe(0);
     for (const name of ["node", "npm", "npx"]) expect(await runs(box.home, name)).toBe(`${name} ${version} linux-x64`);
+    expect(readdirSync(fleets).map((name) => readFileSync(join(fleets, name), "utf8"))).toEqual(Array(3).fill("#!/bin/sh\necho fleet\n"));
   });
 
   onLinux("installs Node.js when the node or npx on PATH is there but does not run", async () => {

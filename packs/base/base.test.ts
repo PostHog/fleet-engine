@@ -1,6 +1,9 @@
 import { beforeAll, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadPacks } from "../../src/pack/manifest.ts";
+import { apply } from "../../src/reconciler/apply.ts";
 import type { AiPlan, AvailableSource, MachineFile, Plan, Profile } from "../../src/pack/types.ts";
 import { resolve } from "../../src/reconciler/resolve.ts";
 
@@ -91,12 +94,30 @@ describe("the Base pack", () => {
     expect(plan("both").steps.find((step) => step.id === "codex-cli")).toMatchObject({ run: ["hedge", "install-codex"] });
   });
 
-  test("installs a pinned Node.js on Linux after the agent CLIs, so a skill runtime can start npx without a failed Node step holding back the rest of Base", () => {
-    for (const ai of plans) {
-      const steps = plan(ai, devbox).steps;
-      expect(steps.at(-1)).toMatchObject({ id: "node-runtime", run: ["hedge", "install-node"], check: ["hedge", "install-node", "--check"] });
-      expect(plan(ai, devbox).commands["install-node"]?.path).toEndWith("packs/base/commands/install-node.ts");
+  test.each(plans)("installs a pinned Node.js on Linux for plan %s, and a Node install that fails leaves the agent CLIs installed and passing their checks", async (ai) => {
+    const devboxPlan = plan(ai, devbox);
+    const installed = new Set<string>();
+    const launched = (command: string[]) => JSON.stringify(command[0] === "hedge" ? ["/bin/sh", join(engine.dir, "hedge"), ...command.slice(1)] : command);
+    const checks = new Map(devboxPlan.steps.flatMap((step) => (step.check ? [[launched(step.check), step.id] as const] : [])));
+    const runs = new Map(devboxPlan.steps.map((step) => [launched(step.run), step.id] as const));
+    const run = async (command: string[]) => {
+      const checked = checks.get(JSON.stringify(command));
+      if (checked) return installed.has(checked) ? 0 : 1;
+      const step = runs.get(JSON.stringify(command));
+      if (step === "node-runtime") return 1;
+      if (step) installed.add(step);
+      return 0;
+    };
+    const home = mkdtempSync(join(tmpdir(), "base-home-"));
+    try {
+      const report = await apply(devboxPlan, { home, run });
+      const agentClis = devboxPlan.steps.map((step) => step.id).filter(isAgentCli);
+      expect(agentClis.length).toBeGreaterThan(0);
+      expect(agentClis.filter((id) => installed.has(id))).toEqual(agentClis);
+      expect(report.findings.filter((finding) => finding.id.startsWith("step:")).map((finding) => finding.id)).toEqual(["step:node-runtime"]);
       expect(plan(ai).steps.map((step) => step.id)).not.toContain("node-runtime");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
     }
   });
 
