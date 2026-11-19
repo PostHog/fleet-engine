@@ -44,8 +44,10 @@
   names the paths to move aside and the variables to remove first. It
   prints no command when the hub's Coder address is plain HTTP, and says so
   when the Coder CLI could not be fetched from the hub's Coder address. It
-  runs `coder login` and `coder config-ssh` on the node under `timeout`,
-  which ends them there after 2 minutes. It removes the token when they
+  runs `coder login` and `coder config-ssh` on the node under
+  `timeout -s KILL`, which kills them there and every process they started
+  after 2 minutes. The SSH call on the hub stops 30 seconds after that,
+  for a connection that stops answering. It removes the token when they
   fail or time out, under `timeout` too, with 1 minute. When the removal
   fails or times out, it names the token and the command that removes it.
   After the node applies the profile, it asks the node's

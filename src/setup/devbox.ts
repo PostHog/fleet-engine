@@ -224,7 +224,8 @@ async function configSsh(host: string, box: Machine) {
 }
 
 const signInLimitSeconds = 120;
-const timedOut = 124;
+const hubSignInLimitMs = (signInLimitSeconds + 30) * 1000;
+const killedAtDeadline = 137;
 const tokenRemoveLimitSeconds = 60;
 const otherSignIn = 87;
 const savedElsewhere = 88;
@@ -239,12 +240,12 @@ async function signInBox(host: string, box: Machine, context: DevboxContext, add
   const name = `hedge-${Date.now().toString(36)}`;
   const token = await here.exec(["coder", "tokens", "create", "--name", name]);
   if (token.code !== 0 || !token.output.trim()) throw new Error(`Coder made no token for ${host}: ${token.output.trim()}`);
-  const login = `${signInState(address)} { [ ! -f "$d/session" ] || chmod 600 "$d/session"; } && IFS= read -r t && CODER_SESSION_TOKEN="$t" coder login --use-token-as-session "$a" && coder config-ssh --yes`;
-  const signedIn = await box.exec(["timeout", "-k", "10", String(signInLimitSeconds), "sh", "-c", login], { input: `${token.stdout.trim()}\n` });
+  const login = `${signInState(address)} { [ ! -f "$d/session" ] || chmod 600 "$d/session"; } && IFS= read -r t && CODER_SESSION_TOKEN="$t" coder login --use-token-as-session "$a" && coder config-ssh --yes; s=$?; [ $s -ne ${killedAtDeadline} ] || s=1; exit $s`;
+  const signedIn = await box.exec(["sh", "-c", `timeout -s KILL ${signInLimitSeconds} sh -c ${quote(login)}; exit $?`], { input: `${token.stdout.trim()}\n`, timeoutMs: hubSignInLimitMs });
   if (signedIn.code === 0) return;
   const removed = (await here.exec(["timeout", "-k", "10", String(tokenRemoveLimitSeconds), "coder", "tokens", "remove", name])).code === 0;
   const cleanup = removed ? "" : ` Hedge could not remove the token it made, ${name}. Remove it with coder tokens remove ${name}.`;
-  const why = [otherSignIn, savedElsewhere].includes(signedIn.code) ? ", because it is signed in another way now" : signedIn.code === timedOut ? `: coder login and coder config-ssh did not finish within ${signInLimitSeconds / 60} minutes` : `: ${signedIn.output.trim()}`;
+  const why = [otherSignIn, savedElsewhere].includes(signedIn.code) ? ", because it is signed in another way now" : signedIn.code === killedAtDeadline ? `: coder login and coder config-ssh did not finish within ${signInLimitSeconds / 60} minutes` : `: ${signedIn.output.trim()}`;
   throw new Error(`Hedge could not sign ${host} in to Coder${why}.${cleanup}`);
 }
 

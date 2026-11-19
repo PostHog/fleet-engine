@@ -63,17 +63,30 @@ describe("hedge devbox add signs the workspace in to Coder", () => {
     const { home, add } = await signedUp();
     signInOnBox(home, { url: "https://coder.example.com", session: "expired-session" });
     chmodSync(coderFile(home, "session"), 0o644);
-    expect(await add(fakeMachine(home, { "box:coder": 1 }))).toBe(0);
+    const box = fakeMachine(home, { "box:coder": 1 });
+    expect(await add(box)).toBe(0);
     expect(coderFiles(home)).toEqual({ url: "https://coder.example.com", session: coderToken });
+    expect(box.sessionModes()).toEqual(["-rw-------"]);
     expect(statSync(coderFile(home, "session")).mode & 0o777).toBe(0o600);
   });
 
-  test("and removes the token it made when timeout on the workspace ends coder login", async () => {
+  test("and removes the token it made when the deadline on the workspace kills a coder login that started, with a positive limit in seconds", async () => {
     const { home, io, add } = await signedUp();
     keepsOwnSsh(home);
     const box = fakeMachine(home, { "box:coder": 1 }, { signInTimesOut: true });
     expect(await add(box)).toBe(1);
-    expect([box.coderTokens(), sshConfig(home), coderFiles(home), box.coderArgv()]).toEqual([[], ownSshConfig, {}, "version\n"]);
+    expect(box.coderArgv().split("\n").some((line) => line.startsWith("login "))).toBe(true);
+    expect([box.coderTokens(), sshConfig(home), coderFiles(home)]).toEqual([[], ownSshConfig, {}]);
+    expect(box.timeoutLimits().map((limit) => Number.isInteger(limit) && limit > 0)).toEqual([true, true]);
+    expect(lastLine(io.output())).toBe(`hedge: Hedge could not sign ${node} in to Coder: coder login and coder config-ssh did not finish within 2 minutes.`);
+  });
+
+  test("and removes the token it made when the SSH connection stops answering after the sign-in started on the workspace", async () => {
+    const { home, io, add } = await signedUp();
+    const box = fakeMachine(home, { "box:coder": 1 }, { signInConnectionStalls: true });
+    expect(await add(box)).toBe(1);
+    expect(box.coderArgv().split("\n").some((line) => line.startsWith("login "))).toBe(true);
+    expect(box.coderTokens()).toEqual([]);
     expect(lastLine(io.output())).toBe(`hedge: Hedge could not sign ${node} in to Coder: coder login and coder config-ssh did not finish within 2 minutes.`);
   });
 
@@ -90,6 +103,7 @@ describe("hedge devbox add signs the workspace in to Coder", () => {
     const box = fakeMachine(home, { "box:coder": 1 }, { signInTimesOut: true, coderTokenRemoveHangs: true });
     expect(await add(box)).toBe(1);
     const [name] = box.coderTokens();
+    expect([box.coderTokens(), box.timeoutLimits().map((limit) => Number.isInteger(limit) && limit > 0)]).toEqual([[name], [true, true]]);
     expect(lastLine(io.output())).toBe(`hedge: Hedge could not sign ${node} in to Coder: coder login and coder config-ssh did not finish within 2 minutes. Hedge could not remove the token it made, ${name}. Remove it with coder tokens remove ${name}.`);
   });
 
