@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawnAsync } from "../../../src/testing/spawn.ts";
@@ -704,6 +704,8 @@ test("a review takes over the budget lock of a hedge proof command that crashed,
 test.each(["hedge-proof-checkout-", "hedge-proof-o'brien-"])("a budget lock whose holder crashed and whose takeovers all crashed midway names the command that clears it, and the next review runs once that command ran, in a home named %s", async (prefix) => {
   const pr = await checkout(prefix);
   const { panel, reviews, lock } = await fixesRoundDue(pr);
+  const listing = () => readdirSync(reviews).sort();
+  const before = listing();
   await stuckRoundLock(reviews, 10);
   const stuckStart = () => pr.hedge("review-start", "--scope", "fixes", "--base", panel).then(() => "", (error: Error) => error.message);
   const stuck = await stuckStart();
@@ -712,6 +714,7 @@ test.each(["hedge-proof-checkout-", "hedge-proof-o'brien-"])("a budget lock whos
   expect(stuck).toContain(`The lock ${lock} is stuck: its holder is gone, and 10 takeovers of it stopped before they ended. Check that no hedge proof command runs on this PR, then run rm -f `);
   expect(await stuckStart()).toContain(`The lock ${lock} is stuck`);
   expect((await spawnAsync(["sh", "-c", clear])).exitCode).toBe(0);
+  expect(listing()).toEqual(before);
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", panel)).output).toContain(`"round":2`);
 });
 
@@ -942,6 +945,22 @@ test("every TESTS item needs an answer and spends review budget whatever words i
   const gate = (await pr.hedge("gate")).output;
   for (const round of ["2", "3", "4", "5"]) expect(gate).toContain(`review: round ${round} has unanswered findings 2;`);
   await expect(pr.hedge("review-start", "--scope", "fixes", "--base", base)).rejects.toThrow("The review budget of 4 reviews is spent");
+});
+
+test("a prose line that starts with TESTS is no TESTS heading, so a nit below it needs no answer and spends no review budget", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: graded("non-critical", "medium") });
+  pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 10, "pull-requests.reviewCeiling": 1 });
+  await pr.commit("feature.txt", "greet\n");
+  await pr.hedge("require", "--none", "--reason", "fixture");
+  const panel = await cannedPanel(pr, { design: minor, others: lensAnswer("(none)") });
+  const fix = await pr.commit("feature.txt", "greet the member\n");
+  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", panel)).output).toContain(`"round":2`);
+  await finishWith(pr, "2", "TESTS pass under Bun.\n\n- nit: feature.txt:1 the greeting could be warmer\n");
+  await pr.commit("feature.txt", "greet every member\n");
+
+  expect((await pr.hedge("gate")).output).not.toContain("has unanswered findings");
+  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", fix)).output).toContain(`"round":3`);
 });
 
 test("a panel lens's TESTS item after its COVERED list needs an answer though it starts with nit, while the lens's nit finding needs none", async () => {
