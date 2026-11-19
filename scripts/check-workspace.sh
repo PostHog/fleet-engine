@@ -35,13 +35,13 @@ token() { if [ -n "${CODER_SESSION_TOKEN:-}" ]; then printf '%s\n' "$CODER_SESSI
 api() { { printf 'Coder-Session-Token: '; token; } | curl -q -fsS -H @- "$url/api/v2/$1"; }
 
 parameters=$(api "workspacebuilds/$build/parameters") || { echo "Coder did not return the parameters of the build of $name." >&2; exit 1; }
-template=$(api "templateversions/$version/rich-parameters") || { echo "Coder did not return the parameters of the template of $name." >&2; exit 1; }
+mutable=$(api "templateversions/$version/rich-parameters" | json 'print map { "$_->{name}\n" } grep { $_->{mutable} } @{ decode_json(join "", <STDIN>) }') || { echo "Coder did not return the parameters of the template of $name." >&2; exit 1; }
 
 restart="From this Mac, run: coder restart $name --parameter"
 status=0
-printf '%s' "$parameters" | TEMPLATE=$template RESTART=$restart json '
+printf '%s' "$parameters" | MUTABLE=$mutable RESTART=$restart json '
   my %got = map { $_->{name} => $_->{value} } @{ decode_json(join "", <STDIN>) };
-  my %mutable = map { $_->{name} => $_->{mutable} } @{ decode_json($ENV{TEMPLATE}) };
+  my %mutable = map { $_ => 1 } split /\n/, $ENV{MUTABLE};
   my $bad = 0;
   for my $pair (@ARGV) {
     my ($key, $value) = split /=/, $pair, 2;

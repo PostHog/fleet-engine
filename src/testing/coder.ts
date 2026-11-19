@@ -8,9 +8,9 @@ export const envToken = "session-token-from-the-environment";
 const perl = Bun.which("perl")!;
 
 export type Build = { transition?: string; status?: string; deadline?: string };
-export type Coder = { parameters: Record<string, string>; mutable: Record<string, boolean>; build?: Build; ttl?: number; token?: string };
+export type Coder = { parameters: Record<string, string>; mutable: Record<string, boolean>; defaultValue?: string; build?: Build; ttl?: number; token?: string };
 
-export function fakeCoder(temp: ReturnType<typeof tempDirs>, { parameters, mutable, build = {}, ttl, token = storedToken }: Coder) {
+export function fakeCoder(temp: ReturnType<typeof tempDirs>, { parameters, mutable, defaultValue = "", build = {}, ttl, token = storedToken }: Coder) {
   const dir = temp.make("coder-");
   const workspaces = [
     { name: "hedge-hub-2", latest_build: { id: "other-build", template_version_id: "other-version", transition: "start", status: "running" }, ttl_ms: null },
@@ -18,9 +18,9 @@ export function fakeCoder(temp: ReturnType<typeof tempDirs>, { parameters, mutab
   ];
   writeFileSync(join(dir, "list.json"), JSON.stringify(workspaces));
   writeFileSync(join(dir, "parameters.json"), JSON.stringify(Object.entries(parameters).map(([name, value]) => ({ name, value }))));
-  writeFileSync(join(dir, "rich-parameters.json"), JSON.stringify(Object.entries(mutable).map(([name, isMutable]) => ({ name, mutable: isMutable, default_value: "" }))));
+  writeFileSync(join(dir, "rich-parameters.json"), JSON.stringify(Object.entries(mutable).map(([name, isMutable]) => ({ name, mutable: isMutable, ephemeral: false, default_value: defaultValue }))));
   const stub = (name: string, body: string) => {
-    writeFileSync(join(dir, name), `#!/bin/sh\necho "${name} $*" >> "${dir}/argv.log"\n${body}\n`);
+    writeFileSync(join(dir, name), `#!/bin/sh\necho "${name} $*" >> "${dir}/argv.log"\nenv >> "${dir}/env.log"\n${body}\n`);
     chmodSync(join(dir, name), 0o755);
   };
   stub("perl", `exec "${perl}" "$@"`);
@@ -41,7 +41,7 @@ case "$url" in
 esac`);
   const check = (args: string[], env: Record<string, string> = {}) => {
     const run = Bun.spawnSync(["sh", script, "hedge-hub", ...args], { env: { PATH: `${dir}:/usr/bin:/bin`, HOME: dir, LANG: "C", ...env } });
-    return { code: run.exitCode, output: run.stdout.toString() + run.stderr.toString(), argv: readFileSync(join(dir, "argv.log"), "utf8") };
+    return { code: run.exitCode, output: run.stdout.toString() + run.stderr.toString(), argv: readFileSync(join(dir, "argv.log"), "utf8"), environment: readFileSync(join(dir, "env.log"), "utf8") };
   };
   return { check };
 }

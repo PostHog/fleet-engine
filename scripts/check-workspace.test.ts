@@ -22,6 +22,15 @@ describe("the setup guide's workspace check", () => {
     expect(result.output).not.toContain("nora@private.test");
   });
 
+  test("puts no template default into the environment or the arguments of any process it starts, and checks as before", () => {
+    const marker = "template-default-marker";
+    const result = coder({ parameters: built, mutable: template, defaultValue: marker }).check(passed);
+    expect([result.code, result.output]).toEqual([0, "ok disk_size\nok region\nok instance_type\nok dotfiles_uri\nok hedge-hub runs and stays on\n"]);
+    expect(result.environment).toContain("PATH=");
+    expect(result.argv).not.toContain(marker);
+    expect(result.environment).not.toContain(marker);
+  });
+
   test("sends the session token from CODER_SESSION_TOKEN when it is set, as coder itself does", () => {
     const result = coder({ parameters: built, mutable: template, token: envToken }).check(passed, { CODER_SESSION_TOKEN: envToken });
     expect([result.code, result.output.split("\n").at(-2)]).toEqual([0, "ok hedge-hub runs and stays on"]);
