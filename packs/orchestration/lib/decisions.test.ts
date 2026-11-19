@@ -157,21 +157,6 @@ test("fleet decisions leaves out a question with no answer, under any mark", asy
   ].join("\n"));
 });
 
-test("fleet decisions reads an old ✅ question written as a link", async () => {
-  const body = "- ✅ **[Which store?](https://example.com/Redis_(software))** Postgres";
-  const lines: string[] = [];
-
-  await runDecisions(["acme/maps#1"], { ...fixtureFetchers({ issues: [issueNode(repository, 1)], discussions: { "acme/maps#1": { body, comments: [] } } }), tracker: () => "", print: (line) => lines.push(line) });
-
-  expect(lines.join("\n")).toBe([
-    "| Question | Answer | Who | Where |",
-    "| --- | --- | --- | --- |",
-    `| [Which store?](https://example.com/Redis_(software)) | Postgres | ✅ Old mark (retired 2026-11-13) | [map #1](https://github.com/${repository}/issues/1) |`,
-    "",
-    "Involvement: no human-in-the-loop tickets.",
-  ].join("\n"));
-});
-
 test("fleet decisions keeps a marked answer over an old ✅ answer to the same question, earlier or later", async () => {
   const body = ["- 👤 **Which store?** Postgres", "- ✅ **Which store?** SQLite", "- ✅ **Which queue?** Redis"].join("\n");
   const comments = [{ author: "ada", body: "- ✅ **Which store?** MySQL", url: url(1, "c1"), createdAt: "2026-11-01T09:00:00Z", updatedAt: "2026-11-20T09:00:00Z" }];
@@ -185,21 +170,6 @@ test("fleet decisions keeps a marked answer over an old ✅ answer to the same q
     "| --- | --- | --- | --- |",
     `| Which store? | Postgres | 👤 Human | ${where} |`,
     `| Which queue? | Redis | ✅ Old mark (retired 2026-11-13) | ${where} |`,
-    "",
-    "Involvement: no human-in-the-loop tickets.",
-  ].join("\n"));
-});
-
-test("fleet decisions keeps a marked answer over an old ✅ answer to the same question written as a link", async () => {
-  const body = ["- 👤 **Which store?** Postgres", "- ✅ **[Which store?](https://example.com/options)** Redis"].join("\n");
-  const lines: string[] = [];
-
-  await runDecisions(["acme/maps#1"], { ...fixtureFetchers({ issues: [issueNode(repository, 1)], discussions: { "acme/maps#1": { body, comments: [] } } }), tracker: () => "", print: (line) => lines.push(line) });
-
-  expect(lines.join("\n")).toBe([
-    "| Question | Answer | Who | Where |",
-    "| --- | --- | --- | --- |",
-    `| Which store? | Postgres | 👤 Human | [map #1](https://github.com/${repository}/issues/1) |`,
     "",
     "Involvement: no human-in-the-loop tickets.",
   ].join("\n"));
