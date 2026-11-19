@@ -3,11 +3,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "smol-toml";
 import { tempDirs } from "../../../src/testing/git.ts";
-import { cliProxy, waitingLines, type ProxyMachine } from "./cli-proxy.ts";
+import { cliProxy, keyHelper, proxyUrl, type ProxyMachine } from "./cli-proxy.ts";
 import { balancingPlan, hedgeApply } from "./cli-proxy-testing.ts";
+import hubPack from "../pack.json";
 import { handOver, hubForward } from "./links.ts";
 import { roleHome } from "./run-testing.ts";
-import { proxyOn, readBoxSettings } from "./machine.ts";
+import { proxyOn, readBoxSettings, remoteHedge } from "./machine.ts";
 import { boxSettings, fakeCoder, fakeMachine, ok, writeHome } from "./testing.ts";
 import { tunnelUnit } from "./tunnels.ts";
 
@@ -90,46 +91,72 @@ test("a relay port on the proxy port is refused only while the workflow is on, b
   expect(hubForward(off, "box-lane")).toContain("8317:127.0.0.1:8317");
 });
 
-test("a box handed over to a proxy that serves no model yet keeps its own sign-in, and the hub says so", async () => {
+const checkLine = (id: string, kind: "todo" | "say") => {
+  const found = hubPack.checks.find((item) => item.id === id)!;
+  return kind === "todo" ? `To do: ${found.todo}` : `Fix: ${found.say}`;
+};
+
+function proxyBox(plan: "claude" | "codex", models: { ids: string[] }) {
+  const home = roleHome(temp.make("hedge-box-"), "devbox");
+  const machine: ProxyMachine = { home, uid: 1000, user: "me", plan, devboxes: [], release: { version: "", url: "", sha256: "" }, run: async () => ok, fetch: async () => Response.json({ data: models.ids.map((id) => ({ id })) }), now: () => 0, sleep: async () => {}, readStdin: async () => "", randomKey: () => clientKey, print: () => {} };
+  return { home, machine };
+}
+
+async function handOverTo(box: ReturnType<typeof proxyBox>, applyNow: () => Promise<{ code: number; stdout: string; stderr: string }>) {
   const hub = fakeMachine(temp.make("hedge-hub-"), { settings: balancing, run: async () => ({ ...ok, code: 1 }) });
   writeHome(hub.machine.home, { ".config/hedge/cli-proxy.key": `${clientKey}\n` });
-  const boxHome = roleHome(temp.make("hedge-box-"), "devbox");
-  const printed: string[] = [];
-  const box = (stdin: string): ProxyMachine => ({ home: boxHome, uid: 1000, user: "me", plan: "claude", devboxes: [], release: { version: "", url: "", sha256: "" }, run: async () => ok, fetch: async () => Response.json({ data: [], object: "list" }), now: () => 0, sleep: async () => {}, readStdin: async () => stdin, randomKey: () => clientKey, print: (line) => printed.push(line) });
-  const { coder } = fakeCoder({ ssh: async (_name, command, stdin) => (command.includes("cli-proxy connect") ? { ...ok, code: await cliProxy("connect", box(stdin ?? "")), stdout: printed.join("\n") } : ok) });
+  const sent: string[] = [];
+  const { coder } = fakeCoder({
+    ssh: async (_name, command, stdin) => {
+      sent.push(command);
+      if (command.includes("cli-proxy connect")) return { ...ok, code: await cliProxy("connect", { ...box.machine, readStdin: async () => stdin ?? "" }) };
+      if (command === remoteHedge("apply")) return applyNow();
+      return ok;
+    },
+  });
   await handOver(coder, hub.machine, "box-lane");
-  expect(hub.lines).toContain("box-lane: the proxy lists no Claude model yet, so Claude Code there keeps its own sign-in until the proxy serves it.");
-  expect(existsSync(join(boxHome, ".claude/settings.json"))).toBe(false);
+  return { lines: hub.lines, sent };
+}
+
+test("a handover runs hedge apply on the box after connect: once the pool empties, it takes off the route an earlier apply recorded, and the hub says the box keeps its own sign-in", async () => {
+  const models = { ids: ["claude-sonnet-5-5"] };
+  const box = proxyBox("claude", models);
+  const claudePlan = await balancingPlan((prefix) => temp.make(prefix), "claude");
+  const applyNow = hedgeApply(box.machine, () => claudePlan);
+  writeHome(box.home, { ".config/hedge/cli-proxy.key": `${clientKey}\n` });
+  expect((await applyNow()).code).toBe(0);
+  const settings = join(box.home, ".claude/settings.json");
+  expect(JSON.parse(readFileSync(settings, "utf8"))).toEqual({ env: { ANTHROPIC_BASE_URL: proxyUrl }, apiKeyHelper: keyHelper });
+  models.ids = [];
+  const { lines, sent } = await handOverTo(box, applyNow);
+  expect(sent.filter((command) => command.includes("cli-proxy connect") || command === remoteHedge("apply"))).toEqual([`umask 077 && ${remoteHedge("cli-proxy connect")}`, remoteHedge("apply")]);
+  expect(JSON.parse(readFileSync(settings, "utf8"))).toEqual({});
+  expect(lines).toContain("box-lane: the proxy lists no Claude model yet, so Claude Code there keeps its own sign-in until the proxy serves it.");
 });
 
-test("a handover prints only the hub's own words for a box line that is exactly a known waiting line", async () => {
-  const hub = fakeMachine(temp.make("hedge-hub-"), { settings: balancing, run: async () => ({ ...ok, code: 1 }) });
-  writeHome(hub.machine.home, { ".config/hedge/cli-proxy.key": `${clientKey}\n` });
-  const stdout = [`token=secret ${waitingLines.claude}`, `${waitingLines.codex} token=secret`, `\u001b[2J${waitingLines.claude}`, `${waitingLines.codex}\u0007`].join("\n");
-  const { coder } = fakeCoder({ ssh: async (_name, command) => (command.includes("cli-proxy connect") ? { ...ok, stdout } : ok) });
-  await handOver(coder, hub.machine, "box-lane");
-  expect(hub.lines.filter((line) => line.startsWith("box-lane:"))).toEqual([]);
-  expect(hub.lines.join("\n")).not.toContain("secret");
-  expect(hub.lines.join("\n")).not.toContain("\u001b");
-  const exact = fakeCoder({ ssh: async (_name, command) => (command.includes("cli-proxy connect") ? { ...ok, stdout: `${waitingLines.codex}\n` } : ok) });
-  await handOver(exact.coder, hub.machine, "box-lane");
-  expect(hub.lines.filter((line) => line.startsWith("box-lane:"))).toEqual(["box-lane: the proxy lists no Codex model yet, so Codex there keeps its own sign-in until the proxy serves it."]);
-});
-
-test("a box handed over on the Codex plan sends Codex through the proxy with the hedge apply that connect runs", async () => {
-  const hub = fakeMachine(temp.make("hedge-hub-"), { settings: balancing, run: async () => ({ ...ok, code: 1 }) });
-  writeHome(hub.machine.home, { ".config/hedge/cli-proxy.key": `${clientKey}\n` });
-  const boxHome = roleHome(temp.make("hedge-box-"), "devbox");
-  const fetch = async () => Response.json({ data: [{ id: "gpt-6.1-sol" }] });
+test("a box handed over on the Codex plan sends Codex through the proxy with the hedge apply that the handover runs after connect", async () => {
+  const box = proxyBox("codex", { ids: ["gpt-6.1-sol"] });
   const codexPlan = await balancingPlan((prefix) => temp.make(prefix), "codex");
-  const box = (stdin: string): ProxyMachine => {
-    const machine: ProxyMachine = { home: boxHome, uid: 1000, user: "me", plan: "codex", devboxes: [], release: { version: "", url: "", sha256: "" }, run: async () => ok, fetch, now: () => 0, sleep: async () => {}, readStdin: async () => stdin, randomKey: () => clientKey, print: () => {} };
-    hedgeApply(machine, () => codexPlan);
-    return machine;
-  };
-  const { coder } = fakeCoder({ ssh: async (_name, command, stdin) => (command.includes("cli-proxy connect") ? { ...ok, code: await cliProxy("connect", box(stdin ?? "")) } : ok) });
-  await handOver(coder, hub.machine, "box-lane");
-  expect(parse(readFileSync(join(boxHome, ".codex/config.toml"), "utf8")).model_provider).toBe("hedge-proxy");
-  expect(existsSync(join(boxHome, ".claude/settings.json"))).toBe(false);
-  expect(await cliProxy("check", box(""), "codex")).toBe(0);
+  const { lines } = await handOverTo(box, hedgeApply(box.machine, () => codexPlan));
+  expect(parse(readFileSync(join(box.home, ".codex/config.toml"), "utf8")).model_provider).toBe("hedge-proxy");
+  expect(existsSync(join(box.home, ".claude/settings.json"))).toBe(false);
+  expect(lines.filter((line) => line.startsWith("box-lane"))).toEqual([]);
+  expect(await cliProxy("check", box.machine, "codex")).toBe(0);
+});
+
+test("a handover whose hedge apply fails or times out on the box says so with the exit code and the command to see why, and goes on", async () => {
+  const box = proxyBox("claude", { ids: ["claude-sonnet-5-5"] });
+  const { lines } = await handOverTo(box, async () => ({ code: 124, stdout: `To do: ${clientKey}`, stderr: "\u001b[2J" }));
+  expect(lines.filter((line) => line.startsWith("box-lane"))).toEqual(["box-lane may keep its own sign-in: hedge apply exited 124 there. To see why, run on the hub: hedge box run box-lane -- hedge apply"]);
+  expect(lines.join("\n")).not.toContain(clientKey);
+});
+
+test("a handover prints only the hub's own words, and only for an apply line that is exactly a proxy check's To do or Fix", async () => {
+  const box = proxyBox("claude", { ids: ["claude-sonnet-5-5"] });
+  const said = async (stdout: string) => (await handOverTo(box, async () => ({ ...ok, stdout }))).lines.filter((line) => line.startsWith("box-lane"));
+  const noisy = [`token=secret ${checkLine("cli-proxy-client", "todo")}`, `${checkLine("cli-proxy-codex", "todo")} token=secret`, `\u001b[2J${checkLine("cli-proxy-client", "say")}`, `${checkLine("cli-proxy-codex", "say")}\u0007`].join("\n");
+  expect(await said(noisy)).toEqual([]);
+  expect(await said(`${checkLine("cli-proxy-codex", "todo")}\n`)).toEqual(["box-lane: the proxy lists no Codex model yet, so Codex there keeps its own sign-in until the proxy serves it."]);
+  expect(await said(`${checkLine("cli-proxy-client", "say")}\n`)).toEqual(["box-lane: Claude Code there keeps its own sign-in, because it cannot reach your own-account proxy or the proxy is not safe to use. To see why, run on the hub: hedge box run box-lane -- hedge cli-proxy check"]);
+  expect(await said(`${checkLine("cli-proxy-codex", "say")}\n`)).toEqual(["box-lane: Codex there keeps its own sign-in, because it cannot reach your own-account proxy or the proxy is not safe to use. To see why, run on the hub: hedge box run box-lane -- hedge cli-proxy check codex"]);
 });

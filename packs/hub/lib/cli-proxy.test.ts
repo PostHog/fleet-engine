@@ -37,9 +37,16 @@ beforeAll(async () => {
 
 const connecting = (fields: Partial<ProxyMachine> = {}, proxy: Proxy = {}) => {
   const box = client(fields, proxy);
-  hedgeApply(box.machine, () => balancing[box.machine.plan ?? "claude"]);
-  return box;
+  const apply = hedgeApply(box.machine, () => balancing[box.machine.plan ?? "claude"]);
+  const connectAndApply = async () => {
+    expect(await cliProxy("connect", box.machine)).toBe(0);
+    return apply();
+  };
+  return { ...box, apply, connectAndApply };
 };
+const saved = (agents: string) => `Saved the proxy key. Run hedge apply now: it sends ${agents} to your own-account proxy at ${proxyUrl}, or says why it cannot yet. Then restart open ${agents} sessions.`;
+const noClaude = "To do: Claude Code keeps its own sign-in, because the own-account proxy on the hub lists no Claude model yet.";
+const noCodex = "To do: Codex keeps its own sign-in, because the own-account proxy on the hub lists no Codex model yet.";
 
 function connected(home: string, settings: Record<string, unknown> = {}) {
   mkdirSync(join(home, ".config/hedge"), { recursive: true });
@@ -289,75 +296,75 @@ test("on the both plan the doctor still asks for Claude subscriptions, and count
   expect(claudeOnly.printed.join("\n")).toContain("with 2 of your own Claude subscriptions.");
 });
 
-test("connect on a Codex plan checks the proxy for a Codex model, and hedge apply sends Codex to the proxy and leaves Claude Code alone", async () => {
-  const { machine, home, printed } = connecting({ plan: "codex" }, { models: ["gpt-6.1-sol"] });
+test("connect on a Codex plan saves the key and changes no setting, and the next hedge apply sends Codex to the proxy and leaves Claude Code alone", async () => {
+  const { machine, home, printed, calls, apply } = connecting({ plan: "codex" }, { models: ["gpt-6.1-sol"] });
   codexRouted(home, mine);
   expect(await cliProxy("connect", machine)).toBe(0);
   expect(readFileSync(keyFile(home), "utf8")).toBe(`${clientKey}\n`);
+  expect(readCodex(home)).toEqual(mine);
+  expect(calls).toEqual([]);
+  expect(printed).toEqual([saved("Codex")]);
+  expect((await apply()).code).toBe(0);
   expect(readCodex(home)).toEqual({ ...mine, model_provider: "hedge-proxy", model_providers: { ...mine.model_providers, "hedge-proxy": hedgeProxy } });
   expect(existsSync(settingsFile(home))).toBe(false);
-  expect(printed.at(-1)).toBe(`Codex uses your own-account proxy at ${proxyUrl} now. Restart open Codex sessions.`);
   expect(await cliProxy("check", machine, "codex")).toBe(0);
 
-  const noCodex = connecting({ plan: "codex" });
-  expect(await cliProxy("connect", noCodex.machine)).toBe(0);
-  expect(noCodex.printed.at(-1)).toBe(`The proxy at ${proxyUrl} lists no Codex model. Add one of your own Codex subscriptions to the hub's proxy. hedge apply keeps Codex on its own sign-in until the proxy serves it.`);
-  expect(readFileSync(keyFile(noCodex.home), "utf8")).toBe(`${clientKey}\n`);
-  expect(existsSync(codexFile(noCodex.home))).toBe(false);
-  expect(await cliProxy("check", noCodex.machine, "codex")).toBe(4);
+  const waiting = connecting({ plan: "codex" });
+  expect((await waiting.connectAndApply()).stdout).toContain(noCodex);
+  expect(readFileSync(keyFile(waiting.home), "utf8")).toBe(`${clientKey}\n`);
+  expect(existsSync(codexFile(waiting.home))).toBe(false);
+  expect(await cliProxy("check", waiting.machine, "codex")).toBe(4);
 
   const theirs = connecting({ plan: "codex" }, { models: ["gpt-6.1-sol"] });
   codexRouted(theirs.home, { ...mine, model_provider: "work" });
-  expect(await cliProxy("connect", theirs.machine)).toBe(0);
+  expect((await theirs.connectAndApply()).stdout).toContain("Note: Kept your model_provider in .codex/config.toml. Run hedge apply --adopt .codex/config.toml to take Hedge's value.");
   expect(readCodex(theirs.home)).toEqual({ ...mine, model_provider: "work" });
-  expect(theirs.printed).toContain("Note: Kept your model_provider in .codex/config.toml. Run hedge apply --adopt .codex/config.toml to take Hedge's value.");
-  expect(theirs.printed.at(-1)).toBe("Codex keeps its own sign-in. The hedge apply report above says why.");
 });
-test("connect on the both plan sends Claude Code to the proxy through hedge apply, and Codex too while the proxy serves it", async () => {
+test("after connect on the both plan, hedge apply sends Claude Code to the proxy, and Codex too while the proxy serves it", async () => {
   const served = connecting({ plan: "both" }, { models: ["claude-sonnet-5-5", "gpt-6.1-sol"] });
-  expect(await cliProxy("connect", served.machine)).toBe(0);
+  expect((await served.connectAndApply()).code).toBe(0);
+  expect(served.printed).toEqual([saved("Claude Code and Codex")]);
   expect(readJson(settingsFile(served.home)).apiKeyHelper).toBe(keyHelper);
   expect(readCodex(served.home)).toEqual({ model_provider: "hedge-proxy", model_providers: { "hedge-proxy": hedgeProxy } });
 
   const claudeOnly = connecting({ plan: "both" });
-  expect(await cliProxy("connect", claudeOnly.machine)).toBe(0);
+  expect((await claudeOnly.connectAndApply()).stdout).toContain(noCodex);
   expect(readJson(settingsFile(claudeOnly.home)).apiKeyHelper).toBe(keyHelper);
   expect(existsSync(codexFile(claudeOnly.home))).toBe(false);
-  expect(claudeOnly.printed.join("\n")).toContain("lists no Codex model. Add one of your own Codex subscriptions to the hub's proxy. hedge apply keeps Codex on its own sign-in until the proxy serves it.");
 });
-test("connect never selects a hedge-proxy table of yours, such as one that cannot reach the proxy with this machine's key", async () => {
+test("hedge apply after connect never selects a hedge-proxy table of yours, such as one that cannot reach the proxy with this machine's key", async () => {
   const { auth: _auth, ...keyless } = hedgeProxy;
   const config = { model_providers: { "hedge-proxy": keyless } };
   for (const plan of ["codex", "both"] as const) {
     const box = connecting({ plan }, { models: ["claude-sonnet-5-5", "gpt-6.1-sol"] });
     codexRouted(box.home, config);
-    expect(await cliProxy("connect", box.machine)).toBe(0);
+    expect((await box.connectAndApply()).stdout).toContain("Fix: Codex cannot reach your own-account proxy");
     expect(readCodex(box.home)).toEqual(config);
-    expect(box.printed.at(-1)).toBe("Codex keeps its own sign-in. The hedge apply report above says why.");
   }
 });
-test("on the both plan, a Codex config that hedge apply cannot write fails connect with apply's reason, and keeps both settings files as they were", async () => {
-  const { machine, home, printed } = connecting({ plan: "both" }, { models: ["claude-sonnet-5-5", "gpt-6.1-sol"] });
+test("on the both plan, a Codex config that hedge apply cannot write fails the apply after connect, and keeps both settings files as they were", async () => {
+  const { home, connectAndApply } = connecting({ plan: "both" }, { models: ["claude-sonnet-5-5", "gpt-6.1-sol"] });
   codexRouted(home, mine);
   chmodSync(join(home, ".codex"), 0o500);
+  let applied;
   try {
-    await expect(cliProxy("connect", machine)).rejects.toThrow("Saved the key, but hedge apply exited 1");
+    applied = await connectAndApply();
   } finally {
     chmodSync(join(home, ".codex"), 0o700);
   }
+  expect(applied.code).toBe(1);
+  expect(applied.stderr).toContain("EACCES");
   expect(existsSync(settingsFile(home))).toBe(false);
   expect(readCodex(home)).toEqual(mine);
-  expect(printed.join("\n")).toContain("EACCES");
 });
-test("connect leaves a Codex config behind a link, and still sends Claude Code to the proxy", async () => {
-  const { machine, home, printed } = connecting({ plan: "both" }, { models: ["claude-sonnet-5-5", "gpt-6.1-sol"] });
+test("hedge apply after connect leaves a Codex config behind a link, and still sends Claude Code to the proxy", async () => {
+  const { home, connectAndApply } = connecting({ plan: "both" }, { models: ["claude-sonnet-5-5", "gpt-6.1-sol"] });
   const outside = temp.make("elsewhere-");
   writeFileSync(join(outside, "config.toml"), stringify(mine));
   symlinkSync(outside, join(home, ".codex"));
-  expect(await cliProxy("connect", machine)).toBe(0);
+  expect((await connectAndApply()).stdout).toContain(`Note: Kept .codex/config.toml because ${join(home, ".codex")} is a link.`);
   expect(parse(readFileSync(join(outside, "config.toml"), "utf8"))).toEqual(mine);
   expect(readJson(settingsFile(home)).apiKeyHelper).toBe(keyHelper);
-  expect(printed.at(-1)).toBe("Codex keeps its own sign-in. The hedge apply report above says why.");
 });
 test("on a devbox, plan names the agents that the plan sends through the proxy", async () => {
   for (const [ai, agents] of [["claude", "Claude Code uses"], ["codex", "Codex uses"], ["both", "Claude Code and Codex use"]] as const) {
@@ -378,45 +385,44 @@ test("the doctor finds a changed unit and a proxy that listens beyond loopback",
   await expect(cliProxy("doctor", open.machine)).rejects.toThrow("loopback only");
 });
 
-test("connect on a devbox checks the key against the proxy first, then saves it privately, and hedge apply sends Claude Code to the proxy", async () => {
-  const { machine, home, requests, printed } = connecting();
+test("connect on a devbox checks the key against the proxy first, then saves it privately and runs nothing, and the next hedge apply sends Claude Code to the proxy", async () => {
+  const { machine, home, requests, printed, calls, apply } = connecting();
   mkdirSync(join(home, ".claude"), { recursive: true });
   writeFileSync(settingsFile(home), JSON.stringify({ model: "opus", env: { MY_FLAG: "1" } }));
   expect(await cliProxy("connect", machine)).toBe(0);
   expect(requests[0]).toEqual({ path: "/v1/models", method: "GET", auth: `Bearer ${clientKey}` });
   expect(readFileSync(keyFile(home), "utf8")).toBe(`${clientKey}\n`);
   expect(modeOf(statSync(keyFile(home)))).toBe("600");
+  expect(readJson(settingsFile(home))).toEqual({ model: "opus", env: { MY_FLAG: "1" } });
+  expect(calls).toEqual([]);
+  expect(printed).toEqual([saved("Claude Code")]);
+  expect((await apply()).code).toBe(0);
   expect(readJson(settingsFile(home))).toEqual({ model: "opus", env: { MY_FLAG: "1", ANTHROPIC_BASE_URL: proxyUrl }, apiKeyHelper: keyHelper });
   expect(readFileSync(settingsFile(home), "utf8")).not.toContain(clientKey);
-  expect(printed.at(-1)).toBe(`Claude Code uses your own-account proxy at ${proxyUrl} now. Restart open Claude Code sessions.`);
 });
 test("connect to a proxy that holds none of your subscriptions saves the key, and hedge apply keeps Claude Code on its own sign-in", async () => {
-  const { machine, home, printed } = connecting({}, { models: [] });
+  const { machine, home, connectAndApply } = connecting({}, { models: [] });
   mkdirSync(join(home, ".claude"), { recursive: true });
   writeFileSync(settingsFile(home), JSON.stringify({ model: "opus" }));
-  expect(await cliProxy("connect", machine)).toBe(0);
+  expect((await connectAndApply()).stdout).toContain(noClaude);
   expect(readFileSync(keyFile(home), "utf8")).toBe(`${clientKey}\n`);
   expect(readJson(settingsFile(home))).toEqual({ model: "opus" });
-  expect(printed.at(-1)).toBe(`The proxy at ${proxyUrl} lists no Claude model. On the hub, run hedge cli-proxy doctor. hedge apply keeps Claude Code on its own sign-in until the proxy serves it.`);
   expect(await cliProxy("check", machine)).toBe(4);
   const refused = connecting({}, { models: [], refuses: true });
   await expect(cliProxy("connect", refused.machine)).rejects.toThrow("refuses this machine's key (HTTP 401). Nothing changed.");
   expect(existsSync(keyFile(refused.home))).toBe(false);
 });
-test("connect again after the pool empties saves the key, and hedge apply takes off the routes an earlier connect put in", async () => {
+test("connect again after the pool empties saves the key, and the next hedge apply takes off the routes an earlier apply put in", async () => {
   const proxy: Proxy = { models: ["claude-sonnet-5-5", "gpt-6.1-sol"] };
-  const { machine, home, printed } = connecting({ plan: "both" }, proxy);
-  expect(await cliProxy("connect", machine)).toBe(0);
+  const { home, connectAndApply } = connecting({ plan: "both" }, proxy);
+  expect((await connectAndApply()).code).toBe(0);
   expect(readCodex(home)).toEqual({ model_provider: "hedge-proxy", model_providers: { "hedge-proxy": hedgeProxy } });
   proxy.models = [];
-  printed.length = 0;
-  expect(await cliProxy("connect", machine)).toBe(0);
+  const emptied = await connectAndApply();
   expect(readJson(settingsFile(home))).toEqual({});
   expect(readCodex(home)).toEqual({});
-  expect(printed.slice(-2)).toEqual([
-    `The proxy at ${proxyUrl} lists no Claude model. On the hub, run hedge cli-proxy doctor. hedge apply keeps Claude Code on its own sign-in until the proxy serves it.`,
-    `The proxy at ${proxyUrl} lists no Codex model. Add one of your own Codex subscriptions to the hub's proxy. hedge apply keeps Codex on its own sign-in until the proxy serves it.`,
-  ]);
+  expect(emptied.stdout).toContain(noClaude);
+  expect(emptied.stdout).toContain(noCodex);
 });
 test("connect refuses a model list it cannot read, and saves no key", async () => {
   const refused = client({}, { modelList: '{"data":[null,{"id":7}]}' });
@@ -468,9 +474,8 @@ test("connect changes nothing for a key that is not hexadecimal or a proxy that 
   mkdirSync(join(elsewhere.home, ".claude"), { recursive: true });
   const gateway = { env: { ANTHROPIC_BASE_URL: "https://gateway.example.com" } };
   writeFileSync(settingsFile(elsewhere.home), JSON.stringify(gateway));
-  expect(await cliProxy("connect", elsewhere.machine)).toBe(0);
+  expect((await elsewhere.connectAndApply()).stdout).toContain("Note: Kept your env.ANTHROPIC_BASE_URL in .claude/settings.json.");
   expect(readJson(settingsFile(elsewhere.home))).toEqual(gateway);
-  expect(elsewhere.printed.at(-1)).toBe("Claude Code keeps its own sign-in. The hedge apply report above says why.");
   await expect(cliProxy("connect", hubMachine().machine)).rejects.toThrow("The hub has its own key");
 });
 test("the check passes while the proxy answers the saved key, and keeps Claude Code on the proxy", async () => {
@@ -519,11 +524,11 @@ test("disconnect takes off the key helper and the Codex provider that fleet cli-
   writeFileSync(settingsFile(both.home), JSON.stringify(fleetClaude));
   codexRouted(both.home, fleetCodex);
 
-  expect(await cliProxy("connect", both.machine)).toBe(0);
+  const applied = await both.connectAndApply();
 
   expect(readJson(settingsFile(both.home))).toEqual(fleetClaude);
   expect(readCodex(both.home)).toEqual(fleetCodex);
-  expect(both.printed).toContain("Note: Kept your apiKeyHelper in .claude/settings.json. Run hedge apply --adopt .claude/settings.json to take Hedge's value.");
+  expect(applied.stdout).toContain("Note: Kept your apiKeyHelper in .claude/settings.json. Run hedge apply --adopt .claude/settings.json to take Hedge's value.");
 
   const left = client({ plan: "both" });
   mkdirSync(join(left.home, ".claude"), { recursive: true });
@@ -554,17 +559,16 @@ test("disconnect removes Hedge's Claude settings and the key, and says how to si
   await expect(cliProxy("disconnect", hubMachine().machine)).rejects.toThrow("own-account-balancing=off");
 });
 
-test("a linked Claude settings file stops disconnect, and hedge apply leaves it when connect runs", async () => {
-  const { machine, home, printed } = connecting();
+test("a linked Claude settings file stops disconnect, and hedge apply after connect leaves it", async () => {
+  const { machine, home, connectAndApply } = connecting();
   connected(home);
   const real = join(temp.make("real-"), "settings.json");
   writeFileSync(real, JSON.stringify({ model: "opus" }));
   rmSync(settingsFile(home));
   symlinkSync(real, settingsFile(home));
   await expect(cliProxy("disconnect", machine)).rejects.toThrow("Keep linked Claude settings path");
-  expect(await cliProxy("connect", machine)).toBe(0);
+  expect((await connectAndApply()).stdout).toContain("Note: Kept .claude/settings.json because it is a link.");
   expect(readJson(real)).toEqual({ model: "opus" });
-  expect(printed.at(-1)).toBe("Claude Code keeps its own sign-in. The hedge apply report above says why.");
 });
 test("install refuses a linked auth folder or binary before it changes modes or runs anything", async () => {
   const auth = hubMachine();
@@ -598,8 +602,8 @@ test("install that fails after it writes a new management key restarts the proxy
   expect(calls).not.toContain("systemctl --user restart hedge-cli-proxy.service");
 });
 
-test("connect keeps Claude settings that change while it checks the proxy", async () => {
-  const { machine, home } = connecting();
+test("hedge apply after connect keeps Claude settings that change while connect checks the proxy", async () => {
+  const { machine, home, connectAndApply } = connecting();
   mkdirSync(join(home, ".claude"), { recursive: true });
   writeFileSync(settingsFile(home), JSON.stringify({ model: "opus" }));
   const fetch = machine.fetch;
@@ -607,7 +611,7 @@ test("connect keeps Claude settings that change while it checks the proxy", asyn
     writeFileSync(settingsFile(home), JSON.stringify({ model: "opus", permissions: { deny: ["Bash(rm:*)"] }, env: { MY_FLAG: "2" } }));
     return fetch(input, init);
   };
-  expect(await cliProxy("connect", machine)).toBe(0);
+  expect((await connectAndApply()).code).toBe(0);
   expect(readJson(settingsFile(home))).toEqual({ model: "opus", permissions: { deny: ["Bash(rm:*)"] }, env: { MY_FLAG: "2", ANTHROPIC_BASE_URL: proxyUrl }, apiKeyHelper: keyHelper });
 });
 

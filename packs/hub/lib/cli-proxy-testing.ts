@@ -4,7 +4,7 @@ import { providerConfigAdapter } from "../../../src/adapters/provider-config/ada
 import type { AiPlan, MachineFile, Plan } from "../../../src/pack/types.ts";
 import { apply } from "../../../src/reconciler/apply.ts";
 import { devbox, engineSource, resolveEngine, skillSources } from "../../../src/testing/packs.ts";
-import { applyCommand, cliProxy, proxyUrl, type ProxyMachine } from "./cli-proxy.ts";
+import { cliProxy, proxyUrl, type ProxyMachine } from "./cli-proxy.ts";
 import { fakeRun, roleHome } from "./run-testing.ts";
 
 export const clientKey = "c1".repeat(32);
@@ -79,12 +79,9 @@ const label = (finding: { todo?: true; repair?: string }) => (finding.todo || fi
 
 export function hedgeApply(machine: ProxyMachine, plan: () => Plan) {
   const quiet: ProxyMachine = { ...machine, print: () => {} };
-  const run = async () => {
+  return async () => {
     const report = await apply(plan(), { home: machine.home, adapters: [providerConfigAdapter()], run: hedgeProxy(quiet, plan().engineRoot) }).catch((error: Error) => error);
     if (report instanceof Error) return { code: 1, stdout: "", stderr: `hedge: ${report.message}\n` };
     return { report, code: report.ok ? 0 : 1, stdout: report.findings.map((finding) => `${label(finding)}: ${finding.say}\n`).join(""), stderr: "" };
   };
-  const outer = machine.run;
-  machine.run = async (command, options) => (command.join(" ") === applyCommand.join(" ") ? run() : outer(command, options));
-  return run;
 }

@@ -329,13 +329,17 @@ describe("the Own-account balancing workflow", () => {
     const applyOff = () => applyWith(proxyOnly(plan({ packs: ["hub"], plan: "both" }, devbox)));
     const codex = () => parse(readFileSync(join(home, ".codex/config.toml"), "utf8"));
     const claude = () => JSON.parse(readFileSync(join(home, ".claude/settings.json"), "utf8"));
-    return { machine, on, printed, applyWith, applyOff, codex, claude };
+    const connectAndApply = async () => {
+      expect(await cliProxy("connect", machine)).toBe(0);
+      return applyNow();
+    };
+    return { machine, on, printed, applyWith, applyOff, codex, claude, connectAndApply };
   };
   const helper = 'cat "$HOME/.config/hedge/cli-proxy.key"';
 
-  test("on a devbox, connect routes Claude Code and Codex through hedge apply, and turning balancing off takes both routes off at the next apply", async () => {
-    const { machine, applyOff, codex, claude } = connectedDevbox();
-    expect(await cliProxy("connect", machine)).toBe(0);
+  test("on a devbox, the hedge apply after connect routes Claude Code and Codex, and turning balancing off takes both routes off at the next apply", async () => {
+    const { applyOff, codex, claude, connectAndApply } = connectedDevbox();
+    expect((await connectAndApply()).code).toBe(0);
     expect(codex()).toEqual({ model_provider: "hedge-proxy", model_providers: { "hedge-proxy": codexProviderTable } });
     expect(claude()).toEqual({ env: { ANTHROPIC_BASE_URL: proxyUrl }, apiKeyHelper: helper });
     expect((await applyOff()).code).toBe(0);
@@ -343,38 +347,46 @@ describe("the Own-account balancing workflow", () => {
     expect(claude()).toEqual({});
   });
 
-  test("after an earlier apply wrote only the hedge-proxy Codex table, connect selects it, and turning balancing off takes the table and the selector off together", async () => {
-    const { machine, on, applyWith, applyOff, codex } = connectedDevbox({ ".config/hedge/cli-proxy.key": `${clientKey}\n` });
+  test("after an earlier apply wrote only the hedge-proxy Codex table, the apply after connect selects it, and turning balancing off takes the table and the selector off together", async () => {
+    const { on, applyWith, applyOff, codex, connectAndApply } = connectedDevbox({ ".config/hedge/cli-proxy.key": `${clientKey}\n` });
     expect((await applyWith({ ...on, config: on.config.filter((entry) => entry.key !== "model_provider") })).code).toBe(0);
     expect(codex()).toEqual({ model_providers: { "hedge-proxy": codexProviderTable } });
-    expect(await cliProxy("connect", machine)).toBe(0);
+    expect((await connectAndApply()).code).toBe(0);
     expect(codex()).toEqual({ model_provider: "hedge-proxy", model_providers: { "hedge-proxy": codexProviderTable } });
     expect((await applyOff()).code).toBe(0);
     expect(codex()).toEqual({});
   });
 
-  test("connect beside a hedge-proxy Codex table of your own with another name selects nothing, and turning balancing off leaves your table", async () => {
+  test("while Hedge owns only the hedge-proxy Codex table and you own the selector, turning balancing off keeps the table and says what to remove", async () => {
+    const { machine, on, applyWith, applyOff, codex } = connectedDevbox({ ".config/hedge/cli-proxy.key": `${clientKey}\n` });
+    expect((await applyWith({ ...on, config: on.config.filter((entry) => entry.key !== "model_provider") })).code).toBe(0);
+    writeFileSync(join(machine.home, ".codex/config.toml"), stringify({ model_provider: "hedge-proxy", model_providers: { "hedge-proxy": codexProviderTable } }));
+    const kept = await applyOff();
+    expect(codex()).toEqual({ model_provider: "hedge-proxy", model_providers: { "hedge-proxy": codexProviderTable } });
+    expect(kept.stdout).toContain("To do: Kept Hedge's proxy route in .codex/config.toml: without it, Codex would select a hedge-proxy provider table that is gone. Remove model_provider from .codex/config.toml, then run hedge apply to take the route out.");
+  });
+
+  test("hedge apply after connect beside a hedge-proxy Codex table of your own with another name selects nothing, and turning balancing off leaves your table", async () => {
     const mine = { model_providers: { "hedge-proxy": { ...codexProviderTable, name: "Mine" } } };
-    const { machine, printed, applyOff, codex } = connectedDevbox({ ".codex/config.toml": stringify(mine) });
-    expect(await cliProxy("connect", machine)).toBe(0);
+    const { applyOff, codex, connectAndApply } = connectedDevbox({ ".codex/config.toml": stringify(mine) });
+    expect((await connectAndApply()).stdout).toContain("Note: Kept your model_providers.hedge-proxy in .codex/config.toml.");
     expect(codex()).toEqual(mine);
-    expect(printed.at(-1)).toBe("Codex keeps its own sign-in. The hedge apply report above says why.");
     expect((await applyOff()).code).toBe(0);
     expect(codex()).toEqual(mine);
   });
 
-  test("your own hedge-proxy selector with a Codex table of your own stays, selector and table, after connect and after turning balancing off", async () => {
+  test("your own hedge-proxy selector with a Codex table of your own stays, selector and table, after connect and apply and after turning balancing off", async () => {
     const mine = { model_provider: "hedge-proxy", model_providers: { "hedge-proxy": { ...codexProviderTable, name: "Mine" } } };
-    const { machine, applyOff, codex } = connectedDevbox({ ".codex/config.toml": stringify(mine) });
-    expect(await cliProxy("connect", machine)).toBe(0);
+    const { applyOff, codex, connectAndApply } = connectedDevbox({ ".codex/config.toml": stringify(mine) });
+    expect((await connectAndApply()).code).toBe(0);
     expect(codex()).toEqual(mine);
     expect((await applyOff()).code).toBe(0);
     expect(codex()).toEqual(mine);
   });
 
   test("Hedge's Claude route beside your own ANTHROPIC_AUTH_TOKEN stays when balancing turns off, with a To do, so the token never goes to Anthropic, and leaves once you remove the token", async () => {
-    const { machine, applyOff, claude } = connectedDevbox({ ".claude/settings.json": JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: "my-token" } }) });
-    expect(await cliProxy("connect", machine)).toBe(0);
+    const { machine, applyOff, claude, connectAndApply } = connectedDevbox({ ".claude/settings.json": JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: "my-token" } }) });
+    expect((await connectAndApply()).code).toBe(0);
     const routed = { env: { ANTHROPIC_AUTH_TOKEN: "my-token", ANTHROPIC_BASE_URL: proxyUrl }, apiKeyHelper: helper };
     expect(claude()).toEqual(routed);
     const kept = await applyOff();

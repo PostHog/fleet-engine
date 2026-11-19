@@ -11,7 +11,6 @@ import { changedFiles, ownedFiles, readIfThere, removeUnits, requireInstalled, w
 import { refuseLinks, writePrivateFile, type Fetch } from "../../mcp-gateway/lib/client.ts";
 import type { Run } from "../../mcp-gateway/lib/hub.ts";
 import { isKeptForBoxes } from "../../../src/hub/names.ts";
-import { remoteLauncher } from "../../../src/hub/ssh.ts";
 import { waitsForPerson } from "../../../src/pack/types.ts";
 import { codexProvider, codexProviderTable, keyHelper } from "../../../src/adapters/provider-config/proxy-route.ts";
 import { refreshCodexCatalog } from "./codex-catalog.ts";
@@ -309,11 +308,6 @@ const missingModel = {
   codex: `The proxy at ${proxyUrl} lists no Codex model. Add one of your own Codex subscriptions to the hub's proxy.`,
 };
 
-export const waitingLines = {
-  claude: `${missingModel.claude} hedge apply keeps Claude Code on its own sign-in until the proxy serves it.`,
-  codex: `${missingModel.codex} hedge apply keeps Codex on its own sign-in until the proxy serves it.`,
-};
-
 function unserved(models: string[] | string, provider: "claude" | "codex"): string | undefined {
   if (typeof models === "string") return models;
   return models.some(servedModel[provider]) ? undefined : missingModel[provider];
@@ -350,11 +344,6 @@ async function leaveClaude(home: string): Promise<void> {
   if (ownHelper(settings.apiKeyHelper)) delete settings.apiKeyHelper;
   if (JSON.stringify(settings) !== before) await replaceUnchanged(path, text, `${JSON.stringify(settings, null, 2)}\n`);
 }
-
-const claudeRouted = async (home: string) => {
-  const { settings } = await readClaude(home).catch(() => ({ settings: {} as Settings }));
-  return settings.env?.ANTHROPIC_BASE_URL === proxyUrl && settings.apiKeyHelper === keyHelper;
-};
 
 async function replaceUnchanged(path: string, before: string | undefined, after: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
@@ -436,13 +425,7 @@ async function codexUnserved(home: string, models: string[] | string): Promise<s
 const reachesProxy = (table: unknown) => isObject(table) && (["base_url", "wire_api", "auth"] as const).every((field) => Bun.deepEquals(table[field], codexProviderTable[field]));
 const ownTable = (path: string) => `${path} has its own ${codexProvider} provider table, which does not reach the proxy with this machine's key.`;
 
-const codexRouted = async (home: string) => {
-  const read = await readableCodex(home);
-  return read?.config.model_provider === codexProvider && reachesProxy(read.providers?.[codexProvider]);
-};
-
-export const applyCommand = ["sh", "-c", `sh ${remoteLauncher} apply`];
-const applyLimitMs = 30 * 60_000;
+const agentNames = { claude: "Claude Code", codex: "Codex", both: "Claude Code and Codex" };
 
 async function connect(machine: ProxyMachine): Promise<void> {
   if (readRole(machine.home) === "hub") throw new Error("The hub has its own key. Run hedge cli-proxy install there.");
@@ -453,16 +436,8 @@ async function connect(machine: ProxyMachine): Promise<void> {
   await refuseLinks(machine.home, keyPath(machine.home), `${what} path`);
   await mkdir(dirname(keyPath(machine.home)), { recursive: true, mode: 0o700 });
   await writePrivateFile(keyPath(machine.home), `${key}\n`);
-  const applied = await machine.run(applyCommand, { timeoutMs: applyLimitMs });
-  for (const line of `${applied.stdout}${applied.stderr}`.split("\n").filter(Boolean)) machine.print(line);
-  if (applied.code !== 0) throw new Error(`Saved the key, but hedge apply exited ${applied.code}, so this machine may keep its own sign-in. Its report above says why. Run hedge apply again once you fixed it.`);
-  const agents: Agent[] = machine.plan === "both" ? ["claude", "codex"] : [pooled(machine.plan)];
-  for (const agent of agents) {
-    const name = agent === "claude" ? "Claude Code" : "Codex";
-    if (unserved(models, agent)) machine.print(waitingLines[agent]);
-    else if (await (agent === "claude" ? claudeRouted : codexRouted)(machine.home)) machine.print(`${name} uses your own-account proxy at ${proxyUrl} now. Restart open ${name} sessions.`);
-    else machine.print(`${name} keeps its own sign-in. The hedge apply report above says why.`);
-  }
+  const agents = agentNames[machine.plan ?? "claude"];
+  machine.print(`Saved the proxy key. Run hedge apply now: it sends ${agents} to your own-account proxy at ${proxyUrl}, or says why it cannot yet. Then restart open ${agents} sessions.`);
 }
 
 async function disconnect(machine: ProxyMachine): Promise<void> {
