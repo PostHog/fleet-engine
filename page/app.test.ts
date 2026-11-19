@@ -194,6 +194,8 @@ describe("the Packs page in a browser", () => {
 const video = (window: Window, selector: string) => window.document.querySelector(selector) as unknown as HTMLVideoElement;
 const dialog = (window: Window) => window.document.querySelector("dialog") as unknown as HTMLDialogElement;
 const accessibleName = (element: Element) => {
+  const label = element.getAttribute("aria-label");
+  if (label) return label;
   const copy = element.cloneNode(true) as Element;
   for (const hidden of copy.querySelectorAll('[aria-hidden="true"]')) hidden.remove();
   return copy.textContent!.replace(/\s+/g, " ").trim();
@@ -235,7 +237,7 @@ describe("the pack videos in a browser", () => {
     expect([dialog(window).open, player.paused, selected(window)]).toEqual([false, true, []]);
   });
 
-  test("Escape, which the browser turns into closing the dialog, stops the video", () => {
+  test("closing the player in any way, such as with Escape, stops the video", () => {
     const window = visit("packs/index.html");
     watchButton(window, "Memory").click();
     expect(video(window, "dialog video").paused).toBe(false);
@@ -279,5 +281,17 @@ describe("the pack videos in a browser", () => {
     expect(clip.paused).toBe(true);
     scrollTo(window, 1);
     expect(clip.paused).toBe(false);
+  });
+
+  test("a pack page's video that the visitor played and paused while less than half of it showed stays paused when they scroll back", () => {
+    const window = visit("packs/hub/index.html");
+    const clip = video(window, "video.clip");
+    scrollTo(window, 1);
+    scrollTo(window, 0.4);
+    expect(clip.paused).toBe(true);
+    clip.play();
+    clip.pause();
+    scrollTo(window, 1);
+    expect(clip.paused).toBe(true);
   });
 });

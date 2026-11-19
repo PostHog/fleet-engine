@@ -235,7 +235,8 @@ describe("the site build", () => {
   test("the packs page shows a Watch button on the card of each pack with a video, and no other, and has one large player", () => {
     const html = page("packs/index.html");
     const cards = html.split('<li class="pack-card').slice(1);
-    expect(cards.filter((card) => card.includes('class="watch"')).map((card) => card.match(/<a class="more" href="([a-z-]+)\/"/)![1])).toEqual(videoPacks);
+    const watches = (card: string) => [...card.matchAll(/<button\b[^>]*>([\s\S]*?)<\/button>/g)].filter((button) => visibleText(button[1]!).trim().startsWith("Watch ·"));
+    expect(cards.filter((card) => watches(card).length === 1).map((card) => card.match(/<a class="more" href="([a-z-]+)\/"/)![1])).toEqual(videoPacks);
     expect(html.match(/<dialog\b/g)).toHaveLength(1);
     expect(html.match(/<video\b/g)).toHaveLength(1);
     expect(html.match(/<dialog\b[\s\S]*?<\/dialog>/)![0]).toContain("<video");
@@ -263,7 +264,9 @@ describe("the site build", () => {
         undefined,
       ]);
       const [summary, steps] = describedBy(html, tags![0]!);
-      expect([pack.name, summary, steps]).toEqual([pack.name, pack.summary, packFlows[pack.name]!.join(" ")]);
+      const lists = [...html.matchAll(/<ol class="flow"[^>]*>([\s\S]*?)<\/ol>/g)].map((list) => visibleText(list[1]!).trim());
+      expect([pack.name, lists.length, summary, steps]).toEqual([pack.name, 1, pack.summary, lists[0]]);
+      expect([pack.name, steps]).toEqual([pack.name, packFlows[pack.name]!.join(" ")]);
       const after = html.slice(html.indexOf("<video"));
       expect([pack.name, after.includes('id="flow-h"')]).toEqual([pack.name, true]);
     }
