@@ -105,8 +105,9 @@ export const onBox = (command: string[]) => (command[0] === "ssh" ? command.at(-
  * takes every curl request which does not turn proxies off. The box's tunnel answers only after tunnelStartsAfter lookups, and the tunnel here only after hereTunnelStartsAfter.
  * Each box's T3 environment id is env-<host>, except on the hosts withoutT3, where T3 never ran.
  * T3 here lists hereLinks as its linked environments, and unlink forgets one, or fails with unlinkFails. ssh never reaches the hosts named unreachable.
+ * Codex here holds one ChatGPT credential, kept when codexProbe says it is logged in. A device sign-in drops it and, once it completes, holds a replaced one, whose test request fails with afterSignIn. codex login status fails with statusError, as when Codex cannot read its credentials store.
  */
-export function fakeMachine(home: string, polls: Partial<Record<SignInName, number>> = {}, options: { org?: boolean; createFails?: string; createFailsAfterMaking?: string; lookupFails?: string; publicRepos?: string[]; scopes?: string; failRun?: boolean; exits?: Partial<Record<SignInName, number>>; connectHere?: boolean; boxFiles?: Record<string, string>; hubDown?: boolean; hubUpdateFails?: string; boxCoderAt?: string; boxCoderSameUser?: boolean; claude?: Partial<Record<"claude" | "box:claude", ClaudeSignedIn>>; startedAt?: number; cliPrintsTunnel?: boolean; serverWithoutLinkState?: Array<"box" | "here">; runtimeOrigin?: string; runtimePid?: unknown; serverGone?: boolean; boxConnect?: { authenticated: unknown; linked: unknown }; hereConnect?: { desired?: unknown; authenticated?: unknown; linked?: unknown }; t3Home?: string; devServerUrl?: string; tunnelStartsAfter?: number; hereTunnelStartsAfter?: number; withoutT3?: string[]; hereLinks?: HereLink[]; unreachable?: string[]; unlinkFails?: string; hereStatusFailures?: number; installers?: Record<string, string>; installerEnv?: Record<string, string>; codexProbe?: { output: string; loggedIn: boolean }; codexConfig?: string } = {}) {
+export function fakeMachine(home: string, polls: Partial<Record<SignInName, number>> = {}, options: { org?: boolean; createFails?: string; createFailsAfterMaking?: string; lookupFails?: string; publicRepos?: string[]; scopes?: string; failRun?: boolean; exits?: Partial<Record<SignInName, number>>; connectHere?: boolean; boxFiles?: Record<string, string>; hubDown?: boolean; hubUpdateFails?: string; boxCoderAt?: string; boxCoderSameUser?: boolean; claude?: Partial<Record<"claude" | "box:claude", ClaudeSignedIn>>; startedAt?: number; cliPrintsTunnel?: boolean; serverWithoutLinkState?: Array<"box" | "here">; runtimeOrigin?: string; runtimePid?: unknown; serverGone?: boolean; boxConnect?: { authenticated: unknown; linked: unknown }; hereConnect?: { desired?: unknown; authenticated?: unknown; linked?: unknown }; t3Home?: string; devServerUrl?: string; tunnelStartsAfter?: number; hereTunnelStartsAfter?: number; withoutT3?: string[]; hereLinks?: HereLink[]; unreachable?: string[]; unlinkFails?: string; hereStatusFailures?: number; installers?: Record<string, string>; installerEnv?: Record<string, string>; codexProbe?: { output: string; loggedIn: boolean; statusError?: string; afterSignIn?: string }; codexConfig?: string } = {}) {
   const left: Record<SignInName, number> = { github: 0, claude: 0, chatgpt: 0, coder: 0, "box:github": 0, "box:claude": 0, "box:chatgpt": 0, "box:t3": 0, "box:coder": 0, ...polls };
   const started = new Set<SignInName>();
   const calls: Array<{ command: string[]; cwd?: string; timeoutMs?: number; input?: string }> = [];
@@ -124,6 +125,7 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
   let devbox = false;
   const passes = (name: SignInName) => left[name] === 0;
   const codexSaved: Partial<Record<SignInName, string>> = {};
+  let codexCredential = options.codexProbe?.loggedIn ? "kept" : undefined;
   const storeIn = (text: string) => /cli_auth_credentials_store\s*=\s*"([^"]*)"/.exec(text)?.[1];
   const configuredStore = (name: SignInName) => {
     const store = name === "chatgpt" && options.codexConfig !== undefined ? parseToml(options.codexConfig).cli_auth_credentials_store : undefined;
@@ -280,9 +282,11 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
       if (line.startsWith("gh api user/memberships/orgs/")) return options.org ? result(true, "active\n") : result(false, "Not Found");
       if (line === "claude auth status") return claudeStatus("claude");
       if (line === "claude -p ok") return claudeReply("claude");
+      if (line.startsWith("codex exec") && options.codexProbe?.afterSignIn && codexCredential === "replaced") return result(false, options.codexProbe.afterSignIn);
       if (line.startsWith("codex exec")) return codexReads("chatgpt", line) ? result(true, "ok") : result(false, options.codexProbe?.output ?? "ok");
       if (line.startsWith("sh -c ") && line.endsWith("/config.toml\"")) return options.codexConfig === undefined ? result(false, "cat: config.toml: No such file or directory") : result(true, options.codexConfig);
-      if (line === "codex login status") return options.codexProbe?.loggedIn ? result(true, "Logged in using ChatGPT") : result(false, "Not logged in");
+      if (line === "codex login status" && options.codexProbe?.statusError) return result(false, options.codexProbe.statusError);
+      if (line === "codex login status") return codexCredential ? result(true, "Logged in using ChatGPT") : result(false, "Not logged in");
       if (line === "coder whoami") return passes("coder") ? result(true, coderWhoami) : result(false, "You are not logged in");
       if (line === "coder whoami -o json") return passes("coder") ? result(true, coderWhoamiJson("https://coder.example.com", coderUserId)) : result(false, "You are not logged in");
       if (line === "coder tokens create") return passes("coder") ? result(true, `${coderToken}\n`) : result(false, "You are not logged in");
@@ -312,6 +316,7 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
       const signIn = (remote === undefined ? name : `box:${name}`) as SignInName;
       started.add(signIn);
       if (word === "codex") codexSaved[signIn] = storeIn(remote ?? command.join(" ")) ?? configuredStore(signIn) ?? "auto";
+      if (signIn === "chatgpt") codexCredential = undefined;
       const exit = options.exits?.[signIn];
       if (exit !== undefined) return { stop: () => {}, exited: Promise.resolve(exit) };
       let kill = () => {};
@@ -334,13 +339,14 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
       sleeps.push(ms);
       now += ms;
       for (const name of started) if (left[name] > 0) left[name]--;
+      if (started.has("chatgpt") && passes("chatgpt") && codexCredential === undefined) codexCredential = "replaced";
     },
     async openUrl(url) {
       opened.push(url);
     },
     has: () => true,
   };
-  return { machine, clock, calls, starts, runs, sleeps, opened, coderSsh, hubUpdates, credentials, hubLinked, sessions: () => [...hereSessions, ...boxSessions], hereLinks: () => hereLinks, peerLinks };
+  return { machine, clock, codexCredential: () => codexCredential, calls, starts, runs, sleeps, opened, coderSsh, hubUpdates, credentials, hubLinked, sessions: () => [...hereSessions, ...boxSessions], hereLinks: () => hereLinks, peerLinks };
 }
 
 function installerBin(home: string, installers: Record<string, string>) {

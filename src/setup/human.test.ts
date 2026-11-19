@@ -6,8 +6,8 @@ import type { FetchedSource, SourceRef } from "../pack/types.ts";
 import { isolateGit, tempDirs } from "../testing/git.ts";
 import { deadEnvironmentToken, fakeMachine, hedgeSetup, machineFile, savedAnswers, scripted } from "./testing.ts";
 import type { Machine } from "./commands.ts";
-import { humanStep, packSignIn, SignInKept } from "./human.ts";
-import { claudeProbeTimeoutMs } from "./signins.ts";
+import { humanStep, packSignIn } from "./human.ts";
+import { chatgptSignIn, claudeProbeTimeoutMs } from "./signins.ts";
 
 isolateGit();
 const temp = tempDirs();
@@ -340,7 +340,6 @@ describe("ChatGPT's device-code sign-in", () => {
 });
 
 describe("ChatGPT's check", () => {
-  const signIns = (box: ReturnType<typeof fakeMachine>) => box.starts.filter((command) => command.includes("--device-auth"));
 
   test("when Codex is signed in but its test request fails, setup reports why, keeps that sign-in, starts no new one, and ends without a crash", async () => {
     const home = temp.make("home-");
@@ -349,7 +348,8 @@ describe("ChatGPT's check", () => {
     expect(result.code).toBe(2);
     expect(result.output).toContain("  Needs you: Sign in to ChatGPT\n  Codex is signed in, but its test request failed: You hit your spend cap set by the owner of your workspace. Setup keeps that sign-in and starts no new one. Fix that, then run hedge setup again.\n");
     expect(result.output).not.toContain("hedge: ");
-    expect(signIns(box)).toEqual([]);
+    expect(result.output).not.toContain("▶ Sign in to ChatGPT");
+    expect(box.codexCredential()).toBe("kept");
   });
 
   test("a token refresh that times out is not a lost sign-in: setup keeps it and reports the failure", async () => {
@@ -358,7 +358,18 @@ describe("ChatGPT's check", () => {
     const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "codex"], ["", ""], box);
     expect(result.code).toBe(2);
     expect(result.output).toContain("Codex is signed in, but its test request failed: Failed to refresh token: error sending request for url (https://auth.openai.com/oauth/token): operation timed out. Setup keeps that sign-in");
-    expect(signIns(box)).toEqual([]);
+    expect(result.output).not.toContain("▶ Sign in to ChatGPT");
+    expect(box.codexCredential()).toBe("kept");
+  });
+
+  test("when Codex cannot read its credentials store, setup keeps the sign-in, starts no device sign-in, and says why", async () => {
+    const home = temp.make("home-");
+    const box = fakeMachine(home, { chatgpt: 99 }, { codexProbe: { output: "ERROR: You hit your spend cap.\n", loggedIn: true, statusError: "Error checking login status: failed to read auth from the keyring: Platform secure storage failure\n" } });
+    const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "codex"], ["", ""], box);
+    expect(result.code).toBe(2);
+    expect(result.output).toContain("  Needs you: Sign in to ChatGPT\n  Codex's test request failed: You hit your spend cap, and codex login status could not tell whether Codex is signed in: Error checking login status: failed to read auth from the keyring: Platform secure storage failure. Setup keeps the sign-in it may have and starts no new one. Fix that, then run hedge setup again.\n");
+    expect(result.output).not.toContain("▶ Sign in to ChatGPT");
+    expect(box.codexCredential()).toBe("kept");
   });
 
   test("starts a new sign-in when the test request says the sign-in expired, though Codex still reports one, and a later Codex session can use the new one", async () => {
@@ -366,28 +377,28 @@ describe("ChatGPT's check", () => {
     const box = fakeMachine(home, { chatgpt: 1 }, { exits: { chatgpt: 0 }, codexProbe: { output: "ERROR: unexpected status 401 Unauthorized: token expired\n", loggedIn: true } });
     const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "codex"], ["", ""], box);
     expect(result.code).toBe(0);
-    expect(signIns(box)).toHaveLength(1);
+    expect(box.codexCredential()).toBe("replaced");
     expect((await box.machine.exec(["codex", "exec", "ok"])).code).toBe(0);
+  });
+
+  const failsAfterSignIn = { exits: { chatgpt: 0 }, codexProbe: { output: "ERROR: unexpected status 401 Unauthorized\n", loggedIn: false, afterSignIn: "ERROR: You hit your spend cap.\n" } };
+  const keptAfterSignIn = "  Codex is signed in, but its test request failed: You hit your spend cap. Setup keeps that sign-in and starts no new one. Fix that, then run";
+
+  test("when the test request fails after a completed device sign-in, setup ends with code 2, keeps the new sign-in, and says to run it again", async () => {
+    const home = temp.make("home-");
+    const box = fakeMachine(home, { chatgpt: 1 }, failsAfterSignIn);
+    const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "codex"], ["", ""], box);
+    expect(result.code).toBe(2);
+    expect(result.output).toContain(`${keptAfterSignIn} hedge setup again.`);
+    expect(box.codexCredential()).toBe("replaced");
   });
 
   test("a kept sign-in names the caller's rerun command, also when its check fails only after the sign-in ended", async () => {
     const io = scripted([]);
-    let checks = 0;
-    const signIn = {
-      id: "chatgpt",
-      title: "Sign in to ChatGPT",
-      minutes: 1,
-      why: "test",
-      command: ["codex", "login", "--device-auth"],
-      async probe() {
-        if (++checks === 1) return false;
-        throw new SignInKept("Codex is signed in, but its test request failed: timed out. Setup keeps that sign-in and starts no new one.");
-      },
-    };
-    const machine = { ...fakeMachine(temp.make("home-")).machine, start: () => ({ stop: () => {}, exited: Promise.resolve(0) }) };
-    const outcome = await humanStep(signIn, { terminal: io.terminal, machine, nonInteractive: false, rerun: "hedge devbox add node-1" }).run();
+    const box = fakeMachine(temp.make("home-"), { chatgpt: 1 }, failsAfterSignIn);
+    const outcome = await humanStep(chatgptSignIn(box.machine, []), { terminal: io.terminal, machine: box.machine, nonInteractive: false, rerun: "hedge devbox add node-1" }).run();
     expect(outcome).toBe("unanswered");
-    expect(io.output()).toContain("  Codex is signed in, but its test request failed: timed out. Setup keeps that sign-in and starts no new one. Fix that, then run hedge devbox add node-1 again.");
+    expect(io.output()).toContain(`${keptAfterSignIn} hedge devbox add node-1 again.`);
   });
 });
 
