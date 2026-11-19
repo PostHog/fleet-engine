@@ -131,19 +131,35 @@ test("a lens waits for a free panel slot of the machine, and --wait restarts a l
   expect(readdirSync(slots)).toEqual([]);
 });
 
-test("a lens takes over a panel slot that a crashed worker on another machine left, so the panel never waits on it", async () => {
+test("a lens takes over a panel slot that a crashed worker on another machine left, so the panel never waits on it and the next review gets the sole slot", async () => {
   const pr = await checkout();
   await pr.commit("feature.txt", "greet\n");
   await pr.hedge("require", "--none", "--reason", "docs only");
   fakeModel(pr, "REVIEWER", clean);
   pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.panelSlots": 1 });
-  const slots = join(pr.home, ".local/state/hedge/proof/.panel-slots");
-  await (await lockHolder("slot", slots, "another-machine")).crash();
+  await (await lockHolder("slot", join(pr.home, ".local/state/hedge/proof/.panel-slots"), "another-machine")).crash();
 
   await pr.hedge("review", "--lens", "correctness");
   expect((await pr.hedge("review", "--wait")).code).toBe(0);
   expect((await pr.hedge("show")).output).not.toContain("queued");
-  expect(readdirSync(slots).filter((name) => !name.startsWith("."))).toEqual([]);
+
+  const reviewed = await pr.git("rev-parse", "HEAD");
+  await pr.commit("feature.txt", "greet the member\n");
+  await pr.hedge("review", "--lens", "correctness", "--scope", "fixes", "--base", reviewed);
+  expect((await pr.hedge("review", "--wait")).code).toBe(0);
+  expect((await pr.hedge("show", "--round", "2")).output).toContain("correctness: done by gpt");
+});
+
+test("a slot taken over from a worker on another machine stops no process here, though its process id and start time match the recorded reviewer", async () => {
+  const io = slotIO(1);
+  const bystander = Bun.spawn(["sleep", "30"], { detached: true });
+  try {
+    await (await lockHolder("slot", io.slots, "another-machine", bystander.pid)).crash();
+    await withSlot(io, async () => undefined);
+    bystander.kill("SIGTERM");
+    await bystander.exited;
+    expect(bystander.signalCode).toBe("SIGTERM");
+  } finally { bystander.kill("SIGKILL"); }
 });
 
 test("a lens reads the whole diff from the round directory and REVIEW.md from the tip of the base branch, and its findings need answers, not its COVERED list", async () => {

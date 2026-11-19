@@ -133,8 +133,11 @@
   finds the lock held stops and names the holder. hedge takes over a lock
   whose command on this machine is gone, and never one that a command on
   another machine holds: the message names the file to delete when that
-  command is gone. Panel slots and round locks keep their earlier rule: a
-  lens takes over a slot whose worker is gone, wherever that worker ran. A final read takes the next free name in the reviews
+  command is gone. A round lock follows the same rule, so a command never
+  drops a round that a command on another machine still records. A lens
+  takes over a panel slot whose worker is gone, wherever that worker ran,
+  and stops that worker's reviewer only when the worker ran on this
+  machine. A final read takes the next free name in the reviews
   directory, so a leftover directory without `round.json` never blocks it.
 
 ## v0.1.0

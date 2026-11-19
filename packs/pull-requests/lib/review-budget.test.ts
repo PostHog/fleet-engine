@@ -575,7 +575,7 @@ test("a review never takes over the budget lock of a command on another machine 
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", panel)).output).toContain(`"round":2`);
 });
 
-test("a fixes round backs out when a dropped unfinished final read is started again under the same name and phase while it weighs the budget", async () => {
+test("a fixes round backs out when a dropped unfinished final read is started again under the same name, phase, and start time while it weighs the budget", async () => {
   const pr = await checkout();
   pr.pullRequestState({ body: graded("non-critical", "medium") });
   pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 2, "pull-requests.reviewCeiling": 3 });
@@ -593,11 +593,19 @@ test("a fixes round backs out when a dropped unfinished final read is started ag
   await spawnAsync(["mkfifo", started, go]);
   pr.env.HEDGE_REVIEW_ARBITER = `cat >/dev/null; if mkdir "${pr.home}/first" 2>/dev/null; then echo > "${started}"; read line < "${go}"; fi; echo CONTINUE`;
 
+  const startedAt = () => JSON.parse(readFileSync(join(babysit.directory, "round.json"), "utf8")).startedAt;
+  const dropped = startedAt();
+
   const slow = pr.hedge("review-start", "--scope", "fixes", "--base", fix);
   await readFile(started, "utf8");
-  rmSync(babysit.directory, { recursive: true, force: true });
-  expect((await pr.hedge("review-start", "--scope", "final", "--phase", "babysit", "--base", fix)).output).toContain(`"id":"final-1"`);
-  await writeFile(go, "go\n");
+  try {
+    rmSync(babysit.directory, { recursive: true, force: true });
+    expect((await pr.hedge("review-start", "--scope", "final", "--phase", "babysit", "--base", fix)).output).toContain(`"id":"final-1"`);
+    expect(startedAt()).toBe(dropped);
+  } finally {
+    await writeFile(go, "go\n");
+    await slow.catch(() => undefined);
+  }
 
   await expect(slow).rejects.toThrow("The reviews changed while this one weighed the budget. Run this command again to weigh it anew");
   await expect(pr.hedge("show", "--round", "3")).rejects.toThrow("has no reservation");
@@ -624,11 +632,15 @@ test("a fixes round backs out when a dropped final read's name is reused in the 
 
   const slow = pr.hedge("review-start", "--scope", "fixes", "--base", fix);
   await readFile(started, "utf8");
-  rmSync(babysit.directory, { recursive: true, force: true });
-  expect((await pr.hedge("review-start", "--scope", "final", "--base", fix)).output).toContain(`"id":"final-1"`);
-  writeFileSync(join(pr.repository, "findings.md"), "- major | feature.txt:1 | the new member goes unnamed | anchor: greet the new member\n");
-  await pr.hedge("review-finish", "--round", "final-1", "--reviewer", "gpt-6.1-sol", "findings.md");
-  await writeFile(go, "go\n");
+  try {
+    rmSync(babysit.directory, { recursive: true, force: true });
+    expect((await pr.hedge("review-start", "--scope", "final", "--base", fix)).output).toContain(`"id":"final-1"`);
+    writeFileSync(join(pr.repository, "findings.md"), "- major | feature.txt:1 | the new member goes unnamed | anchor: greet the new member\n");
+    await pr.hedge("review-finish", "--round", "final-1", "--reviewer", "gpt-6.1-sol", "findings.md");
+  } finally {
+    await writeFile(go, "go\n");
+    await slow.catch(() => undefined);
+  }
 
   await expect(slow).rejects.toThrow("The reviews changed while this one weighed the budget. Run this command again to weigh it anew");
   await expect(pr.hedge("show", "--round", "3")).rejects.toThrow("has no reservation");

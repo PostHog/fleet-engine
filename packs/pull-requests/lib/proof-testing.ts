@@ -190,18 +190,19 @@ export type Checkout = Awaited<ReturnType<typeof checkout>>;
 
 export const exitedPid = async () => (await spawnAsync(["true"])).pid;
 
-const lockHolderScript = `import { roundLock, withBudgetLock, withSlot } from ${JSON.stringify(join(import.meta.dir, "proof-panel.ts"))};
-const [kind, path, host] = process.argv.slice(2);
+const lockHolderScript = `import { roundLock, withBudgetLock, withRoundLock, withSlot } from ${JSON.stringify(join(import.meta.dir, "proof-panel.ts"))};
+const [kind, path, host, reviewer] = process.argv.slice(2);
 const owner = { pid: process.pid, host, now: () => new Date(), startTime: async () => "Sun Oct 25 11:00:00 2026" };
 const hold = async () => { console.log("held"); await Bun.stdin.text(); };
 if (kind === "budget") await withBudgetLock(path, await roundLock(owner), hold);
-else await withSlot({ ...owner, env: {}, pause: async () => {}, slots: path, slotCount: 1, limit: 60000 }, hold);
+else if (kind === "round") await withRoundLock(path, await roundLock(owner), hold);
+else await withSlot({ ...owner, env: {}, pause: async () => {}, slots: path, slotCount: 1, limit: 60000 }, async (slot) => { if (reviewer) await slot.recordReviewer(Number(reviewer)); await hold(); });
 `;
 
-export async function lockHolder(kind: "budget" | "slot", path: string, host = hostname()) {
+export async function lockHolder(kind: "budget" | "round" | "slot", path: string, host = hostname(), reviewer?: number) {
   const script = join(fixture("hedge-lock-holder-"), "hold.ts");
   writeFileSync(script, lockHolderScript);
-  const child = Bun.spawn([process.execPath, script, kind, path, host], { stdin: "pipe", stdout: "pipe", stderr: "inherit" });
+  const child = Bun.spawn([process.execPath, script, kind, path, host, ...reviewer ? [String(reviewer)] : []], { stdin: "pipe", stdout: "pipe", stderr: "inherit" });
   const reader = child.stdout.getReader();
   let said = "";
   while (!said.includes("held")) {

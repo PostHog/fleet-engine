@@ -269,6 +269,7 @@ type Holder = { pid: number; host?: string; token?: string; started?: string; re
 export type Slot = { recordReviewer: (pid: number) => Promise<void> };
 export type RoundLock = { owner: LockOwner; holder: Holder };
 export class RoundBusy extends Error {}
+export class ForeignLock extends RoundBusy {}
 export class RoundGone extends Error {}
 
 export async function processStart(pid: number) {
@@ -310,16 +311,15 @@ export async function lockNewRound(directory: string, lock: RoundLock) {
   await claim(lockPath(directory), lock.holder);
 }
 
-export const withRoundLock = <T>(directory: string, lock: RoundLock, step: () => Promise<T>) => holdingLock(directory, lock, "from any machine", step);
-export const withBudgetLock = <T>(reviews: string, lock: RoundLock, step: () => Promise<T>) => holdingLock(reviews, lock, "from this machine only", step);
-
-async function holdingLock<T>(directory: string, lock: RoundLock, takeover: Takeover, step: () => Promise<T>) {
-  await takeLock(directory, lock, takeover);
+export async function withRoundLock<T>(directory: string, lock: RoundLock, step: () => Promise<T>) {
+  await takeLock(directory, lock);
   try { return await step(); }
   finally { await release(lockPath(directory), lock.holder); }
 }
 
-async function takeLock(directory: string, { owner, holder }: RoundLock, takeover: Takeover) {
+export const withBudgetLock = withRoundLock;
+
+async function takeLock(directory: string, { owner, holder }: RoundLock) {
   const path = lockPath(directory);
   for (let attempt = 0; attempt < lockAttempts; attempt++) {
     if (await claimRound(directory, holder)) return;
@@ -327,8 +327,8 @@ async function takeLock(directory: string, { owner, holder }: RoundLock, takeove
     if (text === undefined) continue;
     const current = holderOf(text);
     if (current?.token === holder.token) return;
-    if (!await stale(path, text, owner, takeover)) throw await busy(directory, current, owner, takeover);
-    await reclaim(path, text, owner, takeover);
+    if (!await stale(path, text, owner, "from this machine only")) throw await busy(directory, current, owner);
+    await reclaim(path, text, owner, "from this machine only");
   }
   throw new Error(`Cannot take the lock ${path}: other commands keep taking it over. Run the command again`);
 }
@@ -341,8 +341,8 @@ async function claimRound(directory: string, holder: Holder) {
   }
 }
 
-async function busy(directory: string, holder: Holder | undefined, owner: LockOwner, takeover: Takeover) {
-  if (takeover === "from this machine only" && elsewhere(holder, owner)) return new RoundBusy(`Process ${holder.pid} on ${holder.host}, another hedge proof command, holds the lock ${lockPath(directory)}. hedge never takes over a lock from another machine: when that command is gone, delete ${lockPath(directory)}, then run this command again`);
+async function busy(directory: string, holder: Holder | undefined, owner: LockOwner) {
+  if (elsewhere(holder, owner)) return new ForeignLock(`Process ${holder.pid} on ${holder.host}, another hedge proof command, holds the lock ${lockPath(directory)}. hedge never takes over a lock from another machine: when that command is gone, delete ${lockPath(directory)}, then run this command again`);
   const who = holder?.pid ? `Process ${holder.pid}, another hedge proof command,` : "Another hedge proof command";
   const panel = await readPlan(directory) ?? await stagedPlan(directory);
   return new RoundBusy(`${who} works on ${directory} and holds its lock ${lockPath(directory)}. Wait for it to end${panel ? ", or run hedge proof review --wait" : ", then run this command again"}`);
@@ -422,7 +422,8 @@ async function reclaim(path: string, text: string, owner: LockOwner, takeover: T
   if (!lock) return false;
   try {
     if (await readSlot(path) !== text) return false;
-    await stopReviewer(holderOf(text), owner);
+    const stopped = holderOf(text);
+    if (!elsewhere(stopped, owner)) await stopReviewer(stopped, owner);
     await rm(path, { force: true });
     return true;
   } finally { await release(lock, holder); }
