@@ -20,16 +20,13 @@ afterEach(async () => {
 type Visit = { from?: Window; files?: SiteFiles; url?: string };
 
 function visit(path: string, { from, files = site, url = `https://hedge.test/hedge-engine/${path.replace(/index\.html$/, "")}` }: Visit = {}) {
-  const window = new Window({ url });
+  const window = new Window({ url, settings: { enableJavaScriptEvaluation: true, suppressInsecureJavaScriptEnvironmentWarning: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true } });
   open.push(window);
   if (from) carryStorage(from, window);
-  const page = files[path] as string;
-  const html = page.replace(/<script>[\s\S]*?<\/script>/, "").replace(/<link rel="stylesheet"[^>]*>/g, "");
-  window.document.write(html);
   window.document.addEventListener("click", (event) => {
     if ((event.target as unknown as Element).closest("a")) event.preventDefault();
   });
-  window.eval(page.match(/<script>([\s\S]*?)<\/script>/)![1]!);
+  window.document.write(files[path] as string);
   return window;
 }
 
