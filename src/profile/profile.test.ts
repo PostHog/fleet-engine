@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { PackManifest, ProfileFile } from "../pack/types.ts";
 import { isolateGit, spawnGit, template, tempDirs } from "../testing/git.ts";
-import { activeChoices, loadMachine, loadProfile, ProfileError, saveAnswers, saveMachine, thisMachine, workflowOverrides } from "./profile.ts";
+import { activeChoices, loadMachine, loadProfile, ProfileError, pushSetting, saveAnswers, saveMachine, thisMachine, workflowOverrides } from "./profile.ts";
 
 isolateGit();
 const temp = tempDirs();
@@ -190,6 +190,26 @@ describe("saving answers", () => {
     expect(error).toBeInstanceOf(ProfileError);
     expect((error as Error).message).toContain(`because ${dir} has changes that are not committed.`);
     expect(readFileSync(join(dir, "hedge.json"), "utf8")).toBe(edited);
+  });
+
+  test("a devbox setting whose push comes after another machine's says to drop setup's commit only when setup made one", async () => {
+    const pushAfterElsewhere = async (value: string) => {
+      const { dir, elsewhere } = await profileBehind();
+      await elsewhere((file) => ({ ...file, settings: { "orchestration.loopProject": "~/code/app" } }));
+      await spawnGit(dir, "pull", "-q");
+      await elsewhere((file) => ({ ...file, plan: "claude" }));
+      const before = await spawnGit(dir, "rev-parse", "HEAD");
+      const error = await pushSetting(dir, "orchestration.loopProject", value, "~/code/app", ["origin", "HEAD:main"], "hedge.json").catch((caught: Error) => caught);
+      return { dir, error: (error as Error).message, made: (await spawnGit(dir, "rev-parse", "HEAD")) !== before };
+    };
+
+    const unchanged = await pushAfterElsewhere("~/code/app");
+    expect(unchanged.made).toBe(false);
+    expect(unchanged.error).toBe(`${unchanged.dir}: another machine pushed to your profile before setup could. Run the same hedge setup command again.`);
+
+    const changed = await pushAfterElsewhere("~/code/other");
+    expect(changed.made).toBe(true);
+    expect(changed.error).toBe(`${changed.dir}: another machine pushed to your profile before setup could. ${changed.dir} and origin both have changes the other lacks. Bring it up to date with git -C ${changed.dir} pull --rebase --autostash, or drop setup's commit, then run the same hedge setup command again.`);
   });
 
   test("a failed push never shows the credentials in the remote's URL", async () => {

@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { PackManifest, Profile, ProfileFile, SettingValue } from "../pack/types.ts";
-import { behindOrigin, bothChanged, loadProfile, pushedBehind, removedOnOrigin, saveAnswers } from "../profile/profile.ts";
+import { bothChanged, loadProfile, pushedBehind, pushedFirst, removedOnOrigin, saveAnswers } from "../profile/profile.ts";
 import type { Machine } from "./commands.ts";
 import { defaultSources, engineRepo } from "./defaults.ts";
 import { profileFile } from "../legacy.ts";
@@ -27,7 +27,7 @@ export type ProfileContext = {
   draft: Draft;
   current?: string;
   packs(): PackManifest[];
-  loaded?(): string | undefined;
+  loaded?(): { name: string; text: string } | undefined;
   /** Called once hedge.json holds every answer and is pushed: the draft is no longer needed. */
   saved(dir: string): Promise<void>;
 };
@@ -120,8 +120,9 @@ async function makeProfile(context: ProfileContext) {
   const { terminal, machine, home, draft } = context;
   const { gh, login, exists, personal, org, team, dir, found } = await lookUp(machine, home, context.packs(), draft.packs ?? [], context.current);
   if (found && (await machine.exec(["git", "-C", dir, "status", "--porcelain", "--", basename(profileFile(dir))])).output.trim()) throw new Error(`${dir}: ${basename(profileFile(dir))} has changes that are not committed. Commit or discard them, then try again.`);
-  if (found && context.loaded?.() !== undefined && !existsSync(profileFile(dir))) throw new Error(removedOnOrigin(dir));
-  if (found && context.loaded?.() !== undefined && readFileSync(profileFile(dir), "utf8") !== context.loaded()) throw new Error(changedMeanwhile(dir));
+  const seen = found ? context.loaded?.() : undefined;
+  if (seen && !existsSync(join(dir, seen.name))) throw new Error(removedOnOrigin(dir, seen.name));
+  if (seen && readFileSync(join(dir, seen.name), "utf8") !== seen.text) throw new Error(changedMeanwhile(dir));
   const create = (repo: string, description: string) => machine.exec(["gh", "repo", "create", repo, "--private", "--description", description]);
   let profileRepo = found ?? team ?? personal;
   const saved = found ? savedSettings(dir) : {};
@@ -164,9 +165,9 @@ async function makeProfile(context: ProfileContext) {
     await git(machine, dir, "add", "--", ...started);
     await git(machine, dir, "commit", "-q", "-m", "Start my Hedge profile", "--", ...started);
   }
-  await saveAnswers(dir, answers);
+  const committed = (await saveAnswers(dir, answers)) || started.length > 0;
   const pushed = await machine.exec(["git", "-C", dir, "push", "-q", ...target]);
-  if (pushed.code !== 0 && pushedBehind(pushed.output)) throw new Error(`another machine pushed to your profile before setup could. ${behindOrigin(dir)}`);
+  if (pushed.code !== 0 && pushedBehind(pushed.output)) throw new Error(pushedFirst(dir, committed));
   if (pushed.code !== 0) throw new Error(`git push in ${dir} failed: ${lastLine(pushed.output)}`);
   terminal.print(`  ✓ Saved your answers in ${profileRepo}. Every machine of yours reads it.`);
   await context.saved(dir);
