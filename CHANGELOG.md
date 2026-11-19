@@ -13,9 +13,11 @@
   `hedge cli-proxy doctor` still warns about it.
 - Each machine keeps Claude Code and Codex on their own sign-ins until the
   proxy serves them. While the proxy answers but holds none of an agent's
-  subscriptions, its route check is a `To do:` line, not a failure. A proxy
-  that is down, refuses the key, or runs a plugin Hedge did not install
-  still fails `hedge doctor`.
+  subscriptions, its route check is a `To do:` line, not a failure.
+  `hedge cli-proxy connect` saves the key on a node in that case, so the
+  first `hedge apply` after the proxy serves an agent sends it there. A
+  proxy that is down, refuses the key, answers without a model list, or
+  runs a plugin Hedge did not install still fails `hedge doctor`.
 - A pack check can name a `todo`: when its command exits 4, Hedge prints
   it as a `To do:` line, keeps the config that waits for the check out, and
   fails neither apply nor doctor. Apply runs such a check after the steps.

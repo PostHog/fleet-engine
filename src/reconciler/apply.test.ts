@@ -288,20 +288,36 @@ describe("a pack check that waits for the person", () => {
     expect(doctor.findings).toEqual([waiting]);
   });
 
-  test("that nothing waits for runs after the steps, so it reads what a step installed, and apply names only its To do", async () => {
-    const order: string[] = [];
+  const installedPool = () => {
+    let installed = false;
     let code = 4;
-    const run = async (command: string[]) => (order.push(command.join(" ")), command.join(" ") === "pool-check" ? code : 0);
-    const steps = [{ id: "install-pool", run: ["install-pool"], check: ["pool-installed"], pack: "base" }];
+    const run = async (command: string[]) => {
+      const words = command.join(" ");
+      if (words === "install-pool") installed = true;
+      if (words === "pool-installed") return installed ? 0 : 1;
+      return words === "pool-check" ? (installed ? code : 1) : 0;
+    };
+    return { run, set: (next: number) => (code = next) };
+  };
+  const steps = [{ id: "install-pool", run: ["install-pool"], check: ["pool-installed"], pack: "base" }];
+
+  test("that nothing waits for runs after the steps, so it reads what a step installed, and apply names only its To do", async () => {
+    const { run, set } = installedPool();
     const home = temp.make("home-");
-    const applied = await apply(plan({ files: [], checks, steps }), { home, run });
-    expect(applied).toMatchObject({ ok: true, findings: [waiting] });
-    expect(order.indexOf("pool-check")).toBeGreaterThan(order.indexOf("pool-installed"));
-    code = 1;
+    expect(await apply(plan({ files: [], checks, steps }), { home, run })).toMatchObject({ ok: true, findings: [waiting] });
+    set(1);
     expect(await apply(plan({ files: [], checks, steps }), { home, run })).toMatchObject({ ok: true, findings: [] });
     expect(await check(plan({ files: [], checks, steps }), { home, run })).toMatchObject({ ok: false, findings: [{ id: "check:pool", pack: "base", say: "Hedge cannot read the pool.", repair: "apply" }] });
-    code = 0;
+    set(0);
     expect(await apply(plan({ files: [], checks, steps }), { home, run })).toMatchObject({ ok: true, findings: [] });
+  });
+
+  test("that config waits for and that fails before a step installs what it reads becomes a To do once the step ran, and the config stays out", async () => {
+    const { run } = installedPool();
+    const home = temp.make("home-");
+    const applied = await apply(plan({ files: [], checks, steps, config }), { home, adapters: [providerConfigAdapter()], run });
+    expect(applied).toMatchObject({ ok: true, findings: [waiting] });
+    expect(settings(home)).toBeUndefined();
   });
 
   test("a check without a todo that exits 4 is a Fix, and a check with one stays a Fix for any other failing code", async () => {

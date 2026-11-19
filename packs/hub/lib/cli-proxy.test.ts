@@ -284,9 +284,11 @@ test("connect on a Codex plan checks the proxy for a Codex model, sends Codex to
   expect(await cliProxy("check", machine, "codex")).toBe(0);
 
   const noCodex = client({ plan: "codex" });
-  await expect(cliProxy("connect", noCodex.machine)).rejects.toThrow("lists no Codex model. Add one of your own Codex subscriptions to the hub's proxy. Nothing changed.");
-  expect(existsSync(keyFile(noCodex.home))).toBe(false);
+  expect(await cliProxy("connect", noCodex.machine)).toBe(0);
+  expect(noCodex.printed).toEqual([`The proxy at ${proxyUrl} lists no Codex model. Add one of your own Codex subscriptions to the hub's proxy. Codex keeps its own sign-in.`]);
+  expect(readFileSync(keyFile(noCodex.home), "utf8")).toBe(`${clientKey}\n`);
   expect(existsSync(codexFile(noCodex.home))).toBe(false);
+  expect(await cliProxy("check", noCodex.machine, "codex")).toBe(waitsForPerson);
 
   const theirs = client({ plan: "codex" }, { models: ["gpt-6.1-sol"] });
   codexRouted(theirs.home, { ...mine, model_provider: "work" });
@@ -388,6 +390,44 @@ test("connect on a devbox checks the key against the proxy first, then saves it 
   expect(modeOf(statSync(settingsFile(home)))).toBe("600");
   expect(readFileSync(settingsFile(home), "utf8")).not.toContain(clientKey);
   expect(printed.join("\n")).toContain("Restart");
+});
+
+test("connect to a proxy that holds none of your subscriptions saves the key, keeps Claude Code on its own sign-in, and leaves the move to a later apply", async () => {
+  const { machine, home, printed } = client({}, { models: [] });
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  writeFileSync(settingsFile(home), JSON.stringify({ model: "opus" }));
+  expect(await cliProxy("connect", machine)).toBe(0);
+  expect(readFileSync(keyFile(home), "utf8")).toBe(`${clientKey}\n`);
+  expect(readJson(settingsFile(home))).toEqual({ model: "opus" });
+  expect(printed).toEqual([`The proxy at ${proxyUrl} lists no Claude model. On the hub, run hedge cli-proxy doctor. Claude Code keeps its own sign-in. The first hedge apply after the proxy serves it sends Claude Code there.`]);
+  expect(await cliProxy("check", machine)).toBe(waitsForPerson);
+  const refused = client({}, { models: [], refuses: true });
+  await expect(cliProxy("connect", refused.machine)).rejects.toThrow("refuses this machine's key (HTTP 401). Nothing changed.");
+  expect(existsSync(keyFile(refused.home))).toBe(false);
+});
+
+test("a model list the proxy cannot give fails the check and the doctor, and never reads as an empty pool", async () => {
+  for (const modelList of ["not json", "{}", '{"data":null}']) {
+    const routed = client({}, { modelList });
+    connected(routed.home);
+    expect(await cliProxy("check", routed.machine)).toBe(1);
+    expect(routed.printed.join("\n")).toContain(`The proxy at ${proxyUrl} answers without a model list.`);
+  }
+  const { machine, home } = hubMachine();
+  await cliProxy("install", machine);
+  await expect(cliProxy("doctor", hubMachine({ home }, { credentials: [], modelList: "not json" }).machine)).rejects.toThrow("answers without a model list");
+});
+
+test("with hub.proxyAccounts at 0, the doctor and accounts pass with an empty pool, and the doctor still wants a model once the pool holds one", async () => {
+  const { machine, home } = hubMachine();
+  await cliProxy("install", machine);
+  for (const plan of ["claude", "codex"] as const) {
+    const empty = hubMachine({ home, plan, accounts: 0 }, { credentials: [], models: [] });
+    expect(await cliProxy("doctor", empty.machine)).toBe(0);
+    expect(empty.printed.join("\n")).not.toContain("To do");
+    expect(await cliProxy("accounts", hubMachine({ home, plan, accounts: 0 }, { credentials: [] }).machine)).toBe(0);
+  }
+  await expect(cliProxy("doctor", hubMachine({ home, accounts: 0 }, { credentials: [{ provider: "claude" }], models: [] }).machine)).rejects.toThrow("lists no Claude model");
 });
 
 test("connect changes nothing for a key that is not hexadecimal, a proxy that does not answer, or Claude settings that point elsewhere", async () => {

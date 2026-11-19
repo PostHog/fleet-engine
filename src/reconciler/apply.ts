@@ -178,18 +178,18 @@ export async function apply(plan: Plan, options: { home: string; dryRun?: boolea
     if (!heldCodes.includes(await run(step.probe, { [undoVariable]: ledgerKey(step) }))) await changeLedger(options.home, "human", ledgerKey(step));
   }
   await undo(items.filter((item) => item.cause !== "pack"));
-  if (!context.dryRun) report.findings.push(...(await waitingChecks(plan, run, gated.checks)));
+  if (!context.dryRun) await waitingChecks(plan, run, gated.checks, report.findings);
   return report;
 }
 
-/** The To do lines of the checks that wait for the person and that the gate did not run, tested once the steps ran, such as a check that reads what a step installs. */
-async function waitingChecks(plan: Plan, run: Runner, gated: Array<[Owned<PackCheck>, number]>): Promise<Finding[]> {
-  const findings: Finding[] = [];
-  for (const item of plan.checks.filter((check) => check.todo && !gated.some(([ran]) => ran === check))) {
-    const code = await run(item.run);
-    if (code === waitsForPerson) findings.push(checkFinding(item, code));
+/** Tests once the steps ran each check that can wait for the person and that the gate did not see pass or wait, such as a check that reads what a step installs. When it waits now, its To do replaces what the gate found. */
+async function waitingChecks(plan: Plan, run: Runner, gated: Array<[Owned<PackCheck>, number]>, findings: Finding[]): Promise<void> {
+  for (const item of plan.checks.filter((check) => check.todo)) {
+    const before = gated.find(([ran]) => ran === item)?.[1];
+    if (before === 0 || before === waitsForPerson || (await run(item.run)) !== waitsForPerson) continue;
+    const stale = findings.findIndex((finding) => finding.id === `check:${item.id}` && finding.pack === item.pack);
+    findings.splice(stale < 0 ? findings.length : stale, stale < 0 ? 0 : 1, checkFinding(item, waitsForPerson));
   }
-  return findings;
 }
 
 export async function check(plan: Plan, options: { home: string; adapters?: Adapter[]; run?: Runner }): Promise<Report> {

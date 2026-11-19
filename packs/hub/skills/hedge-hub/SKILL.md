@@ -163,7 +163,10 @@ the person's own subscriptions, never for someone else's.
   serves no model for the agent, because it holds none of that agent's
   subscriptions that work, the check exits 4: the agent stays on its own
   sign-in, and the line is a `To do:` with the login command, not a
-  failure. The first apply after the proxy
+  failure. `hedge cli-proxy connect` then saves the key and leaves the
+  agent on its own sign-in; the first `hedge apply` after the proxy serves
+  the agent sends it there. Connect still changes nothing when the proxy
+  does not answer or refuses the key. The first apply after the proxy
   answers again sends the agent back to the proxy.
 - **The panel.** The Proxy panel workflow is off by default and needs
   own-account balancing. With

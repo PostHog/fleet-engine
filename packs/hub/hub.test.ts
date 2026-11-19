@@ -432,8 +432,8 @@ describe("the Own-account balancing workflow", () => {
       const { home, result, options } = emptyHub("claude");
       const fresh = await apply(result, options);
       expect(fresh.ok).toBe(true);
-      expect(fresh.findings.map((finding) => [finding.id, finding.repair ?? "todo"])).toEqual([["check:cli-proxy-client", "apply"], ["check:cli-proxy-accounts", "todo"]]);
-      expect(fresh.findings[1]!.say).toContain(`Run on the hub, once for each subscription: ${login("claude")}.`);
+      expect(fresh.findings.map((finding) => [finding.id, finding.repair ?? "todo"])).toEqual([["check:cli-proxy-client", "todo"], ["check:cli-proxy-accounts", "todo"]]);
+      expect(fresh.findings.map((finding) => finding.say.endsWith(`: ${login("claude")}`))).toEqual([true, true]);
       expect(existsSync(join(home, ".local/share/hedge-cli-proxy/cli-proxy-api"))).toBe(true);
       const applied = await apply(result, options);
       expect(applied.ok).toBe(true);
@@ -446,7 +446,9 @@ describe("the Own-account balancing workflow", () => {
 
     test("on the Codex plan, lists the Codex login as a To do and keeps Codex on its own sign-in", async () => {
       const { home, result, options } = emptyHub("codex");
-      expect((await apply(result, options)).ok).toBe(true);
+      const fresh = await apply(result, options);
+      expect(fresh.ok).toBe(true);
+      expect(fresh.findings.map((finding) => [finding.id, finding.repair ?? "todo"])).toEqual([["check:cli-proxy-codex", "todo"], ["check:cli-proxy-codex-accounts", "todo"]]);
       const applied = await apply(result, options);
       expect(applied.ok).toBe(true);
       expect(applied.findings.map((finding) => [finding.id, finding.todo])).toEqual([["check:cli-proxy-codex", true], ["check:cli-proxy-codex-accounts", true]]);
