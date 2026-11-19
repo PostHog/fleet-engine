@@ -163,7 +163,13 @@ async function reviewsSpent(reviews: string, started: string[], phase: FinalRead
 
 async function leadsToFixes(directory: string) {
   const findings = await readFile(join(directory, "findings.md"), "utf8").catch(() => undefined);
-  return findings === undefined || listedItems(reviewedLines(findings).kept).some((item) => !flooredItem.test(item));
+  return findings === undefined || lensBlocks(findings).some((block) => listedItems(reviewedLines(block).kept).some((item) => !flooredItem.test(item)));
+}
+
+function lensBlocks(findings: string) {
+  const blocks: string[] = [];
+  for (const line of findings.split("\n")) if (findingsBlock.test(line)) blocks.push(line); else if (blocks.length) blocks[blocks.length - 1] += `\n${line}`;
+  return blocks.length ? blocks : [findings];
 }
 
 export type ArbiterVerdict = { verdict: "continue" | "escalate" | "unavailable"; reason: string; model: string };
@@ -238,8 +244,8 @@ const reserveDecided = (reviews: string, name: string, record: object, decision:
 async function startFinalRead(home: string, identity: ProofIdentity, base: string | undefined, decision: Decision | undefined, phase: FinalReadPhase, permit: Permit, cleanBaseMerge: CleanBaseMerge, quietCommit: QuietCommit, capturedBy: CapturedBy, from: string | undefined, lock: LockRound | undefined): Promise<Reserved> {
   if (base === undefined) throw new Error("A final read needs --base with the latest reviewed commit");
   if (base === identity.commit) throw new Error("HEAD is already reviewed. Skip the final read.");
-  const carried = reviewedThrough(identity.commit, new Set([base]), cleanBaseMerge, quietCommit);
-  if (!decision && carried?.quiet.length) throw new Error(`HEAD needs no final read: final read carried from ${short(base)}: ${quietReason(carried.kinds)}. hedge proof gate counts the carry. To read it anyway, pass --agent '<your reason>', or the user's --override`);
+  const quiet = decision ? undefined : reviewedThrough(identity.commit, new Set([base]), cleanBaseMerge, quietCommit);
+  if (quiet?.quiet.length) throw new Error(`HEAD needs no final read: final read carried from ${short(base)}: ${quietReason(quiet.kinds)}. hedge proof gate counts the carry. To read it anyway, pass --agent '<your reason>', or the user's --override`);
   const reviews = join(pullRequestDirectory(home, identity), "reviews");
   for (let attempt = 1; attempt <= 100; attempt++) {
     const started = await reviewNames(reviews);
@@ -250,7 +256,7 @@ async function startFinalRead(home: string, identity: ProofIdentity, base: strin
     if (!coversReview(base, latest.commit, cleanBaseMerge)) throw new Error(`Final read base must be the latest reviewed commit ${latest.commit}, or a clean base merge the gate carried it to`);
     const spent = await reviewsSpent(reviews, started, phase);
     const { free, ceiling } = permit.limits;
-    const stop = carried && spent >= ceiling ? budgetSpent(permit.limits) : undefined;
+    const stop = gateCarry(identity, finished, cleanBaseMerge, quietCommit).found && spent >= ceiling ? budgetSpent(permit.limits) : undefined;
     const verdict = await permitReview(home, identity, spent >= free, stop, decision, permit);
     let read = 1;
     while (started.includes(finalReadPrefix + read)) read++;
@@ -486,7 +492,7 @@ const answerItem = /^\s*(?:[-*]\s+)?(\d+)[.):]\s+\**(fixed|rejected|known)\b/i;
 
 const noFinding = /^(?:#.*|no findings\.?|findings:?|\(none\))$/i;
 
-const findingsBlock = /^\s*FINDINGS\b:?/;
+const findingsBlock = /^\s*\**FINDINGS\b\**:?\**/;
 const testsBlock = /^\s*(?:#+\s*)?\**TESTS\b/;
 const flooredItem = /^\s*(?:[-*]|\d+[.)])\s+(?:[^|\n]*\|)?\s*\**(?:minor|nit)\**\s*\|/i;
 
@@ -1029,8 +1035,13 @@ function reviewedThrough(start: string, reviewed: Set<string>, cleanBaseMerge: C
   return undefined;
 }
 
-async function carryForward(home: string, identity: ProofIdentity, reviewed: Set<string>, cleanBaseMerge: CleanBaseMerge, quietCommit: QuietCommit) {
-  const found = reviewedThrough(identity.commit, reviewed, cleanBaseMerge, quietCommit);
+function gateCarry(identity: ProofIdentity, finished: FinishedReview[], cleanBaseMerge: CleanBaseMerge, quietCommit: QuietCommit) {
+  const firstPanel = finished.find((review) => review.panel);
+  const counted = firstPanel ? finished.filter((review) => review.finishedAt >= firstPanel.finishedAt) : finished;
+  return { counted, found: reviewedThrough(identity.commit, new Set(counted.map((review) => review.commit)), cleanBaseMerge, quietCommit) };
+}
+
+async function carryForward(home: string, identity: ProofIdentity, found: ReturnType<typeof reviewedThrough>) {
   if (!found || (!found.merges.length && !found.quiet.length)) return undefined;
   const quiet = found.quiet.length ? { quiet: found.quiet, reason: quietReason(found.kinds) } : {};
   const carried: Carried = { commit: identity.commit, from: found.from, merges: found.merges, ...quiet, recordedAt: new Date().toISOString() };
@@ -1043,26 +1054,26 @@ const panelHint = "Run hedge proof review, which runs the lenses of the PR's rev
 async function reviewStatus(weigh: Weigh, cleanBaseMerge: CleanBaseMerge, quietCommit: QuietCommit): Promise<Status & { panelGap?: GapProof }> {
   const { home, identity, decisions } = weigh;
   const all = await finishedReviews(home, identity);
-  const firstPanel = all.find((review) => review.panel);
-  if (firstPanel) return headReview(home, identity, all.filter((review) => review.finishedAt >= firstPanel.finishedAt), cleanBaseMerge, quietCommit);
+  const carry = gateCarry(identity, all, cleanBaseMerge, quietCommit);
+  if (all.some((review) => review.panel)) return headReview(home, identity, carry);
   const gap = await readJson<Gap | undefined>(gapPath(home, identity, "panel"), undefined);
   const weighed = await gapAcceptance(weigh, gap, "panel");
   const acceptance = weighed.acceptance;
   if (!gap && acceptance?.by !== "the user") return { problem: "missing", line: `review: no finished panel round on the PR${all.length ? `; ${all.length} single-reviewer review(s) do not count` : ""}. ${panelHint}`, ...lapseOf(weighed) };
   const panelGap = gapProof(gap, weighed, decisions);
   const line = `panel ${gapText(panelGap)}`;
-  const head = await headReview(home, identity, all, cleanBaseMerge, quietCommit);
+  const head = await headReview(home, identity, carry);
   if (!acceptance) return { problem: head.problem ?? "gap", line: `${head.line}; ${line}`, panelGap, ...countedGap(weighed) };
   return { ...head, line: `${head.line}; ${line}`, covered: head.covered && `${head.covered}, ${line}`, panelGap, ...countedGap(weighed) };
 }
 
-async function headReview(home: string, identity: ProofIdentity, finished: FinishedReview[], cleanBaseMerge: CleanBaseMerge, quietCommit: QuietCommit): Promise<Status> {
+async function headReview(home: string, identity: ProofIdentity, { counted: finished, found }: ReturnType<typeof gateCarry>): Promise<Status> {
   const head = finished.filter((review) => review.commit === identity.commit).at(-1);
   if (head) {
     const covered = `${reviewLabel(head.name)}${head.reviewer ? ` by ${head.reviewer}` : ""}`;
     return { problem: undefined, line: `review: HEAD reviewed in ${covered}`, covered };
   }
-  const carried = await carryForward(home, identity, new Set(finished.map((review) => review.commit)), cleanBaseMerge, quietCommit);
+  const carried = await carryForward(home, identity, found);
   if (carried?.reason) {
     const review = finished.filter((done) => done.commit === carried.from).at(-1)!;
     const merges = carried.merges.length ? ` and ${carried.merges.length} clean merge(s) of the base` : "";
