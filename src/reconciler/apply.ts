@@ -83,8 +83,15 @@ function claimFindings(claimed: Action[]): Finding[] {
   }));
 }
 
+type ApplyOptions = { home: string; dryRun?: boolean; adopt?: string[]; adoptFrom?: string[]; skip?: string[]; adapters?: Adapter[]; run?: Runner; issue?: Issuer; progress?: (line: string) => void };
+type Checked = Array<[Owned<PackCheck>, number]>;
+
 /** Skipped steps, named pack/id, wait for a later apply: this run neither runs nor undoes them. */
-export async function apply(plan: Plan, options: { home: string; dryRun?: boolean; adopt?: string[]; adoptFrom?: string[]; skip?: string[]; adapters?: Adapter[]; run?: Runner; issue?: Issuer; progress?: (line: string) => void }): Promise<Report> {
+export async function apply(plan: Plan, options: ApplyOptions): Promise<Report> {
+  return (await reconcile(plan, options)).report;
+}
+
+async function reconcile(plan: Plan, options: ApplyOptions): Promise<{ report: Report; checks: Checked }> {
   const context = { home: options.home, dryRun: options.dryRun ?? false, adopt: options.adopt ?? [], adoptFrom: options.adoptFrom ?? [] };
   const adapters = options.adapters ?? [filesAdapter];
   const adoptable = new Set(adapters.flatMap((adapter) => adapter.targets(plan)));
@@ -95,7 +102,7 @@ export async function apply(plan: Plan, options: { home: string; dryRun?: boolea
   if (plan.unanswered.length) {
     report.ok = false;
     report.findings.push(...plan.unanswered.map((setting) => ({ id: `unanswered:${setting.key}`, pack: setting.key.split(".")[0] ?? "", say: `${setting.question} Answer it with hedge set ${setting.key}=<value>.`, repair: "human" as const })));
-    return report;
+    return { report, checks: [] };
   }
   const run = viaEngine(plan, options.run ?? spawnRunner(options.home, plan.machine.profileDir));
   const node = plan.onHub || plan.pullsFromHub ? plan.machine.name : undefined;
@@ -110,7 +117,7 @@ export async function apply(plan: Plan, options: { home: string; dryRun?: boolea
     if (result.failed) report.ok = false;
     if (!result.blocked) continue;
     report.ok = false;
-    if (!context.dryRun) return report;
+    if (!context.dryRun) return { report, checks: gated.checks };
   }
   const before = await readLedger(options.home);
   const record = async (key: string, step?: LedgerStep) => {
@@ -175,25 +182,44 @@ export async function apply(plan: Plan, options: { home: string; dryRun?: boolea
     if (!heldCodes.includes(await run(step.probe, { [undoVariable]: ledgerKey(step) }))) await changeLedger(options.home, "human", ledgerKey(step));
   }
   await undo(items.filter((item) => item.cause !== "pack"));
-  if (!context.dryRun) await waitingChecks(plan, run, gated.checks, report.findings);
-  return report;
+  if (context.dryRun) return { report, checks: gated.checks };
+  const settled = await waitingChecks(plan, run, gated.checks, report.findings);
+  if (!settled.length) return { report, checks: gated.checks };
+  for (const adapter of adapters.filter((each) => each.name === "config")) {
+    const result = await adapter.apply(withSettled(plan, gated.plan, settled), context);
+    report.actions.push(...result.actions);
+    report.findings.push(...result.findings.filter((finding) => !report.findings.some((other) => other.id === finding.id && other.pack === finding.pack && other.say === finding.say)));
+    if (result.failed || result.blocked) report.ok = false;
+  }
+  return { report, checks: gated.checks };
 }
 
-async function waitingChecks(plan: Plan, run: Runner, gated: Array<[Owned<PackCheck>, number]>, findings: Finding[]): Promise<void> {
+async function waitingChecks(plan: Plan, run: Runner, gated: Checked, findings: Finding[]): Promise<Array<Owned<PackCheck>>> {
+  const settled: Array<Owned<PackCheck>> = [];
   for (const item of plan.checks.filter((check) => check.todo)) {
     const before = gated.find(([ran]) => ran === item)?.[1];
-    if (before === 0 || before === waitsForPerson || (await run(item.run)) !== waitsForPerson) continue;
+    if (before === 0 || before === waitsForPerson) continue;
+    const code = await run(item.run);
     const stale = findings.findIndex((finding) => finding.id === `check:${item.id}` && finding.pack === item.pack);
-    findings.splice(stale < 0 ? findings.length : stale, stale < 0 ? 0 : 1, checkFinding(item, waitsForPerson));
+    findings.splice(stale < 0 ? findings.length : stale, stale < 0 ? 0 : 1, ...(code === 0 ? [] : [checkFinding(item, code)]));
+    if (code === 0 && before !== undefined) settled.push(item);
   }
+  return settled;
+}
+
+function withSettled(plan: Plan, gated: Plan, settled: Array<Owned<PackCheck>>): Plan {
+  const passes = (pack: string, id?: string) => settled.some((item) => item.pack === pack && item.id === id);
+  const config = plan.config.filter((entry) => gated.config.includes(entry) || passes(entry.pack, entry.after));
+  const dropped = gated.dropped.filter((entry) => !entry.item.startsWith("config ") || !passes(entry.pack, entry.check));
+  return { ...gated, config, dropped };
 }
 
 export async function check(plan: Plan, options: { home: string; adapters?: Adapter[]; run?: Runner }): Promise<Report> {
   const run = viaEngine(plan, options.run ?? spawnRunner(options.home, plan.machine.profileDir));
-  const report = await apply(plan, { ...options, dryRun: true });
+  const { report, checks } = await reconcile(plan, { ...options, dryRun: true });
   for (const item of plan.checks) {
     if (report.findings.some((finding) => finding.id === `check:${item.id}` && finding.pack === item.pack)) continue;
-    const code = await run(item.run);
+    const code = checks.find(([ran]) => ran === item)?.[1] ?? (await run(item.run));
     if (code !== 0) report.findings.push(checkFinding(item, code));
   }
   const waits = waiter(plan, run);
@@ -228,7 +254,7 @@ function humanFinding(step: Owned<HumanStep>, repairStillToRun: boolean): Findin
 }
 
 /** Tests each check once, running a Hedge repair first when a human step's probe fails and repairs are on, then drops the items whose check fails. A config entry may also wait for a pack check, which has no repair. It tests the checks that served services wait for first, which only the hub can, and fills their credentials, so a repair that reads a credential sees it in the same apply. */
-async function gate(plan: Plan, run: Runner, repair: boolean, issue?: (ready: CatalogEntry[]) => Promise<Finding[]>): Promise<{ plan: Plan; failed: Array<Owned<HumanStep>>; passed: Array<Owned<HumanStep>>; checks: Array<[Owned<PackCheck>, number]>; issued: Finding[] }> {
+async function gate(plan: Plan, run: Runner, repair: boolean, issue?: (ready: CatalogEntry[]) => Promise<Finding[]>): Promise<{ plan: Plan; failed: Array<Owned<HumanStep>>; passed: Array<Owned<HumanStep>>; checks: Checked; issued: Finding[] }> {
   const tested = new Map<Owned<HumanStep>, boolean>();
   const probe = async (step: Owned<HumanStep>) => {
     if ((await run(step.probe)) === 0) return true;

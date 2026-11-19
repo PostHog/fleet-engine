@@ -301,12 +301,12 @@ describe("a pack check that waits for the person", () => {
   };
   const steps = [{ id: "install-pool", run: ["install-pool"], check: ["pool-installed"], pack: "base" }];
 
-  test("that nothing waits for runs after the steps, so it reads what a step installed, and apply names only its To do", async () => {
+  test("that nothing waits for runs after the steps, so it reads what a step installed, and apply reports what it finds then", async () => {
     const { run, set } = installedPool();
     const home = temp.make("home-");
     expect(await apply(plan({ files: [], checks, steps }), { home, run })).toMatchObject({ ok: true, findings: [waiting] });
     set(1);
-    expect(await apply(plan({ files: [], checks, steps }), { home, run })).toMatchObject({ ok: true, findings: [] });
+    expect(await apply(plan({ files: [], checks, steps }), { home, run })).toMatchObject({ ok: true, findings: [{ id: "check:pool", pack: "base", say: "Hedge cannot read the pool.", repair: "apply" }] });
     expect(await check(plan({ files: [], checks, steps }), { home, run })).toMatchObject({ ok: false, findings: [{ id: "check:pool", pack: "base", say: "Hedge cannot read the pool.", repair: "apply" }] });
     set(0);
     expect(await apply(plan({ files: [], checks, steps }), { home, run })).toMatchObject({ ok: true, findings: [] });
@@ -318,6 +318,31 @@ describe("a pack check that waits for the person", () => {
     const applied = await apply(plan({ files: [], checks, steps, config }), { home, adapters: [providerConfigAdapter()], run });
     expect(applied).toMatchObject({ ok: true, findings: [waiting] });
     expect(settings(home)).toBeUndefined();
+  });
+
+  test("that config waits for and that fails before a step starts what it reads puts its config in once the step ran, and doctor then passes", async () => {
+    const { run, set } = installedPool();
+    set(0);
+    const home = temp.make("home-");
+    const options = { home, adapters: [providerConfigAdapter()], run };
+    const applied = await apply(plan({ files: [], checks, steps, config }), options);
+    expect(applied).toMatchObject({ ok: true, findings: [] });
+    expect(applied.actions.map((action) => [action.target, action.operation])).toEqual([[".claude/settings.json", "create"]]);
+    expect(settings(home)).toEqual({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" } });
+    expect(await check(plan({ files: [], checks, steps, config }), options)).toMatchObject({ ok: true, findings: [] });
+  });
+
+  test("doctor reads one result of a check that config waits for, for both the config and the finding", async () => {
+    const home = temp.make("home-");
+    const options = { home, adapters: [providerConfigAdapter()], run: exitCodes({}) };
+    await apply(plan({ files: [], checks, config }), options);
+    let probes = 0;
+    const emptying = async (command: string[]) => (command.join(" ") === "pool-check" ? (probes++ === 0 ? 0 : 4) : 0);
+    expect(await check(plan({ files: [], checks, config }), { ...options, run: emptying })).toMatchObject({ ok: true, findings: [] });
+    probes = 0;
+    const filling = async (command: string[]) => (command.join(" ") === "pool-check" ? (probes++ === 0 ? 4 : 0) : 0);
+    const doctor = await check(plan({ files: [], checks, config }), { ...options, run: filling });
+    expect(doctor.findings.map((finding) => [finding.id, finding.todo ?? finding.repair])).toEqual([["check:pool", true], ["config:.claude/settings.json", "apply"]]);
   });
 
   test("a check without a todo that exits 4 is a Fix, and a check with one stays a Fix for any other failing code", async () => {

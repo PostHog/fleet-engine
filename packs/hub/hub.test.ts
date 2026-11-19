@@ -414,16 +414,18 @@ describe("the Own-account balancing workflow", () => {
 
   describe("apply on a hub whose proxy holds none of your subscriptions", () => {
     const proxyOnly = (result: Plan): Plan => ({ ...result, files: [], jobs: [], human: [], steps: result.steps.filter((step) => step.id === "cli-proxy"), checks: result.checks.filter((check) => check.workflow === "own-account-balancing"), config: result.config.filter((entry) => entry.workflow === "own-account-balancing") });
-    const hedgeProxy = (machine: ProxyMachine) => async (command: string[]) => {
-      const words = command.join(" ");
-      const mode = (["install", "doctor", "accounts", "check codex", "check"] as const).find((name) => words.endsWith(`hedge cli-proxy ${name}`));
-      if (!mode) return 0;
-      return cliProxy(mode === "check codex" ? "check" : mode, machine, mode === "check codex" ? "codex" : "claude").catch(() => 1);
+    const hedgeProxy = (machine: ProxyMachine, engineRoot: string | undefined, started?: () => void) => async (command: string[]) => {
+      const [shell, launcher, group, mode, ...rest] = command;
+      const agent = mode === "check" && rest.join(" ") === "codex" ? "codex" : "claude";
+      const known = (["install", "doctor", "accounts", "check"] as const).find((name) => name === mode);
+      if (shell !== "/bin/sh" || !engineRoot || launcher !== join(engineRoot, "hedge") || group !== "cli-proxy" || !known || (rest.length && agent !== "codex")) throw new Error(`The hub pack runs no ${command.join(" ")}`);
+      if (known === "install") started?.();
+      return cliProxy(known, machine, agent).catch(() => 1);
     };
     const emptyHub = (ai: "claude" | "codex", credentials: Array<{ provider: string }> = []) => {
       const { machine, home } = proxyMachine((prefix) => temp.make(prefix), { plan: ai, devboxes: [] }, { credentials, models: [] });
       const result = proxyOnly(plan({ ...balancing, plan: ai }, hub));
-      const options = { home, adapters: [providerConfigAdapter()], run: hedgeProxy(machine) };
+      const options = { home, adapters: [providerConfigAdapter()], run: hedgeProxy(machine, result.engineRoot) };
       return { home, result, options };
     };
     const login = (agent: string) => `~/.local/share/hedge-cli-proxy/cli-proxy-api -config ~/.local/share/hedge-cli-proxy/config.yaml -${agent}-login -no-browser`;
@@ -432,12 +434,12 @@ describe("the Own-account balancing workflow", () => {
       const { home, result, options } = emptyHub("claude");
       const fresh = await apply(result, options);
       expect(fresh.ok).toBe(true);
-      expect(fresh.findings.map((finding) => [finding.id, finding.repair ?? "todo"])).toEqual([["check:cli-proxy-client", "todo"], ["check:cli-proxy-accounts", "todo"]]);
+      expect(fresh.findings.map((finding) => [finding.id, finding.todo ?? finding.repair])).toEqual([["check:cli-proxy-client", true], ["check:cli-proxy-accounts", true]]);
       expect(fresh.findings.map((finding) => finding.say.endsWith(`: ${login("claude")}`))).toEqual([true, true]);
       expect(existsSync(join(home, ".local/share/hedge-cli-proxy/cli-proxy-api"))).toBe(true);
       const applied = await apply(result, options);
       expect(applied.ok).toBe(true);
-      expect(applied.findings.map((finding) => [finding.id, finding.repair ?? "todo"])).toEqual([["check:cli-proxy-client", "todo"], ["check:cli-proxy-accounts", "todo"]]);
+      expect(applied.findings.map((finding) => [finding.id, finding.todo ?? finding.repair])).toEqual([["check:cli-proxy-client", true], ["check:cli-proxy-accounts", true]]);
       expect(existsSync(join(home, ".claude/settings.json"))).toBe(false);
       const doctor = await check(result, options);
       expect(doctor.ok).toBe(true);
@@ -448,7 +450,7 @@ describe("the Own-account balancing workflow", () => {
       const { home, result, options } = emptyHub("codex");
       const fresh = await apply(result, options);
       expect(fresh.ok).toBe(true);
-      expect(fresh.findings.map((finding) => [finding.id, finding.repair ?? "todo"])).toEqual([["check:cli-proxy-codex", "todo"], ["check:cli-proxy-codex-accounts", "todo"]]);
+      expect(fresh.findings.map((finding) => [finding.id, finding.todo ?? finding.repair])).toEqual([["check:cli-proxy-codex", true], ["check:cli-proxy-codex-accounts", true]]);
       const applied = await apply(result, options);
       expect(applied.ok).toBe(true);
       expect(applied.findings.map((finding) => [finding.id, finding.todo])).toEqual([["check:cli-proxy-codex", true], ["check:cli-proxy-codex-accounts", true]]);
@@ -459,19 +461,33 @@ describe("the Own-account balancing workflow", () => {
 
     test("with one subscription of the 2 that hub.proxyAccounts asks for, apply routes Claude Code to the proxy that serves it and still lists the To do", async () => {
       const { machine, home } = proxyMachine((prefix) => temp.make(prefix), { plan: "claude", devboxes: [] }, { credentials: [{ provider: "claude" }] });
-      const options = { home, adapters: [providerConfigAdapter()], run: hedgeProxy(machine) };
       const result = proxyOnly(plan({ ...balancing, plan: "claude" }, hub));
+      const options = { home, adapters: [providerConfigAdapter()], run: hedgeProxy(machine, result.engineRoot) };
       await apply(result, options);
       const applied = await apply(result, options);
       expect(applied).toMatchObject({ ok: true, findings: [{ id: "check:cli-proxy-accounts", todo: true }] });
       expect(JSON.parse(readFileSync(join(home, ".claude/settings.json"), "utf8")).env.ANTHROPIC_BASE_URL).toBe("http://127.0.0.1:8317");
     });
 
+    test("with one working subscription and a proxy that only its step starts, one apply routes Claude Code to the proxy, and doctor passes", async () => {
+      const proxy: Proxy = { credentials: [{ provider: "claude" }], down: true };
+      const { machine, home } = proxyMachine((prefix) => temp.make(prefix), { plan: "claude", devboxes: [] }, proxy);
+      const result = proxyOnly(plan({ ...balancing, plan: "claude" }, hub));
+      const options = { home, adapters: [providerConfigAdapter()], run: hedgeProxy(machine, result.engineRoot, () => (proxy.down = false)) };
+      const applied = await apply(result, options);
+      expect(applied.ok).toBe(true);
+      expect(applied.findings.map((finding) => [finding.id, finding.todo ?? finding.repair])).toEqual([["check:cli-proxy-accounts", true]]);
+      expect(JSON.parse(readFileSync(join(home, ".claude/settings.json"), "utf8")).env.ANTHROPIC_BASE_URL).toBe("http://127.0.0.1:8317");
+      const doctor = await check(result, options);
+      expect(doctor.ok).toBe(true);
+      expect(doctor.findings.map((finding) => [finding.id, finding.todo ?? finding.repair])).toEqual([["check:cli-proxy-accounts", true]]);
+    });
+
     test("takes Claude Code off the proxy once its pool empties, and lists the To do", async () => {
       const proxy: Proxy = { credentials: [{ provider: "claude" }] };
       const { machine, home } = proxyMachine((prefix) => temp.make(prefix), { plan: "claude", devboxes: [] }, proxy);
-      const options = { home, adapters: [providerConfigAdapter()], run: hedgeProxy(machine) };
       const result = proxyOnly(plan({ ...balancing, plan: "claude" }, hub));
+      const options = { home, adapters: [providerConfigAdapter()], run: hedgeProxy(machine, result.engineRoot) };
       await apply(result, options);
       await apply(result, options);
       expect(JSON.parse(readFileSync(join(home, ".claude/settings.json"), "utf8")).apiKeyHelper).toBeDefined();
