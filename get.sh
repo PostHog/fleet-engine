@@ -82,9 +82,12 @@ custom_fleet_engine() {
   [ "$(sed -n 2p "$fleet_wrapper" 2>/dev/null)" = "# Fleet" ] || return 1
   named=$(sed -n "s|^exec sh '\\(.*\\)/fleet' \"\\\$@\"\$|\\1|p" "$fleet_wrapper" 2>/dev/null | head -n 1)
   case "$named" in *"'"*) return 0 ;; /*) ;; *) return 0 ;; esac
-  [ ! -L "$fleet_engine" ] || { named=$(real_path "$fleet_engine"); return 0; }
   [ "$named" != "$fleet_engine" ] && [ "$(real_path "$named")" != "$(real_path "$fleet_engine")" ]
 }
+
+if [ -L "$fleet_engine" ]; then
+  fail "$fleet_engine is a link to $(real_path "$fleet_engine"), and Hedge finds and stops only a Fleet engine that sits in $fleet_engine itself, so Hedge changed nothing. Stop Fleet's services, cron jobs and fleet: tasks in T3 Code by hand and delete the link $fleet_engine, or move the engine to $fleet_engine in place of the link. Then run get.sh again."
+fi
 
 if custom_fleet_engine; then
   folder=$(printf '%s' "$named" | sed "s/'\\\\''/'/g")

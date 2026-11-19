@@ -25,7 +25,10 @@
   `~/.local/bin/fleet`, or move the engine to `~/.local/share/fleet/engine`
   and change the path in `~/.local/bin/fleet` to match, then run `get.sh`
   again. A `~/.local/bin/fleet` without the `# Fleet` line is not Fleet's,
-  and Hedge ignores it.
+  and Hedge ignores it. When `~/.local/share/fleet/engine` itself is a link,
+  `get.sh`, `hedge retire-fleet`, its dry run, and `hedge apply` refuse the
+  same way, and name the link and where it points. Stop Fleet by hand and
+  delete the link, or move the engine into its place.
 - On the first run, `get.sh` first runs `hedge retire-fleet`, also with
   `--install-only`. When it cannot show that each piece of Fleet stopped, it
   copies and applies nothing and exits 1. Stop what it names by hand, or
@@ -97,10 +100,12 @@
   file before the checkout moves, and records nothing. Only a regular file
   named `hedge` counts, not a folder or a link. It writes or removes its
   update notice only after the new engine's packages installed, so a refused
-  or rolled-back update leaves the notice as it was. When it cannot write the
-  notice, it prints a warning and the update goes on. It refuses before
-  anything moves when `~/.local/state/hedge` or its `update.json`, with its
-  links resolved, leads into Fleet's state folder.
+  or rolled-back update leaves the notice as it was. It writes the notice
+  only to a regular file in a real folder. When `~/.local/state/hedge` or its
+  `update.json` is a link or leads into Fleet's state folder, or the folder
+  cannot hold the file, such as when `~/.local/state/hedge` is a file, it
+  skips the notice with a warning and the update goes on. It never writes
+  Fleet's state.
 - `hedge update` runs apply with the profile it pulled.
 - `hedge update` and `hedge refresh` use the Hedge copy of a profile that the
   machine file still names in a Fleet path, or refuse, before they pull.

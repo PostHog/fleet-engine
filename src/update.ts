@@ -131,9 +131,6 @@ async function releases(options: UpdateOptions, url: string) {
 }
 
 async function followRelease(options: UpdateOptions, url: string, switched: boolean): Promise<Moved> {
-  refuseLegacyPath(dirname(noticePath(options.home)));
-  refuseLegacyPath(noticePath(options.home));
-  for (const path of [dirname(noticePath(options.home)), noticePath(options.home)]) if (lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink()) throw new Error(`${path} is a link, so Hedge does not write the update notice there.`);
   const versions = await releases(options, url);
   if (!versions) return false;
   const pin = parse(options.engine.ref);
@@ -184,6 +181,10 @@ async function rollBack(options: UpdateOptions, before: string, installError: st
 async function saveNotice(options: UpdateOptions, newMajor: string | undefined) {
   const path = noticePath(options.home);
   try {
+    for (const each of [dirname(path), path]) {
+      refuseLegacyPath(each);
+      if (lstatSync(each, { throwIfNoEntry: false })?.isSymbolicLink()) throw new Error(`${each} is a link, so Hedge does not write the update notice there.`);
+    }
     if (!newMajor) return await rm(path, { force: true });
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, JSON.stringify({ newMajor }) + "\n");

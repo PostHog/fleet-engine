@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { closeSync, constants, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, symlinkSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, constants, copyFileSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ProfileFile } from "./pack/types.ts";
 import { isolateGit, spawnGit, template, tempDirs } from "./testing/git.ts";
@@ -72,6 +72,8 @@ const originOf = async (engineDir: string) => (await spawnGit(engineDir, "config
 async function releaseWithDependency(remote: string, version: string) {
   mkdirSync(join(remote, "dep"));
   writeFileSync(join(remote, "dep", "package.json"), JSON.stringify({ name: "dep", version: "1.0.0" }));
+  writeFileSync(join(remote, "dep", "says"), "dep 1.0.0\n");
+  writeFileSync(join(remote, "hedge"), `[ "$1" = apply ] || exit 64\nengine=$(dirname "$0")\n{ cat "$engine/VERSION" && echo && cat "$engine/node_modules/dep/says"; } > "$HOME/applied"\n`);
   writeFileSync(join(remote, "package.json"), JSON.stringify({ name: "engine", dependencies: { dep: "file:./dep" } }));
   expect((await spawnAsync([process.execPath, "install"], { cwd: remote })).exitCode).toBe(0);
   writeFileSync(join(remote, "VERSION"), version);
@@ -115,29 +117,6 @@ describe("hedge update", () => {
     expect(result.code).toBe(0);
     expect(result.version).toBe("v0.1.1");
     expect(await originOf(engineDir)).toBe(hedge);
-  });
-
-  test.each([
-    ["a file", ["v0.1.0", "v0.1.1", "v1.0.0"]],
-    ["a link out of that folder", ["v0.1.0", "v0.1.1"]],
-  ])("refuses to write or remove the update notice when Hedge's state folder leads into Fleet's, and Fleet's notice is %s, and leaves the engine where it is", async (kind, tags) => {
-    const remote = await engineRemote(tags);
-    const engineDir = await engineCheckout(remote, "v0.1.0");
-    const home = temp.make("home-");
-    const outside = join(temp.make("outside-"), "notice.json");
-    writeFileSync(outside, "fleet's own\n");
-    mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
-    if (kind === "a file") copyFileSync(outside, join(home, ".local/state/fleet/update.json"));
-    else symlinkSync(outside, join(home, ".local/state/fleet/update.json"));
-    symlinkSync(join(home, ".local/state/fleet"), join(home, ".local/state/hedge"));
-    const lines: string[] = [];
-
-    const refused = await update({ home, engineDir, profileDir: temp.make("profile-"), engine: { repo: remote, ref: "v0.1.0", channel: "release" }, print: (line) => lines.push(line), runApply: async () => 0 }).catch((error: Error) => error.message);
-
-    expect(refused).toBe(`${dirname(noticePath(home))} is in a Fleet path from before the rename, so Hedge does not write there.`);
-    expect(readFileSync(join(home, ".local/state/fleet/update.json"), "utf8")).toBe("fleet's own\n");
-    expect(readFileSync(outside, "utf8")).toBe("fleet's own\n");
-    expect(await Bun.file(join(engineDir, "VERSION")).text()).toBe("v0.1.0");
   });
 
   test.each(["only a fleet launcher", "a folder named hedge", "a link named hedge that leads nowhere"])("refuses a release whose commit has no hedge launcher file, with %s, before the checkout moves, and records nothing and leaves the update notice", async (kind) => {
@@ -546,24 +525,56 @@ describe("hedge update", () => {
     expect(result.version).toBe("main");
   });
 
-  test.each([
-    ["is there", (home: string) => `${noticePath(home)} is in a Fleet path from before the rename, so Hedge does not write there.`],
-    ["is absent", (home: string) => `${noticePath(home)} is a link, so Hedge does not write the update notice there.`],
-  ])("refuses to write the update notice when Hedge's state folder is real but its update.json links into Fleet's state, and Fleet's notice %s, and leaves the engine where it is", async (kind, message) => {
-    const remote = await engineRemote(["v0.1.0", "v0.1.1", "v1.0.0"]);
+  const fleetsOwn = "fleet's own\n";
+  const noticeCases: Array<[string, string[], (home: string, outside: string) => string]> = [
+    ["Hedge's state folder links into Fleet's, and Fleet's notice is a file", ["v0.1.0", "v0.1.1", "v1.0.0"], (home) => {
+      writeFileSync(join(home, ".local/state/fleet/update.json"), fleetsOwn);
+      symlinkSync(join(home, ".local/state/fleet"), join(home, ".local/state/hedge"));
+      return `${dirname(noticePath(home))} is in a Fleet path from before the rename, so Hedge does not write there.`;
+    }],
+    ["Hedge's state folder links into Fleet's, and Fleet's notice links out of that folder", ["v0.1.0", "v0.1.1"], (home, outside) => {
+      symlinkSync(outside, join(home, ".local/state/fleet/update.json"));
+      symlinkSync(join(home, ".local/state/fleet"), join(home, ".local/state/hedge"));
+      return `${dirname(noticePath(home))} is in a Fleet path from before the rename, so Hedge does not write there.`;
+    }],
+    ["Hedge's state folder is real but its update.json links to Fleet's notice", ["v0.1.0", "v0.1.1", "v1.0.0"], (home) => {
+      writeFileSync(join(home, ".local/state/fleet/update.json"), fleetsOwn);
+      mkdirSync(join(home, ".local/state/hedge"));
+      symlinkSync(join(home, ".local/state/fleet/update.json"), noticePath(home));
+      return `${noticePath(home)} is in a Fleet path from before the rename, so Hedge does not write there.`;
+    }],
+    ["Hedge's state folder is real but its update.json links to an absent notice in Fleet's state", ["v0.1.0", "v0.1.1", "v1.0.0"], (home) => {
+      mkdirSync(join(home, ".local/state/hedge"));
+      symlinkSync(join(home, ".local/state/fleet/update.json"), noticePath(home));
+      return `${noticePath(home)} is a link, so Hedge does not write the update notice there.`;
+    }],
+    ["Hedge's state folder is a file", ["v0.1.0", "v0.1.1", "v1.0.0"], (home) => {
+      writeFileSync(join(home, ".local/state/hedge"), "not a folder\n");
+      return "ENOTDIR";
+    }],
+  ];
+
+  test.each(noticeCases)("skips the update notice with a warning when %s, and hedge update still moves the engine, applies and exits 0, and writes no file in Fleet's state", async (_kind, tags, arrange) => {
+    const remote = await engineRemote(tags);
     const engineDir = await engineCheckout(remote, "v0.1.0");
     const home = temp.make("home-");
-    const fleetNotice = join(home, ".local/state/fleet/update.json");
+    const outside = join(temp.make("outside-"), "notice.json");
+    writeFileSync(outside, fleetsOwn);
     mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
-    mkdirSync(join(home, ".local/state/hedge"), { recursive: true });
-    if (kind === "is there") writeFileSync(fleetNotice, "fleet's own\n");
-    symlinkSync(fleetNotice, noticePath(home));
+    const reason = arrange(home, outside);
+    const state = () => readdirSync(join(home, ".local/state"), { recursive: true, withFileTypes: true }).map((entry) => {
+      const path = join(entry.parentPath, entry.name);
+      return `${path} ${entry.isSymbolicLink() ? `-> ${readlinkSync(path)}` : entry.isFile() ? readFileSync(path, "utf8") : "folder"}`;
+    }).sort();
+    const before = state();
 
-    const refused = await update({ home, engineDir, profileDir: temp.make("profile-"), engine: { repo: remote, ref: "v0.1.0", channel: "release" }, print: () => {}, runApply: async () => 0 }).catch((error: Error) => error.message);
+    const result = await cliUpdate(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" }, home);
 
-    expect(refused).toBe(message(home));
-    expect(existsSync(fleetNotice) && readFileSync(fleetNotice, "utf8")).toBe(kind === "is there" && "fleet's own\n");
-    expect(await Bun.file(join(engineDir, "VERSION")).text()).toBe("v0.1.0");
+    expect(result).toMatchObject({ code: 0, applied: true, version: "v0.1.1" });
+    expect(result.output).toContain(`hedge update: warning: could not ${tags.includes("v1.0.0") ? "save" : "clear"} the new major notice in ${noticePath(home)}, so hedge doctor may name the wrong release: `);
+    expect(result.output).toContain(reason);
+    expect(state()).toEqual(before);
+    expect(readFileSync(outside, "utf8")).toBe(fleetsOwn);
   });
 
   test("warns when it cannot write the update notice, and still installs the packages, applies and exits 0", async () => {
@@ -577,7 +588,7 @@ describe("hedge update", () => {
 
     expect(result).toMatchObject({ code: 0, version: "v0.2.0" });
     expect(existsSync(join(engineDir, "node_modules", "dep", "package.json"))).toBe(true);
-    expect(readFileSync(join(home, "applied"), "utf8")).toBe("v0.2.0");
+    expect(readFileSync(join(home, "applied"), "utf8")).toBe("v0.2.0\ndep 1.0.0\n");
     expect(result.output).toContain(`hedge update: warning: could not save the new major notice in ${noticePath(home)}, so hedge doctor may name the wrong release:`);
   });
 
@@ -600,13 +611,14 @@ describe("hedge update", () => {
     expect(await readNotice(home)).toContain("Hedge v9.0.0 is out.");
   });
 
-  test("installs the packages the new engine needs before it applies", async () => {
+  test("installs the packages the new engine needs before it applies, so the new engine's apply uses them", async () => {
     const remote = await engineRemote(["v0.1.0"]);
     const engineDir = await engineCheckout(remote, "v0.1.0");
     await releaseWithDependency(remote, "v0.2.0");
-    const result = await run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" });
-    expect(result).toMatchObject({ code: 0, applied: 1, version: "v0.2.0" });
-    expect(existsSync(join(engineDir, "node_modules", "dep", "package.json"))).toBe(true);
+    const home = temp.make("home-");
+    const result = await cliUpdate(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" }, home);
+    expect(result).toMatchObject({ code: 0, applied: true, version: "v0.2.0" });
+    expect(readFileSync(join(home, "applied"), "utf8")).toBe("v0.2.0\ndep 1.0.0\n");
     expect(await spawnGit(engineDir, "status", "--porcelain")).toBe("");
   });
 

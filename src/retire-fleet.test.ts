@@ -653,6 +653,48 @@ describe("hedge retire-fleet", () => {
     expect(existsSync(join(custom.home, ".local/state/hedge/state.json"))).toBe(false);
   });
 
+  const withLinkedEngine = () => {
+    const linked = withFleetCommand(".local/share/fleet/engine");
+    const link = join(linked.home, ".local/share/fleet/engine");
+    const checkout = join(linked.home, "src/fleet-engine");
+    mkdirSync(checkout, { recursive: true });
+    rmSync(link, { recursive: true });
+    symlinkSync(checkout, link);
+    const refusal = `Hedge: ${link} is a link to ${checkout}, and Hedge finds and stops only a Fleet engine that sits in ${link} itself, so Hedge changed nothing.`;
+    const files = () => readdirSync(linked.home, { recursive: true }).map(String).sort();
+    return { ...linked, refusal, files };
+  };
+
+  test("on a machine whose default Fleet engine folder is a link, retire and its dry run refuse, name the link and where it points, and change nothing", async () => {
+    const linked = withLinkedEngine();
+    const before = linked.files();
+
+    const retired = await linked.hedge(["retire-fleet"]);
+    const listed = await linked.hedge(["retire-fleet", "--dry-run"]);
+
+    expect([retired.code, listed.code]).toEqual([1, 1]);
+    expect(retired.output).toStartWith(linked.refusal);
+    expect(retired.output).toEndWith("Then run hedge retire-fleet again.");
+    expect(listed.output).toStartWith(linked.refusal);
+    expect(linked.systemd.units.get("fleet-peer-box-t3.service")).toEqual({ active: true, enabled: true });
+    expect(linked.files()).toEqual(before);
+  });
+
+  test("on a machine whose default Fleet engine folder is a link, apply refuses, names the link and where it points, and starts and changes nothing", async () => {
+    const linked = withLinkedEngine();
+    const profile = profileDir(["watcher"]);
+    const before = linked.files();
+
+    const applied = await linked.hedge(["apply", "--profile", profile]);
+
+    expect(applied.code).toBe(1);
+    expect(applied.output).toContain(linked.refusal.slice("Hedge: ".length));
+    expect(applied.output).toContain("Then run hedge apply again.");
+    expect(linked.systemd.units.get("fleet-peer-box-t3.service")).toEqual({ active: true, enabled: true });
+    expect(linked.systemd.units.has("hedge-watch.service")).toBe(false);
+    expect(linked.files()).toEqual(before);
+  });
+
   test("on a machine whose fleet command names a Fleet engine folder with an escaped apostrophe, retire refuses and stops nothing", async () => {
     const custom = withFleetCommand("src/it's fleet");
 

@@ -81,6 +81,8 @@ export function fleetEngineInstalled(home: string): boolean {
 const fleetCommand = /^exec sh '(.*)\/fleet' "\$@"$/m;
 
 export function customFleetEngine(home: string, next: string): string | undefined {
+  const engine = join(home, legacyEngine);
+  if (lstatSync(engine, { throwIfNoEntry: false })?.isSymbolicLink()) return `${engine} is a link to ${real(engine)}, and Hedge finds and stops only a Fleet engine that sits in ${engine} itself, so Hedge changed nothing. Stop Fleet's services, cron jobs and fleet: tasks in T3 Code by hand and delete the link ${engine}, or move the engine to ${engine} in place of the link. Then run ${next} again.`;
   const wrapper = join(home, ".local/bin/fleet");
   let text: string;
   try {
@@ -90,7 +92,6 @@ export function customFleetEngine(home: string, next: string): string | undefine
   }
   if (text.split("\n")[1] !== "# Fleet") return undefined;
   const named = fleetCommand.exec(text)?.[1];
-  const engine = join(home, legacyEngine);
   const plain = named !== undefined && named.startsWith("/") && !named.includes("'");
   if (plain && (resolve(named) === resolve(engine) || real(named) === real(engine))) return undefined;
   const folder = named === undefined ? "a folder that Hedge cannot read from that file" : named.replaceAll("'\\''", "'");

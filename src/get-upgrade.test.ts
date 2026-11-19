@@ -89,18 +89,21 @@ describe("get.sh upgrades a machine that Fleet runs", () => {
     expect(state.crontab).toBe(oldCron);
   });
 
-  onLinuxHost("stops before it changes anything when the default Fleet engine folder links to a custom checkout", () => {
+  onLinuxHost("stops before it changes anything when the default Fleet engine folder links to a custom checkout, and names the link and where it points", () => {
     const machine = fleetMachine({ oldEngine: "src/fleet-engine" });
-    const checkout = join(machine.home, "src/fleet-engine");
+    const checkout = join(machine.home, "src/other-engine");
+    mkdirSync(checkout);
     writeFileSync(join(checkout, "fleet"), "");
     writeFileSync(join(checkout, "hedge"), "");
-    symlinkSync(checkout, join(machine.home, ".local/share/fleet/engine"));
+    const link = join(machine.home, ".local/share/fleet/engine");
+    symlinkSync(checkout, link);
     const before = tree(machine.home);
 
     const result = machine.getSh([]);
 
     expect(result.code).toBe(1);
-    expect(result.output).toContain(`Hedge: ${machine.home}/.local/bin/fleet runs a Fleet engine in ${checkout}, and Hedge finds and stops only the Fleet engine in ${machine.home}/.local/share/fleet/engine, so Hedge changed nothing.`);
+    expect(result.output).toContain(`Hedge: ${link} is a link to ${checkout}, and Hedge finds and stops only a Fleet engine that sits in ${link} itself, so Hedge changed nothing.`);
+    expect(result.output).toContain(`delete the link ${link}, or move the engine to ${link} in place of the link. Then run get.sh again.`);
     expect(tree(machine.home)).toEqual(before);
     expect(machine.state().units).toEqual({ "fleet-watch.service": running });
   });
