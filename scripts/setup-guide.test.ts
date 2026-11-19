@@ -24,7 +24,7 @@ const root = join(import.meta.dir, "..");
 const guide = () => readFileSync(join(root, "SETUP.md"), "utf8");
 const notePaths = () => readdirSync(join(root, "packs")).map((pack) => join("packs", pack, "SETUP.md")).filter((path) => existsSync(join(root, path)));
 
-const blocksIn = (text: string) => [...text.matchAll(/^ *```\w*\n([\s\S]*?)^ *```$/gm)].map((match) => match[1]!.replace(/^ +/gm, ""));
+const blocksIn = (text: string) => [...text.matchAll(/^( *)```\w*\n([\s\S]*?)^ *```$/gm)].map((match) => match[2]!.replace(new RegExp(`^ {0,${match[1]!.length}}`, "gm"), ""));
 
 const coderValueOptions = new Set(["--client-tls-ca-file", "--client-tls-cert-file", "--client-tls-key-file", "--global-config", "--header", "--header-command", "--token", "--url"]);
 function coderSubcommands(code: string) {
@@ -208,7 +208,7 @@ describe("the agent setup guide", () => {
     const texts = [guide(), readFileSync(join(root, "docs/getting-started.md"), "utf8")];
     expect(texts.flatMap(cliParameterChanges)).toEqual([]);
     const flagged = (markdown: string) => cliParameterChanges(markdown).length > 0;
-    const rejected = ["Run `coder start`.", "Run `coder --verbose restart hub`.", "Run `CODER_URL=x coder --url x 'restart'\nhub`.", "```sh\na && coder update hub\n```\n", "```sh\ncoder --verbose \\\n  restart hub\n```\n", "```sh\ncoder re\\\nstart hub\n```\n"];
+    const rejected = ["Run `coder start`.", "Run `coder --verbose restart hub`.", "Run `CODER_URL=x coder --url x 'restart'\nhub`.", "```sh\na && coder update hub\n```\n", "```sh\ncoder --verbose \\\n  restart hub\n```\n", "```sh\ncoder re\\\nstart hub\n```\n", "1. Step:\n\n   ```sh\n   coder\\\n     restart hub\n   ```\n"];
     const kept = ["Keep `coder create start --template dev`.", "Keep `coder schedule start hub`.", "Its restart command can ask for a parameter."];
     expect([rejected.map(flagged), kept.map(flagged)]).toEqual([rejected.map(() => true), kept.map(() => false)]);
     for (const text of texts) expect(text.replace(/\s+/g, " ")).toContain("**Settings → Parameters**");
