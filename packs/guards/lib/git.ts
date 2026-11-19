@@ -36,7 +36,7 @@ const aliasReason = (person: string) => "Fleet blocked this command: it makes an
   + `Run \`gh stack\` itself. If you need the alias, stop and ask ${person}.`;
 
 const configReason = (person: string) => "Fleet blocked this command: it runs gh while it sets or names GH_CONFIG_DIR, XDG_CONFIG_HOME or HOME, "
-  + "or runs gh through sudo, doas, or env or exec with an option, so this guard cannot tell which gh aliases run. "
+  + "or uses sudo, doas, env or exec, so this guard cannot tell which gh aliases run. "
   + "Run gh without them, and pass text that names these variables in a file, such as with --body-file. Reading `$HOME` is fine. "
   + `If you need it, stop and ask ${person}.`;
 
@@ -163,8 +163,11 @@ function ghAliasHidesStack(name: string, args: string[]): boolean {
 /** The variables that move gh's config directory, and a read of one as `$NAME` or `${NAME}`. */
 const configVariable = /\b(?:GH_CONFIG_DIR|XDG_CONFIG_HOME|HOME)\b/;
 const configRead = /\$(?:\{(?:GH_CONFIG_DIR|XDG_CONFIG_HOME|HOME)\}|(?:GH_CONFIG_DIR|XDG_CONFIG_HOME|HOME)\b)/g;
-/** `sudo` and `doas` switch the user, and `env` or `exec` with an option can clear, unset or split the environment. */
-const environmentWrapper = /(?:^|[^\w.-])(?:(?:sudo|doas)(?![\w.-])|(?:env|exec)\s+-)/;
+/**
+ * `sudo` and `doas` switch the user, and `env` or `exec` can clear or unset the environment, with options a redirection
+ * can separate. `gh extension exec` is not the shell's `exec`.
+ */
+const environmentWrapper = /(?:^|[^\w.-])(?:sudo|doas|env|(?<!\bext(?:ensions?)?\s+)exec)(?![\w.-])/;
 
 /** A `$'…'` string with an escape that can spell a letter, such as `\x47`. */
 const escapedLetters = /\$'[^']*\\[xuUc0-7]/;
@@ -173,8 +176,8 @@ const unquoted = (command: string) => command.replace(/\\\r?\n/g, "").replace(/\
 
 /**
  * Whether gh may read another config than the one the agent's environment names: the command names a variable that
- * moves it other than to read it, or runs gh through a wrapper that changes the user or the environment, also when
- * quotes or escapes split those words. The guard does not follow the shell's assignments, exports, tildes and unsets;
+ * moves it other than to read it, or uses a wrapper that can change the user or the environment, also when quotes or
+ * escapes split those words. The guard does not follow the shell's assignments, exports, tildes and unsets;
  * it refuses them.
  */
 function movesGhConfig(command: string): boolean {
@@ -198,10 +201,12 @@ function ghAliases(): Record<string, unknown> | undefined {
 
 /**
  * The aliases of a gh config. gh reads the first YAML document and the first of duplicate keys, and Bun the last, and Bun
- * reads a key such as `001` as `1`. So the config must be one block mapping, with one `name:` line at the indent of its
- * aliases for each alias Bun reads, spelled as Bun reads it.
+ * reads a key such as `001` as `1`. So the config must be one block mapping with one `aliases` key, and one `name:` line
+ * at the indent of its aliases for each alias Bun reads, spelled as Bun reads it. gh also breaks lines at U+0085, U+2028
+ * and U+2029, and Bun does not, so those and a lone CR refuse it.
  */
 function aliasesIn(text: string): Record<string, unknown> | undefined {
+  if (/[\r\u0085\u2028\u2029](?<!\r(?=\n))/.test(text)) return undefined;
   let parsed: { aliases?: Record<string, unknown> } | null;
   try {
     parsed = Bun.YAML.parse(text) as typeof parsed;
@@ -212,6 +217,7 @@ function aliasesIn(text: string): Record<string, unknown> | undefined {
   const keys: string[] = [];
   let indent: number | undefined;
   let inAliases = false;
+  let seen = false;
   for (const line of text.split(/\r?\n/)) {
     if (/^\s*(?:#.*)?$/.test(line)) continue;
     const leading = /^\s*/.exec(line)![0].length;
@@ -219,6 +225,8 @@ function aliasesIn(text: string): Record<string, unknown> | undefined {
       const top = /^[\w-]+:(?:[ \t](.*))?$/.exec(line);
       if (!top) return undefined;
       inAliases = line.startsWith("aliases:");
+      if (inAliases && seen) return undefined;
+      seen ||= inAliases;
       if (inAliases && !/^\s*(?:\{\}\s*)?(?:#.*)?$/.test(top[1] ?? "")) return undefined;
       continue;
     }
@@ -235,8 +243,11 @@ function aliasesIn(text: string): Record<string, unknown> | undefined {
 const aliasActions = new Set(["set", "delete", "list", "ls", "import"]);
 /** gh groups an alias must not reach: the stack extension, alias management, and extensions. */
 const guardedGroups = new Set(["stack", "alias", ...extensionGroups]);
-/** gh's built-in commands that an alias may start with. Any other first word may be an extension or another alias. */
-const builtins = new Set(["alias", "api", "attestation", "auth", "browse", "cache", "codespace", "completion", "config", "extension", "gist", "gpg-key", "help", "issue", "label", "org", "pr", "project", "release", "repo", "ruleset", "run", "search", "secret", "ssh-key", "status", "variable", "version", "workflow"]);
+/**
+ * gh's built-in commands that an alias may start with. Any other first word may be an extension or another alias, and
+ * so may `help`, which gh adds after the extensions.
+ */
+const builtins = new Set(["alias", "api", "attestation", "auth", "browse", "cache", "codespace", "completion", "config", "extension", "gist", "gpg-key", "issue", "label", "org", "pr", "project", "release", "repo", "ruleset", "run", "search", "secret", "ssh-key", "status", "variable", "version", "workflow"]);
 const plainName = /^[\w.:-]+(?: [\w.:-]+)*$/;
 const plainExpansion = /^[\w \t\r\n=.,:/@+%-]*$/;
 
