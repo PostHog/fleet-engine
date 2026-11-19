@@ -121,9 +121,14 @@
   TESTS item.
 - A review that starts while another weighs the budget backs out when the
   other one started first. This holds also when the other one reuses the
-  name of a final read that was dropped meanwhile. A reservation that hedge
-  cannot read for any reason other than a missing file stops the command
-  with the read error, so the budget is never counted short.
+  name of a final read that was dropped meanwhile, in the same millisecond
+  too: each reservation has its own id in `round.json`. A reservation that
+  hedge cannot read for any reason other than a missing file stops the
+  command with the read error, so the budget is never counted short. A
+  review that stops after it reserves removes its own round, so a retry is
+  not blocked as unfinished. A final read takes the next free name in the
+  reviews directory, so a leftover directory without `round.json` never
+  blocks it.
 
 ## v0.1.0
 

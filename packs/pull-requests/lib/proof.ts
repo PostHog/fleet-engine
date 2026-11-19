@@ -129,7 +129,7 @@ async function reserve(reviews: string, name: string, record: object, lock: Lock
   await mkdir(temporary, { mode: 0o700 });
   try {
     await lock?.(temporary);
-    await writeFile(join(temporary, "round.json"), JSON.stringify({ ...record, startedAt: new Date().toISOString() }) + "\n", { flag: "wx", mode: 0o600 });
+    await writeFile(join(temporary, "round.json"), JSON.stringify({ ...record, reservationId: crypto.randomUUID(), startedAt: new Date().toISOString() }) + "\n", { flag: "wx", mode: 0o600 });
     await rename(temporary, join(reviews, name));
     return true;
   } catch (error) {
@@ -145,9 +145,9 @@ type FinalReadPhase = (typeof finalReadPhases)[number];
 const unstarted = "￿";
 const isReviewName = (name: string) => /^(\d+|final-\d+)$/.test(name);
 const reviewNames = async (reviews: string) => (await entries(reviews)).filter(isReviewName);
-/** When a round was reserved; a round that vanished meanwhile sorts last, so it never makes another back out. */
-const reservedAt = async (reviews: string, name: string) =>
-  (await readJson<{ startedAt?: string } | undefined>(join(reviews, name, "round.json"), undefined))?.startedAt ?? unstarted;
+type Stamped = { startedAt?: string; reservationId?: string };
+const stamp = (round: Stamped | undefined) => ({ at: round?.startedAt ?? unstarted, key: round?.reservationId ?? round?.startedAt ?? unstarted });
+const stampOf = async (reviews: string, name: string) => stamp(await readJson<Stamped | undefined>(join(reviews, name, "round.json"), undefined));
 
 function finalReadPhase(value: string): FinalReadPhase {
   if (!(finalReadPhases as readonly string[]).includes(value)) throw new Error("Final read phase must be review or babysit");
@@ -158,11 +158,11 @@ type Counted = Map<string, string>;
 
 async function reviewsSpent(reviews: string, phase: FinalReadPhase) {
   const rounds = await Promise.all((await reviewNames(reviews)).map(async (name) => {
-    const round = await readJson<{ phase?: FinalReadPhase; startedAt?: string } | undefined>(join(reviews, name, "round.json"), undefined);
-    return round && { name, startedAt: round.startedAt ?? unstarted, spends: (round.phase ?? "review") === phase && await leadsToFixes(join(reviews, name)) };
+    const round = await readJson<Stamped & { phase?: FinalReadPhase } | undefined>(join(reviews, name, "round.json"), undefined);
+    return round && { name, key: stamp(round).key, spends: (round.phase ?? "review") === phase && await leadsToFixes(join(reviews, name)) };
   }));
   const present = rounds.filter((round) => round !== undefined);
-  return { spent: present.filter(({ spends }) => spends).length, counted: new Map(present.map(({ name, startedAt }) => [name, startedAt] as const)) };
+  return { spent: present.filter(({ spends }) => spends).length, counted: new Map(present.map(({ name, key }) => [name, key] as const)) };
 }
 
 async function leadsToFixes(directory: string) {
@@ -257,8 +257,9 @@ async function startFinalRead(home: string, identity: ProofIdentity, base: strin
     if (unfinished) throw new Error("A review is unfinished. Finish it before a final read.");
     const stop = carried && spent >= ceiling ? budgetSpent(permit.limits) : undefined;
     const verdict = await permitReview(home, identity, spent >= free, stop, decision, permit);
+    const taken = new Set(await reviewNames(reviews));
     let read = 1;
-    while (counted.has(finalReadPrefix + read)) read++;
+    while (taken.has(finalReadPrefix + read)) read++;
     const name = finalReadPrefix + read;
     if (await reserveDecided(reviews, name, { ...identity, round: "final", read, scope: "final", base, from, phase, arbiter: verdict, capturedBy }, decision, lock)) return await reservedAlone(reviews, counted, name, { round: "final", id: name, directory: join(reviews, name) });
   }
@@ -266,15 +267,20 @@ async function startFinalRead(home: string, identity: ProofIdentity, base: strin
 }
 
 async function reservedAlone(reviews: string, counted: Counted, name: string, reserved: Reserved) {
-  const others = (await reviewNames(reviews)).filter((started) => started !== name);
-  const mine = await reservedAt(reviews, name);
-  // Both racers see each other, so only the later reservation backs out; the earlier one keeps its round.
-  const other = (await Promise.all(others.map(async (started) => ({ started, at: await reservedAt(reviews, started) }))))
-    .filter(({ started, at }) => counted.get(started) !== at)
-    .find(({ started, at }) => at < mine || (at === mine && started < name))?.started;
-  if (!other) return reserved;
-  await rm(join(reviews, name), { recursive: true, force: true });
-  throw new Error(`Review ${other} started while this one weighed the budget. Run this one again to weigh it anew`);
+  try {
+    const other = await overtakenBy(reviews, counted, name);
+    if (other) throw new Error(`Review ${other} started while this one weighed the budget. Run this one again to weigh it anew`);
+    return reserved;
+  } catch (error) {
+    await rm(join(reviews, name), { recursive: true, force: true });
+    throw error;
+  }
+}
+
+async function overtakenBy(reviews: string, counted: Counted, name: string) {
+  const mine = (await stampOf(reviews, name)).at;
+  const others = await Promise.all((await reviewNames(reviews)).filter((started) => started !== name).map(async (started) => ({ started, ...await stampOf(reviews, started) })));
+  return others.filter(({ started, key }) => counted.get(started) !== key).find(({ started, at }) => at < mine || (at === mine && started < name))?.started;
 }
 
 const coversReview = (base: string, reviewed: string, cleanBaseMerge: CleanBaseMerge) => reviewedThroughMerges(base, new Set([reviewed]), cleanBaseMerge) !== undefined;
