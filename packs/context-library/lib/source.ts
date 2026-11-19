@@ -94,7 +94,7 @@ function withoutHidden(html: string): string {
   hidden.lastIndex = 0;
   for (let open = hidden.exec(html); open; open = hidden.exec(html)) {
     kept += `${html.slice(at, open.index)} `;
-    if (open[0].endsWith("/>")) {
+    if (open[1]?.toLowerCase() === "svg" && open[0].endsWith("/>")) {
       at = hidden.lastIndex;
       continue;
     }
@@ -108,23 +108,23 @@ function withoutHidden(html: string): string {
 
 const attribute = /([^\s"'=<>/]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g;
 
-function linkTarget(tag: string, base: string): string | undefined {
+function linkTarget(tag: string, base: string): URL | undefined {
   const href = [...tag.matchAll(attribute)].find((match) => match[1]!.toLowerCase() === "href");
+  if (!href) return undefined;
   try {
-    const target = new URL(decoded(href?.[2] ?? href?.[3] ?? href?.[4] ?? ""), base);
-    return href && /^https?:$/.test(target.protocol) ? target.href : undefined;
+    return new URL(decoded(href[2] ?? href[3] ?? href[4] ?? ""), base);
   } catch {
     return undefined;
   }
 }
 
 export function pageText(html: string, base: string): string {
-  let linked = 0;
+  let budget = partLimit;
   return decoded(withoutHidden(html)
     .replace(links, (_whole, tag: string, text: string) => {
-      const target = linked < partLimit ? linkTarget(tag, base) : undefined;
-      linked += target?.length ?? 0;
-      return target ? `${text} (${target})` : text;
+      const target = budget > 0 ? linkTarget(tag, base) : undefined;
+      budget -= target?.href.length ?? 0;
+      return target && budget >= 0 && /^https?:$/.test(target.protocol) ? `${text} (${target.href})` : text;
     })
     .replace(blockTags, "\n")
     .replace(anyTag, " "))

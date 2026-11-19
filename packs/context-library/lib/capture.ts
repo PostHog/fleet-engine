@@ -115,23 +115,30 @@ function newPath(worktree: string, wanted: string): string {
   throw new Error(`${wanted} and its numbered copies exist already; nothing was saved`);
 }
 
-const noteFields = /^(title|type|topics|date|source|series|people|wispr|status):/;
+const linkLike = /(?:[a-z][a-z0-9+.-]*:)?\/\/[^\s<>"'`]+/gi;
+const linkEnd = /[.,;:!?)\]}*_~]+$/;
+const fenceOpener = /^([ \t>*+\-\d.)]*)(`{3,}|~{3,}|:{3,})([^\n]*)$/gm;
+const entityStart = /&(?!(?:amp|lt|gt|quot|apos);)(?=#|[a-z][a-z0-9]*;)/gi;
 
-function knownFields(text: string): string {
-  const head = /^---\n([\s\S]*?)\n---(\n|$)/.exec(text);
-  if (!head) return text;
-  let kept = false;
-  const lines = head[1]!.split("\n").filter((line) => {
-    if (!/^\s/.test(line) && !line.startsWith("- ")) kept = noteFields.test(line);
-    return kept;
+function readLinksOnly(text: string, read: string): string {
+  return text.replace(/\\(?=[/:])/g, "").replace(linkLike, (link) => {
+    const bare = link.replace(linkEnd, "");
+    return read.includes(bare) ? link : `(link removed)${link.slice(bare.length)}`;
   });
-  return `---\n${lines.join("\n")}\n---${head[2]}${text.slice(head[0].length)}`;
 }
 
-const inert = (text: string) => knownFields(text)
-  .replace(/!+\[/g, "[")
-  .replace(/<(?=[a-z/!?])/gi, "&lt;")
-  .replace(/(`{3,}|~{3,})([^\n]*)/g, (whole, fence: string, info: string) => (info.trim() ? `${fence}text` : whole));
+function inert(text: string, read: string): string {
+  return readLinksOnly(text, read)
+    .replace(entityStart, "&amp;")
+    .replace(/!+\[/g, "[")
+    .replace(/<(?=[a-z/!?])/gi, "&lt;")
+    .replace(fenceOpener, (whole, prefix: string, fence: string, info: string) => (info.trim() && !(fence.startsWith("`") && info.includes("`")) ? `${prefix}${fence}text` : whole));
+}
+
+function readText(input: CaptureInput, material: Material, existing: Existing | undefined): string {
+  const read = [input.source, input.note ?? "", ...material.parts.map((part) => part.text), ...(material.meetings ?? []).flatMap((meeting) => [meeting.text, meeting.link ?? ""]), existing?.text ?? ""].join("\n");
+  return `${read}\n${read.replaceAll("&amp;", "&")}`;
+}
 
 function wisprOf(draft: Draft, input: CaptureInput, material: Material): string | undefined {
   if (!input.startedAt) return undefined;
@@ -155,7 +162,7 @@ export async function capture(input: CaptureInput, deps: CaptureDeps): Promise<C
     const topics = [...new Set(docs.flatMap((doc) => doc.topics))].sort();
     const draft = await deps.agent(capturePrompt(input, library, existing, deps.today(), material, topics));
     const wispr = wisprOf(draft, input, material);
-    const text = inert(draft.text);
+    const text = inert(draft.text, readText(input, material, existing));
     if (found && existing && text === existing.text) {
       return { path: found.path, title: found.title, url: docUrl(library, found.path), updated: true, text: existing.text, wispr };
     }

