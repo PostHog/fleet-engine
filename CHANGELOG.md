@@ -116,7 +116,9 @@
   Its advice names only the retries that can run: `--agent` only while the
   budget is left, and no retry while a review is unfinished.
 - `hedge proof respond` takes a "known" answer only when the reviews that
-  count reach the ceiling. A review with no blocker or major does not count.
+  count reach the ceiling. A review counts when the gate asks for an answer
+  to one of its items: a blocker, a major, a finding without a severity, or a
+  TESTS item.
 
 ## v0.1.0
 

@@ -155,8 +155,9 @@ function finalReadPhase(value: string): FinalReadPhase {
 
 async function reviewsSpent(reviews: string, started: string[], phase: FinalReadPhase) {
   const spent = await Promise.all(started.map(async (name) => {
-    const readPhase = name.startsWith(finalReadPrefix) ? (JSON.parse(await readFile(join(reviews, name, "round.json"), "utf8")) as { phase?: FinalReadPhase }).phase ?? "review" : "review";
-    return readPhase === phase && await leadsToFixes(join(reviews, name));
+    const round = name.startsWith(finalReadPrefix) ? await readFile(join(reviews, name, "round.json"), "utf8").catch(() => undefined) : "{}";
+    if (round === undefined) return false;
+    return ((JSON.parse(round) as { phase?: FinalReadPhase }).phase ?? "review") === phase && await leadsToFixes(join(reviews, name));
   }));
   return spent.filter(Boolean).length;
 }
