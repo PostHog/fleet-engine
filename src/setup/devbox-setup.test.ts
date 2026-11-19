@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { gitEnv, isolateGit, spawnGit, tempDirs } from "../testing/git.ts";
 import { profilePath } from "./profile.ts";
@@ -59,19 +59,24 @@ describe("hedge setup with a devbox", () => {
 
   const changeOnFirstCommit = (home: string, change: string) => changeOnFirstCommitIn(home, join(temp.make("elsewhere-"), "profile"), change);
 
-  test("a devbox setting saved while another machine changes a setting keeps that machine's value", async () => {
+  test("a devbox setting whose push comes after another machine's stops and keeps its commit, and after git pull --rebase the same command run again saves it on top", async () => {
     const home = temp.make("home-");
     expect((await hedgeSetup(home, devboxArgs, ["", ""], fakeMachine(home))).code).toBe(130);
-    const publishNow = await changeOnFirstCommit(home, 'profile.settings = { ...profile.settings, "elsewhere.setting": value };');
-    publishNow("before");
+    await changeOnFirstCommit(home, 'await Bun.write("about-me.md", "# Changed on another machine\\n");');
 
-    const resumed = await hedgeSetup(home, devboxArgs, ["~/code/app"], fakeMachine(home));
+    const stopped = await hedgeSetup(home, devboxArgs, ["~/code/app"], fakeMachine(home));
 
-    expect(resumed.code).toBe(0);
-    expect((await pushedAnswers(home)).settings).toEqual({ "elsewhere.setting": "after", "orchestration.loopProject": "~/code/app" });
+    expect(stopped.code).toBe(1);
+    expect(stopped.output).toContain(`hedge: ${profilePath(home)}: another machine pushed to your profile before this command could. ${profilePath(home)} and origin both have changes the other lacks. Bring it up to date with git -C ${profilePath(home)} pull --rebase, or drop setup's commit, then run the same hedge setup command again.`);
+    expect(await spawnGit(profilePath(home), "log", "-1", "--format=%s")).toBe("Save Hedge answers");
+    expect((await pushedAnswers(home)).settings).toEqual({});
+    await spawnGit(profilePath(home), "pull", "-q", "--rebase");
+    expect((await hedgeSetup(home, devboxArgs, [""], fakeMachine(home))).code).toBe(0);
+    expect((await pushedAnswers(home)).settings).toEqual({ "orchestration.loopProject": "~/code/app" });
+    expect(await spawnGit(home, "--git-dir", githubRepo(home, "nora/hedge-profile"), "show", "main:about-me.md")).toBe("# Changed on another machine");
   });
 
-  test("stops when another machine changes the same devbox setting before the push, and the same command run again saves this run's answer", async () => {
+  test("stops when another machine changes the same devbox setting before the push, and after setup's commit is dropped the same command run again saves this run's answer", async () => {
     const home = temp.make("home-");
     expect((await hedgeSetup(home, devboxArgs, ["", ""], fakeMachine(home))).code).toBe(130);
     await changeOnFirstCommit(home, 'profile.settings = { ...profile.settings, "orchestration.loopProject": value };');
@@ -79,8 +84,9 @@ describe("hedge setup with a devbox", () => {
     const stopped = await hedgeSetup(home, devboxArgs, ["~/code/app"], fakeMachine(home));
 
     expect(stopped.code).toBe(1);
-    expect(stopped.output).toContain(`hedge: ${profilePath(home)}: another machine saved your profile while this command ran. Run the same command again: it starts from the profile as it is now.`);
+    expect(stopped.output).toContain(`hedge: ${profilePath(home)}: another machine pushed to your profile before this command could.`);
     expect((await pushedAnswers(home)).settings).toEqual({ "orchestration.loopProject": "after" });
+    await spawnGit(profilePath(home), "reset", "-q", "--keep", "@{upstream}");
     expect((await hedgeSetup(home, devboxArgs, ["~/code/app"], fakeMachine(home))).code).toBe(0);
     expect((await pushedAnswers(home)).settings).toEqual({ "orchestration.loopProject": "~/code/app" });
   });
@@ -119,22 +125,23 @@ describe("hedge setup with a devbox", () => {
     expect((await pushedAnswers(home)).settings).toEqual({});
   });
 
-  test("stops before it saves a devbox setting when another file has a staged change, and keeps that change when another machine pushes", async () => {
+  test("stops before it saves a devbox setting when another machine removed hedge.json while setup asks it, and writes no new hedge.json", async () => {
     const home = temp.make("home-");
     expect((await hedgeSetup(home, devboxArgs, ["", ""], fakeMachine(home))).code).toBe(130);
-    await changeOnFirstCommit(home, 'profile.settings = { ...profile.settings, "elsewhere.setting": value };');
-    const file = join(profilePath(home), "about-me.md");
-    const committed = readFileSync(file, "utf8");
-    writeFileSync(file, "# Staged on this machine\n");
-    await spawnGit(profilePath(home), "add", "about-me.md");
-    writeFileSync(file, committed);
+    const elsewhere = join(temp.make("elsewhere-"), "profile");
+    await spawnGit(home, "clone", "-q", githubRepo(home, "nora/hedge-profile"), elsewhere);
+    const removeElsewhere = async () => {
+      await spawnGit(elsewhere, "rm", "-q", "hedge.json");
+      await spawnGit(elsewhere, "commit", "-q", "-m", "Remove hedge.json on another machine");
+      await spawnGit(elsewhere, "push", "-q");
+    };
 
-    const resumed = await hedgeSetup(home, devboxArgs, ["~/code/app"], fakeMachine(home));
+    const stopped = await hedgeSetup(home, devboxArgs, [async () => (await removeElsewhere(), "~/code/app")], fakeMachine(home));
 
-    expect(resumed.code).toBe(1);
-    expect(resumed.output).toContain(`${profilePath(home)} has staged changes. Commit or unstage them first, then try again.`);
-    expect(await spawnGit(profilePath(home), "show", ":about-me.md")).toBe("# Staged on this machine");
-    expect((await pushedAnswers(home)).settings).toEqual({});
+    expect(stopped.code).toBe(1);
+    expect(stopped.output).toContain(`hedge: ${profilePath(home)}: your profile's hedge.json was removed on origin. Restore it there, then run the same hedge setup command again.`);
+    expect((await spawnGit(home, "--git-dir", githubRepo(home, "nora/hedge-profile"), "ls-tree", "--name-only", "main")).split("\n")).not.toContain("hedge.json");
+    expect(existsSync(join(profilePath(home), "hedge.json"))).toBe(false);
   });
 
   test("stops before it saves a devbox setting when hedge.json has a change that is not committed, and keeps that change", async () => {

@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { PackManifest, Profile, ProfileFile, SettingValue } from "../pack/types.ts";
-import { bothChanged, loadProfile, pushedBehind, saveAnswers } from "../profile/profile.ts";
+import { behindOrigin, bothChanged, loadProfile, pushedBehind, removedOnOrigin, saveAnswers } from "../profile/profile.ts";
 import type { Machine } from "./commands.ts";
 import { defaultSources, engineRepo } from "./defaults.ts";
 import { profileFile } from "../legacy.ts";
@@ -120,8 +120,8 @@ async function makeProfile(context: ProfileContext) {
   const { terminal, machine, home, draft } = context;
   const { gh, login, exists, personal, org, team, dir, found } = await lookUp(machine, home, context.packs(), draft.packs ?? [], context.current);
   if (found && (await machine.exec(["git", "-C", dir, "status", "--porcelain", "--", basename(profileFile(dir))])).output.trim()) throw new Error(`${dir}: ${basename(profileFile(dir))} has changes that are not committed. Commit or discard them, then try again.`);
-  if (found && (await machine.exec(["git", "-C", dir, "diff", "--cached", "--quiet"])).code !== 0) throw new Error(`${dir} has staged changes. Commit or unstage them first, then try again.`);
-  if (found && context.loaded?.() !== undefined && (!existsSync(profileFile(dir)) || readFileSync(profileFile(dir), "utf8") !== context.loaded())) throw new Error(changedMeanwhile(dir));
+  if (found && context.loaded?.() !== undefined && !existsSync(profileFile(dir))) throw new Error(removedOnOrigin(dir));
+  if (found && context.loaded?.() !== undefined && readFileSync(profileFile(dir), "utf8") !== context.loaded()) throw new Error(changedMeanwhile(dir));
   const create = (repo: string, description: string) => machine.exec(["gh", "repo", "create", repo, "--private", "--description", description]);
   let profileRepo = found ?? team ?? personal;
   const saved = found ? savedSettings(dir) : {};
@@ -148,7 +148,6 @@ async function makeProfile(context: ProfileContext) {
 
   if (!found) await checkout(machine, home, dir, profileRepo);
   const target = await saveTarget(machine, dir);
-  const head = await machine.exec(["git", "-C", dir, "rev-parse", "--verify", "-q", "HEAD"]);
   await git(machine, dir, "config", "user.name", login);
   await git(machine, dir, "config", "user.email", `${login}@users.noreply.github.com`);
   await startFiles(dir, context, same(profileRepo, team) ? org : undefined);
@@ -167,10 +166,7 @@ async function makeProfile(context: ProfileContext) {
   }
   await saveAnswers(dir, answers);
   const pushed = await machine.exec(["git", "-C", dir, "push", "-q", ...target]);
-  if (pushed.code !== 0 && head.code === 0 && pushedBehind(pushed.output)) {
-    await git(machine, dir, "reset", "-q", "--keep", head.output.trim());
-    throw new Error(changedMeanwhile(dir));
-  }
+  if (pushed.code !== 0 && pushedBehind(pushed.output)) throw new Error(`another machine pushed to your profile before setup could. ${behindOrigin(dir)}`);
   if (pushed.code !== 0) throw new Error(`git push in ${dir} failed: ${lastLine(pushed.output)}`);
   terminal.print(`  ✓ Saved your answers in ${profileRepo}. Every machine of yours reads it.`);
   await context.saved(dir);

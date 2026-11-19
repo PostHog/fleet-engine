@@ -30,6 +30,9 @@
 - Setup saves your answers as changes on top of what your other machines
   pushed: a pack another machine added stays when a rerun removes another
   pack, and a node's setting never overwrites a setting saved meanwhile.
+  When another machine pushes first, setup stops and keeps its commit. It
+  says to run `git -C <profile> pull --rebase`, or to drop its commit, and
+  then to run the same command again.
 - Setup takes and saves the profile only on `origin`. When the checkout's
   branch tracks a local branch or another remote, setup stops before it
   commits and says to point the branch at `origin`.

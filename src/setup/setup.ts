@@ -4,7 +4,7 @@ import { profileFile } from "../legacy.ts";
 import { loadPacks } from "../pack/manifest.ts";
 import { cachedSource, fetchSource } from "../pack/sources.ts";
 import type { AvailableSource, FetchedSource, MachineFile, Plan, Preset, Profile, SetupProgress, SourceRef } from "../pack/types.ts";
-import { loadMachine, loadProfile, pushSetting, saveMachine, thisMachine } from "../profile/profile.ts";
+import { behindOrigin, loadMachine, loadProfile, pushSetting, saveMachine, thisMachine } from "../profile/profile.ts";
 import { resolve } from "../reconciler/resolve.ts";
 import { defaultSources, engineRepo, makesOwnDevbox } from "./defaults.ts";
 import { FlagError, hasPicks, parseSetupFlags, type SetupFlags } from "./flags.ts";
@@ -308,6 +308,7 @@ function chatgptStep(signIn: SignIn, human: HumanContext, plan: Plan): Step {
 
 async function fastForward(box: Machine, home: string, dir: string) {
   const failed = await takeOrigin(box, home, dir);
+  if (failed && Number((await box.exec(["git", "-C", dir, "rev-list", "--count", "@{upstream}..HEAD"])).output.trim()) > 0) throw new Error(behindOrigin(dir));
   if (failed) throw new Error(`could not take the new commits of your profile in ${dir}: ${failed.output.trim().split("\n").at(-1)}. Run git -C ${dir} pull, then run hedge setup again.`);
 }
 

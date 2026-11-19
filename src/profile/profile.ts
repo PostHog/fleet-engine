@@ -63,28 +63,18 @@ export async function pushSetting(dir: string, key: string, value: SettingValue,
   const edited = await run(dir, "git", "status", "--porcelain", "--", name);
   if (!edited.ok) throw new ProfileError(`${dir}: could not check ${name}: ${edited.stderr}`);
   if (edited.stdout) throw new ProfileError(`${dir}: ${name} has changes that are not committed. Commit or discard them, then try again.`);
-  if ((await run(dir, "git", "diff", "--cached", "--quiet")).code !== 0) throw new ProfileError(`${dir} has staged changes. Commit or unstage them first, then try again.`);
-  const answers: Partial<ProfileFile> = { settings: { [key]: value } };
-  const unchanged = async () => JSON.stringify(((await readJson(path))?.settings as Record<string, unknown> | undefined)?.[key]) === JSON.stringify(seen);
-  const meanwhile = new ProfileError(`${dir}: another machine saved your profile while this command ran. Run the same command again: it starts from the profile as it is now.`);
-  if (!(await unchanged())) throw meanwhile;
-  const pushOnTop = async () => {
-    const head = await run(dir, "git", "rev-parse", "--verify", "HEAD");
-    if (!head.ok) throw new ProfileError(`${dir}: has no commit to save answers on top of.`);
-    await commitAnswers(dir, answers);
-    const pushed = await run(dir, "git", "push", "-q", ...target);
-    if (pushed.ok) return true;
-    if (!pushedBehind(pushed.stderr)) throw pushFailed(dir, pushed.stderr);
-    const dropped = await run(dir, "git", "reset", "-q", "--keep", head.stdout);
-    if (!dropped.ok) throw new ProfileError(`${dir}: could not take back the answers it could not push: ${gitReason(dropped.stderr) ?? "git reset failed"}.`);
-    return false;
-  };
-  if (await pushOnTop()) return;
-  const pulled = await run(dir, "git", "pull", "-q", "--ff-only", "--no-rebase");
-  if (!pulled.ok) throw new ProfileError(`${dir}: could not take what another machine pushed: ${gitReason(pulled.stderr) ?? "git pull failed"}. Run git -C ${dir} pull --ff-only, then run the same command again.`);
-  if ((await unchanged()) && (await pushOnTop())) return;
-  throw meanwhile;
+  if (!existsSync(path)) throw new ProfileError(removedOnOrigin(dir));
+  const saved = ((await readJson(path))?.settings as Record<string, unknown> | undefined)?.[key];
+  if (JSON.stringify(saved) !== JSON.stringify(seen)) throw new ProfileError(`${dir}: another machine saved your profile while this command ran. Run the same command again: it starts from the profile as it is now.`);
+  await commitAnswers(dir, { settings: { [key]: value } });
+  const pushed = await run(dir, "git", "push", "-q", ...target);
+  if (pushed.ok) return;
+  throw pushedBehind(pushed.stderr) ? new ProfileError(`${dir}: another machine pushed to your profile before this command could. ${behindOrigin(dir)}`) : pushFailed(dir, pushed.stderr);
 }
+
+export const behindOrigin = (dir: string) => `${bothChanged(dir, "origin")} Bring it up to date with git -C ${dir} pull --rebase, or drop setup's commit, then run the same hedge setup command again.`;
+
+export const removedOnOrigin = (dir: string) => `${dir}: your profile's hedge.json was removed on origin. Restore it there, then run the same hedge setup command again.`;
 
 async function commitAnswers(dir: string, answers: Partial<ProfileFile>) {
   const path = profileFile(dir);
