@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
-import { fleetAdapter, scheduledTasks, type FleetOptions } from "./adapters/fleet/adapter.ts";
+import { fleetAdapter, procProcesses, scheduledTasks, type FleetOptions } from "./adapters/fleet/adapter.ts";
 import { spawnRunner, type CommandRunner } from "./adapters/run.ts";
 import type { T3Server } from "./adapters/t3/port.ts";
 import { jobsAdapter } from "./adapters/jobs/adapter.ts";
@@ -440,6 +440,59 @@ describe("hedge retire-fleet", () => {
     expect(retired.output).toContain("Hedge: /proc could not be read (ENOENT: no such file or directory). Hedge could not verify that it stopped.");
     expect(applied.code).toBe(1);
     expect(applied.output).toContain("/proc could not be read (ENOENT: no such file or directory), so Hedge cannot tell whether Fleet still runs, and started nothing.");
+    expect(linux.systemd.units.has("hedge-watch.service")).toBe(false);
+  });
+
+  test("a process whose command Hedge cannot read for another reason than its end fails retire, and apply starts nothing", async () => {
+    const proc = temp.make("proc-");
+    mkdirSync(join(proc, "4242/cmdline"), { recursive: true });
+    mkdirSync(join(proc, "4243"));
+    const linux = machine("linux", oldInstall(), undefined, { run: fakeProcesses().run, uid: process.getuid!(), sleep: async () => {}, processes: procProcesses(process.getuid!(), proc) });
+
+    const retired = await linux.hedge(["retire-fleet"]);
+    const applied = await linux.hedge(["apply", "--profile", profileDir(["watcher"])]);
+
+    expect(retired.code).toBe(1);
+    expect(retired.output).toContain("Hedge: process 4242 could not be read (EISDIR");
+    expect(applied.code).toBe(1);
+    expect(applied.output).toContain("so Hedge cannot tell whether Fleet still runs, and started nothing.");
+    expect(linux.systemd.units.has("hedge-watch.service")).toBe(false);
+  });
+
+  test("after a retire fails on a Fleet installer that outlives its agent-update job, the next retire and apply still see the installer, and leave Hedge's own installer alone", async () => {
+    const home = oldInstall();
+    const fleetEngine = join(home, ".local/share/fleet/engine");
+    const proc = temp.make("proc-");
+    const listed = (pid: number, ppid: number, argv: string[], engine?: string) => {
+      mkdirSync(join(proc, String(pid)));
+      writeFileSync(join(proc, String(pid), "cmdline"), `${argv.join("\0")}\0`);
+      writeFileSync(join(proc, String(pid), "stat"), `${pid} (${argv[0]}) S ${ppid} ${pid} ${pid} 0`);
+      writeFileSync(join(proc, String(pid), "environ"), engine ? `HOME=${home}\0FLEET_ENGINE_DIR=${engine}\0` : `HOME=${home}\0`);
+    };
+    listed(4242, 1, ["/home/bin/bun", `${fleetEngine}/packs/base/commands/agent-update.ts`], fleetEngine);
+    listed(4250, 4242, ["/usr/bin/node", "/home/bin/t3", "update", "--yes", "--channel", "nightly"], fleetEngine);
+    listed(4260, 1, ["/usr/bin/node", "/home/bin/t3", "update", "--yes", "--channel", "nightly"], join(home, ".local/share/hedge/engine"));
+    listed(4270, 1, ["/usr/bin/node", "/home/bin/t3", "update", "--yes", "--channel", "nightly"]);
+    const signalled: number[][] = [];
+    const jobEndsInstallerStays: CommandRunner = async (command) => {
+      if (command[0] !== "kill") return { code: 127, stdout: "" };
+      signalled.push(command.slice(2).map(Number));
+      rmSync(join(proc, "4242"), { recursive: true, force: true });
+      return { code: 0, stdout: "" };
+    };
+    const linux = machine("linux", home, undefined, { run: jobEndsInstallerStays, uid: process.getuid!(), sleep: async () => {}, processes: procProcesses(process.getuid!(), proc) });
+
+    const first = await linux.hedge(["retire-fleet"]);
+    const second = await linux.hedge(["retire-fleet"]);
+    const applied = await linux.hedge(["apply", "--profile", profileDir(["watcher"])]);
+
+    expect(first.code).toBe(1);
+    expect(second.code).toBe(1);
+    expect(second.output).toContain("Hedge: running command fleet agent-update: t3 update (process 4250): it has not ended.");
+    expect(applied.code).toBe(1);
+    expect(applied.output).toContain("The running command fleet agent-update: t3 update (process 4250) from before the rename still runs (it has not ended), so Hedge started nothing.");
+    expect(signalled.flat()).not.toContain(4260);
+    expect(signalled.flat()).not.toContain(4270);
     expect(linux.systemd.units.has("hedge-watch.service")).toBe(false);
   });
 
