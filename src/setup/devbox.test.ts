@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { git, isolateGit, tempDirs } from "../testing/git.ts";
-import { getShHarness } from "../testing/get-sh.ts";
+import { getShHarness, onLinuxHost } from "../testing/get-sh.ts";
 import { overSsh, pairing, profileForBox, sshHosts } from "./devbox.ts";
 import { claudeProbeTimeoutMs } from "./signins.ts";
 import { boxHome, deadEnvironmentToken, fakeMachine, hedgeSetup, machineFile, onBox, remote } from "./testing.ts";
@@ -40,9 +40,10 @@ describe("the devbox over SSH", () => {
     expect(pairing("no server running")).toBeUndefined();
   });
 
-  test("installs Hedge on the chosen host, signs it in with the codes shown here, applies the profile, and links T3 Code both ways", async () => {
+  onLinuxHost("installs Hedge on the chosen host, signs it in with the codes shown here, applies the profile, and links T3 Code both ways", async () => {
     const home = homeWithHosts();
-    const box = fakeMachine(home, { "box:github": 1, "box:claude": 1, "box:chatgpt": 2, "box:t3": 1 }, { installerEnv: shellEnv(sandbox("Linux")) });
+    const node = sandbox("Linux");
+    const box = fakeMachine(home, { "box:github": 1, "box:claude": 1, "box:chatgpt": 2, "box:t3": 1 }, { installerEnv: shellEnv(node) });
     const result = await hedgeSetup(home, ["--preset", "starter"], ["", "", "", "1"], box);
     expect(result.code).toBe(0);
     expect(result.output).toContain("? Which SSH host is your devbox?");
@@ -54,7 +55,10 @@ describe("the devbox over SSH", () => {
     const onTheBox = remote(box);
     const nodeHome = boxHome(home, "node-1");
     expect(git(join(nodeHome, ".local/share/hedge/engine"), "rev-parse", "HEAD")).toBe(git(engine.repo, "rev-parse", "main"));
-    expect(readFileSync(join(nodeHome, ".local/bin/hedge"), "utf8")).toContain(join(nodeHome, ".local/share/hedge/engine/hedge"));
+    const installed = Bun.spawnSync(["sh", "-c", 'PATH="$HOME/.local/bin:$PATH"; command -v hedge && hedge --help'], { cwd: nodeHome, env: { PATH: node.bin, HOME: nodeHome } });
+    expect(installed.stderr.toString()).toBe("");
+    expect(installed.stdout.toString()).toStartWith(`${join(nodeHome, ".local/bin/hedge")}\nHedge: one setup for T3 Code, agents, and your workflows\n`);
+    expect(installed.exitCode).toBe(0);
     expect(JSON.parse(readFileSync(join(nodeHome, ".config/hedge/machine.json"), "utf8"))).toEqual({ schema: 1, role: "devbox", name: "node-1" });
     expect(onTheBox).toContain("gh auth login --hostname github.com --git-protocol https --web --scopes repo,read:org,admin:public_key,admin:ssh_signing_key,workflow");
     expect(onTheBox).toContain("gh auth setup-git");
