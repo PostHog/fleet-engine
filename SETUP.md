@@ -401,6 +401,32 @@ Recommend taking Hedge's version, unless they set the value on purpose.
 Tell them that a new Terminal window has `hedge` on its `PATH`. With Mac
 only, go on to step 10. With a hub and nodes, go on to step 9.
 
+### Go back to Fleet
+
+`hedge retire-fleet` turns Fleet's jobs off and keeps their files and
+launchers. It acts only on a machine with the Fleet engine install in
+`~/.local/share/fleet/engine`. To go back on such a machine:
+
+1. Stop Hedge's jobs. On Linux, run
+   `systemctl --user disable --now` for each unit that
+   `systemctl --user list-units --all 'hedge-*'` names, and delete the
+   `# hedge:` lines with `crontab -e`. On a Mac, run
+   `launchctl bootout gui/$(id -u)/<label>` for each `dev.hedge.*` agent.
+   In T3 Code, turn off each `hedge:` scheduled task.
+2. When `~/.local/share/fleet/engine/fleet doctor` prints `Fleet is now
+   Hedge`, check out the commit before the rename:
+   `git -C ~/.local/share/fleet/engine checkout -q --detach <commit>`.
+3. Turn the stopped units back on. Retire named each one as
+   `stopped and turned off the ...`. On Linux, run
+   `systemctl --user enable --now <unit>`. On a Mac, run
+   `launchctl enable gui/$(id -u)/<label>`, then
+   `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/<label>.plist`.
+   For the MCP hub, run `docker update --restart=unless-stopped fleet-mcphub`
+   and `docker start fleet-mcphub`.
+4. Run `~/.local/share/fleet/engine/fleet apply`. It writes the `# fleet:`
+   crontab lines again from the same profile.
+5. In T3 Code, turn each `fleet:` scheduled task back on.
+
 ## 9. Add the hub and the nodes
 
 The default is one **hub** with a 200 GB disk and one **node** with a 500 GB
