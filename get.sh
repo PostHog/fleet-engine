@@ -39,14 +39,18 @@ done
 [ "$(id -u)" -ne 0 ] || fail "run this as your login user, without sudo."
 export PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH"
 
-# Paths from before the rename move to their new names and keep a link at the old one.
+# Paths from before the rename are copied to their new names, without the links in them. The old paths stay as they are.
 legacy_paths=".config/fleet:.config/hedge .local/state/fleet:.local/state/hedge .local/share/fleet:.local/share/hedge .local/share/fleet-cli-proxy:.local/share/hedge-cli-proxy .local/share/fleet-hub-https:.local/share/hedge-hub-https .local/share/fleet-mcphub:.local/share/hedge-mcphub .ssh/fleet_ed25519:.ssh/hedge_ed25519 .ssh/fleet_ed25519.pub:.ssh/hedge_ed25519.pub .ssh/fleet-allowed-signers:.ssh/hedge-allowed-signers .ssh/fleet-coder-git.pub:.ssh/hedge-coder-git.pub .ssh/fleet-peers.conf:.ssh/hedge-peers.conf"
 for pair in $legacy_paths; do
   before="$HOME/${pair%%:*}"
   after="$HOME/${pair#*:}"
   if { [ -e "$before" ] && [ ! -L "$before" ]; } && ! { [ -e "$after" ] || [ -L "$after" ]; }; then
-    mv "$before" "$after"
-    ln -s "${after##*/}" "$before"
+    partial="$after.$$.partial"
+    rm -rf "$partial"
+    if ! { cp -RPp "$before" "$partial" && find "$partial" -type l -exec rm -f {} + && mv "$partial" "$after"; }; then
+      rm -rf "$partial"
+      fail "could not copy $before to $after."
+    fi
   fi
 done
 

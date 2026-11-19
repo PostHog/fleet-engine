@@ -1,5 +1,6 @@
-import { existsSync, lstatSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { chmodSync, constants, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { writePrivateFile } from "./files/private.ts";
 
 export const profileFileName = "hedge.json";
@@ -54,6 +55,7 @@ export function linkHedgeCommand(home: string, engineRoot: string): boolean {
 const legacyFilesGroup = "fleet";
 const filesGroup = "hedge";
 const statePath = ".local/state/hedge/state.json";
+const machinePath = ".config/hedge/machine.json";
 
 const present = (path: string) => {
   try {
@@ -64,41 +66,82 @@ const present = (path: string) => {
 };
 
 /**
- * Moves each path from before the rename to its new name and leaves a link at
- * the old name, so hooks, jobs and scripts that still name it keep working.
- * A path whose new name is taken stays as it is: the new one wins. Returns the
- * paths it moved.
+ * Copies each path from before the rename to its new name, when nothing has
+ * the new name yet. The old paths stay as they are, and a link in them is not
+ * copied. Then it takes over the ownership records of the copies. Returns the
+ * paths it copied.
  */
-export async function migrateLegacyPaths(home: string): Promise<Array<readonly [string, string]>> {
-  const moved = legacyPaths.filter(([before, after]) => {
+export async function copyLegacyPaths(home: string): Promise<Array<readonly [string, string]>> {
+  const copied = legacyPaths.filter(([before, after]) => {
     const old = present(join(home, before));
     if (!old || old.isSymbolicLink() || present(join(home, after))) return false;
-    renameSync(join(home, before), join(home, after));
-    symlinkSync(basename(after), join(home, before));
+    copyWhole(join(home, before), join(home, after));
     return true;
   });
-  await renameStateEntries(home);
-  return moved;
+  await takeOverRecords(home);
+  await pointMachineAtCopies(home);
+  return copied;
 }
 
-const linkedPrefixes = (home: string) => legacyPaths.filter(([before]) => present(join(home, before))?.isSymbolicLink());
+function copyWhole(from: string, to: string) {
+  const partial = `${to}.${randomUUID()}.partial`;
+  try {
+    copyTree(from, partial);
+    renameSync(partial, to);
+  } catch (error) {
+    rmSync(partial, { recursive: true, force: true });
+    throw error;
+  }
+}
 
-/** Points the file ownership records at the new paths, so apply does not look for its files through the links. */
-async function renameStateEntries(home: string) {
+function copyTree(from: string, to: string) {
+  const info = lstatSync(from);
+  if (info.isFile()) {
+    copyFileSync(from, to, constants.COPYFILE_EXCL);
+    chmodSync(to, info.mode & 0o7777);
+  } else if (info.isDirectory()) {
+    mkdirSync(to, { mode: 0o700 });
+    for (const name of readdirSync(from)) copyTree(join(from, name), join(to, name));
+    chmodSync(to, info.mode & 0o7777);
+  }
+}
+
+/** The copy of an old path, or undefined when the path is not in an old tree. */
+function copyOf(path: string): string | undefined {
+  const match = legacyPaths.find(([before]) => path === before || path.startsWith(`${before}/`));
+  return match && `${match[1]}${path.slice(match[0].length)}`;
+}
+
+const sameFile = (one: string, other: string) => present(one)?.isFile() && present(other)?.isFile() && readFileSync(one).equals(readFileSync(other));
+
+/**
+ * Takes over the ownership records of a state copied from before the rename,
+ * once. A record of a file in an old path moves to its copy only when the copy
+ * holds the same bytes. Hedge drops every other record in an old path, so it
+ * never owns a file in the old tree.
+ */
+async function takeOverRecords(home: string) {
   const path = join(home, statePath);
   if (!present(path)?.isFile()) return;
   const state = JSON.parse(readFileSync(path, "utf8")) as { version: number; groups: Record<string, Record<string, unknown>> };
-  const groups = { ...state.groups };
-  if (groups[legacyFilesGroup] && !groups[filesGroup]) {
-    groups[filesGroup] = groups[legacyFilesGroup];
-    delete groups[legacyFilesGroup];
-  }
-  const prefixes = linkedPrefixes(home);
-  const renamed = (target: string) => {
-    const match = prefixes.find(([before]) => target === before || target.startsWith(`${before}/`));
-    return match ? `${match[1]}${target.slice(match[0].length)}` : target;
+  const { [legacyFilesGroup]: legacy, ...others } = state.groups;
+  if (!legacy || others[filesGroup]) return;
+  const follow = (target: string) => {
+    const copy = copyOf(target);
+    return copy === undefined ? target : sameFile(join(home, target), join(home, copy)) ? copy : undefined;
   };
-  const next = Object.fromEntries(Object.entries(groups).map(([name, entries]) => [name, Object.fromEntries(Object.entries(entries).map(([target, entry]) => [Object.hasOwn(entries, renamed(target)) ? target : renamed(target), entry]))]));
-  const text = JSON.stringify({ ...state, groups: next }, null, 2) + "\n";
-  if (text !== readFileSync(path, "utf8")) await writePrivateFile(path, text);
+  const records = (entries: Record<string, unknown>) => Object.fromEntries(Object.entries(entries).flatMap(([target, entry]) => (follow(target) === undefined ? [] : [[follow(target)!, entry]])));
+  const groups = Object.fromEntries(Object.entries({ ...others, [filesGroup]: legacy }).map(([name, entries]) => [name, records(entries)]));
+  await writePrivateFile(path, JSON.stringify({ ...state, groups }, null, 2) + "\n");
+}
+
+/** Points the machine file at the copy of a profile that was in an old path. */
+async function pointMachineAtCopies(home: string) {
+  const path = join(home, machinePath);
+  if (!present(path)?.isFile()) return;
+  const machine = JSON.parse(readFileSync(path, "utf8")) as { profileDir?: unknown };
+  if (typeof machine.profileDir !== "string" || !machine.profileDir.startsWith(`${home}/`)) return;
+  const copy = copyOf(machine.profileDir.slice(home.length + 1));
+  if (copy === undefined || !present(join(home, copy))?.isDirectory()) return;
+  await writePrivateFile(path, JSON.stringify({ ...machine, profileDir: join(home, copy) }, null, 2) + "\n");
 }

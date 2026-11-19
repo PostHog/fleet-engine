@@ -7,16 +7,24 @@
 - The product and its command are now Hedge and `hedge`. `get.sh` also
   installs `fleet` as the same command, so hooks, jobs, and habits from
   before the rename keep working.
-- `hedge apply`, `hedge setup`, `hedge update`, and `get.sh` move each folder
+- `hedge apply`, `hedge setup`, `hedge update`, and `get.sh` copy each folder
   and file that the engine owned under an old name, such as `~/.config/fleet`,
-  `~/.local/state/fleet`, and `~/.local/share/fleet`, to its new name, and
-  leave a link at the old name. When both names are there, the new one wins
-  and the old one stays as it is.
+  `~/.local/state/fleet`, `~/.local/share/fleet`, and `~/.ssh/fleet_ed25519`,
+  to its new name. They copy only when nothing has the new name yet. They copy
+  files and folders with their modes, and skip links. They never move, change,
+  or delete anything under an old name. Delete the old paths when you no
+  longer need them.
+- Hedge takes over its records of the files the engine wrote only for the
+  copies that hold the same bytes. It never owns a file under an old name, so
+  a later `hedge apply` never removes or replaces one.
 - A profile with `fleet.json` and no `hedge.json` still works. Each `FLEET_`
   variable still works while its `HEDGE_` variable is unset. Setup reuses a
   `fleet-profile` or `fleet-memory` repo.
-- Jobs, crontab lines, launchd agents, T3 tasks, and T3 worktree scripts that
-  the engine made under the old names are replaced by the new ones.
+- Hedge stops and turns off the launchd agents, systemd units, and T3 tasks
+  that the engine made under the old names, and starts the new ones. It keeps
+  the old agent and unit files. When an old job does not stop, Hedge leaves it
+  as it is, does not start the new one, and says so. Crontab lines and T3
+  worktree scripts from before the rename are replaced by the new ones.
 - The repository and the site keep their addresses for now.
 
 ## v0.1.0

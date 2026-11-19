@@ -5,7 +5,9 @@ import type { CommandRunner } from "../adapters/run.ts";
 export function fakeSystemd() {
   const units = new Map<string, { active: boolean; enabled: boolean }>();
   const starts = new Map<string, number>();
+  const calls: string[][] = [];
   const run: CommandRunner = async (command) => {
+    calls.push(command);
     if (command[0] !== "systemctl" || command[1] !== "--user") return { code: 127, stdout: "" };
     const [verb, ...rest] = command.slice(2);
     const unit = rest.at(-1)!;
@@ -23,5 +25,5 @@ export function fakeSystemd() {
     return parts.every(Boolean) ? "running" : parts.some(Boolean) ? "partly removed" : "gone";
   };
   const started = (id: string) => starts.get(`hedge-${id}.service`) ?? 0;
-  return { run, service, started };
+  return { run, service, started, units, calls };
 }

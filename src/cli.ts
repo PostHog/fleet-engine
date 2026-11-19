@@ -30,7 +30,7 @@ import { spawnRunner, type CommandRunner } from "./adapters/run.ts";
 import { become, canBecome, type Become } from "./runner/become.ts";
 import { trackCommand } from "./usage/usage.ts";
 import { asHedge } from "./reconciler/engine-command.ts";
-import { adoptLegacyEnv, linkHedgeCommand, migrateLegacyPaths, withLegacyNames } from "./legacy.ts";
+import { adoptLegacyEnv, copyLegacyPaths, linkHedgeCommand, withLegacyNames } from "./legacy.ts";
 
 /** env: the environment that tells a Coder workspace apart; tests pass their own. */
 export type CliOptions = { home: string; engineRoot: string; platform: NodeJS.Platform; env?: Record<string, string | undefined>; print: (line: string) => void; fail?: (line: string) => void; run?: Runner; terminal?: Terminal; apply?: (profileDir: string, skip?: string[]) => Promise<number>; setup?: Pick<SetupOptions, "machine" | "fetchSource" | "doctor" | "env" | "timeZone" | "clock">; clock?: Clock; adapters?: () => Adapter[]; hostname?: () => string; stdin?: () => ReadableStream<Uint8Array>; capture?: CommandRunner; become?: Become; interactive?: boolean };
@@ -77,7 +77,7 @@ export async function main(argv: string[], options: CliOptions): Promise<number>
   if (Object.hasOwn(builtins, command)) trackCommand(options.home, command, rest, builtins[command]!, options.env ?? {}, options.interactive);
   try {
     if (migrates(command, rest)) {
-      for (const [before, after] of await migrateLegacyPaths(options.home)) options.print(`moved ~/${before} to ~/${after}`);
+      for (const [before, after] of await copyLegacyPaths(options.home)) options.print(`copied ~/${before} to ~/${after}`);
       if (linkHedgeCommand(options.home, options.engineRoot)) options.print("added ~/.local/bin/hedge");
     }
     if (command === "apply" || command === "doctor") return await reconcile(command, rest, options);
