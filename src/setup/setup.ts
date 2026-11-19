@@ -292,7 +292,7 @@ const proxyServesCodex = "With own-account balancing on, Codex goes through the 
 
 function chatgptStep(signIn: SignIn, human: HumanContext, plan: Plan): Step {
   const balanced = plan.workflows.some((workflow) => workflow.id === "own-account-balancing" && workflow.active);
-  return balanced ? optionalStep(signIn, human.terminal, proxyServesCodex) : humanStep(signIn, human);
+  return balanced ? optionalStep(signIn, human, proxyServesCodex) : humanStep(signIn, human);
 }
 
 async function fastForward(box: Machine, home: string, dir: string) {

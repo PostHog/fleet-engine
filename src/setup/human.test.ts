@@ -4,10 +4,10 @@ import { join } from "node:path";
 import { loadPacks } from "../pack/manifest.ts";
 import type { FetchedSource, SourceRef } from "../pack/types.ts";
 import { isolateGit, tempDirs } from "../testing/git.ts";
-import { deadEnvironmentToken, fakeMachine, hedgeSetup, machineFile, savedAnswers } from "./testing.ts";
+import { deadEnvironmentToken, fakeMachine, hedgeSetup, machineFile, savedAnswers, scripted } from "./testing.ts";
 import type { Machine } from "./commands.ts";
-import { humanStep, packSignIn } from "./human.ts";
-import { claudeProbeTimeoutMs, codexLogin } from "./signins.ts";
+import { humanStep, packSignIn, SignInKept } from "./human.ts";
+import { claudeProbeTimeoutMs } from "./signins.ts";
 
 isolateGit();
 const temp = tempDirs();
@@ -257,11 +257,11 @@ describe("hedge setup sign-ins", () => {
     const result = await hedgeSetup(home, ["--preset", "starter"], ["", "", ""], box);
     expect(result.code).toBe(0);
     expect(box.runs).toEqual([{ command: ["claude", "auth", "login"], input: true }]);
-    expect(box.starts.at(-1)).toEqual(["codex", "login", "-c", 'cli_auth_credentials_store="file"', "--device-auth"]);
-    const probes = box.calls.filter((call) => call.command[0] === "codex" && call.command[1] === "exec");
+    expect((await box.machine.exec(["codex", "exec", "ok"])).code).toBe(0);
+    const probes = box.calls.filter((call) => call.command[0] === "codex" && call.command[1] === "exec" && call.command.length > 3);
     expect(probes.length).toBeGreaterThan(1);
     for (const probe of probes) {
-      expect(probe.command.slice(0, 7)).toEqual(["codex", "exec", "--ephemeral", "--sandbox", "read-only", "--ignore-user-config", "--skip-git-repo-check"]);
+      expect(probe.command.slice(0, 6)).toEqual(["codex", "exec", "--ephemeral", "--sandbox", "read-only", "--ignore-user-config"]);
       expect(probe.command).toContain("gpt-6.2-sol");
       expect(probe.timeoutMs).toBe(20000);
       expect(probe.cwd!.startsWith(home)).toBe(false);
@@ -285,7 +285,37 @@ describe("hedge setup sign-ins", () => {
     expect(await box.machine.run(["claude", "auth", "login"], { input: true })).toBe(0);
     const again = await hedgeSetup(home, ["--chat", "--preset", "starter", "--plan", "both"], [], box);
     expect(again.code).toBe(0);
-    expect(box.starts).toContainEqual(codexLogin);
+    expect(again.output).toContain("▶ Sign in to ChatGPT");
+    expect((await box.machine.exec(["codex", "exec", "ok"])).code).toBe(0);
+  });
+});
+
+describe("ChatGPT's credentials store", () => {
+  const signInCount = (box: ReturnType<typeof fakeMachine>) => box.starts.filter((command) => command.includes("--device-auth")).length;
+
+  test("with no store in the Codex config, the sign-in goes to a file, so a later Codex session over SSH still has it", async () => {
+    const home = temp.make("home-");
+    const box = fakeMachine(home, { chatgpt: 2 }, { exits: { chatgpt: 0 } });
+    const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "codex"], ["", ""], box);
+    expect(result.code).toBe(0);
+    expect(signInCount(box)).toBe(1);
+    expect((await box.machine.exec(["codex", "exec", "ok"])).code).toBe(0);
+  });
+
+  test("with a store in the Codex config, setup signs in to that store and checks it, so the person's own Codex sessions have the sign-in", async () => {
+    const home = temp.make("home-");
+    const box = fakeMachine(home, { chatgpt: 2 }, { exits: { chatgpt: 0 }, codexConfig: 'model = "gpt-6.2-sol"\ncli_auth_credentials_store = "keyring"\n\n[profiles.fast]\nmodel = "x"\n' });
+    const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "codex"], ["", ""], box);
+    expect(result.code).toBe(0);
+    expect(result.output).toContain("$ codex login --device-auth\n");
+    expect((await box.machine.exec(["codex", "exec", "ok"])).code).toBe(0);
+  });
+
+  test("a store named only inside a table of the Codex config does not count, so the sign-in still goes to a file", async () => {
+    const home = temp.make("home-");
+    const box = fakeMachine(home, { chatgpt: 2 }, { exits: { chatgpt: 0 }, codexConfig: '[profiles.other]\ncli_auth_credentials_store = "keyring"\n' });
+    expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "codex"], ["", ""], box)).code).toBe(0);
+    expect((await box.machine.exec(["codex", "exec", "ok"])).code).toBe(0);
   });
 });
 
@@ -302,32 +332,76 @@ describe("ChatGPT's device-code sign-in", () => {
 });
 
 describe("ChatGPT's check", () => {
-  test("when Codex is signed in but its test request fails, setup prints why and starts no new sign-in", async () => {
+  const signIns = (box: ReturnType<typeof fakeMachine>) => box.starts.filter((command) => command.includes("--device-auth"));
+
+  test("when Codex is signed in but its test request fails, setup reports why, keeps that sign-in, starts no new one, and ends without a crash", async () => {
     const home = temp.make("home-");
     const box = fakeMachine(home, { chatgpt: 99 }, { codexProbe: { output: "ERROR: You hit your spend cap set by the owner of your workspace.\n", loggedIn: true } });
     const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "codex"], ["", ""], box);
-    expect(result.code).toBe(1);
-    expect(result.output).toContain("hedge: Codex is signed in, but its test request failed: You hit your spend cap set by the owner of your workspace. Setup keeps that sign-in and starts no new one. Fix that, then run hedge setup again.");
-    expect(box.starts).not.toContainEqual(codexLogin);
+    expect(result.code).toBe(2);
+    expect(result.output).toContain("  Needs you: Sign in to ChatGPT\n  Codex is signed in, but its test request failed: You hit your spend cap set by the owner of your workspace. Setup keeps that sign-in and starts no new one. Fix that, then run hedge setup again.\n");
+    expect(result.output).not.toContain("hedge: ");
+    expect(signIns(box)).toEqual([]);
   });
 
-  test("starts a new sign-in when the test request says the sign-in expired, though Codex still reports one", async () => {
+  test("a token refresh that times out is not a lost sign-in: setup keeps it and reports the failure", async () => {
     const home = temp.make("home-");
-    const box = fakeMachine(home, { chatgpt: 1 }, { codexProbe: { output: "ERROR: unexpected status 401 Unauthorized: token expired\n", loggedIn: true } });
+    const box = fakeMachine(home, { chatgpt: 99 }, { codexProbe: { output: "ERROR: Failed to refresh token: error sending request for url (https://auth.openai.com/oauth/token): operation timed out\n", loggedIn: true } });
+    const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "codex"], ["", ""], box);
+    expect(result.code).toBe(2);
+    expect(result.output).toContain("Codex is signed in, but its test request failed: Failed to refresh token: error sending request for url (https://auth.openai.com/oauth/token): operation timed out. Setup keeps that sign-in");
+    expect(signIns(box)).toEqual([]);
+  });
+
+  test("starts a new sign-in when the test request says the sign-in expired, though Codex still reports one, and a later Codex session can use the new one", async () => {
+    const home = temp.make("home-");
+    const box = fakeMachine(home, { chatgpt: 1 }, { exits: { chatgpt: 0 }, codexProbe: { output: "ERROR: unexpected status 401 Unauthorized: token expired\n", loggedIn: true } });
     const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "codex"], ["", ""], box);
     expect(result.code).toBe(0);
-    expect(box.starts).toContainEqual(codexLogin);
+    expect(signIns(box)).toHaveLength(1);
+    expect((await box.machine.exec(["codex", "exec", "ok"])).code).toBe(0);
+  });
+
+  test("a kept sign-in names the caller's rerun command, also when its check fails only after the sign-in ended", async () => {
+    const io = scripted([]);
+    let checks = 0;
+    const signIn = {
+      id: "chatgpt",
+      title: "Sign in to ChatGPT",
+      minutes: 1,
+      why: "test",
+      command: ["codex", "login", "--device-auth"],
+      async probe() {
+        if (++checks === 1) return false;
+        throw new SignInKept("Codex is signed in, but its test request failed: timed out. Setup keeps that sign-in and starts no new one.");
+      },
+    };
+    const machine = { ...fakeMachine(temp.make("home-")).machine, start: () => ({ stop: () => {}, exited: Promise.resolve(0) }) };
+    const outcome = await humanStep(signIn, { terminal: io.terminal, machine, nonInteractive: false, rerun: "hedge devbox add node-1" }).run();
+    expect(outcome).toBe("unanswered");
+    expect(io.output()).toContain("  Codex is signed in, but its test request failed: timed out. Setup keeps that sign-in and starts no new one. Fix that, then run hedge devbox add node-1 again.");
   });
 });
 
 describe("ChatGPT with own-account balancing", () => {
+  const balanced = ["--non-interactive", "--preset", "starter", "--plan", "both", "--add", "hub", "--workflows", "own-account-balancing=on,mcp-gateway=off", "--set", "hub.alias=coder.hedge-hub"];
+
   test("setup passes without this machine's ChatGPT sign-in, and leaves a To do line that says why", async () => {
     const home = temp.make("home-");
     const box = fakeMachine(home, { chatgpt: 99 });
-    const result = await hedgeSetup(home, ["--non-interactive", "--preset", "starter", "--plan", "both", "--add", "hub", "--workflows", "own-account-balancing=on,mcp-gateway=off", "--set", "hub.alias=coder.hedge-hub"], [], box);
+    const result = await hedgeSetup(home, balanced, [], box);
     expect(result.code).toBe(0);
     expect(result.output).toContain(`  To do: Sign in to ChatGPT. With own-account balancing on, Codex goes through the proxy on the hub once it holds one of your ChatGPT subscriptions, so setup does not need this sign-in. Codex here needs it only until then. Run: codex login -c 'cli_auth_credentials_store="file"' --device-auth.`);
-    expect(box.starts).not.toContainEqual(codexLogin);
+    expect(box.starts.filter((command) => command.includes("--device-auth"))).toEqual([]);
+  });
+
+  test("when the check fails on a kept sign-in, the To do line says why and never tells the person to sign in again", async () => {
+    const home = temp.make("home-");
+    const box = fakeMachine(home, { chatgpt: 99 }, { codexProbe: { output: "ERROR: You hit your spend cap.\n", loggedIn: true } });
+    const result = await hedgeSetup(home, balanced, [], box);
+    expect(result.code).toBe(0);
+    expect(result.output).toContain("  To do: Sign in to ChatGPT. With own-account balancing on, Codex goes through the proxy on the hub once it holds one of your ChatGPT subscriptions, so setup does not need this sign-in. Codex here needs it only until then. Codex is signed in, but its test request failed: You hit your spend cap. Setup keeps that sign-in and starts no new one. Fix that, then run hedge setup again.\n");
+    expect(result.output).not.toContain("Run: codex login");
   });
 
   test("still needs the sign-in when balancing is off", async () => {
@@ -335,6 +409,15 @@ describe("ChatGPT with own-account balancing", () => {
     const result = await hedgeSetup(home, ["--non-interactive", "--preset", "starter", "--plan", "both", "--add", "hub", "--workflows", "mcp-gateway=off", "--set", "hub.alias=coder.hedge-hub"], [], fakeMachine(home, { chatgpt: 99 }));
     expect(result.code).toBe(2);
     expect(result.output).toContain("  Needs you: Sign in to ChatGPT");
+  });
+
+  test("a rerun with balancing turned off needs the sign-in that the optional check left open", async () => {
+    const home = temp.make("home-");
+    const box = fakeMachine(home, { chatgpt: 99 });
+    expect((await hedgeSetup(home, balanced, [], box)).code).toBe(0);
+    const off = await hedgeSetup(home, ["--non-interactive", "--workflows", "own-account-balancing=off"], [], box);
+    expect(off.code).toBe(2);
+    expect(off.output).toContain("  Needs you: Sign in to ChatGPT");
   });
 });
 
