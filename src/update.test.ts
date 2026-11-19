@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { ProfileFile } from "./pack/types.ts";
 import { isolateGit, spawnGit, template, tempDirs } from "./testing/git.ts";
 import { spawnAsync } from "./testing/spawn.ts";
@@ -211,6 +211,30 @@ describe("hedge update", () => {
 
     expect(failed).toMatchObject({ code: 1, version: "v0.1.1", output: expect.stringContaining("so the update was rolled back") });
     expect(await pinSavedBySetup(engineDir)).toEqual({ repo: "PostHog/hedge", ref: "v0.1.1", channel: "release" });
+  });
+
+  async function withFetchBeforeFirstCheckout<T>(work: () => Promise<T>) {
+    const realGit = Bun.which("git")!;
+    const bin = temp.make("bin-");
+    writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = -C ] && [ "$3" = checkout ] && [ ! -e "$2/.git/raced" ]; then : > "$2/.git/raced"; "${realGit}" -C "$2" fetch -q origin main; fi\nexec "${realGit}" "$@"\n`, { mode: 0o755 });
+    const path = process.env.PATH;
+    process.env.PATH = `${bin}:${path}`;
+    try {
+      return await work();
+    } finally {
+      process.env.PATH = path;
+    }
+  }
+
+  test("a fetch that lands between the release fetch and its checkout does not change the commit that hedge update installs and records", async () => {
+    const remote = await engineRemote(["v0.1.0", "v0.1.1"]);
+    const engineDir = await engineCheckout(remote, "v0.1.0");
+
+    const result = await withFetchBeforeFirstCheckout(() => run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" }));
+
+    expect(existsSync(join(engineDir, ".git/raced"))).toBe(true);
+    expect(result).toMatchObject({ code: 0, version: "v0.1.1" });
+    expect(await spawnGit(engineDir, "rev-parse", "refs/hedge/releases/v0.1.1")).toBe(await spawnGit(remote, "rev-parse", "v0.1.1^{commit}"));
   });
 
   test("hedge triage --print names the release that hedge update installed", async () => {

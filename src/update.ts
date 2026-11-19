@@ -39,7 +39,7 @@ export async function update(given: UpdateOptions): Promise<number> {
   if (!moved) return 1;
   const failed = await installPackages(options.engineDir);
   if (failed !== undefined) return await rollBack(options, before, failed), 1;
-  if (!(await recordRelease(options, moved.release))) return 1;
+  if (!(await recordRelease(options, moved))) return 1;
   if (!(await saveOrigin(options, origin))) return 1;
   const profileMoved = await pullProfile(options);
   const applied = await options.runApply();
@@ -78,19 +78,28 @@ async function saveOrigin(options: UpdateOptions, origin: Origin) {
   return true;
 }
 
-type Moved = false | { release?: string };
+type Moved = false | { release?: { tag: string; commit: string } };
 
-async function recordRelease(options: UpdateOptions, release: string | undefined) {
-  if (!release) return true;
-  const recorded = await git(options.engineDir, "update-ref", `${releaseRefs}/${release}`, "HEAD");
-  if (!recorded.ok) options.print(`hedge update: the engine is at ${release}, but could not record that release: ${recorded.err}`);
+async function recordRelease(options: UpdateOptions, moved: Exclude<Moved, false>) {
+  if (!moved.release) return true;
+  const { tag, commit } = moved.release;
+  const recorded = await git(options.engineDir, "update-ref", `${releaseRefs}/${tag}`, commit);
+  if (!recorded.ok) options.print(`hedge update: the engine is at ${tag}, but could not record that release: ${recorded.err}`);
   return recorded.ok;
 }
 
+async function fetchedCommit(options: UpdateOptions, url: string, ref: string) {
+  const fetched = await git(options.engineDir, "fetch", "-q", "--depth", "1", "--no-tags", url, ref);
+  if (!fetched.ok) return options.print(`hedge update: could not fetch the engine: ${fetched.err}`), undefined;
+  const commit = await git(options.engineDir, "rev-parse", "--verify", "FETCH_HEAD^{commit}");
+  if (!commit.ok) return options.print(`hedge update: could not read the fetched engine: ${commit.err}`), undefined;
+  return commit.out;
+}
+
 async function trackMain(options: UpdateOptions, url: string): Promise<Moved> {
-  const fetched = await git(options.engineDir, "fetch", "-q", "--depth", "1", "--no-tags", url, "main");
-  if (!fetched.ok) return options.print(`hedge update: could not fetch the engine: ${fetched.err}`), false;
-  const checkedOut = await git(options.engineDir, "checkout", "-q", "--detach", "FETCH_HEAD");
+  const commit = await fetchedCommit(options, url, "main");
+  if (!commit) return false;
+  const checkedOut = await git(options.engineDir, "checkout", "-q", "--detach", commit);
   if (!checkedOut.ok) return options.print(`hedge update: could not check out main: ${checkedOut.err}`), false;
   options.print(`Engine follows main at ${(await git(options.engineDir, "rev-parse", "--short", "HEAD")).out}.`);
   return {};
@@ -132,12 +141,12 @@ async function followRelease(options: UpdateOptions, url: string, switched: bool
 }
 
 async function checkOutRelease(options: UpdateOptions, url: string, target: Version): Promise<Moved> {
-  const fetched = await git(options.engineDir, "fetch", "-q", "--depth", "1", "--no-tags", url, `refs/tags/${target.tag}`);
-  if (!fetched.ok) return options.print(`hedge update: could not fetch the engine: ${fetched.err}`), false;
-  const checkedOut = await git(options.engineDir, "checkout", "-q", "--detach", "FETCH_HEAD");
+  const commit = await fetchedCommit(options, url, `refs/tags/${target.tag}`);
+  if (!commit) return false;
+  const checkedOut = await git(options.engineDir, "checkout", "-q", "--detach", commit);
   if (!checkedOut.ok) return options.print(`hedge update: could not check out ${target.tag}: ${checkedOut.err}`), false;
   options.print(`Engine is at ${target.tag}.`);
-  return { release: target.tag };
+  return { release: { tag: target.tag, commit } };
 }
 
 async function installPackages(engineDir: string) {
