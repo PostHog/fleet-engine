@@ -417,6 +417,39 @@ test("connect again after the pool empties takes Hedge's routes off Claude Code 
   expect(printed.at(-1)).toEndWith("Codex keeps its own sign-in.");
 });
 
+test("connect again after the pool empties leaves a proxy address that Hedge's key helper does not go with", async () => {
+  const { machine, home } = client({}, { models: [] });
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  const theirs = { env: { ANTHROPIC_BASE_URL: proxyUrl, ANTHROPIC_API_KEY: "sample" } };
+  writeFileSync(settingsFile(home), JSON.stringify(theirs));
+  expect(await cliProxy("connect", machine)).toBe(0);
+  expect(readJson(settingsFile(home))).toEqual(theirs);
+});
+
+test("connect again after the pool empties says when Codex may still use the proxy, and leaves a linked or locked config", async () => {
+  const linked = client({ plan: "both" }, { models: [] });
+  connected(linked.home);
+  const outside = temp.make("elsewhere-");
+  writeFileSync(join(outside, "config.toml"), stringify({ ...mine, model_provider: "hedge-proxy", model_providers: { ...mine.model_providers, "hedge-proxy": hedgeProxy } }));
+  symlinkSync(outside, join(linked.home, ".codex"));
+  expect(await cliProxy("connect", linked.machine)).toBe(0);
+  expect(readFileSync(join(outside, "config.toml"), "utf8")).toContain('model_provider = "hedge-proxy"');
+  expect(linked.printed.at(-1)).toEndWith("Codex may still use the proxy. Fix that, then run hedge apply.");
+
+  const locked = client({ plan: "both" }, { models: [] });
+  connected(locked.home);
+  codexRouted(locked.home);
+  chmodSync(join(locked.home, ".codex"), 0o500);
+  try {
+    expect(await cliProxy("connect", locked.machine)).toBe(0);
+  } finally {
+    chmodSync(join(locked.home, ".codex"), 0o700);
+  }
+  expect(readCodex(locked.home).model_provider).toBe("hedge-proxy");
+  expect(readJson(settingsFile(locked.home)).apiKeyHelper).toBeUndefined();
+  expect(locked.printed.at(-1)).toEndWith("Codex may still use the proxy. Fix that, then run hedge apply.");
+});
+
 test("connect refuses a model list it cannot read, and saves no key", async () => {
   const refused = client({}, { modelList: '{"data":[null,{"id":7}]}' });
   await expect(cliProxy("connect", refused.machine)).rejects.toThrow("answers without a model list. Nothing changed.");
