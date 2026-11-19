@@ -210,6 +210,14 @@ describe("hedge packs with a profile that still names an old pack", () => {
     expect((await hedge(home, ["packs", "--add", "communication"])).code).toBe(0);
     expect((await pushed()).workflows).toEqual({ "shell-guards": true, "package-age": true });
   });
+
+  test("says a workflow stays off for a missing setting only when the same command does not set it", async () => {
+    const { home, elsewhere } = await machineWithProfile();
+    await elsewhere((file) => ({ ...file, packs: ["pull-requests", "context-library"], workflows: { "context-library": false } }));
+    const warning = "context-library is on in your profile, but stays off: waits for setting context-library.repo.";
+    expect((await hedge(home, ["packs", "--workflows", "context-library=on"])).output).toContain(warning);
+    expect((await hedge(home, ["packs", "--workflows", "context-library=on", "--set", "context-library.repo=example/library"])).output).not.toContain(warning);
+  });
 });
 
 describe("hedge settings and hedge set", () => {

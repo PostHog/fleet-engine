@@ -231,6 +231,14 @@ describe("resolve", () => {
     expect(states({ "base-route": false }).slice(0, 3)).toEqual([["direct", true, undefined], ["after-direct", true, undefined], ["routed", false, "needs workflow base-route"]]);
   });
 
+  test("a fallback whose setting is answered stays on while the workflow it yields to waits for its own setting", () => {
+    const setting = (key: string) => ({ key, question: `${key}?`, type: "string" as const });
+    const flow = (id: string, fields: { yields?: string[] }) => ({ id, name: id, sentence: `${id}.`, default: true, settings: [`pair.${id}`], offUntilSet: [`pair.${id}`], ...fields });
+    const pair = withPack({ schema: 1, name: "pair", summary: "Pair.", settings: [setting("pair.fallback"), setting("pair.preferred")], workflows: [flow("fallback", { yields: ["preferred"] }), flow("preferred", {})] });
+    const states = plan({ packs: ["pair"], settings: { "pair.fallback": "set" } }, mac, [engine, pair]).workflows.filter((state) => state.pack === "pair").map(({ id, active, reason }) => [id, active, reason]);
+    expect(states).toEqual([["fallback", true, undefined], ["preferred", false, "waits for setting pair.preferred"]]);
+  });
+
   test("settles a chain of yields: the first stays on when the one it yields to yields in turn", () => {
     const flow = (id: string, yields: string[] = []) => ({ id, name: id, sentence: `${id}.`, default: true, yields });
     const chain = withPack({ schema: 1, name: "chain", summary: "Chain.", workflows: [flow("a", ["b"]), flow("b", ["c"]), flow("c")] });
