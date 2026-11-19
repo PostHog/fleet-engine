@@ -458,14 +458,14 @@ async function connect(machine: ProxyMachine): Promise<void> {
   await mkdir(dirname(keyPath(machine.home)), { recursive: true, mode: 0o700 });
   await writePrivateFile(keyPath(machine.home), `${key}\n`);
   const waiting = unserved(models, "claude");
-  if (agent === "claude" && waiting) machine.print(`${waiting} ${applyWaits("Claude Code")}`);
+  if (agent === "claude" && waiting) machine.print(`${waiting} Run hedge apply: it keeps Claude Code on its own sign-in until the proxy serves it.`);
   else if (agent === "claude") {
     await sendClaude(machine.home, true);
     machine.print(`Claude Code uses your own-account proxy at ${proxyUrl} now. Restart open Claude Code sessions.`);
   }
   if (codex === undefined) return;
   const missing = typeof codex === "string" ? undefined : unserved(models, "codex");
-  if (missing) return machine.print(`${missing} ${applyWaits("Codex")}`);
+  if (missing) return machine.print(`${missing} Run hedge apply: it keeps Codex on its own sign-in until the proxy serves it.`);
   const failed = typeof codex === "string" ? codex : await sendCodex(machine.home, agent === "claude");
   if (failed) return machine.print(`${failed} Codex keeps its own sign-in.`);
   machine.print(`Codex uses your own-account proxy at ${proxyUrl} now. Restart open Codex sessions.`);
