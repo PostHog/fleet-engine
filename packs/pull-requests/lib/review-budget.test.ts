@@ -519,6 +519,22 @@ test("a finished review with no blocker or major spends no review budget, while 
   await expect(pr.hedge("review-start", "--scope", "fixes", "--base", await pr.git("rev-parse", "HEAD"))).rejects.toThrow("The review budget of 2 reviews is spent");
 });
 
+test("a review whose only item to answer is a TESTS item spends review budget", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: graded("non-critical", "medium") });
+  pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 10, "pull-requests.reviewCeiling": 1 });
+  await pr.commit("feature.txt", "greet\n");
+  await pr.hedge("require", "--none", "--reason", "fixture");
+  const panel = await cannedPanel(pr, { design: minor, others: lensAnswer("(none)") });
+  const fix = await pr.commit("feature.txt", "greet the member\n");
+  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", panel)).output).toContain(`"round":2`);
+  await finishWith(pr, "2", `${lensAnswer("(none)")}TESTS:\n- feature.test.ts:3 asserts the call count of greet\n`);
+  await pr.commit("feature.txt", "greet every member\n");
+
+  expect((await pr.hedge("gate")).output).toContain("review: round 2 has unanswered findings 1;");
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", fix)).rejects.toThrow("The review budget of 1 reviews is spent");
+});
+
 test("for a panel that mixes a prose-only lens with a lens that lists a minor, the review budget spends exactly when the gate asks for an answer", async () => {
   const pr = await checkout();
   pr.pullRequestState({ body: graded("non-critical", "medium") });
@@ -554,14 +570,14 @@ test("the ceiling never refuses a final read of a HEAD the gate does not carry, 
   await expect(pr.hedge("review-start", "--scope", "final", "--base", await pr.git("rev-parse", "HEAD~1"), "--agent", "One more read checks the test.")).rejects.toThrow("The review budget of 2 reviews is spent");
 });
 
-test("a HEAD that the gate carries across a revert of the latest reviewed fix needs no final read, and with --agent meets the ceiling, whatever --base names", async () => {
+test("a HEAD that the gate carries across a revert of the latest reviewed fix needs no final read, and with --agent meets the ceiling, while a --base that is not the latest reviewed commit is refused first", async () => {
   const pr = await checkout();
   const { panel, fix } = await atCeiling(pr);
   await pr.git("revert", "--no-edit", fix);
 
   expect((await pr.hedge("gate")).output).toContain(`review: final read carried from ${panel.slice(0, 7)}: revert of a PR commit`);
   await expect(pr.hedge("review-start", "--scope", "final", "--base", fix)).rejects.toThrow(`HEAD needs no final read: final read carried from ${panel.slice(0, 7)}: revert of a PR commit`);
-  await expect(pr.hedge("review-start", "--scope", "final", "--base", panel)).rejects.toThrow(`HEAD needs no final read: final read carried from ${panel.slice(0, 7)}: revert of a PR commit`);
+  await expect(pr.hedge("review-start", "--scope", "final", "--base", panel)).rejects.toThrow(`Final read base must be the latest reviewed commit ${fix}`);
   await expect(pr.hedge("review-start", "--scope", "final", "--base", fix, "--agent", "The revert needs a read.")).rejects.toThrow("The review budget of 2 reviews is spent");
 });
 

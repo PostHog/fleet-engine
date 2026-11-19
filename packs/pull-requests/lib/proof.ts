@@ -243,11 +243,11 @@ async function startFinalRead(home: string, identity: ProofIdentity, base: strin
     const started = await reviewNames(reviews);
     const finished = await finishedReviews(home, identity);
     const carried = gateCarry(identity, finished, cleanBaseMerge, quietCommit).found;
-    if (!decision && carried?.quiet.length) throw new Error(`HEAD needs no final read: final read carried from ${short(carried.from)}: ${quietReason(carried.kinds)}. hedge proof gate counts the carry. To read it anyway, pass --agent '<your reason>', or the user's --override`);
     if (finished.length < started.length) throw new Error("A review is unfinished. Finish it before a final read.");
     const latest = finished.at(-1);
     if (!latest) throw new Error("A final read needs a finished earlier review");
     if (!coversReview(base, latest.commit, cleanBaseMerge)) throw new Error(`Final read base must be the latest reviewed commit ${latest.commit}, or a clean base merge the gate carried it to`);
+    if (!decision && carried?.quiet.length) throw new Error(`HEAD needs no final read: final read carried from ${short(carried.from)}: ${quietReason(carried.kinds)}. hedge proof gate counts the carry. To read it anyway, pass --agent '<your reason>', or the user's --override`);
     const spent = await reviewsSpent(reviews, started, phase);
     const { free, ceiling } = permit.limits;
     const stop = carried && spent >= ceiling ? budgetSpent(permit.limits) : undefined;
