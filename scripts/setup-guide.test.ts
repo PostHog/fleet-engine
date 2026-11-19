@@ -184,7 +184,7 @@ describe("the agent setup guide", () => {
 
   test("the guide's one coder create command passes the disk, region, dotfiles, and every other parameter with --parameter, with --preset none and --yes", () => {
     const creates = codeIn(guide()).filter((code) => code.startsWith("coder create "));
-    expect(creates).toEqual(["coder create <name> --template <template> --preset none --parameter <disk parameter>=<200 or 500> --parameter <region parameter>=<region> --parameter <dotfiles parameter>=https://github.com/<profile repo> --parameter <other parameter>=<value> --yes\n"]);
+    expect(creates).toEqual(["coder create <name> --template <template> --preset none --parameter <disk parameter>=<200 or 500> --parameter <region parameter>=<region> --parameter <dotfiles parameter>=git@github.com:<profile repo>.git --parameter <other parameter>=<value> --yes\n"]);
     expect(words(step(5))).toContain("Pass each parameter with its own `--parameter`, also those where the default is right, so Coder asks nothing");
   });
 
@@ -199,7 +199,8 @@ describe("the agent setup guide", () => {
     const script = fetched.match(/main\/(scripts\/check-workspace\.sh)/)![1]!;
     expect(existsSync(join(root, script))).toBe(true);
     expect(code).toContain("sh ~/.cache/hedge-setup/check-workspace.sh <name> <parameter>=<value> <parameter>=<value>\n");
-    expect(code.join("\n")).not.toMatch(/\$dir\/session|Coder-Session-Token/);
+    expect(code.join("\n")).not.toMatch(/\$dir\/session/);
+    expect(code.join("\n").split("\n").filter((line) => line.includes("Coder-Session-Token") && !line.startsWith("{ printf 'Coder-Session-Token: '; coder login token; } | curl -q -fsS -H @- "))).toEqual([]);
     expect(words(step(5))).toContain("the disk size, the region, the instance type, and the dotfiles repo. Never pass a private value to the check");
     expect(words(step(5))).toContain("A parameter that the template does not let change, such as the disk size or the region, needs a new workspace: ask, then `coder delete <name>` and create it again, before setup touches it.");
   });
@@ -216,8 +217,49 @@ describe("the agent setup guide", () => {
     expect([printed.code, printed.output]).toEqual([1, "x instance_type is not the value you passed. In the Coder web app, set it under Settings, Parameters, and submit.\nok hedge-hub runs and stays on\n"]);
   });
 
-  test("reads the template's parameters when coder templates pull fails", () => {
-    expect(words(step(5))).toContain("When `coder templates pull` fails, open the template's page in the Coder web app");
+  test("reads the template's parameters from the Coder API of its active version, with the token on curl's standard input, and never with coder templates pull", () => {
+    const code = codeIn(step(5));
+    expect(code).toContain("coder templates list -o json\n");
+    expect(code).toContain("{ printf 'Coder-Session-Token: '; coder login token; } | curl -q -fsS -H @- <coder address>/api/v2/templateversions/<active version id>/rich-parameters\n");
+    expect(words(step(5))).toContain("read `Template.active_version_id`");
+    expect(blocksIn(guide()).join("\n")).not.toContain("coder templates pull");
+    expect(words(step(5))).toContain("When that fails, open the template's page in the Coder web app");
+  });
+
+  test("gives the dotfiles the private profile's SSH address, names the dotfiles branch, and says a fresh node's start script fails until hedge devbox add", () => {
+    expect(words(guide())).not.toMatch(/dotfiles parameter[^.]*https:\/\/github\.com\/<|`https:\/\/github\.com\/<repo>`/);
+    expect(words(step(5))).toContain("| The dotfiles | Pass the profile repo of item 3, as `git@github.com:<profile repo>.git`. |");
+    expect(words(step(5))).toContain("| The dotfiles branch, such as `dotfiles_branch` |");
+    expect(words(step(7))).toContain("change the dotfiles parameter of each workspace to `git@github.com:<repo>.git`");
+    expect(words(step(5))).toContain("each `ssh coder.<node>` prints `A startup script exited with an error` and the start log. That is expected");
+  });
+
+  test("checks the hub's own Coder session before it makes a token, and says what to do when Coder forbids tokens", () => {
+    const code = codeIn(step(7)).join("\n");
+    const whoami = code.indexOf(onHubLine("coder whoami && coder config-ssh --yes"));
+    expect(whoami).toBeGreaterThanOrEqual(0);
+    expect(whoami).toBeLessThan(code.indexOf("coder tokens create | ssh coder.<hub>"));
+    expect(words(step(7))).toContain("`rbac: forbidden`. Then ask the person for a session token from `<coder address>/cli-auth` with the secret prompt");
+  });
+
+  test("on a rerun, says the profile's packs win over the page's picks", () => {
+    expect(words(step(1))).toContain("The profile's packs win over the picks from the page.");
+    expect(words(beforeSteps("## Picks from the page"))).toContain("the packs in their profile win over the page's picks");
+  });
+
+  test("checks only the earlier hub the person names, never every workspace", () => {
+    expect(words(step(1))).toContain("Check only the workspace they name. Never check every workspace");
+    expect(words(step(1))).not.toContain("For each workspace that runs");
+  });
+
+  test("names the hub before setup runs again when the gateway needs it", () => {
+    expect(words(step(7))).toContain("A line `To do: This machine cannot reach the MCP gateway`.** The profile turns on the hub pack, so the gateway needs a named hub. Run the `hedge hub here` of item 4 now");
+  });
+
+  test("the Recovery note sends the proxy's failed Claude callback to the hub, as a file from the secret prompt", () => {
+    const note = readFileSync(join(root, "packs/recovery/SETUP.md"), "utf8");
+    expect(codeIn(note)).toContain(`ssh coder.<hub> 'sed "s/^/url = /" | curl -q -fsS -K -' < <file>\n`);
+    expect(words(note)).toContain("Ask for that whole address with the secret prompt, delivered as a file");
   });
 
   test("follows a team pack's own setup note first, at the path where setup keeps that team's pack", async () => {

@@ -73,7 +73,8 @@ Ask everything else as the steps say. Without the list, ask every question.
 | `Packs once the hub runs` | The answer to item 2 of step 9. `none` means no pack, so skip item 2. |
 
 The page names packs only. Each pack's setup note still asks which of its
-workflows to turn on and which settings it needs.
+workflows to turn on and which settings it needs. On a rerun of setup (step
+1), the packs in their profile win over the page's picks: see step 1.
 
 A prompt from an earlier page can carry more lines. Use them too:
 
@@ -133,9 +134,12 @@ passes. When they have no Coder deployment, stop: this setup needs Coder
 today. Plain Linux boxes over SSH are not supported yet. "Set it up by hand"
 in the README installs Hedge on one Linux box.
 
-**An earlier setup.** Run `coder list`. For each workspace that runs, check
-whether Hedge runs there and whether it is the hub. Their boxes can have any
-name, so do not skip one whose name does not start with `hedge-`:
+**An earlier setup.** Run `coder list`, and ask whether one of the running
+workspaces is the hub of an earlier Hedge or Fleet setup. Their boxes can
+have any name, so offer each running workspace whose name starts with
+`hedge-` or `fleet-` as an option, and "None" too; they can name another one
+in their own answer. Check only the workspace they name. Never check every
+workspace: an account can have dozens, and each check takes an SSH session:
 
 ```sh
 ssh coder.<name> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge hub status'
@@ -155,6 +159,11 @@ When a hub answers, show its packs with `hedge packs` there, and ask:
   `--preset`, and name only what changes with `--add`, `--remove`, and
   `--workflows`. Everything else stays as it is. Files they changed by hand
   are kept, and step 8 shows them. Skip step 5 for the hub.
+
+  The profile's packs win over the picks from the page. Add each picked
+  pack that the profile does not have with `--add`. When the profile has a
+  pack that the picks leave out, name it and ask whether to keep it, the
+  recommended option, or to remove it with `--remove`.
 
 An earlier Hedge or Fleet that runs on this Mac stays as it is until the hub
 works. Then offer to stop it. On a Mac, `get.sh` installs nothing: it only
@@ -249,19 +258,30 @@ says what to do with a template parameter that holds one.
    when they want another. Below, `<hub>` and `<node>` stand for them, and
    `<name>` for any of them.
 2. **Template.** List them with `coder templates list`. When there is one,
-   use it; ask only when there are more. Read its parameters, the
-   `coder_parameter` blocks in its files:
+   use it; ask only when there are more. Read its parameters from the Coder
+   API. `coder templates pull` needs an organization name that a member
+   often cannot pass, so do not use it. First find the template's id and
+   its active version:
 
    ```sh
-   coder templates pull <template> ~/.cache/hedge-setup/template-<template>
+   coder templates list -o json
    ```
 
-   When `coder templates pull` fails, open the template's page in the Coder
-   web app, `<coder address>/templates/<template>`, and ask the person to
-   read you the parameters and their allowed values from it.
+   In the entry whose `Template.name` is `<template>`, read
+   `Template.active_version_id`. Then read that version's parameters. The
+   session token goes to `curl` on its standard input, so it never shows:
 
-   Find the disk size, the region, the dotfiles, the secret parameters, and
-   the ephemeral parameters, those with `ephemeral = true`.
+   ```sh
+   { printf 'Coder-Session-Token: '; coder login token; } | curl -q -fsS -H @- <coder address>/api/v2/templateversions/<active version id>/rich-parameters
+   ```
+
+   When that fails, open the template's page in the Coder web app,
+   `<coder address>/templates/<template>`, and ask the person to read you
+   the parameters and their allowed values from it.
+
+   Find the disk size, the region, the dotfiles, the dotfiles branch, the
+   secret parameters, and the ephemeral parameters, those with
+   `"ephemeral": true`.
    A secret is a parameter that holds a token, a key, a password, or another
    credential: its name or description says so, or the form hides what you
    type. Never ask about a secret. Sort each other parameter by the first
@@ -270,7 +290,8 @@ says what to do with a template parameter that holds one.
    | Parameter | What you do |
    | --- | --- |
    | The disk size | Pass the size that item 4 gives. |
-   | The dotfiles | Pass the profile repo of item 3. |
+   | The dotfiles | Pass the profile repo of item 3, as `git@github.com:<profile repo>.git`. |
+   | The dotfiles branch, such as `dotfiles_branch` | Pass its default, mostly empty, which is the profile's default branch. Setup saves the answers to the branch the box checks out, so a box on another branch never changes the default branch. |
    | The region | Ask. |
    | Another parameter without a default | Ask. |
    | Another parameter with a default | Pass its default. |
@@ -287,6 +308,16 @@ says what to do with a template parameter that holds one.
    log. That is expected. A team pack can keep the profile in its GitHub org
    instead; step 7 checks the repo again. Below, `<profile repo>` is the
    `owner/name` you found.
+
+   Coder clones the dotfiles with the workspace's Git SSH key. The profile
+   is private, so give its SSH address, `git@github.com:<profile repo>.git`.
+   Its `https://github.com/` address fails with `Write access to repository
+   not granted`, because the box has no GitHub sign-in yet.
+
+   A node's dotfiles install fails until `hedge devbox add` in step 9 has
+   signed it in to GitHub and turned on lingering. Until then, each
+   `ssh coder.<node>` prints `A startup script exited with an error` and the
+   start log. That is expected: say so once, and go on.
 4. **Create.** Give the hub a 200 GB disk and each node a 500 GB disk.
    When the template has an ephemeral parameter, stop and tell the person:
    this guide does not set up such a workspace, because Coder drops or
@@ -311,7 +342,7 @@ says what to do with a template parameter that holds one.
    `--preset none` stops the preset question that `--yes` does not skip:
 
    ```sh
-   coder create <name> --template <template> --preset none --parameter <disk parameter>=<200 or 500> --parameter <region parameter>=<region> --parameter <dotfiles parameter>=https://github.com/<profile repo> --parameter <other parameter>=<value> --yes
+   coder create <name> --template <template> --preset none --parameter <disk parameter>=<200 or 500> --parameter <region parameter>=<region> --parameter <dotfiles parameter>=git@github.com:<profile repo>.git --parameter <other parameter>=<value> --yes
    ```
 
    Never use `--copy-parameters-from`: Coder then takes the copied
@@ -399,12 +430,26 @@ Every command in this step runs on the hub over SSH. Wait until
 `ssh coder.<hub> true` passes.
 
 1. **Sign the hub in to Coder.** The hub reaches the nodes over SSH through
-   Coder, so it needs its own Coder session. Make a token here and send it on
-   standard input, so it never shows in the chat:
+   Coder, so it needs its own Coder session. A Coder workspace often has one
+   already. Check first:
+
+   ```sh
+   ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; coder whoami && coder config-ssh --yes'
+   ```
+
+   When it passes, the hub is signed in: go on with item 2. Otherwise make a
+   token here and send it on standard input, so it never shows in the chat:
 
    ```sh
    coder tokens create | ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; { command -v coder >/dev/null || { case $(uname -m) in x86_64) a=amd64;; aarch64|arm64) a=arm64;; *) exit 1;; esac; mkdir -p "$HOME/.local/bin" && curl -fsSL "<coder address>/bin/coder-linux-$a" -o "$HOME/.local/bin/coder" && chmod +x "$HOME/.local/bin/coder"; }; } && IFS= read -r token && CODER_SESSION_TOKEN="$token" coder login --use-token-as-session <coder address> && coder config-ssh --yes'
    ```
+
+   When it ends with code 1 and prints nothing, `coder tokens create` failed
+   here, and the hub read no token. A Coder deployment can forbid its
+   members to make tokens, with `rbac: forbidden`. Then ask the person for a session token from
+   `<coder address>/cli-auth` with the secret prompt, delivered as a file,
+   and run the same `ssh coder.<hub> '…'` part with `< <file>` instead of the
+   pipe.
 
 2. **Install.** Download the install script on the hub and read it. Keep it
    in view, because a pipe into `sh` hides what runs:
@@ -464,6 +509,10 @@ Every command in this step runs on the hub over SSH. Wait until
      ssh -t coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; claude auth login'
      ```
 
+   - **A line `To do: This machine cannot reach the MCP gateway`.** The
+     profile turns on the hub pack, so the gateway needs a named hub. Run
+     the `hedge hub here` of item 4 now, before you run setup again.
+
    Then run the same setup command again. Every step skips what is done. On
    any other stop, read the last lines, explain them, and fix what they
    name. Use each wait (see "While something runs").
@@ -472,7 +521,7 @@ Every command in this step runs on the hub over SSH. Wait until
    `✓ Created the private repo <repo>` or `✓ Reusing your repo <repo>`. When
    that is not `<profile repo>` from step 5, such as a profile in a team's
    GitHub org, change the dotfiles parameter of each workspace to
-   `https://github.com/<repo>` in the Coder web app, as step 5 says. The new
+   `git@github.com:<repo>.git` in the Coder web app, as step 5 says. The new
    build stops the hub for a moment, so wait for it before the next SSH
    command. Then run the check of step 5 again, and wait until
    `ssh coder.<name> true` passes. When the template does not let the
@@ -483,7 +532,7 @@ Every command in this step runs on the hub over SSH. Wait until
    | --- | --- |
    | GitHub | Once, with every permission Hedge needs: it creates their private `hedge-profile` repo, adds the hub's SSH key, and reads their org's packs. A code to type at a GitHub page. |
    | Claude | Claude Code on the hub uses their Claude plan. In a Terminal window, as above. |
-   | ChatGPT | Codex on the hub uses their ChatGPT plan. A code to type at a ChatGPT page. Setup checks it with a real request. When it fails, setup says how to turn on device code sign-in, or how to sign in in the browser of this machine over an SSH port forward instead. |
+   | ChatGPT | Codex on the hub uses their ChatGPT plan. A code to type at a ChatGPT page. Setup checks it with a real request. When the request fails for another reason, such as a spend cap, setup prints the reason and keeps the sign-in. When device code sign-in is off, setup says how to turn it on, or how to sign in in the browser of this machine over an SSH port forward instead. With own-account balancing on, setup does not need it, because Codex goes through the hub's proxy: setup leaves a `To do:` line instead. This sign-in is only for Codex on the box. The MCP gateway's ChatGPT sign-ins only let agents reach apps such as Slack, and the proxy keeps its own subscriptions. |
 
 4. **Name the hub.** Run this right after setup ends, before any step that a
    pack's setup note puts after the setup command. The Slack and incident.io
