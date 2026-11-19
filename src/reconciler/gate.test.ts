@@ -76,6 +76,13 @@ test("a service whose check fails gets no unit, and its setup command installs i
   expect((await hedge("doctor")).lines.join("\n")).not.toContain(todo);
 });
 
+test("a repair command from before the rename shows as a hedge command, which a machine set up after the rename has", async () => {
+  const { profile, hedge } = machine("fleet gated setup");
+  const output = (await hedge("apply", "--profile", profile)).lines.join("\n");
+  expect(output).toContain(todo);
+  expect(output).not.toContain("Run: fleet");
+});
+
 test("a check that stops passing removes the unit, and doctor names the check as a To do once", async () => {
   const { profile, hedge, service } = machine();
   await hedge("apply", "--profile", profile);

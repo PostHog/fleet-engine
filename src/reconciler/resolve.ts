@@ -24,6 +24,7 @@ import { signerSetting } from "../adapters/identity/signers.ts";
 import { engineSettings } from "../pack/manifest.ts";
 import { placedMachine } from "../profile/profile.ts";
 import { forwardId, hubForward } from "../hub/ssh.ts";
+import { asHedgeLine } from "./engine-command.ts";
 
 export class ResolveError extends Error {}
 
@@ -101,7 +102,7 @@ export function resolve(profile: Profile, saved: MachineFile, sources: FetchedSo
     const rules = (manifest.codexRules ?? []).filter((entry) => fits(pack, { ...entry, plans: entry.plans ?? codexPlans }, `codex rules ${entry.path}`));
     if (rules.length) packFiles.push({ target: `.codex/rules/hedge-${pack}.rules`, content: rules.map((entry) => readFileSync(within(dir, entry.path, pack), "utf8").replace(/\n?$/, "\n")).join("") });
     for (const job of manifest.jobs ?? []) if (fits(pack, job, `job ${job.id}`)) plan.jobs.push({ ...job, pack });
-    for (const step of manifest.human ?? []) if (fits(pack, step, `human ${step.id}`)) plan.human.push({ ...step, pack });
+    for (const step of manifest.human ?? []) if (fits(pack, step, `human ${step.id}`)) plan.human.push({ ...step, ...(step.command ? { command: asHedgeLine(step.command) } : {}), pack });
     for (const step of manifest.steps ?? []) {
       if (fits(pack, step, `step ${step.id}`)) plan.steps.push({ ...step, pack });
       else if (step.undo && plan.dropped.at(-1)?.reason === `workflow ${step.workflow} is off`) (plan.undo ??= []).push({ ...step, pack, prerequisite: manifest.human?.find((human) => human.id === step.after)?.probe });
