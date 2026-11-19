@@ -290,6 +290,17 @@ describe("fleet context add", () => {
     expect(await pushedFiles(machine)).toEqual(["CATALOG.md", notePath]);
   });
 
+  test("a document outside notes/ that cites the same link stays as written, and the capture adds a note beside it", async () => {
+    const research = `---\ntitle: Billing research\nsource: ${slackSource}\n---\n\nHand-written.\n`;
+    const machine = await library({ "research/billing.md": research });
+    await fleetContext(machine, ["sync"]);
+    const seen: string[] = [];
+    expect((await fleetContext(machine, ["add", slackSource], drafting(notePath, planning(), seen))).out).toStartWith("Saved Sprint planning 2026-11-11");
+    expect(seen[0]).not.toContain("Update the existing document");
+    expect(await spawnGit(machine.root, "--git-dir", machine.remote, "show", "main:research/billing.md")).toBe(research.trim());
+    expect(await pushedFiles(machine)).toEqual(["CATALOG.md", notePath, "research/billing.md"]);
+  });
+
   test("an update that finds nothing new keeps the note and pushes nothing", async () => {
     const machine = await library({ [notePath]: planning() });
     await fleetContext(machine, ["sync"]);
@@ -311,7 +322,7 @@ describe("fleet context add", () => {
       { env: settings, home: machine.home, git: runGit, agent: () => drafting(notePath, planning(wispr), seen, wispr), sources, today: () => "2026-11-16", share: unusedShare });
     expect(JSON.parse((await capture(link)).output).wispr).toBe(link);
     expect(calls).toEqual([
-      { route: "wispr-flow", tool: "search_meetings", args: { since: "2026-11-16T11:00:07.000Z", until: "2026-11-16T13:00:07.000Z", limit: 3 } },
+      { route: "wispr-flow", tool: "search_meetings", args: { since: "2026-11-16T11:00:07.000Z", until: "2026-11-16T13:00:07.000Z", limit: 5 } },
       { route: "wispr-flow", tool: "get_meeting", args: { meeting_id: "m-1", view_transcript: {} } },
     ]);
     expect(seen[0]).toContain(`Wispr Flow meeting m-1, share link ${link}:\n\n\`\`\`text\nHuddle summary: ship the queue\n\`\`\``);
@@ -319,18 +330,27 @@ describe("fleet context add", () => {
     for (const [said, kept] of [["m-1", "m-1"], ["pending", "pending"], ["https://evil.example.com/x", "none"], ["not an id!", "none"]]) expect(JSON.parse((await capture(said!)).output).wispr).toBe(kept);
   });
 
-  test("a Slack capture still saves when Wispr Flow cannot be searched, and a capture without a start time asks nothing of Wispr", async () => {
-    const { capturePrompt } = await import("./lib/capture.ts");
-    const { readMaterial } = await import("./lib/source.ts");
-    const sam = { path: "/library", repo: "", url: "", owner: "Sam" };
+  test("a Slack capture still saves when Wispr Flow cannot be searched, keeps each meeting it could read, and a capture without a start time asks nothing of Wispr", async () => {
+    const machine = await library();
+    await fleetContext(machine, ["sync"]);
+    const settings = { FLEET_SETTINGS: JSON.stringify({ "context-library.repo": machine.url, "context-library.path": "~/dev/library", "context-library.url": "", "context-library.owner": "Sam" }) };
+    const seen: string[] = [];
     const failing = fakeSources((call) => { if (call.route === "wispr-flow") throw new Error("Wispr is down"); return ""; });
-    const material = await readMaterial({ source: slackSource, material: "x", startedAt: "2026-11-16T12:00:07.000Z" }, failing.sources);
-    expect(material.meetings).toBeUndefined();
-    expect(capturePrompt({ source: slackSource, via: "slack", startedAt: "2026-11-16T12:00:07.000Z" }, sam, undefined, "2026-11-16", material, [])).toContain("Wispr Flow could not be searched for meetings held then.");
+    const answer = await slackCapture(JSON.stringify({ source: slackSource, material: "x", startedAt: "2026-11-16T12:00:07.000Z" }),
+      { env: settings, home: machine.home, git: runGit, agent: () => drafting(notePath, planning(), seen, "pending"), sources: failing.sources, today: () => "2026-11-16", share: unusedShare });
+    expect(JSON.parse(answer.output)).toMatchObject({ path: notePath, wispr: "pending" });
+    expect(seen[0]).toContain("Wispr Flow could not be searched for meetings held then.");
+    expect(await pushedFiles(machine)).toContain(notePath);
+    const { readMaterial } = await import("./lib/source.ts");
+    const partly = fakeSources((call) => {
+      if (call.tool === "search_meetings") return JSON.stringify({ meetings: [{ id: "m-1" }, { id: "m-2" }] });
+      if (call.args.meeting_id === "m-1") throw new Error("gone");
+      return "Standup summary";
+    });
+    expect((await readMaterial({ source: slackSource, material: "x", startedAt: "2026-11-16T12:00:07.000Z" }, partly.sources)).meetings).toEqual([{ id: "m-2", text: "Standup summary" }]);
     const quiet = fakeSources();
-    const plain = await readMaterial({ source: slackSource, material: "x" }, quiet.sources);
+    await readMaterial({ source: slackSource, material: "x" }, quiet.sources);
     expect(quiet.calls).toEqual([]);
-    expect(capturePrompt({ source: slackSource, via: "cli" }, sam, undefined, "2026-11-16", plain, [])).not.toContain("Wispr");
   });
 
   test("a capture that loses the race for the catalog writes a fresh catalog over the other capture and saves both notes", async () => {
@@ -440,15 +460,17 @@ console.log(JSON.stringify({ type: "result", is_error: false, structured_output:
     const slack = (tool: string, args: Record<string, unknown>) => ({ route: "slack", tool, args });
     const drive = (tool: string, args: Record<string, unknown>) => ({ route: "google-drive", tool, args });
     const cases: Array<[string, SourceCall | { page: string }]> = [
-      [slackSource, slack("slack_read_thread", { channel_id: "C1", message_ts: "1794409358.124319" })],
-      ["https://example.slack.com/archives/C1/p1794409400000100?thread_ts=1794409358.124319&cid=C1", slack("slack_read_thread", { channel_id: "C1", message_ts: "1794409358.124319" })],
-      ["https://example.slack.com/archives/C1/p1794409400000100?thread_ts=1.2%3Bx", slack("slack_read_thread", { channel_id: "C1", message_ts: "1794409400.000100" })],
+      [slackSource, slack("slack_read_thread", { channel_id: "C1", message_ts: "1794409358.124319", limit: 1000 })],
+      ["https://example.slack.com/archives/C1/p1794409400000100?thread_ts=1794409358.124319&cid=C1", slack("slack_read_thread", { channel_id: "C1", message_ts: "1794409358.124319", limit: 1000 })],
+      ["https://example.slack.com/archives/C1/p1794409400000100?thread_ts=1.2%3Bx", slack("slack_read_thread", { channel_id: "C1", message_ts: "1794409400.000100", limit: 1000 })],
       ["https://example.slack.com/docs/T1/F0CANVAS1", slack("slack_read_canvas", { canvas_id: "F0CANVAS1" })],
       ["https://docs.google.com/document/d/abc/edit", drive("get_document_text", { document_url: "https://docs.google.com/document/d/abc/edit" })],
       ["https://docs.google.com/presentation/d/abc/edit", drive("get_presentation_text", { presentation_url: "https://docs.google.com/presentation/d/abc/edit" })],
       ["https://docs.google.com/spreadsheets/d/abc/edit", drive("fetch", { url: "https://docs.google.com/spreadsheets/d/abc/edit" })],
       ["https://drive.google.com/file/d/abc/view", drive("fetch", { url: "https://drive.google.com/file/d/abc/view" })],
       ["https://notes.wisprflow.ai/shared/abc", { route: "wispr-flow", tool: "resolve_share_link", args: { url: "https://notes.wisprflow.ai/shared/abc", view_transcript: {} } }],
+      ["https://docs.google.com/document/d/e/2PACX-abc/pub", { page: "https://docs.google.com/document/d/e/2PACX-abc/pub" }],
+      ["https://docs.google.com/presentation/d/e/2PACX-abc/pub", { page: "https://docs.google.com/presentation/d/e/2PACX-abc/pub" }],
       ["https://example.com/post", { page: "https://example.com/post" }],
       ["https://slack.com.example.com/archives/C1/p1794409358124319", { page: "https://slack.com.example.com/archives/C1/p1794409358124319" }],
     ];
@@ -468,15 +490,50 @@ console.log(JSON.stringify({ type: "result", is_error: false, structured_output:
     expect(material.parts.map((part) => part.label)).toEqual([slackSource, "Slack canvas F0CANVAS"]);
   });
 
-  test("reads a web page as text without its scripts, and refuses an error or a file that is not text", async () => {
+  test("reads a web page as text with its links and without its scripts, and refuses an error or a file that is not text", async () => {
     const { readPage } = await import("./lib/source.ts");
     const url = "https://example.com/plan";
     const answering = (body: string, type: string, status = 200) => async () => new Response(body, { status, headers: { "content-type": type } });
-    const html = "<html><head><title>Plan &amp; scope</title><script>steal()</script><style>p{}</style></head><body><p>Load&nbsp;test &#x2192; ship&#0;</p><!-- hidden --></body></html>";
-    expect(await readPage(url, answering(html, "text/html; charset=utf-8"))).toBe("Plan & scope\nLoad test → ship");
+    const html = `<html><head><title>Plan &amp; scope</title><script>steal()</script><style>p{}</style></head><body><p data-x="a>b">Load&nbsp;test &#x2192; ship&#0; &mdash; <a href="/spec?x=1&amp;y=2">the spec</a>, <a href="javascript:steal()">bad</a></p><!-- hidden --></body></html>`;
+    expect(await readPage(url, answering(html, "text/html; charset=utf-8"))).toBe("Plan & scope\nLoad test → ship — the spec (https://example.com/spec?x=1&y=2), bad");
     expect(await readPage(url, answering("# Notes", "text/markdown"))).toBe("# Notes");
     await expect(readPage(url, answering("x", "text/html", 404))).rejects.toThrow(`${url} answered HTTP 404`);
     await expect(readPage(url, answering("x", "application/pdf"))).rejects.toThrow("cannot read as text");
+  });
+
+  test("follows a page's redirects only to other https sites by name, at most five", async () => {
+    const { readPage } = await import("./lib/source.ts");
+    const asked: string[] = [];
+    const redirecting = (hops: Record<string, string>) => async (input: string | URL | Request, init?: RequestInit) => {
+      const at = String(input);
+      asked.push(at);
+      expect(init?.redirect).toBe("manual");
+      return hops[at] ? new Response(null, { status: 302, headers: { location: hops[at]! } }) : new Response("<p>Moved here</p>", { headers: { "content-type": "text/html" } });
+    };
+    expect(await readPage("https://example.com/a", redirecting({ "https://example.com/a": "/b", "https://example.com/b": "https://docs.example.org/c" }))).toBe("Moved here");
+    expect(asked).toEqual(["https://example.com/a", "https://example.com/b", "https://docs.example.org/c"]);
+    for (const target of ["http://example.com/x", "https://127.0.0.1/x", "https://[::1]/x", "https://localhost:3317/mcphub", "https://0x7f000001/x", "https://2130706433/x", "https://metadata.google.internal/x", "file:///etc/passwd"]) {
+      await expect(readPage("https://example.com/a", redirecting({ "https://example.com/a": target }))).rejects.toThrow("reads only https pages on a named public site");
+    }
+    await expect(readPage("https://localhost/x", redirecting({}))).rejects.toThrow("reads only https pages on a named public site");
+    const loop = Object.fromEntries(Array.from({ length: 7 }, (_, hop) => [`https://example.com/${hop}`, `https://example.com/${hop + 1}`]));
+    await expect(readPage("https://example.com/0", redirecting(loop))).rejects.toThrow("redirected more than 5 times");
+  });
+
+  test("reads a gateway source through the hub's fleet group with the machine's key", async () => {
+    const { hubSources } = await import("./lib/source.ts");
+    const home = temp.make("home-");
+    write(home, { ".config/fleet/mcphub.client.json": JSON.stringify({ baseUrl: "http://127.0.0.1:3317/mcphub", token: "key-12" }) });
+    const sent: Array<{ url: string; method: string; auth: string | null; body: unknown }> = [];
+    const gateway = async (input: string | URL | Request, init?: RequestInit) => {
+      const body = init?.body ? JSON.parse(String(init.body)) as { id?: number; method?: string } : undefined;
+      sent.push({ url: String(input), method: init?.method ?? "GET", auth: new Headers(init?.headers).get("authorization"), body: body?.method === "tools/call" ? body : body?.method });
+      if (body?.method === "tools/call") return new Response(`data: ${JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: "Sam: ship it" }] } })}\n\n`, { headers: { "content-type": "text/event-stream" } });
+      return new Response(body?.id === 0 ? "{}" : "", { headers: { "content-type": "application/json", "mcp-session-id": "s-1" } });
+    };
+    expect(await hubSources(home, gateway).call("slack", "slack_read_thread", { channel_id: "C1", message_ts: "1.1" })).toBe("Sam: ship it");
+    expect(sent.map(({ url, method, auth }) => `${method} ${url} ${auth}`)).toEqual(Array(4).fill("").map((_, at) => `${["POST", "POST", "POST", "DELETE"][at]} http://127.0.0.1:3317/mcphub/mcp/fleet Bearer key-12`));
+    expect(sent[2]!.body).toMatchObject({ method: "tools/call", params: { name: "slack-slack_read_thread", arguments: { channel_id: "C1", message_ts: "1.1" } } });
   });
 
   test("a source read through the gateway fails with the fix on a machine without a gateway key", async () => {

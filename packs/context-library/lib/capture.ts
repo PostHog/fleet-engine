@@ -130,7 +130,7 @@ export async function capture(input: CaptureInput, deps: CaptureDeps): Promise<C
   await must(git, ["worktree", "add", "--quiet", "--detach", worktree, "origin/main"], root);
   try {
     const docs = readLibrary(worktree);
-    const found = docs.find((doc) => doc.source === input.source);
+    const found = docs.find((doc) => doc.source === input.source && notePath.test(doc.path));
     const existing = found && { path: found.path, text: readFileSync(join(worktree, found.path), "utf8") };
     const topics = [...new Set(docs.flatMap((doc) => doc.topics))].sort();
     const draft = await deps.agent(capturePrompt(input, library, existing, deps.today(), material, topics));
