@@ -35,7 +35,6 @@ import { importFleet, isCopyOf } from "./import-fleet.ts";
 import { fleetAdapter, type FleetAdapter } from "./adapters/fleet/adapter.ts";
 
 /** env: the environment that tells a Coder workspace apart; tests pass their own. */
-/** launchedFrom: the engine folder as the command named it, before links resolve. */
 export type CliOptions = { home: string; engineRoot: string; launchedFrom?: string; platform: NodeJS.Platform; env?: Record<string, string | undefined>; print: (line: string) => void; fail?: (line: string) => void; run?: Runner; terminal?: Terminal; apply?: (profileDir: string, skip?: string[]) => Promise<number>; setup?: Pick<SetupOptions, "machine" | "fetchSource" | "doctor" | "env" | "timeZone" | "clock">; clock?: Clock; adapters?: () => Adapter[]; hostname?: () => string; stdin?: () => ReadableStream<Uint8Array>; capture?: CommandRunner; become?: Become; interactive?: boolean };
 
 const usage = `Hedge: one setup for T3 Code, agents, and your workflows
@@ -100,19 +99,16 @@ export async function main(argv: string[], options: CliOptions): Promise<number>
   }
 }
 
-/** An engine in a Fleet path from before the rename changes nothing. An old job exits 0 so that it raises no alert; every other command exits 1. */
 function inert(argv: string[], options: CliOptions) {
   (options.fail ?? options.print)(fleetIsHedge);
   return isOldJob(argv) ? 0 : 1;
 }
 
-/** get.sh runs this once the new engine is in place. */
 async function bringOverFleet(options: CliOptions) {
   for (const line of await importFleet(options.home)) options.print(`Hedge: ${line}.`);
   return 0;
 }
 
-/** get.sh runs this after import-fleet and before apply: it stops and turns off every piece of Fleet, keeps their files, and fails while one is not verified stopped. */
 const fleetOf = (options: CliOptions) => (options.adapters ?? engineAdapters)().find((adapter): adapter is FleetAdapter => adapter.name === "fleet") ?? fleetAdapter();
 
 async function retireFleet(args: string[], options: CliOptions) {
@@ -489,7 +485,6 @@ function handlerSubcommands(plan: Plan) {
   return Object.fromEntries(Object.entries(plan.handlers).flatMap(([seam, handler]) => (handler.subcommands ? [[seam, handler.subcommands]] : [])));
 }
 
-/** A profile in a Fleet path from before the rename is never used: Hedge uses its Hedge copy, which get.sh makes, or refuses. The copy counts only when it is a checkout of the same repository. */
 function hedgeProfile(options: CliOptions, dir: string): string {
   const legacy = underLegacyPath(options.home, dir);
   const selected = legacy ? hedgeCopy(options.home, dir) : dir;
