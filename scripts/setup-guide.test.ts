@@ -8,7 +8,7 @@ import { sourceCache } from "../src/setup/setup.ts";
 import { profilePath } from "../src/setup/profile.ts";
 import { devboxesOf } from "../packs/hub/lib/machine.ts";
 import { cliFixtures } from "../src/testing/cli.ts";
-import { fakeMachine, hedgeSetup, savedAnswers } from "../src/setup/testing.ts";
+import { fakeMachine, hedgeSetup, savedAnswers, scripted } from "../src/setup/testing.ts";
 import { isolateGit, tempDirs } from "../src/testing/git.ts";
 import { needsHubPacks } from "../src/setup/defaults.ts";
 import { promptLabels, startPrompt } from "../page/model.ts";
@@ -94,6 +94,28 @@ describe("the agent setup guide", () => {
     }
   });
 
+  test("on a fresh Coder hub, step 7 names the hub right after hedge setup, so a pack note's hub-only command, such as incident.io's hedge page, runs there before step 9", async () => {
+    const hedgeCommandsOf = (text: string) => codeIn(text).flatMap((code) => [...code.matchAll(/; hedge ([a-z][a-z-]*(?: [a-z][a-z-]*)?)/g)].map((match) => match[1]!));
+    const inStep7 = hedgeCommandsOf(step(7));
+    expect(inStep7.slice(inStep7.indexOf("setup"), inStep7.indexOf("setup") + 2)).toEqual(["setup", "hub here"]);
+    expect(codeIn(readFileSync(join(root, "packs/incident-io/SETUP.md"), "utf8")).join("\n")).toContain(`; hedge page --key setup-check --title "Setup check" --dry-run'`);
+
+    const runOnHub = async (order: "guide" | "without hub here") => {
+      const home = temp.make("hub-home-");
+      const box = fakeMachine(home);
+      const io = scripted([]);
+      const env = { CODER: "true", CODER_AGENT_URL: "https://coder.example.com", CODER_WORKSPACE_NAME: "hedge-hub" };
+      const onHub = (args: string[]) => main(args, { home, engineRoot: root, platform: "linux", env, hostname: () => "hedge-hub", print: io.terminal.print, fail: io.terminal.print, terminal: io.terminal, apply: async () => 0, setup: { machine: box.machine, clock: box.clock, doctor: async () => 0, env, timeZone: "UTC" } });
+      const args = setupArgs().replace("<id>", "starter").replace("<claude|codex|both>", "codex").split(" ");
+      expect(await onHub(["setup", ...args, "--add", "incident-io", "--workflows", "page-owner=on"])).toBe(0);
+      if (order === "guide") expect(await onHub(["hub", "here"])).toBe(0);
+      await onHub(["page", "--key", "setup-check", "--title", "Setup check", "--dry-run"]);
+      return io.output();
+    };
+    expect(await runOnHub("without hub here")).toContain("hedge page runs on the hub. Run it there.");
+    expect(await runOnHub("guide")).not.toContain("runs on the hub");
+  });
+
   test("on the hub, its hedge setup command waits for GitHub and ChatGPT in the browser, stops for Claude, and finishes after the guide's Claude sign-in in a terminal", async () => {
     const home = temp.make("home-");
     const args = setupArgs().replace("<id>", "everyday").replace("<claude|codex|both>", "both").split(" ");
@@ -128,20 +150,18 @@ describe("the agent setup guide", () => {
   test("creates a 200 GB hub and 500 GB nodes in one coder create each, with every template parameter given and the profile repo as dotfiles", () => {
     expect(words(step(4))).toContain("one **hub** with a 200 GB disk and one **node** with a 500 GB disk");
     const creates = codeIn(step(5)).filter((code) => code.startsWith("coder create "));
-    expect(creates).toEqual(["coder create <name> --template <template> --preset none --parameter <disk parameter>=<200 or 500> --parameter <region parameter>=<region> --parameter <dotfiles parameter>=https://github.com/<login>/hedge-profile --parameter <other parameter>=<value> --yes\n"]);
+    expect(creates).toEqual(["coder create <name> --template <template> --preset none --parameter <disk parameter>=<200 or 500> --parameter <region parameter>=<region> --parameter <dotfiles parameter>=https://github.com/<profile repo> --parameter <other parameter>=<value> --yes\n"]);
     expect(words(step(5))).toContain("Pass every parameter of the template with its own `--parameter`");
   });
 
-  test("never copies parameters from another workspace, and says why", () => {
-    expect(blocksIn(guide()).filter((code) => code.includes("--copy-parameters-from"))).toEqual([]);
-    expect(words(step(5))).toContain("Never use `--copy-parameters-from`: Coder then takes the copied workspace's values over every `--parameter` you pass.");
-  });
-
-  test("reads each new workspace's build parameters back from Coder before it goes on", () => {
-    const readBack = codeIn(step(5)).find((code) => code.includes("/api/v2/workspacebuilds/"));
-    expect(readBack).toContain("/api/v2/users/me/workspace/<name>");
-    expect(readBack).toContain("/parameters");
-    expect(words(step(5))).toContain("The step is done when each value matches what you passed.");
+  test("checks each new workspace with the engine's own check, given every parameter of its create, and replaces a workspace whose fixed parameter is wrong before setup", () => {
+    const code = codeIn(step(5));
+    const fetched = code.find((line) => line.includes("/scripts/check-workspace.sh -o "))!;
+    const script = fetched.match(/main\/(scripts\/check-workspace\.sh)/)![1]!;
+    expect(existsSync(join(root, script))).toBe(true);
+    expect(code).toContain("sh ~/.cache/hedge-setup/check-workspace.sh <name> <parameter>=<value> <parameter>=<value>\n");
+    expect(code.join("\n")).not.toMatch(/\$dir\/session|Coder-Session-Token/);
+    expect(words(step(5))).toContain("A parameter that the template does not let change, such as the disk size or the region, needs a new workspace: ask, then `coder delete <name>` and create it again, before setup touches it.");
   });
 
   test("reads the template's parameters when coder templates pull fails", () => {
@@ -162,8 +182,21 @@ describe("the agent setup guide", () => {
     expect(existsSync(guidePathOfNote!)).toBe(true);
   });
 
-  test("keeps the hub and the nodes running while the Mac sleeps", () => {
-    expect(codeIn(step(5))).toContain("coder schedule stop <name> manual");
+  test("keeps the hub and the nodes running while the Mac sleeps, and checks the running build's stop time after", () => {
+    const text = guide();
+    expect(text.indexOf("`coder schedule stop <name> manual`")).toBeLessThan(text.indexOf("sh ~/.cache/hedge-setup/check-workspace.sh <name>"));
+  });
+
+  test("a change to an earlier setup ends at step 8, so step 9's first-install defaults never turn off a workflow the person did not name", () => {
+    expect(words(step(1))).toContain("Then check the hub as in step 8, and end there. Skip step 9: its command sets first-install defaults, such as `mcp-gateway=off`, that would change what they did not name.");
+    expect(words(hubStep())).toContain("This step runs only on a first setup; a change to an earlier setup ends at step 8 (see step 1).");
+  });
+
+  test("pairs a box that T3 Code does not list through its T3 Connect address and a token made there, never the loopback pairing URL", () => {
+    const pairing = step(10);
+    expect(codeIn(pairing).slice(0, 2)).toEqual([`ssh coder.<name> 'export PATH="${guidePath}"; t3 connect status --json'\n`, `ssh coder.<name> 'export PATH="${guidePath}"; t3 pair --ttl 10m --label t3-app'\n`]);
+    expect(words(pairing)).toContain("The address is `https://` and its `tunnelHostname`.");
+    expect(words(pairing)).toContain("Never give the `Pairing URL` it prints");
   });
 
   test("checks each workspace with a hedge doctor that sets the guide's PATH over SSH", () => {
