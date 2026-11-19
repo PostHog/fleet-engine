@@ -5,12 +5,11 @@ import { Database } from "bun:sqlite";
 import { fleetAdapter, scheduledTasks, type FleetOptions } from "./adapters/fleet/adapter.ts";
 import type { T3Server } from "./adapters/t3/port.ts";
 import { jobsAdapter } from "./adapters/jobs/adapter.ts";
-import type { CommandRunner } from "./adapters/run.ts";
 import { main } from "./cli.ts";
 import { filesAdapter, type Adapter } from "./reconciler/apply.ts";
 import { cliFixtures, repoRoot } from "./testing/cli.ts";
 import { tempDirs } from "./testing/git.ts";
-import { fakeDocker, fakeLaunchd, fakeTasks, runners } from "./testing/old-fleet.ts";
+import { fakeCrontab, fakeDocker, fakeLaunchd, fakeTasks, runners } from "./testing/old-fleet.ts";
 import { fakeSystemd } from "./testing/systemd.ts";
 
 const temp = tempDirs();
@@ -48,13 +47,8 @@ function machine(platform: NodeJS.Platform, home = oldInstall(), tasks?: FleetOp
   const launchd = fakeLaunchd();
   const docker = fakeDocker();
   const t3 = fakeTasks();
-  const cron = { text: "" };
-  const crontab: CommandRunner = async (command, options) => {
-    if (command.join(" ") === "crontab -l") return { code: 0, stdout: cron.text };
-    if (command.join(" ") === "crontab -") return (cron.text = options?.input ?? ""), { code: 0, stdout: "" };
-    return { code: 127, stdout: "" };
-  };
-  const run = runners(crontab, systemd.run, launchd.run, docker.run);
+  const cron = fakeCrontab();
+  const run = runners(cron.run, systemd.run, launchd.run, docker.run);
   const fleet = fleetAdapter({ run, uid: 501, accountHome: async () => home, tasks: tasks ?? (async () => t3.client) });
   const adapters = (): Adapter[] => [fleet, filesAdapter, jobsAdapter({ run, engineRoot: repoRoot, uid: 501, accountHome: async () => home })];
   const engine = engineWithService();
@@ -63,7 +57,7 @@ function machine(platform: NodeJS.Platform, home = oldInstall(), tasks?: FleetOp
     const code = await main(args, { home, engineRoot: engine, platform, env: {}, print: (line) => lines.push(line), run: async () => 0, adapters });
     return { code, output: lines.join("\n") };
   };
-  return { home, systemd, launchd, docker, t3, hedge };
+  return { home, systemd, launchd, docker, t3, cron, hedge };
 }
 
 describe("hedge retire-fleet", () => {
@@ -124,6 +118,40 @@ describe("hedge retire-fleet", () => {
     expect([...mac.launchd.loaded]).toEqual(["com.example.other"]);
     expect([...mac.launchd.disabled].sort()).toEqual(["com.fleet.hub-tunnel", "dev.fleet.fleet-update", "dev.fleet.prune", "dev.fleet.recover"]);
     expect(readFileSync(join(agents, "dev.fleet.prune.plist"), "utf8")).toBe("<plist>dev.fleet.prune</plist>\n");
+  });
+
+  test("an agent that unloads but stays enabled, and a container that keeps its restart policy, each fail retire", async () => {
+    const mac = machine("darwin");
+    mac.launchd.loaded.add("dev.fleet.recover");
+    mac.launchd.pinned.add("dev.fleet.recover");
+    mac.docker.containers.set("fleet-mcphub", { running: true, restart: "unless-stopped", pinned: true });
+
+    const retired = await mac.hedge(["retire-fleet"]);
+
+    expect(retired.code).toBe(1);
+    expect(retired.output).toContain("Hedge: launchd agent dev.fleet.recover: launchd still has it enabled, so it starts again at the next login. Hedge could not verify that it stopped.");
+    expect(retired.output).toContain("Hedge: Docker container fleet-mcphub: Docker starts it again, because its restart policy is unless-stopped. Hedge could not verify that it stopped.");
+  });
+
+  test("removes each # fleet: crontab entry, keeps the other entries and the old launchers, and fails when the crontab cannot be written", async () => {
+    const linux = machine("linux");
+    const launcher = join(linux.home, ".local/state/fleet/jobs/nightly.sh");
+    mkdirSync(join(linux.home, ".local/state/fleet/jobs"), { recursive: true });
+    writeFileSync(launcher, "#!/bin/sh\n");
+    linux.cron.table.text = `MAILTO=""\n0 3 * * * /bin/sh '${launcher}' # fleet:nightly\n*/5 * * * * my-own-job\n0 4 * * * /bin/sh '/x/prune.sh' # hedge:prune\n`;
+    const broken = machine("linux");
+    broken.cron.table.text = "0 3 * * * /bin/sh /x/nightly.sh # fleet:nightly\n";
+    broken.cron.table.refuse = true;
+
+    const retired = await linux.hedge(["retire-fleet"]);
+    const refused = await broken.hedge(["retire-fleet"]);
+
+    expect(retired.code).toBe(0);
+    expect(retired.output).toContain("Hedge: stopped and turned off the cron job nightly from before the rename, and kept its files.");
+    expect(linux.cron.table.text).toBe(`MAILTO=""\n*/5 * * * * my-own-job\n0 4 * * * /bin/sh '/x/prune.sh' # hedge:prune\n`);
+    expect(existsSync(launcher)).toBe(true);
+    expect(refused.code).toBe(1);
+    expect(refused.output).toContain("Hedge: cron job nightly: it is still in your crontab. Hedge could not verify that it stopped.");
   });
 
   test("an agent that does not stop, a task that stays on, and Docker that does not answer while old MCPHub data is there each fail retire", async () => {
