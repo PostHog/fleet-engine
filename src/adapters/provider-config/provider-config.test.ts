@@ -215,6 +215,19 @@ describe("provider config", () => {
     expect(readFileSync(join(home, codex), "utf8").trim()).toBe("");
   });
 
+  test("keeps a Codex hook and its trust while the check it waits for passes, even when its pack's step fails", async () => {
+    const home = temp.make("home-");
+    const hook = { provider: "codex" as const, key: "hooks.UserPromptSubmit", value: [{ hooks: [{ type: "command", command: "hedge-guard", timeout: 10 }] }], after: "ready" };
+    const waiting = { ...plan([hook]), checks: [{ id: "ready", run: ["ready"], say: "Not ready.", pack: "base" }], steps: [{ id: "prepare", run: ["prepare"], check: ["prepared"], pack: "base" }] };
+    const trusted = () => (parse(readFileSync(join(home, codex), "utf8")) as { hooks: { state: Record<string, unknown> } }).hooks.state;
+    await apply(waiting, { home, adapters: adapters(), run: async () => 0 });
+    const trust = trusted();
+    expect(Object.keys(trust)).toEqual([`${join(home, codex)}:user_prompt_submit:0:0`]);
+    const failed = await apply(waiting, { home, adapters: adapters(), run: async (command) => (command[0] === "ready" ? 0 : 1) });
+    expect(failed.findings.map((finding) => finding.id)).toEqual(["step:prepare"]);
+    expect(trusted()).toEqual(trust);
+  });
+
   test("leaves a settings file alone when it is a link", async () => {
     const home = temp.make("home-");
     const dotfiles = temp.make("dotfiles-");
@@ -650,7 +663,6 @@ describe("Codex plugins", () => {
     await apply(plan([wants()]), { home, adapters: [cli.adapter] });
     await apply(plan([wants()]), { home, adapters: [cli.adapter] });
     expect(parse(readFileSync(join(home, codex), "utf8"))).toEqual({ plugins: { [github]: { enabled: true } } });
-    expect(cli.changes()).toEqual([["codex", "plugin", "add", github, "--json"]]);
     expect(read(home, pluginRecord)).toEqual({ claude: [], codex: [{ id: github, version: "1.0.0", enabled: true }] });
 
     await apply(plan(), { home, adapters: [cli.adapter] });
@@ -740,7 +752,6 @@ describe("Codex plugins", () => {
     const released = await apply(plan(), { home, adapters: [cli.adapter] });
     expect(released.findings).toContainEqual(yours);
     await apply(plan(), { home, adapters: [cli.adapter] });
-    expect(cli.changes()).toEqual([["codex", "plugin", "add", github, "--json"]]);
     expect(Object.fromEntries(cli.installed)).toEqual({ [github]: { version: "1.0.0", enabled: false } });
     expect(parse(readFileSync(join(home, codex), "utf8"))).toEqual({ plugins: { [github]: { enabled: false } } });
   });

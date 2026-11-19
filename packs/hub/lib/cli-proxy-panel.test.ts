@@ -191,3 +191,25 @@ test("turning the panel off removes only the pinned plugin and names the plugins
   expect([existsSync(files(home).plugin), readFileSync(other, "utf8")]).toEqual([false, "someone else's plugin"]);
   expect(off.printed).toContain(`Kept plugins Hedge did not install: ${other}. Remove them: hedge cli-proxy doctor fails while they are there.`);
 });
+
+test("the route check on the hub fails, for Claude Code and Codex, while doctor finds the proxy unsafe, and passes with Hedge's own panel files", async () => {
+  const { machine, home } = hub({ panel, plan: "both" });
+  await cliProxy("install", machine);
+  const check = async (agent: "claude" | "codex") => {
+    const run = hub({ home, panel, plan: "both" });
+    return [await cliProxy("check", run.machine, agent), run.printed.join("\n")] as const;
+  };
+  expect((await check("claude"))[0]).toBe(0);
+  const other = join(dataDir(home), "plugins/other.so");
+  writeFileSync(other, "someone else's plugin");
+  for (const agent of ["claude", "codex"] as const) {
+    const [code, printed] = await check(agent);
+    expect(code).toBe(1);
+    expect(printed).toContain(`Remove the plugins Hedge did not install: ${other}.`);
+  }
+  rmSync(other);
+  writeFileSync(files(home).plugin, "tampered");
+  const [code, printed] = await check("claude");
+  expect(code).toBe(1);
+  expect(printed).toContain(`${files(home).plugin} does not match the pinned quota-ledger plugin 0.1.0.`);
+});

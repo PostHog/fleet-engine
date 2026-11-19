@@ -61,12 +61,9 @@ export async function reconcilePlugins(plan: Plan, home: string, dryRun: boolean
   return { findings: [...claude.findings, ...codex], resolved };
 }
 
-const heldPlan = (plan: Plan): Plan => ({ ...plan, config: plan.held ?? [] });
-
 async function reconcileClaude(plan: Plan, home: string, dryRun: boolean, run: CommandRunner, settings: PluginSettings, record: ClaudeOwned[], resolved: string[]): Promise<{ findings: Finding[]; owned?: ClaudeOwned[] }> {
   const outage = settings.outage;
   const planned = wantedPlugins(plan);
-  const held = wantedPlugins(heldPlan(plan));
   const owned = record.map((entry) => entry.id);
   const wanted = planned.filter((id) => settings.accepted?.includes(id));
   if (!planned.length && !owned.length) return { findings: [] };
@@ -78,7 +75,7 @@ async function reconcileClaude(plan: Plan, home: string, dryRun: boolean, run: C
   }
   resolved.push("plugins:claude");
   const missing = wanted.filter((id) => !installed.includes(id));
-  const leaving = outage ? [] : record.filter((entry) => !planned.includes(entry.id) && !held.includes(entry.id) && installed.includes(entry.id));
+  const leaving = outage ? [] : record.filter((entry) => !planned.includes(entry.id) && installed.includes(entry.id));
   const changedOutside = (entry: ClaudeOwned) => entry.enabled !== undefined && settings.claudeEnabled?.[entry.id] !== undefined && settings.claudeEnabled[entry.id] !== entry.enabled;
   const released = leaving.filter(changedOutside).map((entry) => entry.id);
   const departed = leaving.map((entry) => entry.id).filter((id) => !released.includes(id));
@@ -112,7 +109,6 @@ const codexFinding = (id: string, say: string): Finding => ({ id: `plugin:codex:
 
 async function reconcileCodex(plan: Plan, home: string, dryRun: boolean, run: CommandRunner, settings: PluginSettings, owned: CodexOwned[], save: (next: CodexOwned[]) => Promise<void>, resolved: string[]): Promise<Finding[]> {
   const planned = wantedCodexPlugins(plan);
-  const held = wantedCodexPlugins(heldPlan(plan));
   if (!planned.length && !owned.length) return [];
   if (!settings.acceptedCodex) return planned.length ? [{ id: "plugins:codex", pack: "engine", say: `Codex plugins wait until Hedge can change .codex/config.toml: ${planned.join(", ")}.`, repair: "apply" }] : [];
   const wanted = planned.filter((id) => settings.acceptedCodex!.includes(id));
@@ -157,7 +153,7 @@ async function reconcileCodex(plan: Plan, home: string, dryRun: boolean, run: Co
     }
     if (found.version !== mine.version) record.set(id, { ...mine, version: found.version });
   }
-  for (const mine of [...record.values()].filter((entry) => !planned.includes(entry.id) && !held.includes(entry.id))) {
+  for (const mine of [...record.values()].filter((entry) => !planned.includes(entry.id))) {
     if (settings.outage) continue;
     const found = present(mine.id);
     if (!found) {

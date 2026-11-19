@@ -5,7 +5,7 @@ import { parse, stringify } from "smol-toml";
 import { providerConfigAdapter } from "../../src/adapters/provider-config/adapter.ts";
 import { apply, check } from "../../src/reconciler/apply.ts";
 import { boxCommand } from "./lib/box-command.ts";
-import { cliProxy, codexProviderTable, type ProxyMachine } from "./lib/cli-proxy.ts";
+import { cliProxy, codexProviderTable, proxyUrl, type ProxyMachine } from "./lib/cli-proxy.ts";
 import { clientKey, dataDir, proxyMachine, type Proxy } from "./lib/cli-proxy-testing.ts";
 import { Coder } from "./lib/coder.ts";
 import { fakeMachine } from "./lib/testing.ts";
@@ -488,7 +488,7 @@ describe("the Own-account balancing workflow", () => {
       const result = proxyOnly(plan({ ...balancing, plan: "claude" }, hub));
       const applied = await apply(result, { home, adapters: [providerConfigAdapter()], run: hedgeProxy(machine, result.engineRoot) });
       expect(applied.ok).toBe(false);
-      expect(applied.findings.map((finding) => [finding.id, finding.todo ?? finding.repair])).toEqual([["step:cli-proxy", "apply"], ["check:cli-proxy-accounts", true]]);
+      expect(applied.findings.map((finding) => [finding.id, finding.todo ?? finding.repair])).toEqual([["check:cli-proxy-client", "apply"], ["step:cli-proxy", "apply"], ["check:cli-proxy-accounts", true]]);
       expect(existsSync(join(home, ".claude/settings.json"))).toBe(false);
     });
 
@@ -499,33 +499,51 @@ describe("the Own-account balancing workflow", () => {
         writeFileSync(join(home, path), text);
       }
       const result = proxyOnly(plan({ ...balancing, plan: ai }, hub));
-      const run = hedgeProxy(machine, result.engineRoot);
-      const routes: unknown[] = [];
       const route = () => (existsSync(join(home, ".claude/settings.json")) ? JSON.parse(readFileSync(join(home, ".claude/settings.json"), "utf8")).env?.ANTHROPIC_BASE_URL : undefined);
-      const watched = async (command: string[]) => {
-        if (command[3] === "doctor") routes.push(route());
-        return run(command);
+      const routes = new Set<unknown>();
+      const reach = machine.fetch;
+      machine.fetch = (input, init) => {
+        if (String(input).startsWith(proxyUrl)) routes.add(route());
+        return reach(input, init);
       };
-      return { home, result, routes, route, options: { home, adapters: [providerConfigAdapter()], run: watched } };
+      return { home, result, routes, route, options: { home, adapters: [providerConfigAdapter()], run: hedgeProxy(machine, result.engineRoot) } };
     };
     const foreignPlugin = { ".local/share/hedge-cli-proxy/plugins/other.so": "plugin" };
+    const unsafe: Array<[string, string | true | undefined]> = [["check:cli-proxy-client", "apply"], ["step:cli-proxy", "apply"], ["check:cli-proxy-accounts", true]];
 
-    test("with a running proxy whose doctor finds a plugin Hedge did not install, apply fails the step and never routes Claude Code to the proxy, not even while the step's check runs", async () => {
+    test("with a running proxy that has a plugin Hedge did not install from the start, apply fails and never routes Claude Code to the proxy", async () => {
       const { result, routes, route, options } = runningHub("claude", { credentials: [{ provider: "claude" }] }, foreignPlugin);
       const applied = await apply(result, options);
+      expect(routes).toEqual(new Set([undefined]));
+      expect(route()).toBeUndefined();
       expect(applied.ok).toBe(false);
-      expect(applied.findings.map((finding) => [finding.id, finding.todo ?? finding.repair])).toEqual([["step:cli-proxy", "apply"], ["check:cli-proxy-accounts", true]]);
-      expect(routes).toEqual([undefined, undefined]);
+      expect(applied.findings.map((finding) => [finding.id, finding.todo ?? finding.repair])).toEqual(unsafe);
+    });
+
+    test("after a successful apply, a plugin Hedge did not install appears while the proxy still lists the model: the next apply fails and takes the route out", async () => {
+      const { home, result, routes, route, options } = runningHub("claude", { credentials: [{ provider: "claude" }] });
+      expect((await apply(result, options)).ok).toBe(true);
+      expect(route()).toBe("http://127.0.0.1:8317");
+      mkdirSync(join(dataDir(home), "plugins"), { recursive: true });
+      writeFileSync(join(dataDir(home), "plugins/other.so"), "plugin");
+      const failed = await apply(result, options);
+      expect(route()).toBeUndefined();
+      expect(failed.ok).toBe(false);
+      expect(failed.findings.map((finding) => [finding.id, finding.todo ?? finding.repair])).toEqual(unsafe);
+      routes.clear();
+      expect((await apply(result, options)).ok).toBe(false);
+      expect(routes).toEqual(new Set([undefined]));
       expect(route()).toBeUndefined();
     });
 
-    test("with a running proxy whose doctor finds a plugin Hedge did not install, a hedge-proxy Codex table of your own with another name stays, and apply says it kept it", async () => {
-      const mine = { model_provider: "hedge-proxy", model_providers: { "hedge-proxy": { ...codexProviderTable, name: "Mine" } } };
+    test("with a running proxy that has a plugin Hedge did not install, a hedge-proxy Codex table of your own survives the failed step, and Codex keeps using it", async () => {
+      const mine = { model_provider: "hedge-proxy", model_providers: { "hedge-proxy": { ...codexProviderTable, name: "Mine", base_url: "https://llm.example.com/v1" } } };
       const { home, result, options } = runningHub("codex", { credentials: [{ provider: "codex" }], models: ["gpt-6.1-sol"] }, { ...foreignPlugin, ".codex/config.toml": stringify(mine) });
       const applied = await apply(result, options);
       expect(applied.ok).toBe(false);
       expect(applied.findings.map((finding) => finding.id)).toContain("step:cli-proxy");
-      expect(applied.findings).toContainEqual({ id: "kept:.codex/config.toml", pack: "engine", say: "Kept your model_providers.hedge-proxy in .codex/config.toml. Run hedge apply --adopt .codex/config.toml to take Hedge's value." });
+      expect(parse(readFileSync(join(home, ".codex/config.toml"), "utf8"))).toEqual(mine);
+      await apply(result, options);
       expect(parse(readFileSync(join(home, ".codex/config.toml"), "utf8"))).toEqual(mine);
     });
 
@@ -534,11 +552,11 @@ describe("the Own-account balancing workflow", () => {
       const first = await apply(result, options);
       expect(first.findings.map((finding) => finding.id)).toEqual(["check:cli-proxy-accounts"]);
       expect(route()).toBe("http://127.0.0.1:8317");
-      routes.splice(0);
+      routes.clear();
       const next = await apply(result, options);
       expect(next.ok).toBe(true);
       expect(next.actions).toEqual([]);
-      expect(routes).toEqual(["http://127.0.0.1:8317"]);
+      expect(routes).toEqual(new Set(["http://127.0.0.1:8317"]));
       expect(route()).toBe("http://127.0.0.1:8317");
     });
 

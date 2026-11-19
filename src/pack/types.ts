@@ -255,8 +255,6 @@ export type Plan = {
   unanswered: PackSetting[];
   ask: PackSetting[];
   dropped: Array<{ pack: string; item: string; reason: string; check?: string; value?: unknown }>;
-  /** Config entries whose check runs only after their pack's steps in this apply. The config adapter leaves their keys as they are. */
-  held?: Array<Owned<ConfigEntry>>;
 };
 
 export type Finding = { id: string; pack: string; say: string; repair?: "apply" | "human"; todo?: true };

@@ -344,6 +344,15 @@ describe("T3 adapter with a running server", () => {
     expect(again.actions).toEqual([]);
   });
 
+  test("applies a setting that waits for a passing check of a pack with a step in this apply, in the same apply", async () => {
+    const home = temp.make("home-");
+    const { server, adapter } = setup({ settings: { sidebarAutoSettleAfterDays: 7 } });
+    const waiting = { ...plan("linux", [{ ...entry("sidebarAutoSettleAfterDays", 3), after: "ready" }]), checks: [{ id: "ready", run: ["ready"], say: "Not ready.", pack: "base" }], steps: [{ id: "prepare", run: ["prepare"], check: ["prepared"], pack: "base" }] };
+    const report = await apply(waiting, { home, adapters: [adapter], run: async () => 0 });
+    expect(report.ok).toBe(true);
+    expect(server.state.settings.sidebarAutoSettleAfterDays).toBe(3);
+  });
+
   test("retries a value T3 did not take on the next apply", async () => {
     const home = temp.make("home-");
     await seed(plan("linux", [entry("sidebarAutoSettleAfterDays", 3)]), home);

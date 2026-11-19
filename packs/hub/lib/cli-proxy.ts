@@ -215,8 +215,8 @@ async function doctor(machine: ProxyMachine, paths: Layout): Promise<void> {
   for (let attempt = 0; attempt < 50 && !(await listeners()).includes(address); attempt++) await machine.sleep(100);
   const bound = await listeners();
   if (!bound.includes(address) || bound.some((local) => local !== address)) throw new Error(`The CLI proxy must listen on loopback only, at ${address}.`);
-  const others = await foreignPlugins(paths);
-  if (others.length) throw new Error(`Remove the plugins Hedge did not install: ${others.join(", ")}. While the Proxy panel is on, anyone with the management key can install plugins from CLIProxyAPI's plugin store, and the proxy runs them on the hub.`);
+  const danger = await unsafe(machine, paths);
+  if (danger) throw new Error(danger);
   await panelDoctor(machine, paths, managementKey);
   const strategy = ((await management(machine.fetch, managementKey, "routing/strategy")) as { strategy?: string }).strategy;
   if (strategy !== "fill-first") throw new Error(`The proxy routes with ${strategy ?? "no strategy"}, not fill-first. Run hedge cli-proxy-balance to restore it.`);
@@ -260,16 +260,22 @@ async function accounts(machine: ProxyMachine, paths: Layout): Promise<number> {
   return short ? waitsForPerson : 0;
 }
 
+async function unsafe(machine: ProxyMachine, paths: Layout): Promise<string | undefined> {
+  const others = await foreignPlugins(paths);
+  if (others.length) return `Remove the plugins Hedge did not install: ${others.join(", ")}. While the Proxy panel is on, anyone with the management key can install plugins from CLIProxyAPI's plugin store, and the proxy runs them on the hub.`;
+  const pinned = machine.panel ? ([[paths.page, machine.panel.page, "management panel"], [paths.plugin, machine.panel.plugin, "quota-ledger plugin"]] as const) : [];
+  for (const [path, release, name] of pinned) {
+    if (!existsSync(path)) return `${path} is missing. Run hedge cli-proxy install.`;
+    if (!(await assetReady(path, release))) return `${path} does not match the pinned ${name} ${release.version}. It may have come from an unpinned source, such as CLIProxyAPI's own panel download. Run hedge cli-proxy install.`;
+  }
+}
+
 async function panelDoctor(machine: ProxyMachine, paths: Layout, managementKey: string): Promise<void> {
   const page = await machine.fetch(panelUrl, { signal: AbortSignal.timeout(5000) }).catch(() => undefined);
   await page?.body?.cancel();
   if (!machine.panel) {
     if (page?.ok) throw new Error(`The management panel answers at ${panelUrl}, but the Proxy panel workflow is off. Run hedge cli-proxy install.`);
     return;
-  }
-  for (const [path, release, name] of [[paths.page, machine.panel.page, "management panel"], [paths.plugin, machine.panel.plugin, "quota-ledger plugin"]] as const) {
-    if (!existsSync(path)) throw new Error(`${path} is missing. Run hedge cli-proxy install.`);
-    if (!(await assetReady(path, release))) throw new Error(`${path} does not match the pinned ${name} ${release.version}. It may have come from an unpinned source, such as CLIProxyAPI's own panel download. Run hedge cli-proxy install.`);
   }
   if (!page?.ok) throw new Error(`The management panel does not load at ${panelUrl}. Run hedge cli-proxy install.`);
   await management(machine.fetch, managementKey, `quota-ledger/samples?since=${machine.now()}`).catch(() => {
@@ -407,9 +413,10 @@ export type Agent = "claude" | "codex";
 const applyWaits = (name: string) => `hedge apply keeps ${name} on its own sign-in until the proxy serves it.`;
 
 async function check(machine: ProxyMachine, agent: Agent): Promise<number> {
+  const danger = readRole(machine.home) === "hub" ? await unsafe(machine, layout(machine.home)) : undefined;
   const key = await savedKey(machine.home);
   const models = key ? await listModels(machine.fetch, key) : `This machine has no proxy key at ${keyPath(machine.home)}. On the hub, hedge cli-proxy doctor prints the connect command.`;
-  const reason = agent === "claude" ? unserved(models, "claude") : await codexUnserved(machine.home, models);
+  const reason = danger ?? (agent === "claude" ? unserved(models, "claude") : await codexUnserved(machine.home, models));
   const name = agent === "claude" ? "Claude Code" : "Codex";
   machine.print(reason ? `${reason} ${applyWaits(name)}` : `${name} reaches your own-account proxy at ${proxyUrl}.`);
   if (!reason) return 0;

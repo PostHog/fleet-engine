@@ -65,7 +65,7 @@ async function reconcileFiles(plan: Plan, home: string, dryRun: boolean, adopt: 
     const fields = owned(plan, target);
     let merged: Merged;
     try {
-      merged = merge(target, before, old, fields, adopt.includes(target.path), { outage, gated: gatedPath(gated, target.provider), dropped: gatedFields(plan, target), held: heldFields(plan, target), configPath: join(home, target.path) });
+      merged = merge(target, before, old, fields, adopt.includes(target.path), { outage, gated: gatedPath(gated, target.provider), dropped: gatedFields(plan, target), configPath: join(home, target.path) });
     } catch (error) {
       keepOld();
       result.findings.push({ id: `kept:${target.path}`, pack: "engine", say: `Kept ${target.path} as it is: Hedge cannot read it (${(error as Error).message}). Fix the file, then run hedge apply.`, repair: "human" });
@@ -106,14 +106,11 @@ function owned(plan: Plan, target: Target): Field[] {
   return fields;
 }
 
-const heldFields = (plan: Plan, target: Target): Field[] => (plan.held ?? []).filter(ownedBy(target)).map((entry) => ({ path: keyPath(entry.key), value: entry.value, pack: entry.pack }));
-
-function merge(target: Target, text: string | undefined, previous: Field[], wanted: Field[], adopt: boolean, options: { outage: boolean; gated: (path: string[]) => boolean; dropped: GatedField[]; held: Field[]; configPath: string }): Merged {
+function merge(target: Target, text: string | undefined, previous: Field[], wanted: Field[], adopt: boolean, options: { outage: boolean; gated: (path: string[]) => boolean; dropped: GatedField[]; configPath: string }): Merged {
   const current: Document = text === undefined ? {} : target.format.decode(text);
   const original = target.format.encode(current);
   const edited = previous.filter((field) => get(current, field.path) !== undefined && !same(get(current, field.path), field.value));
-  const holds = (path: string[]) => options.held.some((field) => overlaps(field.path, path));
-  const stale = options.outage ? [] : staleKeys(target.provider, current, (path) => target.owns(path) && !wanted.some((field) => overlaps(field.path, path)) && !edited.some((field) => overlaps(field.path, path)) && !holds(path));
+  const stale = options.outage ? [] : staleKeys(target.provider, current, (path) => target.owns(path) && !wanted.some((field) => overlaps(field.path, path)) && !edited.some((field) => overlaps(field.path, path)));
   const record: Field[] = [];
   const kept: string[] = [];
   const changed: string[] = [];
@@ -138,17 +135,6 @@ function merge(target: Target, text: string | undefined, previous: Field[], want
     return applied;
   };
   const applied = reconcile(wanted);
-  for (const field of options.held) {
-    const value = get(current, field.path);
-    if (value === undefined) continue;
-    const old = previous.find((item) => samePath(item.path, field.path));
-    if (same(value, field.value)) record.push(field);
-    else if (old && same(value, old.value)) record.push(old);
-    else {
-      if (!adopt) kept.push(field.path.join("."));
-      if (old) record.push(old);
-    }
-  }
   const trust: Field[] = [];
   const departed = previous.filter((field) => !wanted.some((item) => overlaps(item.path, field.path)) && !isHookTrust(field));
   const keepsEdit = (field: Field) => get(current, field.path) !== undefined && !same(get(current, field.path), field.value);
@@ -162,7 +148,7 @@ function merge(target: Target, text: string | undefined, previous: Field[], want
   }
   const all = [...wanted, ...trust];
   for (const field of previous) {
-    if (all.some((item) => overlaps(item.path, field.path)) || holds(field.path)) continue;
+    if (all.some((item) => overlaps(item.path, field.path))) continue;
     if ((options.outage && !options.gated(field.path)) || keepsEdit(field)) record.push(field);
     else if (get(current, field.path) !== undefined) {
       remove(current, field.path);
@@ -172,7 +158,7 @@ function merge(target: Target, text: string | undefined, previous: Field[], want
   const untouched = (field: GatedField) => get(current, field.path) === undefined || same(get(current, field.path), field.value);
   const unrecorded = options.dropped
     .filter((field) => options.dropped.every((other) => other.check !== field.check || other.pack !== field.pack || untouched(other)))
-    .filter((field) => !all.some((item) => overlaps(item.path, field.path)) && !holds(field.path))
+    .filter((field) => !all.some((item) => overlaps(item.path, field.path)))
     .map((field) => field.path);
   for (const path of [...stale, ...unrecorded]) {
     if (get(current, path) === undefined) continue;

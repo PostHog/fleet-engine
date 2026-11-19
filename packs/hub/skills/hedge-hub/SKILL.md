@@ -155,8 +155,11 @@ the person's own subscriptions, never for someone else's.
   hands them over.
 - **When the proxy is down.** Hedge's Claude settings wait for
   `hedge cli-proxy check`, and its Codex settings wait for
-  `hedge cli-proxy check codex`. Both checks only read. When the proxy does
-  not serve an agent with this machine's key, `hedge apply` leaves that
+  `hedge cli-proxy check codex`. Both checks only read. On the hub, both
+  also fail while `hedge cli-proxy doctor` finds the proxy unsafe: a plugin
+  Hedge did not install, or panel files that do not match their pins. When
+  the proxy is unsafe, or does not serve an agent with this machine's key,
+  `hedge apply` leaves that
   agent's settings out and removes Hedge's own values, so the agent uses its
   own sign-in, and the next apply changes nothing. `hedge apply` and
   `hedge doctor` name the failed check. When the proxy answers the key but

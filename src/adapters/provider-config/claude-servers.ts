@@ -28,7 +28,6 @@ const finding = (id: string, say: string, repair?: Finding["repair"]): Finding =
 export async function reconcileServers(plan: Plan, home: string, options: { dryRun: boolean; adopt: boolean; outage: boolean; gated: (path: string[]) => boolean; run: CommandRunner }): Promise<Result> {
   const result: Result = { actions: [], findings: [], resolved: [] };
   const wanted = wantedServers(plan);
-  const held = wantedServers({ ...plan, config: plan.held ?? [] }).map((server) => server.name);
   const recordText = await readState(home, serversTarget);
   const previous = parseOwned(recordText);
   if (!wanted.length && !previous.length) return result;
@@ -57,7 +56,7 @@ export async function reconcileServers(plan: Plan, home: string, options: { dryR
   }
   for (const old of previous) {
     if (wanted.some((server) => server.name === old.name)) continue;
-    if (held.includes(old.name) || (options.outage && !options.gated(["mcpServers", old.name]))) next.push(old);
+    if (options.outage && !options.gated(["mcpServers", old.name])) next.push(old);
     else if (same(servers[old.name], old.stored)) remove.push(old.name);
   }
   if (kept.length) result.findings.push(finding(`kept:${claudeJson}`, `Kept your ${kept.join(", ")} in ${claudeJson}. Run hedge apply --adopt ${claudeJson} to take Hedge's value.`));
