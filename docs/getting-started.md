@@ -26,8 +26,11 @@ parameter to your profile repo: `https://github.com/<login>/hedge-profile`,
 or `https://github.com/<login>/fleet-profile` when you have a profile from
 before the rename. `hedge setup` makes `hedge-profile` in step 2 when you
 have none. When setup prints another repo in step 2, such as a profile in a
-team's org, change the dotfiles parameter of each workspace with
-`coder update <workspace> --parameter <dotfiles parameter>=https://github.com/<repo>`.
+team's org, change the dotfiles parameter of each workspace from your Mac
+with
+`coder restart <workspace> --parameter <dotfiles parameter>=https://github.com/<repo> --yes`.
+`coder update` changes nothing while the workspace uses the template's
+active version.
 
 ```sh
 coder login <your Coder URL>
@@ -46,10 +49,11 @@ over every `--parameter` you pass.
 build that is already running can keep a stop time from its template.
 [`scripts/check-workspace.sh`](../scripts/check-workspace.sh) checks both:
 `sh check-workspace.sh hedge-hub <parameter>=<value>...` prints `ok` for each
-parameter that has the value you passed, and for a workspace with no stop
-time. It prints no value and no token. When the disk size or the region is
-wrong and the template does not let it change, delete the workspace and
-create it again.
+parameter that has the value you passed, and for a workspace that runs with
+no stop time. Pass it only the disk size, the region, the instance type, and
+the dotfiles repo, never a private value. It prints no value and no token.
+When the disk size or the region is wrong and the template does not let it
+change, delete the workspace and create it again.
 
 Check that SSH works. With the default prefix, the workspace `hedge-hub` is
 the host `coder.hedge-hub`:

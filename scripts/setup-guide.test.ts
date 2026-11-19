@@ -154,14 +154,24 @@ describe("the agent setup guide", () => {
     expect(words(step(5))).toContain("Pass every parameter of the template with its own `--parameter`");
   });
 
-  test("checks each new workspace with the engine's own check, given every parameter of its create, and replaces a workspace whose fixed parameter is wrong before setup", () => {
+  test("checks each new workspace with the engine's own check, given only the parameters the guide sets and no private value, and replaces a workspace whose fixed parameter is wrong before setup", () => {
     const code = codeIn(step(5));
     const fetched = code.find((line) => line.includes("/scripts/check-workspace.sh -o "))!;
     const script = fetched.match(/main\/(scripts\/check-workspace\.sh)/)![1]!;
     expect(existsSync(join(root, script))).toBe(true);
     expect(code).toContain("sh ~/.cache/hedge-setup/check-workspace.sh <name> <parameter>=<value> <parameter>=<value>\n");
     expect(code.join("\n")).not.toMatch(/\$dir\/session|Coder-Session-Token/);
+    expect(words(step(5))).toContain("the disk size, the region, the instance type, and the dotfiles repo. Never pass a private value to the check");
     expect(words(step(5))).toContain("A parameter that the template does not let change, such as the disk size or the region, needs a new workspace: ask, then `coder delete <name>` and create it again, before setup touches it.");
+  });
+
+  test("changes a parameter with the restart from the Mac that the check names, never with coder update, which skips a workspace on the active template version", () => {
+    const docs = [guide(), readFileSync(join(root, "docs/getting-started.md"), "utf8")].map((text) => text.replace(/\s+/g, " "));
+    for (const text of docs) expect(text).not.toMatch(/`coder update [^`]*--parameter/);
+    expect(docs[0]).toContain("`coder restart <name> --parameter <parameter>=<value> --yes`");
+    expect(docs[0]).toContain("Run it here on the Mac, never on the hub over SSH, because the restart stops the hub: `coder restart <name> --parameter <dotfiles parameter>=https://github.com/<repo> --yes`");
+    expect(docs[1]).toContain("`coder restart <workspace> --parameter <dotfiles parameter>=https://github.com/<repo> --yes`");
+    expect(readFileSync(join(root, "scripts/check-workspace.sh"), "utf8")).toContain('restart="From this Mac, run: coder restart $name --parameter"');
   });
 
   test("reads the template's parameters when coder templates pull fails", () => {
@@ -184,7 +194,9 @@ describe("the agent setup guide", () => {
 
   test("keeps the hub and the nodes running while the Mac sleeps, and checks the running build's stop time after", () => {
     const text = guide();
-    expect(text.indexOf("`coder schedule stop <name> manual`")).toBeLessThan(text.indexOf("sh ~/.cache/hedge-setup/check-workspace.sh <name>"));
+    const schedule = text.indexOf("`coder schedule stop <name> manual`");
+    const check = text.indexOf("sh ~/.cache/hedge-setup/check-workspace.sh <name>");
+    expect([schedule >= 0, check >= 0, schedule < check]).toEqual([true, true, true]);
   });
 
   test("a change to an earlier setup ends at step 8, so step 9's first-install defaults never turn off a workflow the person did not name", () => {

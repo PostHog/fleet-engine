@@ -284,25 +284,31 @@ you never print it back.
    something runs").
 5. **Keep them running.** Agents work there while the Mac sleeps:
    `coder schedule stop <name> manual`.
-6. **Check them.** When a create ends, check that each parameter of the
-   workspace's build has the value you passed, and that no stop time ends
-   it. Download the check once, and read it. It prints only parameter
-   names, never a value or the Coder session token:
+6. **Check them.** When a create ends, check that the workspace runs, that
+   no stop time ends it, and that the parameters this guide sets have the
+   values you passed: the disk size, the region, the instance type, and the
+   dotfiles repo. Never pass a private value to the check; Hedge does not
+   read private values back. Download the check once, and read it. It prints
+   only parameter names, never a value or the Coder session token:
 
    ```sh
    mkdir -p ~/.cache/hedge-setup && curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/scripts/check-workspace.sh -o ~/.cache/hedge-setup/check-workspace.sh && cat ~/.cache/hedge-setup/check-workspace.sh
    ```
 
-   Then run it for each workspace, with each `--parameter` of its create:
+   Then run it for each workspace, with those parameters of its create:
 
    ```sh
    sh ~/.cache/hedge-setup/check-workspace.sh <name> <parameter>=<value> <parameter>=<value>
    ```
 
    The step is done when every line starts with `ok`. Do what each `x` line
-   says, and run the check again. A parameter that the template does not let
-   change, such as the disk size or the region, needs a new workspace: ask,
-   then `coder delete <name>` and create it again, before setup touches it.
+   says, and run the check again. To change a parameter that the template
+   lets change, restart the workspace from this Mac with the new value:
+   `coder restart <name> --parameter <parameter>=<value> --yes`.
+   `coder update` changes nothing while the workspace uses the template's
+   active version. A parameter that the template does not let change, such
+   as the disk size or the region, needs a new workspace: ask, then
+   `coder delete <name>` and create it again, before setup touches it.
 7. **SSH.** Run `coder config-ssh --yes`. The step is done when
    `ssh coder.<name> true` passes for each workspace.
 
@@ -423,12 +429,13 @@ Every command in this step runs on the hub over SSH. Wait until
    Setup prints the profile repo it uses, in a line
    `✓ Created the private repo <repo>` or `✓ Reusing your repo <repo>`. When
    that is not `<profile repo>` from step 5, such as a profile in a team's
-   GitHub org, change the dotfiles parameter of each workspace with
-   `coder update <name> --parameter <dotfiles parameter>=https://github.com/<repo>`,
-   and run the check of step 5 again. The update restarts the workspace, so
-   wait until `ssh coder.<name> true` passes. When the template does not let
-   the parameter change, the box still works: its nightly `hedge update`
-   keeps it on their profile.
+   GitHub org, change the dotfiles parameter of each workspace. Run it here
+   on the Mac, never on the hub over SSH, because the restart stops the hub:
+   `coder restart <name> --parameter <dotfiles parameter>=https://github.com/<repo> --yes`.
+   Then run the check of step 5 again, and wait until
+   `ssh coder.<name> true` passes. When the template does not let the
+   parameter change, the box still works: its nightly `hedge update` keeps
+   it on their profile.
 
    | Sign-in | What it is for |
    | --- | --- |
