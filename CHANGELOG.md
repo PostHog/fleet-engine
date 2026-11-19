@@ -11,12 +11,20 @@
   docs-only one too, takes a final read, and the gate prints the command. The
   quiet-commit walk, its test-file and revert checks, and their carry lines
   are gone.
-- A later round or final read reads only that net delta, so a merge of the
-  base adds nothing to read.
-- A review that finds no blocker or major spends no review budget. After the
-  arbiter stops the loop, one final read of the net delta may still run, such
-  as to confirm a revert. That read starts no other review: a blocker or major
-  it finds goes to the user.
+- The base is the PR's base commit on GitHub, never a remote-tracking ref of
+  the checkout. Each review records it, and a review whose base GitHub's base
+  no longer holds, such as after a rewind, carries nothing. A file left in
+  conflict, a binary one too, never carries. A gate in a checkout without HEAD
+  stops before it calls GitHub.
+- A later round or final read reads only that net delta, from the latest
+  reviewed head, so a merge of the base adds nothing to read, and a revert or
+  a deleted file stays in it.
+- A review that finds no blocker or major spends no review budget. The final
+  read that the gate asks for runs even when the budget is spent; the budget
+  stops the fixes rounds after it. When the arbiter escalates, one final read
+  of the net delta may still run, such as to confirm a revert. That read takes
+  the stop once, and a blocker or major it finds goes to the user. An arbiter
+  that gives no verdict stops nothing.
 
 ### Fleet is now Hedge
 

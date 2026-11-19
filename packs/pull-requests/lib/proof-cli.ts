@@ -45,7 +45,8 @@ type Subcommand = {
 };
 
 const overrideHelp = `--override takes the user's answer to the question that review-start prints when the arbiter escalates or gives no
-verdict. At the review budget hedge asks nothing, and only the user's --override runs another review. Ask it with your question tool, with the options "Run one more round" and "Stop
+verdict. At the review budget hedge asks nothing, and only the user's --override runs another review; a final read
+whose net delta is not empty still runs. Ask it with your question tool, with the options "Run one more round" and "Stop
 here". Only their choice of "Run one more round" there counts, quoted with the date they gave it, for example
 --override '2026-10-24 "Run one more round"'. --thread names the T3 thread where they answered and defaults to this
 one (T3CODE_THREAD_ID). A typed message, a refusal, or a general rule, such as "ship everything autonomously", does
@@ -71,10 +72,13 @@ The settings pull-requests.freeReviews and pull-requests.reviewCeiling set how m
 one more and where the loop stops: the panel rounds and the final reads of the review phase count together, and the
 final reads of the babysit phase count apart. Only a review that leads to fixes counts: a finished review whose
 findings hold no blocker or major, and no finding without a severity, spends nothing. The default budget is the panel,
-the fixes read, and the last read. A PR of the Read tier gets its one read and one final read of its fixes. When the
-arbiter stops the loop, one final read of the net delta may still run without the arbiter, such as to confirm the
-revert of a fix. That read starts no other review: a blocker or major it finds goes to the user, and only the user's
---override runs another review. The arbiter is the lookup model of your AI plan; HEDGE_REVIEW_ARBITER replaces its
+the fixes read, and the last read. A PR of the Read tier gets its one read and one final read of its fixes. The final
+read that the gate asks for, one whose net delta is not empty, runs even when the budget is spent; a blocker or major
+it finds still spends budget, and the budget stops the fixes rounds after it. When the arbiter escalates, hedge saves
+the stop with an id, and one final read of the net delta may still run without the arbiter, such as to confirm the
+revert of a fix. That read takes the stop once. A blocker or major it finds goes to the user, and only the user's
+--override runs another review; when it finds none, the next review asks the arbiter again. An arbiter that times out
+or gives no verdict stops nothing. The user's --override clears the stop once its decision is in the ledger. The arbiter is the lookup model of your AI plan; HEDGE_REVIEW_ARBITER replaces its
 command.`;
 
 const subcommands: Record<string, Subcommand> = {
@@ -391,14 +395,18 @@ by a review that finished after one, such as a final read; single-reviewer round
 of each review tier counts as the panel. Only blocker and major findings, findings without a severity, and the items of
 a TESTS block need an answer: minor and nit findings are noted. An accepted
 panel gap (gap --kind panel) stands in for the panel. The review also carries to HEAD when nothing changed past a
-reviewed head and the base. The gate merges each of the latest 5 reviewed heads, latest first, with the base that HEAD
-contains (git merge-tree --write-tree), and diffs that tree against HEAD. An empty diff carries the review, such as
+reviewed head and the base. The base is the PR's base commit that GitHub names when the gate reads the PR, never a
+remote-tracking ref of the checkout; the gate fetches it from a remote of the PR's repository when the checkout lacks
+it. The gate merges each of the latest 5 reviewed heads, latest first, with the base that HEAD contains (git
+merge-tree --write-tree), and diffs that tree against HEAD. An empty diff carries the review, such as
 after a clean merge of the base, or a change and its revert: the gate prints "review: HEAD carried from <sha>: nothing
 changed past it and the base" and writes the receipt carried/<HEAD>.json, on which it never passes alone. Any other
 diff, a test-only or docs-only one too, takes a final read: the gate prints how many files changed and the command
-hedge proof review --scope final --base <sha>. A conflict that the merge leaves keeps its markers in the tree, so a file
-that HEAD resolved is in the diff. When the checkout lacks either commit, or has no remote of the PR's repository,
-nothing carries, and a missing commit never makes the gate read the PR's base branch from GitHub.
+hedge proof review --scope final --base <sha>. Each file that the merge leaves in conflict is in the diff, so a
+conflict never carries, even one without markers, such as in a binary file. Nothing carries from a reviewed head when
+the checkout lacks it, when the PR's base cannot be read or fetched, or when the PR's base on GitHub no longer holds
+the base that its review recorded, such as after a rewind of the base: the gate then asks for a full read. The gate
+checks that the checkout holds HEAD before it calls GitHub, and stops with the command that fetches it.
 When those checks pass, the judge runs read-only on the reviewer's row of the model table, as hedge proof review
 picks it. hedge hands it the diff from the merge base, CI, the owed kinds, the counted evidence, every review's
 findings and responses, and the coding standards in ~/.agents/guides/coding-standards.md. It answers four questions:
@@ -508,8 +516,11 @@ change the judge. Exit 1 when no case was scored.`,
 round is --scope fixes, and a final read is --scope final; both take --base with the commit of the latest finished
 review. The printed id names the round for review-finish and respond. A later round and a final read read only the net
 delta: their diff starts at their base merged with the base that HEAD contains, so a merge of the base adds nothing to
-read. A final read of a HEAD whose net delta is empty is refused, unless --agent with your reason, or the user's
---override, asks for it. After an arbiter stop, the one final read that may still run prints that it confirms the stop.
+read. The diff starts at the latest reviewed head merged with the base, and the reviewer gets all of it, a revert or a
+deleted file too. The base is the PR's base commit on GitHub, and each round records it. A final read of a HEAD whose
+net delta is empty is refused, unless --agent with your reason, or the user's --override, asks for it. A final read
+whose net delta is not empty runs even when the review budget is spent. After an arbiter escalation, the one final
+read that may still run prints that it confirms the stop.
 A later round with --agent, or the user's --override, may be --scope full: it reviews
 the whole PR diff at HEAD again, such as after a restack.
 ${overrideHelp}`,
