@@ -9,7 +9,7 @@ export const archive = "fake release archive";
 export const release = { version: "9.9.9", url: "https://example.com/proxy.tar.gz", sha256: new Bun.CryptoHasher("sha256").update(archive).digest("hex") };
 export const dataDir = (home: string) => join(home, ".local/share/hedge-cli-proxy");
 
-export type Proxy = { catalog?: unknown; registry?: unknown; strategy?: string; credentials?: Array<{ name?: string; auth_index?: string; provider: string; disabled?: boolean; status?: string; unavailable?: boolean; status_message?: string }>; models?: string[]; down?: boolean; refuses?: boolean; modelList?: string; silentModels?: boolean; authFiles?: unknown };
+export type Proxy = { catalog?: unknown; registry?: unknown; strategy?: string; credentials?: Array<{ name?: string; auth_index?: string; provider: string; disabled?: boolean; status?: string; unavailable?: boolean; status_message?: string }>; models?: string[]; down?: boolean; stopped?: boolean; refuses?: boolean; modelList?: string; silentModels?: boolean; authFiles?: unknown };
 
 export function fakeProxy(proxy: Proxy = {}) {
   const requests: Array<{ path: string; method: string; auth: string }> = [];
@@ -19,7 +19,7 @@ export function fakeProxy(proxy: Proxy = {}) {
     requests.push({ path: url.pathname, method: init?.method ?? "GET", auth });
     if (proxy.catalog !== undefined && url.pathname.endsWith("/codex_client_models.json")) return Response.json(proxy.catalog);
     if (proxy.registry !== undefined && url.pathname.endsWith("/models.json")) return Response.json(proxy.registry);
-    if (proxy.down || url.origin !== proxyUrl) throw new TypeError("connection refused");
+    if (proxy.down || proxy.stopped || url.origin !== proxyUrl) throw new TypeError("connection refused");
     if (url.pathname === "/v1/models" && proxy.silentModels) throw new TypeError("connection refused");
     if (url.pathname === "/v1/models" && proxy.modelList !== undefined) return new Response(proxy.modelList, { status: 200 });
     if (url.pathname === "/v1/models") return auth === `Bearer ${clientKey}` && !proxy.refuses ? Response.json({ data: (proxy.models ?? ["claude-sonnet-5-5"]).map((id) => ({ id })) }) : new Response("no", { status: 401 });
@@ -39,6 +39,7 @@ export function proxyMachine(make: (prefix: string) => string, fields: Partial<P
     const installed = existsSync(join(dataDir(home), "cli-proxy-api"));
     if (command[0]!.endsWith("cli-proxy-api")) return { stdout: installed ? `CLIProxyAPI Version: ${release.version}, Commit: x\n` : "", code: installed ? 0 : 127 };
     if (command[0] === "ss") return { stdout: "LISTEN 0 4096 127.0.0.1:8317 0.0.0.0:*\n" };
+    if (command[0] === "systemctl" && (command.includes("restart") || command.includes("--now"))) proxy.stopped = false;
     return undefined;
   });
   const { fetch, requests } = fakeProxy(proxy);

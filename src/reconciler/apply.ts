@@ -110,8 +110,10 @@ async function reconcile(plan: Plan, options: ApplyOptions): Promise<{ report: R
   const gated = await gate(plan, run, !context.dryRun, issue);
   report.findings.push(...gated.issued, ...gated.failed.map((step) => humanFinding(step, context.dryRun)), ...gated.checks.filter(([, code]) => code !== 0).map(([item, code]) => checkFinding(item, code)));
   if (!context.dryRun && gated.failed.some(repairedByHedge)) report.ok = false;
+  const firstFindings = new Map<Adapter, Finding[]>();
   for (const adapter of adapters) {
     const result = await adapter.apply(gated.plan, context);
+    firstFindings.set(adapter, result.findings);
     report.actions.push(...result.actions);
     report.findings.push(...result.findings);
     if (result.failed) report.ok = false;
@@ -183,22 +185,23 @@ async function reconcile(plan: Plan, options: ApplyOptions): Promise<{ report: R
   }
   await undo(items.filter((item) => item.cause !== "pack"));
   if (context.dryRun) return { report, checks: gated.checks };
-  const settled = await waitingChecks(plan, run, gated.checks, report.findings);
+  const settled = await waitingChecks(plan, run, gated.checks, report.findings, failed);
   if (!settled.length) return { report, checks: gated.checks };
   for (const adapter of adapters.filter((each) => each.name === "config")) {
     const result = await adapter.apply(withSettled(plan, gated.plan, settled), context);
+    const stale = firstFindings.get(adapter) ?? [];
+    report.findings.splice(0, report.findings.length, ...report.findings.filter((finding) => !stale.includes(finding)), ...result.findings);
     report.actions.push(...result.actions);
-    report.findings.push(...result.findings.filter((finding) => !report.findings.some((other) => other.id === finding.id && other.pack === finding.pack && other.say === finding.say)));
     if (result.failed || result.blocked) report.ok = false;
   }
   return { report, checks: gated.checks };
 }
 
-async function waitingChecks(plan: Plan, run: Runner, gated: Checked, findings: Finding[]): Promise<Array<Owned<PackCheck>>> {
+async function waitingChecks(plan: Plan, run: Runner, gated: Checked, findings: Finding[], failed: Set<string>): Promise<Array<Owned<PackCheck>>> {
   const settled: Array<Owned<PackCheck>> = [];
   for (const item of plan.checks.filter((check) => check.todo)) {
     const before = gated.find(([ran]) => ran === item)?.[1];
-    if (before === 0 || before === waitsForPerson) continue;
+    if (before === 0 || before === waitsForPerson || (before !== undefined && failed.has(item.pack))) continue;
     const code = await run(item.run);
     const stale = findings.findIndex((finding) => finding.id === `check:${item.id}` && finding.pack === item.pack);
     findings.splice(stale < 0 ? findings.length : stale, stale < 0 ? 0 : 1, ...(code === 0 ? [] : [checkFinding(item, code)]));

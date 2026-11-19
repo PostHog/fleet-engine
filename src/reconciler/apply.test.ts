@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync, wr
 import { join } from "node:path";
 import type { Plan } from "../pack/types.ts";
 import { tempDirs } from "../testing/git.ts";
-import { providerConfigAdapter } from "../adapters/provider-config/adapter.ts";
+import { providerConfigAdapter, type CommandRunner } from "../adapters/provider-config/adapter.ts";
 import { apply, check, filesAdapter, type Adapter } from "./apply.ts";
 
 const temp = tempDirs();
@@ -330,6 +330,29 @@ describe("a pack check that waits for the person", () => {
     expect(applied.actions.map((action) => [action.target, action.operation])).toEqual([[".claude/settings.json", "create"]]);
     expect(settings(home)).toEqual({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" } });
     expect(await check(plan({ files: [], checks, steps, config }), options)).toMatchObject({ ok: true, findings: [] });
+  });
+
+  test("that config waits for and that passes once a step ran replaces the first config findings, so a plugin that waited for the step's Claude Code leaves no Fix", async () => {
+    const pool = installedPool();
+    pool.set(0);
+    let installed = false;
+    const run = async (command: string[]) => {
+      if (command.join(" ") === "install-pool") installed = true;
+      return pool.run(command);
+    };
+    const plugins: string[] = [];
+    const claude: CommandRunner = async (command) => {
+      if (!installed) return { code: 127, stdout: "" };
+      if (command.join(" ") === "claude plugin list --json") return { code: 0, stdout: JSON.stringify(plugins.map((id) => ({ id, scope: "user" }))) };
+      if (command[2] === "install") plugins.push(command[3]!);
+      return { code: 0, stdout: "[]" };
+    };
+    const plugin = { provider: "claude" as const, key: "enabledPlugins.context7@claude-plugins-official", value: true, pack: "base" };
+    const home = temp.make("home-");
+    const applied = await apply(plan({ files: [], checks, steps, config: [...config, plugin] }), { home, adapters: [providerConfigAdapter({ run: claude })], run });
+    expect(applied).toMatchObject({ ok: true, findings: [] });
+    expect(plugins).toEqual(["context7@claude-plugins-official"]);
+    expect(settings(home).env).toEqual({ ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" });
   });
 
   test("doctor reads one result of a check that config waits for, for both the config and the finding", async () => {
