@@ -60,11 +60,24 @@ test("a box that cannot reach the proxy yet keeps its own sign-in, and the hando
   writeHome(on.machine.home, { ".config/hedge/cli-proxy.key": `${clientKey}\n` });
   const { coder } = fakeCoder({ ssh: async (_box, command) => ({ ...ok, code: command.includes("cli-proxy connect") ? 1 : 0, stderr: "The proxy does not answer." }) });
   await handOver(coder, on.machine, "box-lane");
-  expect(on.lines).toContain("box-lane keeps its own sign-in: The proxy does not answer.");
+  expect(on.lines).toContain("box-lane keeps its own sign-in: hedge cli-proxy connect exited 1 there. Run hedge cli-proxy check on box-lane to see why.");
 
   const none = fakeMachine(temp.make("hedge-box-"), { settings: balancing, run: async () => ({ ...ok, code: 1 }) });
   await handOver(fakeCoder().coder, none.machine, "box-lane");
   expect(none.lines).toContain("skip ~/.config/hedge/cli-proxy.key: this machine has none");
+});
+
+test("a failed handover prints the hub's own words with the exit code, and neither the box's output nor a key in it", async () => {
+  const on = fakeMachine(temp.make("hedge-box-"), { settings: balancing, run: async () => ({ ...ok, code: 1 }) });
+  writeHome(on.machine.home, { ".config/hedge/cli-proxy.key": `${clientKey}\n` });
+  for (const output of [{ stderr: `key ${clientKey} refused\u001b[2J` }, { stdout: `key ${clientKey} refused\u001b[2J` }]) {
+    const { coder } = fakeCoder({ ssh: async (_box, command) => ({ ...ok, ...output, code: command.includes("cli-proxy connect") ? 3 : 0 }) });
+    await handOver(coder, on.machine, "box-lane");
+  }
+  expect(on.lines.filter((line) => line.startsWith("box-lane keeps"))).toEqual(Array(2).fill("box-lane keeps its own sign-in: hedge cli-proxy connect exited 3 there. Run hedge cli-proxy check on box-lane to see why."));
+  expect(on.lines.join("\n")).not.toContain(clientKey);
+  expect(on.lines.join("\n")).not.toContain("\u001b");
+  expect(on.lines.join("\n")).not.toContain("refused");
 });
 
 test("a relay port on the proxy port is refused only while the workflow is on, before any tunnel or box forward is built", () => {
