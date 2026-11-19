@@ -9,12 +9,16 @@
 # Running it again picks up where it stopped: every step skips what is done.
 set -eu
 
+if [ "$(uname -s)" = Darwin ]; then
+  printf 'Hedge: %s\n' "Hedge runs on cloud boxes, not on a Mac. Your Mac only runs the T3 Code app. To set up your hub, follow https://posthog.github.io/hedge/#start" >&2
+  exit 1
+fi
+
 engine_slug=PostHog/hedge
 default_engine_dir=$HOME/.local/share/hedge/engine
 profile=
 install_only=
 bun_version=1.4.4
-gh_mac_version=2.103.3
 
 say() { printf 'Hedge: %s\n' "$*" >&2; }
 fail() {
@@ -113,7 +117,6 @@ export PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH"
 
 # hedge setup reads this log to time the whole install, from this line on.
 install_log="$HOME/.local/state/hedge/logs/install-timings"
-needed_you=
 mkdir -p "${install_log%/*}"
 printf 'start %s\n' "$(date +%s)" >"$install_log"
 ended() { printf '%s %s%s\n' "$1" "$(date +%s)" "${2:+ $2}" >>"$install_log"; }
@@ -139,64 +142,12 @@ download() {
   printf '%s\n' "$file"
 }
 
-mac_tools() {
-  export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-  if ! xcode-select -p >/dev/null 2>&1; then
-    say "Installing the Command Line Tools. Finish the window that opens; this script waits."
-    needed_you=needed-you
-    xcode-select --install >/dev/null 2>&1 || true
-    until xcode-select -p >/dev/null 2>&1; do sleep 5; done
-  fi
-  if ! t3_app; then
-    has brew || install_homebrew
-    brew install --cask t3-code
-  fi
-  has gh || mac_gh
-  has bun || direct_bun
-}
-
-t3_app() {
-  [ -d "/Applications/T3 Code.app" ] || open -Ra "T3 Code" >/dev/null 2>&1
-}
-
-install_homebrew() {
-  say "Installing Homebrew. It asks for your Mac password once."
-  needed_you=needed-you
-  installer=$(download https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)
-  # Under curl | sh, stdin is the script, so Homebrew could not ask for the password.
-  if [ ! -t 0 ] && (: </dev/tty) 2>/dev/null; then
-    /bin/bash "$installer" </dev/tty || fail "Homebrew did not install."
-  else
-    /bin/bash "$installer" || fail "Homebrew did not install."
-  fi
-  has brew || fail "Homebrew installed, but brew is not on PATH."
-}
-
-chip() {
-  if [ "$(uname -s)" = Darwin ] && [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || true)" = 1 ]; then echo arm64; else uname -m; fi
-}
-
 sha256() {
-  if has sha256sum; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -c1-64
+  sha256sum "$1" | cut -c1-64
 }
 
 unzip_to() {
   python3 -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' "$1" "$2"
-}
-
-mac_gh() {
-  case "$(chip)" in
-    arm64) name="gh_${gh_mac_version}_macOS_arm64"; sum=d700207eae9ae98fe2b89535c2c087c07823d4628c56364695a5a07ef311c062 ;;
-    x86_64) name="gh_${gh_mac_version}_macOS_amd64"; sum=a2f86418f4350ae6e9ec60d5000bdf7665728436946a97fc27fe50e6ae752682 ;;
-    *) fail "no gh build for $(chip). Install gh from https://cli.github.com." ;;
-  esac
-  work=$(mktemp -d)
-  fetch "https://github.com/cli/cli/releases/download/v$gh_mac_version/$name.zip" -o "$work/gh.zip" || fail "could not download gh."
-  [ "$(sha256 "$work/gh.zip")" = "$sum" ] || fail "gh checksum mismatch."
-  unzip_to "$work/gh.zip" "$work"
-  mkdir -p "$HOME/.local/bin"
-  install -m 755 "$work/$name/bin/gh" "$HOME/.local/bin/gh"
-  rm -rf "$work"
 }
 
 linux_gh() {
@@ -219,12 +170,10 @@ linux_gh() {
 }
 
 direct_bun() {
-  case "$(uname -s) $(chip)" in
-    "Linux aarch64"|"Linux arm64") target=linux-aarch64; sum=baa6bb36f51d6e58561e02bbea825038a9df454f673d6d776e8bbf86f8c7850e ;;
-    "Linux x86_64"|"Linux amd64") target=linux-x64; sum=bf8ccbfb2b0b80159e0f9a6d15c55317add8077534dbc6130a3edb52fccb395c ;;
-    "Darwin arm64") target=darwin-aarch64; sum=c240d7f0ccb90c263a849fcdb09b7ee62630d921348ed6aafda86b9d577bc510 ;;
-    "Darwin x86_64") target=darwin-x64; sum=50a3491f73abc2fe81673171a85762d3bc2cc1680ccecadd983de99adf77977e ;;
-    *) fail "no Bun build for $(chip). Install Bun from https://bun.sh." ;;
+  case "$(uname -m)" in
+    aarch64|arm64) target=linux-aarch64; sum=baa6bb36f51d6e58561e02bbea825038a9df454f673d6d776e8bbf86f8c7850e ;;
+    x86_64|amd64) target=linux-x64; sum=bf8ccbfb2b0b80159e0f9a6d15c55317add8077534dbc6130a3edb52fccb395c ;;
+    *) fail "no Bun build for $(uname -m). Install Bun from https://bun.sh." ;;
   esac
   work=$(mktemp -d)
   fetch "https://github.com/oven-sh/bun/releases/download/bun-v$bun_version/bun-$target.zip" -o "$work/bun.zip" || fail "could not download Bun."
@@ -314,10 +263,6 @@ add_login_line() {
 login_path() {
   dirs="\$HOME/.local/bin \$HOME/.bun/bin"
   shell=${SHELL:-}
-  if [ "$(uname -s)" = Darwin ]; then
-    dirs="$dirs /opt/homebrew/bin"
-    [ -n "$shell" ] || shell=zsh
-  fi
   case "${shell##*/}" in
     zsh) file=.zprofile ;;
     bash) file=.profile; [ ! -f "$HOME/.bash_login" ] || file=.bash_login; [ ! -f "$HOME/.bash_profile" ] || file=.bash_profile ;;
@@ -337,15 +282,11 @@ login_path() {
   say "Open a new terminal to use hedge. ~/$file now puts ~/.local/bin and ~/.bun/bin on your PATH."
 }
 
-case "$(uname -s)" in
-  Darwin) mac_tools ;;
-  Linux)
-    for tool in curl git tar sha256sum python3; do has "$tool" || fail "install $tool first."; done
-    has gh || linux_gh
-    has bun || direct_bun ;;
-  *) fail "Hedge runs on macOS and Linux." ;;
-esac
-ended tools "$needed_you"
+[ "$(uname -s)" = Linux ] || fail "Hedge runs on Linux cloud boxes."
+for tool in curl git tar sha256sum python3; do has "$tool" || fail "install $tool first."; done
+has gh || linux_gh
+has bun || direct_bun
+ended tools
 t3_cli
 ended t3
 has git || fail "git is missing."
