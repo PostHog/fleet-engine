@@ -62,7 +62,6 @@ export type DevboxContext = {
   models: ModelRow[];
   /** The profile's clone URL and the engine ref it pins, so the box runs what this machine runs. */
   profile(): Promise<{ url: string; engineRef: string }>;
-  /** The command that picks up where a failed sign-in on the box stopped. */
   rerun?: string;
 };
 
@@ -377,7 +376,7 @@ async function linkBothWays(host: string, box: Machine, context: DevboxContext) 
   await link(box, host, boxAddress, context.machine, here);
   const hereAddress = await connectAddress(context.machine);
   if (hereAddress) await link(context.machine, here, hereAddress, box, host);
-  else if (await linkedStatus(context.machine)) context.terminal.print(`  · T3 Connect is on here, but Hedge could not find this machine's tunnel address. Update T3 Code here, then run ${again(context)} again so ${host} links back.`);
+  else if (await linkedStatus(context.machine)) throw new Error(`T3 Connect is on here, but Hedge could not find this machine's tunnel address. Update T3 Code here, then run ${again(context)} again so ${host} links back.`);
   else context.terminal.print(`  · ${host} does not link back to this machine, because T3 Connect is off here. Turn it on with t3 up --connect, and T3 Code on ${host} can pair with this machine.`);
 }
 

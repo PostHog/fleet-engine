@@ -231,11 +231,11 @@ describe("the devbox over SSH", () => {
     expect(box.sessions().filter((session) => !session.revoked)).toEqual([]);
   });
 
-  test("says so when T3 Connect is on here but its tunnel address cannot be found, instead of calling it off", async () => {
+  test("stops when T3 Connect is on here but its tunnel address cannot be found, instead of calling it off", async () => {
     const home = homeWithHosts();
     const box = fakeMachine(home, {}, { connectHere: true, serverWithoutLinkState: ["here"] });
     const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude", "--devbox", "node-1"], ["", "", ""], box);
-    expect(result.code).toBe(0);
+    expect(result.code).toBe(1);
     expect(result.output).toContain("T3 Connect is on here, but Hedge could not find this machine's tunnel address. Update T3 Code here, then run hedge setup again so node-1 links back.");
     expect(result.output).not.toContain("because T3 Connect is off here");
   });

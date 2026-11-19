@@ -30,6 +30,26 @@ describe("hedge devbox add", () => {
     expect((await hedgeSetup(temp.make("home-"), ["--devbox", "-oProxyCommand=x"])).output).toStartWith("hedge setup: --devbox takes an SSH host");
   });
 
+  test("when this machine has no tunnel address for the node to link back to, hedge devbox add fails and links back once run again after the address is there", async () => {
+    const home = temp.make("home-");
+    expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""])).code).toBe(0);
+    const io = scripted([]);
+    const options = { home, engineRoot, platform: "linux" as const, print: io.terminal.print, terminal: io.terminal };
+    const hub: { connectHere: boolean; serverWithoutLinkState: Array<"box" | "here"> } = { connectHere: true, serverWithoutLinkState: ["here"] };
+    const box = fakeMachine(home, {}, hub);
+    const linkBack = "t3 environment link https://here.relay.example --pairing-code HERECODE --access full-access";
+    const onNode = () => box.calls.map((call) => onBox(call.command)).filter((line) => line !== undefined);
+    expect(await main(["devbox", "add", "node-2"], { ...options, setup: { machine: box.machine } })).toBe(1);
+    expect(io.output()).toContain("Hedge could not find this machine's tunnel address. Update T3 Code here, then run hedge devbox add node-2 again so node-2 links back.");
+    expect(machineFile(home).setup.done).not.toContain("devbox:node-2:link");
+    expect(onNode()).not.toContainEqual(expect.stringContaining(linkBack));
+
+    hub.serverWithoutLinkState = [];
+    expect(await main(["devbox", "add", "node-2"], { ...options, setup: { machine: box.machine } })).toBe(0);
+    expect(machineFile(home).setup.done).toContain("devbox:node-2:link");
+    expect(onNode()).toContainEqual(expect.stringContaining(linkBack));
+  });
+
   test("when ChatGPT's sign-in fails on a node, hedge devbox add says to run hedge devbox add for that node again, not hedge setup", async () => {
     const home = temp.make("home-");
     expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "codex"], ["", ""])).code).toBe(0);
