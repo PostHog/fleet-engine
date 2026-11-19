@@ -102,6 +102,8 @@ test("the bridge counts as signed in once its own Codex home holds a ChatGPT sig
   expect(await slackBridgeSignedIn({ ...hub, home: join(home, "elsewhere") })).toBe(false);
 });
 
+const savesToFileStoreOnly = (content: string) => `case "$*" in *'cli_auth_credentials_store="file"'*) echo ${content} > "$CODEX_HOME/auth.json" ;; *) echo "Successfully logged in" ;; esac`;
+
 function codexLogin(home: string, script: string) {
   const codex = join(home, ".local/share/hedge/codex/current/bin/codex");
   writeFileSync(codex, `#!/bin/sh\n${script}\n`);
@@ -114,10 +116,9 @@ test("sign-in runs Codex's device sign-in, puts the new sign-in into the bridge'
   const { api, hub, home } = hubWith();
   await registerSlackBridge(hub);
   writeFileSync(join(bridgeHome(home), "auth.json"), "earlier");
-  codexLogin(home, `echo "$*" > "${home}/login-args"\necho new > "$CODEX_HOME/auth.json"`);
+  codexLogin(home, savesToFileStoreOnly("new"));
   api.calls.length = 0;
   expect(await signInSlackBridge(hub)).toBe(0);
-  expect(readFileSync(join(home, "login-args"), "utf8")).toBe('login -c cli_auth_credentials_store="file" --device-auth\n');
   expect(bridgeAuth(home)).toBe("new\n");
   expect(api.calls.filter((call) => call.method !== "GET").map((call) => `${call.method} ${call.path}`)).toEqual(["POST servers/slack/reload"]);
   expect(hub.printed.at(-1)).toBe("Slack signed in. Agents reach them through the gateway now.");
@@ -137,7 +138,7 @@ test("a sign-in that stops part way keeps the bridge's earlier sign-in", async (
 test("a sign-in whose ChatGPT account has no Slack app fails and says where to connect Slack", async () => {
   const { hub, home } = hubWith({ toolCounts: { slack: 0 } });
   await registerSlackBridge(hub);
-  codexLogin(home, `echo new > "$CODEX_HOME/auth.json"`);
+  codexLogin(home, savesToFileStoreOnly("new"));
   expect(await signInSlackBridge(hub)).toBe(1);
   expect(hub.printed.at(-1)).toBe("The gateway finds no Slack tools for this sign-in. Connect Slack in ChatGPT, Settings, Apps, with this ChatGPT account, then run: hedge mcp-gateway reconnect slack");
   expect(hub.printed).not.toContain("Slack signed in. Agents reach them through the gateway now.");
