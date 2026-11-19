@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { PackManifest, Profile, ProfileFile, SettingValue } from "../pack/types.ts";
-import { bothChanged, loadProfile, pushedBehind, pushedFirst, removedOnOrigin, saveAnswers } from "../profile/profile.ts";
+import { bothChanged, checkUnchanged, loadProfile, pushedBehind, pushedFirst, saveAnswers, type ProfileRead } from "../profile/profile.ts";
 import type { Machine } from "./commands.ts";
 import { defaultSources, engineRepo } from "./defaults.ts";
 import { profileFile } from "../legacy.ts";
@@ -27,7 +27,7 @@ export type ProfileContext = {
   draft: Draft;
   current?: string;
   packs(): PackManifest[];
-  loaded?(): { name: string; text: string } | undefined;
+  loaded?(): ProfileRead | undefined;
   /** Called once hedge.json holds every answer and is pushed: the draft is no longer needed. */
   saved(dir: string): Promise<void>;
 };
@@ -121,8 +121,7 @@ async function makeProfile(context: ProfileContext) {
   const { gh, login, exists, personal, org, team, dir, found } = await lookUp(machine, home, context.packs(), draft.packs ?? [], context.current);
   if (found && (await machine.exec(["git", "-C", dir, "status", "--porcelain", "--", basename(profileFile(dir))])).output.trim()) throw new Error(`${dir}: ${basename(profileFile(dir))} has changes that are not committed. Commit or discard them, then try again.`);
   const seen = found ? context.loaded?.() : undefined;
-  if (seen && !existsSync(join(dir, seen.name))) throw new Error(removedOnOrigin(dir, seen.name));
-  if (seen && readFileSync(join(dir, seen.name), "utf8") !== seen.text) throw new Error(changedMeanwhile(dir));
+  if (seen) checkUnchanged(dir, seen);
   const create = (repo: string, description: string) => machine.exec(["gh", "repo", "create", repo, "--private", "--description", description]);
   let profileRepo = found ?? team ?? personal;
   const saved = found ? savedSettings(dir) : {};
@@ -223,8 +222,6 @@ export async function takeOrigin(machine: Machine, home: string, dir: string) {
   const merged = await machine.exec(["git", "-C", dir, "merge", "-q", "--ff-only", fetched.output.trim()]);
   return merged.code === 0 ? undefined : merged;
 }
-
-const changedMeanwhile = (dir: string) => `another machine saved your profile in ${dir} while setup ran. Run the same hedge setup command again: it starts from the profile as it is now.`;
 
 export async function saveTarget(machine: Machine, dir: string) {
   if ((await machine.exec(["git", "-C", dir, "rev-parse", "--verify", "-q", "HEAD"])).code !== 0) {

@@ -121,7 +121,7 @@ describe("hedge setup with a devbox", () => {
     const stopped = await hedgeSetup(home, devboxArgs, [() => (publish("new-project"), "")], fakeMachine(home));
 
     expect(stopped.code).toBe(1);
-    expect(stopped.output).toContain(`hedge: ${profilePath(home)}: another machine saved your profile while this command ran. Run the same command again: it starts from the profile as it is now.`);
+    expect(stopped.output).toContain(`hedge: another machine saved your profile in ${profilePath(home)} while setup ran. Run the same hedge setup command again: it starts from the profile as it is now.`);
     expect((await pushedAnswers(home)).settings).toEqual({ "orchestration.loopProject": "new-project" });
     expect((await hedgeSetup(home, devboxArgs, [""], fakeMachine(home))).code).toBe(0);
     expect((await pushedAnswers(home)).settings).toEqual({ "orchestration.loopProject": "new-project" });
@@ -185,6 +185,32 @@ describe("hedge setup with a devbox", () => {
     expect(stopped.output).toContain(`hedge: ${profilePath(home)}: your profile's hedge.json was removed on origin. Restore it there, then run the same hedge setup command again.`);
     expect(JSON.parse(await spawnGit(home, "--git-dir", githubRepo(home, "nora/hedge-profile"), "show", "main:fleet.json")).settings).toEqual({});
     expect(JSON.parse(readFileSync(join(profilePath(home), "fleet.json"), "utf8")).settings).toEqual({});
+  });
+
+  test("stops before it saves a devbox setting when another machine adds hedge.json beside the fleet.json setup read while setup asks it, and saves the setting to neither file", async () => {
+    const home = temp.make("home-");
+    expect((await hedgeSetup(home, devboxArgs, ["", ""], fakeMachine(home))).code).toBe(130);
+    const elsewhere = join(temp.make("elsewhere-"), "profile");
+    await spawnGit(home, "clone", "-q", githubRepo(home, "nora/hedge-profile"), elsewhere);
+    await spawnGit(elsewhere, "mv", "hedge.json", "fleet.json");
+    await spawnGit(elsewhere, "commit", "-q", "-m", "Keep only a fleet.json from before the rename");
+    await spawnGit(elsewhere, "push", "-q");
+    const addElsewhere = async () => {
+      writeFileSync(join(elsewhere, "hedge.json"), readFileSync(join(elsewhere, "fleet.json")));
+      await spawnGit(elsewhere, "add", "hedge.json");
+      await spawnGit(elsewhere, "commit", "-q", "-m", "Add hedge.json on another machine");
+      await spawnGit(elsewhere, "push", "-q");
+    };
+
+    const stopped = await hedgeSetup(home, devboxArgs, [async () => (await addElsewhere(), "~/code/app")], fakeMachine(home));
+
+    expect(stopped.code).toBe(1);
+    expect(stopped.output).toContain(`hedge: another machine saved your profile in ${profilePath(home)} while setup ran. Run the same hedge setup command again: it starts from the profile as it is now.`);
+    const origin = githubRepo(home, "nora/hedge-profile");
+    for (const name of ["fleet.json", "hedge.json"]) {
+      expect(JSON.parse(await spawnGit(home, "--git-dir", origin, "show", `main:${name}`)).settings).toEqual({});
+      expect(JSON.parse(readFileSync(join(profilePath(home), name), "utf8")).settings).toEqual({});
+    }
   });
 
   test("stops before it saves a devbox setting when hedge.json has a change that is not committed, and keeps that change", async () => {

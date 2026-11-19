@@ -1,10 +1,8 @@
-import { readFile } from "node:fs/promises";
-import { basename, join } from "node:path";
-import { profileFile } from "../legacy.ts";
+import { join } from "node:path";
 import { loadPacks } from "../pack/manifest.ts";
 import { cachedSource, fetchSource } from "../pack/sources.ts";
 import type { AvailableSource, FetchedSource, MachineFile, Plan, Preset, Profile, SetupProgress, SourceRef } from "../pack/types.ts";
-import { behindOrigin, loadMachine, loadProfile, pushSetting, saveMachine, thisMachine } from "../profile/profile.ts";
+import { behindOrigin, loadMachine, loadProfile, pushSetting, readProfileFile, saveMachine, thisMachine } from "../profile/profile.ts";
 import { resolve } from "../reconciler/resolve.ts";
 import { defaultSources, engineRepo, makesOwnDevbox } from "./defaults.ts";
 import { FlagError, hasPicks, parseSetupFlags, type SetupFlags } from "./flags.ts";
@@ -55,7 +53,7 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
   const box: Machine = { ...realMachine, ...options.machine };
   if (machine.profileDir) await fastForward(box, options.home, machine.profileDir);
   const progress = { done: machine.setup?.done ?? [], draft: machine.profileDir ? profileDraft(await loadProfile(machine.profileDir)) : withInferred(machine.setup ?? { done: [] }) };
-  let loaded = machine.profileDir ? await profileText(machine.profileDir) : undefined;
+  let loaded = machine.profileDir ? readProfileFile(machine.profileDir) : undefined;
   const catalog = await loadCatalog(options.engineRoot, teamRefs(progress.draft), options.home);
   const remember = () => saveMachine(options.home, { ...machine, setup: machine.profileDir ? { done: progress.done } : { done: progress.done, ...withoutInferred(progress.draft) } });
   const fetchTeam = (ref: SourceRef) => (options.fetchSource ?? fetchSource)(ref, sourceCache(options.home));
@@ -126,7 +124,7 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
     const existing = await existingProfile(box, options.home, catalog.packs.map((pack) => pack.manifest), progress.draft.packs ?? catalog.teamPacks);
     if (!existing) return;
     const saved = profileDraft(existing);
-    loaded = await profileText(existing.dir);
+    loaded = readProfileFile(existing.dir);
     const sources = [...existing.sources, ...(progress.draft.sources ?? []).filter((ref) => !existing.sources.some((kept) => kept.name === ref.name))];
     await context.answer({ ...saved, ...(hasPicks(flags) ? picksFrom(flags, catalog, saved) : {}), plan: flags.plan ?? progress.draft.plan ?? saved.plan, sources, settings: { ...existing.settings, ...progress.draft.settings } });
   };
@@ -197,9 +195,9 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
         const outcome = await step.run();
         const value = progress.draft.settings?.[key];
         if (outcome !== "unanswered" && machine.profileDir && value !== undefined) {
-          const name = basename(profileFile(machine.profileDir));
+          const read = readProfileFile(machine.profileDir);
           await fastForward(box, options.home, machine.profileDir);
-          await pushSetting(machine.profileDir, key, value, seen, await saveTarget(box, machine.profileDir), name);
+          await pushSetting(machine.profileDir, key, value, seen, await saveTarget(box, machine.profileDir), read);
         }
         return outcome;
       },
@@ -305,11 +303,6 @@ const proxyServesCodex = "With own-account balancing on, Codex goes through the 
 function chatgptStep(signIn: SignIn, human: HumanContext, plan: Plan): Step {
   const balanced = plan.workflows.some((workflow) => workflow.id === "own-account-balancing" && workflow.active);
   return balanced ? optionalStep(signIn, human, proxyServesCodex) : humanStep(signIn, human);
-}
-
-async function profileText(dir: string) {
-  const path = profileFile(dir);
-  return { name: basename(path), text: await readFile(path, "utf8") };
 }
 
 async function fastForward(box: Machine, home: string, dir: string) {

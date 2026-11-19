@@ -209,6 +209,33 @@ describe("hedge setup while another machine changes the profile", () => {
     expect(JSON.parse(await spawnGit(home, "--git-dir", githubRepo(home, "nora/hedge-profile"), "show", "main:fleet.json")).packs).toEqual(["pull-requests"]);
   });
 
+  test("a rerun stops before it saves the profile when another machine adds hedge.json beside the fleet.json setup read, and saves the draft to neither file", async () => {
+    const home = temp.make("home-");
+    expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""])).code).toBe(0);
+    const elsewhere = join(temp.make("elsewhere-"), "profile");
+    await spawnGit(home, "clone", "-q", githubRepo(home, "nora/hedge-profile"), elsewhere);
+    await spawnGit(elsewhere, "mv", "hedge.json", "fleet.json");
+    await spawnGit(elsewhere, "commit", "-q", "-m", "Keep only a fleet.json from before the rename");
+    await spawnGit(elsewhere, "push", "-q");
+    const addElsewhere = async () => {
+      const legacy = JSON.parse(readFileSync(join(elsewhere, "fleet.json"), "utf8"));
+      writeFileSync(join(elsewhere, "hedge.json"), `${JSON.stringify({ ...legacy, packs: [...legacy.packs, "guards"] }, null, 2)}\n`);
+      await spawnGit(elsewhere, "add", "hedge.json");
+      await spawnGit(elsewhere, "commit", "-q", "-m", "Add hedge.json on another machine");
+      await spawnGit(elsewhere, "push", "-q");
+    };
+
+    const stopped = await hedgeSetup(home, ["--remove", "pull-requests"], [async () => (await addElsewhere(), "")]);
+
+    expect(stopped.code).toBe(1);
+    expect(stopped.output).toContain(`hedge: another machine saved your profile in ${profilePath(home)} while setup ran. Run the same hedge setup command again: it starts from the profile as it is now.`);
+    const origin = githubRepo(home, "nora/hedge-profile");
+    expect(JSON.parse(await spawnGit(home, "--git-dir", origin, "show", "main:fleet.json")).packs).toEqual(["pull-requests"]);
+    expect(JSON.parse(await spawnGit(home, "--git-dir", origin, "show", "main:hedge.json")).packs).toEqual(["pull-requests", "guards"]);
+    expect(JSON.parse(await spawnGit(profilePath(home), "show", "HEAD:fleet.json")).packs).toEqual(["pull-requests"]);
+    expect(JSON.parse(await spawnGit(profilePath(home), "show", "HEAD:hedge.json")).packs).toEqual(["pull-requests", "guards"]);
+  });
+
   test("an apply-only resume runs the steps of the plan that another machine saved after the stop", async () => {
     const home = temp.make("home-");
     const stopped = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""], undefined, undefined, 0, "linux", () => {

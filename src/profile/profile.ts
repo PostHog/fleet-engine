@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -56,16 +56,29 @@ export async function saveAnswers(dir: string, answers: Partial<ProfileFile>, op
   return committed;
 }
 
-export async function pushSetting(dir: string, key: string, value: SettingValue, seen: SettingValue | undefined, target: string[], name: string) {
+export type ProfileRead = { name: string; text: string };
+
+export function readProfileFile(dir: string): ProfileRead {
+  const path = profileFile(dir);
+  return { name: basename(path), text: readFileSync(path, "utf8") };
+}
+
+export function checkUnchanged(dir: string, seen: ProfileRead) {
+  if (!existsSync(join(dir, seen.name))) throw new ProfileError(removedOnOrigin(dir, seen.name));
+  if (basename(profileFile(dir)) !== seen.name || readFileSync(join(dir, seen.name), "utf8") !== seen.text) throw new ProfileError(changedMeanwhile(dir));
+}
+
+export async function pushSetting(dir: string, key: string, value: SettingValue, seen: SettingValue | undefined, target: string[], read: ProfileRead) {
   refuseLegacyPath(dir);
+  const { name } = read;
   const path = join(dir, name);
   refuseLegacyPath(path);
   const edited = await run(dir, "git", "status", "--porcelain", "--", name);
   if (!edited.ok) throw new ProfileError(`${dir}: could not check ${name}: ${edited.stderr}`);
   if (edited.stdout) throw new ProfileError(`${dir}: ${name} has changes that are not committed. Commit or discard them, then try again.`);
-  if (!existsSync(path)) throw new ProfileError(removedOnOrigin(dir, name));
+  checkUnchanged(dir, read);
   const saved = ((await readJson(path))?.settings as Record<string, unknown> | undefined)?.[key];
-  if (JSON.stringify(saved) !== JSON.stringify(seen)) throw new ProfileError(`${dir}: another machine saved your profile while this command ran. Run the same command again: it starts from the profile as it is now.`);
+  if (JSON.stringify(saved) !== JSON.stringify(seen)) throw new ProfileError(changedMeanwhile(dir));
   const committed = await commitAnswers(dir, { settings: { [key]: value } }, path);
   const pushed = await run(dir, "git", "push", "-q", ...target);
   if (pushed.ok) return;
@@ -74,7 +87,9 @@ export async function pushSetting(dir: string, key: string, value: SettingValue,
 
 export const behindOrigin = (dir: string, committed = false) => `${bothChanged(dir, "origin")} Bring it up to date with git -C ${dir} pull --rebase --autostash${committed ? ", or drop setup's commit" : ""}, then run the same hedge setup command again.`;
 
-export const pushedFirst = (dir: string, committed: boolean) => `another machine pushed to your profile before setup could. ${committed ? behindOrigin(dir, true) : "Run the same hedge setup command again."}`;
+export const pushedFirst = (dir: string, committed: boolean) => `another machine pushed to your profile before setup could. ${behindOrigin(dir, committed)}`;
+
+export const changedMeanwhile = (dir: string) => `another machine saved your profile in ${dir} while setup ran. Run the same hedge setup command again: it starts from the profile as it is now.`;
 
 export const removedOnOrigin = (dir: string, name: string) => `${dir}: your profile's ${name} was removed on origin. Restore it there, then run the same hedge setup command again.`;
 
