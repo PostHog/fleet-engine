@@ -7,14 +7,21 @@
 - Hedge runs your agents on a hub and one or more nodes in the cloud. The
   Mac and the phone run only the T3 Code app. The "Mac only" setup is gone
   from the site, `SETUP.md`, the presets, and the docs.
-- On a Mac, `get.sh` stops before it installs anything, and points at the
-  setup page.
+- On a Mac, `get.sh` installs nothing. It only stops and turns off the
+  launchd jobs of an earlier Fleet or Hedge there, keeps their files, and
+  points at the setup page. The Fleet notice and a failed `hedge update` on a
+  Mac point there too.
 - The setup agent creates the hub and the nodes with one `coder create`
   each, with every template parameter given and the profile repo as
-  dotfiles, and reads the build's parameters back. It sets Hedge up on the
-  hub over SSH, and adds the nodes from the hub.
+  dotfiles. `scripts/check-workspace.sh` then checks each build's parameters
+  and its stop time, and prints no value and no token. It sets Hedge up on
+  the hub over SSH, names the hub right after `hedge setup`, and adds the
+  nodes from the hub.
 - On a box without a browser, ChatGPT signs in with a device code, and
-  Claude in a terminal.
+  Claude in a terminal. When device code sign-in is off, setup says how to
+  turn it on, or how to sign in over an SSH port forward.
+- The site loads a script and styles whose names carry a hash of their
+  content, so a cached page always runs its own script.
 
 ### Fleet is now Hedge
 
