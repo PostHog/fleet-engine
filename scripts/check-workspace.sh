@@ -32,7 +32,7 @@ esac
 case "$transition $state" in
   "start running") ;;
   "delete canceled")
-    echo "x $name has a delete build that is canceled, so its name stays taken. Ask the person whether it should go. If so, they delete it from the workspace's menu in the Coder web app, and you create it again when it is gone. If not, they press Start there, then run this check again. When the start fails, they ask the Coder admin."
+    echo "x $name has a delete build that is canceled, so its name stays taken. Ask the person whether it should go. If so, they delete it from the workspace's menu in the Coder web app, and you create it again when it is gone. If not, they get it running with the action that the Coder web app offers for it, such as Activate or Start, never Retry, then run this check again. When that fails, they ask the Coder admin."
     exit 1 ;;
   "delete "*)
     echo "x $name has a delete build that is $state, so its name stays taken. Ask the person whether it should go. If so, they delete it from the workspace's menu in the Coder web app, and you create it again when it is gone. If not, they never press Retry, which deletes it again, and ask the Coder admin to restore it."
