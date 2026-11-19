@@ -238,16 +238,21 @@ describe("the pack videos in a browser", () => {
     expect([dialog(window).open, video(window, "dialog video").paused]).toEqual([false, true]);
   });
 
-  test("a visitor who asks for reduced motion gets the player without autoplay, and presses play", () => {
+  test("a visitor who asks for reduced motion gets the player without autoplay, and presses play", async () => {
     const window = visit("packs/index.html", { motion: "reduce" });
     watchButton(window, "Orchestration").click();
-    expect([dialog(window).open, video(window, "dialog video").paused]).toEqual([true, true]);
+    await window.happyDOM.waitUntilComplete();
+    const player = video(window, "dialog video");
+    expect([dialog(window).open, player.paused, player.controls]).toEqual([true, true, true]);
+    await player.play();
+    expect(player.paused).toBe(false);
   });
 
-  test("a pack page's video waits for the visitor to press play, even when it shows in full", () => {
+  test("a pack page's video waits for the visitor to press play, even when it shows in full", async () => {
     const window = visit("packs/hub/index.html", { inView: true });
     window.dispatchEvent(new window.Event("scroll"));
     window.dispatchEvent(new window.Event("load"));
+    await window.happyDOM.waitUntilComplete();
     expect(video(window, "video.clip").paused).toBe(true);
   });
 });

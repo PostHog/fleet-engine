@@ -228,7 +228,7 @@ describe("the site build", () => {
   });
 
   const videoPacks = ["hub", "pull-requests", "orchestration", "memory", "slack"];
-  const attributesOf = (tag: string): Record<string, string | true | undefined> => Object.fromEntries([...tag.matchAll(/\s([a-z-]+)(?:="([^"]*)")?/g)].map((match) => [match[1]!, match[2] || true]));
+  const attributesOf = (tag: string): Record<string, string | true | undefined> => Object.fromEntries([...tag.matchAll(/\s([a-z-]+)(?:="([^"]*)")?/g)].map((match) => [match[1]!, !match[2] || match[2] === match[1] ? true : match[2]]));
   const describedBy = (html: string, tag: string) => String(attributesOf(tag)["aria-describedby"] ?? "").split(" ").map((id) => visibleText(html.match(new RegExp(`<(\\w+)[^>]* id="${id}"[^>]*>([\\s\\S]*?)</\\1>`))?.[2] ?? "").trim());
 
   test("the packs page shows a Watch button on the card of each pack with a video, and no other, and has one large player", () => {
