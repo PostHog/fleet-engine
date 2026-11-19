@@ -28,7 +28,7 @@ const blocksIn = (text: string) => [...text.matchAll(/^ *```\w*\n([\s\S]*?)^ *``
 
 const coderValueOptions = new Set(["--client-tls-ca-file", "--client-tls-cert-file", "--client-tls-key-file", "--global-config", "--header", "--header-command", "--token", "--url"]);
 function coderSubcommands(code: string) {
-  return code.replace(/\\\n/g, " ").split("\n").flatMap((line) => {
+  return code.replace(/\\\n/g, "").split("\n").flatMap((line) => {
     const words = (line.match(/"[^"]*"|'[^']*'|\S+/g) ?? []).map((word) => word.replace(/^["']|["']$/g, ""));
     return words.flatMap((word, at) => {
       if (word !== "coder") return [];
@@ -207,8 +207,10 @@ describe("the agent setup guide", () => {
   test("changes a parameter in the workspace's Settings in the Coder web app, as the check says, and never with the Coder CLI", () => {
     const texts = [guide(), readFileSync(join(root, "docs/getting-started.md"), "utf8")];
     expect(texts.flatMap(cliParameterChanges)).toEqual([]);
-    const sample = "Run `coder start`, then `coder --verbose restart hub`,\nor `CODER_URL=x coder --url x 'restart'\nhub`. Keep `coder create start --template dev` and `coder schedule start hub`.\n\n```sh\na && coder update hub\n```\n\n```sh\ncoder --verbose \\\n  restart hub\n```\n";
-    expect(cliParameterChanges(sample)).toEqual(["a && coder update hub\n", "coder --verbose \\\nrestart hub\n", "coder start", "coder --verbose restart hub", "CODER_URL=x coder --url x 'restart' hub"]);
+    const flagged = (markdown: string) => cliParameterChanges(markdown).length > 0;
+    const rejected = ["Run `coder start`.", "Run `coder --verbose restart hub`.", "Run `CODER_URL=x coder --url x 'restart'\nhub`.", "```sh\na && coder update hub\n```\n", "```sh\ncoder --verbose \\\n  restart hub\n```\n", "```sh\ncoder re\\\nstart hub\n```\n"];
+    const kept = ["Keep `coder create start --template dev`.", "Keep `coder schedule start hub`.", "Its restart command can ask for a parameter."];
+    expect([rejected.map(flagged), kept.map(flagged)]).toEqual([rejected.map(() => true), kept.map(() => false)]);
     for (const text of texts) expect(text.replace(/\s+/g, " ")).toContain("**Settings → Parameters**");
     const printed = fakeCoder(temp, { parameters: { instance_type: "m7g.xlarge" }, mutable: { instance_type: true } }).check(["instance_type=m7g.4xlarge"]);
     expect([printed.code, printed.output]).toEqual([1, "x instance_type is not the value you passed. In the Coder web app, set it under Settings, Parameters, and submit.\nok hedge-hub runs and stays on\n"]);
