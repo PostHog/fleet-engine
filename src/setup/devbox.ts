@@ -114,7 +114,7 @@ export function devboxSteps(host: string, context: DevboxContext): Step[] {
     humanStep(on(githubSignIn(box, async () => {})), human),
     auto(host, "profile", `Apply your profile on ${host}`, 3, context.terminal, () => applyProfile(box, context)),
     ...(context.plan === "codex" ? [] : [claudeOnBox(host, box, context)]),
-    ...(context.plan === "claude" ? [] : [humanStep(on(Object.assign(Object.create(chatgpt) as SignIn, { command: ["codex", "login", "--device-auth"] })), human)]),
+    ...(context.plan === "claude" ? [] : [humanStep(on(chatgpt), human)]),
     humanStep(t3Connect(host, box), human),
     auto(host, "link", `Link T3 Code here and on ${host}`, 1, context.terminal, () => linkBothWays(host, box, context)),
   ];

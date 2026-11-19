@@ -13,7 +13,7 @@ const graceAfterExit = 15;
 function ended(signIn: SignIn, code: number) {
   const name = signIn.command![0];
   if (code === 127) return `${name} is not installed here. Install it, then run hedge setup again.`;
-  return `${signIn.command!.join(" ")} ended${code ? ` with code ${code}` : ""}, but ${signIn.title} still does not pass its check. Fix what it says above, then run hedge setup again.`;
+  return `${signIn.command!.join(" ")} ended${code ? ` with code ${code}` : ""}, but ${signIn.title} still does not pass its check. Fix what it says above, then run hedge setup again.${signIn.whenItFails ? ` ${signIn.whenItFails}` : ""}`;
 }
 
 export type SignIn = {
@@ -29,6 +29,7 @@ export type SignIn = {
   /** The command ends by itself and may still work after the probe passes, such as a repair that applies the profile: setup waits for it instead of stopping it. */
   finishes?: true;
   url?: string;
+  whenItFails?: string;
   /** Runs once the probe passes, before the step counts as done. */
   after?(): Promise<void>;
 };

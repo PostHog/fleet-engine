@@ -289,6 +289,18 @@ describe("hedge setup sign-ins", () => {
   });
 });
 
+describe("ChatGPT's device-code sign-in", () => {
+  test("when the account or workspace turns device-code sign-in off, setup says how to turn it on, and how to sign in in a browser over an SSH port forward instead", async () => {
+    const home = temp.make("home-");
+    const box = fakeMachine(home, { chatgpt: 99 }, { exits: { chatgpt: 1 } });
+    const result = await hedgeSetup(home, ["--chat", "--preset", "starter", "--plan", "codex"], [], box);
+    expect(result.code).toBe(1);
+    expect(result.output).toContain("codex login --device-auth ended with code 1, but Sign in to ChatGPT still does not pass its check.");
+    expect(result.output).toContain("When it says that device code sign-in is off, turn on device code authorization for Codex in ChatGPT's settings under Security. In a ChatGPT workspace, a workspace admin turns it on.");
+    expect(result.output).toContain("Or sign in in the browser of your own computer: run ssh -L 1455:localhost:1455 <this box> there, then codex login in that SSH session, and open the link it prints. Then run hedge setup again.");
+  });
+});
+
 describe("a pack's sign-in", () => {
   const killed = 143;
 
