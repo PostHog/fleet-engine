@@ -132,6 +132,7 @@ describe("hedge update", () => {
     await spawnGit(old, "tag", "v0.1.2");
     const engineDir = await engineCheckout(old, "v0.1.0");
     const head = await spawnGit(engineDir, "rev-parse", "HEAD");
+    const engineBefore = await triageEngineLine(engineDir);
 
     const result = await cliUpdate(engineDir, { repo: old, ref: "v0.1.0", channel: "release" });
 
@@ -140,7 +141,7 @@ describe("hedge update", () => {
     expect(await spawnGit(engineDir, "rev-parse", "HEAD")).toBe(head);
     expect(result.version).toBe("v0.1.0");
     expect(existsSync(join(engineDir, "hedge"))).toBe(true);
-    expect(await spawnGit(engineDir, "for-each-ref", "--format=%(refname)", "refs/hedge")).toBe("");
+    expect(await triageEngineLine(engineDir)).toBe(engineBefore);
     expect(result.applied).toBe(false);
   });
 
@@ -332,10 +333,9 @@ describe("hedge update", () => {
     expect(result).toMatchObject({ code: 0, version: "main" });
   });
 
-  test("two hedge update runs that fetch the same tag at the same time each install the commit that they fetched, and neither loses its fetched ref", async () => {
+  test("two hedge update runs that fetch the same tag at the same time each install the commit that they fetched, and hedge triage names that release", async () => {
     const remote = await engineRemote(["v0.1.0", "v0.1.1"]);
     const engineDir = await engineCheckout(remote, "v0.1.0");
-    const refsBefore = await spawnGit(engineDir, "for-each-ref", "--format=%(refname)");
     const original = await spawnGit(remote, "rev-parse", "v0.1.1^{commit}");
     const realGit = Bun.which("git")!;
     const bin = temp.make("bin-");
@@ -357,7 +357,7 @@ describe("hedge update", () => {
       expect(second).toMatchObject({ code: 0, version: "v0.1.1 retagged" });
       const retagged = await spawnGit(remote, "rev-parse", "v0.1.1^{commit}");
       expect(await spawnGit(engineDir, "rev-parse", "HEAD")).toBe(retagged);
-      expect(await spawnGit(engineDir, "for-each-ref", "--points-at", "HEAD", "--format=%(refname)", "refs/hedge/releases")).toBe("refs/hedge/releases/v0.1.1");
+      expect(await triageEngineLine(engineDir)).toBe("- Engine: v0.1.1");
 
       writeSync(held[1]!, "\n");
       expect(await first).toMatchObject({ code: 0, version: "v0.1.1" });
@@ -368,8 +368,7 @@ describe("hedge update", () => {
       held.forEach((fd) => closeSync(fd));
     }
     expect(await spawnGit(engineDir, "rev-parse", "HEAD")).toBe(original);
-    expect(await spawnGit(engineDir, "for-each-ref", "--points-at", "HEAD", "--format=%(refname)", "refs/hedge/releases")).toBe("refs/hedge/releases/v0.1.1");
-    expect(await spawnGit(engineDir, "for-each-ref", "--format=%(refname)")).toBe([refsBefore, "refs/hedge/releases/v0.1.1"].filter(Boolean).join("\n"));
+    expect(await triageEngineLine(engineDir)).toBe("- Engine: v0.1.1");
   });
 
   async function triageEngineLine(engineDir: string) {
