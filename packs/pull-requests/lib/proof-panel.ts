@@ -151,6 +151,14 @@ async function requirePlan(directory: string) {
   return plan;
 }
 
+export async function panelOutcome(directory: string): Promise<"none" | "finished" | "unfinished"> {
+  if (!existsSync(planPath(directory))) return existsSync(stagedPath(directory)) ? "unfinished" : "none";
+  const plan = await readPlan(directory).catch(() => undefined);
+  const lenses = Array.isArray(plan?.lenses) ? plan.lenses : [];
+  const states = await Promise.all(lenses.map((lens) => readJson<LensStatus | undefined>(lensFile(directory, lens.name, ".json"), undefined).catch(() => undefined)));
+  return states.length && states.every((status) => status?.state === "done") ? "finished" : "unfinished";
+}
+
 const readStatus = (directory: string, name: string) => readJson<LensStatus>(lensFile(directory, name, ".json"), { state: "queued", attempts: 0 });
 const writeStatus = (directory: string, name: string, status: LensStatus) => writeJson(lensFile(directory, name, ".json"), status);
 
