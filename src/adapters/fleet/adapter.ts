@@ -3,7 +3,7 @@ import { lstatSync, readdirSync, readFileSync, readlinkSync, statSync } from "no
 import { basename, join } from "node:path";
 import type { Finding } from "../../pack/types.ts";
 import type { Adapter } from "../../reconciler/apply.ts";
-import { fleetEngineInstalled, inLegacyEngine, oldJob, underLegacyPath } from "../../legacy.ts";
+import { customFleetEngine, fleetEngineInstalled, inLegacyEngine, oldJob, underLegacyPath } from "../../legacy.ts";
 import { skipOtherHome, spawnRunner, type CommandRunner } from "../run.ts";
 import { localT3Server } from "../t3/session.ts";
 import type { T3Server } from "../t3/port.ts";
@@ -317,6 +317,8 @@ export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
       return { actions: [], findings: [] };
     },
     async holds(home, platform) {
+      const custom = customFleetEngine(home, "hedge apply");
+      if (custom) return [{ id: "fleet:custom-engine", pack: "engine", say: custom, repair: "human" }];
       if (!fleetEngineInstalled(home)) return [];
       const skipped = await skipOtherHome("fleet", "the jobs from before the rename", home, options);
       if (skipped) return skipped.findings;

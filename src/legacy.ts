@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 
 export const profileFileName = "hedge.json";
@@ -74,18 +74,27 @@ export const underLegacyPath = (home: string, path: string): boolean => underHom
 
 export const legacyEngine = ".local/share/fleet/engine";
 
-const oldCommand = /^exec sh '(.*)\/fleet' "\$@"$/m;
-const recordedEngine = (home: string) => {
+export function fleetEngineInstalled(home: string): boolean {
+  return lstatSync(join(home, legacyEngine), { throwIfNoEntry: false }) !== undefined;
+}
+
+const fleetCommand = /^exec sh '(.*)\/fleet' "\$@"$/m;
+
+export function customFleetEngine(home: string, next: string): string | undefined {
+  const wrapper = join(home, ".local/bin/fleet");
+  let text: string;
   try {
-    return oldCommand.exec(readFileSync(join(home, ".local/bin/fleet"), "utf8"))?.[1];
+    text = readFileSync(wrapper, "utf8");
   } catch {
     return undefined;
   }
-};
-
-export function fleetEngineInstalled(home: string): boolean {
-  const recorded = recordedEngine(home);
-  return lstatSync(join(home, legacyEngine), { throwIfNoEntry: false }) !== undefined || (recorded !== undefined && statSync(recorded, { throwIfNoEntry: false })?.isDirectory() === true);
+  if (text.split("\n")[1] !== "# Fleet") return undefined;
+  const named = fleetCommand.exec(text)?.[1];
+  const engine = join(home, legacyEngine);
+  const plain = named !== undefined && named.startsWith("/") && !named.includes("'");
+  if (plain && (resolve(named) === resolve(engine) || real(named) === real(engine))) return undefined;
+  const folder = named === undefined ? "a folder that Hedge cannot read from that file" : named.replaceAll("'\\''", "'");
+  return `${wrapper} runs a Fleet engine in ${folder}, and Hedge finds and stops only the Fleet engine in ${engine}, so Hedge changed nothing. Stop Fleet's services, cron jobs and fleet: tasks in T3 Code by hand and delete ${wrapper}, or move the engine to ${engine} and change the path in ${wrapper} to match. Then run ${next} again.`;
 }
 
 export const inLegacyEngine = (home: string, path: string): boolean => underHome(home, path, (relative) => relative === legacyEngine || relative.startsWith(`${legacyEngine}/`));

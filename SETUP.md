@@ -404,10 +404,10 @@ only, go on to step 10. With a hub and nodes, go on to step 9.
 ### Go back to Fleet
 
 On its first run, `get.sh` turns Fleet's jobs off and keeps their files and
-launchers. It does this only on a machine with a Fleet engine install: the
-engine in `~/.local/share/fleet/engine`, or the checkout that Fleet's
-`~/.local/bin/fleet` command ran. Below, `<engine>` is that folder. To go
-back on such a machine:
+launchers. It does this only on a machine with a Fleet engine install in
+`~/.local/share/fleet/engine`. When Fleet's `~/.local/bin/fleet` runs an
+engine in another folder, `get.sh` stops before it changes anything, so there
+is nothing to go back from. To go back on a machine that `get.sh` moved:
 
 1. Stop Hedge's jobs. On Linux, run
    `systemctl --user disable --now` for each unit that
@@ -417,10 +417,10 @@ back on such a machine:
    In T3 Code, turn off each `hedge:` scheduled task. For the MCP hub, run
    `docker update --restart=no hedge-mcphub` and `docker stop hedge-mcphub`,
    because both hubs use port 3317.
-2. When `<engine>/fleet doctor` prints `Fleet is now Hedge`, check out the
+2. When `~/.local/share/fleet/engine/fleet doctor` prints `Fleet is now Hedge`, check out the
    commit before the rename:
-   `git -C <engine> checkout -q --detach <commit>`.
-3. Run `<engine>/fleet packs --workflows nightly-updates=off`. This turns
+   `git -C ~/.local/share/fleet/engine checkout -q --detach <commit>`.
+3. Run `~/.local/share/fleet/engine/fleet packs --workflows nightly-updates=off`. This turns
    off Fleet's nightly updates, so its updater does not check out Hedge
    again. It also turns off the nightly Claude Code, Codex and T3 Code
    updates. It saves the change in the profile, pushes it, and applies, so

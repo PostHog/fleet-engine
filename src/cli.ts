@@ -30,7 +30,7 @@ import { spawnRunner, type CommandRunner } from "./adapters/run.ts";
 import { become, canBecome, type Become } from "./runner/become.ts";
 import { trackCommand } from "./usage/usage.ts";
 import { asHedge } from "./reconciler/engine-command.ts";
-import { adoptLegacyEnv, fleetIsHedge, inAnyLegacyPath, isOldJob, profileFile, renamedPath, underLegacyPath, withLegacyNames } from "./legacy.ts";
+import { adoptLegacyEnv, customFleetEngine, fleetIsHedge, inAnyLegacyPath, isOldJob, profileFile, renamedPath, underLegacyPath, withLegacyNames } from "./legacy.ts";
 import { importFleet, isCopyOf } from "./import-fleet.ts";
 import { fleetAdapter, type FleetAdapter } from "./adapters/fleet/adapter.ts";
 
@@ -114,6 +114,8 @@ const fleetOf = (options: CliOptions) => (options.adapters ?? engineAdapters)().
 async function retireFleet(args: string[], options: CliOptions) {
   if (args.length > 1 || (args.length && args[0] !== "--dry-run")) return options.print("Usage: hedge retire-fleet [--dry-run]"), 2;
   const fleet = fleetOf(options);
+  const custom = customFleetEngine(options.home, "hedge retire-fleet");
+  if (custom) return (options.fail ?? options.print)(`Hedge: ${custom}`), 1;
   if (!fleet.installed(options.home)) return options.print("Hedge: this machine has no Fleet engine install, so there is nothing from before the rename to stop."), 0;
   if (args.length) return listFleet(fleet, options);
   const fail = options.fail ?? options.print;
