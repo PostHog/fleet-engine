@@ -29,7 +29,7 @@ if [ "${1:-}" = --check ]; then
 fi
 if ! installed; then
   command -v apt-get >/dev/null 2>&1 || { echo "earlyoom: install it with your package manager, then run this again." >&2; exit 1; }
-  NEEDRESTART_MODE=a DEBIAN_FRONTEND=noninteractive apt-get install -y earlyoom
+  NEEDRESTART_MODE=l DEBIAN_FRONTEND=noninteractive apt-get install -y earlyoom
 fi
 state=$(config_state)
 if [ "$state" = unknown ]; then
