@@ -263,7 +263,7 @@ describe("provider config", () => {
 
     expect(lstatSync(join(home, claude)).isSymbolicLink()).toBe(true);
     expect(read(dotfiles, "settings.json")).toEqual({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" } });
-    expect(report.findings).toContainEqual({ id: `kept:${claude}`, pack: "engine", say: `Kept ${claude} because it is a link. Hedge would set model; remove env.ANTHROPIC_BASE_URL there. Make it a plain file in a plain folder to let Hedge change it.` });
+    expect(report.findings).toContainEqual({ id: `kept:${claude}`, pack: "engine", say: `Kept ${claude} because it is a link. Hedge would set model there. Make it a plain file in a plain folder to let Hedge change it.` });
   });
 
   test("leaves a settings file it cannot read as it is", async () => {

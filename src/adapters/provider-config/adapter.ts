@@ -154,11 +154,10 @@ function merge(target: Target, text: string | undefined, previous: Field[], want
     }
   }
   const route = proxyRoute[target.provider] ?? [];
-  const held = route.filter((field) => get(current, field.path) !== undefined);
-  const hedges = held.every((field) => same(get(current, field.path), field.value));
+  const hedges = route.every((field) => same(get(current, field.path), field.value));
   const wantedRoute = route.some((field) => all.some((item) => overlaps(item.path, field.path)));
   const outageKeeps = options.outage && !route.some((field) => options.gated(field.path));
-  for (const field of hedges && !wantedRoute && !outageKeeps ? held : []) {
+  for (const field of hedges && !wantedRoute && !outageKeeps ? route : []) {
     remove(current, field.path);
     removed.push(field.path.join("."));
   }
