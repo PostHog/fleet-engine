@@ -515,7 +515,16 @@ const noFinding = /^(?:#.*|no findings\.?|findings:?|\(none\))$/i;
 
 const findingsBlock = /^\s*FINDINGS\b:?/;
 const testsBlock = /^\s*(?:#+\s*)?\**TESTS\b/;
-const flooredItem = /^\s*(?:[-*]|\d+[.)])\s+(?:(?:[^|\n]*\|)?\s*\**(?:minor|nit)\**\s*\||(?![^|\n]*\|)\**(?:minor|nit)(?:[,:]\**|\**[,:])\s)/i;
+const listItem = /^\s*(?:[-*]|\d+[.)])\s+(.*)/;
+const severityField = /^\**(blocker|major|minor|nit)\**$/i;
+const severityShorthand = /^\**(?:minor|nit)(?:[,:]\**|\**[,:])\s/i;
+
+function flooredItem(text: string) {
+  const item = listItem.exec(text.split("\n")[0]!)?.[1];
+  if (item === undefined) return false;
+  const stated = item.split("|").slice(0, 2).map((field) => severityField.exec(field.trim())?.[1]?.toLowerCase()).find(Boolean);
+  return stated ? stated === "minor" || stated === "nit" : severityShorthand.test(item);
+}
 
 const anchorIntro = /^(?:fleet|hedge) compared each finding's anchor with the diff and with earlier reviews of this PR\.$/;
 const anchorNote = /^- (?:Not in the diff, so check it before triage: \S|Seen before in [^:\n]+: \S|\d+ findings? quotes? no anchor\.$)/;
@@ -560,7 +569,7 @@ function ladderFindings(findings: string) {
   return findings.split("\n").filter((line) => {
     if (testsBlock.test(line)) tests = true;
     else if (findingsBlock.test(line) || /^(COVERED\b|#)/.test(line)) tests = false;
-    return !tests && !flooredItem.test(line);
+    return !tests && !flooredItem(line);
   }).join("\n");
 }
 
@@ -623,7 +632,7 @@ const unlistedKnown = (findings: string, responses: string, listed: string[]) =>
     return answer?.verdict === "known" && !(location && listed.some((item) => locations(item).includes(location))) ? [index + 1] : [];
   });
 
-const needsNoAnswer = ({ text, note }: { text: string; note?: boolean }) => note || flooredItem.test(text);
+const needsNoAnswer = ({ text, note }: { text: string; note?: boolean }) => note || flooredItem(text);
 
 const unanswered = (findings: string, responses: string) =>
   answeredFindings(findings, responses).findings.flatMap((finding, index) => finding.answer || needsNoAnswer(finding) ? [] : [index + 1]);

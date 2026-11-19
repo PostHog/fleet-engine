@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { spawnAsync } from "../../../src/testing/spawn.ts";
 import { answeredFindings, reviewedFindings } from "./proof.ts";
 import { checkout, cleanFixtures, exitedPid, fakeModel, lockHolder, finishRound, fixture, graded, markPanel, models, recordingModel, settings, type Checkout } from "./proof-testing.ts";
@@ -715,6 +715,7 @@ test.each(["hedge-proof-checkout-", "hedge-proof-o'brien-"])("a budget lock whos
 
   expect(stuck).toContain(`The lock ${lock} is stuck: its holder is gone, and 10 takeovers of it stopped before they ended. Check that no hedge proof command runs on this PR, then run rm -f `);
   expect((await spawnAsync(["sh", "-c", clear])).exitCode).toBe(0);
+  expect(readdirSync(dirname(lock)).filter((name) => name.startsWith("round.lock"))).toEqual([]);
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", panel)).output).toContain(`"round":2`);
 });
 
@@ -945,7 +946,7 @@ test("a review that lists only minor or nit items that lead with the severity an
   const panel = await cannedPanel(pr, { design: minor, others: lensAnswer("(none)") });
   const fix = await pr.commit("feature.txt", "greet the member\n");
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", panel)).output).toContain(`"round":2`);
-  await finishWith(pr, "2", "# GPT-6.1 Sol final read 1\n\n1. minor, feature.txt:1: the word reads oddly.\n2. **nit**, feature.txt:1: the name could be shorter.\n3. nit: feature.test.ts:3 has no case for an empty name.\n4. **Minor:** feature.txt:1 the greeting could be warmer.\n");
+  await finishWith(pr, "2", "# GPT-6.1 Sol final read 1\n\n1. minor, feature.txt:1: the word reads oddly.\n2. **nit**, feature.txt:1: the name could be shorter.\n3. nit: feature.test.ts:3 has no case for an empty name.\n4. **Minor:** feature.txt:1 the greeting could be warmer.\n5. nit: feature.ts:2 Use a clearer type name | anchor: type Greeting = string | undefined\n");
   const later = await pr.commit("feature.txt", "greet every member\n");
 
   expect((await pr.hedge("gate")).output).not.toContain("has unanswered findings");
