@@ -32,9 +32,9 @@
   saves read that commit, never a fresh read of the base. A fixes round or
   final read always starts at the latest finished review, also when its
   `--base` is a clean merge of it. An unfinished round that an older Hedge
-  reserved does not resume or publish: `hedge proof review` and its `--wait`
-  refuse it and print the `rm -rf` that deletes it, and the review command
-  you ran for it then starts a new one.
+  reserved does not resume or publish: `hedge proof review`, its `--wait`,
+  and `review-finish` refuse it and print the `rm -rf` that deletes it, and
+  the command that reserved it then starts a new one.
 - `hedge proof miss` saves the reviewed head and the base of a net delta, so
   `hedge proof eval` replays the range of a later round or final read through
   the same range builder as the live review, with each conflict's two sides.
@@ -42,10 +42,8 @@
   budget is spent, or a confirming read found a blocker or major, the full
   read it names takes the user's `--override`, also for a read that already
   holds the user's `--override`. The conflict brief quotes each `git show`
-  argument for the shell. Hedge redacts known secrets once in each whole
-  reviewer prompt, lens brief, and eval prompt, file names and REVIEW.md
-  headings too, and once in each diff file. A lens covers a file by the name
-  its brief shows.
+  argument for the shell. Hedge redacts known secrets in each diff, its
+  conflict headings too, as it did before.
 - A review that finds no blocker or major spends no review budget. The final
   read that the gate asks for runs even when the budget is spent; the budget
   stops the fixes rounds after it. When the arbiter escalates, one final read
@@ -59,7 +57,8 @@
   its last write, through its waits on T3, the hub, the arbiter, or a
   reviewer, so an answer always binds to the stop it read. A second command
   stops and names the first. The lock file stays out of the gate's
-  fingerprint.
+  fingerprint. A later round refuses to start while a panel is unfinished,
+  because its lenses publish their findings without the lock.
 
 ### Fleet is now Hedge
 

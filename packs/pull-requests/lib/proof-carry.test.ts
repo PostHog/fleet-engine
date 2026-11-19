@@ -502,43 +502,6 @@ test("the conflict brief quotes each git show argument, so a file name with a sp
   expect([show(reviewedSide!), show(baseSide!)]).toEqual(["two\n", "three\n"]);
 });
 
-const fakeToken = ["gh", "p_", "x1".repeat(18)].join("");
-
-test("a secret in the name of a directory with a REVIEW.md on the base reaches no prompt: not the panel's lens, the final read of its conflict, nor the eval replay", async () => {
-  const pr = await checkout();
-  const directory = `keys-${fakeToken}`;
-  const name = `${directory}/list.txt`;
-  const shown = (path: string) => path.replace(fakeToken, "[redacted GitHub token]");
-  mkdirSync(join(pr.repository, directory));
-  await pr.advanceBase(`${directory}/REVIEW.md`, "Check each key.\n");
-  await pr.advanceBase(name, "one\n");
-  await pr.git("merge", "-q", "--no-edit", "main");
-  await pr.hedge("require", "--none", "--reason", "docs only");
-  const reviewed = await pr.commit(name, "two\n");
-  const reviewer = fakeModel(pr, "REVIEWER", covering(shown(name)));
-  await pr.hedge("review", "--lens", "correctness");
-  const waited = await pr.hedge("review", "--wait");
-  expect(waited.code).toBe(0);
-  expect(waited.output).not.toContain(fakeToken);
-  await pr.advanceBase(name, "three\n");
-  await pr.git("merge", "-q", "main");
-  writeFileSync(join(pr.repository, name), "two and three\n");
-  await pr.git("add", name);
-  await pr.git("commit", "-q", "--no-edit");
-  reviewer.answer("No findings.\n");
-  await pr.hedge("review", "--scope", "final", "--base", reviewed);
-  await pr.hedge("miss", "--source", "human", "--finding", "The list drops the reviewed side");
-  pr.env.HEDGE_PROOF_EVAL_JUDGE = judgedMissed;
-
-  expect((await pr.hedge("eval")).output).toContain("missed: the review names nothing");
-  const prompts = reviewer.prompts();
-  for (const prompt of prompts) {
-    expect(prompt).toContain(`### ${shown(directory)}/REVIEW.md\n\nCheck each key.`);
-    expect(prompt).not.toContain(fakeToken);
-  }
-  for (const prompt of prompts.slice(-2)) expect(prompt).toContain(`# Conflict in ${shown(name)}: `);
-});
-
 test("a review that recorded no base, as the base version wrote it, carries nothing and asks for a final read, which runs", async () => {
   const pr = await checkout();
   const { reviewed, reviewer } = await panelReviewed(pr);
@@ -621,6 +584,32 @@ const olderHedge = (pr: Checkout, round: string, drop: string) => {
   writeFileSync(path, JSON.stringify(older));
 };
 
+test("review-finish refuses an unfinished round that an older Hedge reserved, as review and review --wait do", async () => {
+  const pr = await checkout();
+  const reviewed = await pr.commit("feature.txt", "new\n");
+  await pr.hedge("review-start", "--scope", "full");
+  await finishRound(pr, "1");
+  await pr.commit("feature.txt", "fixed\n");
+  await pr.hedge("review-start", "--scope", "final", "--base", reviewed);
+  olderHedge(pr, "final-1", "merged");
+
+  await expect(finishRound(pr, "final-1")).rejects.toThrow(`Review final-1 was reserved by an older Hedge, which recorded no merged start or base on GitHub, so it cannot resume. Delete it with rm -rf '${join(pr.pullRequest, "reviews", "final-1")}'`);
+  expect(await reviewLine(pr)).not.toStartWith("review: HEAD reviewed");
+});
+
+test("a fixes round refuses to start while a final panel is unfinished, so no panel finishes while its arbiter weighs the budget", async () => {
+  const pr = await checkout();
+  const { reviewed } = await panelReviewed(pr);
+  await pr.commit("feature.txt", "greet the member\n");
+  pr.env.HEDGE_PROOF_REVIEWER = failingReviewer;
+  await pr.hedge("review", "--lens", "correctness", "--scope", "final", "--base", reviewed);
+  await pr.hedge("review", "--wait").catch(() => undefined);
+  await pr.commit("feature.txt", "greet the new member\n");
+  pr.env.HEDGE_REVIEW_ARBITER = "cat >/dev/null; echo 'the arbiter was asked' >&2; exit 3";
+
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow("The panel of final read 1 is unfinished, and its lenses may still finish. Wait for it with hedge proof review --wait --round final-1, then start this round again.");
+});
+
 for (const lens of [[], ["--lens", "correctness"]]) {
   test(`an unfinished final ${lens.length ? "panel" : "read"} that an older Hedge reserved is refused by review and review --wait, and runs again once its directory is deleted`, async () => {
     const pr = await checkout();
@@ -631,7 +620,7 @@ for (const lens of [[], ["--lens", "correctness"]]) {
     await pr.hedge(...command).catch(() => undefined);
     olderHedge(pr, "final-1", "merged");
 
-    const refusal = `Review final-1 was reserved by an older Hedge, which recorded no merged start or base on GitHub, so it cannot resume. Delete it with rm -rf '${join(pr.pullRequest, "reviews", "final-1")}', then run the hedge proof review command you ran for it again`;
+    const refusal = `Review final-1 was reserved by an older Hedge, which recorded no merged start or base on GitHub, so it cannot resume. Delete it with rm -rf '${join(pr.pullRequest, "reviews", "final-1")}', then run the hedge proof command that reserved it again`;
     await expect(pr.hedge(...command)).rejects.toThrow(refusal);
     await expect(pr.hedge("review", "--wait")).rejects.toThrow(refusal);
     expect(Bun.spawnSync(["sh", "-c", /rm -rf '[^']*'/.exec(refusal)![0]]).exitCode).toBe(0);

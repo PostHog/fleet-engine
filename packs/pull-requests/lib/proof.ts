@@ -326,6 +326,8 @@ async function startRound(home: string, identity: ProofIdentity, reviews: string
   while (started.includes(String(round))) round++;
   if (round === 1 && scope !== "full") throw new Error("Round 1 is --scope full: it reviews the whole PR diff. Drop --base");
   const finished = await finishedReviews(home, identity);
+  const running = await runningPanel(reviews, started);
+  if (running) throw new Error(`The panel of ${reviewLabel(running)} is unfinished, and its lenses may still finish. Wait for it with hedge proof review --wait --round ${running}, then start this round again.`);
   const stopped = await stopState(reviews, started);
   if (decision?.mark !== "👤") await refuseAfterConfirmingRead(identity, reviews, stopped);
   const spent = await reviewsSpent(reviews, started, "review");
@@ -403,6 +405,9 @@ export async function markRecorded(directory: string) {
   if (mark === "👤" && reservation.clears !== undefined && stopIdOf(dirname(directory)) === reservation.clears) await rm(stopPath(dirname(directory)), { force: true });
   await writeJson(join(directory, "round.json"), { ...reservation, decision: { mark, id }, recorded: true } satisfies Reservation);
 }
+
+const runningPanel = async (reviews: string, started: string[]) =>
+  (await Promise.all(started.map(async (name) => !await hasFindings(join(reviews, name)) && await access(join(reviews, name, "panel.json")).then(() => true, () => false) ? name : undefined))).find(Boolean);
 
 const hasFindings = (directory: string) => access(join(directory, "findings.md")).then(() => true, () => false);
 

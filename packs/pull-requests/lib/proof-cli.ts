@@ -249,7 +249,7 @@ runs again with the lenses it started with when you pass no --lens.
 row for a PR that Claude wrote, and the review-codex row for a PR that Codex wrote when the table has one, else the
 review row. On the both plan that reviewer is the family that did not write the PR; on a single plan it is a fresh
 session of that provider. hedge builds the prompt from the diff, the PR title and description, and the coding
-standards in ~/.agents/guides/coding-standards.md, redacts known secrets in all of it, and saves the reviewer's answer as the findings. hedge checks each
+standards in ~/.agents/guides/coding-standards.md, and saves the reviewer's answer as the findings. hedge checks each
 finding's anchor against the diff and prints the result after the findings; it keeps it apart, in anchors.md. Answer them with hedge proof respond. Scope and --base work as for
 review-start. When the reviewer gives no answer, the round stays reserved and the next hedge proof review on the same
 commit retries it. The setting pull-requests.reviewTimeoutMinutes limits the reviewer. HEDGE_PROOF_REVIEWER replaces
@@ -272,7 +272,7 @@ to that family's reviewer.
 --knowledge adds the repo's review material for a lens, and gives the text of a Team perspective that PANEL.md does
 not list. hedge starts the lenses in the background and returns at once; at most pull-requests.panelSlots reviewers
 run at once on this machine, and the rest wait. Each raw answer is kept in lenses/<name>.md. A lens that ends without
-a FINDINGS block or a COVERED list of every changed file, by the name its brief shows, runs once more, and a lens stopped by spent quota does not;
+a FINDINGS block or a COVERED list of every changed file runs once more, and a lens stopped by spent quota does not;
 when it fails again, the round stays unfinished with the cause, and the same review --lens command reruns the failed
 lenses; :same or :other moves a failed lens to the family that is up when the other has an outage. When every lens
 is done, hedge joins the answers under one heading per lens as the round's findings. On a PR of the Read tier the
@@ -528,11 +528,12 @@ deleted file too. The base is the PR's base commit on GitHub. Each round records
 and its REVIEW.md rules read that commit. A final read of a HEAD whose net delta is empty is refused, unless --agent
 with your reason, or the user's --override, asks for it. A later round or final read whose net delta hedge cannot read
 is refused, with the command that recovers, such as a full read, which names the user's --override once the review
-budget is spent or a read confirmed the arbiter's stop. An unfinished round that an older Hedge reserved does not resume: hedge proof review and its --wait
-refuse it and print the rm -rf that deletes it; then run the review command again.
+budget is spent or a read confirmed the arbiter's stop. An unfinished round that an older Hedge reserved does not resume: hedge proof review, its --wait,
+and review-finish refuse it and print the rm -rf that deletes it; then run the command that reserved it again.
 A --scope full round reads from where HEAD branched from the PR's base commit on GitHub. A final read
 whose net delta is not empty runs even when the review budget is spent. After an arbiter escalation, the one final
 read that may still run names the stop it confirms in the "confirms" field of the printed JSON.
+A later round refuses to start while a panel is unfinished; wait for it with hedge proof review --wait --round <id>.
 A later round with --agent, or the user's --override, may be --scope full: it reviews
 the whole PR diff at HEAD again, such as after a restack.
 ${overrideHelp}`,
@@ -565,7 +566,8 @@ first and needs the hub; a round whose decision is recorded finishes without it.
       const head = identity();
       return reviewStep(head, context, async () => {
         const directory = await reviewDirectory(context.home, head, round);
-        await requireReservation(directory);
+        const reservation = await requireReservation(directory);
+        if (!existsSync(join(directory, "findings.md"))) resumable({ reservation, directory });
         await recordRound(directory, context);
         context.print(await finishReview(context.home, head, round, resolve(context.cwd, findings[0]!), reviewer));
         return 0;
@@ -580,7 +582,7 @@ type Pending = { reservation: Reservation; directory: string };
 function resumable({ reservation, directory }: Pending) {
   const { from, baseSha } = reservation;
   if (from && baseSha && (reservation.scope === "full" || reservation.merged)) return { from, baseSha };
-  throw new Error(`Review ${basename(directory)} was reserved by an older Hedge, which recorded no merged start or base on GitHub, so it cannot resume. Delete it with rm -rf '${directory.replaceAll("'", `'\\''`)}', then run the hedge proof review command you ran for it again`);
+  throw new Error(`Review ${basename(directory)} was reserved by an older Hedge, which recorded no merged start or base on GitHub, so it cannot resume. Delete it with rm -rf '${directory.replaceAll("'", `'\\''`)}', then run the hedge proof command that reserved it again`);
 }
 
 const plannedLenses = (plan: Plan) => plan.arguments ?? (plan.lenses.some(({ name }) => name === "combined") ? [] : plan.lenses.map(({ name }) => name));

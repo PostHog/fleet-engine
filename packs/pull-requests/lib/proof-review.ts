@@ -9,15 +9,13 @@ export const diffCap = 300_000;
 
 const keptDiffLines = (value: string) => value.split("\n").slice(1).map((line) => `\n${/^[ +-]/.test(line) ? line[0] : ""}`).join("");
 
-export const redacted = (text: string) => replaceSecrets(text, (kind, value) => `[redacted ${kind}]${keptDiffLines(value)}`);
+export const reviewedDiff = (diff: string) => replaceSecrets(diff, (kind, value) => `[redacted ${kind}]${keptDiffLines(value)}`);
 
 export function capped(text: string, cap: number) {
   return text.length > cap ? `${text.slice(0, cap)}\n[cut at ${cap} characters]` : text;
 }
 
-export const reviewPrompt = (input: ReviewInput) => redacted(promptOf(input));
-
-function promptOf(input: ReviewInput) {
+export function reviewPrompt(input: ReviewInput) {
   const range = `${input.from}..${input.commit}`;
   const independence = input.crossFamily ? "from the model family that did not write it" : "in a fresh session, apart from the session that wrote it";
   return `You review a pull request as an independent reviewer ${independence}. Work read-only.
