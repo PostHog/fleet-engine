@@ -260,7 +260,8 @@ says what to do with a template parameter that holds one.
    web app, `<coder address>/templates/<template>`, and ask the person to
    read you the parameters and their allowed values from it.
 
-   Find the disk size, the region, the dotfiles, and the secret parameters.
+   Find the disk size, the region, the dotfiles, the secret parameters, and
+   the ephemeral parameters, those with `ephemeral = true`.
    A secret is a parameter that holds a token, a key, a password, or another
    credential: its name or description says so, or the form hides what you
    type. Never ask about a secret. Sort each other parameter by the first
@@ -287,12 +288,14 @@ says what to do with a template parameter that holds one.
    instead; step 7 checks the repo again. Below, `<profile repo>` is the
    `owner/name` you found.
 4. **Create.** Give the hub a 200 GB disk and each node a 500 GB disk.
-   When the template has a secret parameter, with a default or without,
-   never run `coder create` for it. For each parameter that a command leaves
-   out, the Coder CLI asks for a value, also with `--yes`, and prints the
-   default, so a secret would show in your output. Ask the
+   When the template has a secret or an ephemeral parameter, with a default
+   or without, never run `coder create` for it: the Coder CLI asks for each
+   parameter that a command leaves out, also with `--yes`, and prints the
+   default, so a secret would show in your output, and it refuses an
+   ephemeral parameter in `--parameter`. Ask the
    person to create each workspace in the Coder web UI instead: they open
-   the template's create form, give the workspace the name from item 1, and
+   the template's create form, pick the preset **None** so that no preset
+   locks a field, give the workspace the name from item 1, and
    fill in the values you give them. They leave a secret that has a default
    as it is, and type a secret without a default themselves. Tell them first
    that Coder keeps each value of the form with the workspace's build, so
@@ -301,7 +304,7 @@ says what to do with a template parameter that holds one.
    whether to type it. When they tell you the workspace name, go on with
    item 5.
 
-   When the template has no secret parameter, run `coder create`. Pass each
+   When the template has neither, run `coder create`. Pass each
    parameter with its own `--parameter`, also those where the default is
    right, so Coder asks nothing and you see each value it uses.
    `--preset none` stops the preset question that `--yes` does not skip:
