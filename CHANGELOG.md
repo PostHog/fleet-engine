@@ -52,14 +52,35 @@
 - Then `get.sh` runs `hedge retire-fleet`, and then `hedge apply`.
   `hedge retire-fleet` finds the launchd agents `dev.fleet.*` and
   `com.fleet.*`, the systemd user units `fleet-*`, the `fleet-mcphub`
-  container, and the T3 tasks `fleet:*`. It stops and turns off each one,
-  keeps its files, and checks that each one is stopped. When it cannot show
-  that one is stopped, it names it and exits 1, and `get.sh` stops before
-  apply. Stop what it names by hand, then run `get.sh` again. A retry after a
-  failed apply runs apply again.
+  container, the `# fleet:` crontab entries, and the T3 tasks `fleet:*`. It
+  stops and turns off each one, keeps its files, and checks each one again:
+  a launchd agent must be unloaded and disabled, the container stopped with
+  the restart policy `no`, and each `# fleet:` entry gone from the crontab.
+  It keeps the other crontab entries. While T3 Code is stopped, it reads the
+  tasks T3 Code saved, and a `fleet:` task that is on there fails it. When it
+  cannot show that a piece is stopped, it names it and exits 1, and `get.sh`
+  stops before apply. Stop what it names by hand, or start T3 Code for a
+  task, then run `get.sh` again.
+- `get.sh` with `-- --dry-run` is a preview: it neither copies nor stops the
+  setup from before the rename, and the preview apply names each piece of
+  Fleet that still runs.
 - `hedge apply` starts nothing while a piece of Fleet still runs, or while it
   cannot tell. It names each piece and says to run `hedge retire-fleet`.
-  There is no handoff and no rollback: Fleet stops first, then Hedge starts.
+  Right before it adds the `hedge:` T3 tasks, it checks T3 Code again, so a
+  `fleet:` task that T3 Code turned on as it started during this apply stops
+  it. There is no handoff and no rollback: Fleet stops first, then Hedge
+  starts.
+- `hedge apply` exits 1 when a service, timer, cron job or T3 task it starts
+  does not start, when a pack step fails in any pack, and when a check that
+  Hedge repairs still fails after the repair. It still runs the other parts.
+  `get.sh` keeps its retry marker until apply exits 0, so an identical retry
+  after a failed apply runs apply again.
+- `hedge update` and `hedge refresh` use the Hedge copy of a profile that the
+  machine file still names in a Fleet path, or refuse, before they pull.
+- Hedge operations that change the machine take an `flock` lock on
+  `~/.local/state/hedge/hedge.lock`. The system lets go of it when the
+  process ends, so an import or apply stopped with Ctrl-C does not block the
+  next run.
 - An engine that runs from a Fleet path, such as `~/.local/share/fleet/engine`
   after the old updater pulled this release, changes nothing. It prints
   `Fleet is now Hedge. Run: curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh | sh`.

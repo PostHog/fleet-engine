@@ -523,7 +523,16 @@ describe("T3 scheduled tasks", () => {
     expect(t3.calls).toEqual(["upsert hedge:digest", "enable hedge:old false"]);
   });
 
-  test("reports a T3 server that cannot list its tasks without failing the apply", async () => {
+  test("adds no task and fails apply while a fleet: task from before the rename is still on, as when T3 Code started during this apply", async () => {
+    const home = temp.make("home-");
+    const t3 = server([{ ...wanted, id: "fleet:quality-loop", title: "Fleet: quality-loop" }]);
+    const report = await apply(plan("linux", [loop]), { home, adapters: [t3.adapter] });
+    expect(report.ok).toBe(false);
+    expect(report.findings).toContainEqual({ id: "tasks:fleet", pack: "engine", say: "The T3 Code task fleet:quality-loop from before the rename is still on, so Hedge added no task. Run hedge retire-fleet, then hedge apply.", repair: "human" });
+    expect(t3.calls).toEqual([]);
+  });
+
+  test("reports a T3 server that cannot list its tasks, and fails the apply", async () => {
     const home = temp.make("home-");
     const adapter = jobsAdapter({
       run: async () => ({ code: 0, stdout: "" }),
@@ -531,6 +540,7 @@ describe("T3 scheduled tasks", () => {
       t3: async () => ({ list: async () => Promise.reject(new Error("T3 Code closed the connection")), upsert: async () => {}, setEnabled: async () => {} }),
     });
     const report = await apply(plan("linux", [loop]), { home, adapters: [adapter] });
+    expect(report.ok).toBe(false);
     expect(report.findings).toContainEqual({ id: "tasks:t3", pack: "engine", say: "Could not read T3 Code's scheduled tasks: T3 Code closed the connection. Run hedge apply again.", repair: "apply" });
   });
 

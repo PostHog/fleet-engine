@@ -5,11 +5,12 @@ import type { CommandRunner } from "../adapters/run.ts";
 /** The unit from before the rename that a hedge- unit replaces. */
 export const oldUnit = (unit: string) => (unit.startsWith("hedge-") ? `fleet-${unit.slice("hedge-".length).replace(/^hedge-/, "fleet-")}` : undefined);
 
-/** A systemd user manager. It refuses to start a hedge- unit while its fleet- unit runs, so a test that runs both fails. shown replaces what show prints for a unit, as a unit stuck in a state would. fileless units run with no unit file, so list-unit-files leaves them out. */
+/** A systemd user manager. It refuses to start a hedge- unit while its fleet- unit runs, so a test that runs both fails. shown replaces what show prints for a unit, as a unit stuck in a state would. fileless units run with no unit file, so list-unit-files leaves them out. failing units do not start. */
 export function fakeSystemd() {
   const units = new Map<string, { active: boolean; enabled: boolean }>();
   const shown = new Map<string, string>();
   const fileless = new Set<string>();
+  const failing = new Set<string>();
   const starts = new Map<string, number>();
   const calls: string[][] = [];
   const start = (unit: string) => {
@@ -34,6 +35,7 @@ export function fakeSystemd() {
       return { code: 0, stdout: `LoadState=${known ? "loaded" : "not-found"}\nActiveState=${state.active ? "active" : "inactive"}\nUnitFileState=${state.enabled ? "enabled" : known ? "disabled" : ""}\nNeedDaemonReload=no\n` };
     }
     if (verb === "enable") units.set(unit, { ...state, enabled: true });
+    if ((verb === "restart" || verb === "start") && failing.has(unit)) return { code: 1, stdout: "", stderr: `Job for ${unit} failed because the control process exited with error code.\n` };
     if (verb === "restart" || verb === "start") start(unit), units.set(unit, { ...state, active: true }), starts.set(unit, (starts.get(unit) ?? 0) + 1);
     if (verb === "disable") units.set(unit, { active: rest.includes("--now") ? false : state.active, enabled: false });
     if (verb === "stop") units.set(unit, { ...state, active: false });
@@ -45,5 +47,5 @@ export function fakeSystemd() {
     return parts.every(Boolean) ? "running" : parts.some(Boolean) ? "partly removed" : "gone";
   };
   const started = (id: string) => starts.get(`hedge-${id}.service`) ?? 0;
-  return { run, service, started, units, shown, fileless, calls };
+  return { run, service, started, units, shown, fileless, failing, calls };
 }

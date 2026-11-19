@@ -64,11 +64,11 @@ test("before apply runs its repair, a dry run and doctor name the failing check 
   expect(doctored.output).not.toContain("To do:");
 });
 
-test("a repair that fails leaves the check as a To do, and the hub issues no key for a service whose gate failed", async () => {
+test("a repair that fails leaves the check as a To do, fails apply, and the hub issues no key for a service whose gate failed", async () => {
   const hedge = machine(hub);
   expect((await hedge("issued", "break")).code).toBe(0);
   const applied = await hedge("apply");
-  expect(applied.code).toBe(0);
+  expect(applied.code).toBe(1);
   expect(applied.output).toContain("To do: The issued service is not installed.\n");
   expect((await hedge("issued", "use")).output).toBe("hedge: issued/issued-api has no credential on this machine yet. Run hedge apply on the hub.");
 });

@@ -5,6 +5,7 @@ import type { ProfileFile } from "./pack/types.ts";
 import { isolateGit, spawnGit, template, tempDirs } from "./testing/git.ts";
 import { spawnAsync } from "./testing/spawn.ts";
 import { noticePath, readNotice, update } from "./update.ts";
+import { main } from "./cli.ts";
 
 isolateGit();
 const temp = tempDirs();
@@ -209,5 +210,40 @@ describe("hedge update", () => {
     const result = await run(engineDir, { repo: remote, ref: "main", channel: "track" });
     expect(result).toMatchObject({ code: 1, applied: 0, output: expect.stringContaining("could not check out main") });
     expect(result.version).toBe("v0.1.0");
+  });
+});
+
+describe("hedge update with a profile in a Fleet path", () => {
+  async function machine(withCopy: boolean) {
+    const home = temp.make("home-");
+    const remote = await engineRemote(["v0.1.0"]);
+    const profileRemote = temp.make("profile-remote-");
+    await spawnGit(profileRemote, "init", "-q", "-b", "main");
+    writeFileSync(join(profileRemote, "hedge.json"), JSON.stringify({ schema: 1, engine: { repo: remote, ref: "v0.1.0", channel: "release" }, sources: [], packs: [], plan: "both", settings: {}, workflows: {} }));
+    await spawnGit(profileRemote, "add", ".");
+    await spawnGit(profileRemote, "commit", "-q", "-m", "start");
+    const old = join(home, ".local/share/fleet/profile");
+    const copy = join(home, ".local/share/hedge/profile");
+    for (const dir of withCopy ? [old, copy] : [old]) mkdirSync(dir, { recursive: true }), await spawnGit(dir, "clone", "-q", profileRemote, ".");
+    await spawnGit(profileRemote, "commit", "-q", "--allow-empty", "-m", "newer answers");
+    mkdirSync(join(home, ".config/hedge"), { recursive: true });
+    writeFileSync(join(home, ".config/hedge/machine.json"), JSON.stringify({ schema: 1, role: "devbox", profileDir: old }));
+    const head = async (dir: string) => (await spawnAsync(["git", "-C", dir, "rev-parse", "HEAD"])).stdout.trim();
+    const lines: string[] = [];
+    const code = await main(["update"], { home, engineRoot: await engineCheckout(remote, "v0.1.0"), platform: "linux", env: {}, print: (line) => lines.push(line) });
+    return { code, output: lines.join("\n"), old: await head(old), copy: withCopy ? await head(copy) : undefined, newest: await head(profileRemote) };
+  }
+
+  test("pulls the Hedge copy and leaves the old profile as it was", async () => {
+    const result = await machine(true);
+    expect(result.copy).toBe(result.newest);
+    expect(result.old).not.toBe(result.newest);
+  });
+
+  test("refuses before it pulls when the profile has no Hedge copy", async () => {
+    const result = await machine(false);
+    expect(result.code).toBe(1);
+    expect(result.output).toContain("is in a Fleet path from before the rename, so Hedge does not use it.");
+    expect(result.old).not.toBe(result.newest);
   });
 });

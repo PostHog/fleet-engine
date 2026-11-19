@@ -141,7 +141,7 @@ describe("apply", () => {
     expect(apply(plan(), { home, adopt: [".bashrc"] })).rejects.toThrow("nothing to adopt at .bashrc");
   });
 
-  test("marks only the failing pack when a pack step fails", async () => {
+  test("skips the rest of the failing pack when a pack step fails, and fails apply whatever the pack", async () => {
     const steps = [
       { id: "a", run: ["one"], pack: "hub" },
       { id: "b", run: ["two"], pack: "hub" },
@@ -150,8 +150,17 @@ describe("apply", () => {
     const ran: string[] = [];
     const report = await apply(plan({ steps }), { home: temp.make("home-"), run: async (command) => (ran.push(command[0]!), command[0] === "one" ? 1 : 0) });
     expect(ran).toEqual(["one", "three"]);
-    expect(report.ok).toBe(true);
+    expect(report.ok).toBe(false);
     expect(report.findings).toEqual([{ id: "step:a", pack: "hub", say: "Step a of the hub pack failed.", repair: "apply" }]);
+  });
+
+  test("fails apply when a check that Hedge repairs still fails after its repair, but not when it waits for a person", async () => {
+    const gateway = { id: "gateway", say: "The gateway is not installed.", probe: ["gateway-installed"], repair: ["gateway-installed", "--repair"], pack: "hub" };
+    const signIn = { id: "sign-in", say: "Sign in.", command: "service login", probe: ["signed-in"], pack: "hub" };
+    const broken = await apply(plan({ human: [gateway] }), { home: temp.make("home-"), run: exitCodes({ "gateway-installed": 1, "gateway-installed --repair": 1 }) });
+    const waiting = await apply(plan({ human: [signIn] }), { home: temp.make("home-"), run: exitCodes({ "signed-in": 1 }) });
+    expect([broken.ok, broken.findings]).toEqual([false, [{ id: "human:gateway", pack: "hub", say: "The gateway is not installed.", repair: "human" }]]);
+    expect(waiting.ok).toBe(true);
   });
 
   test("skips a step whose check already passes", async () => {

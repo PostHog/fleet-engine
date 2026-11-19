@@ -10,7 +10,8 @@ import { hublessReason } from "./resolve.ts";
 import { withLegacyNames } from "../legacy.ts";
 
 export type AdapterContext = { home: string; dryRun: boolean; adopt: string[]; adoptFrom?: string[] };
-export type AdapterResult = { actions: Action[]; findings: Finding[]; blocked?: boolean };
+/** failed: something the adapter had to start or change did not happen, so apply fails, though the next adapters still run. */
+export type AdapterResult = { actions: Action[]; findings: Finding[]; blocked?: boolean; failed?: boolean };
 export type Adapter = {
   name: "files" | "config" | "jobs" | "identity" | "t3" | "fleet";
   /** The targets that --adopt may name for this adapter. */
@@ -111,10 +112,12 @@ export async function apply(plan: Plan, options: { home: string; dryRun?: boolea
   const issue = !context.dryRun && node && options.issue ? (ready: CatalogEntry[]) => options.issue!(ready, node) : undefined;
   const gated = await gate(plan, run, !context.dryRun, issue);
   report.findings.push(...gated.issued, ...gated.failed.map((step) => humanFinding(step, context.dryRun)), ...gated.failedChecks.map(checkFinding));
+  if (!context.dryRun && gated.failed.some(repairedByHedge)) report.ok = false;
   for (const adapter of adapters) {
     const result = await adapter.apply(gated.plan, context);
     report.actions.push(...result.actions);
     report.findings.push(...result.findings);
+    if (result.failed) report.ok = false;
     if (!result.blocked) continue;
     report.ok = false;
     if (!context.dryRun) return report;
@@ -173,7 +176,7 @@ export async function apply(plan: Plan, options: { home: string; dryRun?: boolea
     if (ran && (holds || !step.check)) continue;
     failed.add(step.pack);
     report.findings.push({ id: `step:${step.id}`, pack: step.pack, say: ran ? `Step ${step.id} of the ${step.pack} pack ran, but does not pass its check.` : `Step ${step.id} of the ${step.pack} pack failed.`, repair: "apply" });
-    if (step.pack === "base") report.ok = false;
+    report.ok = false;
   }
   for (const step of context.dryRun ? [] : plan.human) {
     if (step.undo && (gated.passed.includes(step) || (await run(step.probe)) === 0)) await changeLedger(options.home, "human", ledgerKey(step), { pack: step.pack, id: step.id, probe: step.left ?? step.probe, undo: step.undo });
@@ -214,8 +217,10 @@ export async function check(plan: Plan, options: { home: string; adapters?: Adap
 
 const checkFinding = (item: Owned<PackCheck>): Finding => ({ id: `check:${item.id}`, pack: item.pack, say: item.say, repair: "apply" });
 
+const repairedByHedge = (step: HumanStep) => step.repair !== undefined && !step.command;
+
 function humanFinding(step: Owned<HumanStep>, repairStillToRun: boolean): Finding {
-  return { id: `human:${step.id}`, pack: step.pack, say: step.command ? `${step.say} Run: ${step.command}` : step.say, repair: repairStillToRun && step.repair && !step.command ? "apply" : "human" };
+  return { id: `human:${step.id}`, pack: step.pack, say: step.command ? `${step.say} Run: ${step.command}` : step.say, repair: repairStillToRun && repairedByHedge(step) ? "apply" : "human" };
 }
 
 /** Tests each check once, running a Hedge repair first when a human step's probe fails and repairs are on, then drops the items whose check fails. A config entry may also wait for a pack check, which has no repair. It tests the checks that served services wait for first, which only the hub can, and fills their credentials, so a repair that reads a credential sees it in the same apply. */
