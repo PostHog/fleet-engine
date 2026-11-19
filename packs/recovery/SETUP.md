@@ -22,8 +22,8 @@ Recovery never knows that a provider has capacity, and continues nothing.
 
    On a Coder box, the Claude sign-in of the proxy, `-claude-login
    -no-browser`, prints a link and then waits for the browser to come back
-   to `localhost:54545` on the hub. Its hint, `ssh -L 54545:…` to the box's
-   public address, does not work for a Coder workspace. Instead, the person
+   to `localhost:54545` on the hub. Its hint, an SSH port forward to the
+   box's public address as root, does not work for a Coder workspace. Instead, the person
    opens the link on the Mac and signs in. The browser then fails to load an
    address that starts with `http://localhost:54545/`. Ask for that whole
    address with the secret prompt, delivered as a file, because it holds a
