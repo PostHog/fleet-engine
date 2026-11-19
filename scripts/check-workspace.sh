@@ -1,4 +1,5 @@
 #!/bin/sh
+# shellcheck disable=SC2016
 set -eu
 
 [ $# -ge 1 ] || { echo "usage: check-workspace.sh <workspace> [<parameter>=<value>]... with no private value" >&2; exit 2; }
