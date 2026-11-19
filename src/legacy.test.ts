@@ -456,7 +456,7 @@ describe("a profile in a Fleet path from before the rename", () => {
     const old = oldProfile(home);
     const remote = temp.make("remote-");
     git(remote, "init", "-q", "--bare");
-    for (const args of [["init", "-q", "-b", "main"], ["add", "."], ["commit", "-q", "-m", "profile"], ["remote", "add", "origin", remote], ["push", "-q", "-u", "origin", "main"]]) git(old, ...args);
+    for (const args of [["init", "-q", "-b", "main"], ["config", "user.name", "Test"], ["config", "user.email", "test@example.com"], ["add", "."], ["commit", "-q", "-m", "profile"], ["remote", "add", "origin", remote], ["push", "-q", "-u", "origin", "main"]]) git(old, ...args);
     cpSync(old, join(home, ".local/share/hedge/profile"), { recursive: true });
     mkdirSync(dirname(machineFile(home)), { recursive: true });
     writeFileSync(machineFile(home), JSON.stringify({ schema: 1, role: "linux", profileDir: old }));
