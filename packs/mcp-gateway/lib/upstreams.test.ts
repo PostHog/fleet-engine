@@ -7,7 +7,7 @@ import { gmail, googleApps, googleCalendar, slack } from "./apps.ts";
 import { issueKey } from "./hub.ts";
 import { declaredUpstreams } from "./declared.ts";
 import { appSignedIn, registerUpstream, registerUpstreams, signInApp, upstreamsRegistered } from "./upstreams.ts";
-import { dockerHost, fakeHub, fakeMcpHub, fakeRun, mcphubFetch, writeMcpHubSettings, type FakeContainer, type FakeMcpHub } from "./testing.ts";
+import { dockerHost, fakeHub, fakeMcpHub, fakeRun, mcphubFetch, upstreamRequest, writeMcpHubSettings, type FakeContainer, type FakeMcpHub } from "./testing.ts";
 
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
@@ -136,6 +136,20 @@ test("a local upstream whose folder is missing on the hub waits with a warning w
   expect(api.configs["notes-search"]).toMatchObject({ command: "node", args: ["/hedge-local/notes-search.mjs"] });
   expect(ran.calls.filter((call) => call.command[1] === "run").at(-1)!.command.join(" ")).toContain(`-v ${missing}:/hedge-notes:ro`);
   expect(await upstreamsRegistered(hub)).toBe(true);
+});
+
+test("an upstream that moves to another origin receives none of the old origin's credentials, also those the gateway keeps by server name", async () => {
+  const { api, hub } = hubWith({ "notes.json": notes });
+  await registerUpstreams(hub);
+  api.configs.notes = { type: "streamable-http", url: "https://old.example.com/mcp", description: "Added by Hedge", startOnDemand: true, headers: { Authorization: "Bearer old-header" }, credentialTemplate: [{ target: "headers", name: "X-Api-Key" }] };
+  api.bindings.notes = { "headers.X-Api-Key": "old-binding" };
+  api.oauthClients.notes = { clientId: "old-client", clientSecret: "old-secret" };
+
+  await registerUpstreams(hub);
+
+  const sent = upstreamRequest(api, "notes");
+  expect(sent.url).toBe("https://notes.example.com/mcp");
+  for (const old of ["old-header", "old-binding", "old-client", "old-secret"]) expect(JSON.stringify(sent)).not.toContain(old);
 });
 
 test("an upstream that Fleet added before the rename becomes Hedge's and keeps its sign-in at the same origin", async () => {

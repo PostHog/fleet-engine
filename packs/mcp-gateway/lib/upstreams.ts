@@ -64,7 +64,7 @@ const originOf = (url: unknown) => (typeof url === "string" && URL.canParse(url)
 
 function forThisOrigin(config: Config | undefined, want: Config): Config | undefined {
   if (!config || config.url === undefined || originOf(config.url) === originOf(want.url)) return config;
-  const { oauth: _oauth, headers: _headers, ...rest } = config;
+  const { oauth: _oauth, headers: _headers, credentialTemplate: _credentialTemplate, ...rest } = config;
   return rest;
 }
 
@@ -92,6 +92,10 @@ export async function registerUpstream(hub: Hub, upstream: Upstream) {
   const config = forThisOrigin(stored, want);
   const signedOut = config !== stored;
   const path = `servers/${encodeURIComponent(upstream.name)}`;
+  if (signedOut && upstream.kind === "oauth") {
+    await call(path, "PUT", { config: { ...config, ...want } });
+    await call(`${path}/oauth/disconnect`, "POST", { scope: "all" });
+  }
   const newClient = upstream.kind === "oauth" && upstream.loopback && !loopbackClientOf(config);
   if (newClient) want.oauth = { ...(want.oauth as Config), clientId: await registerLoopbackClient(hub.fetch, upstream) };
   if (!config) await call("servers", "POST", { name: upstream.name, config: want });
