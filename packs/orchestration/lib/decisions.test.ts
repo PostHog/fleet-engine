@@ -136,7 +136,37 @@ test("fleet decisions leaves out an old ✅ progress note whose bold text asks n
   expect(lines.join("\n")).toBe([
     "| Question | Answer | Who | Where |",
     "| --- | --- | --- | --- |",
-    `| Old question? | Old answer | ✅ Unmarked (before 2026-11-13) | [map #1](https://github.com/${repository}/issues/1) |`,
+    `| Old question? | Old answer | ✅ Old mark (retired 2026-11-13) | [map #1](https://github.com/${repository}/issues/1) |`,
+    "",
+    "Involvement: no human-in-the-loop tickets.",
+  ].join("\n"));
+});
+
+test("fleet decisions leaves out an old ✅ question with no answer", async () => {
+  const body = ["- ✅ **Which queue?**   ", "- ✅ **Which store?** Postgres"].join("\n");
+  const lines: string[] = [];
+
+  await runDecisions(["acme/maps#1"], { ...fixtureFetchers({ issues: [issueNode(repository, 1)], discussions: { "acme/maps#1": { body, comments: [] } } }), tracker: () => "", print: (line) => lines.push(line) });
+
+  expect(lines.join("\n")).toBe([
+    "| Question | Answer | Who | Where |",
+    "| --- | --- | --- | --- |",
+    `| Which store? | Postgres | ✅ Old mark (retired 2026-11-13) | [map #1](https://github.com/${repository}/issues/1) |`,
+    "",
+    "Involvement: no human-in-the-loop tickets.",
+  ].join("\n"));
+});
+
+test("fleet decisions reads an old ✅ question written as a link", async () => {
+  const body = "- ✅ **[Which store?](https://example.com/options)** Postgres";
+  const lines: string[] = [];
+
+  await runDecisions(["acme/maps#1"], { ...fixtureFetchers({ issues: [issueNode(repository, 1)], discussions: { "acme/maps#1": { body, comments: [] } } }), tracker: () => "", print: (line) => lines.push(line) });
+
+  expect(lines.join("\n")).toBe([
+    "| Question | Answer | Who | Where |",
+    "| --- | --- | --- | --- |",
+    `| [Which store?](https://example.com/options) | Postgres | ✅ Old mark (retired 2026-11-13) | [map #1](https://github.com/${repository}/issues/1) |`,
     "",
     "Involvement: no human-in-the-loop tickets.",
   ].join("\n"));
@@ -154,7 +184,7 @@ test("fleet decisions keeps a marked answer over an old ✅ answer to the same q
     "| Question | Answer | Who | Where |",
     "| --- | --- | --- | --- |",
     `| Which store? | Postgres | 👤 Human | ${where} |`,
-    `| Which queue? | Redis | ✅ Unmarked (before 2026-11-13) | ${where} |`,
+    `| Which queue? | Redis | ✅ Old mark (retired 2026-11-13) | ${where} |`,
     "",
     "Involvement: no human-in-the-loop tickets.",
   ].join("\n"));
@@ -187,8 +217,8 @@ test("fleet decisions lists a newer ✅ answer where its question first stood", 
   expect(lines.join("\n")).toBe([
     "| Question | Answer | Who | Where |",
     "| --- | --- | --- | --- |",
-    `| Which cache? | Redis | ✅ Unmarked (before 2026-11-13) | [map](${url(1, "c1")}) |`,
-    `| Which lock? | etcd | ✅ Unmarked (before 2026-11-13) | [map #1](https://github.com/${repository}/issues/1) |`,
+    `| Which cache? | Redis | ✅ Old mark (retired 2026-11-13) | [map](${url(1, "c1")}) |`,
+    `| Which lock? | etcd | ✅ Old mark (retired 2026-11-13) | [map #1](https://github.com/${repository}/issues/1) |`,
     "",
     "Involvement: no human-in-the-loop tickets.",
   ].join("\n"));
@@ -206,7 +236,7 @@ test("fleet decisions shows old ✅ lines as their own group after the three mar
     "| --- | --- | --- | --- |",
     `| Human question? | His answer | 👤 Human | ${where} |`,
     `| Agent question? | Took A | 🤖 Agent | ${where} |`,
-    `| Old question? | Old answer | ✅ Unmarked (before 2026-11-13) | ${where} |`,
+    `| Old question? | Old answer | ✅ Old mark (retired 2026-11-13) | ${where} |`,
     "",
     "Involvement: no human-in-the-loop tickets.",
   ].join("\n"));
