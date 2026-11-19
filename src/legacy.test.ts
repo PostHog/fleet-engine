@@ -3,7 +3,7 @@ import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readF
 import { dirname, join } from "node:path";
 import { fleetAdapter } from "./adapters/fleet/adapter.ts";
 import { jobsAdapter } from "./adapters/jobs/adapter.ts";
-import type { CommandRunner } from "./adapters/run.ts";
+import type { CommandRunner, RunOptions } from "./adapters/run.ts";
 import { main } from "./cli.ts";
 import { fleetIsHedge, legacyPaths, underLegacyPath } from "./legacy.ts";
 import { saveAnswers, saveMachine } from "./profile/profile.ts";
@@ -37,7 +37,8 @@ function macMachine() {
   return { home, launchd, hedge: machineCommand(home, "darwin", launchd.run) };
 }
 
-function machineCommand(home: string, platform: NodeJS.Platform, run: CommandRunner) {
+function machineCommand(home: string, platform: NodeJS.Platform, machineRun: CommandRunner) {
+  const run = async (command: string[], options?: RunOptions) => (command[0] === "ps" ? { code: 0, stdout: "" } : await machineRun(command, options));
   const adapters = (): Adapter[] => [fleetAdapter({ run, uid: 501, accountHome: async () => home, tasks: async () => undefined }), filesAdapter, jobsAdapter({ run, engineRoot: repoRoot, uid: 501, accountHome: async () => home })];
   return async (args: string[]) => {
     const lines: string[] = [];
@@ -593,6 +594,29 @@ describe("a profile in a Fleet path from before the rename", () => {
     expect(result.output).toContain(`${join(copy, "hedge.json")} is in a Fleet path from before the rename, so Hedge does not use it.`);
     expect(readFileSync(machineFile(home), "utf8")).toBe(saved);
     expect(existsSync(join(home, ".local/state/hedge"))).toBe(false);
+  });
+
+  test("hedge set checks the profile file again after the pull, and refuses it when the pulled commit made it a link into a Fleet path", async () => {
+    const home = temp.make("home-");
+    const old = oldProfile(home);
+    const remote = temp.make("remote-");
+    git(remote, "init", "-q", "--bare");
+    const profile = profileDir();
+    for (const args of [["init", "-q", "-b", "main"], ["config", "user.name", "Test"], ["config", "user.email", "test@example.com"], ["add", "."], ["commit", "-q", "-m", "profile"], ["remote", "add", "origin", remote], ["push", "-q", "-u", "origin", "main"]]) git(profile, ...args);
+    const other = join(temp.make("other-"), "profile");
+    git(dirname(other), "clone", "-q", "-b", "main", remote, other);
+    rmSync(join(other, "hedge.json"));
+    symlinkSync(join(old, "hedge.json"), join(other, "hedge.json"));
+    for (const args of [["config", "user.name", "Test"], ["config", "user.email", "test@example.com"], ["add", "."], ["commit", "-q", "-m", "link"], ["push", "-q", "origin", "main"]]) git(other, ...args);
+    mkdirSync(dirname(machineFile(home)), { recursive: true });
+    writeFileSync(machineFile(home), JSON.stringify({ schema: 1, role: "linux", profileDir: profile }));
+    const before = tree(old);
+
+    const result = await hedge(["set", "base.heavySlots=3"], home);
+
+    expect(result.code).toBe(1);
+    expect(result.output).toContain(`${join(profile, "hedge.json")} is in a Fleet path from before the rename, so Hedge does not use it.`);
+    expect(tree(old)).toEqual(before);
   });
 
   test("hedge set on a machine whose machine file points into a Fleet path changes the Hedge copy, not the old profile", async () => {

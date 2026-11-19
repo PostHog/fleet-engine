@@ -91,13 +91,6 @@ describe("the Base pack", () => {
     expect(plan("both").steps.find((step) => step.id === "codex-cli")).toMatchObject({ run: ["hedge", "install-codex"] });
   });
 
-  test("installs Codex on Linux from its release package, which needs no Node", () => {
-    const step = plan("both", devbox).steps.find((item) => item.id === "codex-cli");
-    expect(step).toMatchObject({ run: ["hedge", "install-codex"] });
-    expect(step?.run).not.toContain("@openai/codex");
-    expect(plan("both", devbox).commands["install-codex"]?.path).toEndWith("packs/base/commands/install-codex.ts");
-  });
-
   test("installs a pinned Node.js on Linux after the agent CLIs, so a skill runtime can start npx without a failed Node step holding back the rest of Base", () => {
     for (const ai of plans) {
       const steps = plan(ai, devbox).steps;

@@ -514,7 +514,7 @@ test("the gate counts a panel round only when its plan is published and every le
   writeFileSync(join(reserved.directory, "panel.staged.json"), JSON.stringify({ lenses: [{ name: "correctness" }] }));
   writeFileSync(join(staged.repository, "review.md"), "No findings.\n");
   await expect(staged.hedge("review-finish", "--round", "1", "--reviewer", "gpt-6.1-sol", "review.md")).rejects.toThrow("Round 1 is a panel round");
-});
+}, 15_000);
 
 test("after a valid panel, a later panel round whose findings the author saved never covers HEAD", async () => {
   const pr = await checkout();

@@ -451,7 +451,7 @@ describe("saving to the context library", () => {
     expect(captures).toHaveLength(1);
   });
 
-  test("after hedge import-fleet, a capture that Fleet queued runs once, and an event that Fleet handled stays handled", async () => {
+  test("after hedge import-fleet, a capture that Fleet queued runs once, an event that Fleet handled stays handled, and a new event that failed to launch is tried again", async () => {
     const home = temp.make("home-");
     mkdirSync(join(home, ".local/state/fleet/slack"), { recursive: true });
     const queued = { trigger: { kind: "capture", channel: "C1", ts: "1794830407.564399" }, since: 0, commandId: "c" };
@@ -459,14 +459,20 @@ describe("saving to the context library", () => {
     const { deps, captures } = savedThread(["none"], { now: 1_000 }, home);
     const launched: string[] = [];
     deps.launch = async (request) => (launched.push(request.title), { failed: "no" });
+    const ownMessages: Record<string, string> = { "1794830000.000100": "handled by Fleet :t3code:", "1794830000.000200": "new after the import :t3code:" };
+    const slack = deps.slack;
+    deps.slack = async (method, args) => (method === "conversations.replies" && ownMessages[args.ts!] ? { messages: [{ user: ownerId, ts: args.ts!, text: ownMessages[args.ts!] }] } : slack(method, args));
 
     expect(await main(["import-fleet"], { home, engineRoot: repoRoot, platform: "linux", env: {}, print: () => {}, run: async () => 0 })).toBe(0);
     await retryPending(deps);
     await handleTrigger({ kind: "message", channel: "C1", ts: "1794830000.000100" }, deps);
+    await handleTrigger({ kind: "message", channel: "C1", ts: "1794830000.000200" }, deps);
 
     expect(captures).toEqual(["2026-11-16T12:00:07.564Z"]);
-    expect(launched).toEqual([]);
-    expect(JSON.parse(readFileSync(statePath(home), "utf8")).pending).toEqual({});
+    expect(launched).toEqual(["Slack: new after the import"]);
+    await retryPending(deps);
+    expect(launched).toEqual(["Slack: new after the import", "Slack: new after the import"]);
+    expect(captures).toEqual(["2026-11-16T12:00:07.564Z"]);
     expect(lstatSync(statePath(home)).mode & 0o777).toBe(0o600);
   });
 

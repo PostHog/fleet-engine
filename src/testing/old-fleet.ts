@@ -1,4 +1,4 @@
-import type { OldTasks } from "../adapters/fleet/adapter.ts";
+import type { OldTasks, Running } from "../adapters/fleet/adapter.ts";
 import type { CommandRunner } from "../adapters/run.ts";
 
 export function fakeLaunchd(oldLabel: (label: string) => string = (label) => label.replace(/^(dev|com)\.hedge\./, "$1.fleet.").replace(/\.hedge-/, ".fleet-")) {
@@ -77,15 +77,24 @@ export function fakeCrontab(text = "") {
 }
 
 export function fakeProcesses() {
-  const table = new Map<number, { args: string; stubborn?: boolean }>();
+  const table = new Map<number, { args: string; ppid?: number; stubborn?: boolean; reusedBy?: string }>();
+  const state = { missing: false };
+  const killed: number[] = [];
+  const list = async (): Promise<Running[]> => {
+    if (state.missing) throw new Error("/proc could not be read (ENOENT: no such file or directory)");
+    const listed = [...table].map(([pid, item]) => ({ pid, ppid: item.ppid ?? 1, argv: item.args.split(" ") }));
+    for (const [pid, item] of table) if (item.reusedBy) table.set(pid, { args: item.reusedBy });
+    return listed;
+  };
   const run: CommandRunner = async (command) => {
-    if (command[0] === "ps") return { code: 0, stdout: [...table].map(([pid, item]) => `${String(pid).padStart(6)} ${item.args}\n`).join("") };
     if (command[0] !== "kill") return { code: 127, stdout: "" };
-    const pid = Number(command.at(-1));
-    if (!table.get(pid)?.stubborn) table.delete(pid);
+    for (const pid of command.slice(2).map(Number)) {
+      killed.push(pid);
+      if (!table.get(pid)?.stubborn) table.delete(pid);
+    }
     return { code: 0, stdout: "" };
   };
-  return { run, table };
+  return { run, list, table, state, killed };
 }
 
 export const runners = (...fakes: CommandRunner[]): CommandRunner => async (command, options) => {

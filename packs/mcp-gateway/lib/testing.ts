@@ -15,11 +15,13 @@ export type FakeMcpHub = {
   healthy: boolean;
   openWithoutKey: boolean;
   notReadyFor: number;
+  oauthClients: Record<string, { clientId: string; clientSecret?: string }>;
+  bindings: Record<string, Record<string, string>>;
   home?: string;
 };
 
 export function fakeMcpHub(fields: Partial<FakeMcpHub> = {}): FakeMcpHub {
-  return { servers: ["tickets", "calendar"], toolCounts: {}, configs: {}, keepsConfig: true, groups: [], calls: [], healthy: true, openWithoutKey: false, notReadyFor: 0, ...fields };
+  return { servers: ["tickets", "calendar"], toolCounts: {}, configs: {}, keepsConfig: true, groups: [], calls: [], healthy: true, openWithoutKey: false, notReadyFor: 0, oauthClients: {}, bindings: {}, ...fields };
 }
 
 function keyOf(state: FakeMcpHub) {
@@ -61,10 +63,19 @@ export function mcphubFetch(state: FakeMcpHub) {
     if (method === "POST" && path === "auth/keys") return Response.json({ success: true, data: { id: "key-new", token: "mcphub_new-machine-token", ...body } }, { status: 201 });
     if (method === "PUT" && path.startsWith("auth/keys/")) return Response.json({ success: true, data: body });
     if (method === "POST" && /^servers\/[^/]+\/reload$/.test(path)) return Response.json({ success: true });
+    const disconnect = path.match(/^servers\/([^/]+)\/oauth\/disconnect$/);
+    if (method === "POST" && disconnect) {
+      const name = decodeURIComponent(disconnect[1]!);
+      const { accessToken: _access, refreshToken: _refresh, clientId, clientSecret, ...oauth } = (state.configs[name]?.oauth ?? {}) as Record<string, unknown>;
+      if (body?.scope === "all") delete state.oauthClients[name];
+      if (state.configs[name]?.oauth) state.configs[name]!.oauth = body?.scope === "all" ? oauth : { ...oauth, clientId, clientSecret };
+      return Response.json({ success: true });
+    }
     const toggle = path.match(/^servers\/([^/]+)\/toggle$/);
     if (method === "POST" && toggle) return (state.configs[decodeURIComponent(toggle[1]!)]!.enabled = body!.enabled), Response.json({ success: true });
     const server = path.match(/^servers\/([^/]+)$/);
     const name = server ? decodeURIComponent(server[1]!) : String(body?.name);
+    const refused = (config: Record<string, any>) => Array.isArray(config.credentialTemplate) && config.credentialTemplate.length > 0 && Object.keys(config.oauth ?? {}).length > 0;
     const stored = (config: Record<string, any>) => {
       const { startOnDemand, options, ...rest } = config;
       const kept = { ...options };
@@ -72,15 +83,26 @@ export function mcphubFetch(state: FakeMcpHub) {
       state.configs[name] = state.keepsConfig ? { ...rest, type: rest.type ?? "stdio", ...(Object.keys(kept).length && { options: kept }), ...(startOnDemand === true && { startOnDemand: true }) } : { type: "stdio" };
     };
     if (method === "POST" && path === "servers") {
-      if (state.servers.includes(name)) return new Response(null, { status: 400 });
+      if (state.servers.includes(name) || refused(body!.config as Record<string, unknown>)) return new Response(null, { status: 400 });
       state.servers.push(name), stored(body!.config as Record<string, unknown>);
       return Response.json({ success: true }, { status: 201 });
     }
     if (!server || !state.servers.includes(name)) return new Response(null, { status: 404 });
     if (method === "GET") return Response.json({ success: true, data: { name, status: "connected", tools: toolsOf(state, name), config: state.configs[name] ?? {} } });
+    if (method === "PUT" && refused(body!.config as Record<string, unknown>)) return new Response(null, { status: 400 });
     if (method === "PUT") return stored(body!.config as Record<string, unknown>), Response.json({ success: true });
     return new Response(null, { status: 404 });
   };
+}
+
+/** What MCPHub at the pinned commit sends an HTTP upstream: its headers with the bound credentials, the OAuth client it registered under the server's name or the one in its config, and its tokens. */
+export function upstreamRequest(state: FakeMcpHub, name: string) {
+  const config = state.configs[name] ?? {};
+  const oauth = (config.oauth ?? {}) as Record<string, unknown>;
+  const slots = Array.isArray(config.credentialTemplate) ? (config.credentialTemplate as Array<{ target: string; name: string }>) : [];
+  const bound = Object.fromEntries(slots.filter((slot) => slot.target === "headers").map((slot) => [slot.name, state.bindings[name]?.[`headers.${slot.name}`]]));
+  const client = state.oauthClients[name] ?? (oauth.clientId ? { clientId: oauth.clientId, clientSecret: oauth.clientSecret } : undefined);
+  return { url: config.url, headers: { ...(config.headers as Record<string, string> | undefined), ...bound }, client, tokens: { accessToken: oauth.accessToken, refreshToken: oauth.refreshToken } };
 }
 
 export type RunCall = { command: string[]; cwd?: string; input?: string };

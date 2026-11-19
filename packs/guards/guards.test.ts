@@ -1085,6 +1085,14 @@ describe("the Git guard", () => {
     "gh alias import aliases.yml",
     "command gh alias set sp 'stack push'",
     "gh alias import -- --help",
+    "gh alias import --help --help=false aliases.yml",
+    "gh alias set probe 'extension list' && gh probe",
+    "gh alias set probe 'demo run' && gh probe",
+    "gh alias set hop probe",
+    "gh alias set -ss sp 'pr list'",
+    "gh alias set \"p'q\" 'pr list'",
+    "echo aliases.yml | xargs gh alias import",
+    "echo alias import aliases.yml | xargs gh",
   ])("refuses a gh alias that can hide a stack push: %s", async (command) => {
     const denied = await preToolUse(homeWith(withGuards(), { "guards.person": "Robin" }), "claude", bash(command, await repo("feature")), { guardAsProcess: true });
     expect(denied.refusal).toContain("gh alias set");
@@ -1092,22 +1100,38 @@ describe("the Git guard", () => {
   });
 
   test.each([
-    ["an alias set before", "gh sp", "force-pushes 6 branches at once"],
-    ["an alias with arguments", "gh s push", "force-pushes 6 branches at once"],
-    ["an alias with a positional argument", "gh sn push", "force-pushes 6 branches at once"],
+    ["an alias set before", "gh sp", "gh alias set"],
+    ["an alias with arguments", "gh s push", "gh alias set"],
+    ["an alias with a positional argument", "gh sn push", "gh alias set"],
     ["a shell alias", "gh shp", "gh alias set"],
-    ["an alias from a GH_CONFIG_DIR the command names", "GH_CONFIG_DIR=OTHER gh other", "force-pushes 6 branches at once"],
-    ["an alias from a relative GH_CONFIG_DIR, read from the command's directory", "GH_CONFIG_DIR=rel-gh gh other", "force-pushes 6 branches at once"],
-    ["a nested alias under a gh command", "gh pr sp", "force-pushes 6 branches at once"],
-    ["an alias whose expansion quotes its words", "gh qp", "force-pushes 6 branches at once"],
-    ["an alias whose name gh unquotes", "gh pr mine", "force-pushes 6 branches at once"],
-    ["an alias from the XDG config home when the command empties an inherited GH_CONFIG_DIR", "GH_CONFIG_DIR= XDG_CONFIG_HOME=XDGDIR gh other", "force-pushes 6 branches at once"],
-  ])("follows %s to the stack push it runs", async (_, command, refusal) => {
+    ["an alias that xargs runs", "echo 1 | xargs gh sp", "gh alias set"],
+    ["an alias that xargs runs by gh's path", "echo 1 | xargs -n1 /usr/bin/gh sp", "gh alias set"],
+    ["an alias from a GH_CONFIG_DIR the command names", "GH_CONFIG_DIR=OTHER gh other", "sets or names GH_CONFIG_DIR"],
+    ["an alias from a relative GH_CONFIG_DIR, read from the command's directory", "GH_CONFIG_DIR=rel-gh gh other", "sets or names GH_CONFIG_DIR"],
+    ["a nested alias under a gh command", "gh pr sp", "gh alias set"],
+    ["an alias whose expansion quotes its words, which the guard does not split", "gh qp", "gh alias set"],
+    ["a config with a quoted alias name, which the guard does not match", "GH_CONFIG_DIR=QUOTED gh pr mine", "sets or names GH_CONFIG_DIR"],
+    ["an alias whose expansion holds a comment", "gh commented", "gh alias set"],
+    ["a placeholder that an earlier argument fills with another placeholder", "gh chain '$2' import", "gh alias set"],
+    ["a shell alias nested under gh alias", "gh alias inspect", "gh alias set"],
+    ["an alias from the config home of the command's own HOME", "HOME=HOMEDIR GH_CONFIG_DIR= gh other", "sets or names GH_CONFIG_DIR"],
+    ["an alias that runs another alias", "gh hop", "gh alias set"],
+    ["an alias gh picks through a synonym of its group", "gh ext demo", "gh alias set"],
+    ["an alias gh picks past a flag", "gh alias --help=false local-demo", "gh alias set"],
+    ["an alias named like a gh alias subcommand that gh does not have", "gh alias rm", "gh alias set"],
+    ["an alias with a space gh does not split", "gh nb", "gh alias set"],
+    ["an argument that a JavaScript replacement pattern would change", "gh sub \"$'\"", "gh alias set"],
+    ["an alias from the XDG config home when the command empties an inherited GH_CONFIG_DIR", "GH_CONFIG_DIR= XDG_CONFIG_HOME=XDGDIR gh other", "sets or names GH_CONFIG_DIR"],
+      ["an alias that runs an alias gh picks through a synonym", "gh hop2 missing.yml", "gh alias set"],
+    ["an alias whose expansion starts with a flag", "gh ext demo2 missing.yml", "gh alias set"],
+    ["an alias whose placeholder takes an argument before its name", "gh ext --help=false demo3 import quiet", "gh alias set"],
+    ["an alias that runs a built-in alias subcommand another alias shadows", "gh hop3 missing.yml", "gh alias set"],
+])("refuses %s, which may hide a stack push", async (_, command, refusal) => {
     const dir = await repo("feature");
     stackOf(dir, sixOpen);
     const home = homeWith(withGuards(), { "guards.person": "Robin" });
     mkdirSync(join(home, ".config/gh"), { recursive: true });
-    writeFileSync(join(home, ".config/gh/config.yml"), "aliases:\n    sp: stack push\n    s: stack\n    shp: '!gh stack push'\n    sn: stack $1\n    pr sp: stack push\n    qp: \"stack 'push'\"\n    \"'pr' mine\": stack push\n    co: pr checkout\n");
+    writeFileSync(join(home, ".config/gh/config.yml"), "aliases:\n    sp: stack push\n    s: stack\n    shp: '!gh stack push'\n    sn: stack $1\n    pr sp: stack push\n    qp: \"stack 'push'\"\n    commented: \"alias # note\\nimport aliases.yml\"\n    chain: alias $1 aliases.yml\n    alias inspect: '!printf ok'\n    hop2: ext demo\n    extension demo2: --help=false alias import\n    extension demo3: alias $2\n    alias quiet: version\n    hop3: alias import\n    alias import: version\n    hop: pr hopped\n    pr hopped: stack push\n    loop: loop\n    extension demo: stack push\n    alias local-demo: stack push\n    alias rm: stack push\n    nb: \"pr\\u00a0list\"\n    sub: alias $1 list\n    co: pr checkout\n");
     const other = join(home, "other-gh");
     mkdirSync(other);
     writeFileSync(join(other, "config.yml"), "aliases:\n    other: stack submit\n");
@@ -1115,24 +1139,135 @@ describe("the Git guard", () => {
     writeFileSync(join(dir, "rel-gh/config.yml"), "aliases:\n    other: stack submit\n");
     mkdirSync(join(home, "xdg/gh"), { recursive: true });
     writeFileSync(join(home, "xdg/gh/config.yml"), "aliases:\n    other: stack submit\n");
+    mkdirSync(join(home, "quoted-gh"));
+    writeFileSync(join(home, "quoted-gh/config.yml"), "aliases:\n    \"pr mi'ne'\": stack push\n");
+    mkdirSync(join(home, "other-home/.config/gh"), { recursive: true });
+    writeFileSync(join(home, "other-home/.config/gh/config.yml"), "aliases:\n    other: stack submit\n");
     const inherited = join(home, "inherited-gh");
     mkdirSync(inherited);
     writeFileSync(join(inherited, "config.yml"), "aliases:\n    other: pr list\n");
-    const denied = await preToolUse(home, "claude", bash(command.replace("OTHER", other).replace("XDGDIR", join(home, "xdg")), dir), { guardAsProcess: true, env: command.startsWith("GH_CONFIG_DIR= ") ? { GH_CONFIG_DIR: inherited } : {} });
+    const denied = await preToolUse(home, "claude", bash(command.replace("OTHER", other).replace("XDGDIR", join(home, "xdg")).replace("QUOTED", join(home, "quoted-gh")).replace("HOMEDIR", join(home, "other-home")), dir), { guardAsProcess: true, env: command.includes("GH_CONFIG_DIR= ") ? { GH_CONFIG_DIR: inherited } : {} });
     expect(denied.refusal).toContain(refusal);
   });
 
-  test.each(["gh alias set co 'pr checkout'", "gh alias list", "gh alias delete sp", "gh alias set --help", "cd - && GH_CONFIG_DIR=relative gh alias set --help"])("allows a gh alias that cannot push a stack: %s", async (command) => {
+  test.each(["gh alias set co 'pr checkout'", "gh alias set co 'pr checkout' && gh co 12", "gh alias list", "gh alias delete sp", "gh alias set --help", "cd $HOME/dev && gh pr list", "echo ${HOME} ${XDG_CONFIG_HOME} && gh pr list", "gh alias import --help=true", "gh alias import --help=false --help", "gh alias import -h --help=false"])("allows a gh alias that cannot push a stack: %s", async (command) => {
     expect(await preToolUse(homeWith(withGuards()), "claude", bash(command, await repo("feature")), { guardAsProcess: true })).toEqual({ code: 0, refusal: undefined });
   });
 
-  test("allows an alias whose expansion quotes a value, as gh splits it", async () => {
+  test("allows deleting an alias that may hide a stack push, since gh alias delete runs before any alias", async () => {
+    const home = homeWith(withGuards());
+    mkdirSync(join(home, ".config/gh"), { recursive: true });
+    writeFileSync(join(home, ".config/gh/config.yml"), "aliases:\n    sp: stack push\n");
+    expect(await preToolUse(home, "claude", bash("gh alias delete sp", await repo("feature")), { guardAsProcess: true })).toEqual({ code: 0, refusal: undefined });
+  });
+
+  test.each(["gh co 12", "gh mine", "gh pr list", "gh pr checkout 12"])("allows %s with aliases that cannot reach a guarded gh group", async (command) => {
+    const dir = await repo("feature");
+    const home = homeWith(withGuards());
+    mkdirSync(join(home, ".config/gh"), { recursive: true });
+    writeFileSync(join(home, ".config/gh/config.yml"), "aliases:\n    co: pr checkout\n    mine: >-\n        pr view\n        12\n    loop: loop\n");
+    expect(await preToolUse(home, "claude", bash(command, dir), { guardAsProcess: true })).toEqual({ code: 0, refusal: undefined });
+  });
+
+  test.each([
+    ["an alias that runs a gh extension directly", "aliases:\n    sp: demo push\n"],
+    ["a duplicate alias, of which gh reads the first and Bun the last", "aliases:\n    sp: stack push\n    sp: pr list\n"],
+    ["a duplicate alias with a quoted name", "aliases:\n    sp: stack push\n    \"sp\": pr list\n"],
+    ["a duplicate alias written as a complex key", "aliases:\n    sp: stack push\n    ? sp\n    : pr list\n"],
+    ["a second aliases block", "aliases:\n    sp: stack push\naliases:\n    sp: pr list\n"],
+    ["a second YAML document after a flow mapping", "{aliases: {sp: stack push}}\n---\naliases: {}\n"],
+    ["a flow mapping before a second aliases block", "aliases: {sp: stack push}\naliases:\n    sp: pr list\n"],
+    ["a config that does not parse", "aliases:\n    sp: [stack push\n"],
+    ["a second aliases block indented deeper", "aliases:\n    sp: stack push\naliases:\n        sp: pr list\n"],
+    ["a comment that gh ends at a next-line character", "aliases:\n    co: pr checkout # note\u0085    sp: stack push\n"],
+    ["an alias that runs gh help, which an extension can take", "aliases:\n    sp: help\n"],
+    ["an alias that references a YAML anchor, which gh reads as the anchor's name", "x: &demo pr list\naliases:\n    sp: *demo\n"],
+    ["an alias name that Bun reads as another number", "aliases:\n    001: stack push\n"],
+    ["a quoted alias name, which gh unquotes", "aliases:\n    \"s'p'\": stack push\n"],
+    ["a config that cannot be read", undefined],
+  ])("refuses gh sp with %s", async (_, config) => {
+    const dir = await repo("feature");
+    const home = homeWith(withGuards());
+    mkdirSync(join(home, ".config/gh"), { recursive: true });
+    if (config === undefined) mkdirSync(join(home, ".config/gh/config.yml"));
+    else writeFileSync(join(home, ".config/gh/config.yml"), config);
+    expect((await preToolUse(home, "claude", bash("gh sp", dir), { guardAsProcess: true })).refusal).toContain("gh alias set");
+  });
+
+  test.each([
+    "export GH_CONFIG_DIR=/elsewhere; gh pr list",
+    "GH_CONFIG_DIR=~/elsewhere gh pr list",
+    ": ${HOME:=/elsewhere}; gh pr list",
+    "bash -c 'XDG_CONFIG_HOME=/elsewhere gh pr list'",
+    "env -i gh pr list",
+    "/usr/bin/env -u PATH gh pr list",
+    "exec -c gh pr list",
+    "sudo gh pr list",
+    "doas gh pr list",
+    "env 2>/dev/null -i gh pr list",
+    "exec >/dev/null -c gh pr list",
+    "echo gh ext\nexec -c gh pr list",
+    "A='gh ext' exec -c gh pr list",
+    "env -i gh alias list",
+    "cd - && GH_CONFIG_DIR=relative gh alias set --help",
+    "env \"GH_CONFIG\"_DIR=/elsewhere gh pr list",
+    "env \"-i\" gh pr list",
+    "env GH_CONFIG$''_DIR=/elsewhere gh pr list",
+    "env $'\\x2di' gh pr list",
+    "unset GH_CONFIG\\\n_DIR; gh pr list",
+    "gh pr list --head fix/env; env -i gh pr list",
+    "gh pr list && sudo gh pr list",
+    "git checkout fix/env | doas gh pr list",
+    "gh pr list $(env -i gh pr list)",
+    "gh pr list `sudo gh pr list`",
+    "{ env -i gh pr list; }",
+    "if env -i gh pr list; then :; fi",
+    "A=1 2>/dev/null env -i gh pr list",
+    "nohup env -i gh pr list",
+    "bash -c 'gh pr list; env -i gh pr list'",
+    "\"e\"nv -i gh pr list",
+    "./bin/env -i gh pr list",
+    "git submodule foreach 'env -i gh pr list' && gh pr list",
+    "git submodule foreach bin/env -i gh pr list && gh pr list",
+    "git -c alias.l='!env -i gh pr list' l && gh pr list",
+    "git -C . -c core.pager=env log && gh pr list",
+    "git fetch --upload-pack 'env -i gh pr list' . && gh pr list",
+    "git rebase -x 'env -i gh pr list' main && gh pr list",
+    "GIT_SSH_COMMAND=env git fetch origin && gh pr list",
+  ])("refuses %s, which may move the config gh reads its aliases from", async (command) => {
+    const home = homeWith(withGuards());
+    expect((await preToolUse(home, "claude", bash(command, await repo("feature")), { guardAsProcess: true })).refusal).toContain("sets or names GH_CONFIG_DIR");
+  });
+
+  test.each([
+    "gh pr list --head fix/env",
+    "gh pr create --head env/setup --base main --title Setup --body Setup",
+    "gh pr checkout sudo",
+    "gh pr list --head fix/doas --json number",
+    "git checkout -b fix/env && gh pr list --head fix/env",
+    "GH_PAGER=cat gh pr view fix/sudo-env",
+    "git -C . push origin HEAD:fix/env && gh pr create --head fix/env --base main --title Env --body Env",
+  ])("allows %s, whose branch name holds a wrapper's name but runs no wrapper", async (command) => {
+    const home = homeWith(withGuards());
+    expect(await preToolUse(home, "claude", bash(command, await repo("feature")), { guardAsProcess: true })).toEqual({ code: 0, refusal: undefined });
+  });
+
+  test.each([
+    ["a relative GH_CONFIG_DIR", { GH_CONFIG_DIR: "relative-gh" }],
+    ["a relative XDG_CONFIG_HOME", { XDG_CONFIG_HOME: "relative-config" }],
+    ["an empty HOME", { HOME: "" }],
+  ])("refuses gh calls when the agent inherits %s", async (_, env) => {
+    const home = homeWith(withGuards());
+    expect((await preToolUse(home, "claude", bash("gh pr list", await repo("feature")), { guardAsProcess: true, env })).refusal).toContain("gh alias set");
+  });
+
+  test("refuses an alias whose expansion quotes a value, which the guard does not split", async () => {
     const dir = await repo("feature");
     stackOf(dir, sixOpen);
     const home = homeWith(withGuards());
     mkdirSync(join(home, ".config/gh"), { recursive: true });
     writeFileSync(join(home, ".config/gh/config.yml"), "aliases:\n    bugs: 'issue list --label=\"good first issue\"'\n");
-    expect(await preToolUse(home, "claude", bash("gh bugs", dir), { guardAsProcess: true })).toEqual({ code: 0, refusal: undefined });
+    expect((await preToolUse(home, "claude", bash("gh bugs", dir), { guardAsProcess: true })).refusal).toContain("gh alias set");
   });
 
   test("allows a program named gs that is not the gh stack wrapper", async () => {
