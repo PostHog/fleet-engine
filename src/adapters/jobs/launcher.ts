@@ -7,8 +7,9 @@ export const agentCopyTarget = (id: string) => `${jobsFolder}/${id}.plist`;
 export const quote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
 
 const session = '[ -r "$HOME/.config/fleet/session.sh" ] && . "$HOME/.config/fleet/session.sh"';
+const claudeToken = '[ -r "$HOME/.config/claude-env/oauth.env" ] && { set -a; . "$HOME/.config/claude-env/oauth.env"; set +a; }';
 
 export function launcherScript(command: string[], path: string, log: string, settings?: string) {
   const stamp = settings === undefined ? [] : [`# settings ${settings}`];
-  return ["#!/bin/sh", ...stamp, `PATH=${quote(path)}`, "export PATH", session, `exec ${command.map(quote).join(" ")} >>${quote(log)} 2>&1`, ""].join("\n");
+  return ["#!/bin/sh", ...stamp, `PATH=${quote(path)}`, "export PATH", session, claudeToken, `exec ${command.map(quote).join(" ")} >>${quote(log)} 2>&1`, ""].join("\n");
 }

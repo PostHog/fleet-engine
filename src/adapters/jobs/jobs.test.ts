@@ -98,6 +98,19 @@ describe("cron jobs on Linux", () => {
     expect(readFileSync(join(home, ".local/state/fleet/jobs/odd.log"), "utf8")).toBe("50%|a\\%b|two\nlines|it's|");
   });
 
+  test("a launcher loads the Claude token that T3 uses, so a job's agents are logged in", async () => {
+    const home = temp.make("home-");
+    mkdirSync(join(home, ".config/claude-env"), { recursive: true });
+    writeFileSync(join(home, ".config/claude-env/oauth.env"), "CLAUDE_CODE_OAUTH_TOKEN=token-from-t3\n");
+    const job: PackJob = { id: "token", command: ["/bin/sh", "-c", "printf %s \"$CLAUDE_CODE_OAUTH_TOKEN\""], schedule: { every: "15m" } };
+
+    await apply(plan("linux", [job]), { home, adapters: [crontab("").adapter] });
+
+    const ran = await spawnAsync(["/bin/sh", join(home, ".local/state/fleet/jobs/token.sh")], { env: { HOME: home, PATH: "/nonexistent" } });
+    expect(ran.exitCode).toBe(0);
+    expect(readFileSync(join(home, ".local/state/fleet/jobs/token.log"), "utf8")).toBe("token-from-t3");
+  });
+
   test("puts back a missing launcher folder, and doctor sees it first", async () => {
     const home = temp.make("home-");
     const cron = crontab("");
