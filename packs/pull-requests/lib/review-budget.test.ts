@@ -106,12 +106,12 @@ test("a prose finding stays a finding when the review also lists TESTS items", (
   expect(items).toEqual(["The greeting drops the name.", "- a.test.ts:1 asserts a mock"]);
 });
 
-test("a test-only diff at low merge risk gets the Read tier: one combined Correctness and Risk lens on the other family, then one final read of its fixes", async () => {
+test("a test-only diff at low merge risk gets the Read tier: one combined Correctness and Risk lens on the other family, then, once both find a major, no more reads", async () => {
   const pr = await checkout();
   pr.pullRequestState({ body: graded("non-critical", "low") });
   await pr.commit("feature.test.ts", Array.from({ length: 80 }, (_, line) => `test("greets ${line}", () => {});`).join("\n") + "\n");
   await pr.hedge("require", "--none", "--reason", "fixture");
-  const reviewer = fakeModel(pr, "REVIEWER", "FINDINGS:\n(none)\nCOVERED: feature.test.ts\n");
+  const reviewer = fakeModel(pr, "REVIEWER", "FINDINGS:\n- feature.test.ts:1 | major | Correctness | the test greets no one | greet a member | anchor: greets\nCOVERED: feature.test.ts\n");
 
   const started = await pr.hedge("review");
   expect(JSON.parse(started.output.split("\n")[0]!)).toMatchObject({ tier: { name: "read" }, lenses: [{ name: "combined", family: "gpt" }] });
@@ -126,9 +126,8 @@ test("a test-only diff at low merge risk gets the Read tier: one combined Correc
 
   await pr.commit("helper.ts", "export const name = \"member\";\n");
   expect((await pr.hedge("gate")).code).toBe(1);
-  reviewer.answer("No findings.");
+  reviewer.answer("FINDINGS:\n- helper.ts:1 | major | Correctness | the name drops the member | name the member | anchor: member\nCOVERED: helper.ts\n");
   expect((await pr.hedge("review", "--scope", "final", "--base", reviewed)).code).toBe(0);
-  expect((await pr.hedge("gate")).code).toBe(0);
   const read = await pr.git("rev-parse", "HEAD");
   await pr.commit("helper.ts", "export const name = \"new member\";\n");
   await expect(pr.hedge("review", "--scope", "final", "--base", read)).rejects.toThrow("The review budget of 2 reviews is spent.");
@@ -363,7 +362,7 @@ test("a known answer waits for the budget of its own phase", async () => {
 test("a review that another one overtakes while it weighs the budget backs out", async () => {
   const pr = await checkout();
   pr.pullRequestState({ body: graded("non-critical", "medium") });
-  pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 2, "pull-requests.reviewCeiling": 3 });
+  pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 1, "pull-requests.reviewCeiling": 3 });
   await pr.commit("feature.txt", "greet\n");
   await pr.hedge("require", "--none", "--reason", "fixture");
   const panel = await panelReview(pr);

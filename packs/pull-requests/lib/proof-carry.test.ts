@@ -12,7 +12,10 @@ afterEach(cleanFixtures);
 
 const repository = "example/product";
 const pr = 7;
+const major = "FINDINGS:\n- src/app.ts:1 | major | Correctness | the count is off by one | count from zero | anchor: app\nCOVERED: src/app.ts\n";
 const clean = "FINDINGS:\n- src/app.ts:1 | minor | Design | a name reads plain | rename it | anchor: app\nCOVERED: src/app.ts\n";
+const continues: Arbiter = async () => ({ verdict: "continue", reason: "", model: "arbiter-under-test" });
+const escalates: Arbiter = async () => ({ verdict: "escalate", reason: "Final read 1 asks to undo the fix round 1 asked for", model: "arbiter-under-test" });
 const unasked: Arbiter = async () => { throw new Error("the arbiter was asked"); };
 const roomy: ReviewLimits = { free: 10, ceiling: 10 };
 
@@ -63,7 +66,7 @@ async function reviewedPanel(repo: Repo, commit: string, findings = clean) {
   await finish(repo, commit, 1, findings);
 }
 
-const finalRead = (repo: Repo, commit: string, base: string, arbiter: Arbiter, limits: ReviewLimits = roomy) =>
+const finalRead = (repo: Repo, commit: string, base: string, arbiter: Arbiter, limits = roomy) =>
   startReview(repo.home, at(commit), { scope: "final", base, arbiter, limits, netDelta: netDelta(repo) });
 
 async function reviewLine(repo: Repo, commit: string) {
@@ -134,6 +137,57 @@ test("a base merge's ledger conflict resolution is part of the net delta", async
 
   expect(netDelta(repo)(reviewed, merged)?.files).toEqual(["testing/ports.md"]);
   expect(await reviewLine(repo, merged)).toBe(`review: HEAD not reviewed, last review covered ${reviewed.slice(0, 7)}; 1 file(s) changed past it and the base. Read them with hedge proof review --scope final --base ${reviewed}`);
+});
+
+test("a final read that finds no blocker or major spends no review budget, even past the ceiling", async () => {
+  const repo = gitRepo();
+  repo.commit("Add the app", { "src/app.ts": "export const app = 1;\n" });
+  repo.start();
+  let reviewed = repo.commit("Count the app", { "src/app.ts": "export const app = 2;\n" });
+  await reviewedPanel(repo, reviewed, major);
+  const limits = { free: 10, ceiling: 2 };
+  for (const [read, count] of [[1, 3], [2, 4], [3, 5]] as const) {
+    const head = repo.commit(`Fix ${read}`, { "src/app.ts": `export const app = ${count};\n` });
+    const { id } = await finalRead(repo, head, reviewed, unasked, limits);
+    expect(id).toBe(`final-${read}`);
+    await finish(repo, head, `final-${read}`, clean);
+    reviewed = head;
+  }
+});
+
+test("a final read that finds a major spends the review budget", async () => {
+  const repo = gitRepo();
+  repo.commit("Add the app", { "src/app.ts": "export const app = 1;\n" });
+  repo.start();
+  const reviewed = repo.commit("Count the app", { "src/app.ts": "export const app = 2;\n" });
+  await reviewedPanel(repo, reviewed, major);
+  const limits = { free: 10, ceiling: 2 };
+  const fixed = repo.commit("Fix 1", { "src/app.ts": "export const app = 3;\n" });
+  await finalRead(repo, fixed, reviewed, unasked, limits);
+  await finish(repo, fixed, "final-1", major);
+  const again = repo.commit("Fix 2", { "src/app.ts": "export const app = 4;\n" });
+
+  await expect(finalRead(repo, again, fixed, unasked, limits)).rejects.toThrow("The review budget of 2 reviews is spent");
+});
+
+test("after an arbiter stop, one final read of the net delta runs without the arbiter, and the next review goes to the user", async () => {
+  const repo = gitRepo();
+  repo.commit("Add the app", { "src/app.ts": "export const app = 1;\n" });
+  repo.start();
+  const reviewed = repo.commit("Count the app", { "src/app.ts": "export const app = 2;\n" });
+  await reviewedPanel(repo, reviewed, major);
+  const limits = { free: 1, ceiling: 10 };
+  const fixed = repo.commit("Fix the count", { "src/app.ts": "export const app = 3;\n" });
+  await expect(finalRead(repo, fixed, reviewed, escalates, limits)).rejects.toThrow("The arbiter escalates");
+
+  const reverted = repo.commit("Revert part of the fix", { "src/app.ts": "export const app = 2;\n", "src/app.test.ts": "expect(app).toBe(2);\n" });
+  const confirming = await finalRead(repo, reverted, reviewed, unasked, limits);
+  expect(confirming.id).toBe("final-1");
+  await finish(repo, reverted, "final-1", major);
+  const next = repo.commit("Fix the test", { "src/app.test.ts": "expect(app).toBe(3);\n" });
+
+  await expect(finalRead(repo, next, reverted, continues, limits)).rejects.toThrow("The arbiter stopped the loop, and final read 1 confirmed its stop. hedge proof starts no other review: take each blocker or major of final read 1 to the user");
+  expect(existsSync(join(pullRequestDirectory(repo.home, at(next)), "reviews", "final-2"))).toBe(false);
 });
 
 test("when the checkout lacks HEAD or the reviewed commit, the review carries nothing and the gate never asks GitHub for the base branch", async () => {

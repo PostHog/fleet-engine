@@ -69,9 +69,13 @@ which waits for it. A round is taken over when its command is gone, when its pro
 started later, or when its lock file stays empty for a minute.
 The settings pull-requests.freeReviews and pull-requests.reviewCeiling set how many reviews run before the arbiter weighs
 one more and where the loop stops: the panel rounds and the final reads of the review phase count together, and the
-final reads of the babysit phase count apart. The default budget is the panel, the fixes read, and the last read. A
-PR of the Read tier gets its one read and one final read of its fixes. The arbiter is the lookup model of your
-AI plan; HEDGE_REVIEW_ARBITER replaces its command.`;
+final reads of the babysit phase count apart. Only a review that leads to fixes counts: a finished review whose
+findings hold no blocker or major, and no finding without a severity, spends nothing. The default budget is the panel,
+the fixes read, and the last read. A PR of the Read tier gets its one read and one final read of its fixes. When the
+arbiter stops the loop, one final read of the net delta may still run without the arbiter, such as to confirm the
+revert of a fix. That read starts no other review: a blocker or major it finds goes to the user, and only the user's
+--override runs another review. The arbiter is the lookup model of your AI plan; HEDGE_REVIEW_ARBITER replaces its
+command.`;
 
 const subcommands: Record<string, Subcommand> = {
   path: {
@@ -505,7 +509,7 @@ round is --scope fixes, and a final read is --scope final; both take --base with
 review. The printed id names the round for review-finish and respond. A later round and a final read read only the net
 delta: their diff starts at their base merged with the base that HEAD contains, so a merge of the base adds nothing to
 read. A final read of a HEAD whose net delta is empty is refused, unless --agent with your reason, or the user's
---override, asks for it.
+--override, asks for it. After an arbiter stop, the one final read that may still run prints that it confirms the stop.
 A later round with --agent, or the user's --override, may be --scope full: it reviews
 the whole PR diff at HEAD again, such as after a restack.
 ${overrideHelp}`,
@@ -519,6 +523,7 @@ ${overrideHelp}`,
         await recordRound(directory, context);
       });
       context.print(JSON.stringify({ round, id, directory }));
+      await printConfirmingRead(directory, context);
       return 0;
     },
   },
@@ -566,6 +571,11 @@ async function runReview(options: Map<string, string>, head: ProofIdentity, cont
   });
 }
 
+async function printConfirmingRead(directory: string, { print }: CommandContext) {
+  const confirms = (await readReservation(directory))?.confirms;
+  if (confirms) print(`This final read confirms the arbiter's stop (${confirms}). It starts no other review: take each blocker or major it finds to the user.`);
+}
+
 async function printSavedReview({ round, id, directory }: SingleRound, { print }: CommandContext) {
   const reservation = await readReservation(directory);
   print(JSON.stringify({ round, id, directory, reviewer: reservation?.reviewer }));
@@ -602,6 +612,7 @@ async function askReviewer(reserved: SingleRound, head: ProofIdentity, author: F
   print(JSON.stringify({ round: reserved.round, id: reserved.id, directory: reserved.directory, reviewer: answer.model }));
   print(answer.text.trim());
   if (anchors) print(`\n${anchors}`);
+  await printConfirmingRead(reserved.directory, context);
   return 0;
 }
 
