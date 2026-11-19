@@ -27,7 +27,6 @@ export type Facts = {
 
 export type Thread = { status: string | null; archived: boolean; deleted: boolean; settled: boolean; wake: string | null; pending: boolean; activeAt: number; openLead: boolean };
 export type Verdict = { path: string; remove: boolean; reason: string };
-/** home: the home folder whose paths from before the rename hold repositories that prune never touches. */
 export type PruneOptions = {
   worktreeRoot: string; statePath: string; now: number; home?: string;
   repos: string[];
@@ -344,7 +343,6 @@ function removeIfDecided(facts: Facts, verdict: Verdict, options: PruneOptions, 
   return removed.exitCode === 0 ? decided : failed(removed.stderr.toString().trim());
 }
 
-/** Why prune keeps path without looking inside it: the path, or its Git repository, is in a Fleet path from before the rename. */
 function fromBeforeTheRename(home: string, path: string): string | undefined {
   if (underLegacyPath(home, path)) return "it is in a Fleet path from before the rename";
   const common = git(path, "rev-parse", "--path-format=absolute", "--git-common-dir");

@@ -11,19 +11,20 @@ const oldCron = "0 3 * * * /bin/sh '/old/nightly.sh' # fleet:nightly\n*/5 * * * 
 const running = { active: true, enabled: true };
 const off = { active: false, enabled: false };
 
-/** The engine with one more pack, whose watch service apply starts as hedge-watch.service. */
-function engineWithWatcher() {
+function engineWithWatcher(change?: (repo: string) => void) {
   const repo = temp.make("engine-watcher-");
   git(repo, "clone", "-q", engine.repo, ".");
   mkdirSync(join(repo, "packs/watcher"), { recursive: true });
   writeFileSync(join(repo, "packs/watcher/pack.json"), JSON.stringify({ schema: 1, name: "watcher", summary: "Watches.", jobs: [{ id: "watch", command: ["true"], schedule: { every: "always" } }] }));
+  change?.(repo);
   git(repo, "add", ".");
   git(repo, "commit", "-q", "-m", "watcher pack");
   return repo;
 }
 
-/** A Linux account that Fleet set up: its machine file, its profile, its watch service running under systemd, and a fleet: cron job beside one of the user's own. systemctl and crontab keep their state in a file between commands. */
-function fleetMachine(failing: string[] = []) {
+type Upgrade = { failing?: string[]; stuck?: string[]; lastWords?: (home: string) => SchedulerState["lastWords"]; engine?: (repo: string) => void };
+
+function fleetMachine({ failing = [], stuck, lastWords, engine: change }: Upgrade = {}) {
   const box = sandbox("Linux");
   const home = box.home;
   const repo = profile();
@@ -41,12 +42,12 @@ function fleetMachine(failing: string[] = []) {
   writeFileSync(join(home, ".config/systemd/user/fleet-watch.service"), "[Unit]\nDescription=Fleet: watch\n");
   const stateFile = join(box.root, "schedulers.json");
   const write = (state: SchedulerState) => writeFileSync(stateFile, JSON.stringify(state));
-  write({ ...emptySchedulers(), units: { "fleet-watch.service": running }, failing, crontab: oldCron });
+  write({ ...emptySchedulers(), units: { "fleet-watch.service": running }, failing, crontab: oldCron, ...(stuck && { stuck }), ...(lastWords && { lastWords: lastWords(home) }) });
   for (const tool of ["systemctl", "crontab"]) box.stub(tool, `exec "${process.execPath}" "${join(import.meta.dir, "testing/scheduler-cli.ts")}" "${stateFile}" ${tool} "$@"`);
   const state = () => JSON.parse(readFileSync(stateFile, "utf8")) as SchedulerState;
-  const engineRepo = engineWithWatcher();
+  const engineRepo = engineWithWatcher(change);
   const getShWith = (args: string[]) => getSh(box, ["--ref", "main", ...args], { env: { HEDGE_ENGINE_REPO: engineRepo, HEDGE_ACCOUNT_HOME: home } });
-  return { home, repo, state, getSh: getShWith, startsAgain: () => write({ ...state(), failing: [] }) };
+  return { home, repo, state, getSh: getShWith, startsAgain: () => write({ ...state(), failing: [], stuck: [] }) };
 }
 
 describe("get.sh upgrades a machine that Fleet runs", () => {
@@ -64,7 +65,7 @@ describe("get.sh upgrades a machine that Fleet runs", () => {
   });
 
   onLinuxHost("exits 1 when the Hedge service does not start, keeps Fleet's off, and an identical retry applies again", () => {
-    const machine = fleetMachine(["hedge-watch.service"]);
+    const machine = fleetMachine({ failing: ["hedge-watch.service"] });
 
     const first = machine.getSh([]);
     const afterFirst = machine.state();
@@ -117,5 +118,52 @@ describe("get.sh upgrades a machine that Fleet runs", () => {
     expect(result.output).not.toContain("unknown option");
     expect(machine.state()).toEqual({ ...emptySchedulers(), units: { "fleet-watch.service": running }, crontab: oldCron });
     expect(existsSync(join(machine.home, ".config/hedge"))).toBe(false);
+  });
+  onLinuxHost("when a Fleet unit does not stop, exits 1 before it copies or starts anything, and a retry once it stops copies and applies", () => {
+    const machine = fleetMachine({ stuck: ["fleet-watch.service"] });
+
+    const first = machine.getSh([]);
+    const afterFirst = machine.state();
+    const copied = existsSync(join(machine.home, ".config/hedge"));
+    machine.startsAgain();
+    const retry = machine.getSh([]);
+
+    expect(first.code).toBe(1);
+    expect(first.output).toContain("Hedge: Fleet may still run, so Hedge copied and applied nothing.");
+    expect([afterFirst.units["fleet-watch.service"]?.active, "hedge-watch.service" in afterFirst.units]).toEqual([true, false]);
+    expect(copied).toBe(false);
+    expect(retry.code).toBe(0);
+    expect([machine.state().units["fleet-watch.service"], machine.state().units["hedge-watch.service"]]).toEqual([off, running]);
+    expect(machine.state().both).toEqual([]);
+  });
+
+  onLinuxHost("a secret that Fleet saves while it stops reaches Hedge's secret store, also with --install-only", () => {
+    const results = [[], ["--install-only"]].map((args) => {
+      const machine = fleetMachine({ lastWords: (home) => [{ unit: "fleet-watch.service", file: join(home, ".local/state/fleet/secrets.jsonl"), line: '{"name":"late"}\n' }] });
+      mkdirSync(join(machine.home, ".local/state/fleet"), { recursive: true });
+      writeFileSync(join(machine.home, ".local/state/fleet/secrets.jsonl"), '{"name":"early"}\n', { mode: 0o600 });
+      const result = machine.getSh(args);
+      return { code: result.code, log: readFileSync(join(machine.home, ".local/state/hedge/secrets.jsonl"), "utf8") };
+    });
+
+    expect(results).toEqual([0, 0].map((code) => ({ code, log: '{"name":"early"}\n{"name":"late"}\n' })));
+  });
+
+  onLinuxHost("a dry run on an engine whose retire-fleet ignores --dry-run stops nothing and says it cannot name what still runs", () => {
+    const machine = fleetMachine({
+      engine: (repo) => {
+        const cli = join(repo, "src/cli.ts");
+        const source = readFileSync(cli, "utf8");
+        const ignoring = source.replace(/  if \(args\.length > 1 \|\| [^\n]*\n/, "").replace("  if (args.length) return listFleet(fleet, options);\n", "");
+        expect(ignoring).not.toBe(source);
+        writeFileSync(cli, ignoring);
+      },
+    });
+
+    const result = machine.getSh(["--", "--dry-run"]);
+
+    expect(result.code).toBe(0);
+    expect(result.output).toContain("so this preview does not name what still runs.");
+    expect(machine.state()).toEqual({ ...emptySchedulers(), units: { "fleet-watch.service": running }, crontab: oldCron });
   });
 });

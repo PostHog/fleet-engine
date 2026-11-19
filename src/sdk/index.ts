@@ -51,7 +51,6 @@ export type Hedge = {
   config(def: ConfigDef): void;
 };
 
-/** The name of Hedge before the rename, for packs that still use it. */
 export type Fleet = Hedge;
 
 export type Secrets = { read(name: string): Promise<string | undefined>; write(name: string, value: string): Promise<void> };

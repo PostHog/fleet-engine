@@ -48,6 +48,8 @@ async function pullProfile(options: UpdateOptions) {
 }
 
 /** The engine checkout must be clean, and its origin must be the profile's engine repository. */
+const fleetEngine = /\/fleet-engine(?:\.git)?$/;
+
 async function ready(options: UpdateOptions) {
   const status = await git(options.engineDir, "status", "--porcelain");
   if (!status.ok) return options.print(`hedge update: ${options.engineDir} is not an engine checkout: ${status.err}`), false;
@@ -55,6 +57,7 @@ async function ready(options: UpdateOptions) {
   const wanted = repoUrl(options.engine.repo);
   const origin = await git(options.engineDir, "remote", "get-url", "origin");
   if (origin.ok && origin.out === wanted) return true;
+  if (origin.ok && fleetEngine.test(wanted) && !fleetEngine.test(origin.out)) return true;
   const changed = await git(options.engineDir, "remote", origin.ok ? "set-url" : "add", "origin", wanted);
   if (!changed.ok) return options.print(`hedge update: could not point the engine at ${wanted}: ${changed.err}`), false;
   options.print(`The engine now comes from ${options.engine.repo}.`);

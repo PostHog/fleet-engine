@@ -8,7 +8,6 @@ export type Managed = { path: string; content: string };
 
 export const readIfThere = (path: string) => readFile(path, "utf8").catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return undefined; throw error; });
 
-/** Whether Hedge wrote content: its first line, or the line after an XML declaration, is marker, or the marker from before the rename that said Fleet. */
 export function ownedBy(content: string, marker: string): boolean {
   const [first, second] = content.split("\n", 2);
   const line = first?.startsWith("<?xml ") === true && first.endsWith("?>") ? second : first;

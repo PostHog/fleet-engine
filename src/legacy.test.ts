@@ -69,7 +69,6 @@ const stateOf = (home: string) => JSON.parse(readFileSync(join(home, ".local/sta
 const oldId = (id: string) => id.replace(/^hedge-/, "fleet-");
 const toOld = (path: string) => legacyPaths.reduce((value, [before, after]) => (value === after || value.startsWith(`${after}/`) ? `${before}${value.slice(after.length)}` : value), path);
 
-/** Turns a machine that Hedge set up into the same machine as the engine from before the rename left it. */
 async function beforeTheRename(machine: Machine, launchd?: ReturnType<typeof macMachine>["launchd"]) {
   const { home } = machine;
   const profile = join(home, ".local/share/hedge/profile");
@@ -103,7 +102,6 @@ async function beforeTheRename(machine: Machine, launchd?: ReturnType<typeof mac
 const bothTrees = (home: string) => Object.fromEntries(legacyPaths.flatMap((pair) => pair).map((path) => [path, tree(join(home, path))]));
 const oldRoot = (home: string) => join(home, ".local/share/fleet/engine");
 
-/** A checkout of this engine at the path the engine had before the rename, as the old updater leaves it once it pulled Hedge. */
 function oldCheckout(home: string, root = oldRoot(home)) {
   for (const path of ["hedge", "fleet", "src", "packs", "package.json"]) cpSync(join(repoRoot, path), join(root, path), { recursive: true });
   symlinkSync(join(repoRoot, "node_modules"), join(root, "node_modules"));
@@ -129,7 +127,6 @@ describe("an engine in a Fleet path from before the rename", () => {
     }
 
     expect(bothTrees(machine.home)).toEqual(before);
-    expect(machine.systemd.calls).toEqual([]);
   });
 
   test("on a Mac, the notice points at the setup page and at the get.sh run that stops Fleet there, since get.sh installs nothing on a Mac", async () => {

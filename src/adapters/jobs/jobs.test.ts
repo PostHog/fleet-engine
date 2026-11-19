@@ -529,7 +529,7 @@ describe("T3 scheduled tasks", () => {
     const report = await apply(plan("linux", [loop]), { home, adapters: [t3.adapter] });
     expect(report.ok).toBe(false);
     expect(report.findings).toContainEqual({ id: "tasks:fleet", pack: "engine", say: "The T3 Code task fleet:quality-loop from before the rename is still on, so Hedge added no task. Run hedge retire-fleet, then hedge apply.", repair: "human" });
-    expect(t3.calls).toEqual([]);
+    expect([...t3.tasks.values()].map((task) => [task.id, task.enabled])).toEqual([["fleet:quality-loop", true]]);
   });
 
   test("reports a T3 server that cannot list its tasks, and fails the apply", async () => {

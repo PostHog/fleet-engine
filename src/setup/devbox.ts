@@ -146,21 +146,28 @@ async function install(box: Machine, host: string, context: DevboxContext) {
   const { engineRef } = await context.profile();
   const getSh = `https://raw.githubusercontent.com/${engineRepo}/${engineRef}/get.sh`;
   await nameBox(box, host);
-  const download = `installer=$(mktemp) && { curl -fsSL ${quote(getSh)} -o "$installer" && sh "$installer" --ref ${quote(engineRef)} --install-only; s=$?; rm -f "$installer"; exit $s; }`;
-  await shown(box, download, `Hedge did not install on the devbox. Fix what it says above, then run ${again(context)} again.`);
+  const hedgeOnly = `{ grep -qF '/.local/share/hedge/engine' "$installer" || { rm -f "$installer"; exit ${refused}; }; }`;
+  const download = `installer=$(mktemp) && { curl -fsSL ${quote(getSh)} -o "$installer" && ${hedgeOnly} && sh "$installer" --ref ${quote(engineRef)} --install-only; s=$?; rm -f "$installer"; exit $s; }`;
+  const code = await box.run(["sh", "-c", download]);
+  if (code === refused) throw new Error(`Your profile pins the engine at ${engineRef}, from before Fleet became Hedge, so Hedge does not install it on ${host}. Set engine.ref in your profile to a Hedge release, then run hedge devbox add ${host} again.`);
+  if (code !== 0) throw new Error(`Hedge did not install on the devbox. Fix what it says above, then run ${again(context)} again.`);
 }
 
 const roleFolder = `"$HOME/.config/hedge"`;
 const roleFile = `"$HOME/.config/hedge/machine.json"`;
 
+const refused = 86;
+const linked = `{ [ ! -L ${roleFolder} ] && [ ! -L ${roleFile} ] || exit ${refused}; }`;
+
 export async function nameBox(box: Machine, host: string) {
-  const read = await box.exec(["sh", "-c", `[ ! -f ${roleFile} ] || cat ${roleFile}`]);
+  const read = await box.exec(["sh", "-c", `${linked} && { [ ! -f ${roleFile} ] || cat ${roleFile}; }`]);
+  if (read.code === refused) throw new Error(`~/.config/hedge or its machine.json on ${host} is a link, so Hedge does not write through it. Move the link away, then run hedge devbox add ${host} again.`);
   if (read.code !== 0) throw new Error(`Hedge could not reach ${host} over SSH: ${read.output.trim()}`);
   const saved = read.stdout.trim() ? roleOf(host, read.stdout) : undefined;
   if (saved?.name === host) return;
   if (saved?.name !== undefined) throw new Error(`${host} already calls itself ${String(saved.name)} in ~/.config/hedge/machine.json. Run hedge devbox add ${String(saved.name)} to keep that name, or set its name there to ${host} and run hedge devbox add ${host} again.`);
   const named = { schema: 1, role: "devbox", ...saved, name: host };
-  const written = await box.exec(["sh", "-c", `mkdir -p ${roleFolder} && cat > ${roleFile}`], { input: `${JSON.stringify(named)}\n` });
+  const written = await box.exec(["sh", "-c", `${linked} && mkdir -p ${roleFolder} && ${linked} && cat > ${roleFile}`], { input: `${JSON.stringify(named)}\n` });
   if (written.code !== 0) throw new Error(`Hedge could not write the role file on ${host}: ${written.output.trim()}`);
 }
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AvailableSource } from "../../src/pack/types.ts";
 import { tempDirs } from "../../src/testing/git.ts";
@@ -14,6 +14,8 @@ import { manifest, serve } from "./lib/slack.ts";
 import { handleTrigger, retryPending, syncFollowed, takeTurn, triggerOf, type Started, type TriggerDeps } from "./lib/trigger.ts";
 import { startSlackStub, type Message } from "./testing.ts";
 import { remoteLauncher } from "../../src/hub/ssh.ts";
+import { main } from "../../src/cli.ts";
+import { repoRoot } from "../../src/testing/cli.ts";
 
 const temp = tempDirs();
 const stops: Array<() => Promise<void> | void> = [];
@@ -418,8 +420,8 @@ describe("saving to the context library", () => {
     expect(sources).toHaveLength(6);
   });
 
-  function savedThread(wispr: (string | undefined)[], clock: { now: number }) {
-    const path = statePath(temp.make("home-"));
+  function savedThread(wispr: (string | undefined)[], clock: { now: number }, home = temp.make("home-")) {
+    const path = statePath(home);
     const told: string[] = [];
     const captures: (string | undefined)[] = [];
     const sentBefore: number[] = [];
@@ -447,6 +449,25 @@ describe("saving to the context library", () => {
     expect(JSON.parse(readFileSync(path, "utf8")).pending).toEqual({});
     await retryPending(deps);
     expect(captures).toHaveLength(1);
+  });
+
+  test("after hedge import-fleet, a capture that Fleet queued runs once, and an event that Fleet handled stays handled", async () => {
+    const home = temp.make("home-");
+    mkdirSync(join(home, ".local/state/fleet/slack"), { recursive: true });
+    const queued = { trigger: { kind: "capture", channel: "C1", ts: "1794830407.564399" }, since: 0, commandId: "c" };
+    writeFileSync(join(home, ".local/state/fleet/slack/slack-trigger.json"), JSON.stringify({ handled: { "C1:1794830000.000100": 500 }, followed: {}, pending: { "C1:1794830407.564399": queued } }), { mode: 0o600 });
+    const { deps, captures } = savedThread(["none"], { now: 1_000 }, home);
+    const launched: string[] = [];
+    deps.launch = async (request) => (launched.push(request.title), { failed: "no" });
+
+    expect(await main(["import-fleet"], { home, engineRoot: repoRoot, platform: "linux", env: {}, print: () => {}, run: async () => 0 })).toBe(0);
+    await retryPending(deps);
+    await handleTrigger({ kind: "message", channel: "C1", ts: "1794830000.000100" }, deps);
+
+    expect(captures).toEqual(["2026-11-16T12:00:07.564Z"]);
+    expect(launched).toEqual([]);
+    expect(JSON.parse(readFileSync(statePath(home), "utf8")).pending).toEqual({});
+    expect(lstatSync(statePath(home)).mode & 0o777).toBe(0o600);
   });
 
   test("a meeting whose Wispr notes are not ready gets one more look 30 minutes later, and only that look sends again, with what went out before", async () => {

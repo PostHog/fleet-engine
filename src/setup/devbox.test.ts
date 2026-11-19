@@ -50,7 +50,7 @@ describe("the devbox over SSH", () => {
     expect(machineFile(home).devboxes).toEqual(["node-1"]);
 
     const onTheBox = remote(box);
-    expect(onTheBox).toContainEqual(expect.stringMatching(/curl -fsSL \S+\/get\.sh -o "\$installer" && sh "\$installer" --ref main --install-only/));
+    expect(onTheBox).toContainEqual(expect.stringMatching(/curl -fsSL \S+\/get\.sh -o "\$installer" && .* && sh "\$installer" --ref main --install-only/));
     expect(onTheBox).toContain("gh auth login --hostname github.com --git-protocol https --web --scopes repo,read:org,admin:public_key,admin:ssh_signing_key,workflow");
     expect(onTheBox).toContain("gh auth setup-git");
     expect(onTheBox).toContainEqual(expect.stringContaining(`gh repo clone https://github.com/nora/hedge-profile.git "$HOME/.local/share/hedge/profile" -- -q && sh "$HOME/.local/share/hedge/engine/get.sh" --ref main --profile "$HOME/.local/share/hedge/profile"`));
