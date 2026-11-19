@@ -142,8 +142,8 @@ test("fleet decisions leaves out an old ✅ progress note whose bold text asks n
   ].join("\n"));
 });
 
-test("fleet decisions leaves out an old ✅ question with no answer", async () => {
-  const body = ["- ✅ **Which queue?**   ", "- ✅ **Which store?** Postgres"].join("\n");
+test("fleet decisions leaves out a question with no answer, under any mark", async () => {
+  const body = ["- ✅ **Which queue?**   ", "- 👤 **Which bus?**   ", "- ✅ **Which store?** Postgres"].join("\n");
   const lines: string[] = [];
 
   await runDecisions(["acme/maps#1"], { ...fixtureFetchers({ issues: [issueNode(repository, 1)], discussions: { "acme/maps#1": { body, comments: [] } } }), tracker: () => "", print: (line) => lines.push(line) });
@@ -158,7 +158,7 @@ test("fleet decisions leaves out an old ✅ question with no answer", async () =
 });
 
 test("fleet decisions reads an old ✅ question written as a link", async () => {
-  const body = "- ✅ **[Which store?](https://example.com/options)** Postgres";
+  const body = "- ✅ **[Which store?](https://example.com/Redis_(software))** Postgres";
   const lines: string[] = [];
 
   await runDecisions(["acme/maps#1"], { ...fixtureFetchers({ issues: [issueNode(repository, 1)], discussions: { "acme/maps#1": { body, comments: [] } } }), tracker: () => "", print: (line) => lines.push(line) });
@@ -166,7 +166,7 @@ test("fleet decisions reads an old ✅ question written as a link", async () => 
   expect(lines.join("\n")).toBe([
     "| Question | Answer | Who | Where |",
     "| --- | --- | --- | --- |",
-    `| [Which store?](https://example.com/options) | Postgres | ✅ Old mark (retired 2026-11-13) | [map #1](https://github.com/${repository}/issues/1) |`,
+    `| [Which store?](https://example.com/Redis_(software)) | Postgres | ✅ Old mark (retired 2026-11-13) | [map #1](https://github.com/${repository}/issues/1) |`,
     "",
     "Involvement: no human-in-the-loop tickets.",
   ].join("\n"));
@@ -185,6 +185,21 @@ test("fleet decisions keeps a marked answer over an old ✅ answer to the same q
     "| --- | --- | --- | --- |",
     `| Which store? | Postgres | 👤 Human | ${where} |`,
     `| Which queue? | Redis | ✅ Old mark (retired 2026-11-13) | ${where} |`,
+    "",
+    "Involvement: no human-in-the-loop tickets.",
+  ].join("\n"));
+});
+
+test("fleet decisions keeps a marked answer over an old ✅ answer to the same question written as a link", async () => {
+  const body = ["- 👤 **Which store?** Postgres", "- ✅ **[Which store?](https://example.com/options)** Redis"].join("\n");
+  const lines: string[] = [];
+
+  await runDecisions(["acme/maps#1"], { ...fixtureFetchers({ issues: [issueNode(repository, 1)], discussions: { "acme/maps#1": { body, comments: [] } } }), tracker: () => "", print: (line) => lines.push(line) });
+
+  expect(lines.join("\n")).toBe([
+    "| Question | Answer | Who | Where |",
+    "| --- | --- | --- | --- |",
+    `| Which store? | Postgres | 👤 Human | [map #1](https://github.com/${repository}/issues/1) |`,
     "",
     "Involvement: no human-in-the-loop tickets.",
   ].join("\n"));

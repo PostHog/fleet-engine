@@ -10,7 +10,7 @@ const whoByMark: Record<string, string> = {
 const oldMark = whoByMark["✅"]!;
 const whoOrder = Object.values(whoByMark);
 const decisionLine = /^\s*[-*]\s*(👤|👍|🤖|✅)️?[\u{1F3FB}-\u{1F3FF}]?\s+\*\*(.+?)\*\*\s*(\S.*?)\s*$/u;
-const markdownLink = /\[([^\]]*)\]\([^)]*\)/g;
+const markdownLink = /\[([^\]]*)\]\((?:[^()\s]|\([^()\s]*\))*\)/g;
 
 type Decision = { question: string; answer: string; who: string; where: string; at: string };
 type Resolution = { type?: string; rounds: number; decisions: Decision[] };
@@ -49,14 +49,18 @@ function decisionsIn(text: string, where: string, at: string): Decision[] {
 }
 
 function asksQuestion(label: string): boolean {
-  return label.replace(markdownLink, "$1").trim().endsWith("?");
+  return visibleText(label).endsWith("?");
+}
+
+function visibleText(label: string): string {
+  return label.replace(markdownLink, "$1").trim();
 }
 
 function newestPerQuestion(decisions: Decision[]): Decision[] {
   const byQuestion = new Map<string, Decision>();
   const oldestFirst = decisions.toSorted((left, right) => left.at.localeCompare(right.at));
   for (const decision of oldestFirst) {
-    const question = decision.question.trim().toLowerCase();
+    const question = visibleText(decision.question).toLowerCase();
     const kept = byQuestion.get(question);
     if (kept && kept.who !== oldMark && decision.who === oldMark) continue;
     if (kept?.who === oldMark && decision.who !== oldMark) byQuestion.delete(question);
