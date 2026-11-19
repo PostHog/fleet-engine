@@ -239,7 +239,7 @@ Show each command as you start it. Put only values that are not secret on a
 command line: every program on the Mac can read the arguments of a running
 command. A private value that is not a secret, such as an email address,
 shows as `<private>` in a command you show, and you never print it back.
-You never ask for, type, or pass a secret, such as a token or a key. Item 2
+You never ask for, type, or pass a secret, such as a token or a key. Item 4
 says what to do with a template parameter that holds one.
 
 1. **Names.** Use `hedge-hub` and `hedge-node-1`, `hedge-node-2`, and so on.
@@ -260,15 +260,14 @@ says what to do with a template parameter that holds one.
    web app, `<coder address>/templates/<template>`, and ask the person to
    read you the parameters and their allowed values from it.
 
-   Find the disk size, the region, and the dotfiles parameters. Then sort
-   each parameter by the first row of this table that fits it. A secret is a
-   parameter that holds a token, a key, a password, or another credential:
-   its name or description says so, or the form hides what you type.
+   Find the disk size, the region, the dotfiles, and the secret parameters.
+   A secret is a parameter that holds a token, a key, a password, or another
+   credential: its name or description says so, or the form hides what you
+   type. Never ask about a secret. Sort each other parameter by the first
+   row of this table that fits it:
 
    | Parameter | What you do |
    | --- | --- |
-   | A secret with a default | Skip it, and do not ask about it. Coder keeps its default. |
-   | A secret without a default | Skip it, and do not ask for it. The person creates this workspace in the Coder web form (item 4). |
    | The disk size | Pass the size that item 4 gives. |
    | The dotfiles | Pass the profile repo of item 3. |
    | The region | Ask. |
@@ -287,28 +286,32 @@ says what to do with a template parameter that holds one.
    log. That is expected. A team pack can keep the profile in its GitHub org
    instead; step 7 checks the repo again. Below, `<profile repo>` is the
    `owner/name` you found.
-4. **Create.** Pass each parameter that item 2 does not skip with its own
-   `--parameter`, also those where the default is right, so you see each
-   value Coder uses. Give the hub a 200 GB disk and each node a 500 GB disk.
+4. **Create.** Give the hub a 200 GB disk and each node a 500 GB disk.
+   When the template has a secret parameter, with a default or without,
+   never run `coder create` for it. For each parameter that a command leaves
+   out, the Coder CLI asks for a value, also with `--yes`, and prints the
+   default, so a secret would show in your output. Ask the
+   person to create each workspace in the Coder web UI instead: they open
+   the template's create form, give the workspace the name from item 1, and
+   fill in the values you give them. They leave a secret that has a default
+   as it is, and type a secret without a default themselves. Tell them first
+   that Coder keeps each value of the form with the workspace's build, so
+   anyone who can see the workspace can read the secret they type. Coder
+   does this for every workspace made from that template, so they decide
+   whether to type it. When they tell you the workspace name, go on with
+   item 5.
+
+   When the template has no secret parameter, run `coder create`. Pass each
+   parameter with its own `--parameter`, also those where the default is
+   right, so Coder asks nothing and you see each value it uses.
    `--preset none` stops the preset question that `--yes` does not skip:
 
    ```sh
    coder create <name> --template <template> --preset none --parameter <disk parameter>=<200 or 500> --parameter <region parameter>=<region> --parameter <dotfiles parameter>=https://github.com/<profile repo> --parameter <other parameter>=<value> --yes
    ```
 
-   Write one `--parameter` for each parameter that item 2 does not skip, and
-   none for a secret. Never use `--copy-parameters-from`: Coder then takes
-   the copied workspace's values over every `--parameter` you pass.
-
-   When the template has a secret without a default, do not run
-   `coder create` for that workspace. Ask the person to create it in the
-   Coder web UI: they open the template's create form, give the workspace the
-   name from item 1, fill in the values you give them, and type the secret
-   themselves. Tell them first that Coder keeps each value of the form with
-   the workspace's build, so anyone who can see the workspace can read the
-   secret they type. Coder does this for every workspace made from that
-   template, so they decide whether to type it. When they tell you the
-   workspace name, go on with item 5.
+   Never use `--copy-parameters-from`: Coder then takes the copied
+   workspace's values over every `--parameter` you pass.
 
    Start the hub and the nodes at once, each in the background. They take
    minutes; use the wait (see "While something runs").

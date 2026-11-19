@@ -163,62 +163,32 @@ describe("the agent setup guide", () => {
     expect(notes.map((note) => note.name).sort()).toEqual(held.sort());
   });
 
-  test("creates a 200 GB hub and 500 GB nodes in one coder create each, with every parameter that is not a secret given and the profile repo as dotfiles", () => {
+  test("steps 4 and 5 give the hub a 200 GB disk and each node a 500 GB disk", () => {
     expect(words(step(4))).toContain("one **hub** with a 200 GB disk and one **node** with a 500 GB disk");
-    const creates = codeIn(step(5)).filter((code) => code.startsWith("coder create "));
+    expect(words(step(5))).toContain("Give the hub a 200 GB disk and each node a 500 GB disk.");
+  });
+
+  test("the guide's one coder create command passes the disk, region, dotfiles, and every other parameter with --parameter, with --preset none and --yes", () => {
+    const creates = codeIn(guide()).filter((code) => code.startsWith("coder create "));
     expect(creates).toEqual(["coder create <name> --template <template> --preset none --parameter <disk parameter>=<200 or 500> --parameter <region parameter>=<region> --parameter <dotfiles parameter>=https://github.com/<profile repo> --parameter <other parameter>=<value> --yes\n"]);
-    expect(words(step(5))).toContain("Pass each parameter that item 2 does not skip with its own `--parameter`");
+    expect(words(step(5))).toContain("Pass each parameter with its own `--parameter`, also those where the default is right, so Coder asks nothing");
   });
 
-  type Parameter = { name: string; secret?: boolean; default?: string };
-  const roles: Record<string, string> = { disk_size: "disk size", region: "region", dotfiles_uri: "dotfiles" };
-  const placeholders: Record<string, string> = { "disk size": "<disk parameter>", region: "<region parameter>", dotfiles: "<dotfiles parameter>" };
-
-  function followStepFive(template: Parameter[]) {
-    const rows = [...step(5).matchAll(/^ *\| ([^|]+?) \| ([^|]+?) \|$/gm)].map((match) => ({ kind: match[1]!, action: match[2]! })).filter((row) => row.kind !== "Parameter" && !row.kind.startsWith("---"));
-    const fits = (kind: string, parameter: Parameter) => {
-      const role = kind.match(/^The (disk size|dotfiles|region)$/)?.[1];
-      if (role) return roles[parameter.name] === role;
-      const sort = kind.match(/^(A secret|Another parameter) (with|without) a default$/);
-      if (!sort) throw new Error(`step 5 sorts parameters by a row this test cannot read: ${kind}`);
-      return (sort[1] === "Another parameter" || parameter.secret === true) && (sort[2] === "with") === (parameter.default !== undefined);
-    };
-    const sorted = template.map((parameter) => {
-      const row = rows.find((candidate) => fits(candidate.kind, parameter));
-      if (!row) throw new Error(`no row of step 5 fits the parameter ${parameter.name}`);
-      const verb = row.action.match(/^(Ask|Pass|Skip)\b/)?.[1];
-      if (!verb) throw new Error(`step 5 says to do with ${parameter.name} what this test cannot read: ${row.action}`);
-      return { parameter, verb, webForm: /Coder web form/.test(row.action) };
-    });
-    const questions = sorted.filter((entry) => entry.verb === "Ask").map((entry) => entry.parameter.name);
-    if (sorted.some((entry) => entry.webForm)) return { questions, commands: [], webForm: true };
-    const others = sorted.filter((entry) => entry.verb !== "Skip" && !roles[entry.parameter.name]).map((entry) => `--parameter ${entry.parameter.name}=<value>`);
-    let create = codeIn(step(5)).find((code) => code.startsWith("coder create "))!.trim().replace("--parameter <other parameter>=<value>", others.join(" "));
-    for (const entry of sorted.filter((entry) => entry.verb !== "Skip" && roles[entry.parameter.name])) create = create.replace(placeholders[roles[entry.parameter.name]!]!, entry.parameter.name);
-    return { questions, commands: [create], webForm: false };
-  }
-
-  const template: Parameter[] = [
-    { name: "disk_size", default: "100" },
-    { name: "region" },
-    { name: "dotfiles_uri", default: "" },
-    { name: "instance_type", default: "m7g.xlarge" },
-    { name: "team" },
-    { name: "backup_key", secret: true, default: "none" },
-  ];
-
-  test("with a template that has a secret without a default, asks for no secret, creates no workspace with coder create, and hands the create to the person in the Coder web form", () => {
-    const followed = followStepFive([...template, { name: "api_token", secret: true }]);
-    expect(followed).toEqual({ questions: ["region", "team"], commands: [], webForm: true });
-    expect(words(step(5))).toContain("Tell them first that Coder keeps each value of the form with the workspace's build, so anyone who can see the workspace can read the secret they type. Coder does this for every workspace made from that template, so they decide whether to type it.");
+  test("no command in the guide or a pack note passes a secret to Coder: no secret --parameter, no --rich-parameter-file, no --parameter-default, no coder secret", () => {
+    const lines = [guide(), ...notePaths().map((path) => readFileSync(join(root, path), "utf8"))].flatMap(codeIn).flatMap((code) => code.split("\n"));
+    expect(lines.filter((line) => /--parameter[ =][^ ]*(secret|token|key|password)|--rich-parameter-file|--parameter-default|coder secret /i.test(line))).toEqual([]);
   });
 
-  test("with a template whose only secret has a default, asks for no secret and creates the workspace without passing it, so Coder keeps its default", () => {
-    const followed = followStepFive(template);
-    expect(followed.questions).toEqual(["region", "team"]);
-    expect(followed.commands).toEqual(["coder create <name> --template <template> --preset none --parameter disk_size=<200 or 500> --parameter region=<region> --parameter dotfiles_uri=https://github.com/<profile repo> --parameter instance_type=<value> --parameter team=<value> --yes"]);
-    const commands = [guide(), ...notePaths().map((path) => readFileSync(join(root, path), "utf8"))].flatMap(codeIn).flatMap((code) => code.split("\n"));
-    expect([...followed.commands, ...commands].filter((line) => /--parameter (backup_key|api_token|<secret)|--rich-parameter-file|coder secret /.test(line))).toEqual([]);
+  test("step 5 sends a template with any secret parameter, with a default or without, to the Coder web form, warns first that the form's values are readable, and runs coder create only for a template without one", () => {
+    const text = words(step(5));
+    expect(text).toContain("When the template has a secret parameter, with a default or without, never run `coder create` for it.");
+    expect(text).toContain("Ask the person to create each workspace in the Coder web UI instead");
+    expect(text).toContain("They leave a secret that has a default as it is, and type a secret without a default themselves.");
+    expect(text).toContain("Tell them first that Coder keeps each value of the form with the workspace's build, so anyone who can see the workspace can read the secret they type.");
+    expect(text).toContain("When the template has no secret parameter, run `coder create`.");
+    expect(text).toContain("Never ask about a secret.");
+    const rows = [...step(5).matchAll(/^ *\| ([^|]+?) \| ([^|]+?) \|$/gm)].map((match) => match[1]!);
+    expect(rows.filter((kind) => /secret/i.test(kind))).toEqual([]);
   });
 
   test("checks each new workspace with the engine's own check, given only the parameters the guide sets and no private value, and replaces a workspace whose fixed parameter is wrong before setup", () => {
