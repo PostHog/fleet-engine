@@ -1,6 +1,6 @@
 import { isAbsolute } from "node:path";
 import { type Hook, printing, quiet, runHook } from "../lib/hook.ts";
-import { formatEditedFile, type RunCommand } from "../lib/format-commands.ts";
+import { formatEditedFile, type RunCommand, safePath } from "../lib/format-commands.ts";
 import { type ToolEvent, writtenFiles } from "../lib/written-files.ts";
 
 export const budgetMs = 75_000;
@@ -10,7 +10,7 @@ const shownLines = 40;
 export const runCommand: RunCommand = async (command, cwd, timeoutMs) => {
   let child: ReturnType<typeof Bun.spawn>;
   try {
-    child = Bun.spawn(command, { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe", timeout: timeoutMs, killSignal: "SIGKILL" });
+    child = Bun.spawn(command, { cwd, env: { ...process.env, PATH: safePath(cwd) }, stdin: "ignore", stdout: "pipe", stderr: "pipe", timeout: timeoutMs, killSignal: "SIGKILL" });
   } catch {
     return undefined;
   }
