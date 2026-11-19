@@ -3,7 +3,7 @@ import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { gitEnv, isolateGit, spawnGit, tempDirs } from "../testing/git.ts";
 import { profilePath } from "./profile.ts";
-import { fakeMachine, hedgeSetup, githubRepo, pushedAnswers } from "./testing.ts";
+import { changeOnFirstCommit as changeOnFirstCommitIn, fakeMachine, hedgeSetup, githubRepo, pushedAnswers } from "./testing.ts";
 
 isolateGit();
 const temp = tempDirs();
@@ -57,17 +57,7 @@ describe("hedge setup with a devbox", () => {
 
   const devboxArgs = ["--preset", "everyday", "--plan", "claude", "--workflows", "pr-digest=on", "--devbox", "node-1"];
 
-  async function changeOnFirstCommit(home: string, change: string) {
-    const elsewhere = join(temp.make("elsewhere-"), "profile");
-    await spawnGit(home, "clone", "-q", githubRepo(home, "nora/hedge-profile"), elsewhere);
-    const publish = join(elsewhere, "..", "publish.ts");
-    writeFileSync(publish, `const [file, value] = process.argv.slice(2);\nconst profile = await Bun.file(file).json();\n${change}\nawait Bun.write(file, JSON.stringify(profile, null, 2) + "\\n");\n`);
-    const changeElsewhere = (value: string) => `'${process.execPath}' '${publish}' hedge.json ${value}`;
-    const marker = join(elsewhere, "..", "published");
-    const hook = `#!/bin/sh\n[ -e '${marker}' ] && exit 0\ntouch '${marker}'\nunset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX\ncd '${elsewhere}' && git pull -q && ${changeElsewhere("after")} && git commit -q -am 'Change the profile on another machine' && git push -q\n`;
-    writeFileSync(join(profilePath(home), ".git/hooks/post-commit"), hook, { mode: 0o755 });
-    return (value: string) => expect(Bun.spawnSync(["sh", "-c", `cd '${elsewhere}' && ${changeElsewhere(value)} && git commit -q -am 'Change the profile on another machine' && git push -q`], { env: gitEnv }).exitCode).toBe(0);
-  }
+  const changeOnFirstCommit = (home: string, change: string) => changeOnFirstCommitIn(home, join(temp.make("elsewhere-"), "profile"), change);
 
   test("a devbox setting saved while another machine changes a setting keeps that machine's value", async () => {
     const home = temp.make("home-");
@@ -93,6 +83,22 @@ describe("hedge setup with a devbox", () => {
     expect((await pushedAnswers(home)).settings).toEqual({ "orchestration.loopProject": "after" });
     expect((await hedgeSetup(home, devboxArgs, ["~/code/app"], fakeMachine(home))).code).toBe(0);
     expect((await pushedAnswers(home)).settings).toEqual({ "orchestration.loopProject": "~/code/app" });
+  });
+
+  test("stops when another machine changes a devbox setting while setup asks it, and the same command run again keeps that machine's value", async () => {
+    const home = temp.make("home-");
+    expect((await hedgeSetup(home, devboxArgs, ["", ""], fakeMachine(home))).code).toBe(130);
+    const publish = await changeOnFirstCommit(home, 'profile.settings = { ...profile.settings, "orchestration.loopProject": value };');
+    rmSync(join(profilePath(home), ".git/hooks/post-commit"));
+    publish("old-project");
+
+    const stopped = await hedgeSetup(home, devboxArgs, [() => (publish("new-project"), "")], fakeMachine(home));
+
+    expect(stopped.code).toBe(1);
+    expect(stopped.output).toContain(`hedge: ${profilePath(home)}: another machine saved your profile while this command ran. Run the same command again: it starts from the profile as it is now.`);
+    expect((await pushedAnswers(home)).settings).toEqual({ "orchestration.loopProject": "new-project" });
+    expect((await hedgeSetup(home, devboxArgs, [""], fakeMachine(home))).code).toBe(0);
+    expect((await pushedAnswers(home)).settings).toEqual({ "orchestration.loopProject": "new-project" });
   });
 
   test("stops before it saves a devbox setting when hedge.json has a staged change, and keeps that change", async () => {

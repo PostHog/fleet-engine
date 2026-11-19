@@ -5,7 +5,7 @@ import { main } from "../cli.ts";
 import type { FetchedSource, SourceRef } from "../pack/types.ts";
 import type { ExecResult, Machine } from "./commands.ts";
 import { quote } from "../hub/ssh.ts";
-import { gitEnv } from "../testing/git.ts";
+import { gitEnv, spawnGit } from "../testing/git.ts";
 import { profilePath } from "./profile.ts";
 import { Stopped, type Terminal } from "./terminal.ts";
 import { remoteLauncher } from "../hub/ssh.ts";
@@ -13,14 +13,17 @@ import { remoteLauncher } from "../hub/ssh.ts";
 export const engineRoot = join(import.meta.dir, "../..");
 
 /** Types each reply in turn; when the replies run out it acts like Ctrl-C. */
-export function scripted(replies: string[]) {
+export type Reply = string | (() => string | Promise<string>);
+
+export function scripted(replies: Reply[]) {
   const lines: string[] = [];
   const prompts: string[] = [];
   const terminal: Terminal = {
     print: (line) => void lines.push(line),
     async ask(prompt) {
       prompts.push(prompt);
-      const reply = replies.shift();
+      const next = replies.shift();
+      const reply = typeof next === "function" ? await next() : next;
       if (reply === undefined) throw new Stopped();
       lines.push(`${prompt}${reply}`);
       return reply;
@@ -360,7 +363,7 @@ function installerBin(home: string, installers: Record<string, string>) {
 
 export const remote = (box: ReturnType<typeof fakeMachine>) => [...box.calls.map((call) => onBox(call.command)), ...box.starts.map(onBox), ...box.runs.map((run) => onBox(run.command))].filter(Boolean) as string[];
 
-export async function hedgeSetup(home: string, args: string[], replies: string[] = [], box = fakeMachine(home), fetchSource?: (ref: SourceRef, cache: string) => Promise<FetchedSource>, doctorCode = 0, platform: NodeJS.Platform = "linux", onApply: (dir: string) => void | Promise<void> = () => {}) {
+export async function hedgeSetup(home: string, args: string[], replies: Reply[] = [], box = fakeMachine(home), fetchSource?: (ref: SourceRef, cache: string) => Promise<FetchedSource>, doctorCode = 0, platform: NodeJS.Platform = "linux", onApply: (dir: string) => void | Promise<void> = () => {}) {
   const io = scripted(replies);
   const applied: string[] = [];
   const skipped: string[][] = [];
@@ -379,4 +382,18 @@ export const savedAnswers = (home: string) => JSON.parse(readFileSync(join(profi
 /** The answers as pushed to the fake github.com. */
 export async function pushedAnswers(home: string, repo = "nora/hedge-profile") {
   return JSON.parse((await realGit(home, ["--git-dir", githubRepo(home, repo), "show", "main:hedge.json"])).output);
+}
+
+export async function changeOnFirstCommit(home: string, elsewhere: string, change: string) {
+  await spawnGit(home, "clone", "-q", githubRepo(home, "nora/hedge-profile"), elsewhere);
+  const publish = join(elsewhere, "..", "publish.ts");
+  writeFileSync(publish, `const [file, value] = process.argv.slice(2);\nconst profile = await Bun.file(file).json();\n${change}\nawait Bun.write(file, JSON.stringify(profile, null, 2) + "\\n");\n`);
+  const changeElsewhere = (value: string) => `'${process.execPath}' '${publish}' hedge.json ${value}`;
+  const marker = join(elsewhere, "..", "published");
+  const hook = `#!/bin/sh\n[ -e '${marker}' ] && exit 0\ntouch '${marker}'\nunset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX\ncd '${elsewhere}' && git pull -q && ${changeElsewhere("after")} && git commit -q -am 'Change the profile on another machine' && git push -q\n`;
+  writeFileSync(join(profilePath(home), ".git/hooks/post-commit"), hook, { mode: 0o755 });
+  return (value: string) => {
+    const published = Bun.spawnSync(["sh", "-c", `cd '${elsewhere}' && git pull -q && ${changeElsewhere(value)} && git commit -q -am 'Change the profile on another machine' && git push -q`], { env: gitEnv });
+    if (published.exitCode !== 0) throw new Error(`could not publish from ${elsewhere}: ${published.stderr.toString()}`);
+  };
 }

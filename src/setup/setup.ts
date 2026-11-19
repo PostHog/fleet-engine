@@ -192,12 +192,13 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
     pushed: (step) => ({
       ...step,
       async run() {
-        const outcome = await step.run();
         const key = step.id.slice("setting:".length);
+        const seen = progress.draft.settings?.[key];
+        const outcome = await step.run();
         const value = progress.draft.settings?.[key];
         if (outcome !== "unanswered" && machine.profileDir && value !== undefined) {
           await fastForward(box, options.home, machine.profileDir);
-          await pushSetting(machine.profileDir, key, value, await saveTarget(box, machine.profileDir));
+          await pushSetting(machine.profileDir, key, value, seen, await saveTarget(box, machine.profileDir));
         }
         return outcome;
       },

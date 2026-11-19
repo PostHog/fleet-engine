@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import type { MachineFile, PackManifest, Profile, ProfileFile, SourceRef } from "../pack/types.ts";
+import type { MachineFile, PackManifest, Profile, ProfileFile, SettingValue, SourceRef } from "../pack/types.ts";
 import { configEntryProblem, isModelRow } from "../pack/manifest.ts";
 import { sourceName } from "../pack/sources.ts";
 import { withoutCredentials } from "../credentials.ts";
@@ -55,7 +55,7 @@ export async function saveAnswers(dir: string, answers: Partial<ProfileFile>, op
   if (options.push) await push(dir);
 }
 
-export async function pushSetting(dir: string, key: string, value: unknown, target: string[]) {
+export async function pushSetting(dir: string, key: string, value: SettingValue, seen: SettingValue | undefined, target: string[]) {
   refuseLegacyPath(dir);
   const path = profileFile(dir);
   refuseLegacyPath(path);
@@ -63,8 +63,10 @@ export async function pushSetting(dir: string, key: string, value: unknown, targ
   const edited = await run(dir, "git", "status", "--porcelain", "--", name);
   if (!edited.ok) throw new ProfileError(`${dir}: could not check ${name}: ${edited.stderr}`);
   if (edited.stdout) throw new ProfileError(`${dir}: ${name} has changes that are not committed. Commit or discard them, then try again.`);
-  const answers = { settings: { [key]: value } } as Partial<ProfileFile>;
-  const setting = async () => JSON.stringify(((await readJson(path))?.settings as Record<string, unknown> | undefined)?.[key]);
+  const answers: Partial<ProfileFile> = { settings: { [key]: value } };
+  const unchanged = async () => JSON.stringify(((await readJson(path))?.settings as Record<string, unknown> | undefined)?.[key]) === JSON.stringify(seen);
+  const meanwhile = new ProfileError(`${dir}: another machine saved your profile while this command ran. Run the same command again: it starts from the profile as it is now.`);
+  if (!(await unchanged())) throw meanwhile;
   const pushOnTop = async () => {
     const head = await run(dir, "git", "rev-parse", "--verify", "HEAD");
     if (!head.ok) throw new ProfileError(`${dir}: has no commit to save answers on top of.`);
@@ -77,11 +79,10 @@ export async function pushSetting(dir: string, key: string, value: unknown, targ
     return false;
   };
   if (await pushOnTop()) return;
-  const before = await setting();
   const pulled = await run(dir, "git", "pull", "-q", "--ff-only", "--no-rebase");
   if (!pulled.ok) throw new ProfileError(`${dir}: could not take what another machine pushed: ${gitReason(pulled.stderr) ?? "git pull failed"}. Run git -C ${dir} pull --ff-only, then run the same command again.`);
-  if (before === (await setting()) && (await pushOnTop())) return;
-  throw new ProfileError(`${dir}: another machine saved your profile while this command ran. Run the same command again: it starts from the profile as it is now.`);
+  if ((await unchanged()) && (await pushOnTop())) return;
+  throw meanwhile;
 }
 
 async function commitAnswers(dir: string, answers: Partial<ProfileFile>) {
@@ -119,7 +120,7 @@ async function push(dir: string, target: string[] = []) {
   if (!pushed.ok) throw pushFailed(dir, pushed.stderr);
 }
 
-const pushedBehind = (stderr: string) => /\((fetch first|non-fast-forward)\)/.test(stderr);
+export const pushedBehind = (stderr: string) => /\((fetch first|non-fast-forward)\)/.test(stderr);
 
 function pushFailed(dir: string, stderr: string) {
   const reason = gitReason(stderr);
