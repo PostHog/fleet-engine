@@ -2,13 +2,13 @@ import { closeSync, existsSync, openSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import { askGap, authorOf, finishReview, startGateRun, ledgerRoot, listStanding, panelCommit, proofDirectory, readJson, readOwed, recordGap, recordGapCommand, recordStanding, requireChoice, stopIdOf, requireNone, devPr, requireProofs, requireReservation, respondToReview, reuseProof, reviewDirectory, reviewOfCommit, reviewRecords, roundId, roundQuestion, runOption, saveProof, startReview, stopOption, storeCapturedFindings, unfinishedReview, writeJson, markRecorded, readReservation, recordReceipt, roundDirectories, unrecordedElsewhere, type Arbiter, type Reservation, type CapturedBy, type ProofIdentity } from "./proof.ts";
+import { askGap, authorOf, pullRequestDirectory, finishReview, startGateRun, ledgerRoot, listStanding, panelCommit, proofDirectory, readJson, readOwed, recordGap, recordGapCommand, recordStanding, requireChoice, stopIdOf, requireNone, devPr, requireProofs, requireReservation, respondToReview, reuseProof, reviewDirectory, reviewOfCommit, reviewRecords, roundId, roundQuestion, runOption, saveProof, startReview, stopOption, storeCapturedFindings, unfinishedReview, writeJson, markRecorded, readReservation, recordReceipt, roundDirectories, unrecordedElsewhere, type Arbiter, type Reservation, type CapturedBy, type ProofIdentity } from "./proof.ts";
 import { AnswerTaken, appendOnce, decideAlone, hearUser, ledgerHolds, ledgerOf } from "./decision-cli.ts";
 import { HubUnreachable, refText, thisMachine, type Decision, type Ssh } from "./decision-ledger.ts";
 import { readComment, runIn } from "./pr-ci.ts";
 import { askModel, family, familyOf, isQuotaExhausted, modelLabel, quotaExitCode, readRubric, reviewerRow, sessionFamily, skillReferences, type Family } from "./proof-models.ts";
 import { runProof, type RunIO } from "./proof-run.ts";
-import { combinedLens, parseGuide, lensBrief, lensIdle, lensLog, panelGuideText, panelLines, publishPanel, readPanelGuide, readPlan, recordWorker, requeueFailed, resolveLens, runLens, stagedPlan, stagePanel, waitForPanel, withRoundLock, withSlot, lockNewRound, processStart, roundLock, RoundBusy, RoundGone, type Lens, type LockOwner, type PanelGuide, type PanelIO, type Plan, type RoundLock, type StartTime } from "./proof-panel.ts";
+import { combinedLens, parseGuide, lensBrief, lensIdle, lensLog, panelGuideText, panelLines, publishPanel, readPanelGuide, readPlan, recordWorker, requeueFailed, resolveLens, runLens, stagedPlan, stagePanel, waitForPanel, withReviewLock, withSlot, processStart, reviewLock, ReviewsBusy, type Lens, type LockOwner, type PanelGuide, type PanelIO, type Plan, type ReviewLock, type StartTime } from "./proof-panel.ts";
 import { evalsPath, promptTemplateHash, readRuns, reportLines, saveRun, scoreCases, type EvalIO } from "./proof-eval.ts";
 import { hashOf, missesPath, missSource, missSources, readMisses, recordMiss } from "./proof-misses.ts";
 import { githubRequest, publishProof, type GitHub } from "./proof-publish.ts";
@@ -38,7 +38,7 @@ export type ProofContext = {
 type Result = { code: number; stdout: string; stderr: string };
 type Run = (command: string[]) => Result;
 type Parsed = { options: Map<string, string>; lists: Map<string, string[]>; flags: Set<string>; files: string[]; command?: string[] };
-type CommandContext = ProofContext & { run: Run; lock: () => Promise<RoundLock> };
+type CommandContext = ProofContext & { run: Run; lock: () => Promise<ReviewLock> };
 type Subcommand = {
   usage: string; summary: string; examples: string[]; options?: string[]; repeatable?: string[]; flags?: string[]; hidden?: boolean; takesCommand?: boolean;
   run: (parsed: Parsed, identity: () => ProofIdentity, context: CommandContext) => Promise<number>;
@@ -57,17 +57,18 @@ as a 🤖 review decision, refused on a PR whose merge-risk callout has no Tier 
 name. The round keeps the decision and the arbiter's verdict. List decisions with hedge decision list.
 A round starts only once its decision is in the ledger. A round that holds a decision stays reserved until the
 ledger holds another decision for the same answer. A round of another commit whose decision is still not in the
-ledger is dropped when the next round starts: its decision never counted. It stays reserved while the hub is down or
-while another command works on it, and the next round starts anyway. When the hub fails or the command stops
+ledger is dropped when the next round starts: its decision never counted. It stays reserved while the hub is down,
+and the next round starts anyway. When the hub fails or the command stops
 before the decision is recorded, run the same command again: it records the same decision, appends it only when the
 ledger does not hold it yet, asks for no new answer, and goes on with that round. A panel whose lenses never started
 starts them on the same command or on --wait, with or without --round, and each lens starts once. A single-reviewer
 round whose findings are saved prints them and runs no reviewer again. review-finish records the round's decision
-first when its review-start ended before it did. Commands on one round take turns, and a new round is reserved with
-its lock already held. A command that finds another hedge proof command at work on the round stops and names its
-process and lock file; wait for it to end, then run the command again, or, on a panel, run hedge proof review --wait,
-which waits for it. A round is taken over when its command is gone, when its process id now names a process that
-started later, or when its lock file stays empty for a minute.
+first when its review-start ended before it did. Commands on the reviews of one PR take turns: each holds the PR's
+reviews.lock from its first read of the rounds and the arbiter's stop to its last write, through every wait on T3, the
+hub, or a reviewer. A command that finds another hedge proof command at work stops and names its process and lock
+file; wait for it to end, then run the command again. hedge proof review --wait keeps polling. The lock is taken over
+when its command is gone, when its process id now names a process that started later, or when its lock file stays
+empty for a minute.
 The settings pull-requests.freeReviews and pull-requests.reviewCeiling set how many reviews run before the arbiter weighs
 one more and where the loop stops: the panel rounds and the final reads of the review phase count together, and the
 final reads of the babysit phase count apart. Only a review that leads to fixes counts: a finished review whose
@@ -248,7 +249,7 @@ runs again with the lenses it started with when you pass no --lens.
 row for a PR that Claude wrote, and the review-codex row for a PR that Codex wrote when the table has one, else the
 review row. On the both plan that reviewer is the family that did not write the PR; on a single plan it is a fresh
 session of that provider. hedge builds the prompt from the diff, the PR title and description, and the coding
-standards in ~/.agents/guides/coding-standards.md, and saves the reviewer's answer as the findings. hedge checks each
+standards in ~/.agents/guides/coding-standards.md, redacts known secrets in all of it, and saves the reviewer's answer as the findings. hedge checks each
 finding's anchor against the diff and prints the result after the findings; it keeps it apart, in anchors.md. Answer them with hedge proof respond. Scope and --base work as for
 review-start. When the reviewer gives no answer, the round stays reserved and the next hedge proof review on the same
 commit retries it. The setting pull-requests.reviewTimeoutMinutes limits the reviewer. HEDGE_PROOF_REVIEWER replaces
@@ -271,7 +272,7 @@ to that family's reviewer.
 --knowledge adds the repo's review material for a lens, and gives the text of a Team perspective that PANEL.md does
 not list. hedge starts the lenses in the background and returns at once; at most pull-requests.panelSlots reviewers
 run at once on this machine, and the rest wait. Each raw answer is kept in lenses/<name>.md. A lens that ends without
-a FINDINGS block or a COVERED list of every changed file runs once more, and a lens stopped by spent quota does not;
+a FINDINGS block or a COVERED list of every changed file, by the name its brief shows, runs once more, and a lens stopped by spent quota does not;
 when it fails again, the round stays unfinished with the cause, and the same review --lens command reruns the failed
 lenses; :same or :other moves a failed lens to the family that is up when the other has an outage. When every lens
 is done, hedge joins the answers under one heading per lens as the round's findings. On a PR of the Read tier the
@@ -527,8 +528,8 @@ deleted file too. The base is the PR's base commit on GitHub. Each round records
 and its REVIEW.md rules read that commit. A final read of a HEAD whose net delta is empty is refused, unless --agent
 with your reason, or the user's --override, asks for it. A later round or final read whose net delta hedge cannot read
 is refused, with the command that recovers, such as a full read, which names the user's --override once the review
-budget is spent. An unfinished round that an older Hedge reserved does not resume: hedge prints the command that
-starts a new one.
+budget is spent or a read confirmed the arbiter's stop. An unfinished round that an older Hedge reserved does not resume: hedge proof review and its --wait
+refuse it and print the rm -rf that deletes it; then run the review command again.
 A --scope full round reads from where HEAD branched from the PR's base commit on GitHub. A final read
 whose net delta is not empty runs even when the review budget is spent. After an arbiter escalation, the one final
 read that may still run names the stop it confirms in the "confirms" field of the printed JSON.
@@ -539,13 +540,13 @@ ${overrideHelp}`,
     options: ["--scope", "--base", "--phase", "--override", "--thread", "--agent", "--standing"],
     run: async ({ options }, identity, context) => {
       const head = identity();
-      const { round, id, directory } = await unrecordedRound(options, head, context) ?? await reserveRound(options, head, context, "author");
-      await roundStep(directory, context, async () => {
+      return reviewStep(head, context, async () => {
+        const { round, id, directory } = await unrecordedRound(options, head, context) ?? await reserveRound(options, head, context, "author");
         await takeOverride(directory, options, head, context);
         await recordRound(directory, context);
+        context.print(JSON.stringify({ round, id, directory, ...await confirmingRead(directory) }));
+        return 0;
       });
-      context.print(JSON.stringify({ round, id, directory, ...await confirmingRead(directory) }));
-      return 0;
     },
   },
   "review-finish": {
@@ -562,13 +563,13 @@ first and needs the hub; a round whose decision is recorded finishes without it.
       const round = roundId(required(options, "--round", "review-finish"));
       const reviewer = required(options, "--reviewer", "review-finish");
       const head = identity();
-      const directory = await reviewDirectory(context.home, head, round);
-      await requireReservation(directory);
-      await roundStep(directory, context, async () => {
+      return reviewStep(head, context, async () => {
+        const directory = await reviewDirectory(context.home, head, round);
+        await requireReservation(directory);
         await recordRound(directory, context);
         context.print(await finishReview(context.home, head, round, resolve(context.cwd, findings[0]!), reviewer));
+        return 0;
       });
-      return 0;
     },
   },
 };
@@ -576,21 +577,15 @@ first and needs the hub; a round whose decision is recorded finishes without it.
 type SingleRound = { round: number | "final"; id: string; directory: string; scope: string; base?: string; from: string; merged?: Merged; baseSha: string; phase?: string };
 type Pending = { reservation: Reservation; directory: string };
 
-function resumable({ reservation, directory }: Pending, lenses?: string[]) {
+function resumable({ reservation, directory }: Pending) {
   const { from, baseSha } = reservation;
   if (from && baseSha && (reservation.scope === "full" || reservation.merged)) return { from, baseSha };
-  throw new Error(`Review ${basename(directory)} was reserved by an older Hedge, which recorded no merged start or base on GitHub, so it cannot resume. Start a new one with rm -rf '${directory.replaceAll("'", `'\\''`)}' && hedge proof review ${restartOptions(reservation, lenses)}`);
+  throw new Error(`Review ${basename(directory)} was reserved by an older Hedge, which recorded no merged start or base on GitHub, so it cannot resume. Delete it with rm -rf '${directory.replaceAll("'", `'\\''`)}', then run the hedge proof review command you ran for it again`);
 }
-
-const restartOptions = (reservation: Reservation, lenses: string[] | undefined) => [
-  reservedOptions(reservation),
-  ...lenses ? lenses.map((lens) => `--lens ${lens}`) : reservation.scope === "full" ? ["--single"] : [],
-  reservation.scope === "full" && reservation.round !== 1 && "--agent '<your reason>'",
-].filter(Boolean).join(" ");
 
 const plannedLenses = (plan: Plan) => plan.arguments ?? (plan.lenses.some(({ name }) => name === "combined") ? [] : plan.lenses.map(({ name }) => name));
 
-async function runReview(options: Map<string, string>, head: ProofIdentity, context: CommandContext) {
+const runReview = (options: Map<string, string>, head: ProofIdentity, context: CommandContext) => reviewStep(head, context, async () => {
   const { home, run } = context;
   const author = await authorOf(home, head);
   const pending = await unfinishedReview(home, head, "hedge");
@@ -598,14 +593,12 @@ async function runReview(options: Map<string, string>, head: ProofIdentity, cont
   const reserved: SingleRound = pending
     ? { round: pending.reservation.round, id: basename(pending.directory), directory: pending.directory, scope: pending.reservation.scope, base: pending.reservation.base, ...resumable(pending), merged: pending.reservation.merged, phase: (pending.reservation as { phase?: string }).phase }
     : await reserveHedgeReview(options, head, context);
-  return roundStep(reserved.directory, context, async () => {
-    if (await readPlan(reserved.directory) || await stagedPlan(reserved.directory)) throw new Error(`${reserved.directory} is an unfinished panel. Rerun it with the same hedge proof review --lens command, or wait for it with --wait`);
-    await takeOverride(reserved.directory, options, head, context);
-    await recordRound(reserved.directory, context);
-    if (existsSync(join(reserved.directory, "findings.md"))) return printSavedReview(reserved, context);
-    return askReviewer(reserved, head, author, context);
-  });
-}
+  if (await readPlan(reserved.directory) || await stagedPlan(reserved.directory)) throw new Error(`${reserved.directory} is an unfinished panel. Rerun it with the same hedge proof review --lens command, or wait for it with --wait`);
+  await takeOverride(reserved.directory, options, head, context);
+  await recordRound(reserved.directory, context);
+  if (existsSync(join(reserved.directory, "findings.md"))) return printSavedReview(reserved, context);
+  return askReviewer(reserved, head, author, context);
+});
 
 async function confirmingRead(directory: string) {
   const confirms = (await readReservation(directory))?.confirms;
@@ -670,7 +663,7 @@ async function reserveRound(options: Map<string, string>, head: ProofIdentity, c
   if (tier.name === "read" && capturedBy === "hedge" && !panel && !decision && !await panelCommit(context.home, head)) throw new Error("A PR of the Read tier gets one read, and it is the panel: run hedge proof review, which runs its combined lens");
   const firstPanel = panel && !await panelCommit(context.home, head);
   const limits = firstPanel ? permit.limits : { ...permit.limits, ceiling: tierCeiling(tier, permit.limits.ceiling) };
-  const reserved = await startReview(context.home, head, { scope, base, from, ...permit, limits, decision, phase: options.get("--phase"), cleanBaseMerge: cleanBaseMerge(head, context.run), netDelta, baseSha, capturedBy, lock: async (directory) => lockNewRound(directory, await context.lock()) });
+  const reserved = await startReview(context.home, head, { scope, base, from, ...permit, limits, decision, phase: options.get("--phase"), cleanBaseMerge: cleanBaseMerge(head, context.run), netDelta, baseSha, capturedBy });
   return { ...reserved, from: reserved.from!, baseSha, scope, base, phase: options.get("--phase") };
 }
 
@@ -698,13 +691,11 @@ function requestedOptions(options: Map<string, string>, reservation: Reservation
 
 async function settleStrandedRounds(head: ProofIdentity, context: CommandContext) {
   for (const directory of await roundDirectories(context.home, head)) {
-    if (!await unrecordedElsewhere(directory, head.commit)) continue;
-    await roundStep(directory, context, async () => {
-      const decision = await unrecordedElsewhere(directory, head.commit);
-      if (!decision) return;
-      if (await ledgerHolds(ledgerOf(context), decision.id)) await markRecorded(directory);
-      else await rm(directory, { recursive: true, force: true });
-    }).catch(unless(RoundBusy, HubUnreachable, RoundGone));
+    const decision = await unrecordedElsewhere(directory, head.commit);
+    if (!decision) continue;
+    const held = await ledgerHolds(ledgerOf(context), decision.id).catch(unless(HubUnreachable));
+    if (held) await markRecorded(directory);
+    else if (held === false) await rm(directory, { recursive: true, force: true });
   }
 }
 
@@ -712,7 +703,7 @@ const unless = (...kinds: (new (...args: never[]) => Error)[]) => (error: unknow
 
 const lockOwner = (context: ProofContext): LockOwner => ({ pid: context.pid ?? process.pid, now: context.now ?? (() => new Date()), startTime: context.startTime ?? processStart });
 
-const roundStep = async <T>(directory: string, context: CommandContext, step: () => Promise<T>) => withRoundLock(directory, await context.lock(), step);
+const reviewStep = async <T>(head: ProofIdentity, context: CommandContext, step: () => Promise<T>) => withReviewLock(pullRequestDirectory(context.home, head), await context.lock(), step);
 
 async function takeOverride(directory: string, options: Map<string, string>, head: ProofIdentity, context: CommandContext) {
   const reservation = await readReservation(directory);
@@ -777,7 +768,7 @@ const detachHedge = ({ cwd, env }: CommandContext) => async (args: string[], log
   } finally { closeSync(output); }
 };
 
-async function runPanel({ options, lists }: Parsed, head: ProofIdentity, context: CommandContext) {
+const runPanel = ({ options, lists }: Parsed, head: ProofIdentity, context: CommandContext) => reviewStep(head, context, async () => {
   const { home, print, env } = context;
   const author = await authorOf(home, head);
   const guide = await readPanelGuide(home);
@@ -797,23 +788,21 @@ async function runPanel({ options, lists }: Parsed, head: ProofIdentity, context
   if (tier) print(tierLine(tier));
   print("The lenses run in the background. Run hedge proof review --wait for the findings, and hedge proof show to see each lens.");
   return 0;
-}
+});
 
 const castOf = ({ family, row, security }: Lens, env: Record<string, string | undefined>) => ({ family, row, model: modelLabel("reviewer", row, env, security), ...(security ? { security: true as const } : {}) });
 
 async function reservePanel(options: Map<string, string>, head: ProofIdentity, lenses: Lens[], guide: PanelGuide, context: CommandContext, chosen: Pick<Plan, "tier" | "arguments">) {
   const rubric = await readRubric(context.home);
   const reserved = await reserveHedgeReview(options, head, context, true);
-  return roundStep(reserved.directory, context, async () => {
-    try {
-      const { plan, briefs } = await panelBriefs(reserved, head, lenses, guide, rubric, context);
-      await stagePanel(reserved.directory, { ...plan, ...chosen }, briefs);
-    } catch (error) {
-      await rm(reserved.directory, { recursive: true, force: true });
-      throw error;
-    }
-    return recordAndStart(reserved.directory, context);
-  });
+  try {
+    const { plan, briefs } = await panelBriefs(reserved, head, lenses, guide, rubric, context);
+    await stagePanel(reserved.directory, { ...plan, ...chosen }, briefs);
+  } catch (error) {
+    await rm(reserved.directory, { recursive: true, force: true });
+    throw error;
+  }
+  return recordAndStart(reserved.directory, context);
 }
 
 async function recordAndStart(directory: string, context: CommandContext) {
@@ -853,18 +842,16 @@ async function rerunPanel(pending: Pending, options: Map<string, string>, head: 
   const { directory, reservation } = pending;
   const plan = await readPlan(directory) ?? await stagedPlan(directory);
   if (!plan) throw new Error(`${directory} is reserved for one reviewer. Run hedge proof review without --lens to retry it`);
-  const start = resumable(pending, plannedLenses(plan));
+  const start = resumable(pending);
   const planned = plan.lenses.map((lens) => lens.name);
   if (lenses.map((lens) => lens.name).sort().join() !== [...planned].sort().join()) throw new Error(`The unfinished round runs the lenses ${planned.join(", ")}. Run hedge proof review without --lens to rerun its failed lenses; --lens <name>:same or :other moves one of them to that family`);
-  return roundStep(directory, context, async () => {
-    await takeOverride(directory, options, head, context);
-    await recordRound(directory, context);
-    if (await readPlan(directory)) {
-      const casts = new Map(lenses.map((lens) => [lens.name, castOf(lens, context.env)]));
-      await requeueFailed(directory, casts, await panelBriefs({ directory, ...start, merged: reservation.merged }, head, lenses, guide, await readRubric(context.home), context));
-    }
-    return startIdleLenses(directory, context);
-  });
+  await takeOverride(directory, options, head, context);
+  await recordRound(directory, context);
+  if (await readPlan(directory)) {
+    const casts = new Map(lenses.map((lens) => [lens.name, castOf(lens, context.env)]));
+    await requeueFailed(directory, casts, await panelBriefs({ directory, ...start, merged: reservation.merged }, head, lenses, guide, await readRubric(context.home), context));
+  }
+  return startIdleLenses(directory, context);
 }
 
 async function knowledgeOf(values: string[], cwd: string) {
@@ -881,9 +868,10 @@ async function knowledgeOf(values: string[], cwd: string) {
 async function waitForReview(options: Map<string, string>, head: ProofIdentity, context: CommandContext) {
   const pending = options.has("--round") ? undefined : await unfinishedReview(context.home, head, "hedge");
   const directory = pending?.directory ?? await reviewDirectory(context.home, head, roundOption(options));
-  await requireReservation(directory);
-  await startStaged(directory, context);
-  const restart = (name: string) => roundStep(directory, context, async () => { if (await lensIdle(directory, name)) await startLens(directory, name, context); }).catch(unless(RoundBusy));
+  const reservation = await requireReservation(directory);
+  if (!existsSync(join(directory, "findings.md"))) resumable({ reservation, directory });
+  await startStaged(head, directory, context);
+  const restart = (name: string) => reviewStep(head, context, async () => { if (await lensIdle(directory, name)) await startLens(directory, name, context); }).catch(unless(ReviewsBusy));
   const code = await waitForPanel(directory, panelIO(context), restart, waitPolls);
   for (const line of await roundLines(directory, context)) context.print(line);
   if (code === 0) context.print(await readFile(join(directory, "findings.md"), "utf8"));
@@ -893,10 +881,10 @@ async function waitForReview(options: Map<string, string>, head: ProofIdentity, 
   return code;
 }
 
-async function startStaged(directory: string, context: CommandContext) {
+async function startStaged(head: ProofIdentity, directory: string, context: CommandContext) {
   for (let poll = 0; !await readPlan(directory); poll++) {
-    try { await roundStep(directory, context, async () => { if (await stagedPlan(directory)) await recordAndStart(directory, context); }); return; }
-    catch (error) { if (!(error instanceof RoundBusy) || poll >= waitPolls) throw error; }
+    try { await reviewStep(head, context, async () => { if (await stagedPlan(directory)) await recordAndStart(directory, context); }); return; }
+    catch (error) { if (!(error instanceof ReviewsBusy) || poll >= waitPolls) throw error; }
     await pausing(context)();
   }
 }
@@ -1090,8 +1078,8 @@ export async function proofCommand(args: string[], context: ProofContext): Promi
   const run = runIn(context.cwd, context.env);
   const parsed = { ...parse(name, command, own), ...split >= 0 ? { command: args.slice(split + 1) } : {} };
   let identity: ProofIdentity | undefined;
-  let lock: Promise<RoundLock> | undefined;
-  return command.run(parsed, () => identity ??= resolveIdentity(parsed.options, run), { ...context, run, lock: () => lock ??= roundLock(lockOwner(context)) });
+  let lock: Promise<ReviewLock> | undefined;
+  return command.run(parsed, () => identity ??= resolveIdentity(parsed.options, run), { ...context, run, lock: () => lock ??= reviewLock(lockOwner(context)) });
 }
 
 async function shareGateResult(head: ProofIdentity, passed: boolean, startedAt: Date, context: ProofContext): Promise<string | undefined> {

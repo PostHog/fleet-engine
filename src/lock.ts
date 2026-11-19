@@ -33,20 +33,6 @@ export function tryLock(path: string): Held | undefined {
   };
 }
 
-export function withSyncLock<T>(path: string, change: () => T): T {
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  const fd = openSync(path, constants.O_RDWR | constants.O_CREAT, 0o600);
-  try {
-    libc ??= openLibc();
-    if (libc.symbols.flock(fd, exclusive) !== 0) throw new Error(`Cannot lock ${path}`);
-    const result = change();
-    if (result instanceof Promise) throw new Error("withSyncLock runs synchronous changes only, so no other task of this process runs while it holds the lock");
-    return result;
-  } finally {
-    closeSync(fd);
-  }
-}
-
 /** The lock that Hedge operations which change this machine take, below home. */
 export const stateLock = ".local/state/hedge/hedge.lock";
 

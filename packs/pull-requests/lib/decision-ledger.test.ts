@@ -418,7 +418,7 @@ test("review-finish refuses a round whose decision is not recorded while the hub
 const listedDecisions = async (pr: Checkout) => (await pr.decide("list", "--pr", "example/product#42")).output.split("\n").filter((line) => line.startsWith("- "));
 const hubLines = (remote: string) => readFileSync(join(remote, ".local/state/hedge/decisions.jsonl"), "utf8").trim().split("\n");
 
-test("a second command on a round that a running command works on stops and names that process, and runs once that command ends", async () => {
+test("a second command on the reviews of a PR that a running command works on stops and names that process, and runs once that command ends", async () => {
   const pr = await checkout();
   await pr.commit("feature.txt", "new\n");
   const hub = hubAt(pr, "stalls on appends");
@@ -427,8 +427,7 @@ test("a second command on a round that a running command works on stops and name
   await hub.appendStalled;
   hub.state.hub = "up";
 
-  const round = join(pr.pullRequest, "reviews/1");
-  await expect(pr.hedge(...overrideStart)).rejects.toThrow(`Process ${process.pid}, another hedge proof command, works on ${round} and holds its lock ${join(round, "round.lock")}. Wait for it to end, then run this command again`);
+  await expect(pr.hedge(...overrideStart)).rejects.toThrow(`Process ${process.pid}, another hedge proof command, works on the reviews in ${pr.pullRequest} and holds its lock ${join(pr.pullRequest, "reviews.lock")}. Wait for it to end, then run this command again`);
   await expect(finishRound(pr)).rejects.toThrow(`Process ${process.pid}`);
   hub.releaseAppends();
   await expect(first).rejects.toThrow("Not recorded");
@@ -454,19 +453,18 @@ test("a round whose command died is taken over: the same command records its dec
   expect(await listedDecisions(pr)).toEqual([expect.stringContaining(`[${roundDecision(pr)}]`)]);
 });
 
-test("a lock file that a crashed command left empty holds the round only for a short grace, then the same command takes it over", async () => {
+test("a lock file that a crashed command left empty holds the reviews only for a short grace, then the same command takes it over", async () => {
   const pr = await checkout();
   await pr.commit("feature.txt", "new\n");
   const hub = hubAt(pr, "drops appends");
   pr.choose("Run one more round");
   await expect(pr.hedge(...overrideStart)).rejects.toThrow("Not recorded");
   hub.state.hub = "up";
-  const round = join(pr.pullRequest, "reviews/1");
-  const lock = join(round, "round.lock");
+  const lock = join(pr.pullRequest, "reviews.lock");
   writeFileSync(lock, "");
   utimesSync(lock, pr.clock.now, pr.clock.now);
 
-  await expect(pr.hedge(...overrideStart)).rejects.toThrow(`Another hedge proof command works on ${round} and holds its lock ${lock}. Wait for it to end, then run this command again`);
+  await expect(pr.hedge(...overrideStart)).rejects.toThrow(`Another hedge proof command works on the reviews in ${pr.pullRequest} and holds its lock ${lock}. Wait for it to end, then run this command again`);
   const crashed = new Date(pr.clock.now.getTime() - 120_000);
   utimesSync(lock, crashed, crashed);
   expect((await pr.hedge(...overrideStart)).code).toBe(0);

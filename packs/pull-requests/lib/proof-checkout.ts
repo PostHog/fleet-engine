@@ -1,5 +1,5 @@
 import { readPullRequest, type Run } from "./pr-ci.ts";
-import { reviewedDiff } from "./proof-review.ts";
+import { redacted } from "./proof-review.ts";
 import { commitsIn, isTestFile } from "./proof-delta.ts";
 import { riskCalloutOf } from "./decision-ledger.ts";
 import type { CleanBaseMerge, DevPr, DevPull, ProofIdentity } from "./proof.ts";
@@ -29,7 +29,7 @@ export function mergeBase(identity: ProofIdentity, run: Run, baseSha = pullReque
 export function diffOf(from: string, to: string, run: Run) {
   const diff = run(["git", "diff", "--no-ext-diff", "--no-textconv", "--no-relative", from, to]);
   if (diff.code !== 0) throw new Error(`Cannot diff ${short(from)}..${short(to)} here (${firstLine(diff.stderr)})`);
-  return reviewedDiff(diff.stdout);
+  return redacted(diff.stdout);
 }
 
 const docsFile = /\.(md|mdx|markdown|rst)$/i;

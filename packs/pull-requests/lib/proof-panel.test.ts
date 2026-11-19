@@ -714,10 +714,11 @@ test("--wait on a panel whose command still writes its briefs keeps polling unti
   const round = join(pr.pullRequest, "reviews/1");
   const staged = readFileSync(join(round, "panel.staged.json"), "utf8");
   rmSync(join(round, "panel.staged.json"));
-  writeFileSync(join(round, "round.lock"), JSON.stringify({ pid: process.pid, token: "briefing", started: "Sun Oct 25 11:00:00 2026" }));
+  const lock = join(pr.pullRequest, "reviews.lock");
+  writeFileSync(lock, JSON.stringify({ pid: process.pid, token: "briefing", started: "Sun Oct 25 11:00:00 2026" }));
   pr.panel.onPause = async () => {
     writeFileSync(join(round, "panel.staged.json"), staged);
-    rmSync(join(round, "round.lock"));
+    rmSync(lock);
   };
 
   const waited = await pr.hedge("review", "--wait");
@@ -742,7 +743,7 @@ test("a hedge review with another scope refuses the round whose decision is not 
   await expectCountedPanel(pr);
 });
 
-test("a review at a newer commit leaves alone the panel round that a command at an older commit still prepares and records", async () => {
+test("a review at a newer commit waits for the command at an older commit that still prepares and records its panel round", async () => {
   const pr = await checkout();
   await pr.commit("feature.txt", "greet\n");
   await pr.hedge("require", "--none", "--reason", "docs only");
@@ -757,17 +758,17 @@ test("a review at a newer commit leaves alone the panel round that a command at 
   hub.state.hub = "up";
   const newer = await pr.commit("feature.txt", "greet the new member\n");
 
-  const review = await pr.hedge("review", "--scope", "fixes", "--base", reviewed);
-  expect(review.code).toBe(0);
-  expect(JSON.parse(review.output.split("\n")[0]!)).toMatchObject({ round: 2, id: "2" });
+  await expect(pr.hedge("review", "--scope", "fixes", "--base", older)).rejects.toThrow(`Process ${process.pid}, another hedge proof command, works on the reviews in ${pr.pullRequest}`);
   hub.releaseAppends();
   expect((await first).code).toBe(0);
   expect((await pr.hedge("review", "--wait", "--round", "final")).code).toBe(0);
+  const review = await pr.hedge("review", "--scope", "fixes", "--base", older);
+  expect(JSON.parse(review.output.split("\n")[0]!)).toMatchObject({ round: 2, id: "2" });
 
   const round = (id: string) => JSON.parse(readFileSync(join(pr.pullRequest, "reviews", id, "round.json"), "utf8"));
   expect(round("final-1")).toMatchObject({ commit: older, recorded: true });
   expect(round("2")).toMatchObject({ commit: newer });
-  const [single, panel] = reviewer.prompts();
+  const [panel, single] = reviewer.prompts();
   expect(panel).toContain("+greet the member");
   expect(panel).not.toContain("+greet the new member");
   expect(single).toContain("+greet the new member");

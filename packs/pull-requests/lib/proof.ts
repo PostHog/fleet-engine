@@ -1,12 +1,11 @@
 import { createHash } from "node:crypto";
-import { existsSync, linkSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { access, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
+import { access, link, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
 import { normalized, type HeardAnswer } from "./proof-answers.ts";
 import { agentRefusal, agentsAcceptance, covers, fold, keptOwed, panelRefusal, tierOf, usersAcceptance, type Decision, type DecisionState, type Ledger, type Mark, type PrRef, type Tier } from "./decision-ledger.ts";
 import type { Family, Usage } from "./proof-models.ts";
 import type { Merged, NetDelta as Delta, ReviewedHead } from "./proof-delta.ts";
-import { withSyncLock } from "../../../src/lock.ts";
 
 export type ProofIdentity = { repository: string; pr: number; commit: string };
 const sha = /^[0-9a-f]{40}$/;
@@ -123,27 +122,14 @@ export async function reuseProof(home: string, identity: ProofIdentity, kind: st
   return reuse;
 }
 
-export type LockRound = (directory: string) => Promise<void>;
-
 export const reviewLockFile = "reviews.lock";
-const underReviewLock = <T>(reviews: string, change: () => T) => withSyncLock(join(dirname(reviews), reviewLockFile), change);
 
-function writeJsonSync(path: string, value: unknown) {
-  const temporary = `${path}.${crypto.randomUUID()}`;
-  writeFileSync(temporary, JSON.stringify(value) + "\n", { flag: "wx", mode: 0o600 });
-  renameSync(temporary, path);
-}
-
-async function reserve(reviews: string, name: string, record: object, seen: string, lock: LockRound | undefined) {
+async function reserve(reviews: string, name: string, record: object) {
   const temporary = join(reviews, `.reservation-${crypto.randomUUID()}`);
   await mkdir(temporary, { mode: 0o700 });
   try {
-    await lock?.(temporary);
     await writeFile(join(temporary, "round.json"), JSON.stringify({ ...record, startedAt: new Date().toISOString() }) + "\n", { flag: "wx", mode: 0o600 });
-    underReviewLock(reviews, () => {
-      if (historyOf(reviews) !== seen) throw new Error("The reviews changed while this one weighed the budget. Run this command again to weigh them anew");
-      renameSync(temporary, join(reviews, name));
-    });
+    await rename(temporary, join(reviews, name));
   } finally { await rm(temporary, { recursive: true, force: true }); }
 }
 
@@ -181,12 +167,6 @@ const stopPath = (reviews: string) => join(dirname(reviews), arbiterStopFile);
 const readStop = (reviews: string) => readJson<ArbiterStop | undefined>(stopPath(reviews), undefined);
 
 export const stopIdOf = (reviews: string) => existsSync(stopPath(reviews)) ? (JSON.parse(readFileSync(stopPath(reviews), "utf8")) as ArbiterStop).id : undefined;
-
-function historyOf(reviews: string) {
-  const names = (existsSync(reviews) ? readdirSync(reviews) : []).filter(isReviewName).sort();
-  const finished = names.map((name) => existsSync(join(reviews, name, "findings.md")));
-  return JSON.stringify({ names, finished, stop: stopIdOf(reviews) });
-}
 
 async function stopState(reviews: string, started: string[]) {
   const stop = await readStop(reviews);
@@ -249,7 +229,7 @@ export const atCeiling = `hedge proof asks nothing more. For each open blocker o
 
 const budgetSpent = ({ ceiling }: ReviewLimits) => `The review budget of ${ceiling} reviews is spent. ${atCeiling}`;
 
-async function permitReview(home: string, identity: ProofIdentity, due: boolean, ceiling: string | undefined, decision: DecisionMark | undefined, { arbiter }: Permit, seen: string) {
+async function permitReview(home: string, identity: ProofIdentity, due: boolean, ceiling: string | undefined, decision: DecisionMark | undefined, { arbiter }: Permit) {
   if (decision?.mark === "👤") return undefined;
   if (ceiling) throw new Error(ceiling);
   if (!due) return undefined;
@@ -257,10 +237,7 @@ async function permitReview(home: string, identity: ProofIdentity, due: boolean,
   const verdict = await arbiter(await arbiterPrompt(home, identity));
   if (verdict.verdict === "continue" || decision) return verdict;
   if (verdict.verdict !== "escalate") throw new Error(askUser(identity, `The arbiter gave no verdict: ${verdict.reason}.`));
-  underReviewLock(reviews, () => {
-    if (historyOf(reviews) !== seen) throw new Error("The reviews changed while the arbiter weighed them, so its verdict is dropped. Run this command again to weigh them anew");
-    writeJsonSync(stopPath(reviews), { id: crypto.randomUUID(), verdict, at: new Date().toISOString() } satisfies ArbiterStop);
-  });
+  await writeJson(stopPath(reviews), { id: crypto.randomUUID(), verdict, at: new Date().toISOString() } satisfies ArbiterStop);
   throw new Error(`${askUser(identity, `The arbiter escalates: ${verdict.reason}.`)} One final read of the net delta may still run without the arbiter, such as to confirm a revert.`);
 }
 
@@ -281,13 +258,13 @@ const fullReadWithin = (identity: ProofIdentity, { ceiling }: ReviewLimits, spen
 
 export type CapturedBy = "hedge" | "author";
 export type DecisionMark = Pick<Decision, "mark" | "id">;
-export type ReviewRequest = { scope: string; base?: string; from?: string; decision?: Decision; phase?: string; arbiter: Arbiter; limits: ReviewLimits; cleanBaseMerge?: CleanBaseMerge; netDelta: NetDelta; baseSha?: string; capturedBy?: CapturedBy; lock?: LockRound };
+export type ReviewRequest = { scope: string; base?: string; from?: string; decision?: Decision; phase?: string; arbiter: Arbiter; limits: ReviewLimits; cleanBaseMerge?: CleanBaseMerge; netDelta: NetDelta; baseSha?: string; capturedBy?: CapturedBy };
 export type Reserved = { round: number | "final"; id: string; directory: string; from?: string; merged?: Merged; baseSha?: string; confirms?: Confirms };
 type Permit = { arbiter: Arbiter; limits: ReviewLimits };
-type Start = { base?: string; from?: string; decision: Decision | undefined; permit: Permit; cleanBaseMerge: CleanBaseMerge; netDelta: NetDelta; baseSha?: string; capturedBy: CapturedBy; lock: LockRound | undefined };
+type Start = { base?: string; from?: string; decision: Decision | undefined; permit: Permit; cleanBaseMerge: CleanBaseMerge; netDelta: NetDelta; baseSha?: string; capturedBy: CapturedBy };
 
-const reserveDecided = (reviews: string, name: string, record: object, decision: Decision | undefined, seen: string, lock: LockRound | undefined) =>
-  reserve(reviews, name, { ...record, ...decision ? { decision } : {}, ...decision?.mark === "👤" ? { clears: stopIdOf(reviews) } : {} }, seen, lock);
+const reserveDecided = (reviews: string, name: string, record: object, decision: Decision | undefined) =>
+  reserve(reviews, name, { ...record, ...decision ? { decision } : {}, ...decision?.mark === "👤" ? { clears: stopIdOf(reviews) } : {} });
 
 function readDelta(netDelta: NetDelta, latest: ReviewedHead, head: string, baseSha: string | undefined, recovery: string) {
   const delta = netDelta(latest, head, baseSha);
@@ -297,33 +274,32 @@ function readDelta(netDelta: NetDelta, latest: ReviewedHead, head: string, baseS
 
 const startOf = (delta: Exclude<Delta, { unread: string }>) => ({ from: delta.tree, merged: delta.merged });
 
-async function startFinalRead(home: string, identity: ProofIdentity, phase: FinalReadPhase, { base, decision, permit, cleanBaseMerge, netDelta, baseSha, capturedBy, lock }: Start): Promise<Reserved> {
+async function startFinalRead(home: string, identity: ProofIdentity, phase: FinalReadPhase, { base, decision, permit, cleanBaseMerge, netDelta, baseSha, capturedBy }: Start): Promise<Reserved> {
   if (base === undefined) throw new Error("A final read needs --base with the latest reviewed commit");
   if (base === identity.commit) throw new Error("HEAD is already reviewed. Skip the final read.");
   const reviews = join(pullRequestDirectory(home, identity), "reviews");
-  const seen = historyOf(reviews);
   const started = await reviewNames(reviews);
   const finished = await finishedReviews(home, identity);
   if (finished.length < started.length) throw new Error("A review is unfinished. Finish it before a final read.");
   const latest = finished.at(-1);
   if (!latest) throw new Error("A final read needs a finished earlier review");
   if (!coversReview(base, latest.commit, cleanBaseMerge)) throw new Error(`Final read base must be the latest reviewed commit ${latest.commit}, or a clean base merge the gate carried it to`);
-  const stopped = decision?.mark === "👤" ? undefined : await stopState(reviews, started);
-  const delta = readDelta(netDelta, latest, identity.commit, baseSha, fullReadWithin(identity, permit.limits, await reviewsSpent(reviews, started, "review"), await confirmedStop(reviews, stopped)));
+  const stop = await stopState(reviews, started);
+  const delta = readDelta(netDelta, latest, identity.commit, baseSha, fullReadWithin(identity, permit.limits, await reviewsSpent(reviews, started, "review"), await confirmedStop(reviews, stop)));
   const required = delta.files.length > 0 || delta.unrecordedBase === true;
   if (!decision && !required) throw new Error(`HEAD needs no final read: nothing changed past ${short(latest.commit)} and the base. hedge proof gate counts the carry. To read it anyway, pass --agent '<your reason>', or the user's --override`);
+  const stopped = decision?.mark === "👤" ? undefined : stop;
   await refuseAfterConfirmingRead(identity, reviews, stopped);
   const confirms = stopped && !stopped.confirmedBy ? { stop: stopped.stop.id, reason: stopped.stop.verdict.reason } : undefined;
   const spent = await reviewsSpent(reviews, started, phase);
   const { free, ceiling } = permit.limits;
-  const stop = !required && spent >= ceiling ? budgetSpent(permit.limits) : undefined;
-  const verdict = confirms ? undefined : await permitReview(home, identity, spent >= free, stop, decision, permit, seen);
+  const verdict = confirms ? undefined : await permitReview(home, identity, spent >= free, !required && spent >= ceiling ? budgetSpent(permit.limits) : undefined, decision, permit);
   let read = 1;
   while (started.includes(finalReadPrefix + read)) read++;
   const name = finalReadPrefix + read;
   const start = startOf(delta);
   const record = { ...identity, round: "final", read, scope: "final", base, ...start, baseSha, phase, arbiter: verdict, capturedBy, ...confirms ? { confirms } : {} };
-  await reserveDecided(reviews, name, record, decision, seen, lock);
+  await reserveDecided(reviews, name, record, decision);
   return { round: "final", id: name, directory: join(reviews, name), ...start, baseSha, ...confirms ? { confirms } : {} };
 }
 
@@ -332,8 +308,8 @@ const coversReview = (base: string, reviewed: string, cleanBaseMerge: CleanBaseM
 const unreadDelta: NetDelta = () => ({ unread: "no checkout reads the net delta here" });
 
 export async function startReview(home: string, identity: ProofIdentity, request: ReviewRequest): Promise<Reserved> {
-  const { scope, base, phase, decision, cleanBaseMerge = () => undefined, netDelta, baseSha, capturedBy = "author", lock } = request;
-  const start: Start = { base, from: request.from, decision, permit: { arbiter: request.arbiter, limits: request.limits }, cleanBaseMerge, netDelta, baseSha, capturedBy, lock };
+  const { scope, base, phase, decision, cleanBaseMerge = () => undefined, netDelta, baseSha, capturedBy = "author" } = request;
+  const start: Start = { base, from: request.from, decision, permit: { arbiter: request.arbiter, limits: request.limits }, cleanBaseMerge, netDelta, baseSha, capturedBy };
   if (!["full", "fixes", "final"].includes(scope)) throw new Error("Review scope must be full, fixes, or final");
   if (phase !== undefined && scope !== "final") throw new Error("--phase applies only to final reads");
   if (base !== undefined && !sha.test(base)) throw new Error("Review base needs a full commit SHA");
@@ -344,23 +320,23 @@ export async function startReview(home: string, identity: ProofIdentity, request
   return startRound(home, identity, reviews, scope, start);
 }
 
-async function startRound(home: string, identity: ProofIdentity, reviews: string, scope: string, { base, from, decision, permit, cleanBaseMerge, netDelta, baseSha, capturedBy, lock }: Start): Promise<Reserved> {
-  const seen = historyOf(reviews);
+async function startRound(home: string, identity: ProofIdentity, reviews: string, scope: string, { base, from, decision, permit, cleanBaseMerge, netDelta, baseSha, capturedBy }: Start): Promise<Reserved> {
   const started = await reviewNames(reviews);
   let round = 1;
   while (started.includes(String(round))) round++;
   if (round === 1 && scope !== "full") throw new Error("Round 1 is --scope full: it reviews the whole PR diff. Drop --base");
   const finished = await finishedReviews(home, identity);
-  if (decision?.mark !== "👤") await refuseAfterConfirmingRead(identity, reviews, await stopState(reviews, started));
+  const stopped = await stopState(reviews, started);
+  if (decision?.mark !== "👤") await refuseAfterConfirmingRead(identity, reviews, stopped);
   const spent = await reviewsSpent(reviews, started, "review");
   const { free, ceiling } = permit.limits;
   const stop = spent >= ceiling ? budgetSpent(permit.limits) : undefined;
   if (stop && decision?.mark !== "👤") throw new Error(stop);
   if (round > 1) await checkLaterRound(reviews, finished, round, scope, base, decision, cleanBaseMerge);
-  const start = base === undefined ? { from } : startOf(readDelta(netDelta, finished.at(-1)!, identity.commit, baseSha, fullReadWithin(identity, permit.limits, spent)));
-  const verdict = await permitReview(home, identity, spent >= free, stop, decision, permit, seen);
+  const start = base === undefined ? { from } : startOf(readDelta(netDelta, finished.at(-1)!, identity.commit, baseSha, fullReadWithin(identity, permit.limits, spent, await confirmedStop(reviews, stopped))));
+  const verdict = await permitReview(home, identity, spent >= free, stop, decision, permit);
   const record = { ...identity, round, scope, base, ...start, baseSha, arbiter: verdict, capturedBy };
-  await reserveDecided(reviews, String(round), record, decision, seen, lock);
+  await reserveDecided(reviews, String(round), record, decision);
   return { round, id: String(round), directory: join(reviews, String(round)), ...start, baseSha };
 }
 
@@ -424,10 +400,8 @@ export async function markRecorded(directory: string) {
   const reservation = await readReservation(directory);
   if (!reservation?.decision || reservation.recorded) return;
   const { mark, id } = reservation.decision;
-  underReviewLock(dirname(directory), () => {
-    if (mark === "👤" && reservation.clears !== undefined && stopIdOf(dirname(directory)) === reservation.clears) rmSync(stopPath(dirname(directory)), { force: true });
-    writeJsonSync(join(directory, "round.json"), { ...reservation, decision: { mark, id }, recorded: true } satisfies Reservation);
-  });
+  if (mark === "👤" && reservation.clears !== undefined && stopIdOf(dirname(directory)) === reservation.clears) await rm(stopPath(dirname(directory)), { force: true });
+  await writeJson(join(directory, "round.json"), { ...reservation, decision: { mark, id }, recorded: true } satisfies Reservation);
 }
 
 const hasFindings = (directory: string) => access(join(directory, "findings.md")).then(() => true, () => false);
@@ -510,7 +484,7 @@ async function storeFindings(directory: string, identity: ProofIdentity, round: 
     const temporary = join(directory, ".findings-" + crypto.randomUUID());
     try {
       await writeFile(temporary, bytes, { flag: "wx", mode: 0o600 });
-      underReviewLock(dirname(directory), () => linkSync(temporary, destination));
+      await link(temporary, destination);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       if (!(await sameContent(destination, bytes))) throw new Error(`Round ${round} already has other findings in ${destination}`);

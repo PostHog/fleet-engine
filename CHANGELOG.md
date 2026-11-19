@@ -32,31 +32,33 @@
   saves read that commit, never a fresh read of the base. A fixes round or
   final read always starts at the latest finished review, also when its
   `--base` is a clean merge of it. An unfinished round that an older Hedge
-  reserved does not resume, and hedge prints the command that starts a new
-  one.
+  reserved does not resume or publish: `hedge proof review` and its `--wait`
+  refuse it and print the `rm -rf` that deletes it, and the review command
+  you ran for it then starts a new one.
 - `hedge proof miss` saves the reviewed head and the base of a net delta, so
   `hedge proof eval` replays the range of a later round or final read through
   the same range builder as the live review, with each conflict's two sides.
 - A refused read names a command that the review budget lets run: once the
   budget is spent, or a confirming read found a blocker or major, the full
-  read it names takes the user's `--override`. The command that replaces a
-  round an older Hedge reserved keeps its lenses, `--single`, and the
-  `--agent` that a later full read needs. The conflict brief quotes each
-  `git show` argument for the shell and redacts secrets in its paths, as in
-  Git's patch.
+  read it names takes the user's `--override`, also for a read that already
+  holds the user's `--override`. The conflict brief quotes each `git show`
+  argument for the shell. Hedge redacts known secrets once in each whole
+  reviewer prompt, lens brief, and eval prompt, file names and REVIEW.md
+  headings too, and once in each diff file. A lens covers a file by the name
+  its brief shows.
 - A review that finds no blocker or major spends no review budget. The final
   read that the gate asks for runs even when the budget is spent; the budget
   stops the fixes rounds after it. When the arbiter escalates, one final read
   of the net delta may still run, such as to confirm a revert. That read takes
   the stop once, and a blocker or major it finds goes to the user. An arbiter
-  that gives no verdict stops nothing, and an escalation that arrives after
-  the reviews changed is dropped. `review-start` prints the confirming read in
+  that gives no verdict stops nothing. `review-start` prints the confirming read in
   its JSON. The user's `--override` clears the stop before it marks its round
   recorded, so a retry still clears it. It clears only the stop it answered:
-  a stop that a later arbiter saves stays. A round reservation, an arbiter
-  stop, the override that clears it, and the findings that finish a review
-  each check the review history or write it under one lock per PR, so two
-  runs never both pass the check. The lock file stays out of the gate's
+  a stop that a later arbiter saves stays. Each command on the reviews of a
+  PR holds one lock per PR from its first read of the rounds and the stop to
+  its last write, through its waits on T3, the hub, the arbiter, or a
+  reviewer, so an answer always binds to the stop it read. A second command
+  stops and names the first. The lock file stays out of the gate's
   fingerprint.
 
 ### Fleet is now Hedge

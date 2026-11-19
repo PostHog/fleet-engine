@@ -1,8 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { spawnAsync } from "../../../src/testing/spawn.ts";
 import { reviewedFindings } from "./proof.ts";
 import { checkout, cleanFixtures, fakeModel, finishRound, fixture, graded, markPanel, models, recordingModel, settings, type Checkout } from "./proof-testing.ts";
 
@@ -357,31 +355,4 @@ test("a known answer waits for the budget of its own phase", async () => {
 
   writeFileSync(join(pr.repository, "responses.md"), "1. known: listed under Known issues.\n");
   await expect(pr.hedge("respond", "--round", "final-2", "responses.md")).rejects.toThrow("only once the review budget of 2 reviews is spent; 1 ran");
-});
-
-test("a review that another one overtakes while it weighs the budget backs out", async () => {
-  const pr = await checkout();
-  pr.pullRequestState({ body: graded("non-critical", "medium") });
-  pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 1, "pull-requests.reviewCeiling": 3 });
-  await pr.commit("feature.txt", "greet\n");
-  await pr.hedge("require", "--none", "--reason", "fixture");
-  const panel = await panelReview(pr);
-  await pr.commit("feature.txt", "greet the member\n");
-  await pr.hedge("review-start", "--scope", "fixes", "--base", panel);
-  await finishRound(pr, "2");
-  const fixes = await pr.git("rev-parse", "HEAD");
-  await pr.commit("feature.txt", "greet the new member\n");
-  const [started, go] = ["started", "go"].map((name) => join(pr.home, name));
-  await spawnAsync(["mkfifo", started, go]);
-  pr.env.HEDGE_REVIEW_ARBITER = `cat >/dev/null; if mkdir "${pr.home}/first" 2>/dev/null; then echo > "${started}"; read line < "${go}"; fi; echo CONTINUE`;
-
-  const slow = pr.hedge("review-start", "--scope", "fixes", "--base", fixes);
-  await readFile(started, "utf8");
-  await pr.hedge("review-start", "--scope", "final", "--base", fixes);
-  writeFileSync(join(pr.repository, "findings.md"), "No findings.\n");
-  await pr.hedge("review-finish", "--round", "final-1", "--reviewer", "gpt-6.1-sol", "findings.md");
-  await writeFile(go, "go\n");
-
-  await expect(slow).rejects.toThrow("The reviews changed while this one weighed the budget. Run this command again to weigh them anew");
-  expect(existsSync(join(pr.pullRequest, "reviews", "3"))).toBe(false);
 });
