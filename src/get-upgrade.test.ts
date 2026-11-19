@@ -96,9 +96,12 @@ describe("get.sh upgrades a machine that Fleet runs", () => {
 
     const result = machine.getSh(["--profile", oldProfile, "--", "--dry-run"]);
 
-    expect(result.output).toContain("Hedge: The systemd unit fleet-watch.service from before the rename still runs (it is active)");
+    const listed = result.output.indexOf("Hedge: The systemd unit fleet-watch.service from before the rename still runs (it is active)");
+    const refused = result.output.indexOf(`${oldProfile} is in a Fleet path from before the rename, so Hedge does not use it.`);
+    expect(result.code).toBe(1);
+    expect(listed).toBeGreaterThanOrEqual(0);
     expect(result.output).toContain("The cron job nightly from before the rename still runs");
-    expect(result.output).toContain(`${oldProfile} is in a Fleet path from before the rename, so Hedge does not use it.`);
+    expect(refused).toBeGreaterThan(listed);
     expect(machine.state()).toEqual({ ...emptySchedulers(), units: { "fleet-watch.service": running }, crontab: oldCron });
   });
 

@@ -285,6 +285,24 @@ describe("hedge apply while Fleet still runs", () => {
     expect(linux.systemd.units.has("hedge-watch.service")).toBe(false);
   });
 
+  test("on Linux, an apply --profile that a Fleet unit stops after the plan loads keeps the saved profile", async () => {
+    const linux = machine("linux");
+    const saved = profileDir([]);
+    expect((await linux.hedge(["apply", "--profile", saved])).code).toBe(0);
+    const firstCheck = linux.fleet.holds;
+    let checks = 0;
+    linux.fleet.holds = async (home, platform) => {
+      const held = await firstCheck(home, platform);
+      if (++checks === 1) linux.systemd.units.set("fleet-watch.service", { active: true, enabled: true });
+      return held;
+    };
+
+    const applied = await linux.hedge(["apply", "--profile", profileDir(["watcher"])]);
+
+    expect(applied.code).toBe(1);
+    expect(JSON.parse(readFileSync(join(linux.home, ".config/hedge/machine.json"), "utf8")).profileDir).toBe(saved);
+  });
+
   test("on Linux, exits 1 when the new unit does not start after retire, and the old unit stays off", async () => {
     const linux = machine("linux");
     linux.systemd.units.set("fleet-watch.service", { active: true, enabled: true });

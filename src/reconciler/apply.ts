@@ -85,7 +85,7 @@ function claimFindings(claimed: Action[]): Finding[] {
 }
 
 /** Skipped steps, named pack/id, wait for a later apply: this run neither runs nor undoes them. */
-export async function apply(plan: Plan, options: { home: string; dryRun?: boolean; adopt?: string[]; adoptFrom?: string[]; skip?: string[]; adapters?: Adapter[]; run?: Runner; issue?: Issuer; progress?: (line: string) => void; holds?: () => Promise<Finding[]> }): Promise<Report> {
+export async function apply(plan: Plan, options: { home: string; dryRun?: boolean; adopt?: string[]; adoptFrom?: string[]; skip?: string[]; adapters?: Adapter[]; run?: Runner; issue?: Issuer; progress?: (line: string) => void }): Promise<Report> {
   const context = { home: options.home, dryRun: options.dryRun ?? false, adopt: options.adopt ?? [], adoptFrom: options.adoptFrom ?? [] };
   const adapters = options.adapters ?? [filesAdapter];
   const adoptable = new Set(adapters.flatMap((adapter) => adapter.targets(plan)));
@@ -98,8 +98,6 @@ export async function apply(plan: Plan, options: { home: string; dryRun?: boolea
     report.findings.push(...plan.unanswered.map((setting) => ({ id: `unanswered:${setting.key}`, pack: setting.key.split(".")[0] ?? "", say: `${setting.question} Answer it with hedge set ${setting.key}=<value>.`, repair: "human" as const })));
     return report;
   }
-  const stillRuns = context.dryRun ? [] : ((await options.holds?.()) ?? []);
-  if (stillRuns.length) return { ...report, ok: false, findings: [...stillRuns, ...report.findings] };
   const run = viaEngine(plan, options.run ?? spawnRunner(options.home, plan.machine.profileDir));
   const node = plan.onHub || plan.pullsFromHub ? plan.machine.name : undefined;
   const issue = !context.dryRun && node && options.issue ? (ready: CatalogEntry[]) => options.issue!(ready, node) : undefined;
