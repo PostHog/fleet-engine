@@ -27,8 +27,19 @@
 - A fixes round takes `--base` with the latest finished review, a final read
   too. A `--scope full` read, the judge's diff, and the review rules start
   from the PR's base commit on GitHub.
+- A round records GitHub's base commit once, when it is reserved. Its diff,
+  its retries, its REVIEW.md rules, and the miss that `hedge proof miss`
+  saves read that commit, never a fresh read of the base. A fixes round or
+  final read always starts at the latest finished review, also when its
+  `--base` is a clean merge of it. An unfinished round that an older Hedge
+  reserved does not resume, and hedge prints the command that starts a new
+  one.
 - `hedge proof miss` saves the reviewed head and the base of a net delta, so
-  `hedge proof eval` replays the range of a later round or final read.
+  `hedge proof eval` replays the range of a later round or final read through
+  the same range builder as the live review, with each conflict's two sides.
+- A refused read names a command that the review budget lets run: once the
+  budget is spent, the full read it names takes the user's `--override`. The
+  conflict brief quotes each `git show` argument for the shell.
 - A review that finds no blocker or major spends no review budget. The final
   read that the gate asks for runs even when the budget is spent; the budget
   stops the fixes rounds after it. When the arbiter escalates, one final read
@@ -37,7 +48,9 @@
   that gives no verdict stops nothing, and an escalation that arrives after
   the reviews changed is dropped. `review-start` prints the confirming read in
   its JSON. The user's `--override` clears the stop before it marks its round
-  recorded, so a retry still clears it.
+  recorded, so a retry still clears it. A round reservation, an arbiter stop,
+  and the override that clears it each check the review history and write
+  under one lock per PR, so two runs never both pass the check.
 
 ### Fleet is now Hedge
 
