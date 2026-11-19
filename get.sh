@@ -15,6 +15,7 @@ if [ "$(uname -s)" = Darwin ]; then
     for plist in "$HOME"/Library/LaunchAgents/*.plist; do [ -e "$plist" ] && basename "$plist" .plist; done
     launchctl list 2>/dev/null | sed 's/.*[[:space:]]//'
   } | grep -E '^(dev[.]fleet|com[.]fleet|dev[.]hedge)[.]' | sort -u)
+  not_off=
   for label in $old_jobs; do
     target="gui/$uid/$label"
     launchctl bootout "$target" >/dev/null 2>&1 || :
@@ -23,14 +24,18 @@ if [ "$(uname -s)" = Darwin ]; then
     launchctl print "$target" >/dev/null 2>&1 || loaded=$?
     if [ "$loaded" -ne 113 ]; then
       printf 'Hedge: %s\n' "the launchd job $label of an earlier Fleet or Hedge still runs. Stop it with: launchctl bootout $target" >&2
-      exit 1
-    fi
-    if ! launchctl print-disabled "gui/$uid" 2>/dev/null | grep -F "\"$label\" =>" | grep -Eq '=> (disabled|true)$'; then
+      not_off="$not_off${not_off:+, }$label"
+    elif ! launchctl print-disabled "gui/$uid" 2>/dev/null | grep -F "\"$label\" =>" | grep -Eq '=> (disabled|true)$'; then
       printf 'Hedge: %s\n' "launchd still has the job $label of an earlier Fleet or Hedge turned on, so it starts again at the next login. Turn it off with: launchctl disable $target" >&2
-      exit 1
+      not_off="$not_off${not_off:+, }$label"
+    else
+      printf 'Hedge: %s\n' "stopped and turned off the launchd job $label of an earlier Fleet or Hedge, and kept its files." >&2
     fi
-    printf 'Hedge: %s\n' "stopped and turned off the launchd job $label of an earlier Fleet or Hedge, and kept its files." >&2
   done
+  if [ -n "$not_off" ]; then
+    printf 'Hedge: %s\n' "these launchd jobs of an earlier Fleet or Hedge are not off yet: $not_off. Run the commands above, then run get.sh again." >&2
+    exit 1
+  fi
   printf 'Hedge: %s\n' "Hedge runs on cloud boxes, not on a Mac. Your Mac only runs the T3 Code app. To set up your hub, follow https://posthog.github.io/hedge/#start" >&2
   [ -n "$old_jobs" ] || exit 1
   exit 0

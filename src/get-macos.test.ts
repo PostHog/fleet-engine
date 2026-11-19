@@ -68,13 +68,15 @@ esac`);
     expect(jobs.login()).toEqual(["com.apple.other"]);
   });
 
-  onLinuxHost("exits 1 and names the job when launchd does not turn it off, so it would start again at the next login", () => {
+  onLinuxHost("still turns off each later job when launchd does not turn one off, then exits 1 and names each job that would start again at the next login", () => {
     const box = sandbox("Darwin");
     const jobs = earlierJobs(box, { failDisable: "dev.fleet.nightly" });
     const result = getSh(box, []);
     expect(result.code).toBe(1);
     expect(result.output).toContain("Hedge: launchd still has the job dev.fleet.nightly of an earlier Fleet or Hedge turned on, so it starts again at the next login. Turn it off with: launchctl disable gui/");
-    expect(jobs.login()).toContain("dev.fleet.nightly");
+    expect(result.output).toContain("Hedge: stopped and turned off the launchd job dev.hedge.update of an earlier Fleet or Hedge, and kept its files.");
+    expect(result.output).toEndWith("Hedge: these launchd jobs of an earlier Fleet or Hedge are not off yet: dev.fleet.nightly. Run the commands above, then run get.sh again.\n");
+    expect(jobs.login()).toEqual(["com.apple.other", "dev.fleet.nightly"]);
   });
 
   onLinuxHost("says so and exits 1 when a job of an earlier Fleet or Hedge does not stop", () => {
@@ -83,5 +85,6 @@ esac`);
     const result = getSh(box, []);
     expect(result.code).toBe(1);
     expect(result.output).toContain("Hedge: the launchd job dev.hedge.update of an earlier Fleet or Hedge still runs. Stop it with: launchctl bootout gui/");
+    expect(result.output).toEndWith("Hedge: these launchd jobs of an earlier Fleet or Hedge are not off yet: dev.hedge.update. Run the commands above, then run get.sh again.\n");
   });
 });
