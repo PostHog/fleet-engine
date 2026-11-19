@@ -251,7 +251,7 @@ describe("hedge update", () => {
   async function withFetchRightAfterHedgesFetch<T>(competing: string, work: () => Promise<T>) {
     const realGit = Bun.which("git")!;
     const bin = temp.make("bin-");
-    writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = -C ] && [ "$3" = fetch ] && [ ! -e "$2/.git/raced" ]; then "${realGit}" "$@"; status=$?; : > "$2/.git/raced"; "${realGit}" -C "$2" fetch -q origin ${competing}; exit $status; fi\nexec "${realGit}" "$@"\n`, { mode: 0o755 });
+    writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = -C ] && [ "$3" = fetch ] && mkdir "${bin}/raced" 2>/dev/null; then "${realGit}" "$@"; status=$?; "${realGit}" -C "$2" fetch -q origin ${competing}; exit $status; fi\nexec "${realGit}" "$@"\n`, { mode: 0o755 });
     const path = process.env.PATH;
     process.env.PATH = `${bin}:${path}`;
     try {
@@ -267,7 +267,7 @@ describe("hedge update", () => {
 
     const result = await withFetchRightAfterHedgesFetch("main", () => run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" }));
 
-    expect(existsSync(join(engineDir, ".git/raced"))).toBe(true);
+    expect(await spawnGit(engineDir, "rev-parse", "FETCH_HEAD^{commit}")).toBe(await spawnGit(remote, "rev-parse", "main^{commit}"));
     expect(result).toMatchObject({ code: 0, version: "v0.1.1" });
     expect(await pinSavedBySetup(engineDir)).toEqual({ repo: "PostHog/hedge", ref: "v0.1.1", channel: "release" });
   });
@@ -278,8 +278,38 @@ describe("hedge update", () => {
 
     const result = await withFetchRightAfterHedgesFetch("v0.1.0", () => run(engineDir, { repo: remote, ref: "main", channel: "track" }));
 
-    expect(existsSync(join(engineDir, ".git/raced"))).toBe(true);
+    expect(await spawnGit(engineDir, "rev-parse", "FETCH_HEAD^{commit}")).toBe(await spawnGit(remote, "rev-parse", "v0.1.0^{commit}"));
     expect(result).toMatchObject({ code: 0, version: "main" });
+  });
+
+  test("two hedge update runs that fetch the same tag at the same time each install the commit that they fetched, and neither loses its fetched ref", async () => {
+    const remote = await engineRemote(["v0.1.0", "v0.1.1"]);
+    const engineDir = await engineCheckout(remote, "v0.1.0");
+    const realGit = Bun.which("git")!;
+    const bin = temp.make("bin-");
+    const fetched = join(bin, "fetched");
+    const resume = join(bin, "resume");
+    await spawnAsync(["mkfifo", fetched, resume]);
+    writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = -C ] && [ "$3" = fetch ] && mkdir "${bin}/paused" 2>/dev/null; then "${realGit}" "$@"; status=$?; echo > "${fetched}"; read _ < "${resume}"; exit $status; fi\nexec "${realGit}" "$@"\n`, { mode: 0o755 });
+    const path = process.env.PATH;
+    process.env.PATH = `${bin}:${path}`;
+    try {
+      const firstFetched = spawnAsync(["cat", fetched]);
+      const first = run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" });
+      await firstFetched;
+      writeFileSync(join(remote, "VERSION"), "v0.1.1 retagged");
+      await spawnGit(remote, "commit", "-q", "-am", "v0.1.1 retagged");
+      await spawnGit(remote, "tag", "-f", "v0.1.1");
+
+      const second = await run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" });
+      expect(second).toMatchObject({ code: 0, version: "v0.1.1 retagged" });
+
+      await spawnAsync(["sh", "-c", 'echo > "$1"', "sh", resume]);
+      expect(await first).toMatchObject({ code: 0, version: "v0.1.1" });
+    } finally {
+      process.env.PATH = path;
+    }
+    expect(await spawnGit(engineDir, "for-each-ref", "refs/hedge/fetching")).toBe("");
   });
 
   async function triageEngineLine(engineDir: string) {

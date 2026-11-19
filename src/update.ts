@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { repoUrl, withoutUserinfo } from "./pack/sources.ts";
@@ -90,7 +91,7 @@ async function recordRelease(options: UpdateOptions, moved: Exclude<Moved, false
 }
 
 async function withFetched(options: UpdateOptions, url: string, ref: string, use: (commit: string) => Promise<Moved>): Promise<Moved> {
-  const fetching = `refs/hedge/fetching/${ref.replace(/^refs\/(?:heads|tags)\//, "")}`;
+  const fetching = `refs/hedge/fetching/${randomUUID()}/${ref.replace(/^refs\/(?:heads|tags)\//, "")}`;
   try {
     const fetched = await git(options.engineDir, "fetch", "-q", "--depth", "1", "--no-tags", url, `+${ref}:${fetching}`);
     if (!fetched.ok) return options.print(`hedge update: could not fetch the engine: ${fetched.err}`), false;
