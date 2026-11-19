@@ -129,14 +129,15 @@ const truthy = /^(?:1|t|true)$/i;
 const falsy = /^(?:0|f|false)$/i;
 
 /**
- * Whether gh prints help for `gh alias …`: the last `--help`, `-h` or `--help=<bool>` before any `--` decides. After
- * `--` it is an operand, such as an import file, and a value gh cannot read counts as no help.
+ * Whether gh prints help for `gh alias …`: `-h` before any `--` does at once, and otherwise the last `--help` or
+ * `--help=<bool>` decides. After `--` it is an operand, such as an import file; a value gh cannot read counts as no help.
  */
 function asksHelp(args: string[]): boolean {
   let help = false;
   for (const arg of args) {
     if (arg === "--") break;
-    if (arg === "--help" || arg === "-h") help = true;
+    if (arg === "-h") return true;
+    if (arg === "--help") help = true;
     const value = /^(?:--help|-h)=(.*)$/.exec(arg)?.[1];
     if (value === undefined) continue;
     if (truthy.test(value)) help = true;
@@ -173,61 +174,47 @@ function ghAliases(env: ReadonlyMap<string, string>, directory: string | undefin
 
 /** gh's own alias subcommands, which run before any alias of the same name. */
 const aliasActions = new Set(["set", "delete", "list", "ls", "import"]);
-/** Alias names and expansions the guard follows: plain words, which gh's shell-word split leaves as they are. */
+/** gh groups an alias must not reach: the stack extension, alias management, and extensions. */
+const guardedGroups = new Set(["stack", "alias", ...extensionGroups]);
 const plainName = /^[\w.:-]+(?: [\w.:-]+)*$/;
 const plainExpansion = /^[\w \t\r\n=.,:/@+%-]*$/;
-const gap = /[ \t\r\n]+/;
-const largestAliasChain = 5;
-const guardedGroups = new Set(["stack", "alias", ...extensionGroups]);
-
-const nameWords = (name: string) => name.split(" ");
-const leads = (name: string, args: string[]) => nameWords(name).every((word, index) => args[index] === word);
 
 /**
- * gh's alias expansion: while the text holds a `$`, each argument in turn replaces its `$N`, as it is; once none is
- * left, the rest follow. Undefined unless the result is plain words.
+ * The last name words of the aliases that may reach a guarded group: an expansion that is not plain words, that names a
+ * guarded group, or that names another such alias. Undefined when an alias
+ * name is not plain words, since gh unquotes it.
  */
-function substituted(expansion: string, rest: string[]): string[] | undefined {
-  let text = expansion;
-  const extra: string[] = [];
-  rest.forEach((arg, index) => {
-    if (text.includes("$")) text = text.replaceAll(`$${index + 1}`, () => arg);
-    else extra.push(arg);
-  });
-  if (!plainExpansion.test(text)) return undefined;
-  return [...text.split(gap).filter(Boolean), ...extra];
-}
-
-/** The arguments an alias chain runs, following the longest alias name that leads the arguments; undefined for a chain the guard does not follow. */
-function resolved(aliases: Record<string, unknown>, args: string[], depth = 0): string[] | undefined {
-  const [name] = Object.keys(aliases).filter((key) => leads(key, args)).sort((a, b) => nameWords(b).length - nameWords(a).length);
-  const expansion = name === undefined ? undefined : aliases[name];
-  if (name === undefined || typeof expansion !== "string") return args;
-  if (depth >= largestAliasChain) return undefined;
-  const next = substituted(expansion, args.slice(nameWords(name).length));
-  return next && resolved(aliases, next, depth + 1);
+function unsafeAliasWords(aliases: Record<string, unknown>): Set<string> | undefined {
+  const names = Object.keys(aliases);
+  if (names.some((name) => !plainName.test(name))) return undefined;
+  const unsafe = new Set<string>();
+  for (let changed = true; changed;) {
+    changed = false;
+    const reached = new Set([...guardedGroups, ...[...unsafe].flatMap((name) => name.split(" "))]);
+    for (const name of names) {
+      if (unsafe.has(name)) continue;
+      const expansion = aliases[name];
+      const words = typeof expansion === "string" ? expansion.split(/[ \t\r\n]+/).filter(Boolean) : [];
+      if (typeof expansion === "string" && plainExpansion.test(expansion) && !words.some((word) => reached.has(word))) continue;
+      unsafe.add(name);
+      changed = true;
+    }
+  }
+  return new Set([...unsafe].map((name) => name.split(" ").at(-1)!));
 }
 
 /**
- * The arguments gh runs after expanding the agent's own gh aliases, followed through a chain of them. With no alias
- * name leading the call, gh can still pick one through synonyms such as `ext` or flags between words, so any alias whose
- * last word the call names may run: the call is refused when such an alias reaches `gh stack`, `gh alias` or an extension, or when
- * the guard does not follow it. Undefined also for a non-plain alias name, or a config the guard cannot find.
+ * The call's arguments when none of the agent's own gh aliases can hide a stack push in it, else undefined. gh picks an
+ * alias through its leading words, synonyms such as `ext`, flags between words, and chains of aliases, so the guard
+ * does not expand: it refuses any call that names the last word of an alias that may reach `gh stack`, `gh alias` or
+ * an extension. Only gh's own alias subcommands, which run before any alias, skip the check.
  */
 function expandedGh({ args, env }: Command, directory: string | undefined): string[] | undefined {
   if (args[0] === "alias" && aliasActions.has(args[1] ?? "")) return args;
   const aliases = ghAliases(env, directory);
   if (aliases === undefined) return undefined;
-  const names = Object.keys(aliases);
-  if (names.some((name) => !plainName.test(name))) return undefined;
-  if (names.some((name) => leads(name, args))) return resolved(aliases, args);
-  for (const name of names) {
-    const last = nameWords(name).at(-1)!;
-    if (!args.includes(last)) continue;
-    const reached = resolved(aliases, [...nameWords(name), ...args.slice(args.indexOf(last) + 1)]);
-    if (!reached || guardedGroups.has(reached[0] ?? "")) return undefined;
-  }
-  return resolved(aliases, args);
+  const unsafe = unsafeAliasWords(aliases);
+  return unsafe && !args.some((arg) => unsafe.has(arg)) ? args : undefined;
 }
 
 function stackPushes(args: string[], repo: () => Repo | undefined): number {
