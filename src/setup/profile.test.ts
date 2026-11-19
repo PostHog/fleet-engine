@@ -125,6 +125,29 @@ describe("hedge setup profile", () => {
     expect((await pushedAnswers(home, "acme/hedge-profile-nora")).packs).not.toContain("posthog");
   });
 
+  test("uses the profile checkout this machine applies and its branch, and leaves the profile's main alone", async () => {
+    const home = temp.make("home-");
+    expect((await hedgeSetup(home, starter, ["", ""])).code).toBe(0);
+    const dotfiles = githubRepo(home, "nora/dotfiles");
+    await spawnGit(home, "clone", "-q", "--bare", githubRepo(home, "nora/hedge-profile"), dotfiles);
+    await spawnGit(dotfiles, "branch", "hub", "main");
+    const checkout = join(home, ".config/coderv2/dotfiles");
+    await spawnGit(home, "clone", "-q", "--config", `url.${join(home, "github-remotes")}/.insteadOf=https://github.com/`, "-b", "hub", "https://github.com/nora/dotfiles.git", checkout);
+    rmSync(profilePath(home), { recursive: true });
+    writeFileSync(join(home, ".config/hedge/machine.json"), JSON.stringify({ schema: 1, role: "linux", profileDir: checkout }));
+    const mainBefore = await spawnGit(dotfiles, "rev-parse", "main");
+
+    const rerun = await hedgeSetup(home, ["--non-interactive", "--plan", "codex"], []);
+
+    expect(rerun.code).toBe(0);
+    expect(rerun.output).toContain("  ✓ Reusing your repo nora/dotfiles");
+    expect(JSON.parse(await spawnGit(dotfiles, "show", "hub:hedge.json")).plan).toBe("codex");
+    expect(await spawnGit(dotfiles, "rev-parse", "main")).toBe(mainBefore);
+    expect((await pushedAnswers(home)).plan).toBe("claude");
+    expect(machineFile(home).profileDir).toBe(checkout);
+    expect(existsSync(profilePath(home))).toBe(false);
+  });
+
   test("uses the org repo when its creation reports a failure but the repo was made", async () => {
     const home = temp.make("home-");
     const result = await teamSetup(home, starter, ["", ""], { createFailsAfterMaking: "acme" });

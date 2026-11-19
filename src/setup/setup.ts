@@ -132,6 +132,7 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
     engineRoot: options.engineRoot,
     nonInteractive: flags.nonInteractive,
     draft: progress.draft,
+    ...(machine.profileDir ? { current: machine.profileDir } : {}),
     packs: () => catalog.packs.map((pack) => pack.manifest),
     async saved(dir) {
       machine.profileDir = dir;

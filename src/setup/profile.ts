@@ -23,6 +23,7 @@ export type ProfileContext = {
   engineRoot: string;
   nonInteractive: boolean;
   draft: Draft;
+  current?: string;
   packs(): PackManifest[];
   /** Called once hedge.json holds every answer and is pushed: the draft is no longer needed. */
   saved(dir: string): Promise<void>;
@@ -88,14 +89,15 @@ function githubSlug(named: string, key: string) {
   return slug;
 }
 
-async function lookUp(machine: Machine, home: string, packs: PackManifest[], picked: string[]) {
+async function lookUp(machine: Machine, home: string, packs: PackManifest[], picked: string[], current?: string) {
   const { gh, exists, login: signedIn } = github(machine);
   const login = await signedIn();
   const personal = `${login}/${profileRepoName}`;
   const org = profileOrg(packs, picked);
   const team = org && `${org}/${profileRepoName}-${login}`;
-  const dir = profilePath(home);
-  const inUse = await clonedProfile(machine, dir, login);
+  const own = current ? await githubOrigin(machine, current) : undefined;
+  const dir = own && current ? current : profilePath(home);
+  const inUse = own ?? (await clonedProfile(machine, dir, login));
   const legacyTeam = org && `${org}/${legacyProfileRepoName}-${login}`;
   let found: string | undefined;
   for (const repo of [inUse, team, personal, legacyTeam, `${login}/${legacyProfileRepoName}`]) if (!found && repo && (await exists(repo))) found = repo;
@@ -113,7 +115,7 @@ export async function existingProfile(machine: Machine, home: string, packs: Pac
 
 async function makeProfile(context: ProfileContext) {
   const { terminal, machine, home, draft } = context;
-  const { gh, login, exists, personal, org, team, dir, found } = await lookUp(machine, home, context.packs(), draft.packs ?? []);
+  const { gh, login, exists, personal, org, team, dir, found } = await lookUp(machine, home, context.packs(), draft.packs ?? [], context.current);
   const create = (repo: string, description: string) => machine.exec(["gh", "repo", "create", repo, "--private", "--description", description]);
   let profileRepo = found ?? team ?? personal;
   const saved = found ? savedSettings(dir) : {};
@@ -156,19 +158,38 @@ async function makeProfile(context: ProfileContext) {
     await git(machine, dir, "commit", "-q", "-m", "Start my Hedge profile", "--", ...started);
   }
   await saveAnswers(dir, answers);
-  await git(machine, dir, "branch", "-M", "main");
-  await git(machine, dir, "push", "-q", "-u", "origin", "main");
+  const branch = await pushBranch(machine, dir);
+  await git(machine, dir, "push", "-q", "-u", "origin", branch);
   terminal.print(`  ✓ Saved your answers in ${profileRepo}. Every machine of yours reads it.`);
   await context.saved(dir);
 }
 
 /** The profile repo this machine's clone already uses, when its name is one setup makes for this login. */
 async function clonedProfile(machine: Machine, dir: string, login: string) {
-  if (!existsSync(join(dir, ".git"))) return undefined;
-  const origin = await machine.exec(["git", "-C", dir, "config", "--get", "remote.origin.url"]);
-  const repo = githubRepoOf(origin.output.trim());
+  const repo = await githubOrigin(machine, dir);
   const ours = (name: string) => repo !== undefined && (repo.toLowerCase() === `${login}/${name}`.toLowerCase() || repo.toLowerCase().endsWith(`/${name}-${login}`.toLowerCase()));
   return ours(profileRepoName) || ours(legacyProfileRepoName) ? repo : undefined;
+}
+
+async function githubOrigin(machine: Machine, dir: string) {
+  if (!existsSync(join(dir, ".git"))) return undefined;
+  const origin = await machine.exec(["git", "-C", dir, "config", "--get", "remote.origin.url"]);
+  return origin.code === 0 ? githubRepoOf(origin.output.trim()) : undefined;
+}
+
+async function currentBranch(machine: Machine, dir: string) {
+  const head = await machine.exec(["git", "-C", dir, "symbolic-ref", "-q", "--short", "HEAD"]);
+  if (head.code !== 0) throw new Error(`${dir} is not on a branch. Check out the branch this machine uses, then run hedge setup again.`);
+  return head.output.trim();
+}
+
+const published = async (machine: Machine, dir: string, branch: string) => (await machine.exec(["git", "-C", dir, "rev-parse", "--verify", "-q", `refs/remotes/origin/${branch}`])).code === 0;
+
+async function pushBranch(machine: Machine, dir: string) {
+  const branch = await currentBranch(machine, dir);
+  if (await published(machine, dir, branch)) return branch;
+  await git(machine, dir, "branch", "-M", "main");
+  return "main";
 }
 
 const isPrivate = (visibility: string | undefined) => visibility === "PRIVATE" || visibility === "INTERNAL";
@@ -202,9 +223,9 @@ async function checkout(machine: Machine, dir: string, repo: string) {
     const other = urls.find((url) => githubRepoOf(url)?.toLowerCase() !== repo.toLowerCase());
     if (other !== undefined) throw new Error(`${dir} is a clone of ${other || "nothing"}, not ${repo}. Move it away, then run hedge setup again.`);
     await git(machine, dir, "fetch", "-q", "origin");
-    const remote = await machine.exec(["git", "-C", dir, "rev-parse", "--verify", "-q", "origin/main"]);
-    if (remote.code !== 0) return;
-    const merged = await machine.exec(["git", "-C", dir, "merge", "-q", "--ff-only", "origin/main"]);
+    const branch = await currentBranch(machine, dir);
+    if (!(await published(machine, dir, branch))) return;
+    const merged = await machine.exec(["git", "-C", dir, "merge", "-q", "--ff-only", `origin/${branch}`]);
     if (merged.code !== 0) throw new Error(`${bothChanged(dir, repo)} Move ${dir} away, then run hedge setup again: it clones ${repo} and saves your answers on top.`);
     return;
   }
