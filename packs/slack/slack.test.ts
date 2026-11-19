@@ -451,29 +451,54 @@ describe("saving to the context library", () => {
     expect(captures).toHaveLength(1);
   });
 
-  test("after hedge import-fleet, a capture that Fleet queued runs once, an event that Fleet handled stays handled, and a new event that failed to launch is tried again", async () => {
+  async function importedFleetQueue() {
     const home = temp.make("home-");
     mkdirSync(join(home, ".local/state/fleet/slack"), { recursive: true });
     const queued = { trigger: { kind: "capture", channel: "C1", ts: "1794830407.564399" }, since: 0, commandId: "c" };
     writeFileSync(join(home, ".local/state/fleet/slack/slack-trigger.json"), JSON.stringify({ handled: { "C1:1794830000.000100": 500 }, followed: {}, pending: { "C1:1794830407.564399": queued } }), { mode: 0o600 });
-    const { deps, captures } = savedThread(["none"], { now: 1_000 }, home);
-    const launched: string[] = [];
-    deps.launch = async (request) => (launched.push(request.title), { failed: "no" });
-    const ownMessages: Record<string, string> = { "1794830000.000100": "handled by Fleet :t3code:", "1794830000.000200": "new after the import :t3code:" };
-    const slack = deps.slack;
-    deps.slack = async (method, args) => (method === "conversations.replies" && ownMessages[args.ts!] ? { messages: [{ user: ownerId, ts: args.ts!, text: ownMessages[args.ts!] }] } : slack(method, args));
-
     expect(await main(["import-fleet"], { home, engineRoot: repoRoot, platform: "linux", env: {}, print: () => {}, run: async () => 0 })).toBe(0);
+    return { home, ...launching(savedThread(["none"], { now: 1_000 }, home)) };
+  }
+
+  function launching(thread: ReturnType<typeof savedThread>) {
+    const launched: string[] = [];
+    thread.deps.launch = async (request) => (launched.push(request.title), { failed: "no" });
+    const ownMessages: Record<string, string> = { "1794830000.000100": "handled by Fleet :t3code:", "1794830000.000200": "a new event :t3code:" };
+    const slack = thread.deps.slack;
+    thread.deps.slack = async (method, args) => (method === "conversations.replies" && ownMessages[args.ts!] ? { messages: [{ user: ownerId, ts: args.ts!, text: ownMessages[args.ts!] }] } : slack(method, args));
+    return { ...thread, launched };
+  }
+
+  test("after hedge import-fleet, a capture that Fleet queued runs once", async () => {
+    const { deps, captures } = await importedFleetQueue();
+
     await retryPending(deps);
-    await handleTrigger({ kind: "message", channel: "C1", ts: "1794830000.000100" }, deps);
-    await handleTrigger({ kind: "message", channel: "C1", ts: "1794830000.000200" }, deps);
+    await retryPending(deps);
 
     expect(captures).toEqual(["2026-11-16T12:00:07.564Z"]);
-    expect(launched).toEqual(["Slack: new after the import"]);
-    await retryPending(deps);
-    expect(launched).toEqual(["Slack: new after the import", "Slack: new after the import"]);
-    expect(captures).toEqual(["2026-11-16T12:00:07.564Z"]);
+  });
+
+  test("after hedge import-fleet, an event that Fleet handled stays handled", async () => {
+    const { deps, launched } = await importedFleetQueue();
+
+    await handleTrigger({ kind: "message", channel: "C1", ts: "1794830000.000100" }, deps);
+
+    expect(launched).toEqual([]);
+  });
+
+  test("hedge import-fleet keeps the Slack queue it brings over readable by its owner only", async () => {
+    const { home } = await importedFleetQueue();
+
     expect(lstatSync(statePath(home)).mode & 0o777).toBe(0o600);
+  });
+
+  test("an event whose launch failed is tried again on the next retry", async () => {
+    const { deps, launched } = launching(savedThread([], { now: 1_000 }));
+
+    await handleTrigger({ kind: "message", channel: "C1", ts: "1794830000.000200" }, deps);
+    await retryPending(deps);
+
+    expect(launched).toEqual(["Slack: a new event", "Slack: a new event"]);
   });
 
   test("a meeting whose Wispr notes are not ready gets one more look 30 minutes later, and only that look sends again, with what went out before", async () => {

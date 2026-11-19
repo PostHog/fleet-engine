@@ -286,7 +286,7 @@ describe("install-codex.sh", () => {
     return (await new Response(child.stdout).text()).trim();
   }
 
-  onLinux("hedge apply, with each command run in the box, moves the Codex that Fleet installed to Hedge's release package and keeps Fleet's copy", async () => {
+  onLinux("hedge apply, with each command run in the box through the hedge launcher, moves the Codex that Fleet installed to Hedge's release package and keeps Fleet's copy", async () => {
     const box = await machine("x86_64", ["x86_64-unknown-linux-musl"]);
     rmSync(join(box.bin, "bun"));
     symlinkSync(process.execPath, join(box.bin, "bun"));
@@ -298,9 +298,8 @@ describe("install-codex.sh", () => {
     const lines: string[] = [];
     const hedge = (args: string[]) => main(args, { home: box.home, engineRoot, platform: "linux", env: {}, print: (line) => lines.push(line), run: inTheBox });
     const inTheBox = async (command: string[]) => {
-      if (command[0] === "/bin/sh" && command[1] === launcher) return hedge(command.slice(2));
       if (!Bun.which(command[0]!, { PATH: path })) return 127;
-      return Bun.spawn(command, { env: { HOME: box.home, PATH: path }, stdout: "ignore", stderr: "ignore" }).exited;
+      return Bun.spawn(command, { env: { HOME: box.home, PATH: path, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" }, stdout: "ignore", stderr: "ignore" }).exited;
     };
     const before = await codexOnPath(box.home, path);
     const saved = process.env.PATH;

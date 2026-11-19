@@ -7,7 +7,7 @@ import { gmail, googleApps, googleCalendar, slack } from "./apps.ts";
 import { issueKey } from "./hub.ts";
 import { declaredUpstreams } from "./declared.ts";
 import { appSignedIn, registerUpstream, registerUpstreams, signInApp, upstreamsRegistered } from "./upstreams.ts";
-import { dockerHost, fakeHub, fakeMcpHub, fakeRun, mcphubFetch, upstreamRequest, writeMcpHubSettings, type FakeContainer, type FakeMcpHub } from "./testing.ts";
+import { dockerHost, fakeHub, fakeMcpHub, fakeRun, mcphubFetch, writeMcpHubSettings, type FakeContainer, type FakeMcpHub } from "./testing.ts";
 
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
@@ -74,7 +74,7 @@ test("an upstream that moves to another origin drops the sign-in and headers of 
   api.configs.notes = { ...api.configs.notes, url: "https://old.example.com/mcp", headers: { Authorization: "Bearer old-origin" }, oauth: { redirectUri: "http://127.0.0.1:3317/mcphub/oauth/callback", accessToken: "old-access", refreshToken: "old-refresh" } };
   hub.printed.length = 0;
   await registerUpstreams(hub);
-  expect(api.configs.notes).toEqual({ type: "streamable-http", url: "https://notes.example.com/mcp", description: "Added by Hedge", startOnDemand: true, oauth: { redirectUri: "http://127.0.0.1:3317/mcphub/oauth/callback" } });
+  expect(api.configs.notes).toEqual({ type: "streamable-http", url: "https://notes.example.com/mcp", description: "Added by Hedge", startOnDemand: true, enabled: true, oauth: { redirectUri: "http://127.0.0.1:3317/mcphub/oauth/callback" } });
   expect(hub.printed).toEqual(["Notes is in the MCP gateway. To sign in to it, on the hub, run: hedge mcp-gateway sign-in"]);
 });
 
@@ -138,18 +138,48 @@ test("a local upstream whose folder is missing on the hub waits with a warning w
   expect(await upstreamsRegistered(hub)).toBe(true);
 });
 
-test("an upstream that moves to another origin receives none of the old origin's credentials, also those the gateway keeps by server name", async () => {
+function movedNotes() {
   const { api, hub } = hubWith({ "notes.json": notes });
-  await registerUpstreams(hub);
-  api.configs.notes = { type: "streamable-http", url: "https://old.example.com/mcp", description: "Added by Hedge", startOnDemand: true, headers: { Authorization: "Bearer old-header" }, credentialTemplate: [{ target: "headers", name: "X-Api-Key" }] };
-  api.bindings.notes = { "headers.X-Api-Key": "old-binding" };
-  api.oauthClients.notes = { clientId: "old-client", clientSecret: "old-secret" };
+  return {
+    api,
+    hub,
+    async moveFromOldOrigin() {
+      await registerUpstreams(hub);
+      api.configs.notes = { type: "streamable-http", url: "https://old.example.com/mcp", description: "Added by Hedge", startOnDemand: true, headers: { Authorization: "Bearer old-header" }, credentialTemplate: [{ target: "headers", name: "X-Api-Key" }], oauth: { redirectUri: "http://127.0.0.1:3317/mcphub/oauth/callback" } };
+      api.bindings.notes = { "headers.X-Api-Key": "old-binding" };
+      api.oauthClients.notes = { clientId: "old-client", clientSecret: "old-secret" };
+      api.received = [];
+    },
+    sentToNewOrigin: () => api.received.filter((sent) => typeof sent.url === "string" && new URL(sent.url).origin === "https://notes.example.com"),
+  };
+}
 
-  await registerUpstreams(hub);
+const oldCredentials = ["old-header", "old-binding", "old-client", "old-secret", "https://old.example.com"];
 
-  const sent = upstreamRequest(api, "notes");
-  expect(sent.url).toBe("https://notes.example.com/mcp");
-  for (const old of ["old-header", "old-binding", "old-client", "old-secret"]) expect(JSON.stringify(sent)).not.toContain(old);
+test("an upstream that moves to another origin receives none of the old origin's credentials at any point of the move, also those the gateway keeps by server name", async () => {
+  const moved = movedNotes();
+  await moved.moveFromOldOrigin();
+
+  await registerUpstreams(moved.hub);
+
+  expect(moved.sentToNewOrigin().length).toBeGreaterThan(0);
+  for (const old of oldCredentials) expect(JSON.stringify(moved.sentToNewOrigin())).not.toContain(old);
+  expect(moved.api.configs.notes).toMatchObject({ url: "https://notes.example.com/mcp", enabled: true });
+});
+
+test("when the gateway does not drop the old origin's sign-in, the upstream keeps its old origin, and the next run drops the sign-in before it moves", async () => {
+  const moved = movedNotes();
+  await moved.moveFromOldOrigin();
+  moved.api.failing = ["POST servers/notes/oauth/disconnect"];
+
+  await expect(registerUpstreams(moved.hub)).rejects.toThrow();
+
+  expect(moved.api.configs.notes!.url).toBe("https://old.example.com/mcp");
+  moved.api.failing = [];
+  await registerUpstreams(moved.hub);
+
+  expect(moved.sentToNewOrigin().length).toBeGreaterThan(0);
+  for (const old of oldCredentials) expect(JSON.stringify(moved.sentToNewOrigin())).not.toContain(old);
 });
 
 test("an upstream that Fleet added before the rename becomes Hedge's and keeps its sign-in at the same origin", async () => {
@@ -164,7 +194,7 @@ test("an upstream that Fleet added at another origin becomes Hedge's without the
   const fleets = { type: "streamable-http", url: "https://old.example.com/mcp", description: "Added by Fleet", headers: { Authorization: "Bearer old-origin" }, oauth: { redirectUri: "http://127.0.0.1:3317/mcphub/oauth/callback", refreshToken: "old-refresh" } };
   const { api, hub } = hubWith({ "notes.json": notes }, { servers: ["tickets", "calendar", "notes"], configs: { notes: fleets } });
   await registerUpstreams(hub);
-  expect(api.configs.notes).toEqual({ type: "streamable-http", url: "https://notes.example.com/mcp", description: "Added by Hedge", startOnDemand: true, oauth: { redirectUri: "http://127.0.0.1:3317/mcphub/oauth/callback" } });
+  expect(api.configs.notes).toEqual({ type: "streamable-http", url: "https://notes.example.com/mcp", description: "Added by Hedge", startOnDemand: true, enabled: true, oauth: { redirectUri: "http://127.0.0.1:3317/mcphub/oauth/callback" } });
   expect(hub.printed).toEqual(["Notes is in the MCP gateway. To sign in to it, on the hub, run: hedge mcp-gateway sign-in"]);
   expect(await upstreamsRegistered(hub)).toBe(true);
 });

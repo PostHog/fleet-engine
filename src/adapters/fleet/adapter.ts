@@ -10,7 +10,7 @@ import type { T3Server } from "../t3/port.ts";
 
 export type FleetPiece = { kind: "launchd" | "systemd" | "container" | "t3" | "cron" | "process"; name: string; pid?: number };
 export type OldTasks = { list(): Promise<Array<{ id: string; enabled: boolean }>>; setEnabled(id: string, enabled: boolean): Promise<void>; saved?: true };
-export type Running = { pid: number; ppid: number; argv: string[] };
+export type Running = { pid: number; ppid: number; argv: string[]; fleetEngine?: string };
 export type FleetOptions = { run?: CommandRunner; accountHome?: () => Promise<string | undefined>; uid?: number; tasks?: (home: string) => Promise<OldTasks | undefined>; sleep?: (ms: number) => Promise<void>; processes?: () => Promise<Running[]> };
 export type Retirement = { retired: string[]; left: string[]; notes: string[] };
 export type FleetAdapter = Adapter & { retire(home: string, platform: NodeJS.Platform): Promise<Retirement | undefined>; holds(home: string, platform: NodeJS.Platform): Promise<Finding[]> };
@@ -30,6 +30,24 @@ const jobLauncher = /\/\.local\/state\/fleet\/jobs\/([A-Za-z0-9._-]+)\.sh$/;
 const packCommand = /\/packs\/[^/]+\/commands\/([a-z0-9-]+)\.ts$/;
 const jobChildren: ReadonlyArray<readonly string[]> = [["update"], ["agent-update"]];
 const jobOrChild = (argv: string[]) => oldJob(argv) ?? jobChildren.find((command) => command.every((word, index) => argv[index] === word));
+const codexInstaller = "/packs/base/lib/install-codex.sh";
+const interpreters = new Set([...shellPrograms, "node", "bun"]);
+const installerCommands: ReadonlyArray<readonly string[]> = [["claude", "update"], ["claude", "plugin"], ["codex", "plugin"], ["t3", "update"], ["t3", "doctor"], ["bun", "add", "-g", "@openai/codex@latest"]];
+
+function installerIn(argv: string[]) {
+  const starts = interpreters.has(basename(argv[0] ?? "")) ? [0, 1] : [0];
+  for (const at of starts) {
+    const words = [basename(argv[at] ?? ""), ...argv.slice(at + 1)];
+    const command = installerCommands.find((command) => command.every((word, index) => words[index] === word));
+    if (command) return command;
+  }
+  return undefined;
+}
+
+function fleetInstaller(home: string, { argv, fleetEngine }: Running): string | undefined {
+  const command = fleetEngine?.startsWith("/") && underLegacyPath(home, fleetEngine) ? installerIn(argv) : undefined;
+  return command && `agent-update: ${command.slice(0, 2).join(" ")}`;
+}
 
 function fleetJob(home: string, words: string[]): string | undefined {
   const [program = "", script = "", ...rest] = words;
@@ -39,6 +57,7 @@ function fleetJob(home: string, words: string[]): string | undefined {
   if (!ours(script)) return undefined;
   if (shellPrograms.has(basename(program))) {
     const launcher = jobLauncher.exec(script)?.[1];
+    if (script.endsWith(codexInstaller)) return "agent-update: install-codex.sh";
     return basename(script) === "fleet" ? job(rest) : launcher && `job ${launcher}`;
   }
   if (basename(program) !== "bun") return undefined;
@@ -47,24 +66,30 @@ function fleetJob(home: string, words: string[]): string | undefined {
   return command ? job([command, ...rest]) : undefined;
 }
 
-function procProcesses(uid: number): () => Promise<Running[]> {
+const vanished = (error: unknown) => ["ENOENT", "ESRCH"].includes((error as NodeJS.ErrnoException).code ?? "");
+const engineIn = (environ: string) => environ.split("\0").find((entry) => entry.startsWith("FLEET_ENGINE_DIR="))?.slice("FLEET_ENGINE_DIR=".length);
+
+export function procProcesses(uid: number, root = "/proc"): () => Promise<Running[]> {
   return async () => {
     let entries: string[];
     try {
-      entries = readdirSync("/proc").filter((name) => /^[0-9]+$/.test(name));
+      entries = readdirSync(root).filter((name) => /^[0-9]+$/.test(name));
     } catch (error) {
-      throw new Error(`/proc could not be read (${(error as Error).message})`);
+      throw new Error(`${root} could not be read (${(error as Error).message})`);
     }
     return entries.flatMap((name): Running[] => {
+      const dir = join(root, name);
       try {
-        if (statSync(`/proc/${name}`).uid !== uid) return [];
-        const argv = readFileSync(`/proc/${name}/cmdline`, "utf8").split("\0");
+        if (statSync(dir).uid !== uid) return [];
+        const argv = readFileSync(join(dir, "cmdline"), "utf8").split("\0");
         if (argv.at(-1) === "") argv.pop();
-        const stat = readFileSync(`/proc/${name}/stat`, "utf8");
+        const stat = readFileSync(join(dir, "stat"), "utf8");
         const ppid = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
-        return argv.length ? [{ pid: Number(name), ppid, argv }] : [];
-      } catch {
-        return [];
+        const fleetEngine = installerIn(argv) ? engineIn(readFileSync(join(dir, "environ"), "utf8")) : undefined;
+        return argv.length ? [{ pid: Number(name), ppid, argv, fleetEngine }] : [];
+      } catch (error) {
+        if (vanished(error)) return [];
+        throw new Error(`process ${name} could not be read (${(error as Error).message})`);
       }
     });
   };
@@ -146,8 +171,9 @@ export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
     } catch (error) {
       return { pieces: [], running: [], unclear: (error as Error).message };
     }
-    const pieces = running.flatMap(({ pid, argv }): FleetPiece[] => {
-      const job = fleetJob(home, argv);
+    const pieces = running.flatMap((item): FleetPiece[] => {
+      const { pid } = item;
+      const job = fleetJob(home, item.argv) ?? fleetInstaller(home, item);
       return job ? [{ kind: "process", name: `fleet ${job} (process ${pid})`, pid }] : [];
     });
     return { pieces, running };

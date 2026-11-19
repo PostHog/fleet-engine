@@ -89,13 +89,15 @@ export async function registerUpstream(hub: Hub, upstream: Upstream) {
     await chmod(appHome(hub.home, upstream), 0o700);
   }
   const want = wanted(upstream, hub);
-  const config = forThisOrigin(stored, want);
-  const signedOut = config !== stored;
+  const fresh = forThisOrigin(stored, want);
+  const signedOut = fresh !== stored;
   const path = `servers/${encodeURIComponent(upstream.name)}`;
-  if (signedOut && upstream.kind === "oauth") {
-    await call(path, "PUT", { config: { ...config, ...want } });
+  const movesOAuth = signedOut && upstream.kind === "oauth";
+  if (movesOAuth) {
+    await call(`${path}/toggle`, "POST", { enabled: false });
     await call(`${path}/oauth/disconnect`, "POST", { scope: "all" });
   }
+  const config = movesOAuth && fresh ? { ...fresh, enabled: false } : fresh;
   const newClient = upstream.kind === "oauth" && upstream.loopback && !loopbackClientOf(config);
   if (newClient) want.oauth = { ...(want.oauth as Config), clientId: await registerLoopbackClient(hub.fetch, upstream) };
   if (!config) await call("servers", "POST", { name: upstream.name, config: want });

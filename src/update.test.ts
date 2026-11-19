@@ -97,7 +97,7 @@ describe("hedge update", () => {
     expect(await originOf(engineDir)).toBe("https://github.com/Acme/fleet-engine.git");
   });
 
-  test("follows a fork whose newest release is older than the Hedge release it ran, and keeps no Hedge tag", async () => {
+  async function hedgeReleaseWithOlderFork() {
     const remote = await engineRemote(["v0.1.0", "v0.1.5"]);
     const fork = temp.make("fork-");
     await spawnGit(fork, "clone", "-q", await engineRemote(["v0.1.0"]), ".");
@@ -107,6 +107,11 @@ describe("hedge update", () => {
     const engineDir = await engineCheckout(remote, "v0.1.5");
     await spawnGit(engineDir, "fetch", "-q", "--tags", "origin");
     await onGithub(engineDir, "PostHog/hedge", remote);
+    return { engineDir, fork };
+  }
+
+  test("follows a fork whose newest release is older than the Hedge release it ran", async () => {
+    const { engineDir, fork } = await hedgeReleaseWithOlderFork();
     await spawnGit(engineDir, "config", `url.${fork}.insteadOf`, "https://github.com/Acme/fleet-engine.git");
 
     const result = await run(engineDir, { repo: "Acme/fleet-engine", ref: "v0.1.0", channel: "release" });
@@ -114,7 +119,35 @@ describe("hedge update", () => {
     expect(result.output).toContain("The engine now comes from Acme/fleet-engine.");
     expect(result.code).toBe(0);
     expect(result.version).toBe("fork v0.1.2");
-    expect((await spawnGit(engineDir, "tag", "--list")).trim().split("\n")).toEqual(["v0.1.0", "v0.1.2"]);
+  });
+
+  test("after the fork cannot be fetched, keeps the Hedge origin, and the next update still moves to the fork's release", async () => {
+    const { engineDir, fork } = await hedgeReleaseWithOlderFork();
+    const hedge = await originOf(engineDir);
+    await spawnGit(engineDir, "config", `url.${join(fork, "gone")}.insteadOf`, "https://github.com/Acme/fleet-engine.git");
+
+    const failed = await run(engineDir, { repo: "Acme/fleet-engine", ref: "v0.1.0", channel: "release" });
+
+    expect(failed).toMatchObject({ code: 1, applied: 0, version: "v0.1.5" });
+    expect(await originOf(engineDir)).toBe(hedge);
+
+    await spawnGit(engineDir, "config", "--remove-section", `url.${join(fork, "gone")}`);
+    await spawnGit(engineDir, "config", `url.${fork}.insteadOf`, "https://github.com/Acme/fleet-engine.git");
+    const retried = await run(engineDir, { repo: "Acme/fleet-engine", ref: "v0.1.0", channel: "release" });
+
+    expect(retried).toMatchObject({ code: 0, applied: 1, version: "fork v0.1.2" });
+    expect(await originOf(engineDir)).toBe("https://github.com/Acme/fleet-engine.git");
+  });
+
+  test("keeps a tag the user made in the engine checkout when it moves to a newer release", async () => {
+    const remote = await engineRemote(["v0.1.0", "v0.1.1"]);
+    const engineDir = await engineCheckout(remote, "v0.1.0");
+    await spawnGit(engineDir, "tag", "my-notes");
+
+    const result = await run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" });
+
+    expect(result).toMatchObject({ code: 0, version: "v0.1.1" });
+    expect(await spawnGit(engineDir, "tag", "--list", "my-notes")).toBe("my-notes");
   });
 
   test("moves the release channel to the newest tag of its major and reports a new major", async () => {
@@ -191,7 +224,6 @@ describe("hedge update", () => {
   test("follows the profile's engine repository", async () => {
     const original = await engineRemote(["v0.1.0"]);
     const engineDir = await engineCheckout(original, "v0.1.0");
-    // A moved engine is a fork or mirror, so its tags point at the same commits.
     const moved = temp.make("engine-moved-");
     await spawnGit(moved, "clone", "-q", original, ".");
     writeFileSync(join(moved, "VERSION"), "v0.2.0");
@@ -200,6 +232,22 @@ describe("hedge update", () => {
     const result = await run(engineDir, { repo: moved, ref: "v0.1.0", channel: "release" });
     expect(result.output).toContain(`The engine now comes from ${moved}.`);
     expect(result.version).toBe("v0.2.0");
+  });
+
+  test("keeps a token in the profile's engine URL out of its messages when it follows that repository", async () => {
+    const original = await engineRemote(["v0.1.0"]);
+    const engineDir = await engineCheckout(original, "v0.1.0");
+    const moved = temp.make("engine-moved-");
+    await spawnGit(moved, "clone", "-q", original, ".");
+    writeFileSync(join(moved, "VERSION"), "v0.2.0");
+    await spawnGit(moved, "commit", "-q", "-am", "v0.2.0");
+    await spawnGit(moved, "tag", "v0.2.0");
+    const withToken = "https://hedge:s3cret-token@git.example.invalid/engine.git";
+    await spawnGit(engineDir, "config", `url.${moved}.insteadOf`, withToken);
+    const result = await run(engineDir, { repo: withToken, ref: "v0.1.0", channel: "release" });
+    expect(result.version).toBe("v0.2.0");
+    expect(result.output).toContain("The engine now comes from https://git.example.invalid/engine.git.");
+    expect(result.output).not.toContain("s3cret-token");
   });
 
   test("never moves an engine that is not on a release back to one", async () => {

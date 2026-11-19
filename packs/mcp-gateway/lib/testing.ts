@@ -17,11 +17,13 @@ export type FakeMcpHub = {
   notReadyFor: number;
   oauthClients: Record<string, { clientId: string; clientSecret?: string }>;
   bindings: Record<string, Record<string, string>>;
+  received: Array<ReturnType<typeof upstreamRequest>>;
+  failing: string[];
   home?: string;
 };
 
 export function fakeMcpHub(fields: Partial<FakeMcpHub> = {}): FakeMcpHub {
-  return { servers: ["tickets", "calendar"], toolCounts: {}, configs: {}, keepsConfig: true, groups: [], calls: [], healthy: true, openWithoutKey: false, notReadyFor: 0, oauthClients: {}, bindings: {}, ...fields };
+  return { servers: ["tickets", "calendar"], toolCounts: {}, configs: {}, keepsConfig: true, groups: [], calls: [], healthy: true, openWithoutKey: false, notReadyFor: 0, oauthClients: {}, bindings: {}, received: [], failing: [], ...fields };
 }
 
 function keyOf(state: FakeMcpHub) {
@@ -46,6 +48,7 @@ export function mcphubFetch(state: FakeMcpHub) {
     const path = url.pathname.slice("/mcphub/api/".length);
     const body = init.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined;
     state.calls.push({ method, path, ...(body ? { body } : {}) });
+    if (state.failing.includes(`${method} ${path}`)) return new Response(null, { status: 500 });
     if (method === "GET" && path === "servers") return Response.json({ success: true, data: state.servers.map((name) => ({ name, status: "connected", tools: toolsOf(state, name) })) });
     if (method === "GET" && path === "groups") return Response.json({ success: true, data: state.groups });
     if (method === "POST" && path === "groups") {
@@ -69,10 +72,16 @@ export function mcphubFetch(state: FakeMcpHub) {
       const { accessToken: _access, refreshToken: _refresh, clientId, clientSecret, ...oauth } = (state.configs[name]?.oauth ?? {}) as Record<string, unknown>;
       if (body?.scope === "all") delete state.oauthClients[name];
       if (state.configs[name]?.oauth) state.configs[name]!.oauth = body?.scope === "all" ? oauth : { ...oauth, clientId, clientSecret };
+      connect(state, name);
       return Response.json({ success: true });
     }
     const toggle = path.match(/^servers\/([^/]+)\/toggle$/);
-    if (method === "POST" && toggle) return (state.configs[decodeURIComponent(toggle[1]!)]!.enabled = body!.enabled), Response.json({ success: true });
+    if (method === "POST" && toggle) {
+      const name = decodeURIComponent(toggle[1]!);
+      state.configs[name]!.enabled = body!.enabled;
+      connect(state, name);
+      return Response.json({ success: true });
+    }
     const server = path.match(/^servers\/([^/]+)$/);
     const name = server ? decodeURIComponent(server[1]!) : String(body?.name);
     const refused = (config: Record<string, any>) => Array.isArray(config.credentialTemplate) && config.credentialTemplate.length > 0 && Object.keys(config.oauth ?? {}).length > 0;
@@ -84,19 +93,26 @@ export function mcphubFetch(state: FakeMcpHub) {
     };
     if (method === "POST" && path === "servers") {
       if (state.servers.includes(name) || refused(body!.config as Record<string, unknown>)) return new Response(null, { status: 400 });
-      state.servers.push(name), stored(body!.config as Record<string, unknown>);
+      state.servers.push(name), stored(body!.config as Record<string, unknown>), connect(state, name);
       return Response.json({ success: true }, { status: 201 });
     }
     if (!server || !state.servers.includes(name)) return new Response(null, { status: 404 });
     if (method === "GET") return Response.json({ success: true, data: { name, status: "connected", tools: toolsOf(state, name), config: state.configs[name] ?? {} } });
     if (method === "PUT" && refused(body!.config as Record<string, unknown>)) return new Response(null, { status: 400 });
-    if (method === "PUT") return stored(body!.config as Record<string, unknown>), Response.json({ success: true });
+    if (method === "PUT") return stored(body!.config as Record<string, unknown>), connect(state, name), Response.json({ success: true });
     return new Response(null, { status: 404 });
   };
 }
 
-/** What MCPHub at the pinned commit sends an HTTP upstream: its headers with the bound credentials, the OAuth client it registered under the server's name or the one in its config, and its tokens. */
-export function upstreamRequest(state: FakeMcpHub, name: string) {
+function connect(state: FakeMcpHub, name: string) {
+  const config = state.configs[name];
+  if (!config || config.enabled === false || typeof config.url !== "string") return;
+  const oauth = config.oauth as Record<string, unknown> | undefined;
+  if (oauth && !oauth.clientId && !state.oauthClients[name]) state.oauthClients[name] = { clientId: `registered-at-${new URL(config.url).origin}` };
+  state.received.push(upstreamRequest(state, name));
+}
+
+function upstreamRequest(state: FakeMcpHub, name: string) {
   const config = state.configs[name] ?? {};
   const oauth = (config.oauth ?? {}) as Record<string, unknown>;
   const slots = Array.isArray(config.credentialTemplate) ? (config.credentialTemplate as Array<{ target: string; name: string }>) : [];
