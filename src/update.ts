@@ -16,6 +16,7 @@ export type UpdateOptions = {
 type Version = { tag: string; parts: [number, number, number] };
 
 const releaseRefs = "refs/hedge/releases";
+export const recordedReleasesAtHead = (engineDir: string) => ["git", "-C", engineDir, "for-each-ref", "--points-at", "HEAD", "--format=%(refname)", releaseRefs];
 export const releaseRefsAtHead = (engineDir: string) => ["git", "-C", engineDir, "for-each-ref", "--points-at", "HEAD", "--format=%(refname)", releaseRefs, "refs/tags"];
 export const releaseIn = (refs: string) => refs.split("\n").map((ref) => ref.trim().replace(/^refs\/(?:hedge\/releases|tags)\//, "")).find((tag) => parse(tag)?.tag === tag);
 

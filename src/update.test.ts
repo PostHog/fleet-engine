@@ -272,17 +272,37 @@ describe("hedge update", () => {
     expect(await spawnGit(engineDir, "rev-parse", "refs/hedge/releases/v0.1.1")).toBe(await spawnGit(remote, "rev-parse", "v0.1.1^{commit}"));
   });
 
+  async function triageEngineLine(engineDir: string) {
+    const io = scripted([]);
+    const capture: CommandRunner = async (command, options) => (command[0] === "git" && command[2] === engineDir ? spawnRunner(command, options) : { code: 1, stdout: "", stderr: "not found" });
+    const code = await main(["triage", "--print"], { home: temp.make("home-"), engineRoot: engineDir, platform: "linux", env: {}, print: io.terminal.print, terminal: io.terminal, capture, hostname: () => "box", run: async () => 0 });
+    expect(code).toBe(0);
+    return io.output().split("\n").find((line) => line.startsWith("- Engine: "));
+  }
+
   test("hedge triage --print names the release that hedge update installed", async () => {
     const remote = await engineRemote(["v0.1.0", "v0.1.1"]);
     const engineDir = await engineCheckout(remote, "v0.1.0");
     expect(await run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" })).toMatchObject({ code: 0, version: "v0.1.1" });
-    const io = scripted([]);
-    const capture: CommandRunner = async (command, options) => (command[0] === "git" && command[2] === engineDir ? spawnRunner(command, options) : { code: 1, stdout: "", stderr: "not found" });
 
-    const code = await main(["triage", "--print"], { home: temp.make("home-"), engineRoot: engineDir, platform: "linux", env: {}, print: io.terminal.print, terminal: io.terminal, capture, hostname: () => "box", run: async () => 0 });
+    expect(await triageEngineLine(engineDir)).toBe("- Engine: v0.1.1");
+  });
 
-    expect(code).toBe(0);
-    expect(io.output()).toContain("- Engine: v0.1.1\n");
+  test("hedge triage --print marks the release that hedge update installed as -dirty when the engine checkout has local changes", async () => {
+    const remote = await engineRemote(["v0.1.0", "v0.1.1"]);
+    const engineDir = await engineCheckout(remote, "v0.1.0");
+    expect(await run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" })).toMatchObject({ code: 0, version: "v0.1.1" });
+    writeFileSync(join(engineDir, "VERSION"), "patched");
+
+    expect(await triageEngineLine(engineDir)).toBe("- Engine: v0.1.1-dirty");
+  });
+
+  test("hedge triage --print names an engine without a Hedge release ref by git describe, with its -dirty marker", async () => {
+    const engineDir = await engineCheckout(await engineRemote(["v0.1.0"]), "v0.1.0");
+    await spawnGit(engineDir, "tag", "v0.1.0");
+    writeFileSync(join(engineDir, "VERSION"), "patched");
+
+    expect(await triageEngineLine(engineDir)).toBe("- Engine: v0.1.0-dirty");
   });
 
   test("keeps a tag the user made in the engine checkout when it moves to a newer release", async () => {

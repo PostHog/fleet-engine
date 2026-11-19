@@ -7,7 +7,7 @@ import { loadMachine, loadProfile } from "../profile/profile.ts";
 import { defaultSources, engineRepo } from "../setup/defaults.ts";
 import { FlagError } from "../setup/flags.ts";
 import { Stopped, type Terminal } from "../setup/terminal.ts";
-import { releaseIn, releaseRefsAtHead } from "../update.ts";
+import { recordedReleasesAtHead, releaseIn } from "../update.ts";
 import { duration, readFailure, readTimings, transcriptTail, usableSeconds, type SetupTimings } from "./triage-record.ts";
 import { redact, type KnownName } from "./triage-redact.ts";
 
@@ -139,9 +139,11 @@ async function versionLines(context: TriageContext, profile: Profile | undefined
 }
 
 async function engineVersion(context: TriageContext) {
-  const installed = await context.capture(releaseRefsAtHead(context.engineRoot), { signal: AbortSignal.timeout(10_000) }).catch(() => undefined);
-  const release = installed?.code === 0 ? releaseIn(installed.stdout) : undefined;
-  return release ?? (await firstLine(context, ["git", "-C", context.engineRoot, "describe", "--tags", "--always", "--dirty"]));
+  const recorded = await context.capture(recordedReleasesAtHead(context.engineRoot), { signal: AbortSignal.timeout(10_000) }).catch(() => undefined);
+  const release = recorded?.code === 0 ? releaseIn(recorded.stdout) : undefined;
+  if (!release) return await firstLine(context, ["git", "-C", context.engineRoot, "describe", "--tags", "--always", "--dirty"]);
+  const commit = await firstLine(context, ["git", "-C", context.engineRoot, "describe", "--always", "--dirty", "--exclude=*"]);
+  return commit?.endsWith("-dirty") ? `${release}-dirty` : release;
 }
 
 async function firstLine(context: TriageContext, command: string[]) {
