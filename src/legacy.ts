@@ -21,10 +21,10 @@ export function adoptLegacyEnv(env: Record<string, string | undefined>): void {
   }
 }
 
-/** env with a FLEET_ copy of each HEDGE_ variable, for packs from before the rename that read the old names. */
+/** env with a FLEET_ copy of each HEDGE_ variable, for packs from before the rename that read the old names. The copy replaces a FLEET_ variable that env already has, so the HEDGE_ value always wins. */
 export function withLegacyNames(env: Record<string, string | undefined>): Record<string, string | undefined> {
   const legacy = Object.fromEntries(Object.entries(env).filter(([key]) => key.startsWith("HEDGE_")).map(([key, value]) => [`FLEET_${key.slice("HEDGE_".length)}`, value]));
-  return { ...legacy, ...env };
+  return { ...env, ...legacy };
 }
 
 /** Paths under the home folder that the engine owned before the rename, and their new names. */

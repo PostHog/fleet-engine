@@ -37,6 +37,21 @@ function plan(overrides: Partial<Plan> = {}): Plan {
 const exitCodes = (codes: Record<string, number>) => async (command: string[]) => codes[command.join(" ")] ?? 0;
 
 describe("apply", () => {
+  test("a step from before the rename that writes to FLEET_PROFILE_DIR writes to the profile this run applies, even when the shell still names an old one", async () => {
+    const home = temp.make("home-");
+    const [old, current] = [temp.make("old-profile-"), temp.make("profile-")];
+    const saved = process.env.FLEET_PROFILE_DIR;
+    process.env.FLEET_PROFILE_DIR = old;
+    try {
+      await apply(plan({ machine: { schema: 1, role: "linux", profileDir: current }, steps: [{ id: "mark", pack: "team", run: ["/bin/sh", "-c", 'touch "$FLEET_PROFILE_DIR/marked"'] }] }), { home, adapters: [] });
+    } finally {
+      if (saved === undefined) delete process.env.FLEET_PROFILE_DIR;
+      else process.env.FLEET_PROFILE_DIR = saved;
+    }
+    expect(existsSync(join(old, "marked"))).toBe(false);
+    expect(existsSync(join(current, "marked"))).toBe(true);
+  });
+
   test("refuses to write while a setting is unanswered", async () => {
     const home = temp.make("home-");
     const report = await apply(plan({ unanswered: [{ key: "orchestration.tracker", question: "Which repo holds your maps?", type: "string" }] }), { home });
