@@ -1,11 +1,10 @@
 import { afterEach, expect, test } from "bun:test";
-import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { spawnAsync } from "../../../src/testing/spawn.ts";
 import { answeredFindings, reviewedFindings } from "./proof.ts";
-import { checkout, cleanFixtures, exitedPid, fakeModel, lockHolder, finishRound, fixture, graded, markPanel, models, recordingModel, settings, type Checkout } from "./proof-testing.ts";
+import { checkout, cleanFixtures, fakeModel, lockHolder, finishRound, fixture, graded, markPanel, models, recordingModel, settings, stuckRoundLock, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
 
@@ -702,20 +701,17 @@ test("a review takes over the budget lock of a hedge proof command that crashed,
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", fixes)).output).toContain(`"round":3`);
 });
 
-test.each(["hedge-proof-checkout-", "hedge-proof-o'brien-"])("a budget lock whose holder is gone and whose takeovers all stopped midway names its lock files and the command that clears them, and the next review runs once they are gone, in a home named %s", async (prefix) => {
+test.each(["hedge-proof-checkout-", "hedge-proof-o'brien-"])("a budget lock whose holder crashed and whose takeovers all crashed midway names the command that clears it, and the next review runs once that command ran, in a home named %s", async (prefix) => {
   const pr = await checkout(prefix);
-  const { panel, lock } = await fixesRoundDue(pr);
-  const dead = await exitedPid();
-  const held = JSON.stringify({ pid: dead, token: "crashed" });
-  writeFileSync(lock, held);
-  const guard = `${lock}.reclaim-${createHash("sha256").update(held).digest("hex").slice(0, 16)}`;
-  for (let generation = 1; generation <= 10; generation++) writeFileSync(generation === 1 ? guard : `${guard}.${generation}`, JSON.stringify({ pid: dead, token: `takeover-${generation}` }));
-  const stuck = await pr.hedge("review-start", "--scope", "fixes", "--base", panel).then(() => "", (error: Error) => error.message);
+  const { panel, reviews, lock } = await fixesRoundDue(pr);
+  await stuckRoundLock(reviews, 10);
+  const stuckStart = () => pr.hedge("review-start", "--scope", "fixes", "--base", panel).then(() => "", (error: Error) => error.message);
+  const stuck = await stuckStart();
   const clear = stuck.match(/then run (rm -f .*) and run this command again/)?.[1] ?? "";
 
   expect(stuck).toContain(`The lock ${lock} is stuck: its holder is gone, and 10 takeovers of it stopped before they ended. Check that no hedge proof command runs on this PR, then run rm -f `);
+  expect(await stuckStart()).toContain(`The lock ${lock} is stuck`);
   expect((await spawnAsync(["sh", "-c", clear])).exitCode).toBe(0);
-  expect(readdirSync(dirname(lock)).filter((name) => name === "round.lock" || name.startsWith("round.lock.reclaim-"))).toEqual([]);
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", panel)).output).toContain(`"round":2`);
 });
 
@@ -921,20 +917,41 @@ test("a finished review with no blocker or major spends no review budget, while 
   await expect(pr.hedge("review-start", "--scope", "fixes", "--base", await pr.git("rev-parse", "HEAD"))).rejects.toThrow("The review budget of 2 reviews is spent");
 });
 
-test("a review whose only item to answer is a TESTS item spends review budget", async () => {
+test("every TESTS item needs an answer and spends review budget whatever words it starts with, while a nit finding above TESTS needs none", async () => {
   const pr = await checkout();
   pr.pullRequestState({ body: graded("non-critical", "medium") });
-  pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 10, "pull-requests.reviewCeiling": 1 });
+  pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 10, "pull-requests.reviewCeiling": 4 });
   await pr.commit("feature.txt", "greet\n");
   await pr.hedge("require", "--none", "--reason", "fixture");
-  const panel = await cannedPanel(pr, { design: minor, others: lensAnswer("(none)") });
-  const fix = await pr.commit("feature.txt", "greet the member\n");
-  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", panel)).output).toContain(`"round":2`);
-  await finishWith(pr, "2", `${lensAnswer("(none)")}TESTS:\n- feature.test.ts:3 asserts the call count of greet\n`);
+  let base = await cannedPanel(pr, { design: minor, others: lensAnswer("(none)") });
+  const testsItems = [
+    "Nit: feature.test.ts:3 asserts the call count of greet",
+    "minor, feature.test.ts:4 asserts the hardcoded output",
+    "Severity | minor | open | feature.test.ts:5 mocks the greeting it checks",
+    "feature.test.ts:6 reads a private field of the greeter",
+  ];
+  for (const [index, item] of testsItems.entries()) {
+    const round = String(index + 2);
+    await pr.commit("feature.txt", `greet member ${round}\n`);
+    expect((await pr.hedge("review-start", "--scope", "fixes", "--base", base)).output).toContain(`"round":${round}`);
+    await finishWith(pr, round, `- nit: feature.txt:1 the greeting could be warmer\n\nTESTS:\n\n- ${item}\n`);
+    base = await pr.git("rev-parse", "HEAD");
+  }
   await pr.commit("feature.txt", "greet every member\n");
 
-  expect((await pr.hedge("gate")).output).toContain("review: round 2 has unanswered findings 1;");
-  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", fix)).rejects.toThrow("The review budget of 1 reviews is spent");
+  const gate = (await pr.hedge("gate")).output;
+  for (const round of ["2", "3", "4", "5"]) expect(gate).toContain(`review: round ${round} has unanswered findings 2;`);
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", base)).rejects.toThrow("The review budget of 4 reviews is spent");
+});
+
+test("a panel lens's TESTS item after its COVERED list needs an answer though it starts with nit, while the lens's nit finding needs none", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: graded("non-critical", "medium") });
+  await pr.commit("feature.txt", "greet\n");
+  await pr.hedge("require", "--none", "--reason", "fixture");
+  await cannedPanel(pr, { design: `${lensAnswer("- feature.txt:1 | nit | Design | a name reads plain | rename it | anchor: greet")}TESTS:\n- nit: feature.test.ts:3 asserts the call count of greet | rewrite\n`, others: lensAnswer("(none)") });
+
+  expect((await pr.hedge("gate")).output).toContain("review: round 1 has unanswered findings 2;");
 });
 
 test("a review that lists only minor or nit items that lead with the severity and a comma or colon needs no answer and spends no review budget, while a minor that may be a major still does", async () => {

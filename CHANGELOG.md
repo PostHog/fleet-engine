@@ -109,6 +109,9 @@
   and a `TESTS` item count, and an unfinished review counts. An item reads as
   minor or nit in the form `- file:line | minor | ...` and in the forms
   `1. minor, file:line: ...` and `1. nit: file:line ...`.
+- Every item under the `TESTS:` heading of a review or a panel lens needs an
+  answer and spends the review budget, even when it starts with `nit` or
+  `minor`. Only a finding above that heading can read as minor or nit.
 - A prose finding that a review writes beside only the notes of its Anchor
   check is a finding. It gets the number after all other items, so an answer
   that an older hedge took still answers the same item.

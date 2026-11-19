@@ -584,11 +584,18 @@ export function reviewedFindings(findings: string) {
 
 function reviewedItems(findings: string) {
   const { kept, tested } = reviewedLines(findings);
-  const parts = [listedItems(kept), listedItems(tested)];
+  const parts = [listedItems(kept), testItems(listedItems(tested))];
   return [...parts.flatMap(({ items }) => items), ...parts.flatMap(({ recovered }) => recovered)];
 }
 
-function listedItems(reviewed: ReviewedLine[]) {
+function testItems({ items, recovered }: { items: ReviewedItem[]; recovered: ReviewedItem[] }) {
+  const mark = (item: ReviewedItem) => ({ ...item, test: true });
+  return { items: items.map(mark), recovered: recovered.map(mark) };
+}
+
+type ReviewedItem = ReviewedLine & { test?: boolean };
+
+function listedItems(reviewed: ReviewedLine[]): { items: ReviewedItem[]; recovered: ReviewedItem[] } {
   const items: ReviewedLine[] = [];
   let open = false;
   for (const { text: line, note } of reviewed) {
@@ -617,13 +624,13 @@ export function answeredFindings(findings: string, responses: string) {
     else if (!match && last && continued.test(line)) last.text += `\n${line.trim()}`;
     else if (line.trim()) { last = undefined; other.push(line.trim()); }
   }
-  return { findings: items.map(({ text, note }, index) => ({ text, ...note ? { note } : {}, ...answers.has(index + 1) ? { answer: answers.get(index + 1)! } : {} })), other: other.join("\n") };
+  return { findings: items.map(({ text, note, test }, index) => ({ text, ...note ? { note } : {}, ...test ? { test } : {}, ...answers.has(index + 1) ? { answer: answers.get(index + 1)! } : {} })), other: other.join("\n") };
 }
 
 const majorItem = /^\s*(?:[-*]|\d+[.)])\s+(?:[^|\n]*\|)?\s*\**major\**\s*\|/i;
 
 const knownBlockers = (findings: string, responses: string) =>
-  answeredFindings(findings, responses).findings.flatMap(({ text, note, answer }, index) => answer?.verdict === "known" && !majorItem.test(text) && !needsNoAnswer({ text, note }) ? [index + 1] : []);
+  answeredFindings(findings, responses).findings.flatMap((finding, index) => finding.answer?.verdict === "known" && !majorItem.test(finding.text) && !needsNoAnswer(finding) ? [index + 1] : []);
 
 const locations = (text: string) => [...text.matchAll(/(?<![\w./-])([\w./-]+:\d+)(?![\w:])/g)].map((match) => match[1]!);
 
@@ -633,7 +640,7 @@ const unlistedKnown = (findings: string, responses: string, listed: string[]) =>
     return answer?.verdict === "known" && !(location && listed.some((item) => locations(item).includes(location))) ? [index + 1] : [];
   });
 
-const needsNoAnswer = ({ text, note }: { text: string; note?: boolean }) => note || flooredItem(text);
+const needsNoAnswer = ({ text, note, test }: { text: string; note?: boolean; test?: boolean }) => note || (!test && flooredItem(text));
 
 const unanswered = (findings: string, responses: string) =>
   answeredFindings(findings, responses).findings.flatMap((finding, index) => finding.answer || needsNoAnswer(finding) ? [] : [index + 1]);
