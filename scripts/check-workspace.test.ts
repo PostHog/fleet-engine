@@ -71,17 +71,22 @@ describe("the setup guide's workspace check", () => {
     );
   });
 
-  test("fails when the latest build is not a running start: says to start a stopped workspace, and to retry a failed or canceled build first", () => {
-    const retry = "In the Coder web app, press Retry until that build succeeds, then Start when the workspace is stopped, and check again.";
+  test("fails on a build that ended without a running start, before it reads any parameter: says to start it in the web app, and never to retry a delete", () => {
     const builds = [
-      { build: { transition: "stop", status: "stopped" }, advice: "Start it in the Coder web app, and check again." },
-      { build: { transition: "start", status: "failed" }, advice: retry },
-      { build: { transition: "stop", status: "failed" }, advice: retry },
-      { build: { transition: "start", status: "canceled" }, advice: retry },
+      { transition: "stop", status: "stopped" },
+      { transition: "start", status: "failed" },
+      { transition: "stop", status: "failed" },
+      { transition: "start", status: "canceled" },
+      { transition: "stop", status: "canceled" },
+      { transition: "delete", status: "failed" },
+      { transition: "delete", status: "deleted" },
     ];
-    for (const { build, advice } of builds) {
+    for (const build of builds) {
       const result = coder({ parameters: built, mutable: template, build }).check(passed);
-      expect([build, result.code, result.output.split("\n").at(-2)]).toEqual([build, 1, `x hedge-hub does not run: its latest build is a ${build.transition} that is ${build.status}. ${advice}`]);
+      const advice = build.transition === "delete"
+        ? `x hedge-hub is deleted or failed to delete: its latest build is a delete that is ${build.status}. Never retry it. Ask the person whether to create the workspace again.\n`
+        : `x hedge-hub does not run: its latest build is a ${build.transition} that is ${build.status}. Ask the person to start it in the Coder web app, then run this check again.\n`;
+      expect([build, result.code, result.output, result.argv.includes("curl ")]).toEqual([build, 1, advice, false]);
     }
   });
 

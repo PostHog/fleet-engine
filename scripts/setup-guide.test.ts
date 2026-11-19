@@ -192,9 +192,7 @@ describe("the agent setup guide", () => {
 
   test("changes a parameter in the workspace's Settings in the Coder web app, as the check says, and never with the Coder CLI", () => {
     const docs = [guide(), readFileSync(join(root, "docs/getting-started.md"), "utf8")].map((text) => text.replace(/\s+/g, " "));
-    const commands = [guide(), readFileSync(join(root, "docs/getting-started.md"), "utf8")].flatMap(codeIn);
-    expect(commands.filter((code) => /\bcoder\s+(?:update|restart|start)\s+\S/.test(code))).toEqual([]);
-    expect(codeIn("```sh\ncoder restart hub --parameter dotfiles=x --yes\n```").filter((code) => /\bcoder\s+(?:update|restart|start)\s+\S/.test(code))).toHaveLength(1);
+    for (const text of docs) expect(text.match(/\bcoder (?:update|restart|start) [^`\s]+/g)).toBeNull();
     expect(docs[0]).toContain("**Settings → Parameters**");
     expect(docs[1]).toContain("**Settings → Parameters**");
   });
