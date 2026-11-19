@@ -94,7 +94,7 @@ describe("the Base pack", () => {
   test("installs a pinned Node.js on Linux after the agent CLIs, so a skill runtime can start npx without a failed Node step holding back the rest of Base", () => {
     for (const ai of plans) {
       const steps = plan(ai, devbox).steps;
-      expect(steps.at(-1)).toMatchObject({ id: "node-runtime", run: ["hedge", "install-node"], check: ["npx", "--version"] });
+      expect(steps.at(-1)).toMatchObject({ id: "node-runtime", run: ["hedge", "install-node"], check: ["hedge", "install-node", "--check"] });
       expect(plan(ai, devbox).commands["install-node"]?.path).toEndWith("packs/base/commands/install-node.ts");
       expect(plan(ai).steps.map((step) => step.id)).not.toContain("node-runtime");
     }

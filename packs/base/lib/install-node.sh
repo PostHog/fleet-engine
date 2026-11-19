@@ -15,6 +15,7 @@ from_fleet() {
   return 1
 }
 if ! from_fleet && node --version >/dev/null 2>&1 && npx --version >/dev/null 2>&1; then exit 0; fi
+[ "${1:-}" != --check ] || exit 1
 
 release="$(dirname "$0")/node.release"
 pin() {
