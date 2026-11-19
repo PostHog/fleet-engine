@@ -3,7 +3,7 @@ import { lstatSync, readdirSync, readFileSync, readlinkSync, statSync } from "no
 import { basename, join } from "node:path";
 import type { Finding } from "../../pack/types.ts";
 import type { Adapter } from "../../reconciler/apply.ts";
-import { inLegacyEngine, legacyEngine, oldJob, underLegacyPath } from "../../legacy.ts";
+import { fleetEngineInstalled, inLegacyEngine, oldJob, underLegacyPath } from "../../legacy.ts";
 import { skipOtherHome, spawnRunner, type CommandRunner } from "../run.ts";
 import { localT3Server } from "../t3/session.ts";
 import type { T3Server } from "../t3/port.ts";
@@ -107,7 +107,6 @@ function descendants(running: Running[], pid: number): number[] {
 }
 
 const present = (path: string) => lstatSync(path, { throwIfNoEntry: false }) !== undefined;
-const engineInstalled = (home: string) => present(join(home, legacyEngine));
 const passive = (unit: string) => unit.endsWith(".slice");
 const names = (folder: string, keep: (name: string) => boolean) => {
   try {
@@ -192,7 +191,7 @@ export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
 
   async function find(home: string, platform: NodeJS.Platform, tasks: OldTasks | undefined): Promise<Found> {
     const found: Found = { pieces: [], unclear: [], notes: [] };
-    if (!engineInstalled(home)) return found;
+    if (!fleetEngineInstalled(home)) return found;
     const add = (kind: FleetPiece["kind"], name: string) => void (found.pieces.some((piece) => piece.kind === kind && piece.name === name) || found.pieces.push({ kind, name }));
     if (platform === "darwin") {
       for (const file of names(join(home, "Library/LaunchAgents"), (name) => launchdPrefixes.some((prefix) => name.startsWith(prefix)) && name.endsWith(".plist"))) add("launchd", file.slice(0, -".plist".length));
@@ -312,13 +311,13 @@ export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
 
   return {
     name: "fleet",
-    installed: engineInstalled,
+    installed: fleetEngineInstalled,
     targets: () => [],
     async apply() {
       return { actions: [], findings: [] };
     },
     async holds(home, platform) {
-      if (!engineInstalled(home)) return [];
+      if (!fleetEngineInstalled(home)) return [];
       const skipped = await skipOtherHome("fleet", "the jobs from before the rename", home, options);
       if (skipped) return skipped.findings;
       const { found, on } = await still(home, platform);
@@ -330,7 +329,7 @@ export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
       return findings;
     },
     async retire(home, platform) {
-      if (!engineInstalled(home)) return { retired: [], left: [], notes: [] };
+      if (!fleetEngineInstalled(home)) return { retired: [], left: [], notes: [] };
       const skipped = await skipOtherHome("fleet", "the jobs from before the rename", home, options);
       if (skipped?.findings.length) throw new Error(skipped.findings[0]!.say);
       if (skipped) return undefined;

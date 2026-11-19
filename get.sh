@@ -302,7 +302,6 @@ link_hedge() {
   mkdir -p "$bin_dir"
   quoted=$(printf '%s' "$launcher" | sed "s/'/'\\\\''/g")
   link_command hedge
-  link_command fleet
 }
 
 add_login_line() {
@@ -368,6 +367,7 @@ if [ -n "$renamed" ]; then
   sh "$launcher" import-fleet || fail "could not copy the setup from before the rename."
   grep -q '"profileDir"' "$machine" 2>/dev/null || rm -f "$pending"
 fi
+[ -n "$preview" ] || link_command fleet
 
 [ -z "$install_only" ] || exit 0
 

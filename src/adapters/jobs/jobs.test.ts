@@ -525,6 +525,7 @@ describe("T3 scheduled tasks", () => {
 
   test("adds no task and fails apply while a fleet: task from before the rename is still on, as when T3 Code started during this apply", async () => {
     const home = temp.make("home-");
+    mkdirSync(join(home, ".local/share/fleet/engine"), { recursive: true });
     const t3 = server([{ ...wanted, id: "fleet:quality-loop", title: "Fleet: quality-loop" }]);
     const report = await apply(plan("linux", [loop]), { home, adapters: [t3.adapter] });
     expect(report.ok).toBe(false);

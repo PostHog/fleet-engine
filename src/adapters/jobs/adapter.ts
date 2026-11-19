@@ -9,6 +9,7 @@ import { linkOnPath, readState, withLock, writeWithBackups, type Write } from ".
 import { skipOtherHome, spawnRunner, type CommandRunner } from "../run.ts";
 import { cronLine, cronSafe, reconcileCrontab } from "./cron.ts";
 import { fleetTaskPrefix } from "../fleet/adapter.ts";
+import { fleetEngineInstalled } from "../../legacy.ts";
 import { labelPrefix, plist } from "./launchd.ts";
 import { engineCommand } from "../../reconciler/engine-command.ts";
 import { agentCopyTarget, jobsFolder, launcherScript, launcherTarget, logTarget } from "./launcher.ts";
@@ -320,7 +321,7 @@ async function reconcileSystemd(jobs: Array<Owned<PackJob>>, scripts: Scripts, {
   return done;
 }
 
-async function reconcileTasks(plan: Plan, client: T3Tasks | undefined, { dryRun, result, outage, gated }: Context) {
+async function reconcileTasks(plan: Plan, client: T3Tasks | undefined, { home, dryRun, result, outage, gated }: Context) {
   const jobs = plan.jobs.filter(isTimed).filter((job) => job.runner === "t3" && job.task);
   if (!client) {
     for (const job of jobs) result.findings.push({ id: `task:${job.id}`, pack: job.pack, say: `The ${job.id} task waits for T3 Code to run. The next hedge apply after T3 Code starts adds it.`, repair: "apply" });
@@ -333,7 +334,7 @@ async function reconcileTasks(plan: Plan, client: T3Tasks | undefined, { dryRun,
     failed(result, { id: "tasks:t3", pack: "engine", say: `Could not read T3 Code's scheduled tasks: ${(error as Error).message}. Run hedge apply again.`, repair: "apply" });
     return;
   }
-  const old = existing.filter((task) => task.id.startsWith(fleetTaskPrefix) && task.enabled);
+  const old = fleetEngineInstalled(home) ? existing.filter((task) => task.id.startsWith(fleetTaskPrefix) && task.enabled) : [];
   for (const task of old) failed(result, { id: "tasks:fleet", pack: "engine", say: `The T3 Code task ${task.id} from before the rename is still on, so Hedge added no task. Run hedge retire-fleet, then hedge apply.`, repair: "human" });
   if (old.length) return;
   for (const job of jobs) {

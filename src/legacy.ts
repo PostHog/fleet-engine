@@ -1,4 +1,4 @@
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 
 export const profileFileName = "hedge.json";
@@ -73,6 +73,20 @@ function underHome(home: string, path: string, inside: (relative: string) => boo
 export const underLegacyPath = (home: string, path: string): boolean => underHome(home, path, inLegacyPath);
 
 export const legacyEngine = ".local/share/fleet/engine";
+
+const oldCommand = /^exec sh '(.*)\/fleet' "\$@"$/m;
+const recordedEngine = (home: string) => {
+  try {
+    return oldCommand.exec(readFileSync(join(home, ".local/bin/fleet"), "utf8"))?.[1];
+  } catch {
+    return undefined;
+  }
+};
+
+export function fleetEngineInstalled(home: string): boolean {
+  const recorded = recordedEngine(home);
+  return lstatSync(join(home, legacyEngine), { throwIfNoEntry: false }) !== undefined || (recorded !== undefined && statSync(recorded, { throwIfNoEntry: false })?.isDirectory() === true);
+}
 
 export const inLegacyEngine = (home: string, path: string): boolean => underHome(home, path, (relative) => relative === legacyEngine || relative.startsWith(`${legacyEngine}/`));
 

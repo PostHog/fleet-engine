@@ -5,7 +5,7 @@ import { Database } from "bun:sqlite";
 import { fleetAdapter, procProcesses, scheduledTasks, type FleetOptions } from "./adapters/fleet/adapter.ts";
 import { spawnRunner, type CommandRunner } from "./adapters/run.ts";
 import type { T3Server } from "./adapters/t3/port.ts";
-import { jobsAdapter } from "./adapters/jobs/adapter.ts";
+import { jobsAdapter, type HedgeTask, type T3Tasks } from "./adapters/jobs/adapter.ts";
 import { main } from "./cli.ts";
 import { filesAdapter, type Adapter } from "./reconciler/apply.ts";
 import { cliFixtures, repoRoot } from "./testing/cli.ts";
@@ -58,7 +58,8 @@ function machine(platform: NodeJS.Platform, home = oldInstall(), tasks?: FleetOp
   const processes = fakeProcesses();
   const run = runners(cron.run, systemd.run, launchd.run, docker.run, live?.run ?? processes.run);
   const fleet = fleetAdapter({ run, uid: live?.uid ?? 501, accountHome: async () => home, tasks: tasks ?? (async () => t3.client), sleep: live?.sleep ?? (async () => {}), processes: live ? live.processes : processes.list });
-  const adapters = (): Adapter[] => [fleet, filesAdapter, jobsAdapter({ run, engineRoot: repoRoot, uid: 501, accountHome: async () => home })];
+  const hedgeTasks: T3Tasks = { list: async () => [...t3.items.values()] as HedgeTask[], upsert: async (task) => void t3.items.set(task.id, task), setEnabled: t3.client.setEnabled };
+  const adapters = (): Adapter[] => [fleet, filesAdapter, jobsAdapter({ run, engineRoot: repoRoot, uid: 501, accountHome: async () => home, t3: async () => hedgeTasks })];
   const engine = engineWithService();
   const clock = { now: Date.now, sleep: async (_ms: number) => {} };
   const hedge = async (args: string[]) => {
@@ -604,11 +605,12 @@ describe("hedge retire-fleet", () => {
     expect(await linux.hedge(["retire-fleet", "--now"])).toEqual({ code: 2, output: "Usage: hedge retire-fleet [--dry-run]" });
   });
 
-  test("on a machine that runs a private Fleet copy and has no Fleet engine install, retire leaves its units running and apply runs", async () => {
+  test("on a machine that runs a private Fleet copy and has no Fleet engine install, retire leaves its units and fleet: tasks running and apply runs", async () => {
     const home = temp.make("home-");
     mkdirSync(join(home, ".config/fleet"), { recursive: true });
     const privateCopy = machine("linux", home);
     privateCopy.systemd.units.set("fleet-peer-box-t3.service", { active: true, enabled: false });
+    privateCopy.t3.items.set("fleet:pr-digest", { id: "fleet:pr-digest", enabled: true });
 
     expect(await privateCopy.hedge(["retire-fleet"])).toEqual({ code: 0, output: noEngine });
     expect(await privateCopy.hedge(["retire-fleet", "--dry-run"])).toEqual({ code: 0, output: noEngine });
@@ -618,6 +620,7 @@ describe("hedge retire-fleet", () => {
     expect(applied.output).not.toContain("from before the rename");
     expect(applied.code).toBe(0);
     expect(privateCopy.systemd.units.get("hedge-watch.service")?.active).toBe(true);
+    expect(privateCopy.t3.items.get("fleet:pr-digest")?.enabled).toBe(true);
   });
 
   test("with a HOME that is not the account's, stops nothing", async () => {
