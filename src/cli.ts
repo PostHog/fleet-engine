@@ -30,12 +30,13 @@ import { spawnRunner, type CommandRunner } from "./adapters/run.ts";
 import { become, canBecome, type Become } from "./runner/become.ts";
 import { trackCommand } from "./usage/usage.ts";
 import { asHedge } from "./reconciler/engine-command.ts";
-import { adoptLegacyEnv, fleetIsHedge, underLegacyPath, withLegacyNames } from "./legacy.ts";
+import { adoptLegacyEnv, fleetIsHedge, isOldJob, underLegacyPath, withLegacyNames } from "./legacy.ts";
 import { importFleet } from "./import-fleet.ts";
 import { fleetAdapter, type FleetAdapter } from "./adapters/fleet/adapter.ts";
 
 /** env: the environment that tells a Coder workspace apart; tests pass their own. */
-export type CliOptions = { home: string; engineRoot: string; platform: NodeJS.Platform; env?: Record<string, string | undefined>; print: (line: string) => void; fail?: (line: string) => void; run?: Runner; terminal?: Terminal; apply?: (profileDir: string, skip?: string[]) => Promise<number>; setup?: Pick<SetupOptions, "machine" | "fetchSource" | "doctor" | "env" | "timeZone" | "clock">; clock?: Clock; adapters?: () => Adapter[]; hostname?: () => string; stdin?: () => ReadableStream<Uint8Array>; capture?: CommandRunner; become?: Become; interactive?: boolean };
+/** launchedFrom: the engine folder as the command named it, before links resolve. */
+export type CliOptions = { home: string; engineRoot: string; launchedFrom?: string; platform: NodeJS.Platform; env?: Record<string, string | undefined>; print: (line: string) => void; fail?: (line: string) => void; run?: Runner; terminal?: Terminal; apply?: (profileDir: string, skip?: string[]) => Promise<number>; setup?: Pick<SetupOptions, "machine" | "fetchSource" | "doctor" | "env" | "timeZone" | "clock">; clock?: Clock; adapters?: () => Adapter[]; hostname?: () => string; stdin?: () => ReadableStream<Uint8Array>; capture?: CommandRunner; become?: Become; interactive?: boolean };
 
 const usage = `Hedge: one setup for T3 Code, agents, and your workflows
 
@@ -75,7 +76,7 @@ const builtins: Record<string, string[]> = { apply: [], doctor: [], update: [], 
 export async function main(argv: string[], options: CliOptions): Promise<number> {
   const [command, ...rest] = argv;
   const help = !command || command === "help" || command === "--help";
-  if (underLegacyPath(options.home, options.engineRoot)) return inert(help, options);
+  if (options.env?.HEDGE_INERT === "1" || [options.engineRoot, options.launchedFrom].some((path) => path !== undefined && underLegacyPath(options.home, path))) return inert(argv, options);
   if (options.env) adoptLegacyEnv(options.env);
   if (help) return options.print(usage), 0;
   if (Object.hasOwn(builtins, command)) trackCommand(options.home, command, rest, builtins[command]!, options.env ?? {}, options.interactive);
@@ -99,11 +100,10 @@ export async function main(argv: string[], options: CliOptions): Promise<number>
   }
 }
 
-/** An engine in a Fleet path from before the rename changes nothing, and exits 0 so that old jobs and hooks raise no alert. */
-function inert(help: boolean, options: CliOptions) {
-  if (help) options.print(usage);
+/** An engine in a Fleet path from before the rename changes nothing. An old job exits 0 so that it raises no alert; every other command exits 1. */
+function inert(argv: string[], options: CliOptions) {
   (options.fail ?? options.print)(fleetIsHedge);
-  return 0;
+  return isOldJob(argv) ? 0 : 1;
 }
 
 /** get.sh runs this once the new engine is in place. */
@@ -526,6 +526,6 @@ if (import.meta.main) {
       process.exit(130);
     });
   }
-  const code = await main(Bun.argv.slice(2), { home: Bun.env.HOME ?? homedir(), engineRoot, platform: process.platform, env: Bun.env, print: (line) => console.log(line), fail: (line) => console.error(line), ...(canBecome() ? { become } : {}) });
+  const code = await main(Bun.argv.slice(2), { home: Bun.env.HOME ?? homedir(), engineRoot, launchedFrom: resolvePath(Bun.argv[1]!, "../.."), platform: process.platform, env: Bun.env, print: (line) => console.log(line), fail: (line) => console.error(line), ...(canBecome() ? { become } : {}) });
   process.exit(code);
 }

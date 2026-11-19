@@ -41,6 +41,14 @@ export const legacyPaths: ReadonlyArray<readonly [string, string]> = [
   [".ssh/fleet-peers.conf", ".ssh/hedge-peers.conf"],
 ];
 
+/** The commands that the jobs and services of the engine from before the rename run. Each is the start of an argument list. */
+export const oldJobCommands: ReadonlyArray<readonly string[]> = [
+  ["nightly"], ["refresh"], ["prune", "--auto"], ["usage", "flush"], ["context", "sync"], ["box", "sweep"], ["box", "nightly"], ["box", "grants"], ["box", "restore"],
+  ["secret", "sweep"], ["dream", "run"], ["peers", "renew"], ["peers", "restore"], ["disk-watch"], ["cli-proxy-balance"], ["memory-sync"], ["recover"], ["run"],
+];
+
+export const isOldJob = (argv: string[]) => oldJobCommands.some((command) => command.every((word, index) => argv[index] === word));
+
 export const fleetIsHedge = "Fleet is now Hedge. Run: curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh | sh";
 
 /** Whether target, relative to the home folder, is a path from before the rename or inside one. */

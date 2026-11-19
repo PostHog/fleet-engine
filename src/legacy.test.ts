@@ -102,8 +102,7 @@ const bothTrees = (home: string) => Object.fromEntries(legacyPaths.flatMap((pair
 const oldRoot = (home: string) => join(home, ".local/share/fleet/engine");
 
 /** A checkout of this engine at the path the engine had before the rename, as the old updater leaves it once it pulled Hedge. */
-function oldCheckout(home: string) {
-  const root = oldRoot(home);
+function oldCheckout(home: string, root = oldRoot(home)) {
   for (const path of ["hedge", "fleet", "src", "packs", "package.json"]) cpSync(join(repoRoot, path), join(root, path), { recursive: true });
   symlinkSync(join(repoRoot, "node_modules"), join(root, "node_modules"));
   return root;
@@ -112,21 +111,39 @@ function oldCheckout(home: string) {
 const quiet = (home: string) => ({ HOME: home, PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" });
 
 describe("an engine in a Fleet path from before the rename", () => {
-  test("apply, update, setup and prune change nothing in either tree, print the notice, and exit 0", async () => {
+  test("an old job's command exits 0 and every other command exits 1, each with the notice, and neither changes either tree", async () => {
     const machine = linuxMachine();
     await beforeTheRename(machine);
     mkdirSync(join(machine.home, ".config/hedge"), { recursive: true });
     writeFileSync(join(machine.home, ".config/hedge/new.txt"), "new\n");
     const before = bothTrees(machine.home);
+    const jobs = [["nightly", "fleet-update", "--", "fleet", "update"], ["prune", "--auto"], ["refresh"], ["run", "slack/slack-trigger"]];
+    const others = [["apply"], ["update"], ["setup"], ["prune"], ["import-fleet"], ["retire-fleet"], ["help"], []];
 
-    for (const args of [["apply"], ["update"], ["setup"], ["prune", "--auto"], ["import-fleet"]]) {
+    for (const args of [...jobs, ...others]) {
       const lines: string[] = [];
       const code = await main(args, { home: machine.home, engineRoot: oldRoot(machine.home), platform: "linux", env: {}, print: (line) => lines.push(line), run: async () => 0 });
-      expect({ args, code, lines }).toEqual({ args, code: 0, lines: [fleetIsHedge] });
+      expect({ args, code, lines }).toEqual({ args, code: jobs.includes(args) ? 0 : 1, lines: [fleetIsHedge] });
     }
 
     expect(bothTrees(machine.home)).toEqual(before);
     expect(machine.systemd.calls).toEqual([]);
+  });
+
+  test("the launcher is inert when the path it was run by, or the path it resolves to, is a Fleet path", () => {
+    const byName = temp.make("home-");
+    mkdirSync(join(byName, ".local/share/fleet"), { recursive: true });
+    symlinkSync(oldCheckout(byName, join(byName, "checkout")), oldRoot(byName));
+    const byTarget = temp.make("home-");
+    symlinkSync(oldCheckout(byTarget), join(byTarget, "engine"));
+    const run = (home: string, launcher: string, ...args: string[]) => {
+      const done = Bun.spawnSync(["sh", launcher, ...args], { env: quiet(home) });
+      return [done.exitCode, done.stderr.toString()];
+    };
+
+    expect(run(byName, join(oldRoot(byName), "hedge"), "apply")).toEqual([1, `${fleetIsHedge}\n`]);
+    expect(run(byName, join(oldRoot(byName), "fleet"), "prune", "--auto")).toEqual([0, `${fleetIsHedge}\n`]);
+    expect(run(byTarget, join(byTarget, "engine/hedge"), "apply")).toEqual([1, `${fleetIsHedge}\n`]);
   });
 
   test("an old scheduled job that runs the old checkout's fleet changes nothing and exits 0", () => {
@@ -156,6 +173,25 @@ describe("an engine in a Fleet path from before the rename", () => {
 
     expect([hook.exitCode, hook.stdout.toString(), hook.stderr.toString()]).toEqual([0, "", `${fleetIsHedge}\n`]);
     expect(bothTrees(home)).toEqual(before);
+  });
+
+  test("a hook runner whose folder or file resolves into a Fleet path exits 0 with the notice", () => {
+    const home = temp.make("home-");
+    const root = oldCheckout(home);
+    mkdirSync(join(home, ".config/fleet/hooks"), { recursive: true });
+    cpSync(join(root, "packs/base/hooks/run.sh"), join(home, ".config/fleet/hooks/run.sh"));
+    symlinkSync(join(home, ".config/fleet"), join(home, ".config/hedge"));
+    const other = temp.make("home-");
+    const otherRoot = oldCheckout(other);
+    mkdirSync(join(other, ".config/hedge/hooks"), { recursive: true });
+    symlinkSync(join(otherRoot, "packs/base/hooks/run.sh"), join(other, ".config/hedge/hooks/run.sh"));
+    const hook = (at: string, runner: string) => {
+      const done = Bun.spawnSync(["sh", runner, "claude", "UserPromptSubmit"], { env: quiet(at), stdin: new TextEncoder().encode("{}") });
+      return [done.exitCode, done.stdout.toString(), done.stderr.toString()];
+    };
+
+    expect(hook(home, join(home, ".config/hedge/hooks/run.sh"))).toEqual([0, "", `${fleetIsHedge}\n`]);
+    expect(hook(other, join(other, ".config/hedge/hooks/run.sh"))).toEqual([0, "", `${fleetIsHedge}\n`]);
   });
 });
 
