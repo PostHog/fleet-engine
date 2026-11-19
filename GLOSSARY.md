@@ -5,7 +5,7 @@ The words the engine, its packs, and its docs use.
 ## Setup layers
 
 **Hedge**:
-The product: the engine, its packs, and the site. Say "PostHog Hedge" once where a reader meets it first, such as a page title or a README heading, so search tells it apart from other projects named Hedge. The command is `hedge`; `fleet` runs the same command, so hooks, jobs, and habits from before the rename keep working.
+The product: the engine, its packs, and the site. Say "PostHog Hedge" once where a reader meets it first, such as a page title or a README heading, so search tells it apart from other projects named Hedge. The command is `hedge`; `fleet` runs the same command, so the habit from before the rename keeps working.
 _Avoid_: Fleet, the tool, the framework
 
 **Engine**:

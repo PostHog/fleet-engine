@@ -4,27 +4,45 @@
 
 ### Fleet is now Hedge
 
-- The product and its command are now Hedge and `hedge`. `get.sh` also
-  installs `fleet` as the same command, so hooks, jobs, and habits from
-  before the rename keep working.
-- `hedge apply`, `hedge setup`, `hedge update`, and `get.sh` copy each folder
-  and file that the engine owned under an old name, such as `~/.config/fleet`,
-  `~/.local/state/fleet`, `~/.local/share/fleet`, and `~/.ssh/fleet_ed25519`,
-  to its new name. They copy only when nothing has the new name yet. They copy
-  files and folders with their modes, and skip links. They never move, change,
-  or delete anything under an old name. Delete the old paths when you no
-  longer need them.
-- Hedge takes over its records of the files the engine wrote only for the
-  copies that hold the same bytes. It never owns a file under an old name, so
-  a later `hedge apply` never removes or replaces one.
+- The product and its command are now Hedge and `hedge`. `get.sh` points
+  `fleet` at the same command, so the habit from before the rename keeps
+  working.
+- To upgrade, run
+  `curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh | sh`
+  once. It makes a fresh checkout of the engine in
+  `~/.local/share/hedge/engine`. It never reuses the old checkout, and it
+  ignores a `FLEET_ENGINE_DIR` or `HEDGE_ENGINE_DIR` that points into a Fleet
+  path.
+- On the first run, `get.sh` copies the setup from before the rename: the
+  profile checkout, the machine file, `~/.config/fleet` with the secret store,
+  the SSH key, and the credential folders of the hub proxy, the MCP hub, and
+  the hub's HTTPS share. It points the machine file at the profile copy only
+  when the copy is the same repository at the same commit. It never copies
+  the engine, locks, logs, run state, caches, or `node_modules`. It copies
+  files and folders with their modes, skips links, and stops when a link is
+  on the way to a new path. It never changes a path that is already there.
+  Then it runs `hedge apply`.
+- An engine that runs from a Fleet path, such as `~/.local/share/fleet/engine`
+  after the old updater pulled this release, changes nothing. `apply`,
+  `update`, `setup`, `prune`, jobs, and hooks print
+  `Fleet is now Hedge. Run: curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh | sh`
+  and exit 0. Nothing that runs from a Fleet path writes, under either name.
+- Hedge never writes, owns, or removes a file under an old name, and
+  `hedge prune` never touches a repository whose Git folder is in a Fleet
+  path. Delete the old paths when you no longer need them.
+- `hedge apply` stops and turns off the launchd agents, systemd units, and T3
+  tasks from before the rename, and keeps their files. It starts each new job
+  only once its old job shows as stopped. When an old job does not stop, or
+  Hedge cannot tell, it leaves the old job as it is, does not start the new
+  one, and says so. When a profile source is down, it starts no new jobs.
+  Crontab lines and T3 worktree scripts from before the rename are replaced by
+  the new ones.
+- The hub tunnel on a Mac moves to its new name only after the new agent is
+  ready. When the new agent does not load, Hedge starts the old one again.
 - A profile with `fleet.json` and no `hedge.json` still works. Each `FLEET_`
-  variable still works while its `HEDGE_` variable is unset. Setup reuses a
+  variable still works while its `HEDGE_` variable is unset. A `HEDGE_`
+  variable that is set, even to an empty string, wins. Setup reuses a
   `fleet-profile` or `fleet-memory` repo.
-- Hedge stops and turns off the launchd agents, systemd units, and T3 tasks
-  that the engine made under the old names, and starts the new ones. It keeps
-  the old agent and unit files. When an old job does not stop, Hedge leaves it
-  as it is, does not start the new one, and says so. Crontab lines and T3
-  worktree scripts from before the rename are replaced by the new ones.
 - The repository is now `PostHog/hedge`, and the site is
   https://posthog.github.io/hedge/. GitHub sends the old repository address
   to the new one, so git, `get.sh` links and profiles that name
