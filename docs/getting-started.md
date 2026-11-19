@@ -19,7 +19,7 @@ You need:
 Open Terminal and run this as yourself, not with `sudo`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/PostHog/fleet-engine/main/get.sh | sh
+curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh | sh
 ```
 
 `get.sh` installs the Command Line Tools, the GitHub CLI, Bun, and T3 Code
@@ -134,12 +134,12 @@ problem: the versions of Hedge, T3 Code, Claude Code, Codex, gh, Bun and your
 OS, the `hedge doctor` output, the step that failed and its error, the setup
 timings, and the setup transcript. It removes tokens, keys, email addresses,
 hostnames and home paths, and shows you the report. Then you pick: open a
-public issue on `PostHog/fleet-engine` with it, save it to a file to send
+public issue on `PostHog/hedge` with it, save it to a file to send
 yourself, or neither.
 
 An agent can run `hedge triage --print` to show you the report in the chat,
 and `hedge triage --send` once you say yes. `--save <file>` writes it to a
 file, and `--note <text>` says what went wrong.
 
-[The Hedge page](https://posthog.github.io/fleet-engine/) shows what each
+[The Hedge page](https://posthog.github.io/hedge/) shows what each
 pack does, and builds the setup prompt with your picks.

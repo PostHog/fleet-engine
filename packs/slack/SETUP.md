@@ -59,5 +59,5 @@ and the Slack app step below runs on the hub.
    window instead, as `ssh -t coder.<hub>` with a hub. It gives the link and
    asks for both tokens itself.
 
-[Start a thread from Slack](https://github.com/PostHog/fleet-engine/blob/main/docs/slack.md)
+[Start a thread from Slack](https://github.com/PostHog/hedge/blob/main/docs/slack.md)
 explains the rest.

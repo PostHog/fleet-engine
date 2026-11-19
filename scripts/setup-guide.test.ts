@@ -290,7 +290,7 @@ describe("the agent setup guide", () => {
   });
 
   test("fetches only files that are in the repo", () => {
-    const paths = [...guide().matchAll(/https:\/\/raw\.githubusercontent\.com\/PostHog\/fleet-engine\/main\/(\S+?)[`)\s]/g)].map((match) => match[1]!);
+    const paths = [...guide().matchAll(/https:\/\/raw\.githubusercontent\.com\/PostHog\/hedge\/main\/(\S+?)[`)\s]/g)].map((match) => match[1]!);
     expect(paths.length).toBeGreaterThan(0);
     expect(paths.filter((path) => !existsSync(join(root, path)))).toEqual([]);
   });

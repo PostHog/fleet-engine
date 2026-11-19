@@ -23,11 +23,11 @@ const instructions = `# Agent rules\n\nIntro.\n\n${table}\n\n# Memory\n\nOther p
 let engine: AvailableSource;
 beforeAll(async () => {
   const dir = join(import.meta.dir, "../../..");
-  engine = { ref: { name: "engine", repo: "PostHog/fleet-engine", ref: "main" }, dir, packs: await loadPacks(dir) };
+  engine = { ref: { name: "engine", repo: "PostHog/hedge", ref: "main" }, dir, packs: await loadPacks(dir) };
 });
 
 function renderedInstructions(models: NonNullable<Profile["overrides"]>["models"]) {
-  const profile: Profile = { schema: 1, dir: "/profile", engine: { repo: "PostHog/fleet-engine", ref: "main", channel: "track" }, sources: [], packs: ["memory", "context-library"], plan: "both", settings: {}, workflows: {}, overrides: { models } };
+  const profile: Profile = { schema: 1, dir: "/profile", engine: { repo: "PostHog/hedge", ref: "main", channel: "track" }, sources: [], packs: ["memory", "context-library"], plan: "both", settings: {}, workflows: {}, overrides: { models } };
   const file = resolve(profile, { schema: 1, role: "mac" }, [engine]).files.find((item) => item.target === ".agents/AGENTS.md");
   if (!file || !("content" in file)) throw new Error("no AGENTS.md");
   return file.content;

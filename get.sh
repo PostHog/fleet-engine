@@ -3,13 +3,13 @@
 # ref, installs its packages, puts hedge on the login PATH, then runs
 # hedge setup, or hedge apply when --profile names a profile.
 #
-#   curl -fsSL https://raw.githubusercontent.com/PostHog/fleet-engine/main/get.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh | sh
 #   sh get.sh [--ref <ref>] [--profile <dir> | --install-only] [-- <flags for hedge>]
 #
 # Running it again picks up where it stopped: every step skips what is done.
 set -eu
 
-engine_slug=PostHog/fleet-engine
+engine_slug=PostHog/hedge
 engine_repo=${HEDGE_ENGINE_REPO:-${FLEET_ENGINE_REPO:-https://github.com/$engine_slug.git}}
 engine_dir=${HEDGE_ENGINE_DIR:-${FLEET_ENGINE_DIR:-$HOME/.local/share/hedge/engine}}
 ref=${HEDGE_ENGINE_REF:-${FLEET_ENGINE_REF:-main}}

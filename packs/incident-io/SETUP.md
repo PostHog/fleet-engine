@@ -9,7 +9,7 @@ that source decides who is paged, so most of the setup is in incident.io.
 With Mac only, the token lives on the Mac. With a hub, it lives on the hub,
 and every other machine pages through it.
 
-[Page you through incident.io](https://github.com/PostHog/fleet-engine/blob/main/docs/incident-io.md)
+[Page you through incident.io](https://github.com/PostHog/hedge/blob/main/docs/incident-io.md)
 explains how it works and its risks. Tell them the risks before step 3.
 
 1. The workflow starts off. Add `--workflows page-owner=on` to the setup

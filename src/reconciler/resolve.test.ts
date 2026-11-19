@@ -13,7 +13,7 @@ let agentSkills: FetchedSource;
 
 beforeAll(async () => {
   const dir = join(fixtures, "engine");
-  engine = { ref: { name: "engine", repo: "PostHog/fleet-engine", ref: "v0.1.0" }, dir, packs: await loadPacks(dir) };
+  engine = { ref: { name: "engine", repo: "PostHog/hedge", ref: "v0.1.0" }, dir, packs: await loadPacks(dir) };
   agentSkills = { ref: { name: "agent-skills", repo: "Silthus/agent-skills", ref: "v1" }, dir: join(fixtures, "agent-skills"), packs: [] };
 });
 
@@ -21,7 +21,7 @@ function profile(overrides: Partial<Profile> = {}): Profile {
   return {
     schema: 1,
     dir: "/profile",
-    engine: { repo: "PostHog/fleet-engine", ref: "v0.1.0", channel: "release" },
+    engine: { repo: "PostHog/hedge", ref: "v0.1.0", channel: "release" },
     sources: [],
     packs: ["pull-requests", "orchestration"],
     plan: "both",

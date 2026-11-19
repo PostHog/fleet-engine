@@ -21,7 +21,7 @@ describe("the getting-started guide", () => {
 
   test("walks from the install line to a linked devbox", () => {
     const guide = read(guidePath);
-    expect(guide).toContain("curl -fsSL https://raw.githubusercontent.com/PostHog/fleet-engine/main/get.sh | sh");
+    expect(guide).toContain("curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh | sh");
     expect(guide).toContain("hedge devbox add");
     expect(guide).toContain("t3 up --connect");
   });

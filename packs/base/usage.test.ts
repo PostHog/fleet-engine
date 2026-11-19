@@ -44,7 +44,7 @@ async function machine(packs: string[], settings: Record<string, string>, workfl
   const home = temp.make("home-");
   const profile = join(home, "profile");
   mkdirSync(profile);
-  writeFileSync(join(profile, "hedge.json"), JSON.stringify({ schema: 1, engine: { repo: "PostHog/fleet-engine", ref: "main", channel: "track" }, sources: [], packs, plan: "both", settings, workflows }));
+  writeFileSync(join(profile, "hedge.json"), JSON.stringify({ schema: 1, engine: { repo: "PostHog/hedge", ref: "main", channel: "track" }, sources: [], packs, plan: "both", settings, workflows }));
   mkdirSync(join(home, ".bun/bin"), { recursive: true });
   symlinkSync(process.execPath, join(home, ".bun/bin/bun"));
   const applied = await hedge(["apply", "--profile", profile], home);

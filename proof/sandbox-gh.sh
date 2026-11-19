@@ -26,7 +26,7 @@ keys() {
 }
 
 contents() {
-  file=${1#repos/PostHog/fleet-engine/contents/}
+  file=${1#repos/PostHog/hedge/contents/}
   ref=main
   case "$file" in
     *"?ref="*) ref=${file#*\?ref=}; file=${file%%\?*} ;;
@@ -57,7 +57,7 @@ api() {
     user/keys) keys authentication "$jq" ;;
     user/ssh_signing_keys) keys signing "$jq" ;;
     user/memberships/orgs/*) refuse "HTTP 404: Not Found (https://api.github.com/$path)" ;;
-    repos/PostHog/fleet-engine/contents/*) contents "$path" ;;
+    repos/PostHog/hedge/contents/*) contents "$path" ;;
     *) refuse "hedge-proof sandbox gh: api $path is not part of the proof" ;;
   esac
 }

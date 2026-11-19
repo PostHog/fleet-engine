@@ -34,7 +34,7 @@ describe("hedge setup profile", () => {
     expect(await pushedFiles(home)).toEqual(["README.md", "about-me.md", "hedge.json", "install.sh"]);
     expect(await pushedAnswers(home)).toEqual({
       schema: 1,
-      engine: { repo: "PostHog/fleet-engine", ref: "main", channel: "track" },
+      engine: { repo: "PostHog/hedge", ref: "main", channel: "track" },
       sources: defaultSources,
       settings: {},
       workflows: {},

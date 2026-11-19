@@ -5,7 +5,7 @@ set -eu
 dir=$(cd "$(dirname "$0")" && pwd -P)
 file=hedge.json
 [ -f "$dir/$file" ] || [ ! -f "$dir/fleet.json" ] || file=fleet.json
-engine_slug=PostHog/fleet-engine
+engine_slug=PostHog/hedge
 ref=$(tr -d '\r\n' <"$dir/$file" |
   sed -n 's/.*"engine"[[:space:]]*:[[:space:]]*{\([^}]*\)}.*/\1/p' |
   sed -n 's/.*"ref"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')

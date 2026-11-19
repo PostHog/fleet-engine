@@ -23,7 +23,7 @@ sudo sh proof/fresh-linux.sh
    with no environment from the box owner:
 
    ```sh
-   curl -fsSL https://raw.githubusercontent.com/PostHog/fleet-engine/main/get.sh | sh -s -- -- --non-interactive --preset everyday --plan both
+   curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh | sh -s -- -- --non-interactive --preset everyday --plan both
    ```
 
    The first run installs Bun, gh, and T3 Code, then stops at the GitHub
@@ -81,7 +81,7 @@ real `curl`. The check `get.sh source` fails when B's `install.sh` did not
 fetch get.sh through it.
 
 ```sh
-sudo HEDGE_PROOF_ENGINE=/path/to/fleet-engine sh proof/fresh-linux.sh
+sudo HEDGE_PROOF_ENGINE=/path/to/hedge sh proof/fresh-linux.sh
 ```
 
 `HEDGE_PROOF_REF` picks the engine ref, `main` by default. The copy's `main`

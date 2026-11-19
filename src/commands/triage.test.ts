@@ -49,7 +49,7 @@ const secretParts = (leaked: ReturnType<typeof secrets>) => Object.values(leaked
 
 type Sent = { command: string[]; input?: string };
 
-function capture(sent: Sent[], gh: { code: number; stdout: string; stderr?: string } = { code: 0, stdout: "https://github.com/PostHog/fleet-engine/issues/999\n" }): CommandRunner {
+function capture(sent: Sent[], gh: { code: number; stdout: string; stderr?: string } = { code: 0, stdout: "https://github.com/PostHog/hedge/issues/999\n" }): CommandRunner {
   const versions: Record<string, string> = { t3: "t3 0.0.42\n", claude: "2.1.300 (Claude Code)\n", codex: "codex-cli 0.170.0\n", gh: "gh version 2.80.0 (2026-10-01)\nhttps://github.com/cli/cli/releases/tag/v2.80.0\n" };
   return async (command, options = {}) => {
     sent.push({ command, ...(options.input === undefined ? {} : { input: options.input }) });
@@ -66,7 +66,7 @@ function capture(sent: Sent[], gh: { code: number; stdout: string; stderr?: stri
 function failedMachine(home: string, leaked = secrets()) {
   const profileDir = join(home, "profile");
   mkdirSync(profileDir, { recursive: true });
-  writeFileSync(join(profileDir, "hedge.json"), JSON.stringify({ schema: 1, engine: { repo: "PostHog/fleet-engine", ref: "v1", channel: "release" }, sources: [{ name: "team", repo: "secret-org/team-packs", ref: "main" }], packs: ["pull-requests", "team"], plan: "both", settings: { "memory.repo": "nora/agent-notes" }, workflows: {}, hub: "hub-big-box", devboxes: ["node-west-7"] }));
+  writeFileSync(join(profileDir, "hedge.json"), JSON.stringify({ schema: 1, engine: { repo: "PostHog/hedge", ref: "v1", channel: "release" }, sources: [{ name: "team", repo: "secret-org/team-packs", ref: "main" }], packs: ["pull-requests", "team"], plan: "both", settings: { "memory.repo": "nora/agent-notes" }, workflows: {}, hub: "hub-big-box", devboxes: ["node-west-7"] }));
   mkdirSync(join(home, ".config/hedge"), { recursive: true });
   writeFileSync(join(home, ".config/hedge/machine.json"), JSON.stringify({ schema: 1, role: "mac", name: "noras-mbp", profileDir, devboxes: ["node-west-7", "q7"], setup: { done: ["bootstrap", "github", "packs"] } }));
   const state = join(home, ".local/state/hedge/logs");
@@ -139,7 +139,7 @@ describe("hedge triage", () => {
     expect(shown).toContain("- Steps done: bootstrap, github, packs");
     expect(shown).toContain("- Failed at 2026-11-11T10:03:00.000Z, 4 of 8: Set up this Mac: hedge apply could not set up this machine on <this machine> for <email>.");
     expect(shown).toContain("- Engine: v1.4.0-3-gabc1234");
-    expect(shown).toContain("- Profile engine pin: PostHog/fleet-engine@v1 (release)");
+    expect(shown).toContain("- Profile engine pin: PostHog/hedge@v1 (release)");
     expect(shown).toContain("- Packs: pull-requests, team; plan both");
     expect(shown).toContain("- T3 Code: t3 0.0.42");
     expect(shown).toContain("- Claude Code: 2.1.300 (Claude Code)");
@@ -190,11 +190,11 @@ describe("hedge triage", () => {
     const result = await triage(home, [], ["", "1"]);
     expect(result.code).toBe(0);
     const issue = result.sent.find((call) => call.command[1] === "issue")!;
-    expect(issue.command).toEqual(["gh", "issue", "create", "--repo", "PostHog/fleet-engine", "--title", "hedge triage: setup failed: hedge apply could not set up this machine on <this machine> for <email>.", "--body-file", "-"]);
+    expect(issue.command).toEqual(["gh", "issue", "create", "--repo", "PostHog/hedge", "--title", "hedge triage: setup failed: hedge apply could not set up this machine on <this machine> for <email>.", "--body-file", "-"]);
     expect(issue.input).toStartWith("## What happened\n\nNot described.\n\n## Setup");
     expect(result.output).toContain(issue.input!.split("\n").slice(0, 12).join("\n"));
     for (const part of secretParts(leaked)) expect(issue.input).not.toContain(part);
-    expect(result.output).toEndWith("✓ Opened https://github.com/PostHog/fleet-engine/issues/999");
+    expect(result.output).toEndWith("✓ Opened https://github.com/PostHog/hedge/issues/999");
     expect(savedReports(home)).toEqual([]);
   });
 
@@ -229,7 +229,7 @@ describe("hedge triage", () => {
     expect(result.prompts).toEqual([]);
     expect(result.output).toContain("Could not open the issue: not logged in at ~ on <this machine> as <name> for <team source>");
     const [file] = savedReports(home);
-    expect(result.output).toEndWith(`Saved the report to ${join(home, file!)}. Open https://github.com/PostHog/fleet-engine/issues/new and paste it there.`);
+    expect(result.output).toEndWith(`Saved the report to ${join(home, file!)}. Open https://github.com/PostHog/hedge/issues/new and paste it there.`);
   });
 
   test("3 sends and saves nothing, --print only shows, and Ctrl-C stops without sending", async () => {

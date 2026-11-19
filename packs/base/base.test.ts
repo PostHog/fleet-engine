@@ -11,11 +11,11 @@ let engine: AvailableSource;
 
 beforeAll(async () => {
   const dir = join(import.meta.dir, "../..");
-  engine = { ref: { name: "engine", repo: "PostHog/fleet-engine", ref: "main" }, dir, packs: await loadPacks(dir) };
+  engine = { ref: { name: "engine", repo: "PostHog/hedge", ref: "main" }, dir, packs: await loadPacks(dir) };
 });
 
 function plan(ai: AiPlan, machine = mac, settings: Profile["settings"] = {}, sources = [engine]): Plan {
-  const profile: Profile = { schema: 1, dir: "/profile", engine: { repo: "PostHog/fleet-engine", ref: "main", channel: "track" }, sources: [], packs: sources.slice(1).flatMap((source) => source.packs.map((pack) => pack.manifest.name)), plan: ai, settings, workflows: {} };
+  const profile: Profile = { schema: 1, dir: "/profile", engine: { repo: "PostHog/hedge", ref: "main", channel: "track" }, sources: [], packs: sources.slice(1).flatMap((source) => source.packs.map((pack) => pack.manifest.name)), plan: ai, settings, workflows: {} };
   return resolve(profile, machine, sources);
 }
 
@@ -71,7 +71,7 @@ describe("the Base pack", () => {
     const coder: MachineFile = { schema: 1, role: "devbox", coder: true };
     expect(plan("both", coder, {}, [engine, team]).settings["identity.signer"]).toBe("coder");
     expect(plan("both", coder, { "identity.signer": "ssh" }, [engine, team]).settings["identity.signer"]).toBe("ssh");
-    const on = resolve({ schema: 1, dir: "/profile", engine: { repo: "PostHog/fleet-engine", ref: "main", channel: "track" }, sources: [], packs: ["team"], plan: "both", settings: {}, workflows: { "team-signing": true } }, coder, [engine, team]);
+    const on = resolve({ schema: 1, dir: "/profile", engine: { repo: "PostHog/hedge", ref: "main", channel: "track" }, sources: [], packs: ["team"], plan: "both", settings: {}, workflows: { "team-signing": true } }, coder, [engine, team]);
     expect(on.settings["identity.signer"]).toBe("1password");
   });
 

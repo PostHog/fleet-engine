@@ -130,7 +130,7 @@ and read the script. Keep it in view, because a pipe into `sh` hides what
 runs:
 
 ```sh
-mkdir -p ~/.cache/hedge-setup && curl -fsSL https://raw.githubusercontent.com/PostHog/fleet-engine/main/get.sh -o ~/.cache/hedge-setup/get.sh && curl -fsSL https://raw.githubusercontent.com/PostHog/fleet-engine/main/presets.json -o ~/.cache/hedge-setup/presets.json && cat ~/.cache/hedge-setup/get.sh
+mkdir -p ~/.cache/hedge-setup && curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh -o ~/.cache/hedge-setup/get.sh && curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/presets.json -o ~/.cache/hedge-setup/presets.json && cat ~/.cache/hedge-setup/get.sh
 ```
 
 Tell the person in two lines what it adds when missing: the GitHub CLI, Bun,
@@ -188,7 +188,7 @@ When the packs are "One by one", ask the multi-select of step 6 right after.
 ## 3. Show what Hedge is
 
 Fetch the picture from
-`https://raw.githubusercontent.com/PostHog/fleet-engine/main/docs/hedge.svg`
+`https://raw.githubusercontent.com/PostHog/hedge/main/docs/hedge.svg`
 and show it. Then say: Hedge installs agent rules, skills, and workflows. A
 **workflow** is one way of working that agents follow, such as a draft pull
 request for every fix. A **pack** is a set of workflows that you turn on as
@@ -276,7 +276,7 @@ the packs:
   question with the packs below whose row says "Always", plus those whose
   row fits their answer in step 4. A pack whose row says "Step 9" needs a
   hub that runs, so step 9 offers it. Base is always on.
-  [The Hedge page](https://posthog.github.io/fleet-engine/) shows what each
+  [The Hedge page](https://posthog.github.io/hedge/) shows what each
   pack does.
 - **AI plan.** Claude, ChatGPT, or both: it decides the sign-ins and the
   model defaults. Recommend the agent they set up in T3 Code
@@ -534,7 +534,7 @@ made, replace the early workspaces: see "Clean up what you replace".
    ```
 
    Before it opens, explain its sign-ins from the table in step 4 of
-   [Getting started](https://github.com/PostHog/fleet-engine/blob/main/docs/getting-started.md).
+   [Getting started](https://github.com/PostHog/hedge/blob/main/docs/getting-started.md).
    Ask them to tell you when it prints that the host is their devbox now.
 7. **Name the hub.** Run `hedge hub here` on the hub. It saves
    `coder.<hub>` as the hub in their profile:

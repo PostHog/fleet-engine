@@ -19,7 +19,7 @@ const engineRoot = join(import.meta.dir, "../..");
 const launcher = join(engineRoot, "hedge");
 
 function profileWith(settings: Record<string, unknown> = {}, dir = temp.make("profile-")) {
-  const profile = { schema: 1, engine: { repo: "PostHog/fleet-engine", ref: "main", channel: "track" }, sources: [], packs: [], plan: "both", settings, workflows: {} };
+  const profile = { schema: 1, engine: { repo: "PostHog/hedge", ref: "main", channel: "track" }, sources: [], packs: [], plan: "both", settings, workflows: {} };
   writeFileSync(join(dir, "hedge.json"), JSON.stringify(profile));
   return dir;
 }

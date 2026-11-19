@@ -127,7 +127,7 @@ describe("the install prompt", () => {
   test("for a pack that needs a hub, checks for the hub before it reads a note, in the words hedge hub status prints", async () => {
     const text = installPrompt(data, select("memory", "recovery", "hub"));
     expect(step(text, "need a hub")).toBe(
-      '2. These packs need a hub: Hub and Recovery. Run `hedge hub status`. When it prints "The hub: not named", I have no hub yet. Tell me, leave those packs out, and offer to add a hub and a node first with step 9 of https://raw.githubusercontent.com/PostHog/fleet-engine/main/SETUP.md. Otherwise the name after "The hub:" is the SSH name of the hub. Use it as the host of each SSH command in a note.',
+      '2. These packs need a hub: Hub and Recovery. Run `hedge hub status`. When it prints "The hub: not named", I have no hub yet. Tell me, leave those packs out, and offer to add a hub and a node first with step 9 of https://raw.githubusercontent.com/PostHog/hedge/main/SETUP.md. Otherwise the name after "The hub:" is the SSH name of the hub. Use it as the host of each SSH command in a note.',
     );
     expect(installPrompt(data, select("recovery"))).toContain("2. This pack needs a hub: Recovery.");
     expect(installPrompt(data, select("recovery"))).toContain("leave that pack out");

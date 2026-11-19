@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 const root = join(import.meta.dir, "..");
 const readme = () => readFileSync(join(root, "README.md"), "utf8");
-const rawMain = "https://raw.githubusercontent.com/PostHog/fleet-engine/main/";
+const rawMain = "https://raw.githubusercontent.com/PostHog/hedge/main/";
 
 function gettingStarted() {
   const text = readme();

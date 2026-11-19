@@ -7,7 +7,7 @@ export const repoRoot = join(import.meta.dir, "../..");
 export function cliFixtures(temp: { make(prefix?: string): string }) {
   function profileDir(packs: string[] = [], aboutMe?: string) {
     const dir = temp.make("profile-");
-    const profile = { schema: 1, engine: { repo: "PostHog/fleet-engine", ref: "main", channel: "track" }, sources: [], packs, plan: "both", settings: {}, workflows: {} };
+    const profile = { schema: 1, engine: { repo: "PostHog/hedge", ref: "main", channel: "track" }, sources: [], packs, plan: "both", settings: {}, workflows: {} };
     writeFileSync(join(dir, "hedge.json"), JSON.stringify(profile));
     if (aboutMe) writeFileSync(join(dir, "about-me.md"), aboutMe);
     return dir;

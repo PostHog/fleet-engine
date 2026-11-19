@@ -209,7 +209,7 @@ A human step opens the browser with `open` on the Mac (`realMachine.openUrl` in 
 
 Each step is for a person on a clean macOS user account.
 
-1. Run the public `curl -fsSL https://raw.githubusercontent.com/PostHog/fleet-engine/main/get.sh | sh` in Terminal.
+1. Run the public `curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh | sh` in Terminal.
 2. Finish the Command Line Tools window when it opens.
 3. Without the T3 Code app only: type the Mac password once when Homebrew asks for it.
 4. Check that `gh`, `bun`, `t3` and `/Applications/T3 Code.app` exist when `get.sh` ends.

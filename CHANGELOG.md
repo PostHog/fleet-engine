@@ -25,7 +25,10 @@
   the old agent and unit files. When an old job does not stop, Hedge leaves it
   as it is, does not start the new one, and says so. Crontab lines and T3
   worktree scripts from before the rename are replaced by the new ones.
-- The repository and the site keep their addresses for now.
+- The repository is now `PostHog/hedge`, and the site is
+  https://posthog.github.io/hedge/. GitHub sends the old repository address
+  to the new one, so git, `get.sh` links and profiles that name
+  `PostHog/fleet-engine` keep working. The old site address no longer works.
 
 ## v0.1.0
 
@@ -114,13 +117,13 @@ Everything.
 
 ### The site
 
-[The Fleet site](https://posthog.github.io/fleet-engine/) says what Fleet is
+[The Fleet site](https://posthog.github.io/hedge/) says what Fleet is
 and offers two setups side by side: Mac only, and Mac plus a hub and a node.
 Each setup has a switch for Pull requests, Orchestration, and Communication.
 The Getting started prompt sits under the two setups and changes with each
 choice. Copy it, or open it in T3 Code.
 
-[The Packs page](https://posthog.github.io/fleet-engine/packs/) shows every
+[The Packs page](https://posthog.github.io/hedge/packs/) shows every
 pack, and each pack has its own page with its workflows, its cost, and its
 settings. For a Fleet that already runs, select packs, and the page builds an
 install prompt that adds them with `fleet packs --add`.

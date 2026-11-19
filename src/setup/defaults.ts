@@ -1,6 +1,6 @@
 import type { SourceRef } from "../pack/types.ts";
 
-export const engineRepo = "PostHog/fleet-engine";
+export const engineRepo = "PostHog/hedge";
 
 export const ownDevboxPacks = ["posthog"];
 
