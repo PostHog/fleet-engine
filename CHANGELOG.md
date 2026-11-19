@@ -101,19 +101,18 @@
 
 ### The review budget
 
-- Only a review that leads to fixes spends the review budget. A finished
-  review with no blocker or major spends nothing. A finding without a
-  severity still counts, and an unfinished review counts. Each lens of a
-  panel counts on its own, so a finding without a severity in one lens
-  counts when another lens lists only a minor.
+- Only a review that leads to fixes spends the review budget. The budget
+  reads findings with the parser of `hedge proof gate` and
+  `hedge proof respond`, so a finished review spends exactly when the gate
+  asks for an answer to one of its findings. A review with only minor and nit
+  findings spends nothing. A blocker, a major, a finding without a severity,
+  and a `TESTS` item count, and an unfinished review counts.
 - The ceiling never refuses a final read of a HEAD that `hedge proof gate`
   does not carry. It asks the gate's own question, from the same reviews,
   whatever `--base` names. A blocker or major that the read finds still
   counts, so the fixes rounds after it stop at the ceiling.
 - A final read without `--agent` stops with "HEAD needs no final read" only
   when the gate carries HEAD across quiet commits, whatever `--base` names.
-- A lens that writes its `FINDINGS` header in bold keeps its findings. The
-  gate asks for their answers, and they count toward the review budget.
 
 ## v0.1.0
 

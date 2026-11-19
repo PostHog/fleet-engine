@@ -70,8 +70,9 @@ which waits for it. A round is taken over when its command is gone, when its pro
 started later, or when its lock file stays empty for a minute.
 The settings pull-requests.freeReviews and pull-requests.reviewCeiling set how many reviews run before the arbiter weighs
 one more and where the loop stops: the panel rounds and the final reads of the review phase count together, and the
-final reads of the babysit phase count apart. Only a review that leads to fixes counts: a finished review whose
-findings hold no blocker, major, or finding without a severity spends nothing, and an unfinished one counts. The
+final reads of the babysit phase count apart. Only a review that leads to fixes counts: a finished review
+counts when the gate asks for an answer to one of its findings, so one with only minor and nit findings spends nothing,
+and an unfinished one counts. The
 budget never refuses a final read of a HEAD that the gate does not carry; a blocker or major that it finds still
 counts, so the fixes rounds after it stop at the ceiling. The default budget is the panel, the fixes read, and the last read. On
 a PR of the Read tier the ceiling is two reviews that count: its one read and one final read of its fixes. At the

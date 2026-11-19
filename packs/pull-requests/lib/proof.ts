@@ -163,13 +163,7 @@ async function reviewsSpent(reviews: string, started: string[], phase: FinalRead
 
 async function leadsToFixes(directory: string) {
   const findings = await readFile(join(directory, "findings.md"), "utf8").catch(() => undefined);
-  return findings === undefined || lensBlocks(findings).some((block) => listedItems(reviewedLines(block).kept).some((item) => !flooredItem.test(item)));
-}
-
-function lensBlocks(findings: string) {
-  const blocks: string[] = [];
-  for (const line of findings.split("\n")) if (findingsBlock.test(line)) blocks.push(line); else if (blocks.length) blocks[blocks.length - 1] += `\n${line}`;
-  return blocks.length ? blocks : [findings];
+  return findings === undefined || unanswered(findings, "").length > 0;
 }
 
 export type ArbiterVerdict = { verdict: "continue" | "escalate" | "unavailable"; reason: string; model: string };
@@ -492,7 +486,7 @@ const answerItem = /^\s*(?:[-*]\s+)?(\d+)[.):]\s+\**(fixed|rejected|known)\b/i;
 
 const noFinding = /^(?:#.*|no findings\.?|findings:?|\(none\))$/i;
 
-const findingsBlock = /^\s*\**FINDINGS\b\**:?\**/;
+const findingsBlock = /^\s*FINDINGS\b:?/;
 const testsBlock = /^\s*(?:#+\s*)?\**TESTS\b/;
 const flooredItem = /^\s*(?:[-*]|\d+[.)])\s+(?:[^|\n]*\|)?\s*\**(?:minor|nit)\**\s*\|/i;
 

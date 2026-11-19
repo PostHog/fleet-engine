@@ -470,7 +470,7 @@ test("a review that another one overtakes while it weighs the budget backs out",
   await expect(pr.hedge("show", "--round", "3")).rejects.toThrow("has no reservation");
 });
 
-const lensAnswer = (findings: string, tests = "") => `FINDINGS:\n${findings}\nCOVERED: feature.txt\n${tests}`;
+const lensAnswer = (findings: string) => `FINDINGS:\n${findings}\nCOVERED: feature.txt\n`;
 const major = (finding: string) => lensAnswer(`- feature.txt:1 | major | Correctness | ${finding} | fix it | anchor: greet`);
 const minor = lensAnswer("- feature.txt:1 | minor | Design | a name reads plain | rename it | anchor: greet");
 
@@ -505,7 +505,7 @@ test("a finished review with no blocker or major spends no review budget, while 
   pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 10, "pull-requests.reviewCeiling": 2 });
   await pr.commit("feature.txt", "greet\n");
   await pr.hedge("require", "--none", "--reason", "fixture");
-  const panel = await cannedPanel(pr, { design: minor, others: lensAnswer("(none)", "TESTS:\n- feature.test.ts:3 asserts the call count of greet\n") });
+  const panel = await cannedPanel(pr, { design: minor, others: lensAnswer("(none)") });
   const second = await pr.commit("feature.txt", "greet the member\n");
   await pr.hedge("review-start", "--scope", "fixes", "--base", panel);
   await finishWith(pr, "2", "No findings.\n");
@@ -519,29 +519,22 @@ test("a finished review with no blocker or major spends no review budget, while 
   await expect(pr.hedge("review-start", "--scope", "fixes", "--base", await pr.git("rev-parse", "HEAD"))).rejects.toThrow("The review budget of 2 reviews is spent");
 });
 
-test("a panel spends review budget when one lens finds a finding without a severity and the other lenses list only a minor", async () => {
+test("for a panel that mixes a prose-only lens with a lens that lists a minor, the review budget spends exactly when the gate asks for an answer", async () => {
   const pr = await checkout();
   pr.pullRequestState({ body: graded("non-critical", "medium") });
   pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 10, "pull-requests.reviewCeiling": 1 });
   await pr.commit("feature.txt", "greet\n");
   await pr.hedge("require", "--none", "--reason", "fixture");
   const panel = await cannedPanel(pr, { design: lensAnswer("The greeting drops the name."), others: minor });
-  await pr.commit("feature.txt", "greet the member\n");
+  const fix = await pr.commit("feature.txt", "greet the member\n");
 
-  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", panel)).rejects.toThrow("The review budget of 1 reviews is spent");
-});
+  expect((await pr.hedge("gate")).output).not.toContain("has unanswered findings");
+  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", panel)).output).toContain(`"round":2`);
+  await finishWith(pr, "2", lensAnswer("The member goes unnamed."));
+  await pr.commit("feature.txt", "greet every member\n");
 
-test("a lens that writes its FINDINGS header in bold keeps its findings: the gate asks for their answers and a major spends review budget", async () => {
-  const pr = await checkout();
-  pr.pullRequestState({ body: graded("non-critical", "medium") });
-  pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 10, "pull-requests.reviewCeiling": 1 });
-  await pr.commit("feature.txt", "greet\n");
-  await pr.hedge("require", "--none", "--reason", "fixture");
-  const panel = await cannedPanel(pr, { design: `**FINDINGS:**\n${major("the greeting drops the name").replace("FINDINGS:\n", "")}`, others: lensAnswer("(none)") });
-  await pr.commit("feature.txt", "greet the member\n");
-
-  expect((await pr.hedge("gate")).output).toContain("review: round 1 has unanswered findings 1;");
-  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", panel)).rejects.toThrow("The review budget of 1 reviews is spent");
+  expect((await pr.hedge("gate")).output).toContain("review: round 2 has unanswered findings 1;");
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", fix)).rejects.toThrow("The review budget of 1 reviews is spent");
 });
 
 test("the ceiling never refuses a final read of a HEAD the gate does not carry, while its major still spends budget and stops the fixes round after it", async () => {
