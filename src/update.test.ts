@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { closeSync, constants, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, constants, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, symlinkSync, writeFileSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ProfileFile } from "./pack/types.ts";
 import { isolateGit, spawnGit, template, tempDirs } from "./testing/git.ts";
@@ -104,6 +104,44 @@ describe("hedge update", () => {
     expect(result.code).toBe(0);
     expect(result.version).toBe("v0.1.1");
     expect(await originOf(engineDir)).toBe(hedge);
+  });
+
+  test("refuses to write or remove the update notice when Hedge's state folder leads into Fleet's, and leaves the engine where it is", async () => {
+    const remote = await engineRemote(["v0.1.0", "v0.1.1", "v1.0.0"]);
+    const engineDir = await engineCheckout(remote, "v0.1.0");
+    const home = temp.make("home-");
+    mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
+    writeFileSync(join(home, ".local/state/fleet/update.json"), "fleet's own\n");
+    symlinkSync(join(home, ".local/state/fleet"), join(home, ".local/state/hedge"));
+    const lines: string[] = [];
+
+    const refused = await update({ home, engineDir, profileDir: temp.make("profile-"), engine: { repo: remote, ref: "v0.1.0", channel: "release" }, print: (line) => lines.push(line), runApply: async () => 0 }).catch((error: Error) => error.message);
+
+    expect(refused).toBe(`${noticePath(home)} is in a Fleet path from before the rename, so Hedge does not write there.`);
+    expect(readFileSync(join(home, ".local/state/fleet/update.json"), "utf8")).toBe("fleet's own\n");
+    expect(await Bun.file(join(engineDir, "VERSION")).text()).toBe("v0.1.0");
+  });
+
+  test("refuses a release whose commit has no hedge launcher before the checkout moves, and records nothing", async () => {
+    const remote = await engineRemote(["v0.1.0"]);
+    const old = temp.make("old-");
+    await spawnGit(old, "clone", "-q", remote, ".");
+    await spawnGit(old, "mv", "hedge", "fleet");
+    writeFileSync(join(old, "VERSION"), "v0.1.2");
+    await spawnGit(old, "commit", "-q", "-am", "only the Fleet launcher");
+    await spawnGit(old, "tag", "v0.1.2");
+    const engineDir = await engineCheckout(old, "v0.1.0");
+    const head = await spawnGit(engineDir, "rev-parse", "HEAD");
+
+    const result = await cliUpdate(engineDir, { repo: old, ref: "v0.1.0", channel: "release" });
+
+    expect(result.code).toBe(1);
+    expect(result.output).toContain("hedge update: v0.1.2 has no hedge launcher, so it is an engine from before the rename. The engine stays where it is.");
+    expect(await spawnGit(engineDir, "rev-parse", "HEAD")).toBe(head);
+    expect(result.version).toBe("v0.1.0");
+    expect(existsSync(join(engineDir, "hedge"))).toBe(true);
+    expect(await spawnGit(engineDir, "for-each-ref", "--format=%(refname)", "refs/hedge")).toBe("");
+    expect(result.applied).toBe(false);
   });
 
   test("follows a fork that the profile names, such as Acme/fleet-engine, away from the Hedge origin", async () => {

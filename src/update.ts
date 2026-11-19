@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { refuseLegacyPath } from "./legacy.ts";
 import { repoUrl, withoutUserinfo } from "./pack/sources.ts";
 import type { ProfileFile } from "./pack/types.ts";
 import { engineRepo } from "./setup/defaults.ts";
@@ -97,6 +98,7 @@ async function withFetched(options: UpdateOptions, url: string, ref: string, use
     if (!fetched.ok) return options.print(`hedge update: could not fetch the engine: ${fetched.err}`), false;
     const commit = await git(options.engineDir, "rev-parse", "--verify", `${fetching}^{commit}`);
     if (!commit.ok) return options.print(`hedge update: could not read the fetched engine: ${commit.err}`), false;
+    if (!(await git(options.engineDir, "cat-file", "-e", `${commit.out}:hedge`)).ok) return options.print(`hedge update: ${ref.replace(/^refs\/(?:heads|tags)\//, "")} has no hedge launcher, so it is an engine from before the rename. The engine stays where it is.`), false;
     return await use(commit.out);
   } finally {
     await git(options.engineDir, "update-ref", "-d", fetching);
@@ -172,6 +174,7 @@ async function rollBack(options: UpdateOptions, before: string, installError: st
 
 async function saveNotice(home: string, newMajor: string | undefined) {
   const path = noticePath(home);
+  refuseLegacyPath(path);
   if (!newMajor) return rm(path, { force: true });
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, JSON.stringify({ newMajor }) + "\n");
