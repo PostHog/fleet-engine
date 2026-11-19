@@ -239,6 +239,29 @@ describe("resolve", () => {
     expect(states).toEqual([["fallback", true, undefined], ["preferred", false, "waits for setting pair.preferred"]]);
   });
 
+  test("asks the settings of a fallback that takes over from a workflow waiting for its setting", () => {
+    const pair = withPack({
+      schema: 1, name: "pair", summary: "Pair.",
+      settings: [{ key: "pair.preferred", question: "Preferred?", type: "string", ask: "never", optional: true }, { key: "pair.fallback", question: "Which fallback?", type: "string", ask: "setup" }],
+      workflows: [
+        { id: "fallback", name: "Fallback", sentence: "Fallback.", default: true, settings: ["pair.fallback"], yields: ["preferred"] },
+        { id: "preferred", name: "Preferred", sentence: "Preferred.", default: true, settings: ["pair.preferred"], offUntilSet: ["pair.preferred"] },
+      ],
+    });
+    const resolved = plan({ packs: ["pair"] }, mac, [engine, pair]);
+    expect(resolved.workflows.filter((state) => state.pack === "pair").map(({ id, active }) => [id, active])).toEqual([["fallback", true], ["preferred", false]]);
+    expect(resolved.ask.map((setting) => setting.key)).toContain("pair.fallback");
+    expect(resolved.unanswered.map((setting) => setting.key)).toEqual(["pair.fallback"]);
+  });
+
+  test("a workflow waits for an engine setting that only an inactive workflow of a later pack gives a default", () => {
+    const library = withPack({ schema: 1, name: "library", summary: "Library.", settings: [{ key: "context.repo", question: "Repo?", type: "string", ask: "never", optional: true }], workflows: [{ id: "shelf", name: "Shelf", sentence: "Shelf.", default: true, settings: ["context.repo"], offUntilSet: ["context.repo"] }] });
+    const later = withPack({ schema: 1, name: "later", summary: "Later.", settings: [{ key: "context.repo", question: "Repo?", type: "string", ask: "never", default: "me/context" }], workflows: [{ id: "archive", name: "Archive", sentence: "Archive.", default: false, settings: ["context.repo"] }] });
+    const resolved = plan({ packs: ["library", "later"] }, mac, [engine, library, later]);
+    expect(resolved.workflows.find((state) => state.id === "shelf")).toMatchObject({ active: false, reason: "waits for setting context.repo" });
+    expect(resolved.settings["context.repo"]).toBeUndefined();
+  });
+
   test("settles a chain of yields: the first stays on when the one it yields to yields in turn", () => {
     const flow = (id: string, yields: string[] = []) => ({ id, name: id, sentence: `${id}.`, default: true, yields });
     const chain = withPack({ schema: 1, name: "chain", summary: "Chain.", workflows: [flow("a", ["b"]), flow("b", ["c"]), flow("c")] });
