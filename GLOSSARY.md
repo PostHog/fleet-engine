@@ -64,8 +64,12 @@ _Avoid_: Local config, state file
 
 ## Machines
 
+**Cloud box**:
+A Linux machine in the cloud, such as a Coder workspace: the hub or a node. Hedge runs only on cloud boxes. The Mac and the phone run only the T3 Code app, and Hedge installs nothing on them.
+_Avoid_: Mac only, local setup
+
 **Devbox**:
-A Linux machine, local or in the cloud, where agents and T3 threads run. A Coder workspace is a devbox from its first `hedge apply`, and signs Git commits with its Coder key.
+A cloud box that Hedge set up, where agents and T3 threads run. A Coder workspace is a devbox from its first `hedge apply`, and signs Git commits with its Coder key.
 _Avoid_: Coding box, agent box
 
 **Node**:
@@ -73,7 +77,7 @@ A devbox that stays on, where T3 threads do the work. The hub links the nodes an
 _Avoid_: Worker box
 
 **Hub**:
-The one machine that the profile's `hub` names, with `hedge hub here`. It runs the items placed on the hub and manages the other machines.
+The one cloud box that the profile's `hub` names, with `hedge hub here`. Setup starts on it. It runs the items placed on the hub, keeps the secrets, adds the nodes with `hedge devbox add`, and manages them.
 _Avoid_: Controller, master box
 
 ## Threads

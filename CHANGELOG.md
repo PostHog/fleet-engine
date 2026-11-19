@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Hedge is cloud only
+
+- Hedge runs your agents on a hub and one or more nodes in the cloud. The
+  Mac and the phone run only the T3 Code app. The "Mac only" setup is gone
+  from the site, `SETUP.md`, the presets, and the docs.
+- On a Mac, `get.sh` stops before it installs anything, and points at the
+  setup page.
+- The setup agent creates the hub and the nodes with one `coder create`
+  each, with every template parameter given and the profile repo as
+  dotfiles, and reads the build's parameters back. It sets Hedge up on the
+  hub over SSH, and adds the nodes from the hub.
+- On a box without a browser, ChatGPT signs in with a device code, and
+  Claude in a terminal.
+
 ### Fleet is now Hedge
 
 - The product and its command are now Hedge and `hedge`. `get.sh` points
