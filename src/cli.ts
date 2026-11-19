@@ -30,7 +30,8 @@ import { spawnRunner, type CommandRunner } from "./adapters/run.ts";
 import { become, canBecome, type Become } from "./runner/become.ts";
 import { trackCommand } from "./usage/usage.ts";
 import { asHedge } from "./reconciler/engine-command.ts";
-import { adoptLegacyEnv, copyLegacyPaths, linkHedgeCommand, withLegacyNames } from "./legacy.ts";
+import { adoptLegacyEnv, fleetIsHedge, underLegacyPath, withLegacyNames } from "./legacy.ts";
+import { importFleet } from "./import-fleet.ts";
 
 /** env: the environment that tells a Coder workspace apart; tests pass their own. */
 export type CliOptions = { home: string; engineRoot: string; platform: NodeJS.Platform; env?: Record<string, string | undefined>; print: (line: string) => void; fail?: (line: string) => void; run?: Runner; terminal?: Terminal; apply?: (profileDir: string, skip?: string[]) => Promise<number>; setup?: Pick<SetupOptions, "machine" | "fetchSource" | "doctor" | "env" | "timeZone" | "clock">; clock?: Clock; adapters?: () => Adapter[]; hostname?: () => string; stdin?: () => ReadableStream<Uint8Array>; capture?: CommandRunner; become?: Become; interactive?: boolean };
@@ -72,14 +73,13 @@ const builtins: Record<string, string[]> = { apply: [], doctor: [], update: [], 
 
 export async function main(argv: string[], options: CliOptions): Promise<number> {
   const [command, ...rest] = argv;
+  const help = !command || command === "help" || command === "--help";
+  if (underLegacyPath(options.home, options.engineRoot)) return inert(help, options);
   if (options.env) adoptLegacyEnv(options.env);
-  if (!command || command === "help" || command === "--help") return options.print(usage), 0;
+  if (help) return options.print(usage), 0;
   if (Object.hasOwn(builtins, command)) trackCommand(options.home, command, rest, builtins[command]!, options.env ?? {}, options.interactive);
   try {
-    if (migrates(command, rest)) {
-      for (const [before, after] of await copyLegacyPaths(options.home)) options.print(`copied ~/${before} to ~/${after}`);
-      if (linkHedgeCommand(options.home, options.engineRoot)) options.print("added ~/.local/bin/hedge");
-    }
+    if (command === "import-fleet") return await bringOverFleet(options);
     if (command === "apply" || command === "doctor") return await reconcile(command, rest, options);
     if (command === "update") return await runUpdate(options);
     if (command === "refresh") return await runRefresh(rest, options);
@@ -97,7 +97,18 @@ export async function main(argv: string[], options: CliOptions): Promise<number>
   }
 }
 
-const migrates = (command: string, args: string[]) => (command === "apply" && !args.includes("--dry-run")) || command === "setup" || command === "update";
+/** An engine in a Fleet path from before the rename changes nothing, and exits 0 so that old jobs and hooks raise no alert. */
+function inert(help: boolean, options: CliOptions) {
+  if (help) options.print(usage);
+  (options.fail ?? options.print)(fleetIsHedge);
+  return 0;
+}
+
+/** get.sh runs this once the new engine is in place. */
+async function bringOverFleet(options: CliOptions) {
+  for (const line of await importFleet(options.home)) options.print(`Hedge: copied ${line}.`);
+  return 0;
+}
 
 /** Runs hedge setup and records its transcript. A failed step's message names hedge triage. */
 async function runSetup(args: string[], options: CliOptions) {

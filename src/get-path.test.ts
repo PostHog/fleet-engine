@@ -1,8 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { getShHarness, onLinuxHost } from "./testing/get-sh.ts";
-import { legacyPaths } from "./legacy.ts";
 
 const { sandbox, getSh } = getShHarness();
 
@@ -88,25 +87,6 @@ describe("hedge on the PATH", () => {
     expect(result.output).not.toContain("fleet");
   });
 
-  test("copies each path from before the rename to its new name, keeps file modes, skips links, and leaves the old paths as they are", () => {
-    const box = sandbox("Linux");
-    const seed = (path: string) => (path.startsWith(".ssh/") ? path : `${path}/seed`);
-    for (const [before] of legacyPaths) {
-      mkdirSync(dirname(join(box.home, seed(before))), { recursive: true });
-      writeFileSync(join(box.home, seed(before)), `${before}\n`, { mode: 0o600 });
-    }
-    symlinkSync(join(box.home, ".profile"), join(box.home, ".config/fleet/elsewhere"));
-    expect(getSh(box, ["--ref", "v0.1.0", "--install-only"]).code).toBe(0);
-    for (const [before, after] of legacyPaths) {
-      expect(readFileSync(join(box.home, seed(after)), "utf8")).toBe(`${before}\n`);
-      expect(lstatSync(join(box.home, seed(after))).mode & 0o777).toBe(0o600);
-      expect(readFileSync(join(box.home, seed(before)), "utf8")).toBe(`${before}\n`);
-      expect(lstatSync(join(box.home, before)).isSymbolicLink()).toBe(false);
-    }
-    expect(lstatSync(join(box.home, ".config/fleet/elsewhere")).isSymbolicLink()).toBe(true);
-    expect(existsSync(join(box.home, ".config/hedge/elsewhere"))).toBe(false);
-  });
-
   test("leaves a new path that is already there as it is", () => {
     const box = sandbox("Linux");
     mkdirSync(join(box.home, ".local/share/fleet-mcphub"), { recursive: true });
@@ -117,12 +97,16 @@ describe("hedge on the PATH", () => {
     expect(readFileSync(join(box.home, ".local/share/fleet-mcphub/old.txt"), "utf8")).toBe("old\n");
   });
 
-  test("installs a pinned engine from before the rename, whose launcher is fleet, and hedge runs it", () => {
+  test("installs a pinned engine from before the rename, whose launcher is fleet, and both the hedge and the fleet command run it", () => {
     const box = sandbox("Linux");
+    mkdirSync(join(box.home, ".local/bin"), { recursive: true });
+    writeFileSync(join(box.home, ".local/bin/fleet"), "#!/bin/sh\n# Fleet\necho the old fleet\n", { mode: 0o755 });
     expect(getSh(box, ["--ref", "v0.0.9", "--install-only"]).code).toBe(0);
-    const result = Bun.spawnSync([join(box.home, ".local/bin/hedge"), "--help"], { cwd: box.home, env: { PATH: box.bin, HOME: box.home } });
-    expect(result.stderr.toString()).toBe("");
-    expect(result.stdout.toString()).toStartWith("Fleet: one setup for T3 Code, agents, and your workflows");
+    for (const command of ["hedge", "fleet"]) {
+      const result = Bun.spawnSync([join(box.home, ".local/bin", command), "--help"], { cwd: box.home, env: { PATH: box.bin, HOME: box.home } });
+      expect([command, result.stderr.toString()]).toEqual([command, ""]);
+      expect(result.stdout.toString()).toStartWith("Fleet: one setup for T3 Code, agents, and your workflows");
+    }
   });
 
   test("takes FLEET_ENGINE_DIR when HEDGE_ENGINE_DIR is not set", () => {

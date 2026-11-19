@@ -3,6 +3,10 @@
 # Usage: run.sh claude|codex <event>
 # It starts from the hooks directory, so a repository's bunfig.toml never loads.
 set -eu
+case "$0" in "$HOME"/.config/fleet/*)
+  echo "Fleet is now Hedge. Run: curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh | sh" >&2
+  exit 0 ;;
+esac
 hooks="$HOME/.config/hedge/hooks"
 for candidate in "$HOME/.bun/bin/bun" /opt/homebrew/bin/bun /usr/local/bin/bun; do
   [ -x "$candidate" ] && bun_binary=$candidate && break

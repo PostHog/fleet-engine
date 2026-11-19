@@ -10,9 +10,7 @@
 set -eu
 
 engine_slug=PostHog/hedge
-engine_repo=${HEDGE_ENGINE_REPO:-${FLEET_ENGINE_REPO:-https://github.com/$engine_slug.git}}
-engine_dir=${HEDGE_ENGINE_DIR:-${FLEET_ENGINE_DIR:-$HOME/.local/share/hedge/engine}}
-ref=${HEDGE_ENGINE_REF:-${FLEET_ENGINE_REF:-main}}
+default_engine_dir=$HOME/.local/share/hedge/engine
 profile=
 install_only=
 bun_version=1.4.4
@@ -26,6 +24,37 @@ fail() {
 }
 has() { command -v "$1" >/dev/null 2>&1; }
 
+# A HEDGE_ variable that is set, even to an empty string, wins over its FLEET_ variable from before the rename.
+setting() {
+  value=$2
+  from=
+  if eval "[ -n \"\${HEDGE_$1+set}\" ]"; then from=HEDGE_$1; elif eval "[ -n \"\${FLEET_$1+set}\" ]"; then from=FLEET_$1; fi
+  [ -z "$from" ] || eval "value=\$$from"
+  [ -z "$from" ] || [ -n "$value" ] || fail "$from is set but empty. Unset it or give it a value."
+}
+
+in_fleet_path() {
+  for home in "$HOME" "$(CDPATH='' cd -- "$HOME" && pwd -P)"; do
+    for old in .config/fleet .local/state/fleet .local/share/fleet .local/share/fleet-cli-proxy .local/share/fleet-hub-https .local/share/fleet-mcphub; do
+      case "$1/" in "$home/$old/"*) return 0 ;; esac
+    done
+  done
+  return 1
+}
+
+setting ENGINE_REPO "https://github.com/$engine_slug.git"
+engine_repo=$value
+setting ENGINE_REF main
+ref=$value
+setting ENGINE_DIR "$default_engine_dir"
+engine_dir=$value
+case "$engine_dir" in /*) ;; *) engine_dir="$PWD/$engine_dir" ;; esac
+real_engine_dir=$( (CDPATH='' cd -- "$engine_dir" 2>/dev/null && pwd -P) || printf '%s' "$engine_dir")
+if in_fleet_path "$engine_dir" || in_fleet_path "$real_engine_dir"; then
+  say "$from points into a Fleet path from before the rename, so the engine goes to $default_engine_dir."
+  engine_dir=$default_engine_dir
+fi
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --ref) [ $# -ge 2 ] || fail "--ref needs a value."; ref=$2; shift 2 ;;
@@ -38,21 +67,6 @@ done
 
 [ "$(id -u)" -ne 0 ] || fail "run this as your login user, without sudo."
 export PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH"
-
-# Paths from before the rename are copied to their new names, without the links in them. The old paths stay as they are.
-legacy_paths=".config/fleet:.config/hedge .local/state/fleet:.local/state/hedge .local/share/fleet:.local/share/hedge .local/share/fleet-cli-proxy:.local/share/hedge-cli-proxy .local/share/fleet-hub-https:.local/share/hedge-hub-https .local/share/fleet-mcphub:.local/share/hedge-mcphub .ssh/fleet_ed25519:.ssh/hedge_ed25519 .ssh/fleet_ed25519.pub:.ssh/hedge_ed25519.pub .ssh/fleet-allowed-signers:.ssh/hedge-allowed-signers .ssh/fleet-coder-git.pub:.ssh/hedge-coder-git.pub .ssh/fleet-peers.conf:.ssh/hedge-peers.conf"
-for pair in $legacy_paths; do
-  before="$HOME/${pair%%:*}"
-  after="$HOME/${pair#*:}"
-  if { [ -e "$before" ] && [ ! -L "$before" ]; } && ! { [ -e "$after" ] || [ -L "$after" ]; }; then
-    partial="$after.$$.partial"
-    rm -rf "$partial"
-    if ! { cp -RPp "$before" "$partial" && find "$partial" -type l -exec rm -f {} + && mv "$partial" "$after"; }; then
-      rm -rf "$partial"
-      fail "could not copy $before to $after."
-    fi
-  fi
-done
 
 # hedge setup reads this log to time the whole install, from this line on.
 install_log="$HOME/.local/state/hedge/logs/install-timings"
@@ -302,10 +316,17 @@ link_hedge
 login_path
 say "Engine ready at $ref in $engine_dir."
 
+machine="$HOME/.config/hedge/machine.json"
+set_up=; [ ! -e "$machine" ] || set_up=1
+[ "${launcher##*/}" != hedge ] || sh "$launcher" import-fleet || fail "could not copy the setup from before the rename."
+
 [ -z "$install_only" ] || exit 0
 
 if [ -n "$profile" ]; then
   exec sh "$launcher" apply --profile "$profile" "$@"
+fi
+if [ -z "$set_up" ] && [ $# -eq 0 ] && grep -q '"profileDir"' "$machine" 2>/dev/null; then
+  exec sh "$launcher" apply
 fi
 if [ ! -t 0 ] && (: </dev/tty) 2>/dev/null; then
   exec sh "$launcher" setup "$@" </dev/tty
