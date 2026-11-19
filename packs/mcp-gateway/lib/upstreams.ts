@@ -135,7 +135,7 @@ async function deviceSignIn(hub: Hub, app: CodexApp) {
   await mkdir(appHome(hub.home, app), { recursive: true, mode: 0o700 });
   const fresh = await mkdtemp(join(signIns, `${account(app)}-`));
   try {
-    const code = await Bun.spawn([hubCodex(hub.home), "login", "--device-auth"], { env: { ...process.env, CODEX_HOME: fresh }, stdio: ["inherit", "inherit", "inherit"] }).exited;
+    const code = await Bun.spawn([hubCodex(hub.home), "login", "-c", 'cli_auth_credentials_store="file"', "--device-auth"], { env: { ...process.env, CODEX_HOME: fresh }, stdio: ["inherit", "inherit", "inherit"] }).exited;
     if (!code) await rename(join(fresh, "auth.json"), join(appHome(hub.home, app), "auth.json"));
     return code;
   } finally { await rm(fresh, { recursive: true, force: true }); }

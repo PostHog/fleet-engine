@@ -117,7 +117,7 @@ test("sign-in runs Codex's device sign-in, puts the new sign-in into the bridge'
   codexLogin(home, `echo "$*" > "${home}/login-args"\necho new > "$CODEX_HOME/auth.json"`);
   api.calls.length = 0;
   expect(await signInSlackBridge(hub)).toBe(0);
-  expect(readFileSync(join(home, "login-args"), "utf8")).toBe("login --device-auth\n");
+  expect(readFileSync(join(home, "login-args"), "utf8")).toBe('login -c cli_auth_credentials_store="file" --device-auth\n');
   expect(bridgeAuth(home)).toBe("new\n");
   expect(api.calls.filter((call) => call.method !== "GET").map((call) => `${call.method} ${call.path}`)).toEqual(["POST servers/slack/reload"]);
   expect(hub.printed.at(-1)).toBe("Slack signed in. Agents reach them through the gateway now.");

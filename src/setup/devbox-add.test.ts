@@ -173,7 +173,7 @@ describe("hedge devbox add", () => {
     const options = { home, engineRoot, platform: "linux" as const, print: io.terminal.print, terminal: io.terminal };
     const box = fakeMachine(home, { "box:chatgpt": 99 }, { exits: { "box:chatgpt": 1 } });
     expect(await main(["devbox", "add", "coder.hedge-node-1"], { ...options, setup: { machine: box.machine } })).toBe(1);
-    expect(io.output()).toContain("codex login --device-auth ended with code 1, but Sign in to ChatGPT on coder.hedge-node-1 still does not pass its check. Fix what it says above, then run hedge devbox add coder.hedge-node-1 again.");
+    expect(io.output()).toContain(`codex login -c cli_auth_credentials_store="file" --device-auth ended with code 1, but Sign in to ChatGPT on coder.hedge-node-1 still does not pass its check. Fix what it says above, then run hedge devbox add coder.hedge-node-1 again.`);
     expect(io.output()).toContain("and open the link it prints. Then run hedge devbox add coder.hedge-node-1 again.");
     expect(io.output()).not.toContain("hedge setup again");
   });

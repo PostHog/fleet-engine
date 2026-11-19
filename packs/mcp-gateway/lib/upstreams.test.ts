@@ -278,7 +278,7 @@ test("one ChatGPT sign-in serves every Google route and the gateway reloads all 
   writeFileSync(join(home, ".local/share/hedge-mcphub/data/google-codex/auth.json"), "broken");
   api.calls.length = 0;
   expect(await signInApp(hub, googleCalendar)).toBe(0);
-  expect(readFileSync(join(home, "logins"), "utf8")).toBe("login --device-auth\nlogin --device-auth\n");
+  expect(readFileSync(join(home, "logins"), "utf8")).toBe("login -c cli_auth_credentials_store=\"file\" --device-auth\nlogin -c cli_auth_credentials_store=\"file\" --device-auth\n");
   expect(readFileSync(join(home, ".local/share/hedge-mcphub/data/google-codex/auth.json"), "utf8")).toBe("{}\n");
   expect(writes(api)).toEqual(["POST servers/gmail/reload", "POST servers/google-calendar/reload", "POST servers/google-drive/reload"]);
 });

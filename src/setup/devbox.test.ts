@@ -59,7 +59,7 @@ describe("the devbox over SSH", () => {
     expect(onTheBox).toContain("gh auth login --hostname github.com --git-protocol https --web --scopes repo,read:org,admin:public_key,admin:ssh_signing_key,workflow");
     expect(onTheBox).toContain("gh auth setup-git");
     expect(onTheBox).toContainEqual(expect.stringContaining(`gh repo clone https://github.com/nora/hedge-profile.git "$HOME/.local/share/hedge/profile" -- -q && sh "$HOME/.local/share/hedge/engine/get.sh" --ref main --profile "$HOME/.local/share/hedge/profile"`));
-    expect(onTheBox).toContain("codex login --device-auth");
+    expect(onTheBox).toContain(`codex login -c 'cli_auth_credentials_store="file"' --device-auth`);
     expect(onTheBox).toContain("t3 up --connect --yes --headless");
     expect(box.runs).toContainEqual({ command: ["ssh", "-t", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "node-1", expect.stringContaining("claude auth login")], input: true });
     expect(box.opened).toEqual(["https://github.com/login/device"]);
