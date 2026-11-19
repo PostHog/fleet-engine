@@ -91,7 +91,7 @@ export function readLibrary(root: string, cacheFile?: string): Doc[] {
   if (!existsSync(root)) return [];
   const files = markdownFiles(root);
   if (!cacheFile) return parseAll(root, files);
-  const signature = `${root}:${files.length}:${Math.max(0, ...files.map((file) => statSync(join(root, file)).mtimeMs))}`;
+  const signature = JSON.stringify([root, Math.max(0, ...files.map((file) => statSync(join(root, file)).mtimeMs)), files.toSorted()]);
   try {
     const cached = JSON.parse(readFileSync(cacheFile, "utf8"));
     if (cached.signature === signature) return cached.docs;
