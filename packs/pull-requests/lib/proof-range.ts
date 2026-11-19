@@ -1,3 +1,4 @@
+import type { Merged } from "./proof-delta.ts";
 import { reviewedDiff } from "./proof-review.ts";
 
 type Result = { code: number; stdout: string; stderr: string };
@@ -5,14 +6,22 @@ export type Run = (command: string[]) => Result;
 
 export type ReviewRange = { files: string[]; leftOut: string[]; diff: string };
 
-export function reviewRange(run: Run, from: string, head: string, branched: string): ReviewRange {
+export type RangeStart = { from: string; merged?: Merged };
+
+export function reviewRange(run: Run, { from, merged }: RangeStart, head: string, branched: () => string): ReviewRange {
   const changed = changedFiles(run, from, head);
-  const own = from === branched || startsAtNetDelta(run, from) ? undefined : new Set(changedFiles(run, branched, head).flat());
+  const own = merged || from === branched() ? undefined : new Set(changedFiles(run, branched(), head).flat());
   const kept = changed.filter((paths) => !own || paths.some((path) => own.has(path)));
-  const files = kept.map(last);
+  const conflicts = merged?.conflicts ?? [];
+  const files = [...new Set([...kept.map(last), ...conflicts])];
   const leftOut = changed.filter((paths) => !kept.includes(paths)).map(last);
-  const diff = files.length ? diffOf(run, from, head, leftOut.length ? kept.flat() : undefined) : "";
-  return { files, leftOut, diff };
+  const diff = kept.length ? diffOf(run, from, head, leftOut.length ? kept.flat() : undefined) : "";
+  return { files, leftOut, diff: diff + conflicts.map((path) => conflictDiff(run, merged!, head, path)).join("") };
+}
+
+function conflictDiff(run: Run, { reviewed, base }: Merged, head: string, path: string) {
+  const lead = `# Conflict in ${path}: the merge of the reviewed head ${reviewed} with the base ${base} leaves it in conflict, and HEAD resolves it. Read both sides with git show ${reviewed}:${path} and git show ${base}:${path}.`;
+  return [`\n${lead}`, `# HEAD against the reviewed head:`, diffOf(run, reviewed, head, [path]), `# HEAD against the base:`, diffOf(run, base, head, [path])].join("\n");
 }
 
 export const leftOutNote = (leftOut: string[]) =>
@@ -39,7 +48,6 @@ function diffOf(run: Run, from: string, to: string, files?: string[]) {
   return reviewedDiff(result.stdout);
 }
 
-const startsAtNetDelta = (run: Run, from: string) => run(["git", "cat-file", "-t", from]).stdout.trim() === "tree";
 const last = (paths: string[]) => paths[paths.length - 1]!;
 const short = (commit: string) => commit.slice(0, 7);
 const firstLine = (text: string) => text.trim().split("\n")[0] ?? "";

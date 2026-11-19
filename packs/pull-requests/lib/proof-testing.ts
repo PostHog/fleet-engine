@@ -107,6 +107,7 @@ printf '{"number":42,"url":"https://github.com/example/product/pull/42","baseRef
     if (next) writeFileSync(join(github, "next-head"), next);
   };
   const whileGithubReadsPull = (script: string) => writeFileSync(join(github, "while-reading"), script);
+  const githubBase = (commit: string) => writeFileSync(join(github, "base-sha"), commit);
   const githubComment = (id: number, author: string, body: string, createdAt = "2026-10-25T11:00:00Z", on = 42) => writeFileSync(join(github, `comment-${id}`), JSON.stringify({ user: { login: author }, body, created_at: createdAt, issue_url: `https://api.github.com/repos/example/product/issues/${on}` }));
   const githubBody = (number = 42) => JSON.parse(readFileSync(join(github, existsSync(join(github, `body-${number}`)) ? `body-${number}` : "body"), "utf8")) as string;
   const githubFault = (fault: "patch-error" | "patch-mangle", text: string | undefined) => text === undefined ? rmSync(join(github, fault), { force: true }) : writeFileSync(join(github, fault), text);
@@ -183,7 +184,7 @@ printf '{"number":42,"url":"https://github.com/example/product/pull/42","baseRef
   const decide = (...args: string[]) => decideIn(repository, ...args);
   const pullRequest = join(home, ".local/state/hedge/proof/example/product/42");
   await seedRepository(repository);
-  return { home, repository, pullRequest, env, git, commit, advanceBase, hedge, hedgeIn, hedgeAs, ci, statuses, required, pullRequestState, githubHead, githubCalls, githubBody, githubFault, githubComment, whileGithubReadsPull, clock, say, choose, chooseGap, reader, panel, hub, pendingCards, decide, decideIn, startTimes };
+  return { home, repository, pullRequest, env, git, commit, advanceBase, hedge, hedgeIn, hedgeAs, ci, statuses, required, pullRequestState, githubHead, githubCalls, githubBody, githubFault, githubComment, whileGithubReadsPull, githubBase, clock, say, choose, chooseGap, reader, panel, hub, pendingCards, decide, decideIn, startTimes };
 }
 
 export type Checkout = Awaited<ReturnType<typeof checkout>>;

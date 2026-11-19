@@ -1,6 +1,6 @@
 import { readPullRequest, type Run } from "./pr-ci.ts";
 import { reviewedDiff } from "./proof-review.ts";
-import { isTestFile } from "./proof-delta.ts";
+import { commitsIn, isTestFile } from "./proof-delta.ts";
 import { riskCalloutOf } from "./decision-ledger.ts";
 import type { CleanBaseMerge, DevPr, DevPull, ProofIdentity } from "./proof.ts";
 
@@ -12,37 +12,18 @@ export function topLevel(run: Run) {
   return result.code === 0 ? result.stdout.trim() : undefined;
 }
 
-/**
- * Where the PR branched from its base. A base branch this checkout has not fetched is fetched from the repository's
- * remote once; without such a remote, or without the commit, the error names the commands that fix it.
- */
-export function mergeBase(identity: ProofIdentity, run: Run) {
-  const base = pullRequestDetails(identity, run).baseRefName;
+export function mergeBase(identity: ProofIdentity, run: Run, baseSha = pullRequestDetails(identity, run).baseSha) {
+  const where = `Cannot find where ${identity.repository}#${identity.pr} branched from its base`;
+  if (!baseSha) throw new Error(`${where}: GitHub names no base commit of the PR. Run the command again once GitHub answers`);
   const remotes = remotesOf(identity.repository, run);
-  const found = () => {
-    for (const remote of remotes) {
-      const result = run(["git", "merge-base", `refs/remotes/${remote}/${base}`, identity.commit]);
-      if (result.code === 0) return result.stdout.trim();
-    }
-    return undefined;
-  };
-  const before = found();
-  if (before) return before;
-  for (const remote of remotes) run(["git", "fetch", "--quiet", remote, `+refs/heads/${base}:refs/remotes/${remote}/${base}`]);
-  const after = found();
-  if (after) return after;
-  const where = `Cannot find where ${identity.repository}#${identity.pr} branched from its base ${base} here`;
-  if (!remotes.length) throw new Error(`${where}: no remote of this checkout points at ${identity.repository}. Run the command in a checkout of ${identity.repository}, or add one here: git remote add hedge-base https://github.com/${identity.repository}.git && git fetch hedge-base ${base} pull/${identity.pr}/head`);
-  if (run(["git", "cat-file", "-e", `${identity.commit}^{commit}`]).code !== 0) throw new Error(`${where}: ${short(identity.commit)} is not in this checkout. Run git fetch ${remotes[0]} pull/${identity.pr}/head`);
-  throw new Error(`${where}, after fetching ${base} from ${remotes.join(", ")}: ${short(identity.commit)} shares no history with it`);
-}
-
-export function baseTip(identity: ProofIdentity, run: Run) {
-  for (const ref of baseRefs(identity, run)) {
-    const result = run(["git", "rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
-    if (result.code === 0) return result.stdout.trim();
-  }
-  throw new Error(`Cannot find the base branch of ${identity.repository}#${identity.pr} here. Fetch it from a remote of ${identity.repository}`);
+  const { present, fetched } = commitsIn(run, () => remotes);
+  const fetch = remotes.length ? "Run git fetch" : `No remote of this checkout points at ${identity.repository}. Run the command in a checkout of ${identity.repository}, or add one here: git remote add hedge-base https://github.com/${identity.repository}.git && git fetch`;
+  const remote = remotes[0] ?? "hedge-base";
+  if (!present(identity.commit)) throw new Error(`${where}: ${short(identity.commit)} is not in this checkout. ${fetch} ${remote} pull/${identity.pr}/head`);
+  if (!fetched(baseSha)) throw new Error(`${where}: the checkout lacks the PR's base ${short(baseSha)}. ${fetch} ${remote} ${baseSha}`);
+  const result = run(["git", "merge-base", baseSha, identity.commit]);
+  if (result.code === 0) return result.stdout.trim();
+  throw new Error(`${where}: ${short(identity.commit)} shares no history with the PR's base ${short(baseSha)}`);
 }
 
 export function diffOf(from: string, to: string, run: Run) {

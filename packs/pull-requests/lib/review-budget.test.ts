@@ -124,12 +124,12 @@ test("a test-only diff at low merge risk gets the Read tier: one combined Correc
   expect((await pr.hedge("show")).output).toContain("review tier: read: merge-risk grade low, 0 authored production lines");
   const reviewed = await pr.git("rev-parse", "HEAD");
 
-  await pr.commit("helper.ts", "export const name = \"member\";\n");
+  const fixed = await pr.commit("helper.ts", "export const name = \"member\";\n");
   expect((await pr.hedge("gate")).code).toBe(1);
   reviewer.answer("FINDINGS:\n- helper.ts:1 | major | Correctness | the name drops the member | name the member | anchor: member\nCOVERED: helper.ts\n");
   expect((await pr.hedge("review", "--scope", "final", "--base", reviewed)).code).toBe(0);
   await pr.commit("helper.ts", "export const name = \"new member\";\n");
-  await expect(pr.hedge("review", "--scope", "fixes", "--base", reviewed)).rejects.toThrow("The review budget of 2 reviews is spent.");
+  await expect(pr.hedge("review", "--scope", "fixes", "--base", fixed)).rejects.toThrow("The review budget of 2 reviews is spent.");
 });
 
 test("a 120-line diff at low merge risk gets the Pair tier: correctness and risk on the other family and fresh eyes on the author's", async () => {
@@ -249,6 +249,7 @@ test("a docs-only PR gets the combined lens in a checkout that has not fetched i
   mkdirSync(remote, { recursive: true });
   await pr.git("init", "-q", "--bare", remote);
   await pr.git("push", "-q", remote, "refs/remotes/origin/main:refs/heads/main");
+  pr.githubBase(await pr.git("rev-parse", "refs/remotes/origin/main"));
   await pr.git("remote", "set-url", "origin", remote);
   await pr.git("update-ref", "-d", "refs/remotes/origin/main");
   fakeModel(pr, "REVIEWER", "FINDINGS:\n(none)\nCOVERED: README.md\n");

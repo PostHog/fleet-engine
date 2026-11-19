@@ -4,7 +4,7 @@ import { basename, dirname, extname, join } from "node:path";
 import { normalized, type HeardAnswer } from "./proof-answers.ts";
 import { agentRefusal, agentsAcceptance, covers, fold, keptOwed, panelRefusal, tierOf, usersAcceptance, type Decision, type DecisionState, type Ledger, type Mark, type PrRef, type Tier } from "./decision-ledger.ts";
 import type { Family, Usage } from "./proof-models.ts";
-import type { NetDelta as Delta, ReviewedHead } from "./proof-delta.ts";
+import type { Merged, NetDelta as Delta, ReviewedHead } from "./proof-delta.ts";
 
 export type ProofIdentity = { repository: string; pr: number; commit: string };
 const sha = /^[0-9a-f]{40}$/;
@@ -171,8 +171,16 @@ export type Confirms = { stop: string; reason: string };
 export const arbiterStopFile = "arbiter-stop.json";
 const stopPath = (reviews: string) => join(dirname(reviews), arbiterStopFile);
 
+const readStop = (reviews: string) => readJson<ArbiterStop | undefined>(stopPath(reviews), undefined);
+
+async function historyOf(reviews: string) {
+  const names = (await reviewNames(reviews)).sort();
+  const finished = await Promise.all(names.map((name) => hasFindings(join(reviews, name))));
+  return JSON.stringify({ names, finished, stop: (await readStop(reviews))?.id });
+}
+
 async function stopState(reviews: string, started: string[]) {
-  const stop = await readJson<ArbiterStop | undefined>(stopPath(reviews), undefined);
+  const stop = await readStop(reviews);
   if (!stop) return undefined;
   const confirming = await Promise.all(started.map(async (name) => (await readJson<{ confirms?: Confirms }>(join(reviews, name, "round.json"), {})).confirms?.stop === stop.id ? name : undefined));
   return { stop, confirmedBy: confirming.find(Boolean) };
@@ -225,7 +233,7 @@ export function parseVerdict(output: string, model: string): ArbiterVerdict {
 
 export type ReviewLimits = { free: number; ceiling: number };
 
-export const atCeiling = `hedge proof asks nothing more. For each open blocker or major, revert the fix that brought it in, or list it in a "## Known issues" section of the PR body, one "- <blocker|major>: <file:line> <finding>" item each, and answer its finding "<n>. known: <why>". A blocker or major that the last read found in the fixes since the panel is reverted, never listed. An open blocker holds the merge; the user's merge word accepts the rest. Only the user's --override runs another review`;
+export const atCeiling = `hedge proof asks nothing more. For each open blocker or major, revert the fix that brought it in, or list it in a "## Known issues" section of the PR body, one "- <blocker|major>: <file:line> <finding>" item each, and answer its finding "<n>. known: <why>". A blocker or major that a final read found in the net delta is reverted, never listed. An open blocker holds the merge; the user's merge word accepts the rest. Only the user's --override runs another review, or the final read that the gate asks for when the net delta is not empty`;
 
 const budgetSpent = ({ ceiling }: ReviewLimits) => `The review budget of ${ceiling} reviews is spent. ${atCeiling}`;
 
@@ -233,10 +241,13 @@ async function permitReview(home: string, identity: ProofIdentity, due: boolean,
   if (decision?.mark === "👤") return undefined;
   if (ceiling) throw new Error(ceiling);
   if (!due) return undefined;
+  const reviews = join(pullRequestDirectory(home, identity), "reviews");
+  const seen = await historyOf(reviews);
   const verdict = await arbiter(await arbiterPrompt(home, identity));
   if (verdict.verdict === "continue" || decision) return verdict;
   if (verdict.verdict !== "escalate") throw new Error(askUser(identity, `The arbiter gave no verdict: ${verdict.reason}.`));
-  await writeJson(stopPath(join(pullRequestDirectory(home, identity), "reviews")), { id: crypto.randomUUID(), verdict, at: new Date().toISOString() } satisfies ArbiterStop);
+  if (await historyOf(reviews) !== seen) throw new Error("The reviews changed while the arbiter weighed them, so its verdict is dropped. Run this command again to weigh them anew");
+  await writeJson(stopPath(reviews), { id: crypto.randomUUID(), verdict, at: new Date().toISOString() } satisfies ArbiterStop);
   throw new Error(`${askUser(identity, `The arbiter escalates: ${verdict.reason}.`)} One final read of the net delta may still run without the arbiter, such as to confirm a revert.`);
 }
 
@@ -251,15 +262,22 @@ function askUser(identity: ProofIdentity, stop: string, agentMay = true) {
 
 export type CapturedBy = "hedge" | "author";
 export type DecisionMark = Pick<Decision, "mark" | "id">;
-export type ReviewRequest = { scope: string; base?: string; from?: string; decision?: Decision; phase?: string; arbiter: Arbiter; limits: ReviewLimits; cleanBaseMerge?: CleanBaseMerge; netDelta?: NetDelta; baseSha?: string; capturedBy?: CapturedBy; lock?: LockRound };
-export type Reserved = { round: number | "final"; id: string; directory: string; from?: string; confirms?: Confirms };
+export type ReviewRequest = { scope: string; base?: string; from?: string; decision?: Decision; phase?: string; arbiter: Arbiter; limits: ReviewLimits; cleanBaseMerge?: CleanBaseMerge; netDelta: NetDelta; baseSha?: string; capturedBy?: CapturedBy; lock?: LockRound };
+export type Reserved = { round: number | "final"; id: string; directory: string; from?: string; merged?: Merged; confirms?: Confirms };
 type Permit = { arbiter: Arbiter; limits: ReviewLimits };
 type Start = { base?: string; from?: string; decision: Decision | undefined; permit: Permit; cleanBaseMerge: CleanBaseMerge; netDelta: NetDelta; baseSha?: string; capturedBy: CapturedBy; lock: LockRound | undefined };
 
 const reserveDecided = (reviews: string, name: string, record: object, decision: Decision | undefined, lock: LockRound | undefined) => reserve(reviews, name, { ...record, ...decision ? { decision } : {} }, lock);
 
 const reviewedAt = (finished: FinishedReview[], commit: string): ReviewedHead => ({ commit, baseSha: (finished.findLast((review) => review.commit === commit) ?? finished.at(-1))?.baseSha });
-const deltaStart = (delta: Delta, base: string) => "tree" in delta ? delta.tree : base;
+
+function readDelta(netDelta: NetDelta, finished: FinishedReview[], base: string, head: string, baseSha: string | undefined) {
+  const delta = netDelta(reviewedAt(finished, base), head, baseSha);
+  if ("unread" in delta) throw new Error(`Cannot read what changed past ${short(base)} and the base: ${delta.unread}`);
+  return delta;
+}
+
+const startOf = (delta: Exclude<Delta, { unread: string }>) => ({ from: delta.tree, merged: delta.merged });
 
 async function startFinalRead(home: string, identity: ProofIdentity, phase: FinalReadPhase, { base, decision, permit, cleanBaseMerge, netDelta, baseSha, capturedBy, lock }: Start): Promise<Reserved> {
   if (base === undefined) throw new Error("A final read needs --base with the latest reviewed commit");
@@ -272,9 +290,9 @@ async function startFinalRead(home: string, identity: ProofIdentity, phase: Fina
     const latest = finished.at(-1);
     if (!latest) throw new Error("A final read needs a finished earlier review");
     if (!coversReview(base, latest.commit, cleanBaseMerge)) throw new Error(`Final read base must be the latest reviewed commit ${latest.commit}, or a clean base merge the gate carried it to`);
-    const delta = netDelta(reviewedAt(finished, base), identity.commit, baseSha);
-    const required = "files" in delta && delta.files.length > 0;
-    if (!decision && "files" in delta && !required) throw new Error(`HEAD needs no final read: nothing changed past ${short(base)} and the base. hedge proof gate counts the carry. To read it anyway, pass --agent '<your reason>', or the user's --override`);
+    const delta = readDelta(netDelta, finished, base, identity.commit, baseSha);
+    const required = delta.files.length > 0 || delta.unrecordedBase === true;
+    if (!decision && !required) throw new Error(`HEAD needs no final read: nothing changed past ${short(base)} and the base. hedge proof gate counts the carry. To read it anyway, pass --agent '<your reason>', or the user's --override`);
     const stopped = decision?.mark === "👤" ? undefined : await stopState(reviews, started);
     await refuseAfterConfirmingRead(identity, reviews, stopped);
     const confirms = stopped && !stopped.confirmedBy ? { stop: stopped.stop.id, reason: stopped.stop.verdict.reason } : undefined;
@@ -285,8 +303,9 @@ async function startFinalRead(home: string, identity: ProofIdentity, phase: Fina
     let read = 1;
     while (started.includes(finalReadPrefix + read)) read++;
     const name = finalReadPrefix + read;
-    const from = deltaStart(delta, base);
-    if (await reserveDecided(reviews, name, { ...identity, round: "final", read, scope: "final", base, from, baseSha, phase, arbiter: verdict, capturedBy, ...confirms ? { confirms } : {} }, decision, lock)) return await reservedAlone(reviews, started, name, { round: "final", id: name, directory: join(reviews, name), from, ...confirms ? { confirms } : {} });
+    const start = startOf(delta);
+    const record = { ...identity, round: "final", read, scope: "final", base, ...start, baseSha, phase, arbiter: verdict, capturedBy, ...confirms ? { confirms } : {} };
+    if (await reserveDecided(reviews, name, record, decision, lock)) return await reservedAlone(reviews, started, name, { round: "final", id: name, directory: join(reviews, name), ...start, ...confirms ? { confirms } : {} });
   }
   throw new Error("Final read limit exceeded");
 }
@@ -307,7 +326,7 @@ const coversReview = (base: string, reviewed: string, cleanBaseMerge: CleanBaseM
 const unreadDelta: NetDelta = () => ({ unread: "no checkout reads the net delta here" });
 
 export async function startReview(home: string, identity: ProofIdentity, request: ReviewRequest): Promise<Reserved> {
-  const { scope, base, phase, decision, cleanBaseMerge = () => undefined, netDelta = unreadDelta, baseSha, capturedBy = "author", lock } = request;
+  const { scope, base, phase, decision, cleanBaseMerge = () => undefined, netDelta, baseSha, capturedBy = "author", lock } = request;
   const start: Start = { base, from: request.from, decision, permit: { arbiter: request.arbiter, limits: request.limits }, cleanBaseMerge, netDelta, baseSha, capturedBy, lock };
   if (!["full", "fixes", "final"].includes(scope)) throw new Error("Review scope must be full, fixes, or final");
   if (phase !== undefined && scope !== "final") throw new Error("--phase applies only to final reads");
@@ -325,15 +344,17 @@ async function startRound(home: string, identity: ProofIdentity, reviews: string
     try { await access(directory); continue; }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     if (round === 1 && scope !== "full") throw new Error("Round 1 is --scope full: it reviews the whole PR diff. Drop --base");
-    if (round > 1) await checkLaterRound(reviews, round, scope, base, decision, cleanBaseMerge);
+    const finished = await finishedReviews(home, identity);
+    if (round > 1) await checkLaterRound(reviews, finished, round, scope, base, decision, cleanBaseMerge);
+    const start = base === undefined ? { from } : startOf(readDelta(netDelta, finished, base, identity.commit, baseSha));
     const started = await reviewNames(reviews);
     if (decision?.mark !== "👤") await refuseAfterConfirmingRead(identity, reviews, await stopState(reviews, started));
     const spent = await reviewsSpent(reviews, started, "review");
     const { free, ceiling } = permit.limits;
     const stop = spent >= ceiling ? budgetSpent(permit.limits) : undefined;
     const verdict = await permitReview(home, identity, spent >= free, stop, decision, permit);
-    const start = base === undefined ? from : deltaStart(netDelta(reviewedAt(await finishedReviews(home, identity), base), identity.commit, baseSha), base);
-    if (await reserveDecided(reviews, String(round), { ...identity, round, scope, base, from: start, baseSha, arbiter: verdict, capturedBy }, decision, lock)) return await reservedAlone(reviews, started, String(round), { round, id: String(round), directory, ...start ? { from: start } : {} });
+    const record = { ...identity, round, scope, base, ...start, baseSha, arbiter: verdict, capturedBy };
+    if (await reserveDecided(reviews, String(round), record, decision, lock)) return await reservedAlone(reviews, started, String(round), { round, id: String(round), directory, ...start });
   }
   throw new Error("Review limit exceeded");
 }
@@ -341,13 +362,13 @@ async function startRound(home: string, identity: ProofIdentity, reviews: string
 type Claim = { repository: string; pr: number };
 const claimPath = (home: string, answer: HeardAnswer) => join(ledgerRoot(home), "claims", `${createHash("sha256").update(`${answer.thread}/${answer.message}`).digest("hex")}.json`);
 
-async function checkLaterRound(reviews: string, round: number, scope: string, base: string | undefined, decision: DecisionMark | undefined, cleanBaseMerge: CleanBaseMerge) {
-  try { await access(join(reviews, String(round - 1), "findings.md")); }
-  catch { throw new Error("Previous review round is unfinished. Reuse its reservation before starting another panel."); }
+async function checkLaterRound(reviews: string, finished: FinishedReview[], round: number, scope: string, base: string | undefined, decision: DecisionMark | undefined, cleanBaseMerge: CleanBaseMerge) {
+  if (!await hasFindings(join(reviews, String(round - 1)))) throw new Error("Previous review round is unfinished. Reuse its reservation before starting another panel.");
   if (scope === "full" && decision) return;
-  const previous = JSON.parse(await readFile(join(reviews, String(round - 1), "round.json"), "utf8")) as ProofIdentity;
-  if (scope !== "fixes" || !base) throw new Error(`Round ${round} needs --scope fixes --base ${previous.commit}, the commit of round ${round - 1}. With --agent '<your reason>', or the user's --override, --scope full reviews the whole PR diff again`);
-  if (!coversReview(base, previous.commit, cleanBaseMerge)) throw new Error(`Round ${round} needs --base ${previous.commit}, the commit of round ${round - 1}`);
+  const latest = finished.at(-1)!;
+  const of = `the commit of ${reviewLabel(latest.name)}, the latest finished review`;
+  if (scope !== "fixes" || !base) throw new Error(`Round ${round} needs --scope fixes --base ${latest.commit}, ${of}. With --agent '<your reason>', or the user's --override, --scope full reviews the whole PR diff again`);
+  if (!coversReview(base, latest.commit, cleanBaseMerge)) throw new Error(`Round ${round} needs --base ${latest.commit}, ${of}`);
 }
 
 function claimedOn(text: string) {
@@ -384,7 +405,7 @@ export function requireChoice(answer: HeardAnswer, lead: string, [accept, declin
 }
 
 type RoundDecision = { decision?: Decision; recorded?: undefined } | { decision: DecisionMark; recorded: true };
-export type Reservation = ProofIdentity & { round: number | "final"; scope: string; base?: string; from?: string; baseSha?: string; confirms?: Confirms; capturedBy?: CapturedBy; reviewer?: string } & RoundDecision;
+export type Reservation = ProofIdentity & { round: number | "final"; scope: string; base?: string; from?: string; merged?: Merged; baseSha?: string; confirms?: Confirms; capturedBy?: CapturedBy; reviewer?: string } & RoundDecision;
 
 export const readReservation = (directory: string) => readJson<Reservation | undefined>(join(directory, "round.json"), undefined);
 
@@ -398,8 +419,8 @@ export async function markRecorded(directory: string) {
   const reservation = await readReservation(directory);
   if (!reservation?.decision || reservation.recorded) return;
   const { mark, id } = reservation.decision;
-  await writeJson(join(directory, "round.json"), { ...reservation, decision: { mark, id }, recorded: true } satisfies Reservation);
   if (mark === "👤") await rm(stopPath(dirname(directory)), { force: true });
+  await writeJson(join(directory, "round.json"), { ...reservation, decision: { mark, id }, recorded: true } satisfies Reservation);
 }
 
 const hasFindings = (directory: string) => access(join(directory, "findings.md")).then(() => true, () => false);
@@ -1046,7 +1067,7 @@ function reviewedThroughMerges(start: string, reviewed: Set<string>, cleanBaseMe
   return undefined;
 }
 
-const nothingPast = (delta: Delta) => "files" in delta && !delta.files.length;
+const nothingPast = (delta: Delta) => "files" in delta && !delta.files.length && !delta.unrecordedBase;
 
 async function carryForward(home: string, identity: ProofIdentity, finished: FinishedReview[], netDelta: NetDelta, base: string | undefined) {
   const heads = finished.toReversed().filter((review, index, latestFirst) => latestFirst.findIndex((other) => other.commit === review.commit) === index).slice(0, maxCarriedHeads);
@@ -1088,7 +1109,10 @@ async function headReview(home: string, identity: ProofIdentity, finished: Finis
   const latest = finished.at(-1);
   if (!latest) return { problem: "missing", line: "review: HEAD not reviewed" };
   const delta = netDelta(latest, identity.commit, base);
-  const read = "unread" in delta ? `; ${delta.unread}` : delta.files.length ? `; ${delta.files.length} file(s) changed past it and the base. Read them with hedge proof review --scope final --base ${latest.commit}` : "";
+  const finalRead = `hedge proof review --scope final --base ${latest.commit}`;
+  const read = "unread" in delta ? `; ${delta.unread}`
+    : delta.unrecordedBase ? `; that review recorded no base, so nothing carries. Read what changed past it with ${finalRead}`
+    : delta.files.length ? `; ${delta.files.length} file(s) changed past it and the base. Read them with ${finalRead}` : "";
   return { problem: "missing", line: `review: HEAD not reviewed, last review covered ${short(latest.commit)}${read}` };
 }
 
@@ -1127,6 +1151,7 @@ function headStatus(identity: ProofIdentity, before: PushedHead, after: PushedHe
   if (before.commit !== identity.commit) return { problem: "missing", line: `head: ${short(identity.commit)} is not the PR's head on GitHub (${short(before.commit) || "none"}); push it` };
   if ("error" in after) return { problem: "missing", line: `head: cannot read the PR head on GitHub again (${after.error})` };
   if (after.commit !== before.commit) return { problem: "missing", line: `head: the PR head moved to ${short(after.commit)} while the gate read CI; run the gate again` };
+  if (after.baseSha !== before.baseSha) return { problem: "missing", line: `head: the PR's base on GitHub moved from ${short(before.baseSha ?? "") || "none"} to ${short(after.baseSha ?? "") || "none"} while the gate ran; run the gate again` };
   return { problem: undefined, line: `head: ${short(identity.commit)} is the PR's head on GitHub` };
 }
 
@@ -1242,7 +1267,7 @@ export async function reviewOfCommit(home: string, identity: ProofIdentity) {
   const review = (await finishedReviews(home, identity)).filter((finished) => finished.commit === identity.commit).at(-1);
   if (!review) return undefined;
   const reservation = await readJson<Reservation | undefined>(join(pullRequestDirectory(home, identity), "reviews", review.name, "round.json"), undefined);
-  return { label: reviewLabel(review.name), scope: reservation?.scope ?? "full", from: reservation?.from ?? reservation?.base, reviewer: review.reviewer };
+  return { label: reviewLabel(review.name), scope: reservation?.scope ?? "full", from: reservation?.from ?? reservation?.base, merged: reservation?.merged, reviewer: review.reviewer };
 }
 
 export const judgeDirectory = (home: string, identity: ProofIdentity) => join(pullRequestDirectory(home, identity), "judge");

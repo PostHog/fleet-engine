@@ -32,7 +32,7 @@ test("hedge proof explains each command and fails closed with one line when it c
   const gate = await run("gate", "--commit", "a".repeat(40));
   expect(gate.code).not.toBe(0);
   expect(gate.stdout).toBe("");
-  expect(gate.stderr.trim().split("\n")).toEqual([expect.stringContaining("no git remotes found). Pass --repo owner/name --pr number")]);
+  expect(gate.stderr.trim().split("\n")).toEqual([expect.stringContaining(`HEAD aaaaaaa is not in this checkout. Fetch it with git fetch origin ${"a".repeat(40)}`)]);
 
   const unknown = await run("review-finish", "--findings");
   expect(unknown.code).not.toBe(0);
@@ -268,11 +268,11 @@ test("at the review budget hedge asks nothing for a fixes round, --agent cannot 
   const fixes = await pr.commit("feature.txt", "fix 1\n");
   await pr.hedge("review-start", "--scope", "fixes", "--base", reviewed);
   await finishRound(pr, "2");
-  await pr.commit("feature.txt", "fix 2\n");
+  const read = await pr.commit("feature.txt", "fix 2\n");
   await pr.hedge("review-start", "--scope", "final", "--base", fixes);
   await finishRound(pr, "final-1");
   await pr.commit("feature.txt", "fix 3\n");
-  const fourth = ["review-start", "--scope", "fixes", "--base", fixes];
+  const fourth = ["review-start", "--scope", "fixes", "--base", read];
 
   const refusal = pr.hedge(...fourth);
   await expect(refusal).rejects.toThrow("The review budget of 3 reviews is spent. hedge proof asks nothing more. For each open blocker or major, revert the fix that brought it in, or list it in a \"## Known issues\" section of the PR body");
