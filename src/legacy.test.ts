@@ -336,6 +336,28 @@ describe("hedge import-fleet, which get.sh runs once the new engine is in place"
     expect(existsSync(join(home, ".config/hedge/hooks/notes.md"))).toBe(false);
   });
 
+  test("an import that another Hedge operation's live lock holds back runs once that process is gone, though it ended without letting go", async () => {
+    const home = temp.make("home-");
+    mkdirSync(join(home, ".config/fleet"), { recursive: true });
+    writeFileSync(join(home, ".config/fleet/kept.txt"), "mine\n");
+    const holder = join(temp.make("holder-"), "hold.ts");
+    writeFileSync(holder, `import { withLock } from ${JSON.stringify(join(import.meta.dir, "adapters/provider-config/store.ts"))};\nawait withLock(process.argv[2]!, async () => { console.log("held"); await new Promise(() => {}); });\n`);
+    const child = Bun.spawn([process.execPath, holder, home], { stdout: "pipe", stderr: "ignore" });
+    const reader = child.stdout.getReader();
+    let said = "";
+    while (!said.includes("held")) said += new TextDecoder().decode((await reader.read()).value);
+
+    const held = await hedge(["import-fleet"], home);
+    child.kill("SIGKILL");
+    await child.exited;
+    const resumed = await hedge(["import-fleet"], home);
+
+    expect(held.code).toBe(1);
+    expect(held.output).toContain("Another Hedge operation holds");
+    expect(resumed.code).toBe(0);
+    expect(readFileSync(join(home, ".config/hedge/kept.txt"), "utf8")).toBe("mine\n");
+  });
+
   test("does not point the machine file at a profile copy whose profile file was a link", async () => {
     const home = temp.make("home-");
     const repo = join(home, ".local/share/fleet/profile");
@@ -456,7 +478,7 @@ describe("a profile in a Fleet path from before the rename", () => {
     const old = oldProfile(home);
     const remote = temp.make("remote-");
     git(remote, "init", "-q", "--bare");
-    for (const args of [["init", "-q", "-b", "main"], ["add", "."], ["commit", "-q", "-m", "profile"], ["remote", "add", "origin", remote], ["push", "-q", "-u", "origin", "main"]]) git(old, ...args);
+    for (const args of [["init", "-q", "-b", "main"], ["config", "user.name", "Test"], ["config", "user.email", "test@example.com"], ["add", "."], ["commit", "-q", "-m", "profile"], ["remote", "add", "origin", remote], ["push", "-q", "-u", "origin", "main"]]) git(old, ...args);
     cpSync(old, join(home, ".local/share/hedge/profile"), { recursive: true });
     mkdirSync(dirname(machineFile(home)), { recursive: true });
     writeFileSync(machineFile(home), JSON.stringify({ schema: 1, role: "linux", profileDir: old }));

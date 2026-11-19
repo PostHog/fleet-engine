@@ -5,6 +5,7 @@ import { parse, stringify } from "smol-toml";
 import type { ConfigEntry, Plan } from "../../pack/types.ts";
 import { apply, check, filesAdapter } from "../../reconciler/apply.ts";
 import { tempDirs } from "../../testing/git.ts";
+import { stateLock, tryLock } from "../../lock.ts";
 import { spawnRunner } from "../run.ts";
 import { providerConfigAdapter, type CommandRunner } from "./adapter.ts";
 
@@ -392,8 +393,9 @@ describe("provider config", () => {
   test("stops while another Hedge run holds the lock, and writes nothing", async () => {
     const home = temp.make("home-");
     write(home, claude, { env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" } });
-    mkdirSync(join(home, ".local/state/hedge/lock"), { recursive: true });
+    const held = tryLock(join(home, stateLock))!;
     await expect(apply(plan(), { home, adapters: [claudeCli().adapter] })).rejects.toThrow("Another Hedge operation holds");
+    held.release();
     expect(read(home, claude)).toEqual({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" } });
   });
 

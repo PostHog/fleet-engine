@@ -228,11 +228,12 @@ async function change(command: keyof typeof changes | "hub", args: string[], opt
 async function runUpdate(options: CliOptions) {
   const machine = await loadMachine(options.home);
   if (!machine?.profileDir) throw new Error("no profile on this machine. Run get.sh, or hedge apply --profile <dir>.");
-  const profile = await loadProfile(machine.profileDir);
+  const profileDir = hedgeProfile(options, machine.profileDir);
+  const profile = await loadProfile(profileDir);
   return update({
     home: options.home,
     engineDir: options.engineRoot,
-    profileDir: machine.profileDir,
+    profileDir,
     engine: profile.engine,
     print: options.print,
     runApply: () => Bun.spawn(["sh", join(options.engineRoot, "hedge"), "apply"], { stdio: ["inherit", "inherit", "inherit"], env: { ...Bun.env, HOME: options.home } }).exited,
@@ -243,9 +244,10 @@ async function runRefresh(args: string[], options: CliOptions) {
   if (args.length) return options.print("Usage: hedge refresh"), 2;
   const machine = await loadMachine(options.home);
   if (!machine?.profileDir) throw new Error("no profile on this machine. Run get.sh, or hedge apply --profile <dir>.");
-  const profile = await loadProfile(machine.profileDir);
+  const profileDir = hedgeProfile(options, machine.profileDir);
+  const profile = await loadProfile(profileDir);
   const applyFiles = async (moved: FetchedSource[]) => {
-    const { plan } = await loadPlan(options, machine.profileDir, { fetch: false, remember: false, fetched: moved });
+    const { plan } = await loadPlan(options, profileDir, { fetch: false, remember: false, fetched: moved });
     if (plan.unanswered.length) {
       for (const setting of plan.unanswered) options.print(`To do: ${setting.question} Answer it with hedge set ${setting.key}=<value>.`);
       return false;

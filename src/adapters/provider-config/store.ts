@@ -2,10 +2,10 @@ import { randomUUID } from "node:crypto";
 import { lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { inside } from "../../files/install.ts";
+import { holdLock, stateLock } from "../../lock.ts";
 
 export type Write = { target: string; before?: string; after: string };
 
-const lockTarget = ".local/state/hedge/lock";
 
 export async function optional(path: string) {
   try {
@@ -34,20 +34,14 @@ export async function readState(home: string, target: string) {
   return optional(inside(home, target));
 }
 
+/** The kernel lets go of the lock when its process ends, so an operation that was stopped part way never holds back the next one. */
 export async function withLock<T>(home: string, work: () => Promise<T>): Promise<T> {
-  await requireRealPath(home, lockTarget);
-  const lock = inside(home, lockTarget);
-  await mkdir(dirname(lock), { recursive: true, mode: 0o700 });
-  try {
-    await mkdir(lock);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error(`Another Hedge operation holds ${lock}. Remove it only if that operation has stopped.`);
-    throw error;
-  }
+  await requireRealPath(home, stateLock);
+  const held = holdLock(inside(home, stateLock));
   try {
     return await work();
   } finally {
-    await rm(lock, { recursive: true, force: true });
+    held.release();
   }
 }
 

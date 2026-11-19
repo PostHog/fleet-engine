@@ -112,6 +112,10 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# A preview passes --dry-run to hedge. It never copies or stops the setup from before the rename.
+preview=
+for arg in "$@"; do [ "$arg" != --dry-run ] || preview=1; done
+
 [ "$(id -u)" -ne 0 ] || fail "run this as your login user, without sudo."
 export PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH"
 
@@ -303,17 +307,25 @@ say "Engine ready at $ref in $engine_dir."
 machine="$HOME/.config/hedge/machine.json"
 # While this is there, the machine file came from Fleet and apply has not passed yet, so the next run applies again.
 pending="$HOME/.local/state/hedge/fleet-apply-pending"
-[ -e "$machine" ] || : >"$pending"
-[ "${launcher##*/}" != hedge ] || sh "$launcher" import-fleet || fail "could not copy the setup from before the rename."
-grep -q '"profileDir"' "$machine" 2>/dev/null || rm -f "$pending"
+renamed=
+[ "${launcher##*/}" != hedge ] || [ -n "$preview" ] || renamed=1
+if [ -n "$renamed" ]; then
+  [ -e "$machine" ] || : >"$pending"
+  sh "$launcher" import-fleet || fail "could not copy the setup from before the rename."
+  grep -q '"profileDir"' "$machine" 2>/dev/null || rm -f "$pending"
+fi
 
 [ -z "$install_only" ] || exit 0
 
-if [ "${launcher##*/}" = hedge ] && ! sh "$launcher" retire-fleet; then
+if [ -n "$preview" ]; then
+  say "This is a preview, so Hedge did not copy or stop the setup from before the rename. Without --dry-run, get.sh stops each Fleet piece that hedge apply names below before it applies."
+elif [ -n "$renamed" ] && ! sh "$launcher" retire-fleet; then
   fail "Fleet may still run, so Hedge applied nothing. Stop each piece named above by hand, then run get.sh again."
 fi
 if [ -n "$profile" ]; then
-  exec sh "$launcher" apply --profile "$profile" "$@"
+  sh "$launcher" apply --profile "$profile" "$@" || exit $?
+  [ -n "$preview" ] || rm -f "$pending"
+  exit 0
 fi
 if [ -e "$pending" ] && [ $# -eq 0 ]; then
   sh "$launcher" apply || exit $?

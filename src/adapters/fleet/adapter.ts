@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Finding } from "../../pack/types.ts";
@@ -7,8 +8,9 @@ import { skipOtherHome, spawnRunner, type CommandRunner } from "../run.ts";
 import { localT3Server } from "../t3/session.ts";
 import type { T3Server } from "../t3/port.ts";
 
-export type FleetPiece = { kind: "launchd" | "systemd" | "container" | "t3"; name: string };
-export type OldTasks = { list(): Promise<Array<{ id: string; enabled: boolean }>>; setEnabled(id: string, enabled: boolean): Promise<void> };
+export type FleetPiece = { kind: "launchd" | "systemd" | "container" | "t3" | "cron"; name: string };
+/** saved: the tasks T3 Code keeps while its server is stopped, which Hedge can read but not change. */
+export type OldTasks = { list(): Promise<Array<{ id: string; enabled: boolean }>>; setEnabled(id: string, enabled: boolean): Promise<void>; saved?: true };
 export type FleetOptions = { run?: CommandRunner; accountHome?: () => Promise<string | undefined>; uid?: number; tasks?: (home: string) => Promise<OldTasks | undefined> };
 /** retired: what retire stopped. left: each piece that is not verified stopped, with why. notes: what retire could not look at. */
 export type Retirement = { retired: string[]; left: string[]; notes: string[] };
@@ -18,8 +20,9 @@ const launchdPrefixes = ["dev.fleet.", "com.fleet."];
 const unitPrefix = "fleet-";
 const containerName = "fleet-mcphub";
 const containerLabel = "org.fleet.service";
-const taskPrefix = "fleet:";
+export const fleetTaskPrefix = "fleet:";
 const notLoaded = 113;
+const cronMarker = /\s# fleet:([A-Za-z0-9._-]+)$/;
 
 const present = (path: string) => lstatSync(path, { throwIfNoEntry: false }) !== undefined;
 const names = (folder: string, keep: (name: string) => boolean) => {
@@ -31,16 +34,32 @@ const names = (folder: string, keep: (name: string) => boolean) => {
 };
 const lines = (text: string) => text.split("\n").map((line) => line.trim()).filter(Boolean);
 const why = (output: { code: number; stderr?: string }) => (output.stderr ?? "").trim().split("\n").at(-1) || `exit ${output.code}`;
-export const describe = (piece: FleetPiece) => ({ launchd: `launchd agent ${piece.name}`, systemd: `systemd unit ${piece.name}`, container: `Docker container ${piece.name}`, t3: `T3 Code task ${piece.name}` })[piece.kind];
+export const describe = (piece: FleetPiece) => ({ launchd: `launchd agent ${piece.name}`, systemd: `systemd unit ${piece.name}`, container: `Docker container ${piece.name}`, t3: `T3 Code task ${piece.name}`, cron: `cron job ${piece.name}` })[piece.kind];
 
-/** The T3 Code scheduled tasks on this machine, or undefined while T3 Code is not running. */
+/** The T3 Code scheduled tasks on this machine: from its server, or from its state store while it is stopped. Undefined when T3 Code has neither. */
 export function scheduledTasks(server: T3Server = localT3Server) {
   return async (home: string): Promise<OldTasks | undefined> => {
-    if (!(await server.answering(home))) return undefined;
+    if (!(await server.answering(home))) return savedTasks(join(home, ".t3/userdata/statev2.sqlite"));
     return {
       list: () => server.session(home, async (rpc) => (await rpc.first<{ tasks: Array<{ id: string; enabled: boolean }> }>("scheduledTasks.subscribe", {})).tasks),
       setEnabled: (id, enabled) => server.session(home, async (rpc) => void (await rpc.call("scheduledTasks.setEnabled", { id, enabled }))),
     };
+  };
+}
+
+function savedTasks(store: string): OldTasks | undefined {
+  if (!present(store)) return undefined;
+  return {
+    saved: true,
+    async list() {
+      const db = new Database(store, { readonly: true });
+      try {
+        return db.query<{ id: string; enabled: number }, []>("select task_id as id, enabled from scheduled_tasks").all().map((row) => ({ id: row.id, enabled: row.enabled !== 0 }));
+      } finally {
+        db.close();
+      }
+    },
+    setEnabled: async () => Promise.reject(new Error("T3 Code is stopped")),
   };
 }
 
@@ -52,6 +71,12 @@ export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
   const uid = options.uid ?? process.getuid?.() ?? 0;
   const tasksOf = options.tasks ?? scheduledTasks();
   const launchdTarget = (label: string) => `gui/${uid}/${label}`;
+  const crontab = async () => {
+    const listed = await run(["crontab", "-l"]);
+    if (listed.code === 0) return { lines: listed.stdout.split("\n").filter(Boolean) };
+    return { lines: [], unclear: listed.code === 127 || /no crontab/i.test(listed.stderr ?? "") ? undefined : `crontab -l did not answer (${why(listed)})` };
+  };
+  const cronId = (line: string) => cronMarker.exec(line)?.[1];
 
   async function find(home: string, platform: NodeJS.Platform, tasks: OldTasks | undefined): Promise<Found> {
     const found: Found = { pieces: [], unclear: [], notes: [] };
@@ -71,6 +96,9 @@ export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
       if (loaded.code !== 0 && loaded.code !== 127 && files.length) found.unclear.push(`systemd's user manager did not answer (${why(loaded)})`);
       const installed = loaded.code === 0 ? await run(["systemctl", "--user", "list-unit-files", "--plain", "--no-legend", `${unitPrefix}*`]) : { code: 1, stdout: "" };
       for (const name of [...files, ...lines(loaded.code === 0 ? loaded.stdout : ""), ...lines(installed.stdout)].map((line) => line.split(/\s+/)[0]!)) if (name.startsWith(unitPrefix)) add("systemd", name);
+      const table = await crontab();
+      if (table.unclear) found.unclear.push(table.unclear);
+      for (const id of table.lines.map(cronId)) if (id) add("cron", id);
     }
     const containers = await run(["docker", "ps", "-a", "--format", `{{.Names}}\t{{.Label "${containerLabel}"}}`]);
     if (containers.code === 0) {
@@ -79,7 +107,7 @@ export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
     if (!tasks) found.notes.push("T3 Code is not running, so Hedge did not look at its scheduled tasks. hedge apply checks them once T3 Code runs.");
     else {
       try {
-        for (const task of await tasks.list()) if (task.id.startsWith(taskPrefix)) add("t3", task.id);
+        for (const task of await tasks.list()) if (task.id.startsWith(fleetTaskPrefix)) add("t3", task.id);
       } catch (error) {
         found.unclear.push(`T3 Code did not list its scheduled tasks (${(error as Error).message})`);
       }
@@ -91,7 +119,11 @@ export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
   async function stillOn(piece: FleetPiece, tasks: OldTasks | undefined): Promise<string | undefined> {
     if (piece.kind === "launchd") {
       const printed = await run(["launchctl", "print", launchdTarget(piece.name)]);
-      return printed.code === notLoaded ? undefined : printed.code === 0 ? "it is still loaded" : `launchctl print exit ${printed.code}`;
+      if (printed.code !== notLoaded) return printed.code === 0 ? "it is still loaded" : `launchctl print exit ${printed.code}`;
+      const listed = await run(["launchctl", "print-disabled", `gui/${uid}`]);
+      if (listed.code !== 0) return `launchctl print-disabled exit ${listed.code}`;
+      const off = lines(listed.stdout).some((line) => new RegExp(`^"${piece.name.replaceAll(".", "\\.")}" => (?:disabled|true)$`).test(line));
+      return off ? undefined : "launchd still has it enabled, so it starts again at the next login";
     }
     if (piece.kind === "systemd") {
       const shown = await run(["systemctl", "--user", "show", "--property=LoadState,ActiveState,UnitFileState", piece.name]);
@@ -105,13 +137,21 @@ export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
       return `it is ${file || "in no unit file state"}`;
     }
     if (piece.kind === "container") {
-      const inspected = await run(["docker", "inspect", "--format", "{{.State.Running}}", piece.name]);
+      const inspected = await run(["docker", "inspect", "--format", "{{.State.Running}} {{.HostConfig.RestartPolicy.Name}}", piece.name]);
       if (inspected.code !== 0) return /no such/i.test(inspected.stderr ?? "") ? undefined : why(inspected);
-      return inspected.stdout.trim() === "false" ? undefined : "it is still running";
+      const [running, restart = ""] = inspected.stdout.trim().split(" ");
+      if (running !== "false") return "it is still running";
+      return ["no", ""].includes(restart) ? undefined : `Docker starts it again, because its restart policy is ${restart}`;
+    }
+    if (piece.kind === "cron") {
+      const table = await crontab();
+      if (table.unclear) return table.unclear;
+      return table.lines.some((line) => cronId(line) === piece.name) ? "it is still in your crontab" : undefined;
     }
     if (!tasks) return "T3 Code is not running";
     try {
-      return (await tasks.list()).find((task) => task.id === piece.name)?.enabled === true ? "it is still on" : undefined;
+      if ((await tasks.list()).find((task) => task.id === piece.name)?.enabled !== true) return undefined;
+      return tasks.saved ? "it is on in T3 Code, which is stopped. Start T3 Code so Hedge can turn it off" : "it is still on";
     } catch (error) {
       return `T3 Code did not list it (${(error as Error).message})`;
     }
@@ -126,14 +166,21 @@ export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
     } else if (piece.kind === "container") {
       await run(["docker", "update", "--restart=no", piece.name]);
       await run(["docker", "stop", piece.name]);
+    } else if (piece.kind === "cron") {
+      const table = await crontab();
+      if (table.unclear) return;
+      const kept = table.lines.filter((line) => cronId(line) !== piece.name);
+      await run(["crontab", "-"], { input: kept.length ? `${kept.join("\n")}\n` : "" });
     } else await tasks?.setEnabled(piece.name, false).catch(() => undefined);
   }
 
-  async function still(home: string, platform: NodeJS.Platform) {
+  /** Each piece found now, and each of earlier, that is not verified stopped. */
+  async function still(home: string, platform: NodeJS.Platform, earlier: FleetPiece[] = []) {
     const tasks = await tasksOf(home).catch(() => undefined);
     const found = await find(home, platform, tasks);
     const on: Array<{ piece: FleetPiece; reason: string }> = [];
-    for (const piece of found.pieces) {
+    const pieces = [...found.pieces, ...earlier.filter((piece) => !found.pieces.some((item) => item.kind === piece.kind && item.name === piece.name))];
+    for (const piece of pieces) {
       const reason = await stillOn(piece, tasks);
       if (reason) on.push({ piece, reason });
     }
@@ -163,7 +210,7 @@ export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
       if (skipped) return undefined;
       const before = await still(home, platform);
       for (const piece of before.found.pieces) await stop(piece, before.tasks);
-      const after = await still(home, platform);
+      const after = await still(home, platform, before.found.pieces);
       const left = [...after.on.map(({ piece, reason }) => `${describe(piece)}: ${reason}`), ...after.found.unclear];
       const retired = before.on.filter(({ piece }) => !after.on.some((item) => item.piece.kind === piece.kind && item.piece.name === piece.name)).map(({ piece }) => describe(piece));
       return { retired, left, notes: after.found.notes };
