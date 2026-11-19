@@ -117,12 +117,12 @@ describe("hedge on the PATH", () => {
     expect(readFileSync(join(box.home, ".local/share/fleet-mcphub/old.txt"), "utf8")).toBe("old\n");
   });
 
-  test("installs an engine from before the rename, whose command is still fleet", () => {
+  test("installs a pinned engine from before the rename, whose launcher is fleet, and hedge runs it", () => {
     const box = sandbox("Linux");
     expect(getSh(box, ["--ref", "v0.0.9", "--install-only"]).code).toBe(0);
     const result = Bun.spawnSync([join(box.home, ".local/bin/hedge"), "--help"], { cwd: box.home, env: { PATH: box.bin, HOME: box.home } });
     expect(result.stderr.toString()).toBe("");
-    expect(result.stdout.toString()).toStartWith("Hedge: one setup for T3 Code, agents, and your workflows");
+    expect(result.stdout.toString()).toStartWith("Fleet: one setup for T3 Code, agents, and your workflows");
   });
 
   test("takes FLEET_ENGINE_DIR when HEDGE_ENGINE_DIR is not set", () => {
