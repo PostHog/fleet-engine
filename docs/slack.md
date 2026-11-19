@@ -48,12 +48,12 @@ names a box, stops the trigger, and its log says which.
 ## How it works
 
 The trigger runs all the time as a Hedge service, `hedge run
-slack/slack-trigger`: a systemd user service `hedge-slack-trigger` on Linux, or
-the launchd agent `dev.hedge.slack-trigger` on a Mac. Hedge installs it only
+slack/slack-trigger`: the systemd user service `hedge-slack-trigger`. Hedge
+installs it only
 after you save your Slack app. It runs on your hub when the Hub pack is
 on. Without the Hub pack, it runs on your only machine, when your profile lists
 no devboxes and the machine is not a devbox. A profile that two machines share
-without a hub, such as two Macs, runs it on both, and each starts a thread for
+without a hub, such as two nodes, runs it on both, and each starts a thread for
 the same message. Turn on the Hub pack in that case.
 
 The trigger holds a Socket Mode connection to your own Slack app, so Slack

@@ -41,5 +41,6 @@ path reaches it now. A later change removes it, with its tests.
 | `packs/hub/lib/hub-tunnel.ts` | Kept the Mac's own tunnel to the hub as a launchd agent. |
 | The `darwin` branches in `packs/base/lib/prune.ts`, `packs/guards/lib/package-age.ts`, `src/lock.ts`, and `src/commands/triage.ts` | Used `lsof`, `rm -x`, `~/Library/Preferences`, `libSystem`, and `sw_vers`. |
 | The Mac lock in `packs/base/lib/install-codex.sh` | Took the install lock with Python's `fcntl.flock`, because a Mac has no `flock`. |
+| The human steps for the `mac` role in `packs/hub/pack.json`, such as trusting the hub's certificate in Keychain Access | Asked the person to do Mac-only steps. |
 | The launchd pieces in `src/adapters/fleet/adapter.ts` | Retired an old Fleet's launchd agents. |
 | The `needed-you` phases in `src/setup/timings.ts` | Read the Mac install's waits for the person. `get.sh` no longer writes them. |

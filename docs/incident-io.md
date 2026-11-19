@@ -69,12 +69,10 @@ source id, also not in an error that incident.io sends back.
 ## With a hub
 
 `hedge page` is a hub command. With a hub, it always runs on the hub, so the
-token lives in one place. On a node or a Mac, `hedge page <flags>` runs on
+token lives in one place. On a node, `hedge page <flags>` runs on
 the hub over SSH and prints the hub's answer. `hedge page setup` sends the
 token to the hub on SSH standard input, never on a command line. Rotating
 the token changes one file. A hub never forwards the command again.
-
-With Mac only, the command and the token stay on the Mac.
 
 **The hub is a single point of failure.** When SSH cannot reach the hub,
 `hedge page` exits 1 and says that ssh to the hub exited 255. When the hub
