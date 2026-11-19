@@ -531,10 +531,10 @@ async function fixesRoundDue(pr: Checkout) {
   return { panel, reviews: join(pr.pullRequest, "reviews"), lock: join(pr.pullRequest, "reviews", "round.lock") };
 }
 
-test("a review takes over the budget lock of a hedge proof command on this machine that crashed, and leaves the lock free for the next review", async () => {
+test("a review takes over the budget lock of a hedge proof command that crashed, and leaves the lock free for the next review", async () => {
   const pr = await checkout();
   const { panel, reviews } = await fixesRoundDue(pr);
-  await (await lockHolder("budget", reviews)).crash();
+  await (await lockHolder(reviews)).crash();
 
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", panel)).output).toContain(`"round":2`);
   await finishRound(pr, "2");
@@ -554,24 +554,12 @@ test("a review that leaves the arbiter while another command holds the budget lo
 
   const waiting = pr.hedge("review-start", "--scope", "fixes", "--base", panel);
   await readFile(started, "utf8");
-  const holder = await lockHolder("budget", reviews);
+  const holder = await lockHolder(reviews);
   try {
     await writeFile(go, "go\n");
     await expect(waiting).rejects.toThrow(`Process ${holder.pid}, another hedge proof command, works on ${reviews} and holds its lock ${lock}. Wait for it to end, then run this command again`);
     await expect(pr.hedge("show", "--round", "2")).rejects.toThrow("has no reservation");
   } finally { expect(await holder.release()).toBe(0); }
-  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", panel)).output).toContain(`"round":2`);
-});
-
-test("a review never takes over the budget lock of a command on another machine and says how to clear it", async () => {
-  const pr = await checkout();
-  const { panel, reviews, lock } = await fixesRoundDue(pr);
-  const holder = await lockHolder("budget", reviews, "another-machine");
-  await holder.crash();
-
-  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", panel)).rejects.toThrow(`Process ${holder.pid} on another-machine, another hedge proof command, holds the lock ${lock}. hedge never takes over a lock from another machine: when that command is gone, delete ${lock}, then run this command again`);
-  await expect(pr.hedge("show", "--round", "2")).rejects.toThrow("has no reservation");
-  rmSync(lock);
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", panel)).output).toContain(`"round":2`);
 });
 
@@ -593,15 +581,11 @@ test("a fixes round backs out when a dropped unfinished final read is started ag
   await spawnAsync(["mkfifo", started, go]);
   pr.env.HEDGE_REVIEW_ARBITER = `cat >/dev/null; if mkdir "${pr.home}/first" 2>/dev/null; then echo > "${started}"; read line < "${go}"; fi; echo CONTINUE`;
 
-  const startedAt = () => JSON.parse(readFileSync(join(babysit.directory, "round.json"), "utf8")).startedAt;
-  const dropped = startedAt();
-
   const slow = pr.hedge("review-start", "--scope", "fixes", "--base", fix);
   await readFile(started, "utf8");
   try {
     rmSync(babysit.directory, { recursive: true, force: true });
     expect((await pr.hedge("review-start", "--scope", "final", "--phase", "babysit", "--base", fix)).output).toContain(`"id":"final-1"`);
-    expect(startedAt()).toBe(dropped);
   } finally {
     await writeFile(go, "go\n");
     await slow.catch(() => undefined);

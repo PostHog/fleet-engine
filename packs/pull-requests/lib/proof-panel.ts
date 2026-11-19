@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { link, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { hostname } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { anchorCheck } from "./finding-anchors.ts";
 import { readJson, roundId, storeCapturedFindings, writeJson, type ProofIdentity } from "./proof.ts";
@@ -17,7 +16,7 @@ export type Cast = { family: Family; model: string; row: ModelRow; security?: tr
 export type Plan = { lenses: ({ name: string; title: string } & Cast)[]; changedFiles: string[]; from?: string; cwd: string; readable: string[]; tier?: ReviewTier; arguments?: string[] };
 type LensStatus = { state: "queued" | "running" | "done" | "failed"; attempts: number; startedAt?: string; finishedAt?: string; cause?: string; usage?: Usage };
 export type StartTime = (pid: number) => Promise<string | undefined>;
-export type LockOwner = { pid: number; host?: string; now: () => Date; startTime: StartTime };
+export type LockOwner = { pid: number; now: () => Date; startTime: StartTime };
 export type PanelIO = LockOwner & { env: Record<string, string | undefined>; pause: () => Promise<void>; slots: string; slotCount: number; limit: number };
 export type Restart = (name: string) => Promise<void>;
 
@@ -265,11 +264,10 @@ function laneProblem(answer: string, changedFiles: string[]) {
   return missed.length ? `COVERED misses ${missed.join(", ")}` : undefined;
 }
 
-type Holder = { pid: number; host?: string; token?: string; started?: string; reviewer?: number; reviewerStarted?: string };
+type Holder = { pid: number; token?: string; started?: string; reviewer?: number; reviewerStarted?: string };
 export type Slot = { recordReviewer: (pid: number) => Promise<void> };
 export type RoundLock = { owner: LockOwner; holder: Holder };
 export class RoundBusy extends Error {}
-export class ForeignLock extends RoundBusy {}
 export class RoundGone extends Error {}
 
 export async function processStart(pid: number) {
@@ -282,10 +280,7 @@ export async function processStart(pid: number) {
   } catch { return undefined; }
 }
 
-const hostOf = (owner: LockOwner) => owner.host ?? hostname();
-const holderFor = async (owner: LockOwner): Promise<Holder> => ({ pid: owner.pid, host: hostOf(owner), token: crypto.randomUUID(), started: await owner.startTime(owner.pid) });
-type Takeover = "from any machine" | "from this machine only";
-const elsewhere = (holder: Holder | undefined, owner: LockOwner): holder is Holder & { host: string } => holder?.host !== undefined && holder.host !== hostOf(owner);
+const holderFor = async (owner: LockOwner): Promise<Holder> => ({ pid: owner.pid, token: crypto.randomUUID(), started: await owner.startTime(owner.pid) });
 
 export async function withSlot<T>(io: PanelIO, work: (slot: Slot) => Promise<T>) {
   const holder = await holderFor(io);
@@ -317,19 +312,19 @@ export async function withRoundLock<T>(directory: string, lock: RoundLock, step:
   finally { await release(lockPath(directory), lock.holder); }
 }
 
-export const withBudgetLock = withRoundLock;
-
 async function takeLock(directory: string, { owner, holder }: RoundLock) {
   const path = lockPath(directory);
+  let blocker: string | undefined;
   for (let attempt = 0; attempt < lockAttempts; attempt++) {
     if (await claimRound(directory, holder)) return;
     const text = await readSlot(path);
     if (text === undefined) continue;
     const current = holderOf(text);
     if (current?.token === holder.token) return;
-    if (!await stale(path, text, owner, "from this machine only")) throw await busy(directory, current, owner);
-    await reclaim(path, text, owner, "from this machine only");
+    if (!await stale(path, text, owner)) throw await busy(directory, current);
+    ({ blocker } = await reclaim(path, text, owner));
   }
+  if (blocker) throw new Error(`Cannot take over the lock ${path}: the takeover guard ${blocker} stays held. When no hedge proof command works on ${directory}, delete ${blocker}, then run this command again`);
   throw new Error(`Cannot take the lock ${path}: other commands keep taking it over. Run the command again`);
 }
 
@@ -341,8 +336,7 @@ async function claimRound(directory: string, holder: Holder) {
   }
 }
 
-async function busy(directory: string, holder: Holder | undefined, owner: LockOwner) {
-  if (elsewhere(holder, owner)) return new ForeignLock(`Process ${holder.pid} on ${holder.host}, another hedge proof command, holds the lock ${lockPath(directory)}. hedge never takes over a lock from another machine: when that command is gone, delete ${lockPath(directory)}, then run this command again`);
+async function busy(directory: string, holder: Holder | undefined) {
   const who = holder?.pid ? `Process ${holder.pid}, another hedge proof command,` : "Another hedge proof command";
   const panel = await readPlan(directory) ?? await stagedPlan(directory);
   return new RoundBusy(`${who} works on ${directory} and holds its lock ${lockPath(directory)}. Wait for it to end${panel ? ", or run hedge proof review --wait" : ", then run this command again"}`);
@@ -382,12 +376,11 @@ export async function reclaimSlots(io: PanelIO) {
 
 async function reclaimStale(path: string, owner: LockOwner) {
   const text = await readSlot(path);
-  return text !== undefined && await stale(path, text, owner, "from any machine") && await reclaim(path, text, owner, "from any machine");
+  return text !== undefined && await stale(path, text, owner) && (await reclaim(path, text, owner)).taken;
 }
 
-async function stale(path: string, text: string, owner: LockOwner, takeover: Takeover) {
+async function stale(path: string, text: string, owner: LockOwner) {
   const holder = holderOf(text);
-  if (takeover === "from this machine only" && elsewhere(holder, owner)) return false;
   if (!holder?.pid) return olderThanGrace(path, owner.now());
   if (!isAlive(holder.pid)) return true;
   if (!holder.started) return false;
@@ -400,32 +393,33 @@ async function olderThanGrace(path: string, now: Date) {
   return written !== undefined && now.getTime() - written > lockGrace;
 }
 
-const guardGenerations = 10;
+type Guard = { lock?: string; dead: string[]; blocker?: string };
 
-async function guard(path: string, text: string, holder: Holder, owner: LockOwner, takeover: Takeover) {
+async function guard(path: string, text: string, holder: Holder, owner: LockOwner): Promise<Guard> {
   const first = `${path}.reclaim-${createHash("sha256").update(text).digest("hex").slice(0, 16)}`;
-  let generation = 1;
-  for (let attempt = 0; attempt < lockAttempts && generation <= guardGenerations; attempt++) {
-    const lock = generation === 1 ? first : `${first}.${generation}`;
-    if (await claim(lock, holder)) return lock;
+  const dead: string[] = [];
+  let lock = first;
+  for (let attempt = 0; attempt < lockAttempts; attempt++) {
+    lock = dead.length ? `${first}.${dead.length + 1}` : first;
+    if (await claim(lock, holder)) return { lock, dead };
     const current = await readSlot(lock);
     if (current === undefined) continue;
-    if (!await stale(lock, current, owner, takeover)) return undefined;
-    generation++;
+    if (!await stale(lock, current, owner)) return { dead, blocker: lock };
+    dead.push(lock);
   }
-  return undefined;
+  return { dead, blocker: lock };
 }
 
-async function reclaim(path: string, text: string, owner: LockOwner, takeover: Takeover) {
+async function reclaim(path: string, text: string, owner: LockOwner): Promise<{ taken: boolean; blocker?: string }> {
   const holder = await holderFor(owner);
-  const lock = await guard(path, text, holder, owner, takeover);
-  if (!lock) return false;
+  const { lock, dead, blocker } = await guard(path, text, holder, owner);
+  if (!lock) return { taken: false, blocker };
   try {
-    if (await readSlot(path) !== text) return false;
-    const stopped = holderOf(text);
-    if (!elsewhere(stopped, owner)) await stopReviewer(stopped, owner);
+    if (await readSlot(path) !== text) return { taken: false };
+    await stopReviewer(holderOf(text), owner);
     await rm(path, { force: true });
-    return true;
+    await Promise.all(dead.map((file) => rm(file, { force: true })));
+    return { taken: true };
   } finally { await release(lock, holder); }
 }
 

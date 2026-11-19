@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fold, type LedgerEvent } from "./decision-ledger.ts";
-import { acceptGap, checkout, clean, cleanFixtures, exitedPid, fakeModel, graded, hubAt, ledgerDecisions, lockHolder, reviewHead, settings, type Checkout } from "./proof-testing.ts";
+import { acceptGap, checkout, clean, cleanFixtures, exitedPid, fakeModel, graded, hubAt, ledgerDecisions, reviewHead, settings, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
 
@@ -521,30 +521,6 @@ test("while the hub is down, a round at an older commit whose decision is not re
   expect(JSON.parse(review.output.split("\n")[0]!)).toMatchObject({ round: 2, id: "2" });
   expect(JSON.parse(readFileSync(join(pr.pullRequest, "reviews/2/round.json"), "utf8"))).toMatchObject({ commit: head });
   expect(readFileSync(join(pr.pullRequest, "reviews/final-1/round.json"), "utf8")).toBe(stranded);
-});
-
-test("a round lock that a command on another machine holds stops --wait with the file to delete, and a new review leaves that round's reservation alone", async () => {
-  const pr = await checkout();
-  await pr.commit("feature.txt", "new\n");
-  await pr.hedge("require", "--none", "--reason", "docs only");
-  const reviewed = await reviewHead(pr);
-  await pr.commit("feature.txt", "newer\n");
-  const hub = hubAt(pr, "drops appends");
-  pr.env.HEDGE_REVIEW_ARBITER = "cat >/dev/null; echo CONTINUE";
-  pr.choose("Run one more round");
-  await expect(pr.hedge("review-start", "--scope", "final", "--base", reviewed, "--override", `2026-10-25 "Run one more round"`)).rejects.toThrow("Not recorded");
-  const round = join(pr.pullRequest, "reviews/final-1");
-  const lock = join(round, "round.lock");
-  const stranded = readFileSync(join(round, "round.json"), "utf8");
-  const holder = await lockHolder("round", round, "another-machine");
-  await holder.crash();
-  await pr.commit("feature.txt", "newest\n");
-  hub.state.hub = "up";
-  fakeModel(pr, "REVIEWER", "No findings.");
-
-  await expect(pr.hedge("review", "--wait", "--round", "final-1")).rejects.toThrow(`Process ${holder.pid} on another-machine, another hedge proof command, holds the lock ${lock}. hedge never takes over a lock from another machine: when that command is gone, delete ${lock}, then run this command again`);
-  expect((await pr.hedge("review", "--scope", "fixes", "--base", reviewed)).code).toBe(0);
-  expect(readFileSync(join(round, "round.json"), "utf8")).toBe(stranded);
 });
 
 test("a rerun whose decision is already in the ledger appends it no second time", async () => {

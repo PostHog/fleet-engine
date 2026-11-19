@@ -1,9 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { cleanFixtures, settings, checkout, clean, verdict, fakeModel, recordingModel, fixture, stalledOnQuota, panelGuide, acceptGap, hubAt, exitedPid, lockHolder, reviewHead, models, type Checkout } from "./proof-testing.ts";
+import { cleanFixtures, settings, checkout, clean, verdict, fakeModel, recordingModel, fixture, stalledOnQuota, panelGuide, acceptGap, hubAt, exitedPid, reviewHead, models, type Checkout } from "./proof-testing.ts";
 import { askModel } from "./proof-models.ts";
-import { processStart, readPlan, withSlot, type PanelIO } from "./proof-panel.ts";
+import { processStart, readPlan, roundLock, withRoundLock, withSlot, type PanelIO } from "./proof-panel.ts";
 
 afterEach(cleanFixtures);
 
@@ -129,37 +129,6 @@ test("a lens waits for a free panel slot of the machine, and --wait restarts a l
   expect((await pr.hedge("review", "--wait")).code).toBe(0);
   expect(whileQueued).toEqual([expect.stringContaining("correctness: queued by gpt")]);
   expect(readdirSync(slots)).toEqual([]);
-});
-
-test("a lens takes over a panel slot that a crashed worker on another machine left, so the panel never waits on it and the next review gets the sole slot", async () => {
-  const pr = await checkout();
-  await pr.commit("feature.txt", "greet\n");
-  await pr.hedge("require", "--none", "--reason", "docs only");
-  fakeModel(pr, "REVIEWER", clean);
-  pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.panelSlots": 1 });
-  await (await lockHolder("slot", join(pr.home, ".local/state/hedge/proof/.panel-slots"), "another-machine")).crash();
-
-  await pr.hedge("review", "--lens", "correctness");
-  expect((await pr.hedge("review", "--wait")).code).toBe(0);
-  expect((await pr.hedge("show")).output).not.toContain("queued");
-
-  const reviewed = await pr.git("rev-parse", "HEAD");
-  await pr.commit("feature.txt", "greet the member\n");
-  await pr.hedge("review", "--lens", "correctness", "--scope", "fixes", "--base", reviewed);
-  expect((await pr.hedge("review", "--wait")).code).toBe(0);
-  expect((await pr.hedge("show", "--round", "2")).output).toContain("correctness: done by gpt");
-});
-
-test("a slot taken over from a worker on another machine stops no process here, though its process id and start time match the recorded reviewer", async () => {
-  const io = slotIO(1);
-  const bystander = Bun.spawn(["sleep", "30"], { detached: true });
-  try {
-    await (await lockHolder("slot", io.slots, "another-machine", bystander.pid)).crash();
-    await withSlot(io, async () => undefined);
-    bystander.kill("SIGTERM");
-    await bystander.exited;
-    expect(bystander.signalCode).toBe("SIGTERM");
-  } finally { bystander.kill("SIGKILL"); }
 });
 
 test("a lens reads the whole diff from the round directory and REVIEW.md from the tip of the base branch, and its findings need answers, not its COVERED list", async () => {
@@ -308,6 +277,47 @@ await withSlot({ env: {}, pause: async () => {}, now: () => new Date(), startTim
   const io = { ...slotIO(1), slots, now: () => new Date(Date.now() + 120_000) };
   expect(await withSlot(io, async () => "ran")).toBe("ran");
   expect(readdirSync(slots).filter((name) => /^\d+$/.test(name))).toEqual([]);
+});
+
+async function roundLockTakeover(signal: "SIGKILL" | "SIGSTOP") {
+  const directory = fixture("hedge-round-lock-");
+  const scratch = fixture("hedge-round-takeover-");
+  const [script, inGuard] = [join(scratch, "take-over.ts"), join(scratch, "in-guard")];
+  const reviewer = await exitedPid();
+  writeFileSync(script, `import { writeFileSync } from "node:fs";
+import { roundLock, withRoundLock } from ${JSON.stringify(join(import.meta.dir, "proof-panel.ts"))};
+const startTime = async (pid: number) => {
+  if (pid === ${reviewer}) { writeFileSync(${JSON.stringify(inGuard)}, ""); process.kill(process.pid, "${signal}"); }
+  return "Sun Oct 25 11:00:00 2026";
+};
+await withRoundLock(${JSON.stringify(directory)}, await roundLock({ pid: process.pid, now: () => new Date(), startTime }), async () => {});
+`);
+  writeFileSync(join(directory, "round.lock"), JSON.stringify({ pid: await exitedPid(), token: "dead", reviewer, reviewerStarted: "Sun Oct 25 10:00:00 2026" }));
+  const child = Bun.spawn(["bun", script], { stdout: "ignore", stderr: "inherit" });
+  while (!existsSync(inGuard) && child.exitCode === null) await new Promise((done) => setImmediate(done));
+  const lock = await roundLock({ pid: process.pid, now: () => new Date(), startTime: async () => "Sun Oct 25 11:00:00 2026" });
+  return { directory, child, take: () => withRoundLock(directory, lock, async () => "ran") };
+}
+
+test("a command that died while it took over a round lock never blocks the next one, which takes over the lock and clears the dead guard", async () => {
+  const { directory, child, take } = await roundLockTakeover("SIGKILL");
+  await child.exited;
+  expect(child.signalCode).toBe("SIGKILL");
+
+  expect(await take()).toBe("ran");
+  expect(readdirSync(directory)).toEqual([]);
+});
+
+test("a round lock whose takeover another live command still guards stops with the guard file to delete", async () => {
+  const { directory, child, take } = await roundLockTakeover("SIGSTOP");
+  try {
+    const lock = join(directory, "round.lock");
+    const guard = join(directory, readdirSync(directory).find((name) => name.startsWith("round.lock.reclaim-"))!);
+    await expect(take()).rejects.toThrow(`Cannot take over the lock ${lock}: the takeover guard ${guard} stays held. When no hedge proof command works on ${directory}, delete ${guard}, then run this command again`);
+  } finally {
+    child.kill("SIGKILL");
+    await child.exited;
+  }
 });
 
 test("a claimant paused while it reclaims a slot is not fenced out, however long the pause: the next claimant waits until it resumes", async () => {
