@@ -102,7 +102,7 @@ function environmentApiKeyDead(host: string | undefined) {
 export const codexProbeTimeoutMs = 20_000;
 
 const fileStore = 'cli_auth_credentials_store="file"';
-const signInGone = /\b401\b|unauthorized|not logged in|expired|log in again|sign in again/i;
+const signInGone = /\b401\b|unauthorized|not logged in|log in again|sign in again|\b(?:token|session|sign-?in|login|credentials?)\b[^.\n]{0,40}\bexpired\b|\bexpired\s+(?:token|session|sign-?in|login|credentials?)\b/i;
 const codexConfig = ["sh", "-c", 'cat "${CODEX_HOME:-$HOME/.codex}/config.toml"'];
 
 async function codexStore(machine: Machine) {

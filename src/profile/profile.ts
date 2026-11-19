@@ -55,18 +55,15 @@ export async function saveAnswers(dir: string, answers: Partial<ProfileFile>, op
   if (options.push) await push(dir);
 }
 
-/**
- * Saves answers on top of the profile as this machine last took it, and
- * pushes them without taking new commits first. When another machine pushed
- * meanwhile, it drops that commit, takes their commits, saves the same
- * answers on top, and pushes once more. Settings merge key by key, so pass
- * only the settings this command changed.
- */
 export async function pushAnswers(dir: string, answers: Partial<ProfileFile>, target: string[] = []) {
   refuseLegacyPath(dir);
   refuseLegacyPath(profileFile(dir));
   const head = await run(dir, "git", "rev-parse", "--verify", "HEAD");
   if (!head.ok) throw new ProfileError(`${dir}: has no commit to save answers on top of.`);
+  const name = basename(profileFile(dir));
+  const edited = await run(dir, "git", "diff", "--quiet", "HEAD", "--", name);
+  if (edited.code === 1) throw new ProfileError(`${dir}: ${name} has changes that are not committed. Commit or discard them, then try again.`);
+  if (!edited.ok) throw new ProfileError(`${dir}: could not compare ${name}: ${edited.stderr}`);
   await commitAnswers(dir, answers);
   const pushed = await run(dir, "git", "push", "-q", ...target);
   if (pushed.ok) return;

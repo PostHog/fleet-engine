@@ -166,10 +166,8 @@ function withoutBus(command: string[]) {
   return command[0] === "env" && ("XDG_RUNTIME_DIR" in vars || "DBUS_SESSION_BUS_ADDRESS" in vars) ? command.slice(1 + Object.keys(vars).length) : command;
 }
 
-/** What T3 Code's service runs with: the settings file, time zone and Claude token it loaded at its last start. */
 type RunningService = { invocation: number; settings?: unknown; zone?: string; token?: string };
 
-/** systemd here reads T3 Code's drop-ins at daemon-reload or t3 service install, and the service loads the files under machine.home when it starts. */
 function runner(server: ReturnType<typeof fakeServer>, machine: Machine = {}) {
   const calls: string[] = [];
   const state = { t3: machine.t3 ?? true, service: machine.service ?? "installed", installFailures: machine.installFailures ?? 0, installerVersions: [] as string[], lingering: false };
@@ -1120,12 +1118,14 @@ describe("T3 on Linux", () => {
       const home = temp.make("home-");
       const { token, env, commands, adapter } = withToken({ home }, { T3CODE_THREAD_ID: "thread-1" });
       await apply(plan("linux", []), { home, adapters: [adapter] });
-      await onUserBus(commands.run, {}, 1000)(["systemctl", "--user", "restart", "t3code.service"]);
-      const restarted = commands.state.systemd.running;
+      const systemctl = onUserBus(commands.run, {}, 1000);
+      const invocation = async () => (await systemctl(["systemctl", "--user", "show", "t3code.service", "--property=InvocationID", "--value"])).stdout;
+      await systemctl(["systemctl", "--user", "restart", "t3code.service"]);
+      const restarted = await invocation();
       delete env.T3CODE_THREAD_ID;
       const report = await apply(plan("linux", []), { home, adapters: [adapter] });
-      expect(restarted?.token).toBe(token);
-      expect(commands.state.systemd.running).toBe(restarted);
+      expect(commands.state.systemd.running?.token).toBe(token);
+      expect(await invocation()).toBe(restarted);
       expect(report.findings.map((item) => item.id)).not.toContain("t3:claude-token");
     });
 

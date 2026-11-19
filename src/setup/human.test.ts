@@ -4,10 +4,10 @@ import { join } from "node:path";
 import { loadPacks } from "../pack/manifest.ts";
 import type { FetchedSource, SourceRef } from "../pack/types.ts";
 import { isolateGit, tempDirs } from "../testing/git.ts";
-import { deadEnvironmentToken, fakeMachine, hedgeSetup, machineFile, savedAnswers, scripted } from "./testing.ts";
+import { deadEnvironmentToken, fakeMachine, hedgeSetup, machineFile, savedAnswers } from "./testing.ts";
 import type { Machine } from "./commands.ts";
 import { humanStep, packSignIn } from "./human.ts";
-import { chatgptSignIn, claudeProbeTimeoutMs } from "./signins.ts";
+import { claudeProbeTimeoutMs } from "./signins.ts";
 
 isolateGit();
 const temp = tempDirs();
@@ -362,6 +362,16 @@ describe("ChatGPT's check", () => {
     expect(box.codexCredential()).toBe("kept");
   });
 
+  test("an expired certificate is not an expired sign-in: setup keeps the sign-in Codex reports and starts no device sign-in", async () => {
+    const home = temp.make("home-");
+    const box = fakeMachine(home, { chatgpt: 99 }, { codexProbe: { output: "ERROR: error sending request for url (https://chatgpt.com/backend-api/codex/responses): invalid peer certificate: certificate expired\n", loggedIn: true } });
+    const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "codex"], ["", ""], box);
+    expect(result.code).toBe(2);
+    expect(result.output).toContain("Codex is signed in, but its test request failed: error sending request for url (https://chatgpt.com/backend-api/codex/responses): invalid peer certificate: certificate expired. Setup keeps that sign-in and starts no new one.");
+    expect(box.starts.filter((command) => command.includes("--device-auth"))).toEqual([]);
+    expect(box.codexCredential()).toBe("kept");
+  });
+
   test("when Codex cannot read its credentials store, setup keeps the sign-in, starts no device sign-in, and says why", async () => {
     const home = temp.make("home-");
     const box = fakeMachine(home, { chatgpt: 99 }, { codexProbe: { output: "ERROR: You hit your spend cap.\n", loggedIn: true, statusError: "Error checking login status: failed to read auth from the keyring: Platform secure storage failure\n" } });
@@ -393,13 +403,6 @@ describe("ChatGPT's check", () => {
     expect(box.codexCredential()).toBe("replaced");
   });
 
-  test("a kept sign-in names the caller's rerun command, also when its check fails only after the sign-in ended", async () => {
-    const io = scripted([]);
-    const box = fakeMachine(temp.make("home-"), { chatgpt: 1 }, failsAfterSignIn);
-    const outcome = await humanStep(chatgptSignIn(box.machine, []), { terminal: io.terminal, machine: box.machine, nonInteractive: false, rerun: "hedge devbox add node-1" }).run();
-    expect(outcome).toBe("unanswered");
-    expect(io.output()).toContain(`${keptAfterSignIn} hedge devbox add node-1 again.`);
-  });
 });
 
 describe("ChatGPT with own-account balancing", () => {

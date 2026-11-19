@@ -227,6 +227,23 @@ describe("hedge setup profile", () => {
     expect(await spawnGit(dotfiles, "show", "hub:about-me.md")).toBe("# Changed on another machine");
   });
 
+  test("takes the commits another machine pushed when origin fetches into its own remote-tracking namespace", async () => {
+    const home = temp.make("home-");
+    const { dotfiles, checkout } = await branchCheckout(home);
+    await spawnGit(checkout, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin-view/*");
+    const elsewhere = join(temp.make("elsewhere-"), "dotfiles");
+    await spawnGit(home, "clone", "-q", "-b", "hub", dotfiles, elsewhere);
+    writeFileSync(join(elsewhere, "about-me.md"), "# Changed on another machine\n");
+    await spawnGit(elsewhere, "commit", "-q", "-am", "Change about me");
+    await spawnGit(elsewhere, "push", "-q", "origin", "hub");
+
+    const rerun = await hedgeSetup(home, ["--non-interactive", "--plan", "codex"], []);
+
+    expect(rerun.code).toBe(0);
+    expect(JSON.parse(await spawnGit(dotfiles, "show", "hub:hedge.json")).plan).toBe("codex");
+    expect(await spawnGit(dotfiles, "show", "hub:about-me.md")).toBe("# Changed on another machine");
+  });
+
   test("adds the host keys of github.com, not of the host gh uses by default, before it reaches a profile over SSH, and keeps the lines already there", async () => {
     const home = temp.make("home-");
     const { dotfiles } = await branchCheckout(home, "git@github.com:nora/dotfiles.git");

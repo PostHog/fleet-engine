@@ -8,7 +8,7 @@ import { loadMachine, loadProfile, pushAnswers, saveMachine, thisMachine } from 
 import { resolve } from "../reconciler/resolve.ts";
 import { defaultSources, engineRepo, makesOwnDevbox } from "./defaults.ts";
 import { FlagError, hasPicks, parseSetupFlags, type SetupFlags } from "./flags.ts";
-import { answered, packList, packsStep, picksFrom, title, plansStep, settingSteps, settingsFrom, waitsForTeams, type Catalog, type Draft, type QuestionContext } from "./questions.ts";
+import { answered, packList, packsStep, picksFrom, title, plansStep, settingSteps, settingsFrom, unmetNeeds, waitsForTeams, type Catalog, type Draft, type QuestionContext } from "./questions.ts";
 import { realMachine, type Machine } from "./commands.ts";
 import { humanStep, optionalStep, packSignIn, type HumanContext, type SignIn } from "./human.ts";
 import { devboxQuestion, devboxSteps, hubSteps, notTakenByHub, profileForBox, type DevboxContext } from "./devbox.ts";
@@ -59,6 +59,8 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
     const fresh = profileDraft(await loadProfile(dir));
     const draft = progress.draft;
     const merged = onTop(fresh, base, draft);
+    const [unmet] = unmetNeeds(merged.packs ?? [], catalog);
+    if (unmet) throw new Error(`another machine changed the packs in your profile while setup ran, and with this run's change ${title(unmet.pack, catalog.packs)} lacks ${unmet.needs.map((name) => title(name, catalog.packs)).join(", ")}, which it needs. Add ${unmet.needs.join(", ")}, or remove ${unmet.pack}, then run hedge setup again.`);
     for (const key of Object.keys(draft) as Array<keyof Draft>) delete draft[key];
     Object.assign(draft, merged);
     base = structuredClone(fresh);
@@ -208,6 +210,7 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
           await reread(machine.profileDir);
           await pushAnswers(machine.profileDir, { settings: changedSettings(base?.settings, progress.draft.settings) }, await saveTarget(box, machine.profileDir));
           base = structuredClone(progress.draft);
+          await reread(machine.profileDir);
         }
         return outcome;
       },
