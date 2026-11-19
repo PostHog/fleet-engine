@@ -26,17 +26,20 @@ const notePaths = () => readdirSync(join(root, "packs")).map((pack) => join("pac
 
 const blocksIn = (text: string) => [...text.matchAll(/^ *```\w*\n([\s\S]*?)^ *```$/gm)].map((match) => match[1]!.replace(/^ +/gm, ""));
 
+const coderValueOptions = new Set(["--client-tls-ca-file", "--client-tls-cert-file", "--client-tls-key-file", "--global-config", "--header", "--header-command", "--token", "--url"]);
 function coderSubcommands(code: string) {
   return code.split("\n").flatMap((line) => {
     const words = (line.match(/"[^"]*"|'[^']*'|\S+/g) ?? []).map((word) => word.replace(/^["']|["']$/g, ""));
     return words.flatMap((word, at) => {
       if (word !== "coder") return [];
       let next = at + 1;
-      while (words[next]?.startsWith("-")) next += words[next]!.includes("=") ? 1 : 2;
+      while (words[next]?.startsWith("-")) next += coderValueOptions.has(words[next]!) ? 2 : 1;
       return words[next] ? [words[next]!] : [];
     });
   });
 }
+const wrappedSpans = (text: string) => [...text.replace(/^ *```[\s\S]*?^ *```$/gm, "").replace(/\s+/g, " ").matchAll(/`([^`]+)`/g)].map((match) => match[1]!);
+const cliParameterChanges = (markdown: string) => [...new Set([...codeIn(markdown), ...wrappedSpans(markdown)])].filter((code) => coderSubcommands(code).some((name) => ["update", "restart", "start"].includes(name)));
 function codeIn(text: string) {
   const blocks = blocksIn(text);
   const spans = [...text.replace(/^ *```[\s\S]*?^ *```$/gm, "").matchAll(/`([^`\n]+)`/g)].map((match) => match[1]!);
@@ -203,10 +206,9 @@ describe("the agent setup guide", () => {
 
   test("changes a parameter in the workspace's Settings in the Coder web app, as the check says, and never with the Coder CLI", () => {
     const texts = [guide(), readFileSync(join(root, "docs/getting-started.md"), "utf8")];
-    const wrappedSpans = (text: string) => [...text.replace(/^ *```[\s\S]*?^ *```$/gm, "").replace(/\s+/g, " ").matchAll(/`([^`]+)`/g)].map((match) => match[1]!);
-    const commands = texts.flatMap((text) => [...codeIn(text), ...wrappedSpans(text)]);
-    expect(commands.filter((code) => coderSubcommands(code).some((name) => ["update", "restart", "start"].includes(name)))).toEqual([]);
-    expect(["coder start", "CODER_URL=x coder --url x 'restart' hub", "a && coder update hub", "coder create start --template dev", "coder schedule start hub"].map((code) => coderSubcommands(code))).toEqual([["start"], ["restart"], ["update"], ["create"], ["schedule"]]);
+    expect(texts.flatMap(cliParameterChanges)).toEqual([]);
+    const sample = "Run `coder start`, then `coder --verbose restart hub`,\nor `CODER_URL=x coder --url x 'restart'\nhub`. Keep `coder create start --template dev` and `coder schedule start hub`.\n\n```sh\na && coder update hub\n```\n";
+    expect(cliParameterChanges(sample)).toEqual(["a && coder update hub\n", "coder start", "coder --verbose restart hub", "CODER_URL=x coder --url x 'restart' hub"]);
     for (const text of texts) expect(text.replace(/\s+/g, " ")).toContain("**Settings → Parameters**");
     const printed = fakeCoder(temp, { parameters: { instance_type: "m7g.xlarge" }, mutable: { instance_type: true } }).check(["instance_type=m7g.4xlarge"]);
     expect([printed.code, printed.output]).toEqual([1, "x instance_type is not the value you passed. In the Coder web app, set it under Settings, Parameters, and submit.\nok hedge-hub runs and stays on\n"]);

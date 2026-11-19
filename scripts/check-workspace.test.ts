@@ -83,7 +83,9 @@ describe("the setup guide's workspace check", () => {
     ];
     for (const build of builds) {
       const result = coder({ parameters: built, mutable: template, build }).check(passed);
-      const advice = build.transition === "delete"
+      const advice = build.transition === "delete" && build.status === "canceled"
+        ? "x hedge-hub has a delete build that is canceled, so its name stays taken. Ask the person whether it should go. If so, they delete it from the workspace's menu in the Coder web app, and you create it again when it is gone. If not, they press Start there, then run this check again. When the start fails, they ask the Coder admin.\n"
+        : build.transition === "delete"
         ? `x hedge-hub has a delete build that is ${build.status}, so its name stays taken. Ask the person whether it should go. If so, they delete it from the workspace's menu in the Coder web app, and you create it again when it is gone. If not, they never press Retry, which deletes it again, and ask the Coder admin to restore it.\n`
         : `x hedge-hub does not run: its latest build is a ${build.transition} that is ${build.status}. Ask the person to get it running with the action that the Coder web app offers for it, such as Start, Retry, or Update and start, then run this check again.\n`;
       expect([build, result.code, result.output, result.requests]).toEqual([build, 1, advice, []]);
