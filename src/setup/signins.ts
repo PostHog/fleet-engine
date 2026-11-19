@@ -100,23 +100,35 @@ function environmentApiKeyDead(host: string | undefined) {
 
 export const codexProbeTimeoutMs = 20_000;
 
+export const codexLogin = ["codex", "login", "-c", 'cli_auth_credentials_store="file"', "--device-auth"];
+
+const codexSignInGone = /\b401\b|unauthorized|not logged in|expired|log in again|sign in again|refresh token/i;
+
 export function chatgptSignIn(machine: Machine, models: ModelRow[]): SignIn {
   const model = (models.find((row) => row.provider === "codex" && row.role === "lookup") ?? models.find((row) => row.provider === "codex"))?.model;
   return {
     id: "chatgpt",
     title: "Sign in to ChatGPT",
     minutes: 1,
-    why: "Codex signs in with your ChatGPT plan. Setup checks with a real request, because a stale sign-in still looks signed in.",
-    command: ["codex", "login", "--device-auth"],
-    whenItFails: "When it says that device code sign-in is off, turn on device code authorization for Codex in ChatGPT's settings under Security. In a ChatGPT workspace, a workspace admin turns it on. Or sign in in the browser of your own computer: run ssh -L 1455:localhost:1455 <this box> there, then codex login in that SSH session, and open the link it prints.",
+    why: "Codex on this machine signs in with your ChatGPT plan, and saves the sign-in in a file, so it lasts after the SSH session ends. This sign-in is only for Codex here. The gateway's ChatGPT sign-ins only let agents reach apps such as Slack, and the hub's proxy keeps its own subscriptions. Setup checks with a real request, because a stale sign-in still looks signed in.",
+    command: codexLogin,
+    whenItFails: `When it says that device code sign-in is off, turn on device code authorization for Codex in ChatGPT's settings under Security. In a ChatGPT workspace, a workspace admin turns it on. Or sign in in the browser of your own computer: run ssh -L 1455:localhost:1455 <this box> there, then codex login -c 'cli_auth_credentials_store="file"' in that SSH session, and open the link it prints.`,
     async probe() {
       const dir = mkdtempSync(join(tmpdir(), "hedge-codex-probe-"));
       try {
         const command = ["codex", "exec", "--ephemeral", "--sandbox", "read-only", "--ignore-user-config", "--skip-git-repo-check", ...(model ? ["--model", model] : []), "Reply with the word ok."];
-        return (await machine.exec(command, { cwd: dir, timeoutMs: codexProbeTimeoutMs })).code === 0;
+        const reply = await machine.exec(command, { cwd: dir, timeoutMs: codexProbeTimeoutMs });
+        if (reply.code === 0) return true;
+        if (codexSignInGone.test(reply.output) || (await machine.exec(["codex", "login", "status"])).code !== 0) return false;
+        throw new Error(`Codex is signed in, but its test request failed: ${probeError(reply.output)}. Setup keeps that sign-in and starts no new one. Fix that, then run hedge setup again.`);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
     },
   };
+}
+
+function probeError(output: string) {
+  const lines = output.split("\n").map((line) => line.trim().replace(/^ERROR:\s*/, "").replace(/\.$/, "")).filter(Boolean);
+  return lines.at(-1) ?? "it printed nothing";
 }

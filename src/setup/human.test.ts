@@ -7,7 +7,7 @@ import { isolateGit, tempDirs } from "../testing/git.ts";
 import { deadEnvironmentToken, fakeMachine, hedgeSetup, machineFile, savedAnswers } from "./testing.ts";
 import type { Machine } from "./commands.ts";
 import { humanStep, packSignIn } from "./human.ts";
-import { claudeProbeTimeoutMs } from "./signins.ts";
+import { claudeProbeTimeoutMs, codexLogin } from "./signins.ts";
 
 isolateGit();
 const temp = tempDirs();
@@ -124,7 +124,7 @@ describe("hedge setup sign-ins", () => {
     const failedHome = temp.make("home-");
     const failed = await hedgeSetup(failedHome, starter, ["", ""], fakeMachine(failedHome, { chatgpt: 50 }, { exits: { chatgpt: 1 } }));
     expect(failed.code).toBe(1);
-    expect(failed.output).toContain("hedge: codex login --device-auth ended with code 1, but Sign in to ChatGPT still does not pass its check. Fix what it says above, then run hedge setup again.");
+    expect(failed.output).toContain(`hedge: codex login -c cli_auth_credentials_store="file" --device-auth ended with code 1, but Sign in to ChatGPT still does not pass its check. Fix what it says above, then run hedge setup again.`);
 
     const missingHome = temp.make("home-");
     const missing = await hedgeSetup(missingHome, starter, ["", ""], fakeMachine(missingHome, { chatgpt: 50 }, { exits: { chatgpt: 127 } }));
@@ -133,7 +133,7 @@ describe("hedge setup sign-ins", () => {
     const quietHome = temp.make("home-");
     const box = fakeMachine(quietHome, { chatgpt: 50 }, { exits: { chatgpt: 0 } });
     const quiet = await hedgeSetup(quietHome, starter, ["", ""], box);
-    expect(quiet.output).toContain("hedge: codex login --device-auth ended, but Sign in to ChatGPT still does not pass its check.");
+    expect(quiet.output).toContain(`hedge: codex login -c cli_auth_credentials_store="file" --device-auth ended, but Sign in to ChatGPT still does not pass its check.`);
     expect(box.sleeps).toHaveLength(16);
   });
 
@@ -257,8 +257,8 @@ describe("hedge setup sign-ins", () => {
     const result = await hedgeSetup(home, ["--preset", "starter"], ["", "", ""], box);
     expect(result.code).toBe(0);
     expect(box.runs).toEqual([{ command: ["claude", "auth", "login"], input: true }]);
-    expect(box.starts.at(-1)).toEqual(["codex", "login", "--device-auth"]);
-    const probes = box.calls.filter((call) => call.command[0] === "codex");
+    expect(box.starts.at(-1)).toEqual(["codex", "login", "-c", 'cli_auth_credentials_store="file"', "--device-auth"]);
+    const probes = box.calls.filter((call) => call.command[0] === "codex" && call.command[1] === "exec");
     expect(probes.length).toBeGreaterThan(1);
     for (const probe of probes) {
       expect(probe.command.slice(0, 7)).toEqual(["codex", "exec", "--ephemeral", "--sandbox", "read-only", "--ignore-user-config", "--skip-git-repo-check"]);
@@ -285,7 +285,7 @@ describe("hedge setup sign-ins", () => {
     expect(await box.machine.run(["claude", "auth", "login"], { input: true })).toBe(0);
     const again = await hedgeSetup(home, ["--chat", "--preset", "starter", "--plan", "both"], [], box);
     expect(again.code).toBe(0);
-    expect(box.starts).toContainEqual(["codex", "login", "--device-auth"]);
+    expect(box.starts).toContainEqual(codexLogin);
   });
 });
 
@@ -295,9 +295,28 @@ describe("ChatGPT's device-code sign-in", () => {
     const box = fakeMachine(home, { chatgpt: 99 }, { exits: { chatgpt: 1 } });
     const result = await hedgeSetup(home, ["--chat", "--preset", "starter", "--plan", "codex"], [], box);
     expect(result.code).toBe(1);
-    expect(result.output).toContain("codex login --device-auth ended with code 1, but Sign in to ChatGPT still does not pass its check.");
+    expect(result.output).toContain(`codex login -c cli_auth_credentials_store="file" --device-auth ended with code 1, but Sign in to ChatGPT still does not pass its check.`);
     expect(result.output).toContain("When it says that device code sign-in is off, turn on device code authorization for Codex in ChatGPT's settings under Security. In a ChatGPT workspace, a workspace admin turns it on.");
-    expect(result.output).toContain("Or sign in in the browser of your own computer: run ssh -L 1455:localhost:1455 <this box> there, then codex login in that SSH session, and open the link it prints. Then run hedge setup again.");
+    expect(result.output).toContain(`Or sign in in the browser of your own computer: run ssh -L 1455:localhost:1455 <this box> there, then codex login -c 'cli_auth_credentials_store="file"' in that SSH session, and open the link it prints. Then run hedge setup again.`);
+  });
+});
+
+describe("ChatGPT's check", () => {
+  test("when Codex is signed in but its test request fails, setup prints why and starts no new sign-in", async () => {
+    const home = temp.make("home-");
+    const box = fakeMachine(home, { chatgpt: 99 }, { codexProbe: { output: "ERROR: You hit your spend cap set by the owner of your workspace.\n", loggedIn: true } });
+    const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "codex"], ["", ""], box);
+    expect(result.code).toBe(1);
+    expect(result.output).toContain("hedge: Codex is signed in, but its test request failed: You hit your spend cap set by the owner of your workspace. Setup keeps that sign-in and starts no new one. Fix that, then run hedge setup again.");
+    expect(box.starts).not.toContainEqual(codexLogin);
+  });
+
+  test("starts a new sign-in when the test request says the sign-in expired, though Codex still reports one", async () => {
+    const home = temp.make("home-");
+    const box = fakeMachine(home, { chatgpt: 1 }, { codexProbe: { output: "ERROR: unexpected status 401 Unauthorized: token expired\n", loggedIn: true } });
+    const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "codex"], ["", ""], box);
+    expect(result.code).toBe(0);
+    expect(box.starts).toContainEqual(codexLogin);
   });
 });
 
