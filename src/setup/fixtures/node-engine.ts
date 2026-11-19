@@ -22,6 +22,7 @@ if (words.startsWith("guards allowlist stage ")) {
 }
 
 const probe = async (command: string[]) => {
+  if (existsSync(join(state, "steps-fail"))) return 1;
   const line = command.join(" ");
   if (line.endsWith("guards allowlist --check")) return holds("allowlist");
   if (line.includes("earlyoom.sh") && line.includes("--check")) return holds("earlyoom");

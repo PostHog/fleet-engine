@@ -65,6 +65,7 @@ export type DevboxContext = {
   profile(): Promise<{ url: string; engineRef: string }>;
   rerun?: string;
   engineRoot?: string;
+  leftForYou?(steps: LeftStep[]): void;
 };
 
 /** The profile's clone URL as stored, and the engine ref the profile pins. */
@@ -276,7 +277,7 @@ async function engineCurrent(box: Machine, context: DevboxContext) {
 
 const userBus = `export XDG_RUNTIME_DIR="\${XDG_RUNTIME_DIR:-/run/user/$(id -u)}";`;
 
-type LeftStep = { say: string; command?: string };
+export type LeftStep = { say: string; command?: string };
 
 async function applyProfile(box: Machine, host: string, context: DevboxContext) {
   const { url, engineRef } = await context.profile();
@@ -287,7 +288,20 @@ async function applyProfile(box: Machine, host: string, context: DevboxContext) 
   const left = await stepsLeft(box);
   if (applied && left === olderEngine) return context.terminal.print(`  · ${host} runs an older Hedge, which cannot list the steps left for you. Run hedge doctor on ${host} to see them.`);
   if (applied && left?.length === 0) return;
+  if (applied && left !== olderEngine && left?.length && context.leftForYou) {
+    context.leftForYou(left);
+    return context.terminal.print(`  · ${left.length === 1 ? "One step is" : `${left.length} steps are`} left for you on ${host}. Hedge lists ${left.length === 1 ? "it" : "them"} at the end and runs none of them.`);
+  }
   throw new Error(applyFailure(host, context, applied, left === olderEngine ? undefined : left));
+}
+
+const yourSteps = (host: string, left: LeftStep[]) => left.map((step) => `  · ${step.say}${step.command ? ` Run: ssh -t ${host} ${quote(`${remotePath} ${step.command}`)}` : ""}`);
+
+export function printLeftForYou(terminal: Terminal, host: string, left: LeftStep[]) {
+  if (!left.length) return;
+  terminal.print("");
+  terminal.print(`Left for you on ${host}. Do each one, then run hedge doctor on ${host} to check:`);
+  for (const line of yourSteps(host, left)) terminal.print(line);
 }
 
 const olderEngine = "older engine";
@@ -308,7 +322,7 @@ const isLeftStep = (step: unknown): step is LeftStep => typeof step === "object"
 function applyFailure(host: string, context: DevboxContext, applied: boolean, left: LeftStep[] | undefined) {
   const rerun = `then run ${again(context)} again.`;
   if (!left?.length) return applied ? `Hedge could not read the steps left on ${host}. Run hedge doctor there and fix what it says, ${rerun}` : `The devbox could not apply your profile. Fix what it says above, ${rerun}`;
-  const yours = left.map((step) => `  · ${step.say}${step.command ? ` Run: ssh -t ${host} ${quote(`${remotePath} ${step.command}`)}` : ""}`);
+  const yours = yourSteps(host, left);
   const intro = applied ? `Your profile applied on ${host}, but steps are left for you there. Do each one, ${rerun}` : `The devbox could not apply your profile. Do what is left for you on ${host}, and fix what it says above, ${rerun}`;
   return [`${intro} Left for you:`, ...yours].join("\n");
 }

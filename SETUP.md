@@ -639,10 +639,13 @@ creates no node ends at step 8 (see step 1).
    it says the hub has not linked the node yet, run
    `hedge peers link coder.<node>` on the hub.
 
-   When steps on the node are left for the person, such as the Git
-   allowlist, earlyoom or a key to paste, it stops with a list of those
-   steps and the command for each. It runs none of them itself. Ask the
-   person to run each command, then run `hedge devbox add` again.
+   When the node applied the profile and only steps for the person are
+   left, such as the Git allowlist, earlyoom or a key to paste, it goes on
+   with the sign-ins, T3 Connect and the link. At the end it lists those
+   steps once, each with its command. It runs none of them itself. Ask the
+   person to run each command, then run `hedge doctor` on the node. When
+   the apply fails for any other reason, it stops at the profile step. Fix
+   what it says, then run `hedge devbox add` again.
 
    When the node reaches Coder only at a plain HTTP address, such as a node
    in another region, `hedge devbox add` sends no Coder token there. It

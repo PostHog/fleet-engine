@@ -33,9 +33,11 @@
   on the node and names the one sign-in the person does there. It removes
   the token of a failed sign-in, or names the token and the command that
   removes it. After the node applies the profile, it asks the node's
-  `hedge doctor --to-do` which steps are left, and ends with a list of
-  them, each with its command. It runs none of them itself. The profile
-  step stays open until none is left. A node with an older Hedge, which has
+  `hedge doctor --to-do` which steps are left. When the apply passed and
+  only those steps are left, it goes on with the sign-ins, T3 Connect and
+  the link, and ends with a list of them, each with its command. It runs
+  none of them itself. When the apply failed, it stops at the profile
+  step, as before. A node with an older Hedge, which has
   no `--to-do`, finishes the step and points to `hedge doctor` there. A
   rerun keeps a node engine that runs the hub's engine commit, when its
   `hedge` command runs. When T3 Code on the hub reaches the node, it says
