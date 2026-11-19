@@ -153,7 +153,7 @@ describe("the OOM survival workflow", () => {
     const md5 = new Bun.CryptoHasher("md5").update(packageDefault).digest("hex");
     stub("dpkg-query", `[ -e "${state}/installed" ] || exit 1\ncase "$*" in *Status*) printf 'install ok installed' ;; *) [ -e "${state}/no-conffiles" ] || printf ' /etc/default/earlyoom ${md5}\\n /etc/other 0\\n' ;; esac`);
     stub("md5sum", `[ -e "${state}/no-md5sum" ] && exit 127\nexec ${Bun.which("md5sum")} "$@"`);
-    stub("apt-get", `touch "${state}/installed"\nmkdir -p "${root}/etc/default"\nprintf '%s' '${packageDefault}' > "${config}"`);
+    stub("apt-get", `printf '%s %s' "$NEEDRESTART_MODE" "$DEBIAN_FRONTEND" > "${state}/apt-env"\ntouch "${state}/installed"\nmkdir -p "${root}/etc/default"\nprintf '%s' '${packageDefault}' > "${config}"`);
     stub(
       "systemctl",
       [
@@ -180,7 +180,7 @@ describe("the OOM survival workflow", () => {
     const start = () => writeFileSync(join(state, "running-config"), readFileSync(config, "utf8"));
     const stop = () => rmSync(join(state, "running-config"));
     const flag = (name: string) => writeFileSync(join(state, name), "");
-    return { config, run, service, writeConfig, install, start, stop, flag };
+    return { config, run, service, writeConfig, install, start, stop, flag, aptEnv: () => read("apt-env") };
   }
 
   test("installs earlyoom, enables it, and runs it with Hedge's config instead of the package's default", () => {
@@ -197,6 +197,12 @@ describe("the OOM survival workflow", () => {
     box.stop();
     expect(box.run().code).toBe(0);
     expect(box.service()).toMatchObject({ runningConfig: config, starts: 2 });
+  });
+
+  test("installs earlyoom with no prompt, so a needrestart box nobody sees cannot hold an install over SSH", () => {
+    const box = machine();
+    expect(box.run().code).toBe(0);
+    expect(box.aptEnv()).toBe("a noninteractive");
   });
 
   test("keeps an earlyoom config the person wrote and runs earlyoom with it", () => {
