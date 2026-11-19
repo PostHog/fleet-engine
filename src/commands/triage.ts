@@ -7,6 +7,7 @@ import { loadMachine, loadProfile } from "../profile/profile.ts";
 import { defaultSources, engineRepo } from "../setup/defaults.ts";
 import { FlagError } from "../setup/flags.ts";
 import { Stopped, type Terminal } from "../setup/terminal.ts";
+import { releaseIn, releaseRefsAtHead } from "../update.ts";
 import { duration, readFailure, readTimings, transcriptTail, usableSeconds, type SetupTimings } from "./triage-record.ts";
 import { redact, type KnownName } from "./triage-redact.ts";
 
@@ -117,7 +118,6 @@ const cell = (text: string) => text.replace(/\|/g, "\\|").replace(/\n/g, " ");
 async function versionLines(context: TriageContext, profile: Profile | undefined) {
   const os = context.platform === "darwin" ? ["sw_vers", "-productVersion"] : ["sh", "-c", '. /etc/os-release 2>/dev/null && echo "$PRETTY_NAME"'];
   const tools: Array<[string, string[]]> = [
-    ["Engine", ["git", "-C", context.engineRoot, "describe", "--tags", "--always", "--dirty"]],
     ["T3 Code", ["t3", "--version"]],
     ["Claude Code", ["claude", "--version"]],
     ["Codex", ["codex", "--version"]],
@@ -125,7 +125,7 @@ async function versionLines(context: TriageContext, profile: Profile | undefined
     ["Git", ["git", "--version"]],
     ["OS", os],
   ];
-  const found = await Promise.all(tools.map(async ([label, command]) => [label, await firstLine(context, command)] as const));
+  const found = await Promise.all([["Engine", await engineVersion(context)] as const, ...tools.map(async ([label, command]) => [label, await firstLine(context, command)] as const)]);
   const lines = found.map(([label, value]) => `- ${label}: ${value ?? "not found"}`);
   const osLine = lines.pop()!;
   return [
@@ -136,6 +136,12 @@ async function versionLines(context: TriageContext, profile: Profile | undefined
     `- Bun: ${Bun.version}`,
     `${osLine} (${context.platform} ${release()} ${arch()})`,
   ];
+}
+
+async function engineVersion(context: TriageContext) {
+  const installed = await context.capture(releaseRefsAtHead(context.engineRoot), { signal: AbortSignal.timeout(10_000) }).catch(() => undefined);
+  const release = installed?.code === 0 ? releaseIn(installed.stdout) : undefined;
+  return release ?? (await firstLine(context, ["git", "-C", context.engineRoot, "describe", "--tags", "--always", "--dirty"]));
 }
 
 async function firstLine(context: TriageContext, command: string[]) {

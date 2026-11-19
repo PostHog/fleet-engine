@@ -6,6 +6,7 @@ import { isolateGit, spawnGit, template, tempDirs } from "./testing/git.ts";
 import { spawnAsync } from "./testing/spawn.ts";
 import { noticePath, readNotice, update } from "./update.ts";
 import { main } from "./cli.ts";
+import { spawnRunner, type CommandRunner } from "./adapters/run.ts";
 import { engineRoot, fakeMachine, pushedAnswers, scripted } from "./setup/testing.ts";
 
 isolateGit();
@@ -210,6 +211,19 @@ describe("hedge update", () => {
 
     expect(failed).toMatchObject({ code: 1, version: "v0.1.1", output: expect.stringContaining("so the update was rolled back") });
     expect(await pinSavedBySetup(engineDir)).toEqual({ repo: "PostHog/hedge", ref: "v0.1.1", channel: "release" });
+  });
+
+  test("hedge triage --print names the release that hedge update installed", async () => {
+    const remote = await engineRemote(["v0.1.0", "v0.1.1"]);
+    const engineDir = await engineCheckout(remote, "v0.1.0");
+    expect(await run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" })).toMatchObject({ code: 0, version: "v0.1.1" });
+    const io = scripted([]);
+    const capture: CommandRunner = async (command, options) => (command[0] === "git" && command[2] === engineDir ? spawnRunner(command, options) : { code: 1, stdout: "", stderr: "not found" });
+
+    const code = await main(["triage", "--print"], { home: temp.make("home-"), engineRoot: engineDir, platform: "linux", env: {}, print: io.terminal.print, terminal: io.terminal, capture, hostname: () => "box", run: async () => 0 });
+
+    expect(code).toBe(0);
+    expect(io.output()).toContain("- Engine: v0.1.1\n");
   });
 
   test("keeps a tag the user made in the engine checkout when it moves to a newer release", async () => {
