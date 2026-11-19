@@ -154,10 +154,16 @@ function finalReadPhase(value: string): FinalReadPhase {
 }
 
 async function reviewsSpent(reviews: string, started: string[], phase: FinalReadPhase) {
-  const reads = started.filter((name) => name.startsWith(finalReadPrefix));
-  const rounds = phase === "review" ? started.length - reads.length : 0;
-  const phases = await Promise.all(reads.map(async (name) => (JSON.parse(await readFile(join(reviews, name, "round.json"), "utf8")) as { phase?: FinalReadPhase }).phase ?? "review"));
-  return rounds + phases.filter((readPhase) => readPhase === phase).length;
+  const spent = await Promise.all(started.map(async (name) => {
+    const readPhase = name.startsWith(finalReadPrefix) ? (JSON.parse(await readFile(join(reviews, name, "round.json"), "utf8")) as { phase?: FinalReadPhase }).phase ?? "review" : "review";
+    return readPhase === phase && await leadsToFixes(join(reviews, name));
+  }));
+  return spent.filter(Boolean).length;
+}
+
+async function leadsToFixes(directory: string) {
+  const findings = await readFile(join(directory, "findings.md"), "utf8").catch(() => undefined);
+  return findings === undefined || listedItems(reviewedLines(findings).kept).some((item) => !flooredItem.test(item));
 }
 
 export type ArbiterVerdict = { verdict: "continue" | "escalate" | "unavailable"; reason: string; model: string };
@@ -200,7 +206,7 @@ export function parseVerdict(output: string, model: string): ArbiterVerdict {
 
 export type ReviewLimits = { free: number; ceiling: number };
 
-export const atCeiling = `hedge proof asks nothing more. For each open blocker or major, revert the fix that brought it in, or list it in a "## Known issues" section of the PR body, one "- <blocker|major>: <file:line> <finding>" item each, and answer its finding "<n>. known: <why>". A blocker or major that the last read found in the fixes since the panel is reverted, never listed. An open blocker holds the merge; the user's merge word accepts the rest. Only the user's --override runs another review`;
+export const atCeiling = `hedge proof asks nothing more. For each open blocker or major, revert the fix that brought it in, or list it in a "## Known issues" section of the PR body, one "- <blocker|major>: <file:line> <finding>" item each, and answer its finding "<n>. known: <why>". A blocker or major that the last read found in the fixes since the panel is reverted, never listed. An open blocker holds the merge; the user's merge word accepts the rest. Only the user's --override runs another review, or a final read of a HEAD that the gate does not carry`;
 
 const budgetSpent = ({ ceiling }: ReviewLimits) => `The review budget of ${ceiling} reviews is spent. ${atCeiling}`;
 
@@ -232,8 +238,8 @@ const reserveDecided = (reviews: string, name: string, record: object, decision:
 async function startFinalRead(home: string, identity: ProofIdentity, base: string | undefined, decision: Decision | undefined, phase: FinalReadPhase, permit: Permit, cleanBaseMerge: CleanBaseMerge, quietCommit: QuietCommit, capturedBy: CapturedBy, from: string | undefined, lock: LockRound | undefined): Promise<Reserved> {
   if (base === undefined) throw new Error("A final read needs --base with the latest reviewed commit");
   if (base === identity.commit) throw new Error("HEAD is already reviewed. Skip the final read.");
-  const quiet = decision ? undefined : reviewedThrough(identity.commit, new Set([base]), cleanBaseMerge, quietCommit);
-  if (quiet?.quiet.length) throw new Error(`HEAD needs no final read: final read carried from ${short(base)}: ${quietReason(quiet.kinds)}. hedge proof gate counts the carry. To read it anyway, pass --agent '<your reason>', or the user's --override`);
+  const carried = reviewedThrough(identity.commit, new Set([base]), cleanBaseMerge, quietCommit);
+  if (!decision && carried?.quiet.length) throw new Error(`HEAD needs no final read: final read carried from ${short(base)}: ${quietReason(carried.kinds)}. hedge proof gate counts the carry. To read it anyway, pass --agent '<your reason>', or the user's --override`);
   const reviews = join(pullRequestDirectory(home, identity), "reviews");
   for (let attempt = 1; attempt <= 100; attempt++) {
     const started = await reviewNames(reviews);
@@ -244,7 +250,7 @@ async function startFinalRead(home: string, identity: ProofIdentity, base: strin
     if (!coversReview(base, latest.commit, cleanBaseMerge)) throw new Error(`Final read base must be the latest reviewed commit ${latest.commit}, or a clean base merge the gate carried it to`);
     const spent = await reviewsSpent(reviews, started, phase);
     const { free, ceiling } = permit.limits;
-    const stop = spent >= ceiling ? budgetSpent(permit.limits) : undefined;
+    const stop = carried && spent >= ceiling ? budgetSpent(permit.limits) : undefined;
     const verdict = await permitReview(home, identity, spent >= free, stop, decision, permit);
     let read = 1;
     while (started.includes(finalReadPrefix + read)) read++;

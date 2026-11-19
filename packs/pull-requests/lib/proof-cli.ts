@@ -45,7 +45,8 @@ type Subcommand = {
 };
 
 const overrideHelp = `--override takes the user's answer to the question that review-start prints when the arbiter escalates or gives no
-verdict. At the review budget hedge asks nothing, and only the user's --override runs another review. Ask it with your question tool, with the options "Run one more round" and "Stop
+verdict. At the review budget hedge asks nothing, and only the user's --override runs another review, or a final read
+of a HEAD that the gate does not carry. Ask it with your question tool, with the options "Run one more round" and "Stop
 here". Only their choice of "Run one more round" there counts, quoted with the date they gave it, for example
 --override '2026-10-24 "Run one more round"'. --thread names the T3 thread where they answered and defaults to this
 one (T3CODE_THREAD_ID). A typed message, a refusal, or a general rule, such as "ship everything autonomously", does
@@ -69,7 +70,10 @@ which waits for it. A round is taken over when its command is gone, when its pro
 started later, or when its lock file stays empty for a minute.
 The settings pull-requests.freeReviews and pull-requests.reviewCeiling set how many reviews run before the arbiter weighs
 one more and where the loop stops: the panel rounds and the final reads of the review phase count together, and the
-final reads of the babysit phase count apart. The default budget is the panel, the fixes read, and the last read. A
+final reads of the babysit phase count apart. Only a review that leads to fixes counts: a finished review whose
+findings hold no blocker, major, or finding without a severity spends nothing, and an unfinished one counts. The
+budget never refuses a final read of a HEAD that the gate does not carry; a blocker or major that it finds still
+counts, so the fixes rounds after it stop at the ceiling. The default budget is the panel, the fixes read, and the last read. A
 PR of the Read tier gets its one read and one final read of its fixes. The arbiter is the lookup model of your
 AI plan; HEDGE_REVIEW_ARBITER replaces its command.`;
 

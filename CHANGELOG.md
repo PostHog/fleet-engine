@@ -99,6 +99,15 @@
   to the new one, so git, `get.sh` links and profiles that name
   `PostHog/fleet-engine` keep working. The old site address no longer works.
 
+### The review budget
+
+- Only a review that leads to fixes spends the review budget. A finished
+  review with no blocker or major spends nothing. A finding without a
+  severity still counts, and an unfinished review counts.
+- The ceiling never refuses a final read of a HEAD that `hedge proof gate`
+  does not carry. A blocker or major that the read finds still counts, so the
+  fixes rounds after it stop at the ceiling.
+
 ## v0.1.0
 
 The first public release. Fleet sets up T3 Code, Claude Code, Codex, and a set

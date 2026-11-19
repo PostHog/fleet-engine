@@ -8,9 +8,9 @@ import { checkout, cleanFixtures, fakeModel, finishRound, fixture, graded, markP
 
 afterEach(cleanFixtures);
 
-async function panelReview(pr: Checkout) {
+async function panelReview(pr: Checkout, findings = "(none)") {
   const changed = (await pr.git("diff", "--name-only", "refs/remotes/origin/main...HEAD")).split("\n").filter(Boolean);
-  fakeModel(pr, "REVIEWER", `FINDINGS:\n(none)\nCOVERED: ${changed.join(", ")}\n`);
+  fakeModel(pr, "REVIEWER", `FINDINGS:\n${findings}\nCOVERED: ${changed.join(", ")}\n`);
   await pr.hedge("review", "--lens", "correctness");
   expect((await pr.hedge("review", "--wait")).code).toBe(0);
   return pr.git("rev-parse", "HEAD");
@@ -106,12 +106,12 @@ test("a prose finding stays a finding when the review also lists TESTS items", (
   expect(items).toEqual(["The greeting drops the name.", "- a.test.ts:1 asserts a mock"]);
 });
 
-test("a test-only diff at low merge risk gets the Read tier: one combined Correctness and Risk lens on the other family, then one final read of its fixes", async () => {
+test("a test-only diff at low merge risk gets the Read tier: one combined Correctness and Risk lens on the other family, then, once both find a major, no fixes round", async () => {
   const pr = await checkout();
   pr.pullRequestState({ body: graded("non-critical", "low") });
   await pr.commit("feature.test.ts", Array.from({ length: 80 }, (_, line) => `test("greets ${line}", () => {});`).join("\n") + "\n");
   await pr.hedge("require", "--none", "--reason", "fixture");
-  const reviewer = fakeModel(pr, "REVIEWER", "FINDINGS:\n(none)\nCOVERED: feature.test.ts\n");
+  const reviewer = fakeModel(pr, "REVIEWER", "FINDINGS:\n- feature.test.ts:1 | major | Correctness | the test greets no one | greet a member | anchor: greets\nCOVERED: feature.test.ts\n");
 
   const started = await pr.hedge("review");
   expect(JSON.parse(started.output.split("\n")[0]!)).toMatchObject({ tier: { name: "read" }, lenses: [{ name: "combined", family: "gpt" }] });
@@ -126,12 +126,10 @@ test("a test-only diff at low merge risk gets the Read tier: one combined Correc
 
   await pr.commit("helper.ts", "export const name = \"member\";\n");
   expect((await pr.hedge("gate")).code).toBe(1);
-  reviewer.answer("No findings.");
+  reviewer.answer("FINDINGS:\n- helper.ts:1 | major | Correctness | the name drops the member | name the member | anchor: member\nCOVERED: helper.ts\n");
   expect((await pr.hedge("review", "--scope", "final", "--base", reviewed)).code).toBe(0);
-  expect((await pr.hedge("gate")).code).toBe(0);
-  const read = await pr.git("rev-parse", "HEAD");
   await pr.commit("helper.ts", "export const name = \"new member\";\n");
-  await expect(pr.hedge("review", "--scope", "final", "--base", read)).rejects.toThrow("The review budget of 2 reviews is spent.");
+  await expect(pr.hedge("review", "--scope", "fixes", "--base", reviewed)).rejects.toThrow("The review budget of 2 reviews is spent.");
 });
 
 test("a 120-line diff at low merge risk gets the Pair tier: correctness and risk on the other family and fresh eyes on the author's", async () => {
@@ -451,7 +449,7 @@ test("a review that another one overtakes while it weighs the budget backs out",
   pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 2, "pull-requests.reviewCeiling": 3 });
   await pr.commit("feature.txt", "greet\n");
   await pr.hedge("require", "--none", "--reason", "fixture");
-  const panel = await panelReview(pr);
+  const panel = await panelReview(pr, "- feature.txt:1 | major | Correctness | the greeting drops the name | greet by name | anchor: greet");
   await pr.commit("feature.txt", "greet the member\n");
   await pr.hedge("review-start", "--scope", "fixes", "--base", panel);
   await finishRound(pr, "2");
@@ -470,4 +468,55 @@ test("a review that another one overtakes while it weighs the budget backs out",
 
   await expect(slow).rejects.toThrow("Review final-1 started while this one weighed the budget");
   expect(existsSync(join(pr.pullRequest, "reviews", "3"))).toBe(false);
+});
+
+const major = (finding: string) => `FINDINGS:\n- feature.txt:1 | major | Correctness | ${finding} | fix it | anchor: greet\nCOVERED: feature.txt\n`;
+
+async function finishWith(pr: Checkout, round: string, findings: string) {
+  writeFileSync(join(pr.repository, "findings.md"), findings);
+  await pr.hedge("review-finish", "--round", round, "--reviewer", "gpt-6.1-sol", "findings.md");
+}
+
+test("a finished review with no blocker or major spends no review budget, while a finding without a severity does", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: graded("non-critical", "medium") });
+  pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 10, "pull-requests.reviewCeiling": 2 });
+  const panel = await pr.commit("feature.txt", "greet\n");
+  await pr.hedge("require", "--none", "--reason", "fixture");
+  await savedPanel(pr, "FINDINGS:\n- feature.txt:1 | minor | Design | a name reads plain | rename it | anchor: greet\nCOVERED: feature.txt\nTESTS:\n- feature.test.ts:3 asserts the call count of greet\n");
+  const second = await pr.commit("feature.txt", "greet the member\n");
+  await pr.hedge("review-start", "--scope", "fixes", "--base", panel);
+  await finishWith(pr, "2", "No findings.\n");
+  const third = await pr.commit("feature.txt", "greet the new member\n");
+
+  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", second)).output).toContain(`"round":3`);
+  await finishWith(pr, "3", "The greeting drops the name.\n");
+  await pr.commit("feature.txt", "greet every member\n");
+  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", third)).output).toContain(`"round":4`);
+  await finishWith(pr, "4", major("the greeting drops the name"));
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", await pr.git("rev-parse", "HEAD"))).rejects.toThrow("The review budget of 2 reviews is spent");
+});
+
+test("the ceiling never refuses a final read of a HEAD the gate does not carry, while its major still spends budget and stops the fixes round after it", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: graded("non-critical", "medium") });
+  pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 10, "pull-requests.reviewCeiling": 2 });
+  const panel = await pr.commit("feature.txt", "greet\n");
+  await pr.hedge("require", "--none", "--reason", "fixture");
+  await savedPanel(pr, major("the greeting drops the name"));
+  const fixes = await pr.commit("feature.txt", "greet the member\n");
+  await pr.hedge("review-start", "--scope", "fixes", "--base", panel);
+  await finishWith(pr, "2", major("the member goes unnamed"));
+  const read = await pr.commit("feature.txt", "greet the new member\n");
+
+  expect((await pr.hedge("review-start", "--scope", "final", "--base", fixes)).output).toContain(`"round":"final"`);
+  await finishWith(pr, "final-1", major("the new member goes unnamed"));
+  await pr.commit("feature.txt", "greet every member\n");
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", fixes)).rejects.toThrow("The review budget of 2 reviews is spent");
+  expect((await pr.hedge("review-start", "--scope", "final", "--base", read)).output).toContain(`"round":"final"`);
+  await finishWith(pr, "final-2", "No findings.\n");
+
+  await pr.commit("feature.test.ts", "test(\"greets every member\", () => {});\n");
+  expect((await pr.hedge("gate")).output).toContain("test-only delta");
+  await expect(pr.hedge("review-start", "--scope", "final", "--base", await pr.git("rev-parse", "HEAD~1"), "--agent", "One more read checks the test.")).rejects.toThrow("The review budget of 2 reviews is spent");
 });
