@@ -1,4 +1,4 @@
-import type { PackManifest, Preset } from "./types.ts";
+import type { PackManifest } from "./types.ts";
 
 export type PackAliases = Map<string, { pack: string; workflows: string[] }>;
 
@@ -29,9 +29,4 @@ export function oldNameOnly(aliases: PackAliases, listed: string[]): Map<string,
     only.set(alias.pack, new Set([...(only.get(alias.pack) ?? []), ...alias.workflows]));
   }
   return only;
-}
-
-export function namedPresets(presets: Preset[], manifests: Array<Pick<PackManifest, "name" | "aliases">>): Preset[] {
-  const aliases = packAliases(manifests);
-  return presets.map((preset) => ({ ...preset, packs: packsNamed(aliases, preset.packs), ...(preset.hubPacks ? { hubPacks: packsNamed(aliases, preset.hubPacks) } : {}) }));
 }

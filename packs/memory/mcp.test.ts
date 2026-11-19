@@ -7,6 +7,7 @@ import { dockerHost, fakeHub, fakeMcpHub, fakeRun, mcphubFetch, writeMcpHubSetti
 import { registerUpstreams } from "../mcp-gateway/lib/upstreams.ts";
 import { contextCommand } from "./commands/context.ts";
 import { runGit } from "./lib/library/git.ts";
+import { contextUpstream, upstreamFile } from "./lib/library/upstream.ts";
 import { answer, type Server } from "./mcp/server.ts";
 
 isolateGit();
@@ -111,4 +112,24 @@ test("on the hub, hedge context declares the library's search to the MCP gateway
   expect(await hedge(["upstream", "remove"])).toBe(0);
   expect(existsSync(join(home, ".config/hedge/mcp-gateway/upstreams/context.json"))).toBe(false);
   expect(await hedge(["upstream", "sideways"])).toBe(2);
+});
+
+test("a hub whose declaration still names the Context library pack's script keeps its search through the gateway's repair", async () => {
+  const home = temp.make("context-old-hub-");
+  mkdirSync(join(home, "notes/decisions"), { recursive: true });
+  writeFileSync(join(home, "notes/decisions/canary.md"), decision);
+  const declared = { ...contextUpstream({ path: join(home, "notes"), url: "" }), script: join(import.meta.dir, "../context-library/mcp/main.ts") };
+  mkdirSync(dirname(upstreamFile(home)), { recursive: true });
+  writeFileSync(upstreamFile(home), JSON.stringify(declared));
+  writeMcpHubSettings(home);
+  mkdirSync(join(home, ".local/share/hedge/codex/current/bin"), { recursive: true }), writeFileSync(join(home, ".local/share/hedge/codex/current/bin/codex"), "");
+  const api = fakeMcpHub({ groups: [{ id: "g", name: "hedge", servers: [] }] });
+  const ran = fakeRun(dockerHost(home, { Config: { Labels: { "org.hedge.service": "mcphub" }, Env: [] }, Image: "sha256:older", State: { Running: true }, Mounts: [] }));
+  await registerUpstreams(fakeHub(home, { fetch: mcphubFetch(api), run: ran.run }));
+  const child = Bun.spawn([Bun.which("node") ?? process.execPath, join(home, ".local/share/hedge-mcphub/local/context.mjs")], {
+    env: { PATH: process.env.PATH, HEDGE_CONTEXT_LIBRARY: join(home, "notes") },
+    stdin: Buffer.from(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "context_search", arguments: { query: "zebra canary" } } }) + "\n"), stdout: "pipe",
+  });
+  const [stdout] = await Promise.all([new Response(child.stdout).text(), child.exited]);
+  expect(JSON.parse(stdout.trim()).result.structuredContent.results[0]).toMatchObject({ path: "decisions/canary.md" });
 });

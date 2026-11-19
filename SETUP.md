@@ -380,7 +380,7 @@ command only once step 7 has named the hub.
 
 | Pack | What it does | Offer it | Setup note |
 | --- | --- | --- | --- |
-| `pull-requests` | Every change passes proof, a second-model review and a QA swarm before it merges, and a nightly loop improves one area. | Always | None |
+| `pull-requests` | Every change passes proof, a second-model review and a QA swarm before it merges, and a nightly loop you turn on improves one area. | Always | None |
 | `orchestration` | Big work becomes a map of tickets that a conductor thread works through, and side work gets its own thread. | Always | `packs/orchestration/SETUP.md` |
 | `communication` | Agents write in your voice, give short updates, and share plans and previews as links. | Always | None |
 | `integrations` | Claude Code and Codex get the official GitHub, Context7, and Convex plugins, and Claude can hand work to Codex. | Always | None |
@@ -388,7 +388,7 @@ command only once step 7 has named the hub.
 | `guards` | Hooks stop an agent's shell commands from running network code, using GitHub outside your owners, pushing past review, or polling in loops. | Always | `packs/guards/SETUP.md` |
 | `slack` | Your own message, reaction, or mention in Slack starts a T3 thread about it. | Always | `packs/slack/SETUP.md` |
 | `incident-io` | An agent that watches a risky change pages you, and only you, through incident.io when it goes wrong. | Always | `packs/incident-io/SETUP.md` |
-| `hub` | The hub links your boxes, cleans their disks, keeps your pack secrets, and pools your subscriptions, so threads go on after a usage limit. | Step 9 | `packs/hub/SETUP.md` |
+| `hub` | The hub links your boxes, cleans their disks, and keeps your pack secrets. Turn on recovery, and threads go on after a usage limit. | Step 9 | `packs/hub/SETUP.md` |
 | `mcp-gateway` | The hub signs in to your MCP servers once, and agents on every machine reach them through it. | Step 9 | `packs/mcp-gateway/SETUP.md` |
 
 ## 7. Set up Hedge on the hub

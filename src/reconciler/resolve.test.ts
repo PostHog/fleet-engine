@@ -925,4 +925,26 @@ describe("a pack that a profile names only by its old name", () => {
     expect(result.jobs.filter((job) => job.pack === "notes").map((job) => job.id)).toEqual(["recall-pull", "sweep"]);
     expect(result.files.some((item) => item.target.endsWith("skills/notes"))).toBe(true);
   });
+
+  test("keeps a workflow outside the old name's workflows off, even when the profile turns it on", () => {
+    const result = plan({ packs: ["library"], settings: {}, workflows: { shared: true } }, mac, [engine, renamed]);
+    expect(result.workflows.filter((workflow) => workflow.pack === "notes").map(({ id, active }) => ({ id, active }))).toEqual([{ id: "recall", active: true }, { id: "shared", active: false }]);
+  });
+
+  test("meets a requirement written with the old name by the old name's workflows, and a requirement of the new name only by the new name", () => {
+    const needing = (name: string, requires: string) => ({ schema: 1, name, summary: "Needs notes.", requires: [requires] }) as PackManifest;
+    const sources = [engine, renamed, withPack(needing("old-reader", "library")), withPack(needing("new-reader", "notes"))];
+    const result = plan({ packs: ["library", "old-reader", "new-reader"], settings: {} }, mac, sources);
+    expect(result.packs.filter((pack) => pack.name.endsWith("reader")).map(({ name, available, reason }) => ({ name, available, reason }))).toEqual([
+      { name: "old-reader", available: true, reason: undefined },
+      { name: "new-reader", available: false, reason: "requires notes" },
+    ]);
+    expect(result.jobs.filter((job) => job.pack === "notes").map((job) => job.id)).toEqual(["recall-pull"]);
+  });
+
+  test("refuses an old name that a pack still has, or that two packs take", () => {
+    const taking = (name: string) => withPack({ schema: 1, name, summary: "Takes library.", aliases: [{ name: "library", workflows: [] }] } as PackManifest);
+    expect(() => plan({ packs: ["notes"], settings: {} }, mac, [engine, renamed, taking("boxes")])).toThrow("packs notes and boxes both take the old name library");
+    expect(() => plan({ packs: ["notes"], settings: {} }, mac, [engine, renamed, withPack({ schema: 1, name: "library", summary: "Still here." } as PackManifest)])).toThrow("pack notes takes the old name library, which another pack still has");
+  });
 });

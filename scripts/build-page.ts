@@ -4,7 +4,6 @@ import { dirname, join, resolve } from "node:path";
 import { artFiles, packGroups } from "../page/cast.ts";
 import type { PageData, PagePack } from "../page/model.ts";
 import { site, type ArtSizes } from "../page/views.ts";
-import { namedPresets } from "../src/pack/aliases.ts";
 import { engineSettings, loadPacks } from "../src/pack/manifest.ts";
 import type { Audience, LoadedPack, Need, PackManifest, Preset } from "../src/pack/types.ts";
 import { engineRepo, needsHubPacks } from "../src/setup/defaults.ts";
@@ -33,7 +32,7 @@ const visible = (audience: Audience) => (item: { audience?: Audience }) => !item
 export async function pageData({ audience, team = [] }: PageOptions): Promise<PageData> {
   if (audience === "public" && team.length) throw new Error("the public build lists no pack from a private source");
   const engine = await loadPacks(engineRoot);
-  const presets = namedPresets((await Bun.file(join(engineRoot, "presets.json")).json()) as Preset[], engine.map((pack) => pack.manifest));
+  const presets = (await Bun.file(join(engineRoot, "presets.json")).json()) as Preset[];
   const shown = visible(audience);
   const base = engine.filter((pack) => pack.manifest.name === "base").map((pack) => pack.manifest);
   const teamManifests = team.map((pack) => pack.manifest).filter(shown);

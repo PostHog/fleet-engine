@@ -36,6 +36,7 @@ export type Workflow = {
   default: boolean;
   settings?: string[];
   offUntilSet?: string[];
+  instructions?: string;
   risk?: string;
 };
 

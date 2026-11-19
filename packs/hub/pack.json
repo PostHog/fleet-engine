@@ -9,7 +9,7 @@
       ]
     }
   ],
-  "summary": "The hub links your boxes, cleans their disks, keeps your pack secrets, and pools your subscriptions, so threads go on after a usage limit.",
+  "summary": "The hub links your boxes, cleans their disks, and keeps your pack secrets. Turn on recovery, and threads go on after a usage limit.",
   "day": "A thread on one devbox starts work on another, and the hub cleans a devbox that fills its disk before you notice.",
   "cost": "You need one devbox that stays on, and some setup on it. Every other machine keeps working when the hub is down.",
   "risk": "The hub holds sign-ins for your MCP servers and reaches every devbox over SSH. Keep it as private as your laptop.",

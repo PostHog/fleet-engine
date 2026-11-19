@@ -231,28 +231,61 @@ describe("apply", () => {
 });
 
 describe("a step whose pack now has a new name", () => {
-  const upstream = { id: "context-upstream", pack: "memory", run: ["install"], check: ["doctor"], undo: ["remove"] };
-  const moved = (home: string) => changeLedger(home, "steps", "context-library/context-upstream", { pack: "context-library", id: "context-upstream", check: ["doctor"], undo: ["remove"] });
-  const memoryPlan = plan({ aliases: { "context-library": "memory" }, packs: [{ name: "base", source: "engine", ref: "main", available: true }, { name: "memory", source: "engine", ref: "main", available: true }], steps: [upstream] });
-
-  test("stays installed: apply moves its ledger entry to the new name and undoes nothing", async () => {
+  const marker = 'test -f "$HOME/upstream"';
+  const upstream = { id: "context-upstream", check: ["sh", "-c", marker], undo: ["sh", "-c", 'rm "$HOME/upstream"'] };
+  const packs = (...names: string[]) => names.map((name) => ({ name, source: "engine", ref: "main", available: true }));
+  const withMemory = plan({ aliases: { "context-library": "memory" }, packs: packs("base", "memory"), steps: [{ ...upstream, pack: "memory", run: ["sh", "-c", 'touch "$HOME/upstream"'] }] });
+  const withoutMemory = plan({ aliases: { "context-library": "memory" } });
+  const installed = async () => {
     const home = temp.make("home-");
-    await moved(home);
-    const ran: string[] = [];
-    const report = await apply(memoryPlan, { home, run: async (command) => (ran.push(command[0]!), 0) });
-    expect(report.ok).toBe(true);
-    expect(ran).not.toContain("remove");
-    expect((await readLedger(home)).steps.map(ledgerKey)).toEqual(["memory/context-upstream"]);
+    writeFileSync(join(home, "upstream"), "");
+    await changeLedger(home, "steps", "context-library/context-upstream", { ...upstream, pack: "context-library" });
+    return home;
+  };
+  const ledgerText = (home: string) => readFileSync(join(home, ".local/state/hedge/steps.json"), "utf8");
+
+  test("stays installed across the upgrade, and is still undone once its pack leaves the profile", async () => {
+    const home = await installed();
+    expect((await apply(withMemory, { home })).ok).toBe(true);
+    expect(existsSync(join(home, "upstream"))).toBe(true);
+    expect((await apply(withoutMemory, { home })).ok).toBe(true);
+    expect(existsSync(join(home, "upstream"))).toBe(false);
+    expect((await readLedger(home)).steps).toEqual([]);
   });
 
-  test("a dry run plans no undo and leaves the ledger as it was", async () => {
-    const home = temp.make("home-");
-    await moved(home);
-    const ran: string[] = [];
-    const report = await apply(memoryPlan, { home, dryRun: true, run: async (command) => (ran.push(command[0]!), 0) });
-    expect(ran).not.toContain("remove");
+  test("a dry run reports no removal and leaves the upstream and the ledger as they were", async () => {
+    const home = await installed();
+    const before = ledgerText(home);
+    const report = await apply(withMemory, { home, dryRun: true });
     expect(report.actions.filter((action) => action.operation === "remove")).toEqual([]);
-    expect((await readLedger(home)).steps.map(ledgerKey)).toEqual(["context-library/context-upstream"]);
+    expect(existsSync(join(home, "upstream"))).toBe(true);
+    expect(ledgerText(home)).toBe(before);
+  });
+
+  test("a dry run after its pack left the profile reports the undo, and probes it under the name the ledger holds", async () => {
+    const home = await installed();
+    const keys: Array<string | undefined> = [];
+    const report = await apply(withoutMemory, { home, dryRun: true, run: async (command, env) => (keys.push(env?.HEDGE_UNDO), command.join(" ").includes(marker) ? 0 : 1) });
+    expect(report.actions.map((action) => action.target)).toContain("step memory/context-upstream");
+    expect(keys).toContain("context-library/context-upstream");
+  });
+
+  test("keeps the newer entry when the ledger already holds the new name too", async () => {
+    const home = await installed();
+    await changeLedger(home, "steps", "memory/context-upstream", { ...upstream, pack: "memory", undo: ["sh", "-c", 'rm "$HOME/upstream"; touch "$HOME/newer-undo"'] });
+    expect((await apply(plan({ aliases: { "context-library": "memory" }, packs: packs("base", "memory") }), { home })).ok).toBe(true);
+    expect(existsSync(join(home, "newer-undo"))).toBe(true);
+    expect((await readLedger(home)).steps).toEqual([]);
+  });
+
+  test("keeps a step of a pack named constructor under its own name", async () => {
+    const home = temp.make("home-");
+    writeFileSync(join(home, "upstream"), "");
+    const step = { ...upstream, pack: "constructor", run: ["true"] };
+    const constructorPlan = plan({ aliases: { "context-library": "memory" }, packs: packs("base", "constructor"), steps: [step] });
+    expect((await apply(constructorPlan, { home })).ok).toBe(true);
+    expect((await apply(constructorPlan, { home })).ok).toBe(true);
+    expect((await readLedger(home)).steps.map(ledgerKey)).toEqual(["constructor/context-upstream"]);
   });
 });
 

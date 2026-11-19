@@ -1,16 +1,14 @@
-import { afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AvailableSource } from "../../../../src/pack/types.ts";
 import { tempDirs } from "../../../../src/testing/git.ts";
-import { devbox, engineSource, resolveEngine, skillSources } from "../../../../src/testing/packs.ts";
+import { cliFixtures } from "../../../../src/testing/cli.ts";
 import { providersCommand } from "./availability.ts";
 import { fakeProxy, modelRows, recoveryHome } from "./testing.ts";
 
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
-let engine: AvailableSource;
-beforeAll(async () => (engine = await engineSource()));
+const { profileDir, hedge } = cliFixtures(temp);
 
 const start = Date.parse("2026-11-10T20:00:00Z");
 const minute = 60_000;
@@ -23,9 +21,14 @@ function providers(home: string, proxy: ReturnType<typeof fakeProxy>, now = star
 }
 
 describe("provider recovery in the Hub pack", () => {
-  test("gives a machine hedge providers", () => {
-    const plan = resolveEngine([engine, ...skillSources(temp.make("skills-"), engine)], { packs: ["hub"] }, devbox);
-    expect(plan.commands.providers).toMatchObject({ pack: "hub" });
+  test("gives a machine with Hub the hedge providers command, which runs, and a machine without it the way to turn it on", async () => {
+    const providersOn = async (packs: string[]) => {
+      const home = temp.make("home-");
+      await hedge(["apply", "--profile", profileDir(packs)], home);
+      return hedge(["providers", "--unknown"], home);
+    };
+    expect(await providersOn(["hub"])).toEqual({ code: 2, output: "" });
+    expect(await providersOn([])).toEqual({ code: 2, output: "hedge providers comes from the hub pack, which is off. Turn it on with hedge packs." });
   });
 });
 
