@@ -192,19 +192,13 @@ describe("the library's upstream from before the Context library pack joined Mem
     expect((await readLedger(home)).steps).toEqual([]);
   });
 
-  test("a replacement declaration that names another server is kept, and its entry clears at the next apply", async () => {
-    const { home, hedge } = await upgraded(["context-library"], { "context-library": false });
-    const replacement = JSON.stringify({ ...JSON.parse(readFileSync(declaration(home), "utf8")), name: "notes", title: "Notes" });
-    writeFileSync(declaration(home), replacement);
-    const applied = await hedge(["apply"]);
-    expect(applied.code).toBe(0);
-    expect(applied.output).not.toContain("context-upstream");
-    expect(readFileSync(declaration(home), "utf8")).toBe(replacement);
-    expect((await readLedger(home)).steps).toEqual([]);
-  });
-
-  for (const [label, change] of [["named notes without a script", { name: "notes", title: "Notes", script: undefined }], ["named context with env 42", { env: 42 }]] as const) {
-    test(`a partly valid local declaration ${label} stays, with its entry, and is reported again by a second apply`, async () => {
+  for (const [label, change] of [
+    ["that names another server", { name: "notes", title: "Notes" }],
+    ["that names another server and has no script", { name: "notes", title: "Notes", script: undefined }],
+    ["that names another server and has a blank script", { name: "notes", title: "Notes", script: " " }],
+    ["named context with env 42", { env: 42 }],
+  ] as const) {
+    test(`a declaration ${label} stays, with its entry, and is reported again by a second apply`, async () => {
       const { home, hedge } = await upgraded(["context-library"], { "context-library": false });
       const content = JSON.stringify({ ...JSON.parse(readFileSync(declaration(home), "utf8")), ...change });
       writeFileSync(declaration(home), content);
