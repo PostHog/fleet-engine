@@ -144,7 +144,7 @@ function fakeServer(options: { up?: boolean; settings?: Record<string, unknown>;
   return { state, calls, tags, server };
 }
 
-type Machine = { t3?: boolean; service?: "installed" | "not installed" | "unavailable"; manager?: boolean; linger?: "yes" | "no" | ""; sudo?: boolean; originHead?: string; refs?: string[]; remotes?: string[]; gitBroken?: boolean; feed?: string; installFailures?: number; env?: Record<string, string>; reloadFailures?: number; restartFailures?: number; sudoRefusal?: string };
+type Machine = { home?: string; t3?: boolean; service?: "installed" | "not installed" | "unavailable"; manager?: boolean; linger?: "yes" | "no" | ""; sudo?: boolean; originHead?: string; refs?: string[]; remotes?: string[]; gitBroken?: boolean; feed?: string; installFailures?: number; env?: Record<string, string>; reloadFailures?: number; restartFailures?: number; sudoRefusal?: string };
 
 const releasesFeed = ["mobile-android-build%2F2.3.0%2Fabc", "v0.1.9-nightly.20990102.7", "v0.1.9-nightly.20990101.3"]
   .map((tag) => `<entry><link rel="alternate" type="text/html" href="https://github.com/pingdotgg/t3code/releases/tag/${tag}"/></entry>`)
@@ -166,10 +166,26 @@ function withoutBus(command: string[]) {
   return command[0] === "env" && ("XDG_RUNTIME_DIR" in vars || "DBUS_SESSION_BUS_ADDRESS" in vars) ? command.slice(1 + Object.keys(vars).length) : command;
 }
 
+/** What T3 Code's service runs with: the settings file, time zone and Claude token it loaded at its last start. */
+type RunningService = { invocation: number; settings?: unknown; zone?: string; token?: string };
+
+/** systemd here reads T3 Code's drop-ins at daemon-reload or t3 service install, and the service loads the files under machine.home when it starts. */
 function runner(server: ReturnType<typeof fakeServer>, machine: Machine = {}) {
   const calls: string[] = [];
   const state = { t3: machine.t3 ?? true, service: machine.service ?? "installed", installFailures: machine.installFailures ?? 0, installerVersions: [] as string[], lingering: false };
-  const systemd = { reloadFailures: machine.reloadFailures ?? 0, restartFailures: machine.restartFailures ?? 0, loaded: false, tokenInT3: false, starts: 1 };
+  const systemd = { reloadFailures: machine.reloadFailures ?? 0, restartFailures: machine.restartFailures ?? 0, loaded: false, tokenInT3: false, starts: 1, unit: {} as { zone?: string; tokenFile?: string }, running: undefined as RunningService | undefined };
+  const fromHome = (path: string) => (machine.home && existsSync(join(machine.home, path)) ? readFileSync(join(machine.home, path), "utf8") : undefined);
+  const loadUnit = () => {
+    const dropIns = machine.home ? join(machine.home, ".config/systemd/user/t3code.service.d") : undefined;
+    const text = dropIns && existsSync(dropIns) ? readdirSync(dropIns).map((name) => readFileSync(join(dropIns, name), "utf8")).join("\n") : "";
+    systemd.unit = { zone: /^Environment=TZ=(.*)$/m.exec(text)?.[1], tokenFile: /^EnvironmentFile=%h\/(.*)$/m.exec(text)?.[1] };
+  };
+  const startService = () => {
+    systemd.starts++;
+    const settings = fromHome(settingsFile);
+    const token = systemd.unit.tokenFile ? fromHome(systemd.unit.tokenFile) : undefined;
+    systemd.running = { invocation: systemd.starts, settings: settings ? JSON.parse(settings) : undefined, zone: systemd.unit.zone, token: token ? /^CLAUDE_CODE_OAUTH_TOKEN=(.*)$/m.exec(token)?.[1] : undefined };
+  };
   const run: CommandRunner = async (whole) => {
     const busVars = envOf(whole);
     const command = withoutBus(whole);
@@ -191,16 +207,16 @@ function runner(server: ReturnType<typeof fakeServer>, machine: Machine = {}) {
       if (state.service === "not installed") return { code: 0, stdout: "T3 Code service\n  Status: not installed\n  Next: Run `t3 service install`.\n" };
       return { code: 0, stdout: "T3 Code service\n  Status: installed · t3@0.9.0\n" };
     }
-    if (line === "t3 service install") return (state.service = "installed"), { code: 0, stdout: "" };
+    if (line === "t3 service install") return (state.service = "installed"), loadUnit(), startService(), { code: 0, stdout: "" };
     if (line === "systemctl --user show-environment") return { code: 0, stdout: "HOME=/home/octo\n" };
     if (line === "sudo -n loginctl enable-linger octo") return machine.sudo ? ((state.lingering = true), { code: 0, stdout: "" }) : { code: 1, stdout: "", stderr: machine.sudoRefusal ?? "sudo: a password is required\n" };
     if (line === "systemctl --user daemon-reload") {
       if (systemd.reloadFailures > 0) return systemd.reloadFailures--, { code: 1, stdout: "", stderr: "Failed to reload daemon" };
-      return (systemd.loaded = true), { code: 0, stdout: "" };
+      return (systemd.loaded = true), loadUnit(), { code: 0, stdout: "" };
     }
     if (line === "systemctl --user try-restart t3code.service" || line === "systemctl --user restart t3code.service") {
       if (systemd.restartFailures > 0) return systemd.restartFailures--, { code: 1, stdout: "", stderr: "Job for t3code.service failed" };
-      return systemd.starts++, (systemd.tokenInT3 = systemd.loaded), { code: 0, stdout: "" };
+      return startService(), (systemd.tokenInT3 = systemd.loaded), { code: 0, stdout: "" };
     }
     if (line === "systemctl --user show t3code.service --property=InvocationID --value") return { code: 0, stdout: `${String(systemd.starts).padStart(32, "0")}\n` };
     if (line === "loginctl show-user octo --property=Linger --value") return { code: 0, stdout: `${machine.linger ?? "yes"}\n` };
@@ -849,17 +865,9 @@ describe("T3 on Linux", () => {
 
   test("writes Hedge's settings before it installs t3 or its service, so T3 Code's first start reads them", async () => {
     const home = temp.make("home-");
-    const { server, commands } = setup({ up: false }, { t3: false, service: "not installed" });
-    const seen: Array<{ line: string; settings: unknown }> = [];
-    const run: CommandRunner = async (command) => {
-      seen.push({ line: withoutBus(command).join(" "), settings: existsSync(join(home, settingsFile)) ? read(home, settingsFile) : undefined });
-      return commands.run(command);
-    };
-    const watched = t3Adapter({ run, server: server.server, user: "octo", uid: 1000, env: {} });
-    const report = await apply(plan("linux", base), { home, adapters: [watched] });
-    const starts = seen.filter(({ line }) => line.includes("t3.codes/install.sh") || line === "t3 service install");
-    expect(starts).toHaveLength(2);
-    for (const start of starts) expect(start.settings).toEqual({ defaultThreadEnvMode: "worktree", sidebarAutoSettleAfterDays: 3, storageCleanup: { worktreeOnMerge: true, logsAfterDays: 14 } });
+    const { commands, adapter } = setup({ up: false }, { home, t3: false, service: "not installed" });
+    const report = await apply(plan("linux", base), { home, adapters: [adapter] });
+    expect(commands.state.systemd.running?.settings).toEqual({ defaultThreadEnvMode: "worktree", sidebarAutoSettleAfterDays: 3, storageCleanup: { worktreeOnMerge: true, logsAfterDays: 14 } });
     expect(report.actions.map((action) => action.target)).toEqual([settingsFile, "t3", "t3 service"]);
   });
 
@@ -984,17 +992,19 @@ describe("T3 on Linux", () => {
 
     test("sets the zone before T3 Code's service starts and before a token restart in the same apply", async () => {
       const home = temp.make("home-");
+      const token = ["sk", "test", "claude", "zone"].join("-");
       const server = fakeServer();
-      const commands = runner(server, { service: "not installed" });
-      const zoneAt: Record<string, boolean> = {};
+      const commands = runner(server, { home, service: "not installed" });
+      let first: RunningService | undefined;
       const run: CommandRunner = async (command) => {
-        const line = withoutBus(command).join(" ");
-        if (line === "t3 service install" || line === "systemctl --user try-restart t3code.service") zoneAt[line] = existsSync(join(home, dropInFile));
-        return commands.run(command);
+        const result = await commands.run(command);
+        first ??= commands.state.systemd.running;
+        return result;
       };
-      const adapter = t3Adapter({ run, server: server.server, user: "octo", uid: 1000, env: { CLAUDE_CODE_OAUTH_TOKEN: ["sk", "test", "claude", "zone"].join("-") } });
+      const adapter = t3Adapter({ run, server: server.server, user: "octo", uid: 1000, env: { CLAUDE_CODE_OAUTH_TOKEN: token } });
       await apply(zoned("Europe/Berlin"), { home, adapters: [adapter] });
-      expect(zoneAt).toEqual({ "t3 service install": true, "systemctl --user try-restart t3code.service": true });
+      const running = commands.state.systemd.running;
+      expect([first?.zone, running?.zone, running?.token]).toEqual(["Europe/Berlin", "Europe/Berlin", token]);
     });
 
     test("leaves the zone as it was when systemd does not reload, so the next apply tries again", async () => {
@@ -1107,12 +1117,14 @@ describe("T3 on Linux", () => {
 
     test("needs no second restart when you restarted T3 Code yourself after the finding", async () => {
       const home = temp.make("home-");
-      const { env, commands, adapter } = withToken({}, { T3CODE_THREAD_ID: "thread-1" });
+      const { token, env, commands, adapter } = withToken({ home }, { T3CODE_THREAD_ID: "thread-1" });
       await apply(plan("linux", []), { home, adapters: [adapter] });
       await onUserBus(commands.run, {}, 1000)(["systemctl", "--user", "restart", "t3code.service"]);
+      const restarted = commands.state.systemd.running;
       delete env.T3CODE_THREAD_ID;
       const report = await apply(plan("linux", []), { home, adapters: [adapter] });
-      expect(restarts(commands.calls)).toEqual(["systemctl --user restart t3code.service"]);
+      expect(restarted?.token).toBe(token);
+      expect(commands.state.systemd.running).toBe(restarted);
       expect(report.findings.map((item) => item.id)).not.toContain("t3:claude-token");
     });
 
