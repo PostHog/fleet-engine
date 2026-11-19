@@ -19,10 +19,12 @@ async function signedUp(setupArgs: string[] = []) {
 
 const profileApplied = (home: string) => boxMachineFile(home, node).profileDir === join(boxHome(home, node), ".local/share/hedge/profile");
 const throughSsh = (home: string, printed: string) => {
-  const bin = join(home, "fake-ssh");
-  mkdirSync(bin, { recursive: true });
-  writeFileSync(join(bin, "ssh"), `#!/bin/sh\n[ "$1" != -t ] || shift\n[ "$1" = ${node} ] || exit 255\nshift\nexec sh -c "$*"\n`, { mode: 0o755 });
-  return Bun.spawnSync(["sh", "-c", printed], { env: { HOME: boxHome(home, node), PATH: `${bin}:${join(boxHome(home, node), ".node/bin")}:/usr/bin:/bin`, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" }, stdout: "ignore", stderr: "ignore" }).exitCode;
+  const local = join(home, "fake-ssh");
+  mkdirSync(local, { recursive: true });
+  const onNode = `HOME='${boxHome(home, node)}' PATH='${join(boxHome(home, node), ".node/bin")}:/usr/bin:/bin'`;
+  writeFileSync(join(local, "ssh"), `#!/bin/sh\n[ "$1" != -t ] || shift\n[ "$1" = ${node} ] || exit 255\nshift\nexec env ${onNode} sh -c "$*"\n`, { mode: 0o755 });
+  writeFileSync(join(local, "sudo"), "#!/bin/sh\nexit 97\n", { mode: 0o755 });
+  return Bun.spawnSync(["sh", "-c", printed], { env: { HOME: home, PATH: `${local}:/usr/bin:/bin`, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" }, stdout: "ignore", stderr: "ignore" }).exitCode;
 };
 const linkedHere = ["https://box-1.relay.example"];
 const listed = (output: string, say: string) => output.split("\n").filter((line) => line.startsWith(`  · ${say}`)).length;
@@ -65,7 +67,7 @@ describe("hedge devbox add applies the profile on the node", () => {
     expect(left[3]).toBe(`Do each one, then run hedge apply on ${node}.`);
   });
 
-  test("stops at the profile step, before the sign-ins and the link, when the apply fails for another reason", async () => {
+  test("stops at the profile step, links nothing, when the apply fails for another reason, and a rerun after the fix applies the profile and links the node", async () => {
     const { home, io, add } = await signedUp(guarded);
     const failed = fakeMachine(home, {}, notTheProfile);
     expect(await add(failed)).toBe(1);
