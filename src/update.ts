@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { lstatSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { refuseLegacyPath } from "./legacy.ts";
@@ -132,6 +133,7 @@ async function releases(options: UpdateOptions, url: string) {
 async function followRelease(options: UpdateOptions, url: string, switched: boolean): Promise<Moved> {
   refuseLegacyPath(dirname(noticePath(options.home)));
   refuseLegacyPath(noticePath(options.home));
+  for (const path of [dirname(noticePath(options.home)), noticePath(options.home)]) if (lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink()) throw new Error(`${path} is a link, so Hedge does not write the update notice there.`);
   const versions = await releases(options, url);
   if (!versions) return false;
   const pin = parse(options.engine.ref);

@@ -1,5 +1,5 @@
 import { describe, expect } from "bun:test";
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { git } from "./testing/git.ts";
 import { getShHarness, onLinuxHost } from "./testing/get-sh.ts";
@@ -87,6 +87,22 @@ describe("get.sh upgrades a machine that Fleet runs", () => {
     const state = machine.state();
     expect(state.units).toEqual({ "fleet-watch.service": running });
     expect(state.crontab).toBe(oldCron);
+  });
+
+  onLinuxHost("stops before it changes anything when the default Fleet engine folder links to a custom checkout", () => {
+    const machine = fleetMachine({ oldEngine: "src/fleet-engine" });
+    const checkout = join(machine.home, "src/fleet-engine");
+    writeFileSync(join(checkout, "fleet"), "");
+    writeFileSync(join(checkout, "hedge"), "");
+    symlinkSync(checkout, join(machine.home, ".local/share/fleet/engine"));
+    const before = tree(machine.home);
+
+    const result = machine.getSh([]);
+
+    expect(result.code).toBe(1);
+    expect(result.output).toContain(`Hedge: ${machine.home}/.local/bin/fleet runs a Fleet engine in ${checkout}, and Hedge finds and stops only the Fleet engine in ${machine.home}/.local/share/fleet/engine, so Hedge changed nothing.`);
+    expect(tree(machine.home)).toEqual(before);
+    expect(machine.state().units).toEqual({ "fleet-watch.service": running });
   });
 
   onLinuxHost("stops before it changes anything when the fleet command names a Fleet engine folder with an escaped apostrophe", () => {
