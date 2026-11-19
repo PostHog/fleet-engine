@@ -86,7 +86,7 @@ const attributes = `(?:[^<>"']|"[^"<]*"|'[^'<]*')*`;
 const blockTags = new RegExp(`<\\/?(?:p|div|br|li|tr|h[1-6]|title|section|article|header|footer|pre|blockquote)\\b${attributes}>`, "gi");
 const anyTag = new RegExp(`<${attributes}>`, "g");
 const links = new RegExp(`<a\\b(${attributes})>((?:(?!<a\\b|<\\/a\\s*>)[\\s\\S])*)<\\/a\\s*>`, "gi");
-const hidden = /<!--|<(script|style|noscript|template|svg)\b/gi;
+const hidden = new RegExp(`<!--|<(script|style|noscript|template|svg)(?=[\\s/>])${attributes}>`, "gi");
 
 function withoutHidden(html: string): string {
   let kept = "";
@@ -94,6 +94,10 @@ function withoutHidden(html: string): string {
   hidden.lastIndex = 0;
   for (let open = hidden.exec(html); open; open = hidden.exec(html)) {
     kept += `${html.slice(at, open.index)} `;
+    if (open[0].endsWith("/>")) {
+      at = hidden.lastIndex;
+      continue;
+    }
     const closing = open[1] ? new RegExp(`<\\/${open[1]}\\s*>`, "gi") : /-->/g;
     closing.lastIndex = hidden.lastIndex;
     if (!closing.exec(html)) return kept;
@@ -115,9 +119,11 @@ function linkTarget(tag: string, base: string): string | undefined {
 }
 
 export function pageText(html: string, base: string): string {
+  let linked = 0;
   return decoded(withoutHidden(html)
     .replace(links, (_whole, tag: string, text: string) => {
-      const target = linkTarget(tag, base);
+      const target = linked < partLimit ? linkTarget(tag, base) : undefined;
+      linked += target?.length ?? 0;
       return target ? `${text} (${target})` : text;
     })
     .replace(blockTags, "\n")

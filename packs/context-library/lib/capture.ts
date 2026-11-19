@@ -115,7 +115,23 @@ function newPath(worktree: string, wanted: string): string {
   throw new Error(`${wanted} and its numbered copies exist already; nothing was saved`);
 }
 
-const inert = (text: string) => text.replaceAll("![", "[").replace(/<(?=[a-z/!?])/gi, "&lt;");
+const noteFields = /^(title|type|topics|date|source|series|people|wispr|status):/;
+
+function knownFields(text: string): string {
+  const head = /^---\n([\s\S]*?)\n---(\n|$)/.exec(text);
+  if (!head) return text;
+  let kept = false;
+  const lines = head[1]!.split("\n").filter((line) => {
+    if (!/^\s/.test(line) && !line.startsWith("- ")) kept = noteFields.test(line);
+    return kept;
+  });
+  return `---\n${lines.join("\n")}\n---${head[2]}${text.slice(head[0].length)}`;
+}
+
+const inert = (text: string) => knownFields(text)
+  .replace(/!+\[/g, "[")
+  .replace(/<(?=[a-z/!?])/gi, "&lt;")
+  .replace(/(`{3,}|~{3,})([^\n]*)/g, (whole, fence: string, info: string) => (info.trim() ? `${fence}text` : whole));
 
 function wisprOf(draft: Draft, input: CaptureInput, material: Material): string | undefined {
   if (!input.startedAt) return undefined;

