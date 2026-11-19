@@ -28,10 +28,12 @@ Recovery never knows that a provider has capacity, and continues nothing.
    address that starts with `http://localhost:54545/`. Ask for that whole
    address with the secret prompt, delivered as a file, because it holds a
    one-time code. While the sign-in still waits, send the address to it on
-   the hub:
+   the hub. `curl` reads the address from its standard input, so it never
+   shows, and goes around any proxy that the hub's environment sets, so
+   the address reaches the waiting sign-in and no proxy:
 
    ```sh
-   ssh coder.<hub> 'sed "s/^/url = /" | curl -q -fsS -K -' < <file>
+   ssh coder.<hub> 'sed "s/^/url = /" | curl -q --noproxy "*" -fsS -K -' < <file>
    ```
 3. After step 9 adds the node, connect it to the proxy. On the hub,
    `hedge cli-proxy doctor` prints one `Connect <node>:` command per node.

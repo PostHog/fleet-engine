@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { main } from "../src/cli.ts";
 import { loadPacks } from "../src/pack/manifest.ts";
 import { fetchSource } from "../src/pack/sources.ts";
 import { sourceCache } from "../src/setup/setup.ts";
+import { saveMachine } from "../src/profile/profile.ts";
 import { profilePath } from "../src/setup/profile.ts";
 import { devboxesOf } from "../packs/hub/lib/machine.ts";
 import { cliFixtures } from "../src/testing/cli.ts";
@@ -57,6 +58,24 @@ const hubStep = () => step(9);
 const beforeSteps = (heading: string) => guide().slice(guide().indexOf(heading), guide().indexOf("\n## 1. "));
 const onHubLine = (command: string) => `ssh coder.<hub> 'export PATH="${guidePath}"; ${command}'`;
 const setupArgs = () => guide().match(/; hedge setup (--chat [^']+)'/)![1]!;
+
+function fakeTools(tools: Record<string, string>) {
+  const bin = temp.make("bin-");
+  for (const [name, body] of Object.entries(tools)) {
+    writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`);
+    chmodSync(join(bin, name), 0o755);
+  }
+  return bin;
+}
+
+async function runShell(script: string, env: Record<string, string>, stdin?: string) {
+  const child = Bun.spawn(["sh", "-c", script], { env, stdin: stdin === undefined ? "ignore" : new Blob([stdin]), stdout: "pipe", stderr: "pipe" });
+  const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  return { code, stdout, stderr };
+}
+
+const remotePart = (command: string) => command.slice(command.indexOf("'") + 1, command.lastIndexOf("'"));
+const blockWith = (text: string, start: string, holding = "") => blocksIn(text).find((block) => block.startsWith(start) && block.includes(holding))!.trim();
 
 function flagValues(flag: string) {
   const code = [guide(), ...notePaths().map((path) => readFileSync(join(root, path), "utf8"))].flatMap(codeIn).join("\n");
@@ -199,8 +218,7 @@ describe("the agent setup guide", () => {
     const script = fetched.match(/main\/(scripts\/check-workspace\.sh)/)![1]!;
     expect(existsSync(join(root, script))).toBe(true);
     expect(code).toContain("sh ~/.cache/hedge-setup/check-workspace.sh <name> <parameter>=<value> <parameter>=<value>\n");
-    expect(code.join("\n")).not.toMatch(/\$dir\/session/);
-    expect(code.join("\n").split("\n").filter((line) => line.includes("Coder-Session-Token") && !line.startsWith("{ printf 'Coder-Session-Token: '; coder login token; } | curl -q -fsS -H @- "))).toEqual([]);
+    expect(code.join("\n")).not.toMatch(/\$dir\/session|Coder-Session-Token/);
     expect(words(step(5))).toContain("the disk size, the region, the instance type, and the dotfiles repo. Never pass a private value to the check");
     expect(words(step(5))).toContain("A parameter that the template does not let change, such as the disk size or the region, needs a new workspace: ask, then `coder delete <name>` and create it again, before setup touches it.");
   });
@@ -217,13 +235,37 @@ describe("the agent setup guide", () => {
     expect([printed.code, printed.output]).toEqual([1, "x instance_type is not the value you passed. In the Coder web app, set it under Settings, Parameters, and submit.\nok hedge-hub runs and stays on\n"]);
   });
 
-  test("reads the template's parameters from the Coder API of its active version, with the token on curl's standard input, and never with coder templates pull", () => {
+  test("reads the parameters of the template's active version with the engine's script, prints no default of a secret, and keeps the session token off every command line", async () => {
+    const fixtures = temp.make("coder-");
+    writeFileSync(join(fixtures, "templates.json"), JSON.stringify([{ Template: { name: "other", active_version_id: "v-other" } }, { Template: { name: "dev", active_version_id: "v-active" } }]));
+    const credential = ["ghp", "fixture", "default", "credential"].join("-");
+    writeFileSync(join(fixtures, "parameters.json"), JSON.stringify([
+      { name: "disk_size", display_name: "Disk size", type: "number", mutable: false, default_value: "100", options: [] },
+      { name: "region", type: "string", default_value: "us-east-1", options: [{ value: "us-east-1" }, { value: "eu-central-1" }] },
+      { name: "dotfiles_uri", type: "string", mutable: true, default_value: "" },
+      { name: "github_pat", display_name: "GitHub", description: "A personal access token", type: "string", mutable: true, default_value: credential },
+      { name: "agent_config", description: "Settings", type: "string", default_value: "masked-fixture-default", styling: { mask_input: true }, options: [{ value: "masked-fixture-option" }] },
+      { name: "scratch", type: "string", ephemeral: true, default_value: "x" },
+    ]));
+    const bin = fakeTools({
+      coder: `case "$*" in\n  "templates list -o json") cat "${fixtures}/templates.json" ;;\n  "whoami -o json") printf '[{"url":"https://coder.example.com"}]' ;;\n  "login token") echo login >> "${fixtures}/token-reads"; echo stored-session ;;\n  *) exit 1 ;;\nesac`,
+      curl: `for url; do :; done\ncat > "${fixtures}/header"\n[ "$url" = https://coder.example.com/api/v2/templateversions/v-active/rich-parameters ] || exit 22\nprintf '%s ' "$@" > "${fixtures}/curl-args"\ncat "${fixtures}/parameters.json"`,
+    });
     const code = codeIn(step(5));
-    expect(code).toContain("coder templates list -o json\n");
-    expect(code).toContain("{ printf 'Coder-Session-Token: '; coder login token; } | curl -q -fsS -H @- <coder address>/api/v2/templateversions/<active version id>/rich-parameters\n");
-    expect(words(step(5))).toContain("read `Template.active_version_id`");
+    expect(code).toContainEqual(expect.stringContaining("https://raw.githubusercontent.com/PostHog/hedge/main/scripts/template-parameters.sh -o ~/.cache/hedge-setup/template-parameters.sh"));
+    const command = code.find((line) => line.startsWith("sh ~/.cache/hedge-setup/template-parameters.sh "))!.trim().replace("~/.cache/hedge-setup/template-parameters.sh", join(root, "scripts/template-parameters.sh")).replace("<template>", "dev");
+    const env = { PATH: `${bin}:${process.env.PATH}`, HOME: fixtures };
+
+    const stored = await runShell(command, env);
+    const fromEnvironment = await runShell(command, { ...env, CODER_SESSION_TOKEN: "environment-session" });
+
+    expect([stored.code, stored.stderr]).toEqual([0, ""]);
+    expect(stored.stdout).toBe(["disk_size (Disk size): number, default 100", "region: string, default us-east-1, options us-east-1 | eu-central-1", "dotfiles_uri: string, mutable, no default", "github_pat (GitHub): string, mutable, secret, has a default", "agent_config: string, secret, has a default", "scratch: string, ephemeral, default x", ""].join("\n"));
+    expect(fromEnvironment.stdout).toBe(stored.stdout);
+    expect(readFileSync(join(fixtures, "header"), "utf8")).toBe("Coder-Session-Token: environment-session\n");
+    expect(readFileSync(join(fixtures, "token-reads"), "utf8")).toBe("login\n");
+    expect(readFileSync(join(fixtures, "curl-args"), "utf8")).not.toContain("session");
     expect(blocksIn(guide()).join("\n")).not.toContain("coder templates pull");
-    expect(words(step(5))).toContain("When that fails, open the template's page in the Coder web app");
   });
 
   test("gives the dotfiles the private profile's SSH address, names the dotfiles branch, and says a fresh node's start script fails until hedge devbox add", () => {
@@ -234,12 +276,31 @@ describe("the agent setup guide", () => {
     expect(words(step(5))).toContain("each `ssh coder.<node>` prints `A startup script exited with an error` and the start log. That is expected");
   });
 
-  test("checks the hub's own Coder session before it makes a token, and says what to do when Coder forbids tokens", () => {
+  test("checks the hub's own Coder session before it makes a token, and when Coder forbids tokens, asks for one as a file", () => {
     const code = codeIn(step(7)).join("\n");
     const whoami = code.indexOf(onHubLine("coder whoami && coder config-ssh --yes"));
     expect(whoami).toBeGreaterThanOrEqual(0);
     expect(whoami).toBeLessThan(code.indexOf("coder tokens create | ssh coder.<hub>"));
-    expect(words(step(7))).toContain("`rbac: forbidden`. Then ask the person for a session token from `<coder address>/cli-auth` with the secret prompt");
+    expect(words(step(7))).toContain("When `coder tokens create` prints `rbac: forbidden`, the Coder deployment forbids its members to make tokens");
+  });
+
+  test("the hub reads the whole Coder token from standard input, also without a final new line, and refuses an empty one", async () => {
+    const fixtures = temp.make("coder-");
+    const bin = fakeTools({ coder: `case "$1" in\n  login) printf '%s|%s' "$*" "$CODER_SESSION_TOKEN" > "${fixtures}/login" ;;\n  config-ssh) touch "${fixtures}/ssh-config" ;;\n  *) exit 1 ;;\nesac` });
+    const remote = remotePart(blockWith(step(7), "coder tokens create | ssh coder.<hub> '")).replaceAll("<coder address>", "https://coder.example.com");
+    const env = { PATH: `${bin}:/usr/bin:/bin`, HOME: fixtures };
+    const token = ["fixture", "session", "token"].join("-");
+
+    const fromFile = await runShell(remote, env, token);
+    expect(fromFile.code).toBe(0);
+    expect(readFileSync(join(fixtures, "login"), "utf8")).toBe(`login --use-token-as-session https://coder.example.com|${token}`);
+    expect(existsSync(join(fixtures, "ssh-config"))).toBe(true);
+
+    const fromPipe = await runShell(remote, env, `${token}2\n`);
+    expect([fromPipe.code, readFileSync(join(fixtures, "login"), "utf8")]).toEqual([0, `login --use-token-as-session https://coder.example.com|${token}2`]);
+
+    const empty = await runShell(remote, { ...env, HOME: temp.make("coder-") }, "\n");
+    expect([empty.code, empty.stderr]).toEqual([1, "No Coder token came in.\n"]);
   });
 
   test("on a rerun, says the profile's packs win over the page's picks", () => {
@@ -252,14 +313,38 @@ describe("the agent setup guide", () => {
     expect(words(step(1))).not.toContain("For each workspace that runs");
   });
 
-  test("names the hub before setup runs again when the gateway needs it", () => {
-    expect(words(step(7))).toContain("A line `To do: This machine cannot reach the MCP gateway`.** The profile turns on the hub pack, so the gateway needs a named hub. Run the `hedge hub here` of item 4 now");
+  test("names the hub before setup runs again when the gateway needs it, for the To do line of code 2 and the Fix line of the last check", () => {
+    expect(words(step(7))).toContain("a line `To do: This machine cannot reach the MCP gateway` or `Fix: This machine cannot reach the MCP gateway` means that the profile turns on the MCP gateway, and the gateway needs a named hub. Run `hedge hub status` on the hub. When it prints `The hub: not named.`, run the `hedge hub here` of item 4 now.");
   });
 
-  test("the Recovery note sends the proxy's failed Claude callback to the hub, as a file from the secret prompt", () => {
-    const note = readFileSync(join(root, "packs/recovery/SETUP.md"), "utf8");
-    expect(codeIn(note)).toContain(`ssh coder.<hub> 'sed "s/^/url = /" | curl -q -fsS -K -' < <file>\n`);
-    expect(words(note)).toContain("Ask for that whole address with the secret prompt, delivered as a file");
+  test("the Recovery note sends the proxy's Claude callback from a file to the waiting sign-in, past the hub's proxy, and never shows its code", async () => {
+    const received: string[] = [];
+    const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (request) => (received.push(new URL(request.url).pathname + new URL(request.url).search), new Response("signed in\n")) });
+    try {
+      const note = readFileSync(join(root, "packs/recovery/SETUP.md"), "utf8");
+      const remote = remotePart(blockWith(note, "ssh coder.<hub> '", "url = "));
+      const code = ["one", "time", "fixture"].join("-");
+      const proxy = "http://127.0.0.1:9";
+      const sent = await runShell(remote, { PATH: process.env.PATH ?? "", http_proxy: proxy, HTTP_PROXY: proxy, all_proxy: proxy }, `http://localhost:${server.port}/callback?code=${code}&state=s`);
+      expect(sent.code).toBe(0);
+      expect(received).toEqual([`/callback?code=${code}&state=s`]);
+      expect(`${sent.stdout}${sent.stderr}`).not.toContain(code);
+      expect(words(note)).toContain("Ask for that whole address with the secret prompt, delivered as a file");
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("adds the profile folder that the hub applies as its T3 Code project, also a Coder dotfiles checkout", async () => {
+    const home = temp.make("hub-");
+    const checkout = join(home, ".config/coderv2/dotfiles");
+    await saveMachine(home, { schema: 1, role: "hub", name: "hedge-hub", profileDir: checkout });
+    const bin = fakeTools({ t3: `printf '%s\\n' "$@" > "${home}/t3-args"` });
+    const remote = remotePart(blockWith(step(11), "ssh coder.<hub> '", "t3 project add"));
+    const added = await runShell(remote, { PATH: `${bin}:/usr/bin:/bin`, HOME: home });
+    expect(added.code).toBe(0);
+    expect(readFileSync(join(home, "t3-args"), "utf8")).toBe(["project", "add", "--title", "hedge-profile", checkout, ""].join("\n"));
+    expect(words(step(11))).toContain("open a thread in the `hedge-profile` project");
   });
 
   test("follows a team pack's own setup note first, at the path where setup keeps that team's pack", async () => {
@@ -472,11 +557,6 @@ describe("the agent setup guide", () => {
     expect(devboxesOf({ HEDGE_PROFILE_DIR: profile }, home)).toContain("coder.old-node");
     save(["coder.hub", "coder.node"]);
     expect(devboxesOf({ HEDGE_PROFILE_DIR: profile }, home)).toEqual(["coder.hub", "coder.node"]);
-  });
-
-  test("adds the profile as a T3 Code project at the folder where setup keeps it, under the name the habits use", () => {
-    expect(codeIn(step(11))).toContain(onHubLine(`t3 project add --title hedge-profile ${profilePath("~")}`) + "\n");
-    expect(words(step(11))).toContain("open a thread in the `hedge-profile` project");
   });
 
   test("fetches only files that are in the repo", () => {

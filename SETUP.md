@@ -258,34 +258,41 @@ says what to do with a template parameter that holds one.
    when they want another. Below, `<hub>` and `<node>` stand for them, and
    `<name>` for any of them.
 2. **Template.** List them with `coder templates list`. When there is one,
-   use it; ask only when there are more. Read its parameters from the Coder
-   API. `coder templates pull` needs an organization name that a member
-   often cannot pass, so do not use it. First find the template's id and
-   its active version:
+   use it; ask only when there are more. Read its parameters with the
+   engine's script. It asks the Coder API for the parameters of the
+   template's active version, with the session token on `curl`'s standard
+   input, so the token never shows. `coder templates pull` needs an
+   organization name that a member often cannot pass, so do not use it.
+   Download the script once, and read it:
 
    ```sh
-   coder templates list -o json
+   mkdir -p ~/.cache/hedge-setup && curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/scripts/template-parameters.sh -o ~/.cache/hedge-setup/template-parameters.sh && cat ~/.cache/hedge-setup/template-parameters.sh
    ```
 
-   In the entry whose `Template.name` is `<template>`, read
-   `Template.active_version_id`. Then read that version's parameters. The
-   session token goes to `curl` on its standard input, so it never shows:
+   Then run it:
 
    ```sh
-   { printf 'Coder-Session-Token: '; coder login token; } | curl -q -fsS -H @- <coder address>/api/v2/templateversions/<active version id>/rich-parameters
+   sh ~/.cache/hedge-setup/template-parameters.sh <template>
    ```
 
-   When that fails, open the template's page in the Coder web app,
+   It prints one line per parameter: its name, its type, and whether it
+   is `mutable`, `ephemeral`, or a `secret`. It prints a default value and
+   the allowed values only for a parameter that is not a secret. For a
+   secret, it prints only `has a default` or `no default`, because a
+   default can be a credential. It counts a parameter as a secret when its
+   name or description names a token, a key, a password, or another
+   credential, or when the form hides what you type.
+
+   When the script fails, open the template's page in the Coder web app,
    `<coder address>/templates/<template>`, and ask the person to read you
-   the parameters and their allowed values from it.
+   the parameter names and their allowed values from it, never a value of
+   a secret.
 
    Find the disk size, the region, the dotfiles, the dotfiles branch, the
-   secret parameters, and the ephemeral parameters, those with
-   `"ephemeral": true`.
+   secret parameters, and the ephemeral parameters.
    A secret is a parameter that holds a token, a key, a password, or another
-   credential: its name or description says so, or the form hides what you
-   type. Never ask about a secret. Sort each other parameter by the first
-   row of this table that fits it:
+   credential: the script marks it `secret`. Never ask about a secret.
+   Sort each other parameter by the first row of this table that fits it:
 
    | Parameter | What you do |
    | --- | --- |
@@ -441,15 +448,16 @@ Every command in this step runs on the hub over SSH. Wait until
    token here and send it on standard input, so it never shows in the chat:
 
    ```sh
-   coder tokens create | ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; { command -v coder >/dev/null || { case $(uname -m) in x86_64) a=amd64;; aarch64|arm64) a=arm64;; *) exit 1;; esac; mkdir -p "$HOME/.local/bin" && curl -fsSL "<coder address>/bin/coder-linux-$a" -o "$HOME/.local/bin/coder" && chmod +x "$HOME/.local/bin/coder"; }; } && IFS= read -r token && CODER_SESSION_TOKEN="$token" coder login --use-token-as-session <coder address> && coder config-ssh --yes'
+   coder tokens create | ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; { command -v coder >/dev/null || { case $(uname -m) in x86_64) a=amd64;; aarch64|arm64) a=arm64;; *) exit 1;; esac; mkdir -p "$HOME/.local/bin" && curl -fsSL "<coder address>/bin/coder-linux-$a" -o "$HOME/.local/bin/coder" && chmod +x "$HOME/.local/bin/coder"; }; } && token=$(tr -d "[:space:]") && { [ -n "$token" ] || { echo "No Coder token came in." >&2; exit 1; }; } && CODER_SESSION_TOKEN="$token" coder login --use-token-as-session <coder address> && coder config-ssh --yes'
    ```
 
-   When it ends with code 1 and prints nothing, `coder tokens create` failed
-   here, and the hub read no token. A Coder deployment can forbid its
-   members to make tokens, with `rbac: forbidden`. Then ask the person for a session token from
+   When `coder tokens create` prints `rbac: forbidden`, the Coder deployment
+   forbids its members to make tokens, and the hub prints
+   `No Coder token came in.` Then ask the person for a session token from
    `<coder address>/cli-auth` with the secret prompt, delivered as a file,
    and run the same `ssh coder.<hub> '…'` part with `< <file>` instead of the
-   pipe.
+   pipe. The hub reads the whole file, also when it does not end with a
+   new line.
 
 2. **Install.** Download the install script on the hub and read it. Keep it
    in view, because a pipe into `sh` hides what runs:
@@ -509,9 +517,12 @@ Every command in this step runs on the hub over SSH. Wait until
      ssh -t coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; claude auth login'
      ```
 
-   - **A line `To do: This machine cannot reach the MCP gateway`.** The
-     profile turns on the hub pack, so the gateway needs a named hub. Run
-     the `hedge hub here` of item 4 now, before you run setup again.
+   With code `2`, or with code `1` at setup's last step, `Check everything`,
+   a line `To do: This machine cannot reach the MCP gateway` or
+   `Fix: This machine cannot reach the MCP gateway` means that the profile
+   turns on the MCP gateway, and the gateway needs a named hub. Run
+   `hedge hub status` on the hub. When it prints `The hub: not named.`,
+   run the `hedge hub here` of item 4 now.
 
    Then run the same setup command again. Every step skips what is done. On
    any other stop, read the last lines, explain them, and fix what they
@@ -752,11 +763,13 @@ is done, and to start one test thread to see it open on a node.
 ## 11. Hand over
 
 Add their profile as a T3 Code project named `hedge-profile` on the hub, so
-they can open a thread there. Skip it when T3 Code already lists that
-project:
+they can open a thread there. Use the folder that the hub applies, which
+setup saves as `profileDir` in `~/.config/hedge/machine.json`: it can be the
+checkout of the Coder dotfiles instead of `~/.local/share/hedge/profile`.
+Skip it when T3 Code already lists a project at that folder:
 
 ```sh
-ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; t3 project add --title hedge-profile ~/.local/share/hedge/profile'
+ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; dir=$(sed -n "s/^ *\"profileDir\": \"\(.*\)\",\{0,1\}$/\1/p" ~/.config/hedge/machine.json) && [ -n "$dir" ] && t3 project add --title hedge-profile "$dir"'
 ```
 
 Then give them these habits, one line each:
