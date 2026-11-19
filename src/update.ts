@@ -1,5 +1,6 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { hedgeOnMac } from "./legacy.ts";
 import { repoUrl } from "./pack/sources.ts";
 import type { ProfileFile } from "./pack/types.ts";
 
@@ -8,6 +9,7 @@ export type UpdateOptions = {
   engineDir: string;
   profileDir: string;
   engine: ProfileFile["engine"];
+  platform: NodeJS.Platform;
   print: (line: string) => void;
   runApply: () => Promise<number>;
 };
@@ -101,8 +103,9 @@ async function installPackages(engineDir: string) {
 async function rollBack(options: UpdateOptions, before: string, installError: string) {
   const failed = `hedge update: could not install the engine's packages in ${options.engineDir}`;
   const restored = await git(options.engineDir, "checkout", "-q", "--force", "--detach", before);
-  if (!restored.ok) return options.print(`${failed}, and could not roll the engine back to ${before.slice(0, 7)}: ${restored.err}. Run get.sh again to repair it.\n${installError}`);
-  const repair = (await installPackages(options.engineDir)) === undefined ? "" : " Its packages did not install either, so run get.sh again to repair it.";
+  const onMac = options.platform === "darwin";
+  if (!restored.ok) return options.print(`${failed}, and could not roll the engine back to ${before.slice(0, 7)}: ${restored.err}. ${onMac ? hedgeOnMac : "Run get.sh again to repair it."}\n${installError}`);
+  const repair = (await installPackages(options.engineDir)) === undefined ? "" : onMac ? ` ${hedgeOnMac}` : " Its packages did not install either, so run get.sh again to repair it.";
   options.print(`${failed}, so the update was rolled back. The engine stays at ${before.slice(0, 7)}.${repair}\n${installError}`);
 }
 

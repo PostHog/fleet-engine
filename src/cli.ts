@@ -30,7 +30,7 @@ import { spawnRunner, type CommandRunner } from "./adapters/run.ts";
 import { become, canBecome, type Become } from "./runner/become.ts";
 import { trackCommand } from "./usage/usage.ts";
 import { asHedge } from "./reconciler/engine-command.ts";
-import { adoptLegacyEnv, fleetIsHedge, isOldJob, profileFile, renamedPath, underLegacyPath, withLegacyNames } from "./legacy.ts";
+import { adoptLegacyEnv, fleetNotice, isOldJob, profileFile, renamedPath, underLegacyPath, withLegacyNames } from "./legacy.ts";
 import { importFleet } from "./import-fleet.ts";
 import { fleetAdapter, type FleetAdapter } from "./adapters/fleet/adapter.ts";
 
@@ -102,7 +102,7 @@ export async function main(argv: string[], options: CliOptions): Promise<number>
 
 /** An engine in a Fleet path from before the rename changes nothing. An old job exits 0 so that it raises no alert; every other command exits 1. */
 function inert(argv: string[], options: CliOptions) {
-  (options.fail ?? options.print)(fleetIsHedge);
+  (options.fail ?? options.print)(fleetNotice(options.platform));
   return isOldJob(argv) ? 0 : 1;
 }
 
@@ -235,6 +235,7 @@ async function runUpdate(options: CliOptions) {
     engineDir: options.engineRoot,
     profileDir,
     engine: profile.engine,
+    platform: options.platform,
     print: options.print,
     runApply: () => Bun.spawn(["sh", join(options.engineRoot, "hedge"), "apply"], { stdio: ["inherit", "inherit", "inherit"], env: { ...Bun.env, HOME: options.home } }).exited,
   });

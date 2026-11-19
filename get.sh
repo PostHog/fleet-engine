@@ -10,8 +10,23 @@
 set -eu
 
 if [ "$(uname -s)" = Darwin ]; then
+  uid=$(id -u)
+  old_jobs=$({
+    for plist in "$HOME"/Library/LaunchAgents/*.plist; do [ -e "$plist" ] && basename "$plist" .plist; done
+    launchctl list 2>/dev/null | sed 's/.*[[:space:]]//'
+  } | grep -E '^(dev[.]fleet|com[.]fleet|dev[.]hedge)[.]' | sort -u)
+  for label in $old_jobs; do
+    launchctl bootout "gui/$uid/$label" >/dev/null 2>&1 || :
+    launchctl disable "gui/$uid/$label" >/dev/null 2>&1 || :
+    if launchctl print "gui/$uid/$label" >/dev/null 2>&1; then
+      printf 'Hedge: %s\n' "the launchd job $label of an earlier Fleet or Hedge still runs. Stop it with: launchctl bootout gui/$uid/$label" >&2
+      exit 1
+    fi
+    printf 'Hedge: %s\n' "stopped and turned off the launchd job $label of an earlier Fleet or Hedge, and kept its files." >&2
+  done
   printf 'Hedge: %s\n' "Hedge runs on cloud boxes, not on a Mac. Your Mac only runs the T3 Code app. To set up your hub, follow https://posthog.github.io/hedge/#start" >&2
-  exit 1
+  [ -n "$old_jobs" ] || exit 1
+  exit 0
 fi
 
 engine_slug=PostHog/hedge

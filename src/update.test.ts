@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { ProfileFile } from "./pack/types.ts";
 import { isolateGit, spawnGit, template, tempDirs } from "./testing/git.ts";
 import { spawnAsync } from "./testing/spawn.ts";
+import { hedgeOnMac } from "./legacy.ts";
 import { noticePath, readNotice, update } from "./update.ts";
 import { main } from "./cli.ts";
 
@@ -41,7 +42,7 @@ async function engineCheckout(remote: string, ref: string) {
   return dir;
 }
 
-async function run(engineDir: string, engine: ProfileFile["engine"], profileDir = temp.make("profile-")) {
+async function run(engineDir: string, engine: ProfileFile["engine"], profileDir = temp.make("profile-"), platform: NodeJS.Platform = "linux") {
   const home = temp.make("home-");
   const lines: string[] = [];
   let applied = 0;
@@ -52,7 +53,7 @@ async function run(engineDir: string, engine: ProfileFile["engine"], profileDir 
     appliedProfile = existsSync(answers) ? readFileSync(answers, "utf8") : undefined;
     return 0;
   };
-  const code = await update({ home, engineDir, profileDir, engine, print: (line) => lines.push(line), runApply });
+  const code = await update({ home, engineDir, profileDir, engine, platform, print: (line) => lines.push(line), runApply });
   return { code, home, applied, appliedProfile, output: lines.join("\n"), version: await Bun.file(join(engineDir, "VERSION")).text() };
 }
 
@@ -178,6 +179,21 @@ describe("hedge update", () => {
     expect(result).toMatchObject({ code: 1, applied: 0, version: "v0.1.0" });
     expect(await spawnGit(engineDir, "rev-parse", "HEAD")).toBe(before);
     expect(result.output).toContain(`could not install the engine's packages in ${engineDir}, so the update was rolled back. The engine stays at ${before.slice(0, 7)}.\n`);
+  });
+
+  test("on a Mac, an update that cannot repair the engine points at the setup page and at the get.sh run that stops Hedge there, not at a get.sh install", async () => {
+    const remote = await engineRemote(["v0.1.0"]);
+    writeFileSync(join(remote, "package.json"), JSON.stringify({ name: "engine", dependencies: { missing: "file:./missing" } }));
+    await spawnGit(remote, "commit", "-q", "-am", "v0.1.1");
+    await spawnGit(remote, "tag", "v0.1.1");
+    const engineDir = await engineCheckout(remote, "v0.1.1");
+    writeFileSync(join(remote, "VERSION"), "v0.2.0");
+    await spawnGit(remote, "commit", "-q", "-am", "v0.2.0");
+    await spawnGit(remote, "tag", "v0.2.0");
+    const onMac = await run(engineDir, { repo: remote, ref: "v0.1.1", channel: "release" }, undefined, "darwin");
+    expect(onMac.code).toBe(1);
+    expect(onMac.output).not.toContain("run get.sh again to repair it");
+    expect(onMac.output).toContain(`so the update was rolled back. The engine stays at ${(await spawnGit(engineDir, "rev-parse", "HEAD")).slice(0, 7)}. ${hedgeOnMac}`);
   });
 
   test("puts back the old engine's packages when the new engine's install fails halfway", async () => {
