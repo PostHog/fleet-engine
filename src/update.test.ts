@@ -57,6 +57,17 @@ async function run(engineDir: string, engine: ProfileFile["engine"], profileDir 
 }
 
 describe("hedge update", () => {
+  test("keeps a Hedge origin when the profile still names the engine repository from before the rename", async () => {
+    const remote = await engineRemote(["v0.1.0", "v0.1.1"]);
+    const engineDir = await engineCheckout(remote, "v0.1.0");
+
+    const result = await run(engineDir, { repo: join(temp.make(), "fleet-engine"), ref: "v0.1.0", channel: "release" });
+
+    expect(result.code).toBe(0);
+    expect(result.version).toBe("v0.1.1");
+    expect((await spawnGit(engineDir, "remote", "get-url", "origin")).trim()).toBe(remote);
+  });
+
   test("moves the release channel to the newest tag of its major and reports a new major", async () => {
     const remote = await engineRemote(["v0.1.0", "v0.1.1", "v0.2.0", "v1.0.0"]);
     const result = await run(await engineCheckout(remote, "v0.1.0"), { repo: remote, ref: "v0.1.0", channel: "release" });
