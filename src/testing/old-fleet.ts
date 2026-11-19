@@ -1,12 +1,13 @@
 import type { OldTasks } from "../adapters/fleet/adapter.ts";
 import type { CommandRunner } from "../adapters/run.ts";
 
-/** launchd for uid 501. It refuses to load a dev.hedge or com.hedge agent while its dev.fleet or com.fleet agent runs. stuck agents ignore bootout; unclear ones make launchctl print fail. */
+/** launchd for uid 501. It refuses to load a dev.hedge or com.hedge agent while its dev.fleet or com.fleet agent runs. stuck agents ignore bootout; unclear ones make launchctl print fail; failing ones do not load. */
 export function fakeLaunchd(oldLabel: (label: string) => string = (label) => label.replace(/^(dev|com)\.hedge\./, "$1.fleet.").replace(/\.hedge-/, ".fleet-")) {
   const loaded = new Set<string>();
   const disabled = new Set<string>();
   const stuck = new Set<string>();
   const unclear = new Set<string>();
+  const failing = new Set<string>();
   const calls: string[][] = [];
   const label = (target: string) => target.replace(/^gui\/501\//, "");
   const run: CommandRunner = async (command) => {
@@ -20,11 +21,12 @@ export function fakeLaunchd(oldLabel: (label: string) => string = (label) => lab
     if (verb === "bootstrap") {
       const name = file!.split("/").at(-1)!.replace(/\.plist$/, "");
       if (loaded.has(oldLabel(name))) throw new Error(`launchd loaded ${name} while ${oldLabel(name)} still runs`);
+      if (failing.has(name)) return { code: 5, stdout: "", stderr: "Bootstrap failed: 5: Input/output error\n" };
       loaded.add(name);
     }
     return { code: 0, stdout: "" };
   };
-  return { run, loaded, disabled, stuck, unclear, calls };
+  return { run, loaded, disabled, stuck, unclear, failing, calls };
 }
 
 /** The Docker CLI. down makes every command fail as it does while the daemon is stopped. */

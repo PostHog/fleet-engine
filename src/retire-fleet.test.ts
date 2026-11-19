@@ -165,6 +165,33 @@ describe("hedge apply while Fleet still runs", () => {
     expect(linux.systemd.units.get("hedge-watch.service")).toEqual({ active: true, enabled: true });
   });
 
+  test("on Linux, exits 1 when the new unit does not start after retire, and the old unit stays off", async () => {
+    const linux = machine("linux");
+    linux.systemd.units.set("fleet-watch.service", { active: true, enabled: true });
+    linux.systemd.failing.add("hedge-watch.service");
+    expect((await linux.hedge(["retire-fleet"])).code).toBe(0);
+
+    const applied = await linux.hedge(["apply", "--profile", profileDir(["watcher"])]);
+
+    expect(applied.code).toBe(1);
+    expect(applied.output).toContain("systemd did not start the watch job (Job for hedge-watch.service failed because the control process exited with error code.).");
+    expect(applied.output).toContain("Hedge could not apply your profile.");
+    expect(linux.systemd.units.get("fleet-watch.service")).toEqual({ active: false, enabled: false });
+  });
+
+  test("on a Mac, exits 1 when the new agent does not load after retire, and the old agent stays off", async () => {
+    const mac = machine("darwin");
+    mac.launchd.loaded.add("dev.fleet.watch");
+    mac.launchd.failing.add("dev.hedge.watch");
+    expect((await mac.hedge(["retire-fleet"])).code).toBe(0);
+
+    const applied = await mac.hedge(["apply", "--profile", profileDir(["watcher"])]);
+
+    expect(applied.code).toBe(1);
+    expect(applied.output).toContain("launchd did not load the watch job.");
+    expect([...mac.launchd.loaded].filter((label) => label.endsWith(".watch"))).toEqual([]);
+  });
+
   test("on a Mac, exits 1 and loads no dev.hedge agent while the dev.fleet one is loaded", async () => {
     const mac = machine("darwin");
     mac.launchd.loaded.add("dev.fleet.watch");
