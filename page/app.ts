@@ -132,13 +132,12 @@ function clips() {
   const videos = document.querySelectorAll<HTMLVideoElement>("video.clip");
   if (!videos.length || calm() || !("IntersectionObserver" in window)) return;
   const observer = new IntersectionObserver((entries) => {
-    for (const entry of entries.filter((item) => item.intersectionRatio >= 0.5)) {
-      const video = entry.target as HTMLVideoElement;
-      observer.unobserve(video);
-      if (video.paused && video.currentTime === 0) start(video);
-    }
+    for (const entry of entries) if (entry.intersectionRatio >= 0.5) start(entry.target as HTMLVideoElement);
   }, { threshold: 0.5 });
-  for (const video of videos) observer.observe(video);
+  for (const video of videos) {
+    video.addEventListener("play", () => observer.unobserve(video));
+    observer.observe(video);
+  }
 }
 
 const chooserForm = document.getElementById("chooser") as HTMLFormElement | null;

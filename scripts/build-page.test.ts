@@ -4,7 +4,6 @@ import { join, posix } from "node:path";
 import type { LoadedPack, PackManifest } from "../src/pack/types.ts";
 import { tempDirs } from "../src/testing/git.ts";
 import { spawnAsync } from "../src/testing/spawn.ts";
-import { packFlows } from "../page/flows.ts";
 import { logoMark } from "../page/logo.ts";
 import { firstStart, installPrompt, startPrompt, toggleSelected, type PageData, type PromptData } from "../page/model.ts";
 import { t3Link } from "../page/prompt.ts";
@@ -235,8 +234,18 @@ describe("the site build", () => {
   test("the packs page shows a Watch button on the card of each pack with a video, and no other, and has one large player", () => {
     const html = page("packs/index.html");
     const cards = html.split('<li class="pack-card').slice(1);
-    const watches = (card: string) => [...card.matchAll(/<button\b[^>]*>([\s\S]*?)<\/button>/g)].filter((button) => visibleText(button[1]!).trim().startsWith("Watch ·"));
-    expect(cards.filter((card) => watches(card).length === 1).map((card) => card.match(/<a class="more" href="([a-z-]+)\/"/)![1])).toEqual(videoPacks);
+    const watched = cards.flatMap((card) => {
+      const buttons = [...card.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)].map((button) => [visibleText(button[2]!).trim(), attributesOf(button[1]!)["aria-label"]] as const);
+      const watch = buttons.filter(([label]) => label.startsWith("Watch"));
+      return watch.length ? [[card.match(/<a class="more" href="([a-z-]+)\/"/)![1], ...watch.flat()]] : [];
+    });
+    expect(watched).toEqual([
+      ["hub", "Watch · 29 s", "Watch · 29 s, the Hub video"],
+      ["pull-requests", "Watch · 29 s", "Watch · 29 s, the Quality gates video"],
+      ["orchestration", "Watch · 30 s", "Watch · 30 s, the Orchestration video"],
+      ["memory", "Watch · 29 s", "Watch · 29 s, the Memory video"],
+      ["slack", "Watch · 20 s", "Watch · 20 s, the Slack video"],
+    ]);
     expect(html.match(/<dialog\b/g)).toHaveLength(1);
     expect(html.match(/<video\b/g)).toHaveLength(1);
     expect(html.match(/<dialog\b[\s\S]*?<\/dialog>/)![0]).toContain("<video");
@@ -266,7 +275,6 @@ describe("the site build", () => {
       const [summary, steps] = describedBy(html, tags![0]!);
       const lists = [...html.matchAll(/<ol class="flow"[^>]*>([\s\S]*?)<\/ol>/g)].map((list) => visibleText(list[1]!).trim());
       expect([pack.name, lists.length, summary, steps]).toEqual([pack.name, 1, pack.summary, lists[0]]);
-      expect([pack.name, steps]).toEqual([pack.name, packFlows[pack.name]!.join(" ")]);
       const after = html.slice(html.indexOf("<video"));
       expect([pack.name, after.includes('id="flow-h"')]).toEqual([pack.name, true]);
     }

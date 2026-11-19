@@ -292,4 +292,14 @@ describe("the pack videos in a browser", () => {
     scrollTo(window, 0.6);
     expect(clip.paused).toBe(true);
   });
+
+  test("a pack page's video that the visitor played and paused before its first frame, while less than half showed, stays paused when they scroll to it", () => {
+    const window = visit("packs/hub/index.html");
+    const clip = video(window, "video.clip");
+    scrollTo(window, 0.4);
+    clip.play();
+    clip.pause();
+    scrollTo(window, 0.6);
+    expect([clip.paused, clip.currentTime]).toEqual([true, 0]);
+  });
 });
