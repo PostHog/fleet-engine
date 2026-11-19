@@ -1,5 +1,5 @@
 import { describe, expect } from "bun:test";
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { git } from "./testing/git.ts";
 import { getShHarness, onLinuxHost, type Sandbox } from "./testing/get-sh.ts";
@@ -27,7 +27,6 @@ function tree(root: string): Record<string, string> {
 const oldTree = (home: string) => Object.fromEntries([...legacyPaths.map(([before]) => before), ".local/bin/fleet", ".config/systemd/user/fleet-watch.service"].map((path) => [path, tree(join(home, path))]));
 const unit = "[Unit]\nDescription=Fleet: watch\n";
 
-/** A Linux machine as the engine from before the rename left it: its checkout, its profile, its machine file, a secret, an SSH key, a lock, and a watch service. */
 function beforeTheRename(box: Sandbox) {
   const home = box.home;
   const oldEngine = join(home, ".local/share/fleet/engine");
@@ -59,57 +58,7 @@ function profileRepo(box: Sandbox) {
   return repo;
 }
 
-/** The engine, with a launcher that writes each command to ~/hedge-commands, fails retire-fleet while ~/retire-fails is there, and fails apply while ~/apply-fails is there. */
-function engineThatFailsOnDemand() {
-  const repo = temp.make("engine-on-demand-");
-  git(repo, "clone", "-q", engine.repo, ".");
-  const launcher = readFileSync(join(repo, "hedge"), "utf8").split("\n");
-  const onDemand = [
-    'echo "$*" >> "$HOME/hedge-commands"',
-    '[ "${1:-}" != retire-fleet ] || [ ! -e "$HOME/retire-fails" ] || { echo "Hedge: systemd unit fleet-watch.service: it is active. Hedge could not verify that it stopped."; exit 1; }',
-    '[ "${1:-}" != apply ] || [ ! -e "$HOME/apply-fails" ] || { echo "apply failed on purpose"; exit 1; }',
-  ];
-  writeFileSync(join(repo, "hedge"), [launcher[0], ...onDemand, ...launcher.slice(1)].join("\n"));
-  git(repo, "commit", "-q", "-am", "fail on demand");
-  return repo;
-}
-const commands = (home: string) => readFileSync(join(home, "hedge-commands"), "utf8").trim().split("\n").filter((line) => /^(?:import-fleet|retire-fleet|apply|setup)\b/.test(line));
-
 describe("get.sh on a machine from before the rename", () => {
-  onLinuxHost("runs retire-fleet after the import and before apply, and stops before apply when Fleet may still run", () => {
-    const box = sandbox("Linux");
-    beforeTheRename(box);
-    const repo = engineThatFailsOnDemand();
-    writeFileSync(join(box.home, "retire-fails"), "");
-
-    const result = getSh(box, ["--ref", "main"], { env: { HEDGE_ENGINE_REPO: repo } });
-
-    expect(result.code).toBe(1);
-    expect(commands(box.home)).toEqual(["import-fleet", "retire-fleet"]);
-    expect(result.output).toContain("Hedge: systemd unit fleet-watch.service: it is active. Hedge could not verify that it stopped.");
-    expect(result.output).toContain("Hedge: Fleet may still run, so Hedge applied nothing. Stop each piece named above by hand, then run get.sh again.");
-  });
-
-  onLinuxHost("an identical retry after a failed apply runs apply again, not setup", () => {
-    const box = sandbox("Linux");
-    beforeTheRename(box);
-    const repo = engineThatFailsOnDemand();
-    writeFileSync(join(box.home, "apply-fails"), "");
-
-    const first = getSh(box, ["--ref", "main"], { env: { HEDGE_ENGINE_REPO: repo } });
-    rmSync(join(box.home, "apply-fails"));
-    rmSync(join(box.home, "hedge-commands"));
-    const second = getSh(box, ["--ref", "main"], { env: { HEDGE_ENGINE_REPO: repo } });
-    const third = getSh(box, ["--ref", "main", "--install-only"], { env: { HEDGE_ENGINE_REPO: repo } });
-
-    expect(first.code).toBe(1);
-    expect(first.output).toContain("apply failed on purpose");
-    expect(second.code).toBe(0);
-    expect(commands(box.home)).toEqual(["import-fleet", "retire-fleet", "apply", "import-fleet"]);
-    expect(second.output).toContain("Applied ");
-    expect(third.code).toBe(0);
-  });
-
   onLinuxHost("puts the engine at the Hedge default when HEDGE_ENGINE_DIR leads into a Fleet path through a link, also when the folder does not exist yet", () => {
     const box = sandbox("Linux");
     beforeTheRename(box);

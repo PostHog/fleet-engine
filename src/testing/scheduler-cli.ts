@@ -1,18 +1,17 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { fakeCrontab, runners } from "./old-fleet.ts";
 import { fakeSystemd } from "./systemd.ts";
 
-/** What the fake schedulers hold between calls. both names each time a new unit started while its old one ran. */
-export type SchedulerState = { units: Record<string, { active: boolean; enabled: boolean }>; failing: string[]; crontab: string; both: string[] };
+export type SchedulerState = { units: Record<string, { active: boolean; enabled: boolean }>; failing: string[]; crontab: string; both: string[]; stuck?: string[]; lastWords?: { unit: string; file: string; line: string }[] };
 
 export const emptySchedulers = (): SchedulerState => ({ units: {}, failing: [], crontab: "", both: [] });
 
-/** Runs one systemctl or crontab command against the state in a file, as a real scheduler keeps its state between commands. */
 export async function runScheduler(stateFile: string, command: string[], input: string | undefined) {
   const state = JSON.parse(readFileSync(stateFile, "utf8")) as SchedulerState;
   const systemd = fakeSystemd();
   for (const [unit, value] of Object.entries(state.units)) systemd.units.set(unit, value);
   for (const unit of state.failing) systemd.failing.add(unit);
+  for (const unit of state.stuck ?? []) systemd.stuck.add(unit);
   const cron = fakeCrontab(state.crontab);
   try {
     return await runners(systemd.run, cron.run)(command, input === undefined ? {} : { input });
@@ -20,6 +19,7 @@ export async function runScheduler(stateFile: string, command: string[], input: 
     state.both.push((error as Error).message);
     return { code: 1, stdout: "", stderr: `${(error as Error).message}\n` };
   } finally {
+    for (const { unit, file, line } of state.lastWords ?? []) if (state.units[unit]?.active && !systemd.units.get(unit)?.active) appendFileSync(file, line);
     writeFileSync(stateFile, JSON.stringify({ ...state, units: Object.fromEntries(systemd.units), crontab: cron.table.text }));
   }
 }

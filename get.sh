@@ -24,7 +24,6 @@ fail() {
 }
 has() { command -v "$1" >/dev/null 2>&1; }
 
-# A HEDGE_ variable that is set, even to an empty string, wins over its FLEET_ variable from before the rename.
 setting() {
   value=$2
   from=
@@ -42,7 +41,6 @@ in_fleet_path() {
   return 1
 }
 
-# The path with every link resolved, also the links above a part of it that does not exist yet.
 real_path() {
   rest=
   path=$1
@@ -56,7 +54,6 @@ real_path() {
 
 leads_into_fleet() { in_fleet_path "$1" || in_fleet_path "$(real_path "$1")"; }
 
-# The first link on the way to a path that leads into a Fleet path.
 fleet_link() {
   path=$1
   while [ "$path" != "$HOME" ] && [ -n "$path" ]; do
@@ -73,7 +70,6 @@ refuse_fleet() {
 
 old_launcher() { sed -n "s|^exec sh '\\(.*\\)/fleet' \"\\\$@\"\$|\\1|p" "$HOME/.local/bin/fleet" 2>/dev/null; }
 
-# A checkout of the engine from before the rename: its launcher is fleet, its remote is fleet-engine, or the old fleet command runs it.
 fleet_checkout() {
   [ -d "$1" ] || return 1
   { [ -e "$1/fleet" ] && [ ! -e "$1/hedge" ]; } && return 0
@@ -108,7 +104,6 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# A preview passes --dry-run to hedge. It never copies or stops the setup from before the rename.
 preview=
 for arg in "$@"; do [ "$arg" != --dry-run ] || preview=1; done
 
@@ -364,11 +359,11 @@ login_path
 say "Engine ready at $ref in $engine_dir."
 
 machine="$HOME/.config/hedge/machine.json"
-# While this is there, the machine file came from Fleet and apply has not passed yet, so the next run applies again.
 pending="$HOME/.local/state/hedge/fleet-apply-pending"
 renamed=
 [ "${launcher##*/}" != hedge ] || [ -n "$preview" ] || renamed=1
 if [ -n "$renamed" ]; then
+  sh "$launcher" retire-fleet || fail "Fleet may still run, so Hedge copied and applied nothing. Stop each piece named above by hand, then run get.sh again."
   [ -e "$machine" ] || : >"$pending"
   sh "$launcher" import-fleet || fail "could not copy the setup from before the rename."
   grep -q '"profileDir"' "$machine" 2>/dev/null || rm -f "$pending"
@@ -378,13 +373,14 @@ fi
 
 if [ -n "$preview" ]; then
   say "This is a preview, so Hedge did not copy or stop the setup from before the rename. Without --dry-run, get.sh stops each piece of Fleet named below before it applies."
-  [ "${launcher##*/}" != hedge ] || sh "$launcher" retire-fleet --dry-run || exit $?
+  if [ "${launcher##*/}" != hedge ]; then :
+  elif grep -qF 'retire-fleet [--dry-run]' "$engine_dir/src/cli.ts"; then sh "$launcher" retire-fleet --dry-run || exit $?
+  else say "The engine at $ref cannot list Fleet without stopping it, so this preview does not name what still runs."
+  fi
   if [ -z "$profile" ]; then
     say "A preview without --profile runs no setup. Run get.sh without --dry-run to set up, or add --profile <dir> to preview the apply."
     exit 0
   fi
-elif [ -n "$renamed" ] && ! sh "$launcher" retire-fleet; then
-  fail "Fleet may still run, so Hedge applied nothing. Stop each piece named above by hand, then run get.sh again."
 fi
 if [ -n "$profile" ]; then
   sh "$launcher" apply --profile "$profile" "$@" || exit $?

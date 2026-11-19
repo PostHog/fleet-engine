@@ -12,6 +12,7 @@ export function fakeSystemd() {
   const fileless = new Set<string>();
   const failing = new Set<string>();
   const broken = new Set<string>();
+  const stuck = new Set<string>();
   const starts = new Map<string, number>();
   const calls: string[][] = [];
   const start = (unit: string) => {
@@ -39,8 +40,8 @@ export function fakeSystemd() {
     if (verb === "enable") units.set(unit, { ...state, enabled: true });
     if ((verb === "restart" || verb === "start") && failing.has(unit)) return { code: 1, stdout: "", stderr: `Job for ${unit} failed because the control process exited with error code.\n` };
     if (verb === "restart" || verb === "start") start(unit), units.set(unit, { ...state, active: true }), starts.set(unit, (starts.get(unit) ?? 0) + 1);
-    if (verb === "disable") units.set(unit, { active: rest.includes("--now") ? false : state.active, enabled: false });
-    if (verb === "stop") units.set(unit, { ...state, active: false });
+    if (verb === "disable") units.set(unit, { active: rest.includes("--now") && !stuck.has(unit) ? false : state.active, enabled: false });
+    if (verb === "stop" && !stuck.has(unit)) units.set(unit, { ...state, active: false });
     return { code: 0, stdout: "" };
   };
   const service = (home: string, id: string) => {
@@ -49,5 +50,5 @@ export function fakeSystemd() {
     return parts.every(Boolean) ? "running" : parts.some(Boolean) ? "partly removed" : "gone";
   };
   const started = (id: string) => starts.get(`hedge-${id}.service`) ?? 0;
-  return { run, service, started, units, shown, fileless, failing, broken, calls };
+  return { run, service, started, units, shown, fileless, failing, broken, stuck, calls };
 }
