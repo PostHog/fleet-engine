@@ -76,3 +76,20 @@ export function underLegacyPath(home: string, path: string): boolean {
   const homes = new Set([resolve(home), real(home)]);
   return [resolve(path), real(path)].some((full) => [...homes].some((root) => full.startsWith(`${root}/`) && inLegacyPath(full.slice(root.length + 1))));
 }
+
+/** The Hedge path of a path in a Fleet path from before the rename, as written or with its links resolved. */
+export function renamedPath(home: string, path: string): string | undefined {
+  for (const full of [resolve(path), real(path)])
+    for (const root of new Set([resolve(home), real(home)])) {
+      const after = full.startsWith(`${root}/`) ? renamed(full.slice(root.length + 1)) : undefined;
+      if (after) return join(root, after);
+    }
+  return undefined;
+}
+
+/** Whether path, as written or with its links resolved, is in a Fleet path from before the rename below any home folder. */
+export const inAnyLegacyPath = (path: string): boolean => [resolve(path), real(path)].some((full) => legacyPaths.some(([before]) => full.includes(`/${before}/`) || full.endsWith(`/${before}`)));
+
+export function refuseLegacyPath(path: string) {
+  if (inAnyLegacyPath(path)) throw new Error(`${path} is in a Fleet path from before the rename, so Hedge does not write there.`);
+}

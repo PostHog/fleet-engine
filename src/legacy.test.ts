@@ -6,6 +6,7 @@ import { jobsAdapter } from "./adapters/jobs/adapter.ts";
 import type { CommandRunner } from "./adapters/run.ts";
 import { main } from "./cli.ts";
 import { fleetIsHedge, legacyPaths, underLegacyPath } from "./legacy.ts";
+import { saveAnswers, saveMachine } from "./profile/profile.ts";
 import { filesAdapter, type Adapter } from "./reconciler/apply.ts";
 import { fakeLaunchd } from "./testing/old-fleet.ts";
 import { fakeSystemd } from "./testing/systemd.ts";
@@ -394,6 +395,82 @@ describe("a profile from before the rename", () => {
     const profile = profileDir();
     writeFileSync(join(profile, "fleet.json"), "not json");
     expect((await hedge(["apply", "--profile", profile], home)).code).toBe(0);
+  });
+});
+
+describe("a profile in a Fleet path from before the rename", () => {
+  const oldProfile = (home: string) => {
+    const old = join(home, ".local/share/fleet/profile");
+    cpSync(profileDir(), old, { recursive: true });
+    return old;
+  };
+  const machineFile = (home: string) => join(home, ".config/hedge/machine.json");
+
+  test("apply --profile uses the Hedge copy of the profile and remembers the copy", async () => {
+    const home = temp.make("home-");
+    const old = oldProfile(home);
+    cpSync(old, join(home, ".local/share/hedge/profile"), { recursive: true });
+    const before = tree(old);
+
+    const result = await hedge(["apply", "--profile", old], home);
+
+    expect(result.code).toBe(0);
+    expect(result.output).toContain(`Hedge: uses ${join(home, ".local/share/hedge/profile")}, the copy of ${old}, because ${old} is in a Fleet path from before the rename.`);
+    expect(JSON.parse(readFileSync(machineFile(home), "utf8")).profileDir).toBe(join(home, ".local/share/hedge/profile"));
+    expect(tree(old)).toEqual(before);
+  });
+
+  test("apply --profile refuses a profile in a Fleet path that has no copy, also through a link, and writes no machine file", async () => {
+    const home = temp.make("home-");
+    const old = oldProfile(home);
+    symlinkSync(old, join(home, "my-profile"));
+
+    const results = [await hedge(["apply", "--profile", old], home), await hedge(["apply", "--profile", join(home, "my-profile")], home)];
+
+    expect(results.map((result) => result.code)).toEqual([1, 1]);
+    for (const [result, given] of results.map((result, index) => [result, [old, join(home, "my-profile")][index]!] as const)) expect(result.output).toContain(`${given} is in a Fleet path from before the rename, so Hedge does not use it. Run get.sh to copy it, or pass --profile with a profile outside the Fleet paths.`);
+    expect(existsSync(machineFile(home))).toBe(false);
+  });
+
+  test("apply --profile refuses a Hedge copy that is a link back into the Fleet path", async () => {
+    const home = temp.make("home-");
+    const old = oldProfile(home);
+    mkdirSync(join(home, ".local/share/hedge"), { recursive: true });
+    symlinkSync(old, join(home, ".local/share/hedge/profile"));
+
+    const result = await hedge(["apply", "--profile", old], home);
+
+    expect(result.code).toBe(1);
+    expect(result.output).toContain(`${old} is in a Fleet path from before the rename, so Hedge does not use it.`);
+  });
+
+  test("hedge set on a machine whose machine file points into a Fleet path changes the Hedge copy, not the old profile", async () => {
+    const home = temp.make("home-");
+    const old = oldProfile(home);
+    const remote = temp.make("remote-");
+    git(remote, "init", "-q", "--bare");
+    for (const args of [["init", "-q", "-b", "main"], ["add", "."], ["commit", "-q", "-m", "profile"], ["remote", "add", "origin", remote], ["push", "-q", "-u", "origin", "main"]]) git(old, ...args);
+    cpSync(old, join(home, ".local/share/hedge/profile"), { recursive: true });
+    mkdirSync(dirname(machineFile(home)), { recursive: true });
+    writeFileSync(machineFile(home), JSON.stringify({ schema: 1, role: "linux", profileDir: old }));
+    const before = tree(old);
+
+    const result = await hedge(["set", "base.heavySlots=3"], home);
+
+    expect(result.output).toContain("Saved");
+    expect(JSON.parse(readFileSync(join(home, ".local/share/hedge/profile/hedge.json"), "utf8")).settings).toEqual({ "base.heavySlots": 3 });
+    expect(tree(old)).toEqual(before);
+  });
+
+  test("the profile writers refuse a folder in a Fleet path", async () => {
+    const home = temp.make("home-");
+    const old = oldProfile(home);
+    const before = tree(old);
+
+    await expect(saveAnswers(old, { plan: "claude" })).rejects.toThrow(`${old} is in a Fleet path from before the rename, so Hedge does not write there.`);
+    await expect(saveMachine(home, { role: "linux", profileDir: old } as never)).rejects.toThrow(`${old} is in a Fleet path from before the rename, so Hedge does not write there.`);
+    expect(tree(old)).toEqual(before);
+    expect(existsSync(machineFile(home))).toBe(false);
   });
 });
 
