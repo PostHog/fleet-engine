@@ -158,6 +158,42 @@ describe("hedge setup while another machine changes the profile", () => {
     expect((await pushedAnswers(home)).plan).toBe("claude");
   });
 
+  test("a rerun stops before it saves the profile when another file has a staged change, and keeps that change when another machine pushes", async () => {
+    const home = temp.make("home-");
+    expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""])).code).toBe(0);
+    await changeOnFirstCommit(home, join(temp.make("elsewhere-"), "profile"), 'profile.packs = [...profile.packs, "guards"];');
+    const file = join(profilePath(home), "about-me.md");
+    const committed = readFileSync(file, "utf8");
+    writeFileSync(file, "# Staged on this machine\n");
+    await spawnGit(profilePath(home), "add", "about-me.md");
+    writeFileSync(file, committed);
+
+    const rerun = await hedgeSetup(home, ["--non-interactive", "--remove", "pull-requests"], []);
+
+    expect(rerun.code).toBe(1);
+    expect(rerun.output).toContain(`hedge: ${profilePath(home)} has staged changes. Commit or unstage them first, then try again.`);
+    expect(await spawnGit(profilePath(home), "show", ":about-me.md")).toBe("# Staged on this machine");
+    expect((await pushedAnswers(home)).packs).toEqual(["pull-requests"]);
+  });
+
+  test("a rerun stops before it saves the profile when another machine deleted hedge.json while it ran", async () => {
+    const home = temp.make("home-");
+    expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""])).code).toBe(0);
+    const elsewhere = join(temp.make("elsewhere-"), "profile");
+    await spawnGit(home, "clone", "-q", githubRepo(home, "nora/hedge-profile"), elsewhere);
+    const deleteElsewhere = async () => {
+      await spawnGit(elsewhere, "rm", "-q", "hedge.json");
+      await spawnGit(elsewhere, "commit", "-q", "-m", "Delete hedge.json on another machine");
+      await spawnGit(elsewhere, "push", "-q");
+    };
+
+    const stopped = await hedgeSetup(home, ["--remove", "pull-requests"], [async () => (await deleteElsewhere(), "")]);
+
+    expect(stopped.code).toBe(1);
+    expect(stopped.output).toContain(`hedge: another machine saved your profile in ${profilePath(home)} while setup ran. Run the same hedge setup command again: it starts from the profile as it is now.`);
+    expect((await spawnGit(home, "--git-dir", githubRepo(home, "nora/hedge-profile"), "ls-tree", "--name-only", "main")).split("\n")).not.toContain("hedge.json");
+  });
+
   test("an apply-only resume runs the steps of the plan that another machine saved after the stop", async () => {
     const home = temp.make("home-");
     const stopped = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""], undefined, undefined, 0, "linux", () => {

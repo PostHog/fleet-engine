@@ -120,7 +120,8 @@ async function makeProfile(context: ProfileContext) {
   const { terminal, machine, home, draft } = context;
   const { gh, login, exists, personal, org, team, dir, found } = await lookUp(machine, home, context.packs(), draft.packs ?? [], context.current);
   if (found && (await machine.exec(["git", "-C", dir, "status", "--porcelain", "--", basename(profileFile(dir))])).output.trim()) throw new Error(`${dir}: ${basename(profileFile(dir))} has changes that are not committed. Commit or discard them, then try again.`);
-  if (found && existsSync(profileFile(dir)) && context.loaded?.() !== undefined && readFileSync(profileFile(dir), "utf8") !== context.loaded()) throw new Error(changedMeanwhile(dir));
+  if (found && (await machine.exec(["git", "-C", dir, "diff", "--cached", "--quiet"])).code !== 0) throw new Error(`${dir} has staged changes. Commit or unstage them first, then try again.`);
+  if (found && context.loaded?.() !== undefined && (!existsSync(profileFile(dir)) || readFileSync(profileFile(dir), "utf8") !== context.loaded())) throw new Error(changedMeanwhile(dir));
   const create = (repo: string, description: string) => machine.exec(["gh", "repo", "create", repo, "--private", "--description", description]);
   let profileRepo = found ?? team ?? personal;
   const saved = found ? savedSettings(dir) : {};

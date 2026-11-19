@@ -119,6 +119,24 @@ describe("hedge setup with a devbox", () => {
     expect((await pushedAnswers(home)).settings).toEqual({});
   });
 
+  test("stops before it saves a devbox setting when another file has a staged change, and keeps that change when another machine pushes", async () => {
+    const home = temp.make("home-");
+    expect((await hedgeSetup(home, devboxArgs, ["", ""], fakeMachine(home))).code).toBe(130);
+    await changeOnFirstCommit(home, 'profile.settings = { ...profile.settings, "elsewhere.setting": value };');
+    const file = join(profilePath(home), "about-me.md");
+    const committed = readFileSync(file, "utf8");
+    writeFileSync(file, "# Staged on this machine\n");
+    await spawnGit(profilePath(home), "add", "about-me.md");
+    writeFileSync(file, committed);
+
+    const resumed = await hedgeSetup(home, devboxArgs, ["~/code/app"], fakeMachine(home));
+
+    expect(resumed.code).toBe(1);
+    expect(resumed.output).toContain(`${profilePath(home)} has staged changes. Commit or unstage them first, then try again.`);
+    expect(await spawnGit(profilePath(home), "show", ":about-me.md")).toBe("# Staged on this machine");
+    expect((await pushedAnswers(home)).settings).toEqual({});
+  });
+
   test("stops before it saves a devbox setting when hedge.json has a change that is not committed, and keeps that change", async () => {
     const home = temp.make("home-");
     expect((await hedgeSetup(home, devboxArgs, ["", ""], fakeMachine(home))).code).toBe(130);

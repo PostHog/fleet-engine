@@ -63,6 +63,7 @@ export async function pushSetting(dir: string, key: string, value: SettingValue,
   const edited = await run(dir, "git", "status", "--porcelain", "--", name);
   if (!edited.ok) throw new ProfileError(`${dir}: could not check ${name}: ${edited.stderr}`);
   if (edited.stdout) throw new ProfileError(`${dir}: ${name} has changes that are not committed. Commit or discard them, then try again.`);
+  if ((await run(dir, "git", "diff", "--cached", "--quiet")).code !== 0) throw new ProfileError(`${dir} has staged changes. Commit or unstage them first, then try again.`);
   const answers: Partial<ProfileFile> = { settings: { [key]: value } };
   const unchanged = async () => JSON.stringify(((await readJson(path))?.settings as Record<string, unknown> | undefined)?.[key]) === JSON.stringify(seen);
   const meanwhile = new ProfileError(`${dir}: another machine saved your profile while this command ran. Run the same command again: it starts from the profile as it is now.`);
