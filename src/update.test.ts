@@ -82,8 +82,7 @@ async function run(engineDir: string, engine: ProfileFile["engine"], profileDir 
   return { code, home, applied, appliedProfile, output: lines.join("\n"), version: await Bun.file(join(engineDir, "VERSION")).text() };
 }
 
-async function cliUpdate(engineDir: string, engine: ProfileFile["engine"]) {
-  const home = temp.make("home-");
+async function cliUpdate(engineDir: string, engine: ProfileFile["engine"], home = temp.make("home-")) {
   const profileDir = temp.make("profile-");
   writeFileSync(join(profileDir, "hedge.json"), JSON.stringify({ schema: 1, engine, sources: [], packs: [], plan: "both", settings: {}, workflows: {} }));
   mkdirSync(join(home, ".config/hedge"), { recursive: true });
@@ -106,36 +105,48 @@ describe("hedge update", () => {
     expect(await originOf(engineDir)).toBe(hedge);
   });
 
-  test("refuses to write or remove the update notice when Hedge's state folder leads into Fleet's, and leaves the engine where it is", async () => {
-    const remote = await engineRemote(["v0.1.0", "v0.1.1", "v1.0.0"]);
+  test.each([
+    ["a file", ["v0.1.0", "v0.1.1", "v1.0.0"]],
+    ["a link out of that folder", ["v0.1.0", "v0.1.1"]],
+  ])("refuses to write or remove the update notice when Hedge's state folder leads into Fleet's, and Fleet's notice is %s, and leaves the engine where it is", async (kind, tags) => {
+    const remote = await engineRemote(tags);
     const engineDir = await engineCheckout(remote, "v0.1.0");
     const home = temp.make("home-");
+    const outside = join(temp.make("outside-"), "notice.json");
+    writeFileSync(outside, "fleet's own\n");
     mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
-    writeFileSync(join(home, ".local/state/fleet/update.json"), "fleet's own\n");
+    if (kind === "a file") copyFileSync(outside, join(home, ".local/state/fleet/update.json"));
+    else symlinkSync(outside, join(home, ".local/state/fleet/update.json"));
     symlinkSync(join(home, ".local/state/fleet"), join(home, ".local/state/hedge"));
     const lines: string[] = [];
 
     const refused = await update({ home, engineDir, profileDir: temp.make("profile-"), engine: { repo: remote, ref: "v0.1.0", channel: "release" }, print: (line) => lines.push(line), runApply: async () => 0 }).catch((error: Error) => error.message);
 
-    expect(refused).toBe(`${noticePath(home)} is in a Fleet path from before the rename, so Hedge does not write there.`);
+    expect(refused).toBe(`${dirname(noticePath(home))} is in a Fleet path from before the rename, so Hedge does not write there.`);
     expect(readFileSync(join(home, ".local/state/fleet/update.json"), "utf8")).toBe("fleet's own\n");
+    expect(readFileSync(outside, "utf8")).toBe("fleet's own\n");
     expect(await Bun.file(join(engineDir, "VERSION")).text()).toBe("v0.1.0");
   });
 
-  test("refuses a release whose commit has no hedge launcher before the checkout moves, and records nothing", async () => {
+  test.each(["only a fleet launcher", "a folder named hedge"])("refuses a release whose commit has no hedge launcher file, with %s, before the checkout moves, and records nothing and leaves the update notice", async (kind) => {
     const remote = await engineRemote(["v0.1.0"]);
     const old = temp.make("old-");
     await spawnGit(old, "clone", "-q", remote, ".");
     await spawnGit(old, "mv", "hedge", "fleet");
+    if (kind === "a folder named hedge") mkdirSync(join(old, "hedge")), writeFileSync(join(old, "hedge/README"), "not a launcher\n"), await spawnGit(old, "add", "hedge");
     writeFileSync(join(old, "VERSION"), "v0.1.2");
     await spawnGit(old, "commit", "-q", "-am", "only the Fleet launcher");
     await spawnGit(old, "tag", "v0.1.2");
     const engineDir = await engineCheckout(old, "v0.1.0");
     const head = await spawnGit(engineDir, "rev-parse", "HEAD");
     const engineBefore = await triageEngineLine(engineDir);
+    const home = temp.make("home-");
+    mkdirSync(dirname(noticePath(home)), { recursive: true });
+    writeFileSync(noticePath(home), JSON.stringify({ newMajor: "v9.0.0" }) + "\n");
 
-    const result = await cliUpdate(engineDir, { repo: old, ref: "v0.1.0", channel: "release" });
+    const result = await cliUpdate(engineDir, { repo: old, ref: "v0.1.0", channel: "release" }, home);
 
+    expect(await readNotice(home)).toContain("Hedge v9.0.0 is out.");
     expect(result.code).toBe(1);
     expect(result.output).toContain("hedge update: v0.1.2 has no hedge launcher, so it is an engine from before the rename. The engine stays where it is.");
     expect(await spawnGit(engineDir, "rev-parse", "HEAD")).toBe(head);

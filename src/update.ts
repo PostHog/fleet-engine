@@ -98,7 +98,7 @@ async function withFetched(options: UpdateOptions, url: string, ref: string, use
     if (!fetched.ok) return options.print(`hedge update: could not fetch the engine: ${fetched.err}`), false;
     const commit = await git(options.engineDir, "rev-parse", "--verify", `${fetching}^{commit}`);
     if (!commit.ok) return options.print(`hedge update: could not read the fetched engine: ${commit.err}`), false;
-    if (!(await git(options.engineDir, "cat-file", "-e", `${commit.out}:hedge`)).ok) return options.print(`hedge update: ${ref.replace(/^refs\/(?:heads|tags)\//, "")} has no hedge launcher, so it is an engine from before the rename. The engine stays where it is.`), false;
+    if ((await git(options.engineDir, "cat-file", "-t", `${commit.out}:hedge`)).out !== "blob") return options.print(`hedge update: ${ref.replace(/^refs\/(?:heads|tags)\//, "")} has no hedge launcher, so it is an engine from before the rename. The engine stays where it is.`), false;
     return await use(commit.out);
   } finally {
     await git(options.engineDir, "update-ref", "-d", fetching);
@@ -129,6 +129,7 @@ async function releases(options: UpdateOptions, url: string) {
 }
 
 async function followRelease(options: UpdateOptions, url: string, switched: boolean): Promise<Moved> {
+  refuseLegacyPath(dirname(noticePath(options.home)));
   const versions = await releases(options, url);
   if (!versions) return false;
   const pin = parse(options.engine.ref);
@@ -136,8 +137,13 @@ async function followRelease(options: UpdateOptions, url: string, switched: bool
   const sameMajor = versions.filter((version) => version.parts[0] === pin.parts[0]).sort(compare);
   const target = sameMajor.at(-1) ?? pin;
   const newer = versions.filter((version) => version.parts[0] > pin.parts[0]).sort(compare).at(-1);
-  await saveNotice(options.home, newer?.tag);
   if (newer) options.print(`Hedge ${newer.tag} is out. It is a new major version, so this update stays on v${pin.parts[0]}.`);
+  const moved = await moveToRelease(options, url, switched, versions, target);
+  if (moved) await saveNotice(options.home, newer?.tag);
+  return moved;
+}
+
+async function moveToRelease(options: UpdateOptions, url: string, switched: boolean, versions: Array<Version & { commit: string }>, target: Version): Promise<Moved> {
   const head = (await git(options.engineDir, "rev-parse", "HEAD")).out;
   const installed = versions.filter((version) => version.commit === head).sort(compare).at(-1);
   if (switched) return checkOutRelease(options, url, target);
@@ -174,7 +180,6 @@ async function rollBack(options: UpdateOptions, before: string, installError: st
 
 async function saveNotice(home: string, newMajor: string | undefined) {
   const path = noticePath(home);
-  refuseLegacyPath(path);
   if (!newMajor) return rm(path, { force: true });
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, JSON.stringify({ newMajor }) + "\n");
