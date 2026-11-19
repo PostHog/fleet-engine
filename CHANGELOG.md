@@ -26,35 +26,38 @@
   plugin Hedge did not install still fails `hedge doctor`.
 - A pack check can name a `todo`: when its command exits 4, Hedge prints
   it as a `To do:` line, keeps the config that waits for the check out, and
-  fails neither apply nor doctor. After the steps, apply runs again each
-  check with a `todo` and each check that config waits for, and reports
-  what it finds then. When that changes which config waits, apply runs
-  every adapter that writes config again, the provider settings and T3's
-  settings: it writes the config whose check passes now, and takes out
-  Hedge's config whose check fails now. So a hub whose proxy was stopped
-  routes Claude Code in one apply, and a route never stays at the end of
-  an apply whose last check found the proxy unsafe. That config pass drops a line of the first pass only
-  when it says the same line again, or when the operation of that line now
-  succeeds. So a Claude plugin that waited for Claude Code leaves no old
-  `Fix:`, a notice such as "It is yours now" stays, and a `Fix:` for an
-  operation that the second pass skips, such as a marketplace update,
-  stays.
+  fails neither apply nor doctor.
+- Apply now writes the provider settings, Claude plugins and MCP servers
+  once, after the steps. Just before, it runs each check with a `todo`
+  and each check that config waits for, and decides that config from
+  those results. So a hub whose proxy was stopped routes Claude Code in
+  one apply, and a route never stays at the end of an apply whose check
+  found the proxy unsafe. A route that an earlier apply wrote stays while
+  the steps run. When an adapter that runs before the steps fails, such
+  as Jobs on a job id it refuses, apply still decides and writes the
+  provider settings, then fails with that adapter's error.
 - On the hub, `hedge cli-proxy check` and `hedge cli-proxy check codex`,
   the checks that Hedge's routes wait for, fail while
   `hedge cli-proxy doctor` finds the proxy unsafe: a plugin Hedge did not
   install, panel files that do not match their pins, or, with the Proxy
-  panel off, a panel page or plugin that is still there. Apply then leaves
-  the route out, or takes Hedge's route out, in its first config pass,
-  before the proxy step runs. So a hub whose proxy has such a plugin never
-  routes Claude Code or Codex to it, and a route that an earlier apply
-  wrote leaves at the next apply. A route to a safe proxy stays in place,
-  and a `hedge-proxy` Codex table of your own stays.
+  panel off, a panel page or plugin that is still there. A link at either
+  panel path fails them too, and the check says to remove the link, then
+  run `hedge cli-proxy install`. Apply then leaves the route out, or takes
+  Hedge's route out. So a hub whose proxy has such a plugin never routes
+  Claude Code or Codex to it, and a route that an earlier apply wrote
+  leaves at the next apply. A route to a safe proxy stays in place, and a
+  `hedge-proxy` Codex table of your own stays.
 - Hedge removes a Claude Code or Codex setting only when its own record
-  says Hedge wrote it, or when it holds Hedge's exact value for a route
-  that waits. It no longer removes a setting because it points at the
-  proxy port 8317. So a Codex provider table of your own, of any name,
-  stays with its selector. `hedge doctor` reads
-  one result of each check for both the config and its line.
+  says Hedge wrote it, or when it is part of the route to the proxy and
+  the whole route holds Hedge's exact values: the Claude proxy address
+  and key helper, or the Codex `hedge-proxy` selector and table. Apply
+  removes that route whenever this apply does not write it, with
+  own-account balancing on or off, so a box that `hedge cli-proxy connect` sent to
+  the proxy leaves it when you turn balancing off. It no longer removes
+  a setting because it points at the proxy port 8317. So a Codex
+  provider table of your own, of any name, stays with its selector.
+  `hedge doctor` reads one result of each check for both the config and
+  its line.
 - When `hedge cli-proxy connect` fails on a box, the hub names the box and
   the exit code, and the command that hands over the same key again:
   `hedge box run <box> -- hedge cli-proxy connect < ~/.config/hedge/cli-proxy.key`.
