@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { main } from "../src/cli.ts";
 import { loadPacks } from "../src/pack/manifest.ts";
@@ -141,11 +141,17 @@ describe("the install prompt", () => {
     const text = installPrompt(data, everyPack());
     expect(step(text, "Find my hub")).toContain('The name after "The hub:" is the SSH name of the hub. In each SSH command of a note, put that whole name in place of the host that holds `<hub>`.');
     const notes = [...text.matchAll(/^ {3}- [^:]+: ~\/\.local\/share\/hedge\/engine\/(\S+)$/gm)].map((match) => readFileSync(join(root, match[1]!), "utf8"));
-    const filled = notes.map((note) => note.replace(/\bssh (-t )?[^\s`'"]*<hub>[^\s`'"]*/g, (_, flag: string | undefined) => `ssh ${flag ?? ""}${hub}`));
-    expect(filled.filter((note) => note.includes("<hub>"))).toEqual([]);
-    const targets = filled.flatMap((note) => [...note.matchAll(/\bssh (?:-t )?([^\s`'"]+)/g)].map((match) => match[1]!));
-    expect(targets.length).toBeGreaterThan(0);
-    expect(new Set(targets)).toEqual(new Set([hub]));
+    const commands = notes.flatMap((note) => [...[...note.matchAll(/^ *```sh\n([\s\S]*?)^ *```$/gm)].map((match) => match[1]!), ...[...note.replace(/^ *```[\s\S]*?^ *```$/gm, "").matchAll(/`([^`\n]+)`/g)].map((match) => match[1]!)]).filter((code) => /\bssh /.test(code));
+    const filled = commands.map((code) => code.replace(/(\bssh (?:-t )?)[^\s`'"]*<hub>[^\s`'"]*/g, `$1${hub}`));
+    expect(filled.filter((code) => code.includes("<hub>"))).toEqual([]);
+    const dir = temp.make("ssh-");
+    writeFileSync(join(dir, "ssh"), `#!/bin/sh\nwhile [ "\${1#-}" != "$1" ]; do shift; done\necho "$1" >> "${dir}/hosts"\n`, { mode: 0o755 });
+    writeFileSync(join(dir, "value"), "");
+    const withValues = (code: string): string => (/<[^<>\s][^<>\n]*>/.test(code) ? withValues(code.replace(/<[^<>\s][^<>\n]*>/g, "value")) : code);
+    for (const code of filled) expect(Bun.spawnSync(["/bin/sh", "-c", withValues(code)], { cwd: dir, env: { HOME: dir, PATH: dir }, stdin: "ignore", timeout: 2000 }).signalCode).toBeUndefined();
+    const reached = readFileSync(join(dir, "hosts"), "utf8").split("\n").filter(Boolean);
+    expect(reached.length).toBe(filled.join("\n").match(/\bssh /g)!.length);
+    expect(new Set(reached)).toEqual(new Set([hub]));
   });
 
   test("names only hedge commands that exist", async () => {

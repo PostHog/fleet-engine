@@ -77,6 +77,7 @@ retire_mac_jobs() {
 }
 
 if [ "$(uname -s)" = Darwin ]; then
+  for arg in "$@"; do [ "$arg" = --dry-run ] || fail "on a Mac, get.sh takes only --dry-run after --, not $arg."; done
   retire_mac_jobs
   say "Hedge runs on cloud boxes, not on a Mac. Your Mac only runs the T3 Code app. To set up your hub, follow https://posthog.github.io/hedge/#start"
   [ -n "$old_jobs" ] || exit 1

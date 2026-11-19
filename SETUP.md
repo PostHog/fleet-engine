@@ -288,28 +288,15 @@ how a secret reaches a workspace.
    Never give a secret, such as a token or a key, with `--parameter`. Coder
    also keeps each parameter value with the workspace's build, where anyone
    who can see the workspace reads it. When a template parameter asks for a
-   secret, ask for the secret with the secret prompt, delivered as a file.
-   Then:
+   secret, do not create that workspace with `coder create`, and do not ask
+   for the secret. Ask the person to create it in the Coder web UI instead:
+   they open the template's create form, give the workspace the name from
+   item 1, type the secret in the form, and fill in the other values you
+   give them. Tell the person that Coder still keeps the secret with the
+   build. When they tell you the workspace name, go on with item 5.
 
-   - When the parameter has a default, keep the default. Give the secret to
-     the workspaces as a Coder secret instead. Coder reads it from standard
-     input and sets it in each workspace that starts:
-     `coder secret create <secret name> --env <variable> < <secret file>`.
-     When the template's files do not say which variable its tools read,
-     ask.
-   - When the parameter has no default, Coder needs it at create. Write it
-     to a parameter file that only the person can read:
-
-     ```sh
-     mkdir -p ~/.cache/hedge-setup && (umask 077 && perl -0777 -ne 's/\n\z//; s/(["\\])/\\$1/g; print "<secret parameter>: \"$_\"\n"' < <secret file> > ~/.cache/hedge-setup/secret-parameters.yaml)
-     ```
-
-     Add `--rich-parameter-file ~/.cache/hedge-setup/secret-parameters.yaml`
-     to each `coder create`, and run
-     `rm -f ~/.cache/hedge-setup/secret-parameters.yaml` when the creates
-     end. Tell the person that Coder still keeps this value with the build. Start the hub and the nodes at once,
-   each in the background. They take minutes; use the wait (see "While
-   something runs").
+   Start the hub and the nodes at once, each in the background. They take
+   minutes; use the wait (see "While something runs").
 5. **Keep them running.** Agents work there while the Mac sleeps:
    `coder schedule stop <name> manual`.
 6. **Check them.** When a create ends, check that the workspace runs, that

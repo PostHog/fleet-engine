@@ -85,6 +85,8 @@ esac`);
 
   for (const [why, args, stub] of [
     ["an unknown flag", ["--dry-run"], undefined],
+    ["an unknown flag after --", ["--", "--force"], undefined],
+    ["an unknown flag after -- next to --dry-run", ["--", "--dry-run", "--force"], undefined],
     ["sudo", [], "echo 0"],
   ] as const) {
     onLinuxHost(`with ${why}, stops before it touches a launchd job`, () => {

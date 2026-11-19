@@ -4,7 +4,7 @@ import { join, resolve as resolvePath } from "node:path";
 import { loadPacks } from "./pack/manifest.ts";
 import { cachedSource, fetchSource, sourceCache } from "./pack/sources.ts";
 import { cannotTell } from "./pack/types.ts";
-import type { AvailableSource, CatalogEntry, FetchedSource, Finding, LoadedPack, MachineFile, PackCode, Plan, Report, SourceRef } from "./pack/types.ts";
+import type { AvailableSource, CatalogEntry, FetchedSource, Finding, LoadedPack, MachineFile, Plan, Report, SourceRef } from "./pack/types.ts";
 import { loadMachine, loadProfile, pullProfile, saveMachine, thisMachine } from "./profile/profile.ts";
 import { engineAdapters } from "./adapters/index.ts";
 import { apply, check, filesAdapter, type Adapter, type Issuer, type Runner } from "./reconciler/apply.ts";
@@ -30,7 +30,7 @@ import { spawnRunner, type CommandRunner } from "./adapters/run.ts";
 import { become, canBecome, type Become } from "./runner/become.ts";
 import { trackCommand } from "./usage/usage.ts";
 import { asHedge } from "./reconciler/engine-command.ts";
-import { adoptLegacyEnv, fleetIsHedge, fleetNotice, inAnyLegacyPath, isOldJob, profileFile, renamedPath, underLegacyPath, withLegacyNames } from "./legacy.ts";
+import { adoptLegacyEnv, fleetNotice, inAnyLegacyPath, isOldJob, profileFile, renamedPath, underLegacyPath, withLegacyNames } from "./legacy.ts";
 import { importFleet, isCopyOf } from "./import-fleet.ts";
 import { fleetAdapter, type FleetAdapter } from "./adapters/fleet/adapter.ts";
 
