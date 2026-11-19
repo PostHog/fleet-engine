@@ -4,8 +4,9 @@ import { join } from "node:path";
 import { main } from "../../../src/cli.ts";
 import { tempDirs } from "../../../src/testing/git.ts";
 import { devbox, engineSource, resolveEngine } from "../../../src/testing/packs.ts";
-import { launcherScript } from "../../../src/adapters/jobs/launcher.ts";
-import { engineCommand } from "../../../src/reconciler/engine-command.ts";
+import { jobsAdapter } from "../../../src/adapters/jobs/adapter.ts";
+import type { CommandRunner } from "../../../src/adapters/run.ts";
+import { apply } from "../../../src/reconciler/apply.ts";
 
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
@@ -319,26 +320,34 @@ describe("install-codex.sh", () => {
     expect(readFileSync(join(fleets, "releases/rust-v0.1.0/bin/codex"), "utf8")).toContain("0.1.0");
   });
 
-  onLinux("the scheduled nightly agent-update job, run at night through its installed launcher and the hedge launcher, moves the Codex that Fleet installed to Hedge's release package", async () => {
+  onLinux("the nightly agent-update job, run at night from the cron entry that apply writes, moves the Codex that Fleet installed to Hedge's release package", async () => {
     const box = await machine("x86_64", ["x86_64-unknown-linux-musl"]);
     rmSync(join(box.bin, "bun"));
     symlinkSync(process.execPath, join(box.bin, "bun"));
+    mkdirSync(join(box.home, ".bun"), { recursive: true });
+    symlinkSync(box.bin, join(box.home, ".bun/bin"));
     fleetCodex(box.home);
     const path = `${box.bin}:${box.home}/.local/bin:/usr/bin:/bin`;
     const profile = temp.make("profile-");
     writeFileSync(join(profile, "hedge.json"), JSON.stringify({ schema: 1, engine: { repo: "PostHog/hedge", ref: "main", channel: "track" }, sources: [], packs: [], plan: "codex", settings: {}, workflows: {} }));
     mkdirSync(join(box.home, ".config/hedge"), { recursive: true });
     writeFileSync(join(box.home, ".config/hedge/machine.json"), JSON.stringify({ schema: 1, role: "devbox", profileDir: profile }));
-    const job = resolveEngine([await engineSource()], { plan: "codex" }, devbox).jobs.find((item) => item.id === "agent-update")!;
-    expect(job.command.slice(0, 2)).toEqual(["hedge", "nightly"]);
+    const plan = resolveEngine([await engineSource()], { plan: "codex" }, devbox);
+    const crontab = { text: "" };
+    const run: CommandRunner = async (command, options) => {
+      if (command.join(" ") === "crontab -l") return { code: 0, stdout: crontab.text };
+      if (command.join(" ") === "crontab -") return (crontab.text = options?.input ?? ""), { code: 0, stdout: "" };
+      return { code: 127, stdout: "" };
+    };
+    await apply({ ...plan, files: [], config: [], steps: [], checks: [], human: [], jobs: plan.jobs.filter((job) => job.id === "agent-update") }, { home: box.home, adapters: [jobsAdapter({ run, engineRoot })] });
+    const entry = crontab.text.split("\n").find((line) => line.endsWith("# hedge:agent-update"));
+    expect(entry).toBeDefined();
     const clock = join(temp.make("clock-"), "clock.ts");
     writeFileSync(clock, `const at = Date.parse("2026-11-10T02:17:00Z");\nconst RealDate = Date;\nglobalThis.Date = class extends RealDate { constructor(...args) { args.length ? super(...args) : super(at); } static now() { return at; } };\n`);
-    const log = join(box.home, "agent-update.log");
-    const installed = join(box.home, "agent-update.sh");
-    writeFileSync(installed, launcherScript(engineCommand(job.command, engineRoot), path, log), { mode: 0o755 });
 
-    const code = await Bun.spawn(["/bin/sh", installed], { env: { HOME: box.home, BUN_OPTIONS: `--preload ${clock}`, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" }, stdout: "ignore", stderr: "ignore" }).exited;
+    const code = await Bun.spawn(["/bin/sh", "-c", entry!.replace(/^(\S+\s+){5}/, "")], { env: { HOME: box.home, PATH: "/usr/bin:/bin", BUN_OPTIONS: `--preload ${clock}`, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" }, stdout: "ignore", stderr: "ignore" }).exited;
 
+    const log = join(box.home, ".local/state/hedge/jobs/agent-update.log");
     expect({ code, codex: readFileSync(log, "utf8").split("\n").find((line) => line.startsWith("Codex:")) }).toEqual({ code: 0, codex: "Codex: up to date." });
     expect(await codexOnPath(box.home, path)).toBe("codex-cli 9.9.9 x86_64-unknown-linux-musl");
     expect(readlinkSync(join(box.home, ".local/bin/codex"))).toBe(join(codexHome(box.home), "current/bin/codex"));
