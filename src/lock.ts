@@ -33,10 +33,8 @@ export function tryLock(path: string): Held | undefined {
   };
 }
 
-/** The lock that Hedge operations which change this machine take, below home. */
 export const stateLock = ".local/state/hedge/hedge.lock";
 
-/** Takes the lock at path, or throws while another process holds it. */
 export function holdLock(path: string): Held {
   const held = tryLock(path);
   if (!held) throw new Error(`Another Hedge operation holds ${path}. Run this again once it ends.`);

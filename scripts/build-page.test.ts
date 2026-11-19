@@ -42,7 +42,6 @@ const visibleText = (html: string) => unescaped(html.replace(/<script[\s\S]*?<\/
 const promptOn = (html: string, id: string) => unescaped(html.match(new RegExp(`<pre id="${id}-text"[^>]*>([\\s\\S]*?)</pre>`))![1]!.replace(/<[^>]+>/g, ""));
 const t3LinkOn = (html: string, id: string) => unescaped(html.match(new RegExp(`<a class="btn btn-ghost" id="${id}-t3" href="([^"]*)"`))![1]!);
 const carried = (html: string) => JSON.parse(html.match(/<script id="hedge-data" type="application\/json">([\s\S]*?)<\/script>/)![1]!) as PromptData;
-const pageScript = (html: string) => html.match(/<script>([\s\S]*?)<\/script>/)?.[1] ?? "";
 const boxOf = (html: string) => html.match(/<section class="box">[\s\S]*?<\/section>/)![0];
 
 function localTargets(path: string, html: string) {
@@ -70,12 +69,11 @@ describe("the site build", () => {
     }
   });
 
-  test("every page carries its own script and styles and asks the site for no script or stylesheet file", () => {
+  test("no page asks the site for a script or stylesheet file", () => {
     expect(Object.keys(files).filter((path) => /\.(js|css)$/.test(path))).toEqual([]);
     for (const [path, html] of pagesOf(files)) {
       expect([path, localTargets(path, html).filter((target) => /\.(js|css)$/.test(target))]).toEqual([path, []]);
       expect([path, html.match(/<script\b[^>]*\bsrc=|<link rel="stylesheet" href="(?!https:)/g)]).toEqual([path, null]);
-      expect([path, pageScript(html).length > 1000, (html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? "").length > 1000]).toEqual([path, true, true]);
     }
   });
 

@@ -6,6 +6,7 @@ import { isolateGit, spawnGit, template, tempDirs } from "./testing/git.ts";
 import { spawnAsync } from "./testing/spawn.ts";
 import { noticePath, readNotice, update } from "./update.ts";
 import { main } from "./cli.ts";
+import { hedgeOnMac } from "./legacy.ts";
 
 isolateGit();
 const temp = tempDirs();
@@ -41,6 +42,15 @@ async function engineCheckout(remote: string, ref: string) {
   return dir;
 }
 
+async function onGithub(engineDir: string, slug: string, remote: string) {
+  const url = `https://github.com/${slug}.git`;
+  await spawnGit(engineDir, "remote", "set-url", "origin", url);
+  await spawnGit(engineDir, "config", `url.${remote}.insteadOf`, url);
+  return url;
+}
+
+const originOf = async (engineDir: string) => (await spawnGit(engineDir, "config", "--get", "remote.origin.url")).trim();
+
 async function run(engineDir: string, engine: ProfileFile["engine"], profileDir = temp.make("profile-"), platform: NodeJS.Platform = "linux") {
   const home = temp.make("home-");
   const lines: string[] = [];
@@ -57,6 +67,90 @@ async function run(engineDir: string, engine: ProfileFile["engine"], profileDir 
 }
 
 describe("hedge update", () => {
+  test.each(["PostHog/fleet-engine", "Silthus/fleet-engine", "https://github.com/PostHog/fleet-engine"])("keeps the Hedge origin when the profile still names %s, this engine's repository from before the rename", async (repo) => {
+    const remote = await engineRemote(["v0.1.0", "v0.1.1"]);
+    const engineDir = await engineCheckout(remote, "v0.1.0");
+    const hedge = await onGithub(engineDir, "PostHog/hedge", remote);
+
+    const result = await run(engineDir, { repo, ref: "v0.1.0", channel: "release" });
+
+    expect(result.code).toBe(0);
+    expect(result.version).toBe("v0.1.1");
+    expect(await originOf(engineDir)).toBe(hedge);
+  });
+
+  test("follows a fork that the profile names, such as Acme/fleet-engine, away from the Hedge origin", async () => {
+    const remote = await engineRemote(["v0.1.0", "v0.1.1"]);
+    const fork = temp.make("fork-");
+    await spawnGit(fork, "clone", "-q", remote, ".");
+    writeFileSync(join(fork, "VERSION"), "v0.1.3");
+    await spawnGit(fork, "commit", "-q", "-am", "fork release");
+    await spawnGit(fork, "tag", "v0.1.3");
+    const engineDir = await engineCheckout(remote, "v0.1.0");
+    await onGithub(engineDir, "PostHog/hedge", remote);
+    await spawnGit(engineDir, "config", `url.${fork}.insteadOf`, "https://github.com/Acme/fleet-engine.git");
+
+    const result = await run(engineDir, { repo: "Acme/fleet-engine", ref: "v0.1.0", channel: "release" });
+
+    expect(result.output).toContain("The engine now comes from Acme/fleet-engine.");
+    expect(result.code).toBe(0);
+    expect(result.version).toBe("v0.1.3");
+    expect(await originOf(engineDir)).toBe("https://github.com/Acme/fleet-engine.git");
+  });
+
+  async function hedgeReleaseWithOlderFork() {
+    const remote = await engineRemote(["v0.1.0", "v0.1.5"]);
+    const fork = temp.make("fork-");
+    await spawnGit(fork, "clone", "-q", await engineRemote(["v0.1.0"]), ".");
+    writeFileSync(join(fork, "VERSION"), "fork v0.1.2");
+    await spawnGit(fork, "commit", "-q", "-am", "fork release");
+    await spawnGit(fork, "tag", "v0.1.2");
+    const engineDir = await engineCheckout(remote, "v0.1.5");
+    await spawnGit(engineDir, "fetch", "-q", "--tags", "origin");
+    await onGithub(engineDir, "PostHog/hedge", remote);
+    return { engineDir, fork };
+  }
+
+  test("follows a fork whose newest release is older than the Hedge release it ran", async () => {
+    const { engineDir, fork } = await hedgeReleaseWithOlderFork();
+    await spawnGit(engineDir, "config", `url.${fork}.insteadOf`, "https://github.com/Acme/fleet-engine.git");
+
+    const result = await run(engineDir, { repo: "Acme/fleet-engine", ref: "v0.1.0", channel: "release" });
+
+    expect(result.output).toContain("The engine now comes from Acme/fleet-engine.");
+    expect(result.code).toBe(0);
+    expect(result.version).toBe("fork v0.1.2");
+  });
+
+  test("after the fork cannot be fetched, keeps the Hedge origin, and the next update still moves to the fork's release", async () => {
+    const { engineDir, fork } = await hedgeReleaseWithOlderFork();
+    const hedge = await originOf(engineDir);
+    await spawnGit(engineDir, "config", `url.${join(fork, "gone")}.insteadOf`, "https://github.com/Acme/fleet-engine.git");
+
+    const failed = await run(engineDir, { repo: "Acme/fleet-engine", ref: "v0.1.0", channel: "release" });
+
+    expect(failed).toMatchObject({ code: 1, applied: 0, version: "v0.1.5" });
+    expect(await originOf(engineDir)).toBe(hedge);
+
+    await spawnGit(engineDir, "config", "--remove-section", `url.${join(fork, "gone")}`);
+    await spawnGit(engineDir, "config", `url.${fork}.insteadOf`, "https://github.com/Acme/fleet-engine.git");
+    const retried = await run(engineDir, { repo: "Acme/fleet-engine", ref: "v0.1.0", channel: "release" });
+
+    expect(retried).toMatchObject({ code: 0, applied: 1, version: "fork v0.1.2" });
+    expect(await originOf(engineDir)).toBe("https://github.com/Acme/fleet-engine.git");
+  });
+
+  test("keeps a tag the user made in the engine checkout when it moves to a newer release", async () => {
+    const remote = await engineRemote(["v0.1.0", "v0.1.1"]);
+    const engineDir = await engineCheckout(remote, "v0.1.0");
+    await spawnGit(engineDir, "tag", "my-notes");
+
+    const result = await run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" });
+
+    expect(result).toMatchObject({ code: 0, version: "v0.1.1" });
+    expect(await spawnGit(engineDir, "tag", "--list", "my-notes")).toBe("my-notes");
+  });
+
   test("moves the release channel to the newest tag of its major and reports a new major", async () => {
     const remote = await engineRemote(["v0.1.0", "v0.1.1", "v0.2.0", "v1.0.0"]);
     const result = await run(await engineCheckout(remote, "v0.1.0"), { repo: remote, ref: "v0.1.0", channel: "release" });
@@ -120,6 +214,15 @@ describe("hedge update", () => {
     expect(result.output).toContain("could not fetch the engine");
   });
 
+  test("on a Mac, an update whose engine fetch fails points once at the setup page and at the get.sh run that stops the old jobs", async () => {
+    const engineDir = await engineCheckout(await engineRemote(["v0.1.0"]), "v0.1.0");
+    await spawnGit(engineDir, "remote", "set-url", "origin", join(temp.make(), "gone"));
+    const result = await run(engineDir, { repo: "gone", ref: "v0.1.0", channel: "release" }, undefined, "darwin");
+    expect(result).toMatchObject({ code: 1, applied: 0 });
+    expect(result.output).toContain("could not fetch the engine");
+    expect(result.output.split(hedgeOnMac).length).toBe(2);
+  });
+
   test("refuses an engine checkout with local changes", async () => {
     const engineDir = await engineCheckout(await engineRemote(["v0.1.0", "v0.1.1"]), "v0.1.0");
     writeFileSync(join(engineDir, "VERSION"), "patched");
@@ -131,7 +234,6 @@ describe("hedge update", () => {
   test("follows the profile's engine repository", async () => {
     const original = await engineRemote(["v0.1.0"]);
     const engineDir = await engineCheckout(original, "v0.1.0");
-    // A moved engine is a fork or mirror, so its tags point at the same commits.
     const moved = temp.make("engine-moved-");
     await spawnGit(moved, "clone", "-q", original, ".");
     writeFileSync(join(moved, "VERSION"), "v0.2.0");
@@ -140,6 +242,22 @@ describe("hedge update", () => {
     const result = await run(engineDir, { repo: moved, ref: "v0.1.0", channel: "release" });
     expect(result.output).toContain(`The engine now comes from ${moved}.`);
     expect(result.version).toBe("v0.2.0");
+  });
+
+  test("keeps a token in the profile's engine URL out of its messages when it follows that repository", async () => {
+    const original = await engineRemote(["v0.1.0"]);
+    const engineDir = await engineCheckout(original, "v0.1.0");
+    const moved = temp.make("engine-moved-");
+    await spawnGit(moved, "clone", "-q", original, ".");
+    writeFileSync(join(moved, "VERSION"), "v0.2.0");
+    await spawnGit(moved, "commit", "-q", "-am", "v0.2.0");
+    await spawnGit(moved, "tag", "v0.2.0");
+    const withToken = "https://hedge:s3cret-token@git.example.invalid/engine.git";
+    await spawnGit(engineDir, "config", `url.${moved}.insteadOf`, withToken);
+    const result = await run(engineDir, { repo: withToken, ref: "v0.1.0", channel: "release" });
+    expect(result.version).toBe("v0.2.0");
+    expect(result.output).toContain("The engine now comes from https://git.example.invalid/engine.git.");
+    expect(result.output).not.toContain("s3cret-token");
   });
 
   test("never moves an engine that is not on a release back to one", async () => {
@@ -192,9 +310,10 @@ describe("hedge update", () => {
     const onMac = await run(engineDir, { repo: remote, ref: "v0.1.1", channel: "release" }, undefined, "darwin");
     expect(onMac.code).toBe(1);
     expect(onMac.output).not.toContain("run get.sh again to repair it");
-    expect(onMac.output).toContain(`so the update was rolled back. The engine stays at ${(await spawnGit(engineDir, "rev-parse", "HEAD")).slice(0, 7)}. Hedge now runs on cloud boxes, not on a Mac.`);
+    expect(onMac.output).toContain(`so the update was rolled back. The engine stays at ${(await spawnGit(engineDir, "rev-parse", "HEAD")).slice(0, 7)}. Its packages did not install either.\n`);
     expect(onMac.output).toContain("Set up your hub at https://posthog.github.io/hedge/#start.");
     expect(onMac.output).toContain("To stop the jobs of an earlier Fleet or Hedge on this Mac, run: curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh | sh");
+    expect(onMac.output.split(hedgeOnMac).length).toBe(2);
   });
 
   test("puts back the old engine's packages when the new engine's install fails halfway", async () => {

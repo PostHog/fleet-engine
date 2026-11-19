@@ -1,12 +1,12 @@
 import { afterAll, afterEach, beforeAll, test } from "bun:test";
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, cpSync, existsSync, openSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { git, isolateGit, tempDirs } from "./git.ts";
 
 export const repoRoot = join(import.meta.dir, "..", "..");
 export const onLinuxHost = test.if(process.platform === "linux");
 
-const systemTools = ["sh", "env", "id", "cat", "mkdir", "mktemp", "rm", "chmod", "dirname", "sed", "grep", "head", "install", "tar", "gzip", "git", "bun", "sha256sum", "tr", "tail", "ls", "cp", "find", "mv", "ln", "basename", "sleep", "python3", "date", "sort"];
+const systemTools = ["sh", "env", "id", "cat", "mkdir", "mktemp", "rm", "chmod", "dirname", "sed", "grep", "head", "install", "tar", "gzip", "git", "bun", "sha256sum", "tr", "tail", "ls", "cp", "find", "mv", "ln", "basename", "sleep", "python3", "date", "sort", "ps"];
 
 type SandboxOptions = { without?: string[]; t3Failures?: number; releasesFeed?: string };
 export type Sandbox = { root: string; bin: string; home: string; log: string; stub: (name: string, body: string) => void; failDownloads: (pattern: string, times: number) => void; stallDownloads: (pattern: string, times: number) => void };
@@ -90,6 +90,7 @@ done
 case "$url" in
   https://github.com/pingdotgg/t3code/releases.atom) cat "${feed}" ;;
   https://github.com/pingdotgg/t3code/releases/download/*/SHA256SUMS) echo sums > "$out" ;;
+  https://raw.githubusercontent.com/PostHog/hedge/*/get.sh) cp "${join(repoRoot, "get.sh")}" "$out" ;;
   https://t3.codes/install.sh) echo '${t3Installer.replaceAll("'", "'\\''")}' > "$out" ;;
   https://github.com/cli/cli/releases/latest) printf 'https://github.com/cli/cli/releases/tag/v9.9.9' ;;
   *gh_9.9.9_linux_amd64.tar.gz) cp "${ghTar}" "$out" ;;
@@ -106,16 +107,26 @@ esac`);
     return dir;
   }
 
+  const shellEnv = (box: Sandbox) => ({ PATH: box.bin, HOME: box.home, HEDGE_ENGINE_REPO: engine.repo, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" });
+
   function getSh(box: Sandbox, args: string[], options: { env?: Record<string, string>; cwd?: string } = {}) {
-    const result = Bun.spawnSync(["sh", join(repoRoot, "get.sh"), ...args], {
-      env: { PATH: box.bin, HOME: box.home, HEDGE_ENGINE_REPO: engine.repo, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", ...options.env },
-      cwd: options.cwd,
-      stdin: "ignore",
-    });
-    return { code: result.exitCode, output: result.stdout.toString() + result.stderr.toString(), calls: existsSync(box.log) ? readFileSync(box.log, "utf8") : "" };
+    const outputFile = join(box.root, "output.log");
+    const output = openSync(outputFile, "w");
+    try {
+      const result = Bun.spawnSync(["sh", join(repoRoot, "get.sh"), ...args], {
+        env: { ...shellEnv(box), ...options.env },
+        cwd: options.cwd,
+        stdin: "ignore",
+        stdout: output,
+        stderr: output,
+      });
+      return { code: result.exitCode, output: readFileSync(outputFile, "utf8"), calls: existsSync(box.log) ? readFileSync(box.log, "utf8") : "" };
+    } finally {
+      closeSync(output);
+    }
   }
 
-  return { temp, engine, sandbox, profile, getSh };
+  return { temp, engine, sandbox, profile, getSh, shellEnv };
 }
 
 function fakeBun(log: string) {

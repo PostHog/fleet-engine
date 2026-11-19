@@ -110,7 +110,6 @@ export async function accountHome(uid = process.getuid?.(), sources = system) {
 
 export type HomeGuard = { run?: CommandRunner; accountHome?: () => Promise<string | undefined> };
 
-/** HEDGE_ACCOUNT_HOME stands in for the account's home folder, so a test can run the installer in a temporary HOME against fake schedulers on its PATH. */
 const thisAccountHome = async () => Bun.env.HEDGE_ACCOUNT_HOME || (await accountHome());
 
 export async function skipOtherHome(adapter: string, what: string, home: string, options: HomeGuard): Promise<AdapterResult | undefined> {

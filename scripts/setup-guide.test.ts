@@ -1,15 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { main } from "../src/cli.ts";
 import { loadPacks } from "../src/pack/manifest.ts";
-import { cachedSource } from "../src/pack/sources.ts";
+import { fetchSource } from "../src/pack/sources.ts";
 import { sourceCache } from "../src/setup/setup.ts";
 import { profilePath } from "../src/setup/profile.ts";
 import { devboxesOf } from "../packs/hub/lib/machine.ts";
 import { cliFixtures } from "../src/testing/cli.ts";
 import { fakeMachine, hedgeSetup, savedAnswers, scripted } from "../src/setup/testing.ts";
-import { isolateGit, tempDirs } from "../src/testing/git.ts";
+import { isolateGit, spawnGit, tempDirs } from "../src/testing/git.ts";
 import { fakeCoder } from "../src/testing/coder.ts";
 import { needsHubPacks } from "../src/setup/defaults.ts";
 import { promptLabels, startPrompt } from "../page/model.ts";
@@ -24,8 +24,22 @@ const root = join(import.meta.dir, "..");
 const guide = () => readFileSync(join(root, "SETUP.md"), "utf8");
 const notePaths = () => readdirSync(join(root, "packs")).map((pack) => join("packs", pack, "SETUP.md")).filter((path) => existsSync(join(root, path)));
 
-const blocksIn = (text: string) => [...text.matchAll(/^ *```\w*\n([\s\S]*?)^ *```$/gm)].map((match) => match[1]!.replace(/^ +/gm, ""));
+const blocksIn = (text: string) => [...text.matchAll(/^( *)```\w*\n([\s\S]*?)^ *```$/gm)].map((match) => match[2]!.replace(new RegExp(`^ {0,${match[1]!.length}}`, "gm"), ""));
 
+const coderValueOptions = new Set(["--client-tls-ca-file", "--client-tls-cert-file", "--client-tls-key-file", "--global-config", "--header", "--header-command", "--token", "--url"]);
+function coderSubcommands(code: string) {
+  return code.replace(/\\\n/g, "").split("\n").flatMap((line) => {
+    const words = (line.match(/"[^"]*"|'[^']*'|\S+/g) ?? []).map((word) => word.replace(/^["']|["']$/g, ""));
+    return words.flatMap((word, at) => {
+      if (word !== "coder") return [];
+      let next = at + 1;
+      while (words[next]?.startsWith("-")) next += coderValueOptions.has(words[next]!) ? 2 : 1;
+      return words[next] ? [words[next]!] : [];
+    });
+  });
+}
+const wrappedSpans = (text: string) => [...text.replace(/^ *```[\s\S]*?^ *```$/gm, "").replace(/\s+/g, " ").matchAll(/`([^`]+)`/g)].map((match) => match[1]!);
+const cliParameterChanges = (markdown: string) => [...new Set([...codeIn(markdown), ...wrappedSpans(markdown)])].filter((code) => coderSubcommands(code).some((name) => ["update", "restart", "start"].includes(name)));
 function codeIn(text: string) {
   const blocks = blocksIn(text);
   const spans = [...text.replace(/^ *```[\s\S]*?^ *```$/gm, "").matchAll(/`([^`\n]+)`/g)].map((match) => match[1]!);
@@ -40,7 +54,6 @@ const step = (number: number) => {
   return guide().slice(from, to < 0 ? undefined : to);
 };
 const hubStep = () => step(9);
-const beforeStepFiveCreate = () => step(5).slice(0, step(5).indexOf("4. **Create.**"));
 const beforeSteps = (heading: string) => guide().slice(guide().indexOf(heading), guide().indexOf("\n## 1. "));
 const onHubLine = (command: string) => `ssh coder.<hub> 'export PATH="${guidePath}"; ${command}'`;
 const setupArgs = () => guide().match(/; hedge setup (--chat [^']+)'/)![1]!;
@@ -164,36 +177,20 @@ describe("the agent setup guide", () => {
     expect(notes.map((note) => note.name).sort()).toEqual(held.sort());
   });
 
-  test("creates a 200 GB hub and 500 GB nodes in one coder create each, with every template parameter given and the profile repo as dotfiles", () => {
+  test("steps 4 and 5 give the hub a 200 GB disk and each node a 500 GB disk", () => {
     expect(words(step(4))).toContain("one **hub** with a 200 GB disk and one **node** with a 500 GB disk");
-    const creates = codeIn(step(5)).filter((code) => code.startsWith("coder create "));
-    expect(creates).toEqual(["coder create <name> --template <template> --preset none --parameter <disk parameter>=<200 or 500> --parameter <region parameter>=<region> --parameter <dotfiles parameter>=https://github.com/<profile repo> --parameter <other parameter>=<value> --yes\n"]);
-    expect(words(step(5))).toContain("Pass every parameter of the template that is not a secret with its own `--parameter`");
+    expect(words(step(5))).toContain("Give the hub a 200 GB disk and each node a 500 GB disk.");
   });
 
-  test("gives a secret template parameter to coder create in a file only the person can read, never in a process argument", () => {
-    const secret = 's3cr3t"value\\with-quotes';
-    const dir = temp.make("secret-");
-    const home = join(dir, "home");
-    const bin = join(dir, "bin");
-    mkdirSync(home);
-    mkdirSync(bin);
-    const secretFile = join(dir, "secret");
-    writeFileSync(secretFile, `${secret}\n`);
-    for (const tool of ["perl", "mkdir"]) {
-      writeFileSync(join(bin, tool), `#!/bin/sh\necho "${tool} $*" >> "${dir}/argv.log"\nexec "${Bun.which(tool)}" "$@"\n`);
-      chmodSync(join(bin, tool), 0o755);
-    }
-    const write = codeIn(step(5)).find((code) => code.includes("secret-parameters.yaml") && code.includes("<secret file>"))!;
-    const run = Bun.spawnSync(["sh", "-c", write.replaceAll("<secret parameter>", "api_token").replaceAll("<secret file>", secretFile)], { env: { HOME: home, PATH: `${bin}:/usr/bin:/bin` } });
-    expect(run.exitCode).toBe(0);
-    const file = join(home, ".cache/hedge-setup/secret-parameters.yaml");
-    expect(Bun.YAML.parse(readFileSync(file, "utf8"))).toEqual({ api_token: secret });
-    expect(statSync(file).mode & 0o777).toBe(0o600);
-    expect(readFileSync(join(dir, "argv.log"), "utf8")).not.toContain("s3cr3t");
-    expect(codeIn(step(5))).toContain("--rich-parameter-file ~/.cache/hedge-setup/secret-parameters.yaml");
-    expect(codeIn(step(5)).filter((code) => /coder secret create/.test(code))).toEqual(["coder secret create <secret name> --env <variable> < <secret file>"]);
-    expect(words(beforeStepFiveCreate())).not.toMatch(/a token, or a key, shows as `<private>`/);
+  test("the guide's one coder create command passes the disk, region, dotfiles, and every other parameter with --parameter, with --preset none and --yes", () => {
+    const creates = codeIn(guide()).filter((code) => code.startsWith("coder create "));
+    expect(creates).toEqual(["coder create <name> --template <template> --preset none --parameter <disk parameter>=<200 or 500> --parameter <region parameter>=<region> --parameter <dotfiles parameter>=https://github.com/<profile repo> --parameter <other parameter>=<value> --yes\n"]);
+    expect(words(step(5))).toContain("Pass each parameter with its own `--parameter`, also those where the default is right, so Coder asks nothing");
+  });
+
+  test("no command line in the guide or a pack note has --rich-parameter-file, --parameter-default, coder secret, or a --parameter value that the shell fills in", () => {
+    const lines = [guide(), ...notePaths().map((path) => readFileSync(join(root, path), "utf8"))].flatMap(codeIn).flatMap((code) => code.split("\n"));
+    expect(lines.filter((line) => /--parameter[ =][^ =]*=[^ ]*[$`]|--rich-parameter-file|--parameter-default|coder secret /.test(line))).toEqual([]);
   });
 
   test("checks each new workspace with the engine's own check, given only the parameters the guide sets and no private value, and replaces a workspace whose fixed parameter is wrong before setup", () => {
@@ -207,15 +204,16 @@ describe("the agent setup guide", () => {
     expect(words(step(5))).toContain("A parameter that the template does not let change, such as the disk size or the region, needs a new workspace: ask, then `coder delete <name>` and create it again, before setup touches it.");
   });
 
-  test("changes a parameter with the restart from the Mac that the check names, never with coder update, which skips a workspace on the active template version", () => {
-    const docs = [guide(), readFileSync(join(root, "docs/getting-started.md"), "utf8")].map((text) => text.replace(/\s+/g, " "));
-    for (const text of docs) expect(text).not.toMatch(/`coder update [^`]*--parameter/);
-    expect(docs[0]).toContain("`coder restart <name> --parameter <parameter>=<value> --yes`");
-    expect(docs[0]).toContain("Run it here on the Mac, never on the hub over SSH, because the restart stops the hub: `coder restart <name> --parameter <dotfiles parameter>=https://github.com/<repo> --yes`");
-    expect(docs[1]).toContain("`coder restart <workspace> --parameter <dotfiles parameter>=https://github.com/<repo> --yes`");
+  test("changes a parameter in the workspace's Settings in the Coder web app, as the check says, and never with the Coder CLI", () => {
+    const texts = [guide(), readFileSync(join(root, "docs/getting-started.md"), "utf8")];
+    expect(texts.flatMap(cliParameterChanges)).toEqual([]);
+    const flagged = (markdown: string) => cliParameterChanges(markdown).length > 0;
+    const rejected = ["Run `coder start`.", "Run `coder --verbose restart hub`.", "Run `CODER_URL=x coder --url x 'restart'\nhub`.", "```sh\na && coder update hub\n```\n", "```sh\ncoder --verbose \\\n  restart hub\n```\n", "```sh\ncoder re\\\nstart hub\n```\n", "1. Step:\n\n   ```sh\n   coder\\\n     restart hub\n   ```\n"];
+    const kept = ["Keep `coder create start --template dev`.", "Keep `coder schedule start hub`.", "Its restart command can ask for a parameter."];
+    expect([rejected.map(flagged), kept.map(flagged)]).toEqual([rejected.map(() => true), kept.map(() => false)]);
+    for (const text of texts) expect(text.replace(/\s+/g, " ")).toContain("**Settings → Parameters**");
     const printed = fakeCoder(temp, { parameters: { instance_type: "m7g.xlarge" }, mutable: { instance_type: true } }).check(["instance_type=m7g.4xlarge"]);
-    expect(printed.code).toBe(1);
-    expect(printed.output).toContain("x instance_type is not the value you passed. From this Mac, run: coder restart hedge-hub --parameter instance_type=<value> --yes\n");
+    expect([printed.code, printed.output]).toEqual([1, "x instance_type is not the value you passed. In the Coder web app, set it under Settings, Parameters, and submit.\nok hedge-hub runs and stays on\n"]);
   });
 
   test("reads the template's parameters when coder templates pull fails", () => {
@@ -226,10 +224,12 @@ describe("the agent setup guide", () => {
     expect(words(hubStep())).toContain("When step 7 printed that a team pack is ticked");
     const notePath = codeIn(hubStep()).join("\n").match(/~\/\S+\/packs\/<pack>\/SETUP\.md/)?.[0];
     const home = temp.make("home-");
-    const cached = join(sourceCache(home), "team", "packs", "hub");
-    cpSync(join(root, "packs", "hub"), cached, { recursive: true });
-    mkdirSync(join(sourceCache(home), "team", ".git"));
-    const source = await cachedSource({ name: "team", repo: "example/team-pack", ref: "main" }, sourceCache(home));
+    const teamRepo = temp.make("team-pack-");
+    cpSync(join(root, "packs", "hub"), join(teamRepo, "packs", "hub"), { recursive: true });
+    await spawnGit(teamRepo, "init", "-q", "-b", "main");
+    await spawnGit(teamRepo, "add", ".");
+    await spawnGit(teamRepo, "commit", "-q", "-m", "team pack");
+    const source = await fetchSource({ name: "team", repo: teamRepo, ref: "main" }, sourceCache(home));
     const pack = "packs" in source ? source.packs.find((loaded) => loaded.manifest.name === "hub") : undefined;
     const guidePathOfNote = notePath?.replace("~", home).replace("<source>", "team").replace("<pack>", "hub");
     expect(guidePathOfNote).toBe(join(pack!.dir, "SETUP.md"));

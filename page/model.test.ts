@@ -25,6 +25,20 @@ const select = (...names: string[]) => names.reduce((selected, name) => toggleSe
 const everyPack = () => select(...data.packs.map((pack) => pack.name));
 const line = (text: string, label: string) => text.match(new RegExp(`^- ${label}: (.*)$`, "m"))?.[1];
 const step = (text: string, start: string) => text.split("\n").find((item) => /^\d+\. /.test(item) && item.includes(start));
+const filledIn = (code: string): string => (/<[^<>\n]+>/.test(code) ? filledIn(code.replace(/<[^<>\n]+>/g, "value")) : code);
+const parses = (code: string) => Bun.spawnSync(["sh", "-n"], { stdin: new TextEncoder().encode(filledIn(code)) }).exitCode === 0;
+const remoteHereDocuments = (code: string) => [...code.matchAll(/\bssh(?:\s+-\S+)*\s+[^\s'"]+\s+sh -s <<'([A-Za-z_][A-Za-z0-9_]*)'\n([\s\S]*?)^\1$/gm)].map((match) => match[2]!);
+const remoteCommands = (code: string) => [
+  ...[...code.matchAll(/\bssh(?:\s+-\S+)*\s+[^\s'"]+\s+'([^']*)'/g)].map((match) => match[1]!),
+  ...remoteHereDocuments(code),
+];
+const unparsedSnippets = (codes: string[]) => codes.filter((code) => !parses(code) || !remoteCommands(code).every(parses));
+const sshSnippets = (note: string) =>
+  [
+    ...[...note.matchAll(/^( *)```sh\n([\s\S]*?)^ *```$/gm)].map((match) => match[2]!.replace(new RegExp(`^${match[1]!}`, "gm"), "")),
+    ...[...note.replace(/^ *```[\s\S]*?^ *```$/gm, "").matchAll(/`([^`\n]+)`/g)].map((match) => match[1]!),
+  ].filter((code) => /\bssh /.test(code));
+const withHub = (code: string, hub: string) => code.replace(/(\bssh (?:-t )?)[^\s`'"]*<hub>[^\s`'"]*/g, `$1${hub}`);
 
 async function hubWithHedge() {
   const home = temp.make("home-");
@@ -133,7 +147,7 @@ describe("the install prompt", () => {
     for (const heading of ["\n## 5. Create the hub and the nodes\n", "\n## 7. Set up Hedge on the hub\n", "\n## 9. Add the hub packs and the nodes\n"]) expect(guide).toContain(heading);
   });
 
-  test("with the name that hedge hub status prints put in where it says, each SSH command of every setup note reaches the hub", async () => {
+  test("with the name that hedge hub status prints put in where it says, each setup note's SSH snippet and the command it runs on the hub parse with sh -n, and each SSH command outside a comment line names the hub as its host", async () => {
     const box = await hubWithHedge();
     expect(await box.hedge(["hub", "here", "coder.hedge-hub"])).toBe(0);
     expect(await box.hedge(["hub", "status"])).toBe(0);
@@ -141,11 +155,23 @@ describe("the install prompt", () => {
     const text = installPrompt(data, everyPack());
     expect(step(text, "Find my hub")).toContain('The name after "The hub:" is the SSH name of the hub. In each SSH command of a note, put that whole name in place of the host that holds `<hub>`.');
     const notes = [...text.matchAll(/^ {3}- [^:]+: ~\/\.local\/share\/hedge\/engine\/(\S+)$/gm)].map((match) => readFileSync(join(root, match[1]!), "utf8"));
-    const filled = notes.map((note) => note.replace(/\bssh (-t )?[^\s`'"]*<hub>[^\s`'"]*/g, (_, flag: string | undefined) => `ssh ${flag ?? ""}${hub}`));
-    expect(filled.filter((note) => note.includes("<hub>"))).toEqual([]);
-    const targets = filled.flatMap((note) => [...note.matchAll(/\bssh (?:-t )?([^\s`'"]+)/g)].map((match) => match[1]!));
-    expect(targets.length).toBeGreaterThan(0);
-    expect(new Set(targets)).toEqual(new Set([hub]));
+    const filled = notes.flatMap(sshSnippets).map((code) => withHub(code, hub));
+    expect(filled.filter((code) => code.includes("<hub>"))).toEqual([]);
+    expect(unparsedSnippets(filled)).toEqual([]);
+    expect(filled.flatMap(remoteCommands).length).toBeGreaterThan(filled.length / 2);
+    const dangling = `ssh ${hub} 'hedge doctor &&'`;
+    expect(unparsedSnippets([dangling])).toHaveLength(1);
+    const recovery = sshSnippets(readFileSync(join(root, "packs/recovery/SETUP.md"), "utf8"))
+      .map((code) => withHub(code, hub))
+      .find((code) => code.includes("sh -s <<"))!;
+    expect(filled).toContain(recovery);
+    const brokenRecovery = recovery.replace(/(sh -s <<[^\n]*\n)/, "$1fi\n");
+    expect([unparsedSnippets([recovery]), unparsedSnippets([brokenRecovery])]).toEqual([[], [brokenRecovery]]);
+    expect(filled.filter((code) => (code.match(/<</g) ?? []).length !== remoteHereDocuments(code).length)).toEqual([]);
+    const run = filled.map((code) => code.split("\n").filter((line) => !/^\s*#/.test(line)).join("\n"));
+    const hosts = run.flatMap((code) => [...code.matchAll(/\bssh((?:\s+-\S+)*)\s+([^\s'"]+)/g)].map((match) => match[2]!));
+    expect(hosts.length).toBe(run.join("\n").match(/\bssh\s/g)!.length);
+    expect(new Set(hosts)).toEqual(new Set([hub]));
   });
 
   test("names only hedge commands that exist", async () => {

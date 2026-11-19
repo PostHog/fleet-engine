@@ -61,7 +61,7 @@ if [ "$os" != Darwin ]; then
 fi
 if [ -e "$link" ] || [ -L "$link" ]; then
   case "$(readlink "$link" || true)" in
-    "$current/bin/codex"|"$package/bin/codex") ;;
+    "$current/bin/codex"|"$package/bin/codex"|"$HOME/.local/share/fleet/codex/current/bin/codex"|"$HOME/.local/share/fleet/codex/bin/codex") ;;
     *) fail "$link exists and Hedge did not install it. Move it away, then run hedge apply." ;;
   esac
 fi

@@ -2,9 +2,9 @@ import { existsSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { loadPacks } from "./pack/manifest.ts";
-import { cachedSource, fetchSource, sourceCache } from "./pack/sources.ts";
+import { cachedSource, fetchSource, sourceCache, withoutUserinfo } from "./pack/sources.ts";
 import { cannotTell } from "./pack/types.ts";
-import type { AvailableSource, CatalogEntry, FetchedSource, Finding, LoadedPack, MachineFile, PackCode, Plan, Report, SourceRef } from "./pack/types.ts";
+import type { AvailableSource, CatalogEntry, FetchedSource, Finding, LoadedPack, MachineFile, Plan, Report, SourceRef } from "./pack/types.ts";
 import { loadMachine, loadProfile, pullProfile, saveMachine, thisMachine } from "./profile/profile.ts";
 import { engineAdapters } from "./adapters/index.ts";
 import { apply, check, filesAdapter, type Adapter, type Issuer, type Runner } from "./reconciler/apply.ts";
@@ -30,12 +30,11 @@ import { spawnRunner, type CommandRunner } from "./adapters/run.ts";
 import { become, canBecome, type Become } from "./runner/become.ts";
 import { trackCommand } from "./usage/usage.ts";
 import { asHedge } from "./reconciler/engine-command.ts";
-import { adoptLegacyEnv, fleetIsHedge, fleetNotice, inAnyLegacyPath, isOldJob, profileFile, renamedPath, underLegacyPath, withLegacyNames } from "./legacy.ts";
+import { adoptLegacyEnv, fleetNotice, inAnyLegacyPath, isOldJob, profileFile, renamedPath, underLegacyPath, withLegacyNames } from "./legacy.ts";
 import { importFleet, isCopyOf } from "./import-fleet.ts";
 import { fleetAdapter, type FleetAdapter } from "./adapters/fleet/adapter.ts";
 
 /** env: the environment that tells a Coder workspace apart; tests pass their own. */
-/** launchedFrom: the engine folder as the command named it, before links resolve. */
 export type CliOptions = { home: string; engineRoot: string; launchedFrom?: string; platform: NodeJS.Platform; env?: Record<string, string | undefined>; print: (line: string) => void; fail?: (line: string) => void; run?: Runner; terminal?: Terminal; apply?: (profileDir: string, skip?: string[]) => Promise<number>; setup?: Pick<SetupOptions, "machine" | "fetchSource" | "doctor" | "env" | "timeZone" | "clock">; clock?: Clock; adapters?: () => Adapter[]; hostname?: () => string; stdin?: () => ReadableStream<Uint8Array>; capture?: CommandRunner; become?: Become; interactive?: boolean };
 
 const usage = `Hedge: one setup for T3 Code, agents, and your workflows
@@ -102,19 +101,16 @@ export async function main(argv: string[], options: CliOptions): Promise<number>
   }
 }
 
-/** An engine in a Fleet path from before the rename changes nothing. An old job exits 0 so that it raises no alert; every other command exits 1. */
 function inert(argv: string[], options: CliOptions) {
   (options.fail ?? options.print)(fleetNotice(options.platform));
   return isOldJob(argv) ? 0 : 1;
 }
 
-/** get.sh runs this once the new engine is in place. */
 async function bringOverFleet(options: CliOptions) {
   for (const line of await importFleet(options.home)) options.print(`Hedge: ${line}.`);
   return 0;
 }
 
-/** get.sh runs this after import-fleet and before apply: it stops and turns off every piece of Fleet, keeps their files, and fails while one is not verified stopped. */
 const fleetOf = (options: CliOptions) => (options.adapters ?? engineAdapters)().find((adapter): adapter is FleetAdapter => adapter.name === "fleet") ?? fleetAdapter();
 
 async function retireFleet(args: string[], options: CliOptions) {
@@ -181,12 +177,18 @@ async function reconcile(command: "apply" | "doctor", args: string[], options: C
   const doctor = command === "doctor";
   const preview = doctor || flags.dryRun;
   const holds = () => fleetOf(options).holds(options.home, options.platform);
-  const held = doctor ? [] : await holds();
-  if (held.length && !flags.dryRun) return printReport({ ok: false, actions: [], findings: held, humanLeft: [] }, command, options.print, false), 1;
-  const { plan, sources } = await loadPlan(options, flags.profile, { fetch: !preview, remember: !preview, inherit: preview });
+  const held = await holds();
+  if (held.length && !preview) return printReport({ ok: false, actions: [], findings: held, humanLeft: [] }, command, options.print, false), 1;
+  const { plan, sources, remember } = await loadPlan(options, flags.profile, { fetch: !preview, inherit: preview }).catch((error: unknown) => {
+    printFindings(held, options.print);
+    throw error;
+  });
+  const stillHeld = preview ? [] : await holds();
+  if (stillHeld.length) return printReport({ ok: false, actions: [], findings: stillHeld, humanLeft: [] }, command, options.print, false), 1;
+  if (!preview) await remember();
   const adapters = (options.adapters ?? engineAdapters)();
   const issue: Issuer = (entries, node) => issueCredentials(entries, node, plan, sources, options);
-  const report = doctor ? await check(plan, { home: options.home, adapters, run: options.run }) : await apply(plan, { home: options.home, adopt: flags.adopt, adoptFrom: flags.adoptFrom, skip: flags.skip, dryRun: flags.dryRun, adapters, run: options.run, issue, progress: options.print, holds });
+  const report = doctor ? await check(plan, { home: options.home, adapters, run: options.run }) : await apply(plan, { home: options.home, adopt: flags.adopt, adoptFrom: flags.adoptFrom, skip: flags.skip, dryRun: flags.dryRun, adapters, run: options.run, issue, progress: options.print });
   if (doctor) {
     const drifted = await drift(plan, report.humanLeft);
     report.findings.push(...drifted);
@@ -203,7 +205,7 @@ async function devbox(args: string[], options: CliOptions) {
   const terminal = options.terminal ?? { ...ttyTerminal(), print: options.print };
   const machine = { ...realMachine, ...options.setup?.machine };
   if (asksAddress(args)) return await printAddress({ terminal, machine });
-  const { plan } = await loadPlan(options, undefined, { fetch: false, remember: false });
+  const { plan } = await loadPlan(options, undefined, { fetch: false });
   try {
     return await devboxCommand(args, { home: options.home, terminal, machine, machineFile: plan.machine, plan });
   } catch (error) {
@@ -222,7 +224,7 @@ function applyProfile(dir: string, options: CliOptions, skip: string[] = []) {
 }
 
 async function change(command: keyof typeof changes | "hub", args: string[], options: CliOptions) {
-  const { plan, sources } = await loadPlan(options, undefined, { fetch: false, remember: false, pull: changesProfile(command, args) });
+  const { plan, sources } = await loadPlan(options, undefined, { fetch: false, pull: changesProfile(command, args) });
   const profileDir = plan.machine.profileDir!;
   const profile = await loadProfile(profileDir);
   const context: ChangeContext = {
@@ -267,7 +269,7 @@ async function runRefresh(args: string[], options: CliOptions) {
   const profileDir = hedgeProfile(options, machine.profileDir);
   const profile = await loadProfile(profileDir);
   const applyFiles = async (moved: FetchedSource[]) => {
-    const { plan } = await loadPlan(options, profileDir, { fetch: false, remember: false, fetched: moved });
+    const { plan } = await loadPlan(options, profileDir, { fetch: false, fetched: moved });
     if (plan.unanswered.length) {
       for (const setting of plan.unanswered) options.print(`To do: ${setting.question} Answer it with hedge set ${setting.key}=<value>.`);
       return false;
@@ -283,11 +285,12 @@ async function runPackCommand(name: string, args: string[], options: CliOptions)
   const typed = ["hedge", name, ...args];
   const undoing = await undoingPack(options.home, options.env ?? {}, typed);
   if (undoing) return runUndo(name, args, undoing, options);
-  const { plan, sources } = await loadPlan(options, undefined, { fetch: false, remember: false, inherit: true });
+  const { plan, sources } = await loadPlan(options, undefined, { fetch: false, inherit: true });
   const command = plan.commands[name];
   if (!command) {
     const owner = sources.flatMap((source) => ("error" in source ? [] : source.packs)).find((pack) => existsSync(join(pack.dir, "commands", `${name}.ts`)) || Object.hasOwn(pack.code?.commands ?? {}, name));
-    options.print(owner ? `hedge ${name} comes from the ${owner.manifest.title ?? owner.manifest.name} pack, which is off. Turn it on with hedge packs.` : `hedge: unknown command ${name}\n\n${usage}`);
+    const unloaded = sources.flatMap((source) => ("error" in source ? [`The pack source ${source.ref.name} at ${source.ref.ref} did not load: ${withoutUserinfo(source.error)}.`] : []));
+    options.print(owner ? `hedge ${name} comes from the ${owner.manifest.title ?? owner.manifest.name} pack, which is off. Turn it on with hedge packs.` : [`hedge: unknown command ${name}`, ...unloaded].join("\n") + `\n\n${usage}`);
     return 2;
   }
   if (name !== "usage") trackCommand(options.home, name, args, command.subcommands ?? [], options.env ?? {}, options.interactive);
@@ -307,7 +310,7 @@ async function runUndo(name: string, args: string[], pack: string, options: CliO
   const cannot = (why: string) => (options.print(`hedge ${name}: cannot run the ${pack} pack's command to undo its step: ${why}`), cannotTell);
   let loaded: Awaited<ReturnType<typeof loadPlan>>;
   try {
-    loaded = await loadPlan(options, undefined, { fetch: false, remember: false, inherit: true, withPack: pack });
+    loaded = await loadPlan(options, undefined, { fetch: false, inherit: true, withPack: pack });
   } catch (error) {
     return cannot((error as Error).message);
   }
@@ -355,7 +358,7 @@ async function runItem(args: string[], options: CliOptions) {
   const [pack, id] = slash < 0 ? ["", ""] : [item.slice(0, slash), item.slice(slash + 1)];
   const repairing = extra.length === 1 && extra[0] === "--repair";
   if (!pack || !id || (extra.length && !repairing)) return options.print("Usage: hedge run <pack>/<id> [--repair]"), 2;
-  const { plan, sources } = await loadPlan(options, undefined, { fetch: false, remember: false, inherit: true });
+  const { plan, sources } = await loadPlan(options, undefined, { fetch: false, inherit: true });
   const loaded = plan.packs.some((entry) => entry.name === pack && entry.available) ? loadedPack(sources, pack) : undefined;
   const code = loaded?.code;
   const job = plan.jobs.find((entry) => entry.pack === pack && entry.id === id);
@@ -453,7 +456,7 @@ async function credential(args: string[], options: CliOptions) {
   const slash = item.indexOf("/");
   const [pack, id] = slash < 0 ? ["", ""] : [item.slice(0, slash), item.slice(slash + 1)];
   if (!pack || !id || !node || extra.length) return options.print("Usage: hedge credential <pack>/<id> <node>"), 2;
-  const { plan, sources } = await loadPlan(options, undefined, { fetch: false, remember: false });
+  const { plan, sources } = await loadPlan(options, undefined, { fetch: false });
   if (!plan.onHub) throw new Error(`hedge credential runs on the hub${plan.hub ? `, ${plan.hub}` : ""}.`);
   if (!plan.catalog?.some((entry) => entry.pack === pack && entry.id === id)) throw new Error(`the service catalog has no ${item}: its workflow or plan is off in your profile.`);
   const loaded = loadedPack(sources, pack)!;
@@ -491,34 +494,45 @@ function handlerSubcommands(plan: Plan) {
   return Object.fromEntries(Object.entries(plan.handlers).flatMap(([seam, handler]) => (handler.subcommands ? [[seam, handler.subcommands]] : [])));
 }
 
-/** A profile in a Fleet path from before the rename is never used: Hedge uses its Hedge copy, which get.sh makes, or refuses. The copy counts only when it is a checkout of the same repository. */
 function hedgeProfile(options: CliOptions, dir: string): string {
-  if (!underLegacyPath(options.home, dir)) return dir;
-  const copy = renamedPath(options.home, dir);
-  if (!copy || underLegacyPath(options.home, copy) || !existsSync(profileFile(copy)) || inAnyLegacyPath(profileFile(copy)) || !isCopyOf(dir, copy)) throw new Error(`${dir} is in a Fleet path from before the rename, so Hedge does not use it. Run get.sh to copy it, or pass --profile with a profile outside the Fleet paths.`);
-  options.print(`Hedge: uses ${copy}, the copy of ${dir}, because ${dir} is in a Fleet path from before the rename.`);
+  const legacy = underLegacyPath(options.home, dir);
+  const selected = legacy ? hedgeCopy(options.home, dir) : dir;
+  refuseLinkedProfile(selected);
+  if (legacy) options.print(`Hedge: uses ${selected}, the copy of ${dir}, because ${dir} is in a Fleet path from before the rename.`);
+  return selected;
+}
+
+function refuseLinkedProfile(dir: string) {
+  if (inAnyLegacyPath(profileFile(dir))) throw new Error(`${profileFile(dir)} is in a Fleet path from before the rename, so Hedge does not use it. Make it a file of its own in ${dir}, or run get.sh to copy the profile.`);
+}
+
+function hedgeCopy(home: string, dir: string): string {
+  const copy = renamedPath(home, dir);
+  if (!copy || underLegacyPath(home, copy) || !existsSync(profileFile(copy)) || inAnyLegacyPath(profileFile(copy)) || !isCopyOf(dir, copy)) throw new Error(`${dir} is in a Fleet path from before the rename, so Hedge does not use it. Run get.sh to copy it, or pass --profile with a profile outside the Fleet paths.`);
   return copy;
 }
 
 /** withPack resolves the plan as if the profile also had that pack on, for the undo of one of its steps. */
-async function loadPlan(options: CliOptions, profileFlag: string | undefined, mode: { fetch: boolean; remember: boolean; inherit?: boolean; pull?: boolean; withPack?: string; fetched?: FetchedSource[] }): Promise<{ plan: Plan; sources: FetchedSource[] }> {
+async function loadPlan(options: CliOptions, profileFlag: string | undefined, mode: { fetch: boolean; inherit?: boolean; pull?: boolean; withPack?: string; fetched?: FetchedSource[] }): Promise<{ plan: Plan; sources: FetchedSource[]; remember: () => Promise<void> }> {
   const saved = await loadMachine(options.home);
   const inherited = mode.inherit && !profileFlag ? options.env?.HEDGE_PROFILE_DIR : undefined;
   const given = profileFlag ? resolvePath(profileFlag) : inherited ? resolvePath(inherited) : saved?.profileDir;
   if (!given) throw new Error("no profile on this machine. Run get.sh, or pass --profile <dir>.");
   const profileDir = hedgeProfile(options, given);
   const machine: MachineFile = { ...thisMachine(saved, options.platform, options.env ?? {}, (options.hostname ?? hostname)()), profileDir };
-  if (mode.pull) await pullProfile(profileDir);
+  if (mode.pull) await pullProfile(profileDir), refuseLinkedProfile(profileDir);
   const loaded = await loadProfile(profileDir);
   const profile = mode.withPack && !loaded.packs.includes(mode.withPack) ? { ...loaded, packs: [...loaded.packs, mode.withPack] } : loaded;
   const cache = sourceCache(options.home);
   const known = (ref: SourceRef) => mode.fetched?.find((source) => source.ref.name === ref.name && !("error" in source));
   const engine: AvailableSource = { ref: { name: "engine", repo: profile.engine.repo, ref: profile.engine.ref }, dir: options.engineRoot, packs: await loadPacks(options.engineRoot) };
-  const sources = [engine, ...(await Promise.all(profile.sources.map((ref) => known(ref) ?? (mode.fetch ? fetchSource(ref, cache, undefined, options.clock) : cachedSource(ref, cache)))))];
+  const sources = [engine, ...(await Promise.all(profile.sources.map((ref) => known(ref) ?? (mode.fetch ? fetchSource(ref, cache, undefined, options.clock) : cachedSource(ref, cache, options.clock)))))];
   const plan = resolve(profile, machine, sources);
   const changed = saved?.profileDir !== profileDir || saved.role !== plan.machine.role || saved.coder !== plan.machine.coder || saved.name !== plan.machine.name;
-  if (mode.remember && changed) await saveMachine(options.home, plan.machine);
-  return { plan, sources };
+  const remember = async () => {
+    if (changed) await saveMachine(options.home, plan.machine);
+  };
+  return { plan, sources, remember };
 }
 
 function parseFlags(args: string[]) {
@@ -543,13 +557,16 @@ function parseFlags(args: string[]) {
 function printReport(report: Report, command: string, print: (line: string) => void, dryRun = false) {
   const changes = report.actions.filter((action) => action.operation !== "keep" && action.operation !== "conflict");
   if (command === "apply") for (const action of changes) print(`${action.operation} ${action.target}`);
-  for (const finding of report.findings) print(`${finding.repair === "human" || finding.todo ? "To do" : finding.repair ? "Fix" : "Note"}: ${finding.say}`);
+  printFindings(report.findings, print);
   const waits = report.findings.some((finding) => finding.todo);
   if (command === "doctor") print(!report.ok ? "Run hedge apply to fix what Hedge can fix." : waits ? "Everything Hedge sets matches your profile. The To do lines above wait for you." : "Everything matches your profile.");
   else if (dryRun) print(report.ok ? `Preview: ${changes.length} change${changes.length === 1 ? "" : "s"} to apply. Nothing was written.` : "Preview: Hedge could not apply your profile. Nothing was written.");
   else print(report.ok ? `Applied ${changes.length} change${changes.length === 1 ? "" : "s"}.` : "Hedge could not apply your profile.");
 }
 
+function printFindings(findings: Report["findings"], print: (line: string) => void) {
+  for (const finding of findings) print(`${finding.repair === "human" || finding.todo ? "To do" : finding.repair ? "Fix" : "Note"}: ${finding.say}`);
+}
 
 if (import.meta.main) {
   const engineRoot = resolvePath(import.meta.dir, "..");

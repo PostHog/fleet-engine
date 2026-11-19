@@ -1,7 +1,6 @@
-import type { OldTasks } from "../adapters/fleet/adapter.ts";
+import type { OldTasks, Running } from "../adapters/fleet/adapter.ts";
 import type { CommandRunner } from "../adapters/run.ts";
 
-/** launchd for uid 501. It refuses to load a dev.hedge or com.hedge agent while its dev.fleet or com.fleet agent runs. stuck agents ignore bootout; unclear ones make launchctl print fail; failing ones do not load; pinned ones stay enabled. */
 export function fakeLaunchd(oldLabel: (label: string) => string = (label) => label.replace(/^(dev|com)\.hedge\./, "$1.fleet.").replace(/\.hedge-/, ".fleet-")) {
   const loaded = new Set<string>();
   const disabled = new Set<string>();
@@ -32,7 +31,6 @@ export function fakeLaunchd(oldLabel: (label: string) => string = (label) => lab
   return { run, loaded, disabled, stuck, unclear, failing, pinned, calls };
 }
 
-/** The Docker CLI. down makes every command fail as it does while the daemon is stopped. A pinned container keeps its restart policy. */
 export function fakeDocker() {
   const containers = new Map<string, { running: boolean; restart: string; label?: string; pinned?: boolean }>();
   const state = { down: false };
@@ -53,7 +51,6 @@ export function fakeDocker() {
   return { run, containers, state };
 }
 
-/** T3 Code's scheduled tasks. refuse makes every change fail. */
 export function fakeTasks(tasks: Array<{ id: string; enabled: boolean }> = []) {
   const items = new Map(tasks.map((task) => [task.id, { ...task }]));
   const state = { refuse: false };
@@ -67,7 +64,6 @@ export function fakeTasks(tasks: Array<{ id: string; enabled: boolean }> = []) {
   return { client, items, state };
 }
 
-/** crontab with one user's table. refuse makes every write fail. */
 export function fakeCrontab(text = "") {
   const table = { text, refuse: false };
   const run: CommandRunner = async (command, options) => {
@@ -80,7 +76,27 @@ export function fakeCrontab(text = "") {
   return { run, table };
 }
 
-/** Sends each command to the first fake that knows its tool. */
+export function fakeProcesses() {
+  const table = new Map<number, { args: string; ppid?: number; stubborn?: boolean; reusedBy?: string }>();
+  const state = { missing: false };
+  const killed: number[] = [];
+  const list = async (): Promise<Running[]> => {
+    if (state.missing) throw new Error("/proc could not be read (ENOENT: no such file or directory)");
+    const listed = [...table].map(([pid, item]) => ({ pid, ppid: item.ppid ?? 1, argv: item.args.split(" ") }));
+    for (const [pid, item] of table) if (item.reusedBy) table.set(pid, { args: item.reusedBy });
+    return listed;
+  };
+  const run: CommandRunner = async (command) => {
+    if (command[0] !== "kill") return { code: 127, stdout: "" };
+    for (const pid of command.slice(2).map(Number)) {
+      killed.push(pid);
+      if (!table.get(pid)?.stubborn) table.delete(pid);
+    }
+    return { code: 0, stdout: "" };
+  };
+  return { run, list, table, state, killed };
+}
+
 export const runners = (...fakes: CommandRunner[]): CommandRunner => async (command, options) => {
   for (const fake of fakes) {
     const answer = await fake(command, options);

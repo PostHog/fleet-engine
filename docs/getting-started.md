@@ -26,11 +26,9 @@ parameter to your profile repo: `https://github.com/<login>/hedge-profile`,
 or `https://github.com/<login>/fleet-profile` when you have a profile from
 before the rename. `hedge setup` makes `hedge-profile` in step 2 when you
 have none. When setup prints another repo in step 2, such as a profile in a
-team's org, change the dotfiles parameter of each workspace from your Mac
-with
-`coder restart <workspace> --parameter <dotfiles parameter>=https://github.com/<repo> --yes`.
-`coder update` changes nothing while the workspace uses the template's
-active version.
+team's org, change the dotfiles parameter of each workspace to
+`https://github.com/<repo>` in the Coder web app: open the workspace, go to
+**Settings → Parameters**, set it, and submit.
 
 ```sh
 coder login <your Coder URL>

@@ -58,12 +58,24 @@ test("a second run changes nothing, and a group that serves more of the upstream
   expect(api.groups[0]!.servers).toEqual(["tickets", "calendar", { name: "notes", tools: ["search_notes", "read_note"] }]);
 });
 
-test("a moved upstream keeps the sign-in that the gateway stored beside it", async () => {
+test("an upstream that moves to another path of its origin keeps the sign-in and headers that the gateway stored beside it", async () => {
   const { api, hub } = hubWith({ "notes.json": notes });
   await registerUpstreams(hub);
-  api.configs.notes = { ...api.configs.notes, url: "https://old.example.com/mcp", oauth: { redirectUri: "http://127.0.0.1:3317/mcphub/oauth/callback", refreshToken: "kept" } };
+  api.configs.notes = { ...api.configs.notes, url: "https://notes.example.com/v1/mcp", headers: { "X-Team": "notes" }, oauth: { redirectUri: "http://127.0.0.1:3317/mcphub/oauth/callback", refreshToken: "kept" } };
+  hub.printed.length = 0;
   await registerUpstreams(hub);
-  expect(api.configs.notes).toMatchObject({ url: "https://notes.example.com/mcp", oauth: { refreshToken: "kept" } });
+  expect(api.configs.notes).toMatchObject({ url: "https://notes.example.com/mcp", headers: { "X-Team": "notes" }, oauth: { refreshToken: "kept" } });
+  expect(hub.printed).toEqual(["Notes is in the MCP gateway."]);
+});
+
+test("an upstream that moves to another origin drops the sign-in and headers of the old origin and asks for a new sign-in", async () => {
+  const { api, hub } = hubWith({ "notes.json": notes });
+  await registerUpstreams(hub);
+  api.configs.notes = { ...api.configs.notes, url: "https://old.example.com/mcp", headers: { Authorization: "Bearer old-origin" }, oauth: { redirectUri: "http://127.0.0.1:3317/mcphub/oauth/callback", accessToken: "old-access", refreshToken: "old-refresh" } };
+  hub.printed.length = 0;
+  await registerUpstreams(hub);
+  expect(api.configs.notes).toEqual({ type: "streamable-http", url: "https://notes.example.com/mcp", description: "Added by Hedge", startOnDemand: true, enabled: true, oauth: { redirectUri: "http://127.0.0.1:3317/mcphub/oauth/callback" } });
+  expect(hub.printed).toEqual(["Notes is in the MCP gateway. To sign in to it, on the hub, run: hedge mcp-gateway sign-in"]);
 });
 
 test("a Codex app upstream that a pack declares runs Hedge's app bridge with its definition, in the Codex home of its account", async () => {
@@ -123,6 +135,67 @@ test("a local upstream whose folder is missing on the hub waits with a warning w
   await registerUpstreams(hub);
   expect(api.configs["notes-search"]).toMatchObject({ command: "node", args: ["/hedge-local/notes-search.mjs"] });
   expect(ran.calls.filter((call) => call.command[1] === "run").at(-1)!.command.join(" ")).toContain(`-v ${missing}:/hedge-notes:ro`);
+  expect(await upstreamsRegistered(hub)).toBe(true);
+});
+
+function movedNotes() {
+  const { api, hub } = hubWith({ "notes.json": notes });
+  return {
+    api,
+    hub,
+    async moveFromOldOrigin() {
+      await registerUpstreams(hub);
+      api.configs.notes = { type: "streamable-http", url: "https://old.example.com/mcp", description: "Added by Hedge", startOnDemand: true, headers: { Authorization: "Bearer old-header" }, credentialTemplate: [{ target: "headers", name: "X-Api-Key" }], oauth: { redirectUri: "http://127.0.0.1:3317/mcphub/oauth/callback" } };
+      api.bindings.notes = { "headers.X-Api-Key": "old-binding" };
+      api.oauthClients.notes = { clientId: "old-client", clientSecret: "old-secret" };
+      api.received = [];
+    },
+    sentToNewOrigin: () => api.received.filter((sent) => typeof sent.url === "string" && new URL(sent.url).origin === "https://notes.example.com"),
+  };
+}
+
+const oldCredentials = ["old-header", "old-binding", "old-client", "old-secret", "https://old.example.com"];
+
+test("an upstream that moves to another origin receives none of the old origin's credentials at any point of the move, also those the gateway keeps by server name", async () => {
+  const moved = movedNotes();
+  await moved.moveFromOldOrigin();
+
+  await registerUpstreams(moved.hub);
+
+  expect(moved.sentToNewOrigin().length).toBeGreaterThan(0);
+  for (const old of oldCredentials) expect(JSON.stringify(moved.sentToNewOrigin())).not.toContain(old);
+  expect(moved.api.configs.notes).toMatchObject({ url: "https://notes.example.com/mcp", enabled: true });
+});
+
+test("when the gateway does not drop the old origin's sign-in, the upstream keeps its old origin, and the next run drops the sign-in before it moves", async () => {
+  const moved = movedNotes();
+  await moved.moveFromOldOrigin();
+  moved.api.failing = ["POST servers/notes/oauth/disconnect"];
+
+  await expect(registerUpstreams(moved.hub)).rejects.toThrow();
+
+  expect(moved.api.configs.notes!.url).toBe("https://old.example.com/mcp");
+  moved.api.failing = [];
+  await registerUpstreams(moved.hub);
+
+  expect(moved.sentToNewOrigin().length).toBeGreaterThan(0);
+  for (const old of oldCredentials) expect(JSON.stringify(moved.sentToNewOrigin())).not.toContain(old);
+});
+
+test("an upstream that Fleet added before the rename becomes Hedge's and keeps its sign-in at the same origin", async () => {
+  const fleets = { type: "streamable-http", url: "https://notes.example.com/mcp", description: "Added by Fleet", oauth: { redirectUri: "http://127.0.0.1:3317/mcphub/oauth/callback", refreshToken: "kept" } };
+  const { api, hub } = hubWith({ "notes.json": notes }, { servers: ["tickets", "calendar", "notes"], configs: { notes: fleets } });
+  await registerUpstreams(hub);
+  expect(api.configs.notes).toMatchObject({ url: "https://notes.example.com/mcp", description: "Added by Hedge", oauth: { refreshToken: "kept" } });
+  expect(await upstreamsRegistered(hub)).toBe(true);
+});
+
+test("an upstream that Fleet added at another origin becomes Hedge's without the old sign-in and headers, and asks for a new sign-in", async () => {
+  const fleets = { type: "streamable-http", url: "https://old.example.com/mcp", description: "Added by Fleet", headers: { Authorization: "Bearer old-origin" }, oauth: { redirectUri: "http://127.0.0.1:3317/mcphub/oauth/callback", refreshToken: "old-refresh" } };
+  const { api, hub } = hubWith({ "notes.json": notes }, { servers: ["tickets", "calendar", "notes"], configs: { notes: fleets } });
+  await registerUpstreams(hub);
+  expect(api.configs.notes).toEqual({ type: "streamable-http", url: "https://notes.example.com/mcp", description: "Added by Hedge", startOnDemand: true, enabled: true, oauth: { redirectUri: "http://127.0.0.1:3317/mcphub/oauth/callback" } });
+  expect(hub.printed).toEqual(["Notes is in the MCP gateway. To sign in to it, on the hub, run: hedge mcp-gateway sign-in"]);
   expect(await upstreamsRegistered(hub)).toBe(true);
 });
 

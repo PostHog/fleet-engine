@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { withDirectories } from "./directories.ts";
 import { shortCluster } from "./kill.ts";
 import { type Command, commandsIn } from "./shell-words.ts";
@@ -31,9 +31,14 @@ const burstReason = (count: number, person: string) => `Hedge blocked this comma
   + "and bursts like that make GitHub fail many CI runs at startup. "
   + `Push in batches of at most ${largestForcePush} branches, about a minute apart. If that does not fit, stop and ask ${person}.`;
 
-const aliasReason = (person: string) => "Hedge blocked this command: it makes an alias or a wrapper command, such as `gh stack alias`, "
-  + "`gh alias set sp 'stack push'`, a shell alias, or `gh alias import`, that can hide gh stack pushes from this guard. "
-  + `Run \`gh stack\` itself. If you need the alias, stop and ask ${person}.`;
+const aliasReason = (person: string) => "Hedge blocked this command: it makes or runs an alias or a wrapper command, such as `gh stack alias`, "
+  + "`gh alias set sp 'stack push'`, a shell alias, or `gh alias import`, or runs gh through `xargs`, which can hide gh stack "
+  + `pushes from this guard. Run \`gh stack\` itself. If you need the alias, stop and ask ${person}.`;
+
+const configReason = (person: string) => "Hedge blocked this command: it runs gh while it sets or names GH_CONFIG_DIR, XDG_CONFIG_HOME or HOME, "
+  + "or uses sudo, doas, env or exec, so this guard cannot tell which gh aliases run. "
+  + "Run gh without them, and pass text that names these variables in a file, such as with --body-file. Reading `$HOME` is fine. "
+  + `If you need it, stop and ask ${person}.`;
 
 export const githubSlug = (url: string) => url.match(/github\.com[:/]+([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i)?.slice(1, 3).join("/");
 
@@ -125,89 +130,203 @@ function stackArgs(name: string, args: string[]): string[] | undefined {
 }
 
 const makesAlias = (args: string[]) => operandsOf(args)[1] === "alias" && !args.includes("--remove");
-/** `gh alias … --help` before any `--`, which only prints help; after `--` it is an operand, such as an import file. */
-const asksHelp = (args: string[]) => args.slice(0, args.includes("--") ? args.indexOf("--") : undefined).some((arg) => arg === "--help" || arg === "-h");
+const truthy = /^(?:1|t|true)$/i;
+const falsy = /^(?:0|f|false)$/i;
 
-function ghAliasHidesStack(name: string, args: string[]): boolean {
-  const [group, action, , expansion] = operandsOf(args);
-  if (name !== "gh" || group !== "alias" || asksHelp(args)) return false;
+/**
+ * Whether gh prints help for `gh alias …`: `-h` before any `--` does at once, and otherwise the last `--help` or
+ * `--help=<bool>` decides. After `--` it is an operand, such as an import file; a value gh cannot read counts as no help.
+ */
+function asksHelp(args: string[]): boolean {
+  let help = false;
+  for (const arg of args) {
+    if (arg === "--") break;
+    if (arg === "-h") return true;
+    if (arg === "--help") help = true;
+    const value = /^(?:--help|-h)=(.*)$/.exec(arg)?.[1];
+    if (value === undefined) continue;
+    if (truthy.test(value)) help = true;
+    else if (falsy.test(value)) help = false;
+    else return false;
+  }
+  return help;
+}
+
+/** `--shell`, or `-s` alone or in a cluster of short flags. */
+const shellFlag = /^(?:--shell(?:=|$)|-[^-=]*s)/;
+
+/**
+ * Whether `gh alias set` or `gh alias import` makes an alias that can hide a stack push: any import, a shell alias, an
+ * expansion from standard input, and an expansion the alias screen would refuse, so a later call in the same command
+ * cannot run it.
+ */
+function ghAliasHidesStack(args: string[]): boolean {
+  const [group, action, name, expansion] = operandsOf(args);
+  if (group !== "alias" || asksHelp(args)) return false;
   if (action === "import") return true;
   if (action !== "set") return false;
-  return expansion === undefined || args.some((arg) => /^(?:-s|--shell)(?:=|$)/.test(arg)) || /^!|\bstack\b/.test(expansion);
+  if (name === undefined || expansion === undefined || args.some((arg) => shellFlag.test(arg))) return true;
+  const aliases = ghAliases();
+  const unsafe = aliases && unsafeAliasWords({ ...aliases, [name]: expansion });
+  return !unsafe || unsafe.has(name.split(" ").at(-1)!);
 }
 
-/** gh's aliases, from the config directory the call names or inherits, resolved from the call's directory; undefined when the guard cannot tell where that is. */
-function ghAliases(env: ReadonlyMap<string, string>, directory: string | undefined): Record<string, unknown> | undefined {
-  const configHome = env.get("XDG_CONFIG_HOME") ?? process.env.XDG_CONFIG_HOME;
-  const named = (env.get("GH_CONFIG_DIR") ?? process.env.GH_CONFIG_DIR) || join(configHome || join(homedir(), ".config"), "gh");
-  if (!isAbsolute(named) && directory === undefined) return undefined;
+/** The variables that move gh's config directory, and a read of one as `$NAME` or `${NAME}`. */
+const configVariable = /\b(?:GH_CONFIG_DIR|XDG_CONFIG_HOME|HOME)\b/;
+const configRead = /\$(?:\{(?:GH_CONFIG_DIR|XDG_CONFIG_HOME|HOME)\}|(?:GH_CONFIG_DIR|XDG_CONFIG_HOME|HOME)\b)/g;
+/** `sudo` and `doas` switch the user, and `env` can clear or unset the environment, with options a redirection can separate. */
+const environmentWrapper = /(?:^|[^\w.-])(?:sudo|doas|env)(?![\w.-])/;
+const commandBreak = /[;&|()`{}\n]/;
+const beforeCommand = /^(?:[A-Za-z_]\w*=\S*|\d*[<>]\S*|if|then|else|elif|do|while|until|!)$/;
+const refLike = /^\+?[\w-][\w.-]*(?:[/:][\w.-]+)+$/;
+const gitDataCommands = new Set(["add", "branch", "checkout", "cherry-pick", "commit", "diff", "fetch", "log", "merge", "pull", "push", "reset", "restore", "revert", "show", "status", "switch", "tag", "worktree"]);
+const runsProgram = /^--(?:upload-pack|receive-pack|exec)(?:=|$)/;
+const wrapperWordsAreData = ([command = "", ...args]: string[]) => {
+  if (basename(command) === "gh") return true;
+  if (basename(command) !== "git") return false;
+  let at = 0;
+  while (args[at] === "-C") at += 2;
+  return gitDataCommands.has(args[at] ?? "") && args.every((arg) => !runsProgram.test(arg) && (!environmentWrapper.test(arg) || refLike.test(arg)));
+};
+const runsWrapper = (words: string) => words.split(commandBreak).some((part) => {
+  if (!environmentWrapper.test(part)) return false;
+  const tokens = part.trim().split(/\s+/);
+  const at = tokens.findIndex((token) => !beforeCommand.test(token));
+  return at < 0 || tokens.slice(0, at).some((token) => environmentWrapper.test(token)) || !wrapperWordsAreData(tokens.slice(at));
+});
+/** The shell's `exec` can clear the environment too; `gh extension exec` also spells the word. */
+const execWord = /(?:^|[^\w.-])exec(?![\w.-])/g;
+
+/** A `$'…'` string with an escape that can spell a letter, such as `\x47`. */
+const escapedLetters = /\$'[^']*\\[xuUc0-7]/;
+/** The command as the shell joins its words: without line continuations, `$` before quotes, quotes and backslashes. */
+const unquoted = (command: string) => command.replace(/\\\r?\n/g, "").replace(/\$(?=["'])/g, "").replace(/["'\\]/g, "");
+
+/**
+ * Whether gh may read another config than the one the agent's environment names: the command names a variable that
+ * moves it other than to read it, or uses a wrapper that can change the user or the environment, also when quotes or
+ * escapes split those words. `exec` may appear only once for each `gh extension exec` call the shell reader found. The
+ * guard does not follow the shell's assignments, exports, tildes and unsets; it refuses them.
+ */
+function movesGhConfig(command: string, extensionExecs: number): boolean {
+  const words = unquoted(command);
+  return escapedLetters.test(command) || configVariable.test(words.replace(configRead, "")) || runsWrapper(words)
+    || (words.match(execWord)?.length ?? 0) > extensionExecs;
+}
+
+/** gh's aliases from the config the agent's environment names; undefined when the guard cannot tell what gh reads. */
+function ghAliases(): Record<string, unknown> | undefined {
+  const { GH_CONFIG_DIR: named, XDG_CONFIG_HOME: configHome, HOME: home } = process.env;
+  const directory = named || (configHome ? join(configHome, "gh") : join(home ?? "", ".config", "gh"));
+  if (!isAbsolute(directory)) return undefined;
+  let text: string;
   try {
-    const config = Bun.YAML.parse(readFileSync(join(resolve(directory ?? "/", named), "config.yml"), "utf8")) as { aliases?: Record<string, unknown> } | null;
-    return config?.aliases ?? {};
-  } catch {
-    return {};
+    text = readFileSync(join(directory, "config.yml"), "utf8");
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? {} : undefined;
   }
-}
-
-/** Words split as gh splits alias names and expansions (shlex): quotes and backslashes group; undefined for an open quote. */
-function shellSplit(text: string): string[] | undefined {
-  const words: string[] = [];
-  let word = "";
-  let started = false;
-  let quote: string | undefined;
-  for (let index = 0; index < text.length; index++) {
-    const char = text[index]!;
-    if (quote === "'") {
-      if (char === "'") quote = undefined;
-      else word += char;
-    } else if (quote === '"') {
-      if (char === '"') quote = undefined;
-      else if (char === "\\" && '"\\$`'.includes(text[index + 1] ?? "x")) word += text[++index];
-      else word += char;
-    } else if (/\s/.test(char)) {
-      if (started) words.push(word);
-      word = "";
-      started = false;
-    } else {
-      started = true;
-      if (char === "'" || char === '"') quote = char;
-      else if (char === "\\") word += text[++index] ?? "";
-      else word += char;
-    }
-  }
-  if (quote) return undefined;
-  if (started) words.push(word);
-  return words;
+  return aliasesIn(text);
 }
 
 /**
- * The arguments gh runs after expanding the agent's own gh alias, matched like gh by its leading words, also a nested
- * name such as `pr mine`; undefined for a shell alias, an expansion gh cannot split, or a config the guard cannot find.
+ * The aliases of a gh config. gh reads the first YAML document and the first of duplicate keys, and Bun the last, and Bun
+ * reads a key such as `001` as `1`. So the config must be one block mapping with one `aliases` key, and one `name:` line
+ * at the indent of its aliases for each alias Bun reads, spelled as Bun reads it. gh also breaks lines at U+0085, U+2028
+ * and U+2029, and Bun does not, so those and a lone CR refuse it. gh reads a reference such as `*name` in the aliases as
+ * the anchor's name, and Bun as its value, so a reference there refuses it too.
  */
-function expandedGh({ args, env }: Command, directory: string | undefined): string[] | undefined {
-  if (args[0] === "alias") return args;
-  const aliases = ghAliases(env, directory);
-  if (aliases === undefined) return undefined;
-  const [match] = Object.entries(aliases)
-    .map(([key, expansion]) => ({ words: shellSplit(key) ?? [], expansion }))
-    .filter(({ words }) => words.length > 0 && words.every((word, index) => args[index] === word))
-    .sort((a, b) => b.words.length - a.words.length);
-  if (match === undefined || typeof match.expansion !== "string") return args;
-  if (match.expansion.trimStart().startsWith("!")) return undefined;
-  return substituted(match.expansion, args.slice(match.words.length));
+function aliasesIn(text: string): Record<string, unknown> | undefined {
+  if (/[\r\u0085\u2028\u2029](?<!\r(?=\n))/.test(text)) return undefined;
+  let parsed: { aliases?: Record<string, unknown> } | null;
+  try {
+    parsed = Bun.YAML.parse(text) as typeof parsed;
+  } catch {
+    return undefined;
+  }
+  const aliases = parsed?.aliases ?? {};
+  const keys: string[] = [];
+  let indent: number | undefined;
+  let inAliases = false;
+  let seen = false;
+  for (const line of text.split(/\r?\n/)) {
+    if (/^\s*(?:#.*)?$/.test(line)) continue;
+    const leading = /^\s*/.exec(line)![0].length;
+    if (leading === 0) {
+      const top = /^[\w-]+:(?:[ \t](.*))?$/.exec(line);
+      if (!top) return undefined;
+      inAliases = line.startsWith("aliases:");
+      if (inAliases && seen) return undefined;
+      seen ||= inAliases;
+      if (inAliases && !/^\s*(?:\{\}\s*)?(?:#.*)?$/.test(top[1] ?? "")) return undefined;
+      continue;
+    }
+    if (!inAliases) continue;
+    if (/(?:^|[\s:,[{])\*/.test(line)) return undefined;
+    if (leading > (indent ??= leading)) continue;
+    const key = /^\s+(.+?):(?:[ \t]|$)/.exec(line)?.[1];
+    if (key === undefined) return undefined;
+    keys.push(key);
+  }
+  const sorted = (list: string[]) => [...list].sort().join("\n");
+  return sorted(keys) === sorted(Object.keys(aliases)) ? aliases : undefined;
 }
 
-/** gh's alias expansion: `$1` and on take the matching argument, gh splits the result into words, and the arguments left over follow. */
-function substituted(expansion: string, rest: string[]): string[] | undefined {
-  const used = new Set<number>();
-  const text = expansion.replace(/\$(\d+)/g, (placeholder, index: string) => {
-    const value = rest[Number(index) - 1];
-    if (value === undefined) return placeholder;
-    used.add(Number(index));
-    return value;
-  });
-  const words = shellSplit(text);
-  return words && [...words, ...rest.filter((_, index) => !used.has(index + 1))];
+/** gh's own alias subcommands, which run before any alias of the same name. */
+const aliasActions = new Set(["set", "delete", "list", "ls", "import"]);
+/** gh groups an alias must not reach: the stack extension, alias management, and extensions. */
+const guardedGroups = new Set(["stack", "alias", ...extensionGroups]);
+/**
+ * gh's built-in commands that an alias may start with. Any other first word may be an extension or another alias, and
+ * so may `help`, which gh adds after the extensions.
+ */
+const builtins = new Set(["alias", "api", "attestation", "auth", "browse", "cache", "codespace", "completion", "config", "extension", "gist", "gpg-key", "issue", "label", "org", "pr", "project", "release", "repo", "ruleset", "run", "search", "secret", "ssh-key", "status", "variable", "version", "workflow"]);
+const plainName = /^[\w.:-]+(?: [\w.:-]+)*$/;
+const plainExpansion = /^[\w \t\r\n=.,:/@+%-]*$/;
+
+/**
+ * The last name words of the aliases that may reach a guarded group: an expansion that is not plain words, that does
+ * not start with a gh built-in, that names a guarded group, or that names a word of another such alias. Undefined when
+ * an alias name is not plain words, since gh unquotes it.
+ */
+function unsafeAliasWords(aliases: Record<string, unknown>): Set<string> | undefined {
+  const names = Object.keys(aliases);
+  if (names.some((name) => !plainName.test(name))) return undefined;
+  const unsafe = new Set<string>();
+  for (let changed = true; changed;) {
+    changed = false;
+    const reached = new Set([...guardedGroups, ...[...unsafe].flatMap((name) => name.split(" "))]);
+    for (const name of names) {
+      if (unsafe.has(name)) continue;
+      const expansion = aliases[name];
+      const words = typeof expansion === "string" ? expansion.split(/[ \t\r\n]+/).filter(Boolean) : [];
+      if (typeof expansion === "string" && plainExpansion.test(expansion) && builtins.has(words[0] ?? "") && !words.some((word) => reached.has(word))) continue;
+      unsafe.add(name);
+      changed = true;
+    }
+  }
+  return new Set([...unsafe].map((name) => name.split(" ").at(-1)!));
+}
+
+/** The arguments after gh, also when `xargs` runs it by any path. */
+function ghArguments({ name, args }: Command): string[] | undefined {
+  if (name === "gh") return args;
+  const at = name === "xargs" ? args.findIndex((arg) => basename(arg) === "gh") : -1;
+  return at < 0 ? undefined : args.slice(at + 1);
+}
+
+const managesAliases = (args: string[]) => args[0] === "alias" && aliasActions.has(args[1] ?? "");
+
+/**
+ * The call's arguments when none of the agent's own gh aliases can hide a stack push in it, else undefined. gh picks an
+ * alias through its leading words, synonyms such as `ext`, flags between words, and chains of aliases, so the guard
+ * does not expand: it refuses any call that names the last word of an alias that may reach `gh stack`, `gh alias` or
+ * an extension. Only gh's own alias subcommands, which run before any alias, skip the check.
+ */
+function expandedGh(args: string[]): string[] | undefined {
+  if (managesAliases(args)) return args;
+  const aliases = ghAliases();
+  const unsafe = aliases && unsafeAliasWords(aliases);
+  return unsafe && !args.some((arg) => unsafe.has(arg)) ? args : undefined;
 }
 
 function stackPushes(args: string[], repo: () => Repo | undefined): number {
@@ -392,11 +511,17 @@ export function gitRisk(command: string, cwd: string, person: string, mainPushRe
     return repos.get(key);
   };
   let forced = 0;
-  for (const [call, directory] of withDirectories(commandsIn(command), cwd)) {
-    const called = call.name === "gh" ? expandedGh(call, directory) : call.args;
-    if (called === undefined) return aliasReason(person);
-    const stack = stackArgs(call.name, called);
-    if ((stack && makesAlias(stack)) || ghAliasHidesStack(call.name, called)) return aliasReason(person);
+  const calls = commandsIn(command);
+  const extensionExecs = calls.filter((call) => {
+    const [group, action] = operandsOf(ghArguments(call) ?? []);
+    return extensionGroups.has(group ?? "") && action === "exec";
+  }).length;
+  for (const [call, directory] of withDirectories(calls, cwd)) {
+    const stack = stackArgs(call.name, call.args);
+    const ghArgs = ghArguments(call);
+    if ((stack && makesAlias(stack)) || (ghArgs && (call.name !== "gh" || ghAliasHidesStack(ghArgs)))) return aliasReason(person);
+    if (ghArgs && movesGhConfig(command, extensionExecs)) return configReason(person);
+    if (ghArgs && !expandedGh(ghArgs)) return aliasReason(person);
     if (stack) forced += stackPushes(stack, () => repoAt(directory, []));
     if (call.name !== "git") continue;
     const { dir, selectors, settings, sub, args } = gitCall(call.args, directory, call.env);

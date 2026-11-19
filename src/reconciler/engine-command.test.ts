@@ -8,10 +8,13 @@ const temp = tempDirs();
 afterEach(() => temp.cleanup());
 
 describe("a command from before the rename", () => {
-  test("runs fleet as the engine's hedge launcher, in a job and in a shell line", () => {
-    expect(engineCommand(["fleet", "update"], "/engine")).toEqual(["/bin/sh", "/engine/hedge", "update"]);
-    expect(engineShellCommand("fleet login --web", "/engine")).toBe("/bin/sh '/engine/hedge' login --web");
-    expect(engineCommand(["fleetwood"], "/engine")).toEqual(["fleetwood"]);
+  test("runs fleet as the engine's hedge launcher, in a job and in a shell line, and leaves a longer name alone", () => {
+    const root = temp.make("engine-");
+    writeFileSync(join(root, "hedge"), 'printf "hedge %s" "$*"\nexit 3\n');
+    const ran = (result: { exitCode: number; stdout: Buffer }) => ({ code: result.exitCode, output: result.stdout.toString() });
+    expect(ran(Bun.spawnSync(engineCommand(["fleet", "update"], root)))).toEqual({ code: 3, output: "hedge update" });
+    expect(ran(Bun.spawnSync(["sh", "-c", engineShellCommand("fleet login --web", root)]))).toEqual({ code: 3, output: "hedge login --web" });
+    expect(engineCommand(["fleetwood"], root)).toEqual(["fleetwood"]);
   });
 });
 

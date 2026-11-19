@@ -34,7 +34,6 @@ export async function readState(home: string, target: string) {
   return optional(inside(home, target));
 }
 
-/** The kernel lets go of the lock when its process ends, so an operation that was stopped part way never holds back the next one. */
 export async function withLock<T>(home: string, work: () => Promise<T>): Promise<T> {
   await requireRealPath(home, stateLock);
   const held = holdLock(inside(home, stateLock));

@@ -1,20 +1,18 @@
 import { Database } from "bun:sqlite";
-import { lstatSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { basename, join } from "node:path";
 import type { Finding } from "../../pack/types.ts";
 import type { Adapter } from "../../reconciler/apply.ts";
-import { legacyPaths } from "../../legacy.ts";
+import { legacyPaths, oldJob, underLegacyPath } from "../../legacy.ts";
 import { skipOtherHome, spawnRunner, type CommandRunner } from "../run.ts";
 import { localT3Server } from "../t3/session.ts";
 import type { T3Server } from "../t3/port.ts";
 
-export type FleetPiece = { kind: "launchd" | "systemd" | "container" | "t3" | "cron"; name: string };
-/** saved: the tasks T3 Code keeps while its server is stopped, which Hedge can read but not change. */
+export type FleetPiece = { kind: "launchd" | "systemd" | "container" | "t3" | "cron" | "process"; name: string; pid?: number };
 export type OldTasks = { list(): Promise<Array<{ id: string; enabled: boolean }>>; setEnabled(id: string, enabled: boolean): Promise<void>; saved?: true };
-export type FleetOptions = { run?: CommandRunner; accountHome?: () => Promise<string | undefined>; uid?: number; tasks?: (home: string) => Promise<OldTasks | undefined> };
-/** retired: what retire stopped. left: each piece that is not verified stopped, with why. notes: what retire could not look at. */
+export type Running = { pid: number; ppid: number; argv: string[]; fleetEngine?: string };
+export type FleetOptions = { run?: CommandRunner; accountHome?: () => Promise<string | undefined>; uid?: number; tasks?: (home: string) => Promise<OldTasks | undefined>; sleep?: (ms: number) => Promise<void>; processes?: () => Promise<Running[]> };
 export type Retirement = { retired: string[]; left: string[]; notes: string[] };
-/** holds: what keeps hedge apply from starting anything, which apply asks before it loads the plan. */
 export type FleetAdapter = Adapter & { retire(home: string, platform: NodeJS.Platform): Promise<Retirement | undefined>; holds(home: string, platform: NodeJS.Platform): Promise<Finding[]> };
 
 const launchdPrefixes = ["dev.fleet.", "com.fleet."];
@@ -24,10 +22,85 @@ const containerLabel = "org.fleet.service";
 export const fleetTaskPrefix = "fleet:";
 const notLoaded = 113;
 const cronMarker = /\s# fleet:([A-Za-z0-9._-]+)$/;
+const exitPolls = 20;
+const exitPollMs = 500;
+
+const shellPrograms = new Set(["sh", "bash", "dash", "zsh"]);
+const jobLauncher = /\/\.local\/state\/fleet\/jobs\/([A-Za-z0-9._-]+)\.sh$/;
+const packCommand = /\/packs\/[^/]+\/commands\/([a-z0-9-]+)\.ts$/;
+const jobChildren: ReadonlyArray<readonly string[]> = [["update"], ["agent-update"]];
+const jobOrChild = (argv: string[]) => oldJob(argv) ?? jobChildren.find((command) => command.every((word, index) => argv[index] === word));
+const codexInstaller = "/packs/base/lib/install-codex.sh";
+const interpreters = new Set([...shellPrograms, "node", "bun"]);
+const installerCommands: ReadonlyArray<readonly string[]> = [["claude", "update"], ["claude", "plugin"], ["codex", "plugin"], ["t3", "update"], ["t3", "doctor"], ["bun", "add", "-g", "@openai/codex@latest"]];
+
+function installerIn(argv: string[]) {
+  const starts = interpreters.has(basename(argv[0] ?? "")) ? [0, 1] : [0];
+  for (const at of starts) {
+    const words = [basename(argv[at] ?? ""), ...argv.slice(at + 1)];
+    const command = installerCommands.find((command) => command.every((word, index) => words[index] === word));
+    if (command) return command;
+  }
+  return undefined;
+}
+
+function fleetInstaller(home: string, { argv, fleetEngine }: Running): string | undefined {
+  const command = fleetEngine?.startsWith("/") && underLegacyPath(home, fleetEngine) ? installerIn(argv) : undefined;
+  return command && `agent-update: ${command.slice(0, 2).join(" ")}`;
+}
+
+function fleetJob(home: string, words: string[]): string | undefined {
+  const [program = "", script = "", ...rest] = words;
+  const ours = (path: string) => path.startsWith("/") && underLegacyPath(home, path);
+  const job = (argv: string[]) => jobOrChild(argv)?.join(" ");
+  if (basename(program) === "fleet" && ours(program)) return job([script, ...rest]);
+  if (!ours(script)) return undefined;
+  if (shellPrograms.has(basename(program))) {
+    const launcher = jobLauncher.exec(script)?.[1];
+    if (script.endsWith(codexInstaller)) return "agent-update: install-codex.sh";
+    return basename(script) === "fleet" ? job(rest) : launcher && `job ${launcher}`;
+  }
+  if (basename(program) !== "bun") return undefined;
+  if (script.endsWith("/src/cli.ts")) return job(rest);
+  const command = packCommand.exec(script)?.[1];
+  return command ? job([command, ...rest]) : undefined;
+}
+
+const vanished = (error: unknown) => ["ENOENT", "ESRCH"].includes((error as NodeJS.ErrnoException).code ?? "");
+const engineIn = (environ: string) => environ.split("\0").find((entry) => entry.startsWith("FLEET_ENGINE_DIR="))?.slice("FLEET_ENGINE_DIR=".length);
+
+export function procProcesses(uid: number, root = "/proc"): () => Promise<Running[]> {
+  return async () => {
+    let entries: string[];
+    try {
+      entries = readdirSync(root).filter((name) => /^[0-9]+$/.test(name));
+    } catch (error) {
+      throw new Error(`${root} could not be read (${(error as Error).message})`);
+    }
+    return entries.flatMap((name): Running[] => {
+      const dir = join(root, name);
+      try {
+        if (statSync(dir).uid !== uid) return [];
+        const argv = readFileSync(join(dir, "cmdline"), "utf8").split("\0");
+        if (argv.at(-1) === "") argv.pop();
+        const stat = readFileSync(join(dir, "stat"), "utf8");
+        const ppid = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
+        const fleetEngine = installerIn(argv) ? engineIn(readFileSync(join(dir, "environ"), "utf8")) : undefined;
+        return argv.length ? [{ pid: Number(name), ppid, argv, fleetEngine }] : [];
+      } catch (error) {
+        if (vanished(error)) return [];
+        throw new Error(`process ${name} could not be read (${(error as Error).message})`);
+      }
+    });
+  };
+}
+
+function descendants(running: Running[], pid: number): number[] {
+  return running.filter((item) => item.ppid === pid && item.pid !== pid).flatMap((item) => [item.pid, ...descendants(running, item.pid)]);
+}
 
 const present = (path: string) => lstatSync(path, { throwIfNoEntry: false }) !== undefined;
 const hadFleet = (home: string) => legacyPaths.some(([before]) => present(join(home, before)));
-/** A slice runs nothing by itself, and it has no [Install] section, so systemd shows it static and turning it off would remove its file. */
 const passive = (unit: string) => unit.endsWith(".slice");
 const names = (folder: string, keep: (name: string) => boolean) => {
   try {
@@ -38,9 +111,9 @@ const names = (folder: string, keep: (name: string) => boolean) => {
 };
 const lines = (text: string) => text.split("\n").map((line) => line.trim()).filter(Boolean);
 const why = (output: { code: number; stderr?: string }) => (output.stderr ?? "").trim().split("\n").at(-1) || `exit ${output.code}`;
-export const describe = (piece: FleetPiece) => ({ launchd: `launchd agent ${piece.name}`, systemd: `systemd unit ${piece.name}`, container: `Docker container ${piece.name}`, t3: `T3 Code task ${piece.name}`, cron: `cron job ${piece.name}` })[piece.kind];
+const listedNothing = (output: { code: number; stdout: string; stderr?: string }) => output.code === 1 && !output.stdout.trim() && !(output.stderr ?? "").trim();
+export const describe = (piece: FleetPiece) => ({ launchd: `launchd agent ${piece.name}`, systemd: `systemd unit ${piece.name}`, container: `Docker container ${piece.name}`, t3: `T3 Code task ${piece.name}`, cron: `cron job ${piece.name}`, process: `running command ${piece.name}` })[piece.kind];
 
-/** The T3 Code scheduled tasks on this machine: from its server, or from its state store while it is stopped. Undefined when T3 Code has neither. */
 export function scheduledTasks(server: T3Server = localT3Server) {
   return async (home: string): Promise<OldTasks | undefined> => {
     if (!(await server.answering(home))) return savedTasks(join(home, ".t3/userdata/statev2.sqlite"));
@@ -58,6 +131,7 @@ function savedTasks(store: string): OldTasks | undefined {
     async list() {
       const db = new Database(store, { readonly: true });
       try {
+        if (!db.query("select 1 from sqlite_master where type = 'table' and name = 'scheduled_tasks'").get()) return [];
         return db.query<{ id: string; enabled: number }, []>("select task_id as id, enabled from scheduled_tasks").all().map((row) => ({ id: row.id, enabled: row.enabled !== 0 }));
       } finally {
         db.close();
@@ -69,7 +143,6 @@ function savedTasks(store: string): OldTasks | undefined {
 
 type Found = { pieces: FleetPiece[]; unclear: string[]; notes: string[] };
 
-/** Every running piece of the engine from before the rename, Fleet, found by its name or label prefix. */
 export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
   const run = options.run ?? spawnRunner;
   const uid = options.uid ?? process.getuid?.() ?? 0;
@@ -81,6 +154,34 @@ export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
     return { lines: [], unclear: listed.code === 127 || /no crontab/i.test(listed.stderr ?? "") ? undefined : `crontab -l did not answer (${why(listed)})` };
   };
   const cronId = (line: string) => cronMarker.exec(line)?.[1];
+  const sleep = options.sleep ?? Bun.sleep;
+  const psProcesses = async (): Promise<Running[]> => {
+    const listed = await run(["ps", "-ww", "-U", String(uid), "-o", "pid=,ppid=,args="]);
+    if (listed.code !== 0) throw new Error(`ps did not answer (${why(listed)})`);
+    return lines(listed.stdout).map((line) => {
+      const [pid, ppid, ...argv] = line.split(/\s+/);
+      return { pid: Number(pid), ppid: Number(ppid), argv };
+    });
+  };
+  const processesOf = (platform: NodeJS.Platform) => options.processes ?? (platform === "linux" ? procProcesses(uid) : psProcesses);
+  const oldCommands = async (home: string, platform: NodeJS.Platform): Promise<{ pieces: FleetPiece[]; running: Running[]; unclear?: string }> => {
+    let running: Running[];
+    try {
+      running = await processesOf(platform)();
+    } catch (error) {
+      return { pieces: [], running: [], unclear: (error as Error).message };
+    }
+    const pieces = running.flatMap((item): FleetPiece[] => {
+      const { pid } = item;
+      const job = fleetJob(home, item.argv) ?? fleetInstaller(home, item);
+      return job ? [{ kind: "process", name: `fleet ${job} (process ${pid})`, pid }] : [];
+    });
+    return { pieces, running };
+  };
+  const stillRunning = async (home: string, platform: NodeJS.Platform, piece: FleetPiece) => {
+    const now = await oldCommands(home, platform);
+    return now.unclear ?? (now.pieces.some((item) => item.pid === piece.pid) ? "it has not ended" : undefined);
+  };
 
   async function find(home: string, platform: NodeJS.Platform, tasks: OldTasks | undefined): Promise<Found> {
     const found: Found = { pieces: [], unclear: [], notes: [] };
@@ -99,6 +200,7 @@ export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
       const loaded = await run(["systemctl", "--user", "list-units", "--all", "--plain", "--no-legend", "--full", `${unitPrefix}*`]);
       if (loaded.code !== 0 && loaded.code !== 127 && files.length) found.unclear.push(`systemd's user manager did not answer (${why(loaded)})`);
       const installed = loaded.code === 0 ? await run(["systemctl", "--user", "list-unit-files", "--plain", "--no-legend", `${unitPrefix}*`]) : { code: 1, stdout: "" };
+      if (loaded.code === 0 && installed.code !== 0 && !listedNothing(installed)) found.unclear.push(`systemd did not list its unit files (${why(installed)})`);
       for (const name of [...files, ...lines(loaded.code === 0 ? loaded.stdout : ""), ...lines(installed.stdout)].map((line) => line.split(/\s+/)[0]!)) if (name.startsWith(unitPrefix) && !passive(name)) add("systemd", name);
       const table = await crontab();
       if (table.unclear) found.unclear.push(table.unclear);
@@ -116,11 +218,14 @@ export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
         found.unclear.push(`T3 Code did not list its scheduled tasks (${(error as Error).message})`);
       }
     }
+    const commands = await oldCommands(home, platform);
+    if (commands.unclear) found.unclear.push(commands.unclear);
+    for (const piece of commands.pieces) found.pieces.push(piece);
     return found;
   }
 
-  /** Why the piece is not verified stopped, or undefined when it is. */
-  async function stillOn(piece: FleetPiece, tasks: OldTasks | undefined): Promise<string | undefined> {
+  async function stillOn(home: string, platform: NodeJS.Platform, piece: FleetPiece, tasks: OldTasks | undefined): Promise<string | undefined> {
+    if (piece.kind === "process") return stillRunning(home, platform, piece);
     if (piece.kind === "launchd") {
       const printed = await run(["launchctl", "print", launchdTarget(piece.name)]);
       if (printed.code !== notLoaded) return printed.code === 0 ? "it is still loaded" : `launchctl print exit ${printed.code}`;
@@ -161,8 +266,16 @@ export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
     }
   }
 
-  async function stop(piece: FleetPiece, tasks: OldTasks | undefined) {
-    if (piece.kind === "launchd") {
+  async function stop(home: string, platform: NodeJS.Platform, piece: FleetPiece, tasks: OldTasks | undefined): Promise<string | undefined> {
+    if (piece.kind === "process") {
+      const now = await oldCommands(home, platform);
+      if (!now.pieces.some((item) => item.pid === piece.pid)) return;
+      const tree = [piece.pid!, ...descendants(now.running, piece.pid!)];
+      await run(["kill", "-TERM", ...tree.map(String)]);
+      const alive = async () => (await processesOf(platform)().catch(() => undefined))?.some((item) => tree.includes(item.pid)) ?? true;
+      for (let poll = 0; poll < exitPolls && (await alive()); poll++) await sleep(exitPollMs);
+      return (await alive()) ? `${describe(piece)}: it or a command it started has not ended` : undefined;
+    } else if (piece.kind === "launchd") {
       await run(["launchctl", "bootout", launchdTarget(piece.name)]);
       await run(["launchctl", "disable", launchdTarget(piece.name)]);
     } else if (piece.kind === "systemd") {
@@ -178,14 +291,13 @@ export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
     } else await tasks?.setEnabled(piece.name, false).catch(() => undefined);
   }
 
-  /** Each piece found now, and each of earlier, that is not verified stopped. */
   async function still(home: string, platform: NodeJS.Platform, earlier: FleetPiece[] = []) {
     const tasks = await tasksOf(home).catch(() => undefined);
     const found = await find(home, platform, tasks);
     const on: Array<{ piece: FleetPiece; reason: string }> = [];
     const pieces = [...found.pieces, ...earlier.filter((piece) => !found.pieces.some((item) => item.kind === piece.kind && item.name === piece.name))];
     for (const piece of pieces) {
-      const reason = await stillOn(piece, tasks);
+      const reason = await stillOn(home, platform, piece, tasks);
       if (reason) on.push({ piece, reason });
     }
     return { found, on, tasks };
@@ -215,10 +327,15 @@ export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
       if (skipped?.findings.length) throw new Error(skipped.findings[0]!.say);
       if (skipped) return undefined;
       const before = await still(home, platform);
-      for (const piece of before.found.pieces) await stop(piece, before.tasks);
+      const stuck = new Map<FleetPiece, string>();
+      for (const piece of before.found.pieces) {
+        const reason = await stop(home, platform, piece, before.tasks);
+        if (reason) stuck.set(piece, reason);
+      }
       const after = await still(home, platform, before.found.pieces);
-      const left = [...after.on.map(({ piece, reason }) => `${describe(piece)}: ${reason}`), ...after.found.unclear];
-      const retired = before.on.filter(({ piece }) => !after.on.some((item) => item.piece.kind === piece.kind && item.piece.name === piece.name)).map(({ piece }) => describe(piece));
+      const same = (piece: FleetPiece) => (item: { piece: FleetPiece }) => item.piece.kind === piece.kind && item.piece.name === piece.name;
+      const left = [...after.on.map(({ piece, reason }) => `${describe(piece)}: ${reason}`), ...[...stuck].filter(([piece]) => !after.on.some(same(piece))).map(([, reason]) => reason), ...after.found.unclear];
+      const retired = before.on.filter(({ piece }) => !stuck.has(piece) && !after.on.some(same(piece))).map(({ piece }) => describe(piece));
       return { retired, left, notes: after.found.notes };
     },
   };

@@ -22,6 +22,15 @@ describe("the setup guide's workspace check", () => {
     expect(result.output).not.toContain("nora@private.test");
   });
 
+  test("puts no template default into the environment or the arguments of any process it starts, and checks as before", () => {
+    const marker = "template-default-marker";
+    const result = coder({ parameters: built, mutable: template, defaultValue: marker }).check(passed);
+    expect([result.code, result.output]).toEqual([0, "ok disk_size\nok region\nok instance_type\nok dotfiles_uri\nok hedge-hub runs and stays on\n"]);
+    expect(result.environment).toContain("PATH=");
+    expect(result.argv).not.toContain(marker);
+    expect(result.environment).not.toContain(marker);
+  });
+
   test("sends the session token from CODER_SESSION_TOKEN when it is set, as coder itself does", () => {
     const result = coder({ parameters: built, mutable: template, token: envToken }).check(passed, { CODER_SESSION_TOKEN: envToken });
     expect([result.code, result.output.split("\n").at(-2)]).toEqual([0, "ok hedge-hub runs and stays on"]);
@@ -34,14 +43,26 @@ describe("the setup guide's workspace check", () => {
     expect([result.code, result.output]).toEqual([0, "ok region\nok hedge-hub runs and stays on\n"]);
   });
 
-  test("says which value differs, restarts with a value the template lets change, and sends one it cannot change to a new workspace", () => {
+  test("tells to change in the Coder web app a workspace parameter, with a name outside ASCII, the template lets change", () => {
+    const result = coder({ parameters: { ...built, région: "eu" }, mutable: { ...template, région: true } }).check(["région=us"]);
+    expect([result.code, result.output]).toEqual([1, "x région is not the value you passed. In the Coder web app, set it under Settings, Parameters, and submit.\nok hedge-hub runs and stays on\n"]);
+  });
+
+  test("fails when the request for the template's parameters fails, even after it delivered JSON", () => {
+    const result = coder({ parameters: built, mutable: template, templateTransferFails: true }).check(passed);
+    expect(result.code).not.toBe(0);
+    expect(result.output).toContain("Coder did not return the parameters of the template of hedge-hub.");
+    expect(result.output).not.toContain("ok hedge-hub runs and stays on");
+  });
+
+  test("says which value differs, sends a value the template lets change to the Coder web app, and sends one it cannot change to a new workspace", () => {
     const result = coder({ parameters: { ...built, disk_size: "100", instance_type: "m7g.xlarge" }, mutable: template }).check([...passed, "missing=1"]);
     expect(result.code).toBe(1);
     expect(result.output).toBe(
       [
         "x disk_size is not the value you passed, and the template does not let it change. Delete the workspace and create it again before setup.",
         "ok region",
-        "x instance_type is not the value you passed. From this Mac, run: coder restart hedge-hub --parameter instance_type=<value> --yes",
+        "x instance_type is not the value you passed. In the Coder web app, set it under Settings, Parameters, and submit.",
         "ok dotfiles_uri",
         "x missing is not a parameter of this build.",
         "ok hedge-hub runs and stays on",
@@ -50,11 +71,26 @@ describe("the setup guide's workspace check", () => {
     );
   });
 
-  test("fails when the latest build is not a running start, and says to start it with the parameters", () => {
-    for (const build of [{ transition: "stop", status: "stopped" }, { transition: "start", status: "failed" }]) {
+  test("fails on a build that ended without a running start, before it reads any parameter: sends the person to the action the web app offers, and asks before a delete", () => {
+    const builds = [
+      { transition: "stop", status: "stopped" },
+      { transition: "start", status: "failed" },
+      { transition: "stop", status: "failed" },
+      { transition: "start", status: "canceled" },
+      { transition: "stop", status: "canceled" },
+      { transition: "delete", status: "failed" },
+      { transition: "delete", status: "canceled" },
+    ];
+    for (const build of builds) {
       const result = coder({ parameters: built, mutable: template, build }).check(passed);
-      expect([build, result.code, result.output.split("\n").at(-2)]).toEqual([build, 1, `x hedge-hub does not run: its latest build is a ${build.transition} that is ${build.status}. From this Mac, run: coder restart hedge-hub --parameter <parameter>=<value> --yes, with each parameter you passed, and check again.`]);
+      const advice = build.transition === "delete" && build.status === "canceled"
+        ? "x hedge-hub has a delete build that is canceled, so its name stays taken. Ask the person whether it should go. If so, they delete it from the workspace's menu in the Coder web app, and you create it again when it is gone. If not, they press Activate when the Coder web app shows it, then Start, never Retry, then run this check again. When that fails, they ask the Coder admin.\n"
+        : build.transition === "delete"
+        ? `x hedge-hub has a delete build that is ${build.status}, so its name stays taken. Ask the person whether it should go. If so, they delete it from the workspace's menu in the Coder web app, and you create it again when it is gone. If not, they never press Retry, which deletes it again, and ask the Coder admin to restore it.\n`
+        : `x hedge-hub does not run: its latest build is a ${build.transition} that is ${build.status}. Ask the person to get it running with the action that the Coder web app offers for it, such as Start, Retry, or Update and start, then run this check again.\n`;
+      expect([build, result.code, result.output, result.requests]).toEqual([build, 1, advice, []]);
     }
+    expect(coder({ parameters: built, mutable: template }).check(passed).requests).toEqual(["https://coder.test/api/v2/workspacebuilds/build-1/parameters", "https://coder.test/api/v2/templateversions/version-1/rich-parameters"]);
   });
 
   test("fails while a build still runs, and says only to wait and check again, before it compares any parameter", () => {
