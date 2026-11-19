@@ -294,6 +294,7 @@ describe("install-codex.sh", () => {
     rmSync(join(box.bin, "bun"));
     symlinkSync(process.execPath, join(box.bin, "bun"));
     stub(box.bin, "npx", "echo 10.9.0");
+    stub(box.bin, "node", "echo v22.0.0");
     const fleets = fleetCodex(box.home);
     const path = `${box.bin}:${box.home}/.local/bin:/usr/bin:/bin`;
     const profile = temp.make("profile-");
