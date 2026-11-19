@@ -6,6 +6,7 @@ import { providerConfigAdapter } from "../../src/adapters/provider-config/adapte
 import { apply, check } from "../../src/reconciler/apply.ts";
 import { boxCommand } from "./lib/box-command.ts";
 import { cliProxy, codexProviderTable, type ProxyMachine } from "./lib/cli-proxy.ts";
+import { proxyMachine } from "./lib/cli-proxy-testing.ts";
 import { Coder } from "./lib/coder.ts";
 import { fakeMachine } from "./lib/testing.ts";
 import type { AvailableSource, MachineFile, MachineRole, Plan, Profile } from "../../src/pack/types.ts";
@@ -267,7 +268,7 @@ describe("the Own-account balancing workflow", () => {
 
   test("with it on, the hub gets the proxy, its balancer, and the route; a devbox gets only the route; the Mac gets nothing", () => {
     const route = { checks: ["cli-proxy-client", "cli-proxy-codex"], config: ["claude:env.ANTHROPIC_BASE_URL", "claude:apiKeyHelper", ...codexRoute] };
-    expect(proxyItems(plan(balancing, hub))).toEqual({ jobs: ["cli-proxy-balance: hedge cli-proxy-balance every 5m"], steps: ["cli-proxy"], ...route });
+    expect(proxyItems(plan(balancing, hub))).toEqual({ jobs: ["cli-proxy-balance: hedge cli-proxy-balance every 5m"], steps: ["cli-proxy"], ...route, checks: ["cli-proxy-accounts", ...route.checks] });
     expect(proxyItems(plan(balancing, devbox))).toEqual({ jobs: [], steps: [], ...route });
     expect(proxyItems(plan(balancing, mac))).toEqual(nothing);
     expect(plan(balancing, hub).settings["hub.proxyAccounts"]).toBe(2);
@@ -408,6 +409,60 @@ describe("the Own-account balancing workflow", () => {
       const { claude, codex } = await applied(homeWith(), both);
       expect(claude.apiKeyHelper).toBe("cat \"$HOME/.config/hedge/cli-proxy.key\"");
       expect(codex.model_provider).toBe("hedge-proxy");
+    });
+  });
+
+  describe("apply on a hub whose proxy holds none of your subscriptions", () => {
+    const proxyOnly = (result: Plan): Plan => ({ ...result, files: [], jobs: [], human: [], steps: result.steps.filter((step) => step.id === "cli-proxy"), checks: result.checks.filter((check) => check.workflow === "own-account-balancing"), config: result.config.filter((entry) => entry.workflow === "own-account-balancing") });
+    const hedgeProxy = (machine: ProxyMachine) => async (command: string[]) => {
+      const words = command.join(" ");
+      const mode = (["install", "doctor", "accounts", "check codex", "check"] as const).find((name) => words.endsWith(`hedge cli-proxy ${name}`));
+      if (!mode) return 0;
+      return cliProxy(mode === "check codex" ? "check" : mode, machine, mode === "check codex" ? "codex" : "claude").catch(() => 1);
+    };
+    const emptyHub = (ai: "claude" | "codex", credentials: Array<{ provider: string }> = []) => {
+      const { machine, home } = proxyMachine((prefix) => temp.make(prefix), { plan: ai, devboxes: [] }, { credentials, models: [] });
+      const result = proxyOnly(plan({ ...balancing, plan: ai }, hub));
+      const options = { home, adapters: [providerConfigAdapter()], run: hedgeProxy(machine) };
+      return { home, result, options };
+    };
+    const login = (agent: string) => `~/.local/share/hedge-cli-proxy/cli-proxy-api -config ~/.local/share/hedge-cli-proxy/config.yaml -${agent}-login -no-browser`;
+
+    test("installs the proxy, passes its step, keeps Claude Code on its own sign-in, and lists the login as a To do; doctor passes too", async () => {
+      const { home, result, options } = emptyHub("claude");
+      const fresh = await apply(result, options);
+      expect(fresh.ok).toBe(true);
+      expect(fresh.findings.map((finding) => [finding.id, finding.repair ?? "todo"])).toEqual([["check:cli-proxy-client", "apply"], ["check:cli-proxy-accounts", "todo"]]);
+      expect(fresh.findings[1]!.say).toContain(`Run on the hub, once for each subscription: ${login("claude")}.`);
+      expect(existsSync(join(home, ".local/share/hedge-cli-proxy/cli-proxy-api"))).toBe(true);
+      const applied = await apply(result, options);
+      expect(applied.ok).toBe(true);
+      expect(applied.findings.map((finding) => [finding.id, finding.repair ?? "todo"])).toEqual([["check:cli-proxy-client", "todo"], ["check:cli-proxy-accounts", "todo"]]);
+      expect(existsSync(join(home, ".claude/settings.json"))).toBe(false);
+      const doctor = await check(result, options);
+      expect(doctor.ok).toBe(true);
+      expect(doctor.findings.map((finding) => [finding.id, finding.todo])).toEqual([["check:cli-proxy-client", true], ["check:cli-proxy-accounts", true]]);
+    });
+
+    test("on the Codex plan, lists the Codex login as a To do and keeps Codex on its own sign-in", async () => {
+      const { home, result, options } = emptyHub("codex");
+      expect((await apply(result, options)).ok).toBe(true);
+      const applied = await apply(result, options);
+      expect(applied.ok).toBe(true);
+      expect(applied.findings.map((finding) => [finding.id, finding.todo])).toEqual([["check:cli-proxy-codex", true], ["check:cli-proxy-codex-accounts", true]]);
+      expect(applied.findings.map((finding) => finding.say).join("\n")).toContain(login("codex"));
+      expect(existsSync(join(home, ".codex/config.toml"))).toBe(false);
+      expect((await check(result, options)).ok).toBe(true);
+    });
+
+    test("with one subscription of the 2 that hub.proxyAccounts asks for, apply routes Claude Code to the proxy that serves it and still lists the To do", async () => {
+      const { machine, home } = proxyMachine((prefix) => temp.make(prefix), { plan: "claude", devboxes: [] }, { credentials: [{ provider: "claude" }] });
+      const options = { home, adapters: [providerConfigAdapter()], run: hedgeProxy(machine) };
+      const result = proxyOnly(plan({ ...balancing, plan: "claude" }, hub));
+      await apply(result, options);
+      const applied = await apply(result, options);
+      expect(applied).toMatchObject({ ok: true, findings: [{ id: "check:cli-proxy-accounts", todo: true }] });
+      expect(JSON.parse(readFileSync(join(home, ".claude/settings.json"), "utf8")).env.ANTHROPIC_BASE_URL).toBe("http://127.0.0.1:8317");
     });
   });
 });

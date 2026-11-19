@@ -18,5 +18,11 @@ Every machine keeps working when the hub is down.
    own-account balancing, so `packs/recovery/SETUP.md` turns it on when they
    pick Recovery. Proxy panel needs own-account balancing too; turn it on only
    when the person asks for the proxy's web panel.
+   With own-account balancing on, the hub installs and runs the proxy even
+   while it holds none of their subscriptions, and setup goes on. Each
+   machine keeps its own sign-in until the proxy serves the agent. Until the
+   proxy holds `hub.proxyAccounts` of their subscriptions (2 by default),
+   `hedge doctor` on the hub shows a `To do:` line with the login command.
+   Relay that line; it does not fail setup.
 4. Each node joins when `hedge devbox add` adds it. The hub takes the new
    node at its next `hedge update`, or at once when it answers.

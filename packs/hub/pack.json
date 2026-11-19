@@ -111,7 +111,7 @@
     },
     {
       "key": "hub.proxyAccounts",
-      "question": "How many of your own subscriptions must the hub's proxy hold before hedge cli-proxy doctor passes? They are Claude subscriptions, or Codex ones on the Codex plan.",
+      "question": "How many of your own subscriptions should the hub's proxy hold? Below that, hedge doctor shows a To do line, and nothing fails. They are Claude subscriptions, or Codex ones on the Codex plan.",
       "type": "number",
       "default": 2,
       "ask": "never"
@@ -663,6 +663,41 @@
       "workflow": "devbox-tokens"
     },
     {
+      "id": "cli-proxy-accounts",
+      "run": [
+        "hedge",
+        "cli-proxy",
+        "accounts"
+      ],
+      "say": "Hedge cannot count the subscriptions in your own-account proxy. Run hedge cli-proxy doctor on the hub to see why.",
+      "todo": "Add your own Claude subscriptions to the own-account proxy, until it holds as many that work as hub.proxyAccounts asks for (2 by default). Run on the hub, once for each subscription: ~/.local/share/hedge-cli-proxy/cli-proxy-api -config ~/.local/share/hedge-cli-proxy/config.yaml -claude-login -no-browser. hedge cli-proxy accounts says how many work now.",
+      "roles": [
+        "hub"
+      ],
+      "plans": [
+        "claude",
+        "both"
+      ],
+      "workflow": "own-account-balancing"
+    },
+    {
+      "id": "cli-proxy-codex-accounts",
+      "run": [
+        "hedge",
+        "cli-proxy",
+        "accounts"
+      ],
+      "say": "Hedge cannot count the subscriptions in your own-account proxy. Run hedge cli-proxy doctor on the hub to see why.",
+      "todo": "Add your own Codex subscriptions to the own-account proxy, until it holds as many that work as hub.proxyAccounts asks for (2 by default). Run on the hub, once for each subscription: ~/.local/share/hedge-cli-proxy/cli-proxy-api -config ~/.local/share/hedge-cli-proxy/config.yaml -codex-login -no-browser. hedge cli-proxy accounts says how many work now.",
+      "roles": [
+        "hub"
+      ],
+      "plans": [
+        "codex"
+      ],
+      "workflow": "own-account-balancing"
+    },
+    {
       "id": "cli-proxy-client",
       "run": [
         "hedge",
@@ -670,6 +705,7 @@
         "check"
       ],
       "say": "Claude Code cannot reach your own-account proxy, so hedge apply keeps it on its own sign-in until the proxy answers. Run hedge cli-proxy check here to see why.",
+      "todo": "Claude Code keeps its own sign-in, because the own-account proxy on the hub serves no Claude model yet: it holds none of your Claude subscriptions that work. Add one on the hub with: ~/.local/share/hedge-cli-proxy/cli-proxy-api -config ~/.local/share/hedge-cli-proxy/config.yaml -claude-login -no-browser. The first hedge apply after that sends Claude Code to the proxy.",
       "roles": [
         "hub",
         "devbox"
@@ -689,6 +725,7 @@
         "codex"
       ],
       "say": "Codex cannot reach your own-account proxy, so hedge apply keeps it on its own sign-in until the proxy answers. Run hedge cli-proxy check codex here to see why.",
+      "todo": "Codex keeps its own sign-in, because the own-account proxy on the hub serves no Codex model yet: it holds none of your Codex subscriptions that work. Add one on the hub with: ~/.local/share/hedge-cli-proxy/cli-proxy-api -config ~/.local/share/hedge-cli-proxy/config.yaml -codex-login -no-browser. The first hedge apply after that sends Codex to the proxy.",
       "roles": [
         "hub",
         "devbox"
@@ -725,6 +762,7 @@
       "plan",
       "install",
       "doctor",
+      "accounts",
       "catalog",
       "connect",
       "disconnect",

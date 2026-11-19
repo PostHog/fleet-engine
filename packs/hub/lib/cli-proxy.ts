@@ -11,11 +11,12 @@ import { changedFiles, ownedFiles, readIfThere, removeUnits, requireInstalled, w
 import { refuseLinks, writePrivateFile, type Fetch } from "../../mcp-gateway/lib/client.ts";
 import type { Run } from "../../mcp-gateway/lib/hub.ts";
 import { isKeptForBoxes } from "../../../src/hub/names.ts";
+import { waitsForPerson } from "../../../src/pack/types.ts";
 import { refreshCodexCatalog } from "./codex-catalog.ts";
 import { must, proxyPort } from "./run.ts";
 
 export { proxyPort, proxyUrl };
-export type ProxyMode = "plan" | "install" | "doctor" | "catalog" | "connect" | "disconnect" | "check" | "remove" | "left";
+export type ProxyMode = "plan" | "install" | "doctor" | "accounts" | "catalog" | "connect" | "disconnect" | "check" | "remove" | "left";
 export type Release = { version: string; url: string; sha256: string };
 export type Panel = { page: Release; plugin: Release; historyDays: number };
 export type AiPlan = "claude" | "codex" | "both";
@@ -219,19 +220,14 @@ async function doctor(machine: ProxyMachine, paths: Layout): Promise<void> {
   await panelDoctor(machine, paths, managementKey);
   const strategy = ((await management(machine.fetch, managementKey, "routing/strategy")) as { strategy?: string }).strategy;
   if (strategy !== "fill-first") throw new Error(`The proxy routes with ${strategy ?? "no strategy"}, not fill-first. Run hedge cli-proxy-balance to restore it.`);
-  const { files } = (await management(machine.fetch, managementKey, "auth-files")) as { files: AuthFile[] };
-  const expired = files.filter((file) => (file.provider === "claude" || file.provider === "codex") && !file.disabled && loginExpired(file));
-  const enabled = (agent: Agent) => files.filter((file) => file.provider === agent && !file.disabled && !expired.includes(file)).length;
-  const agent = pooled(machine.plan);
-  const count = enabled(agent);
-  const floor = machine.accounts ?? 2;
-  const lapsed = expired.filter((file) => file.provider === agent).length;
-  if (count < floor) throw new Error(`Add at least ${floor} of your own ${subscription[agent]} subscriptions that work; found ${count}${lapsed ? `, and ${lapsed} whose login expired, which you can sign in again` : ""}. Run: ${loginCommand(paths, agent)}`);
-  const reason = await probe(machine.fetch, key, agent);
+  const { agent, count, short, expired, enabled } = await pool(machine, paths, managementKey);
+  const models = await listModels(machine.fetch, key);
+  const reason = typeof models === "string" ? models : short ? undefined : unserved(models, agent);
   if (reason) throw new Error(reason);
   const beside = machine.plan === "both" ? ` and ${subscriptions(enabled("codex"), "codex")}` : "";
   const balancer = agent === "claude" ? "puts the one whose weekly quota resets first on top" : "frees each one whose quota cooldown its live usage disproves";
   machine.print(`CLI proxy: CLIProxyAPI ${machine.release.version} runs at ${proxyUrl}, loopback only, with ${count} of your own ${subscription[agent]} subscriptions${beside}. Every 5 minutes the balancer ${balancer}.`);
+  if (short) machine.print(`CLI proxy: To do: ${short}`);
   for (const file of expired) {
     const provider = file.provider as Agent;
     machine.print(`CLI proxy: Warning: the ${subscription[provider]} subscription ${shortId(file)} cannot refresh its login, so the proxy cannot use it and the balancer cannot read its usage. Sign it in again with: ${loginCommand(paths, provider)}. Or disable it in the management panel.`);
@@ -240,6 +236,26 @@ async function doctor(machine: ProxyMachine, paths: Layout): Promise<void> {
   if (!existsSync(paths.registry)) machine.print(`CLI proxy: Warning: ${paths.registry} is missing, so the proxy does not route the models upstream does not list yet. Run hedge cli-proxy catalog.`);
   if (machine.panel) machine.print(`Open the management panel at ${panelUrl} on the hub, or on a devbox through its tunnel, and sign in with the MANAGEMENT_PASSWORD in ${paths.management}.`);
   for (const devbox of machine.devboxes.filter((name) => !isKeptForBoxes(name))) machine.print(`Connect ${devbox}: ssh ${devbox} ${quote('sh "$HOME/.local/share/hedge/engine/hedge" cli-proxy connect')} < ~/.config/hedge/cli-proxy.key`);
+}
+
+async function pool(machine: ProxyMachine, paths: Layout, managementKey: string) {
+  const { files } = (await management(machine.fetch, managementKey, "auth-files")) as { files: AuthFile[] };
+  const expired = files.filter((file) => (file.provider === "claude" || file.provider === "codex") && !file.disabled && loginExpired(file));
+  const enabled = (agent: Agent) => files.filter((file) => file.provider === agent && !file.disabled && !expired.includes(file)).length;
+  const agent = pooled(machine.plan);
+  const count = enabled(agent);
+  const floor = machine.accounts ?? 2;
+  const lapsed = expired.filter((file) => file.provider === agent).length;
+  const meanwhile = count ? "" : ` Until the proxy holds one, ${agent === "claude" ? "Claude Code" : "Codex"} keeps its own sign-in on each machine.`;
+  const short = count < floor ? `Add at least ${floor} of your own ${subscription[agent]} subscriptions that work to the proxy; found ${count}${lapsed ? `, and ${lapsed} whose login expired, which you can sign in again` : ""}.${meanwhile} Run on the hub, once for each subscription: ${loginCommand(paths, agent)}` : undefined;
+  return { agent, count, floor, short, expired, enabled };
+}
+
+async function accounts(machine: ProxyMachine, paths: Layout): Promise<number> {
+  await refuseLinkedLayout(machine.home, paths);
+  const { agent, count, floor, short } = await pool(machine, paths, await readManagementKey(machine.home));
+  machine.print(short ? `CLI proxy: To do: ${short}` : `CLI proxy: ${subscriptions(count, agent)} of yours work, and hub.proxyAccounts asks for ${floor}.`);
+  return short ? waitsForPerson : 0;
 }
 
 async function panelDoctor(machine: ProxyMachine, paths: Layout, managementKey: string): Promise<void> {
@@ -381,13 +397,14 @@ async function sendCodexHome(home: string): Promise<boolean> {
 
 export type Agent = "claude" | "codex";
 
-async function check(machine: ProxyMachine, agent: Agent): Promise<boolean> {
+async function check(machine: ProxyMachine, agent: Agent): Promise<number> {
   const key = await savedKey(machine.home);
   const models = key ? await listModels(machine.fetch, key) : `This machine has no proxy key at ${keyPath(machine.home)}. On the hub, hedge cli-proxy doctor prints the connect command.`;
   const reason = agent === "claude" ? unserved(models, "claude") : await codexUnserved(machine.home, models);
   const name = agent === "claude" ? "Claude Code" : "Codex";
   machine.print(reason ? `${reason} hedge apply keeps ${name} on its own sign-in until the proxy serves it.` : `${name} reaches your own-account proxy at ${proxyUrl}.`);
-  return !reason;
+  if (!reason) return 0;
+  return reason === missingModel[agent] ? waitsForPerson : 1;
 }
 
 async function codexUnserved(home: string, models: string[] | string): Promise<string | undefined> {
@@ -481,14 +498,15 @@ async function plan(machine: ProxyMachine, paths: Layout): Promise<void> {
 export async function cliProxy(mode: ProxyMode, machine: ProxyMachine, agent: Agent = "claude"): Promise<number> {
   if (machine.uid === 0) throw new Error("Run hedge cli-proxy as the person who runs Claude Code, not root.");
   const paths = layout(machine.home);
-  if (mode === "install" || mode === "doctor" || mode === "catalog") requireHubRole(machine.home, `cli-proxy ${mode}`);
+  if (mode === "install" || mode === "doctor" || mode === "accounts" || mode === "catalog") requireHubRole(machine.home, `cli-proxy ${mode}`);
   if (mode === "catalog") return catalog(machine, paths);
+  if (mode === "accounts") return accounts(machine, paths);
   if (mode === "plan") await plan(machine, paths);
   if (mode === "install") await install(machine, paths);
   if (mode === "doctor") await doctor(machine, paths);
   if (mode === "connect") await connect(machine);
   if (mode === "disconnect") await disconnect(machine);
-  if (mode === "check") return (await check(machine, agent)) ? 0 : 1;
+  if (mode === "check") return check(machine, agent);
   if (mode === "left") return (await ownedFiles(machine.home, [paths.unit], marker, what)).length ? 0 : 1;
   if (mode === "remove") await removeUnits(machine.home, [paths.unit], marker, what, machine.run);
   return 0;

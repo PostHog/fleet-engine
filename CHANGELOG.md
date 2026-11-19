@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Setup never waits for proxy subscriptions
+
+- On a hub with own-account balancing, `hedge apply` and `hedge setup` no
+  longer fail while the proxy holds fewer of your own Claude or Codex
+  subscriptions than `hub.proxyAccounts`, none included. The proxy installs
+  and runs, and `hedge apply` and `hedge doctor` show a `To do:` line with
+  the login command. `hedge cli-proxy accounts` counts the subscriptions
+  that work. A subscription whose login expired still does not count, and
+  `hedge cli-proxy doctor` still warns about it.
+- Each machine keeps Claude Code and Codex on their own sign-ins until the
+  proxy serves them. While the proxy answers but holds none of an agent's
+  subscriptions, its route check is a `To do:` line, not a failure. A proxy
+  that is down, refuses the key, or runs a plugin Hedge did not install
+  still fails `hedge doctor`.
+- A pack check can name a `todo`: when its command exits 4, Hedge prints
+  it as a `To do:` line, keeps the config that waits for the check out, and
+  fails neither apply nor doctor. Apply runs such a check after the steps.
+
 ### Hedge is cloud only
 
 - Hedge runs your agents on a hub and one or more nodes in the cloud. The

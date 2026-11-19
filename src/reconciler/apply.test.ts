@@ -270,6 +270,48 @@ describe("a config entry that waits for a pack check", () => {
   });
 });
 
+describe("a pack check that waits for the person", () => {
+  const checks = [{ id: "pool", run: ["pool-check"], say: "Hedge cannot read the pool.", todo: "Add an account to the pool.", pack: "base" }];
+  const config = [{ provider: "claude" as const, key: "env.ANTHROPIC_BASE_URL", value: "http://127.0.0.1:8317", after: "pool", pack: "base" }];
+  const waiting = { id: "check:pool", pack: "base", say: "Add an account to the pool.", todo: true as const };
+  const settings = (home: string) => (existsSync(join(home, ".claude/settings.json")) ? JSON.parse(readFileSync(join(home, ".claude/settings.json"), "utf8")) : undefined);
+
+  test("keeps the config that waits for it out, and apply and doctor say it as a To do that fails nothing", async () => {
+    const home = temp.make("home-");
+    const options = { home, adapters: [providerConfigAdapter()], run: exitCodes({ "pool-check": 4 }) };
+    const applied = await apply(plan({ files: [], checks, config }), options);
+    expect(applied.ok).toBe(true);
+    expect(applied.findings).toEqual([waiting]);
+    expect(settings(home)).toBeUndefined();
+    const doctor = await check(plan({ files: [], checks, config }), options);
+    expect(doctor.ok).toBe(true);
+    expect(doctor.findings).toEqual([waiting]);
+  });
+
+  test("that nothing waits for runs after the steps, so it reads what a step installed, and apply names only its To do", async () => {
+    const order: string[] = [];
+    let code = 4;
+    const run = async (command: string[]) => (order.push(command.join(" ")), command.join(" ") === "pool-check" ? code : 0);
+    const steps = [{ id: "install-pool", run: ["install-pool"], check: ["pool-installed"], pack: "base" }];
+    const home = temp.make("home-");
+    const applied = await apply(plan({ files: [], checks, steps }), { home, run });
+    expect(applied).toMatchObject({ ok: true, findings: [waiting] });
+    expect(order.indexOf("pool-check")).toBeGreaterThan(order.indexOf("pool-installed"));
+    code = 1;
+    expect(await apply(plan({ files: [], checks, steps }), { home, run })).toMatchObject({ ok: true, findings: [] });
+    expect(await check(plan({ files: [], checks, steps }), { home, run })).toMatchObject({ ok: false, findings: [{ id: "check:pool", pack: "base", say: "Hedge cannot read the pool.", repair: "apply" }] });
+    code = 0;
+    expect(await apply(plan({ files: [], checks, steps }), { home, run })).toMatchObject({ ok: true, findings: [] });
+  });
+
+  test("a check without a todo that exits 4 is a Fix, and a check with one stays a Fix for any other failing code", async () => {
+    const home = temp.make("home-");
+    const plain = [{ ...checks[0]!, todo: undefined }];
+    expect((await check(plan({ files: [], checks: plain }), { home, run: exitCodes({ "pool-check": 4 }) })).findings).toEqual([{ id: "check:pool", pack: "base", say: "Hedge cannot read the pool.", repair: "apply" }]);
+    expect((await check(plan({ files: [], checks, config }), { home, adapters: [providerConfigAdapter()], run: exitCodes({ "pool-check": 1 }) })).ok).toBe(false);
+  });
+});
+
 describe("check", () => {
   test("runs pack checks and human probes, and lists the human steps left", async () => {
     const human = [{ id: "github", say: "Sign in to GitHub.", command: "gh auth login --web", probe: ["gh", "auth", "status"], pack: "base" }];

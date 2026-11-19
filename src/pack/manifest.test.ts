@@ -198,6 +198,12 @@ describe("loadPacks", () => {
     await expect(loadPacks(sourceWith({ base: { ...base, checks, steps: [{ id: "start", run: ["start"], after: "proxy-up", roles: ["devbox"] }] } }))).rejects.toThrow("steps start: after must name a human step of this pack");
   });
 
+  test("takes a check's todo only as a sentence that says what the person does", async () => {
+    const check = { id: "pool", run: ["pool-check"], say: "Hedge cannot read the pool." };
+    await expect(loadPacks(sourceWith({ base: { ...base, checks: [{ ...check, todo: "Add an account to the pool." }] } }))).resolves.toHaveLength(1);
+    for (const todo of ["", " ", 4]) await expect(loadPacks(sourceWith({ base: { ...base, checks: [{ ...check, todo }] } }))).rejects.toThrow("checks pool: todo must say what the person does");
+  });
+
   test("rejects malformed nested items with a clear error", async () => {
     const setting = base.settings[0];
     const row = { role: "review", work: "Review", provider: "codex", model: "m", effort: "high" };

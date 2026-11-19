@@ -234,6 +234,7 @@ function checkShapes(raw: Record<string, unknown>, fail: (message: string) => ne
   });
   each("checks", (item, label) => {
     need(typeof item.id === "string" && isStrings(item.run) && typeof item.say === "string", `${label}: needs an id, a run list, and a say`);
+    need(item.todo === undefined || filled(item.todo), `${label}: todo must say what the person does`);
     filters(item, label);
   });
 }

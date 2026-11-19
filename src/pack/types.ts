@@ -163,7 +163,11 @@ export type PackManifest = {
   subcommands?: Record<string, string[]>;
 };
 
-export type PackCheck = Scope & { id: string; run: string[]; say: string };
+/** The exit code of a pack check that waits for the person, such as a pool that holds none of their accounts yet. The check does not pass, so config that waits for it stays out, but it fails nothing: Hedge says the check's todo as a To do line. */
+export const waitsForPerson = 4;
+
+/** say is the Fix line while run fails. todo is the To do line while run exits waitsForPerson. */
+export type PackCheck = Scope & { id: string; run: string[]; say: string; todo?: string };
 
 export const handlerSeams = ["review-bot", "heavy-route", "pr-command", "slack-capture", "secret-rows", "secret-providers", "proof-receipt"] as const;
 export type HandlerSeam = (typeof handlerSeams)[number];
@@ -255,6 +259,7 @@ export type Plan = {
   dropped: Array<{ pack: string; item: string; reason: string; check?: string; value?: unknown }>;
 };
 
-export type Finding = { id: string; pack: string; say: string; repair?: "apply" | "human" };
+/** repair: who fixes it; a finding with a repair fails apply or doctor. todo: a To do line that fails nothing. */
+export type Finding = { id: string; pack: string; say: string; repair?: "apply" | "human"; todo?: true };
 
 export type Report = { ok: boolean; actions: Action[]; findings: Finding[]; humanLeft: Array<Owned<HumanStep>> };

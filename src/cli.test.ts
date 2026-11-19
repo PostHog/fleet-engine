@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, symlinkSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join, relative } from "node:path";
+import { main } from "./cli.ts";
 import { cliFixtures, repoRoot } from "./testing/cli.ts";
 import { spawnGit, tempDirs } from "./testing/git.ts";
 
@@ -28,6 +29,28 @@ function snapshot(root: string): Record<string, string> {
 }
 
 describe("hedge apply", () => {
+  test("a check that waits for the person prints a To do, and neither apply nor doctor fails", async () => {
+    const engine = temp.make("engine-");
+    cpSync(join(repoRoot, "packs/base"), join(engine, "packs/base"), { recursive: true });
+    mkdirSync(join(engine, "packs/pool"), { recursive: true });
+    writeFileSync(join(engine, "packs/pool/pack.json"), JSON.stringify({ schema: 1, name: "pool", summary: "A pool of accounts.", checks: [{ id: "pool", run: ["pool-check"], say: "Hedge cannot read the pool.", todo: "Add an account to the pool." }] }));
+    const home = temp.make("home-");
+    const profile = profileDir(["pool"]);
+    const run = async (command: string[]) => (command.at(-1) === "pool-check" ? 4 : 0);
+    const typed = async (args: string[]) => {
+      const lines: string[] = [];
+      const code = await main(args, { home, engineRoot: engine, platform: "linux", env: {}, print: (line) => lines.push(line), run });
+      return { code, lines };
+    };
+    const applied = await typed(["apply", "--profile", profile]);
+    expect(applied.code).toBe(0);
+    expect(applied.lines).toContain("To do: Add an account to the pool.");
+    expect(applied.lines.at(-1)).toStartWith("Applied ");
+    const doctor = await typed(["doctor", "--profile", profile]);
+    expect(doctor.code).toBe(0);
+    expect(doctor.lines.slice(-2)).toEqual(["To do: Add an account to the pool.", "Everything Hedge sets matches your profile. The To do lines above wait for you."]);
+  });
+
   test("puts the base pack's rules on a fresh machine and remembers the profile", async () => {
     const home = temp.make("home-");
     const profile = profileDir();

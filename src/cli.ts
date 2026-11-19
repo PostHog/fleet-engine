@@ -543,8 +543,9 @@ function parseFlags(args: string[]) {
 function printReport(report: Report, command: string, print: (line: string) => void, dryRun = false) {
   const changes = report.actions.filter((action) => action.operation !== "keep" && action.operation !== "conflict");
   if (command === "apply") for (const action of changes) print(`${action.operation} ${action.target}`);
-  for (const finding of report.findings) print(`${finding.repair === "human" ? "To do" : finding.repair ? "Fix" : "Note"}: ${finding.say}`);
-  if (command === "doctor") print(report.ok ? "Everything matches your profile." : "Run hedge apply to fix what Hedge can fix.");
+  for (const finding of report.findings) print(`${finding.repair === "human" || finding.todo ? "To do" : finding.repair ? "Fix" : "Note"}: ${finding.say}`);
+  const waits = report.findings.some((finding) => finding.todo);
+  if (command === "doctor") print(!report.ok ? "Run hedge apply to fix what Hedge can fix." : waits ? "Everything Hedge sets matches your profile. The To do lines above wait for you." : "Everything matches your profile.");
   else if (dryRun) print(report.ok ? `Preview: ${changes.length} change${changes.length === 1 ? "" : "s"} to apply. Nothing was written.` : "Preview: Hedge could not apply your profile. Nothing was written.");
   else print(report.ok ? `Applied ${changes.length} change${changes.length === 1 ? "" : "s"}.` : "Hedge could not apply your profile.");
 }

@@ -9,8 +9,11 @@ Recovery never knows that a provider has capacity, and continues nothing.
 
 1. Add `--add recovery` to the command in item 2 of step 9, and add
    `provider-recovery=on,own-account-balancing=on` to `--workflows`.
-2. Once item 2 of step 9 has turned it on, the proxy needs at least two of their
-   own subscriptions. This prints the sign-in command that adds one:
+2. Once item 2 of step 9 has turned it on, Recovery needs at least one of
+   their own subscriptions in the proxy, and the proxy should hold two. Setup
+   does not wait for them: until the proxy holds them, `hedge doctor` shows a
+   `To do:` line with the sign-in command, and nothing fails. This prints
+   the sign-in command that adds one:
 
    ```sh
    ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge cli-proxy plan'
