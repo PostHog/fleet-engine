@@ -485,6 +485,38 @@ test("a review that another one overtakes while it weighs the budget backs out",
   await expect(pr.hedge("show", "--round", "3")).rejects.toThrow("has no reservation");
 });
 
+test("of two final reads that weigh the same budget and reserve final-9 and final-10 in the same millisecond, only the first stays", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: graded("non-critical", "medium") });
+  pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 1, "pull-requests.reviewCeiling": 20 });
+  await pr.commit("feature.txt", "greet\n");
+  await pr.hedge("require", "--none", "--reason", "fixture");
+  let base = await panelReview(pr, "- feature.txt:1 | major | Correctness | the greeting drops the name | greet by name | anchor: greet");
+  pr.env.HEDGE_REVIEW_ARBITER = continueArbiter();
+  for (let read = 1; read <= 8; read++) {
+    const head = await pr.commit("feature.txt", `greet ${read}\n`);
+    await pr.hedge("review-start", "--scope", "final", "--base", base);
+    writeFileSync(join(pr.repository, "findings.md"), "No findings.\n");
+    await pr.hedge("review-finish", "--round", `final-${read}`, "--reviewer", "gpt-6.1-sol", "findings.md");
+    base = head;
+  }
+  await pr.commit("feature.txt", "greet 9\n");
+  const [started1, go1, started2, go2] = ["started1", "go1", "started2", "go2"].map((name) => join(pr.home, name));
+  await spawnAsync(["mkfifo", started1, go1, started2, go2]);
+  pr.env.HEDGE_REVIEW_ARBITER = `cat >/dev/null; if mkdir "${pr.home}/first" 2>/dev/null; then n=1; else n=2; fi; echo > "${pr.home}/started$n"; read line < "${pr.home}/go$n"; echo CONTINUE`;
+
+  const first = pr.hedge("review-start", "--scope", "final", "--base", base);
+  await readFile(started1, "utf8");
+  const second = pr.hedge("review-start", "--scope", "final", "--base", base);
+  await readFile(started2, "utf8");
+  await writeFile(go1, "go\n");
+  expect((await first).output).toContain(`"id":"final-9"`);
+  await writeFile(go2, "go\n");
+
+  await expect(second).rejects.toThrow("Review final-9 started while this one weighed the budget");
+  await expect(pr.hedge("show", "--round", "final-10")).rejects.toThrow("has no reservation");
+});
+
 test("a fixes round backs out when a dropped final read's name is reused in the same millisecond while it weighs the budget, so it never opens past the ceiling", async () => {
   const pr = await checkout();
   pr.pullRequestState({ body: graded("non-critical", "medium") });
@@ -505,11 +537,8 @@ test("a fixes round backs out when a dropped final read's name is reused in the 
 
   const slow = pr.hedge("review-start", "--scope", "fixes", "--base", fix);
   await readFile(started, "utf8");
-  const { startedAt } = JSON.parse(readFileSync(join(babysit.directory, "round.json"), "utf8"));
   rmSync(babysit.directory, { recursive: true, force: true });
   expect((await pr.hedge("review-start", "--scope", "final", "--base", fix)).output).toContain(`"id":"final-1"`);
-  const replacement = join(babysit.directory, "round.json");
-  writeFileSync(replacement, JSON.stringify({ ...JSON.parse(readFileSync(replacement, "utf8")), startedAt }));
   writeFileSync(join(pr.repository, "findings.md"), "- major | feature.txt:1 | the new member goes unnamed | anchor: greet the new member\n");
   await pr.hedge("review-finish", "--round", "final-1", "--reviewer", "gpt-6.1-sol", "findings.md");
   await writeFile(go, "go\n");

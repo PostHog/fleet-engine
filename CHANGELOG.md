@@ -120,9 +120,10 @@
   to one of its items: a blocker, a major, a finding without a severity, or a
   TESTS item.
 - A review that starts while another weighs the budget backs out when the
-  other one started first. This holds also when the other one reuses the
-  name of a final read that was dropped meanwhile, in the same millisecond
-  too: each reservation has its own id in `round.json`. A reservation that
+  other one started first, or in the same millisecond, whatever their names,
+  such as `final-9` and `final-10`. This holds also when the other one reuses
+  the name of a final read that was dropped meanwhile: each reservation has
+  its own id in `round.json`. A reservation that
   hedge cannot read for any reason other than a missing file stops the
   command with the read error, so the budget is never counted short. A
   review that stops after it reserves removes its own round, so a retry is
