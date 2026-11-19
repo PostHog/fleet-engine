@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { main } from "../cli.ts";
 import { loadPacks } from "../pack/manifest.ts";
@@ -35,6 +35,29 @@ async function packsAfterSetup() {
     },
   };
 }
+
+describe("hedge setup after a stop", () => {
+  test("takes the profile's new commits before it applies", async () => {
+    const home = temp.make("home-");
+    const stopped = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""], undefined, undefined, 0, "linux", () => {
+      throw new Error("apply stopped");
+    });
+    expect(stopped.code).toBe(1);
+    const elsewhere = join(home, "elsewhere");
+    await spawnGit(home, "clone", "-q", githubRepo(home, "nora/hedge-profile"), elsewhere);
+    writeFileSync(join(elsewhere, "about-me.md"), "# Changed on another machine\n");
+    await spawnGit(elsewhere, "commit", "-q", "-am", "change about me");
+    await spawnGit(elsewhere, "push", "-q", "origin", "main");
+
+    let applied = "";
+    const resumed = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""], undefined, undefined, 0, "linux", (dir) => {
+      applied = readFileSync(join(dir, "about-me.md"), "utf8");
+    });
+
+    expect(resumed.code).toBe(0);
+    expect(applied).toBe("# Changed on another machine\n");
+  });
+});
 
 describe("hedge packs --add memory", () => {
   test("creates the private memory repo, as setup does, and points memory.repo at it", async () => {
