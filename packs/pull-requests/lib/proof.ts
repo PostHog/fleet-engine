@@ -515,7 +515,7 @@ const noFinding = /^(?:#.*|no findings\.?|findings:?|\(none\))$/i;
 
 const findingsBlock = /^\s*FINDINGS\b:?/;
 const testsBlock = /^\s*(?:#+\s*)?\**TESTS\b/;
-const flooredItem = /^\s*(?:[-*]|\d+[.)])\s+(?:(?:[^|\n]*\|)?\s*\**(?:minor|nit)\**\s*\||\**(?:minor|nit)\**,)/i;
+const flooredItem = /^\s*(?:[-*]|\d+[.)])\s+(?:(?:[^|\n]*\|)?\s*\**(?:minor|nit)\**\s*\||\**(?:minor|nit)\**[,:])/i;
 
 const anchorIntro = /^(?:fleet|hedge) compared each finding's anchor with the diff and with earlier reviews of this PR\.$/;
 const anchorNote = /^- (?:Not in the diff, so check it before triage: \S|Seen before in [^:\n]+: \S|\d+ findings? quotes? no anchor\.$)/;

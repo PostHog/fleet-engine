@@ -935,7 +935,7 @@ test("a review whose only item to answer is a TESTS item spends review budget", 
   await expect(pr.hedge("review-start", "--scope", "fixes", "--base", fix)).rejects.toThrow("The review budget of 1 reviews is spent");
 });
 
-test("a review that lists only minor or nit items that lead with the severity and a comma needs no answer and spends no review budget, while a minor that may be a major still does", async () => {
+test("a review that lists only minor or nit items that lead with the severity and a comma or colon needs no answer and spends no review budget, while a minor that may be a major still does", async () => {
   const pr = await checkout();
   pr.pullRequestState({ body: graded("non-critical", "medium") });
   pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 10, "pull-requests.reviewCeiling": 1 });
@@ -944,7 +944,7 @@ test("a review that lists only minor or nit items that lead with the severity an
   const panel = await cannedPanel(pr, { design: minor, others: lensAnswer("(none)") });
   const fix = await pr.commit("feature.txt", "greet the member\n");
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", panel)).output).toContain(`"round":2`);
-  await finishWith(pr, "2", "# GPT-6.1 Sol final read 1\n\n1. minor, feature.txt:1: the word reads oddly.\n2. **nit**, feature.txt:1: the name could be shorter.\n");
+  await finishWith(pr, "2", "# GPT-6.1 Sol final read 1\n\n1. minor, feature.txt:1: the word reads oddly.\n2. **nit**, feature.txt:1: the name could be shorter.\n3. nit: feature.test.ts:3 has no case for an empty name.\n4. **Minor:** feature.txt:1 the greeting could be warmer.\n");
   const later = await pr.commit("feature.txt", "greet every member\n");
 
   expect((await pr.hedge("gate")).output).not.toContain("has unanswered findings");

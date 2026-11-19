@@ -107,8 +107,8 @@
   asks for an answer to one of its findings. A review with only minor and nit
   findings spends nothing. A blocker, a major, a finding without a severity,
   and a `TESTS` item count, and an unfinished review counts. An item reads as
-  minor or nit in the form `- file:line | minor | ...` and in the form
-  `1. minor, file:line: ...`.
+  minor or nit in the form `- file:line | minor | ...` and in the forms
+  `1. minor, file:line: ...` and `1. nit: file:line ...`.
 - A prose finding that a review writes beside only the notes of its Anchor
   check is a finding. It gets the number after all other items, so an answer
   that an older hedge took still answers the same item.
