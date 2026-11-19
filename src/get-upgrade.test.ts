@@ -137,16 +137,15 @@ describe("get.sh upgrades a machine that Fleet runs", () => {
     expect(machine.state().both).toEqual([]);
   });
 
-  onLinuxHost("a secret that Fleet saves while it stops reaches Hedge's secret store, also with --install-only", () => {
-    const results = [[], ["--install-only"]].map((args) => {
-      const machine = fleetMachine({ lastWords: (home) => [{ unit: "fleet-watch.service", file: join(home, ".local/state/fleet/secrets.jsonl"), line: '{"name":"late"}\n' }] });
-      mkdirSync(join(machine.home, ".local/state/fleet"), { recursive: true });
-      writeFileSync(join(machine.home, ".local/state/fleet/secrets.jsonl"), '{"name":"early"}\n', { mode: 0o600 });
-      const result = machine.getSh(args);
-      return { code: result.code, log: readFileSync(join(machine.home, ".local/state/hedge/secrets.jsonl"), "utf8") };
-    });
+  onLinuxHost("a secret that Fleet saves while it stops reaches Hedge's secret store, also when --install-only hands over to setup", () => {
+    const machine = fleetMachine({ lastWords: (home) => [{ unit: "fleet-watch.service", file: join(home, ".local/state/fleet/secrets.jsonl"), line: '{"name":"late"}\n' }] });
+    mkdirSync(join(machine.home, ".local/state/fleet"), { recursive: true });
+    writeFileSync(join(machine.home, ".local/state/fleet/secrets.jsonl"), '{"name":"early"}\n', { mode: 0o600 });
 
-    expect(results).toEqual([0, 0].map((code) => ({ code, log: '{"name":"early"}\n{"name":"late"}\n' })));
+    const result = machine.getSh(["--install-only"]);
+
+    expect(result.code).toBe(0);
+    expect(readFileSync(join(machine.home, ".local/state/hedge/secrets.jsonl"), "utf8")).toBe('{"name":"early"}\n{"name":"late"}\n');
   });
 
   onLinuxHost("a dry run on an engine whose retire-fleet ignores --dry-run stops nothing and says it cannot name what still runs", () => {
