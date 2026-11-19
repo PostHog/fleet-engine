@@ -54,7 +54,10 @@ printf '%s' "$parameters" | MUTABLE=$mutable json '
   exit $bad;
 ' "$@" || status=1
 
-if [ "$transition $state" != "start running" ]; then
+if [ "$state" = failed ] || [ "$state" = canceled ]; then
+  echo "x $name does not run: its latest build is a $transition that is $state. In the Coder web app, press Retry until that build succeeds, then Start when the workspace is stopped, and check again."
+  status=1
+elif [ "$transition $state" != "start running" ]; then
   echo "x $name does not run: its latest build is a $transition that is $state. Start it in the Coder web app, and check again."
   status=1
 elif [ "$schedule" = scheduled ]; then

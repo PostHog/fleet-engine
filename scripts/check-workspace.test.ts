@@ -71,10 +71,17 @@ describe("the setup guide's workspace check", () => {
     );
   });
 
-  test("fails when the latest build is not a running start, and says to start it with the parameters", () => {
-    for (const build of [{ transition: "stop", status: "stopped" }, { transition: "start", status: "failed" }]) {
+  test("fails when the latest build is not a running start: says to start a stopped workspace, and to retry a failed or canceled build first", () => {
+    const retry = "In the Coder web app, press Retry until that build succeeds, then Start when the workspace is stopped, and check again.";
+    const builds = [
+      { build: { transition: "stop", status: "stopped" }, advice: "Start it in the Coder web app, and check again." },
+      { build: { transition: "start", status: "failed" }, advice: retry },
+      { build: { transition: "stop", status: "failed" }, advice: retry },
+      { build: { transition: "start", status: "canceled" }, advice: retry },
+    ];
+    for (const { build, advice } of builds) {
       const result = coder({ parameters: built, mutable: template, build }).check(passed);
-      expect([build, result.code, result.output.split("\n").at(-2)]).toEqual([build, 1, `x hedge-hub does not run: its latest build is a ${build.transition} that is ${build.status}. Start it in the Coder web app, and check again.`]);
+      expect([build, result.code, result.output.split("\n").at(-2)]).toEqual([build, 1, `x hedge-hub does not run: its latest build is a ${build.transition} that is ${build.status}. ${advice}`]);
     }
   });
 

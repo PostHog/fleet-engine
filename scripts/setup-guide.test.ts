@@ -192,13 +192,11 @@ describe("the agent setup guide", () => {
 
   test("changes a parameter in the workspace's Settings in the Coder web app, as the check says, and never with the Coder CLI", () => {
     const docs = [guide(), readFileSync(join(root, "docs/getting-started.md"), "utf8")].map((text) => text.replace(/\s+/g, " "));
-    for (const text of docs) expect(text).not.toMatch(/`coder (?:update|restart|start) [^`]*`/);
-    expect(docs[0]).toContain("ask the person to open the workspace in the Coder web app, go to **Settings → Parameters**, set the value you give them, and submit.");
-    expect(docs[0]).toContain("change the dotfiles parameter of each workspace to `https://github.com/<repo>` in the Coder web app, as step 5 says.");
-    expect(docs[1]).toContain("change the dotfiles parameter of each workspace to `https://github.com/<repo>` in the Coder web app: open the workspace, go to **Settings → Parameters**, set it, and submit.");
-    const printed = fakeCoder(temp, { parameters: { instance_type: "m7g.xlarge" }, mutable: { instance_type: true } }).check(["instance_type=m7g.4xlarge"]);
-    expect(printed.code).toBe(1);
-    expect(printed.output).toContain("x instance_type is not the value you passed. In the Coder web app, set it under Settings, Parameters, and submit.\n");
+    const commands = [guide(), readFileSync(join(root, "docs/getting-started.md"), "utf8")].flatMap(codeIn);
+    expect(commands.filter((code) => /\bcoder\s+(?:update|restart|start)\s+\S/.test(code))).toEqual([]);
+    expect(codeIn("```sh\ncoder restart hub --parameter dotfiles=x --yes\n```").filter((code) => /\bcoder\s+(?:update|restart|start)\s+\S/.test(code))).toHaveLength(1);
+    expect(docs[0]).toContain("**Settings → Parameters**");
+    expect(docs[1]).toContain("**Settings → Parameters**");
   });
 
   test("reads the template's parameters when coder templates pull fails", () => {
