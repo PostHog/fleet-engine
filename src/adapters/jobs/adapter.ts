@@ -73,7 +73,6 @@ export function jobsAdapter(options: JobsOptions = {}): Adapter {
 type Context = { home: string; dryRun: boolean; run: CommandRunner; result: AdapterResult; outage: boolean; gated: Set<string> };
 type Scripts = Map<string, Write>;
 
-/** A start, stop, or change that did not happen fails apply. */
 function failed(result: AdapterResult, finding: Finding) {
   result.findings.push(finding);
   result.failed = true;

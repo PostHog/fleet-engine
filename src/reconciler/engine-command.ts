@@ -1,10 +1,8 @@
 import { join } from "node:path";
 import { quote } from "../adapters/jobs/launcher.ts";
 
-/** A command line with its leading fleet, the name from before the rename, read as hedge. */
 export const asHedge = (command: string[]): string[] => (command[0] === "fleet" ? ["hedge", ...command.slice(1)] : command);
 
-/** The same for a shell command line, such as a human step's command. */
 export const asHedgeLine = (command: string): string => command.replace(/^fleet(?=\s|$)/, "hedge");
 
 /** A leading hedge runs the launcher of the engine at engineRoot, because get.sh puts no hedge on PATH. Other commands stay as they are. */

@@ -46,7 +46,6 @@ export async function readLedger(home: string): Promise<Ledger> {
   return ledger;
 }
 
-/** The ledger value holds, or undefined when it is not a Hedge step ledger. */
 export function asLedger(parsed: unknown): Ledger | undefined {
   const value = (parsed ?? {}) as { version?: unknown; steps?: unknown; human?: unknown };
   const valid = (step: Partial<LedgerStep>) =>

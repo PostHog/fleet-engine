@@ -106,7 +106,6 @@ const agentPath = (mac: Pick<MacTunnel, "home">) => join(mac.home, "Library/Laun
 const legacyLabel = "com.fleet.hub-tunnel";
 const notFound = 113;
 
-/** The hub tunnel from before the rename holds the same ports, so the new one starts only while launchd does not run the old one. */
 async function requireOldStopped(mac: MacTunnel) {
   const { code } = await mac.run(["launchctl", "print", `gui/${mac.uid}/${legacyLabel}`]);
   if (code === notFound) return;

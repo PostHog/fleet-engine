@@ -339,7 +339,6 @@ export const codexProviderTable = { name: "Hedge CLI proxy", base_url: codexUrl,
 const fleetProvider = "fleet-proxy";
 const fleetProviderTable = { name: "Fleet CLI proxy", base_url: codexUrl, wire_api: "responses", auth: { command: "/bin/sh", args: ["-c", fleetKeyHelper] } };
 
-/** Removes the provider table that fleet cli-proxy connect wrote, while it is unchanged, and the model_provider that names it. Returns whether Codex used it. */
 function withoutFleetProvider(config: Record<string, unknown>): boolean {
   const providers = config.model_providers as Record<string, unknown> | undefined;
   if (!Bun.deepEquals(providers?.[fleetProvider], fleetProviderTable)) return false;

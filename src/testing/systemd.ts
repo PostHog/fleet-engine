@@ -2,10 +2,8 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { CommandRunner } from "../adapters/run.ts";
 
-/** The unit from before the rename that a hedge- unit replaces. */
 export const oldUnit = (unit: string) => (unit.startsWith("hedge-") ? `fleet-${unit.slice("hedge-".length).replace(/^hedge-/, "fleet-")}` : undefined);
 
-/** A systemd user manager. It refuses to start a hedge- unit while its fleet- unit runs, so a test that runs both fails. shown replaces what show prints for a unit, as a unit stuck in a state would. fileless units run with no unit file, so list-unit-files leaves them out. failing units do not start. */
 export function fakeSystemd() {
   const units = new Map<string, { active: boolean; enabled: boolean }>();
   const shown = new Map<string, string>();

@@ -10,7 +10,6 @@ import { hublessReason } from "./resolve.ts";
 import { withLegacyNames } from "../legacy.ts";
 
 export type AdapterContext = { home: string; dryRun: boolean; adopt: string[]; adoptFrom?: string[] };
-/** failed: something the adapter had to start or change did not happen, so apply fails, though the next adapters still run. */
 export type AdapterResult = { actions: Action[]; findings: Finding[]; blocked?: boolean; failed?: boolean };
 export type Adapter = {
   name: "files" | "config" | "jobs" | "identity" | "t3" | "fleet";
