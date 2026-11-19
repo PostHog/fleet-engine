@@ -51,7 +51,7 @@ const remoteFor = (root: string, url: string) => systemGit(root, ["ls-remote", "
 function refuses(command: string[]) {
   try {
     const refused = Bun.spawnSync(command, { stdout: "ignore", stderr: "pipe", timeout: 10_000 });
-    return refused.exitCode !== 0 && refused.stderr.toString().includes("Hedge blocked Git access");
+    return refused.exitCode !== 0 && /(?:Hedge|Fleet) blocked Git access/.test(refused.stderr.toString());
   } catch {
     return false;
   }

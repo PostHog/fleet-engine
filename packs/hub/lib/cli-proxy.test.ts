@@ -425,6 +425,32 @@ test("the check fails without a saved key, or when the proxy serves no Claude mo
   expect(existsSync(settingsFile(fresh.home))).toBe(false);
 });
 
+test("connect and disconnect take over the key helper and the Codex provider that fleet cli-proxy connect wrote, and keep your own", async () => {
+  const fleetHelper = 'cat "$HOME/.config/fleet/cli-proxy.key"';
+  const fleetProxy = { name: "Fleet CLI proxy", base_url: `${proxyUrl}/v1`, wire_api: "responses", auth: { command: "/bin/sh", args: ["-c", fleetHelper] } };
+  const fleetCodex = { ...mine, model_provider: "fleet-proxy", model_providers: { ...mine.model_providers, "fleet-proxy": fleetProxy } };
+  const both = client({ plan: "both" }, { models: ["claude-sonnet-5-5", "gpt-6.1-sol"] });
+  mkdirSync(join(both.home, ".claude"), { recursive: true });
+  writeFileSync(settingsFile(both.home), JSON.stringify({ model: "opus", env: { ANTHROPIC_BASE_URL: proxyUrl }, apiKeyHelper: fleetHelper }));
+  codexRouted(both.home, fleetCodex);
+
+  expect(await cliProxy("connect", both.machine)).toBe(0);
+
+  expect(readJson(settingsFile(both.home))).toEqual({ model: "opus", env: { ANTHROPIC_BASE_URL: proxyUrl }, apiKeyHelper: keyHelper });
+  expect(readCodex(both.home)).toEqual({ ...mine, model_provider: "hedge-proxy", model_providers: { ...mine.model_providers, "hedge-proxy": hedgeProxy } });
+
+  const left = client({ plan: "both" });
+  mkdirSync(join(left.home, ".claude"), { recursive: true });
+  writeFileSync(settingsFile(left.home), JSON.stringify({ model: "opus", env: { ANTHROPIC_BASE_URL: proxyUrl }, apiKeyHelper: fleetHelper }));
+  codexRouted(left.home, fleetCodex);
+  writeFileSync(keyFile(left.home), `${clientKey}\n`, { mode: 0o600 });
+
+  expect(await cliProxy("disconnect", left.machine)).toBe(0);
+
+  expect(readJson(settingsFile(left.home))).toEqual({ model: "opus" });
+  expect(readCodex(left.home)).toEqual(mine);
+});
+
 test("disconnect removes only Hedge's own values: a base URL or key helper you set stays", async () => {
   const { machine, home } = client();
   connected(home);

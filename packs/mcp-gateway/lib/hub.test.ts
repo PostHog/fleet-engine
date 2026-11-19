@@ -82,6 +82,13 @@ test("a machine keeps its key, an old server-scoped key moves to the hedge group
   ]);
 });
 
+test("a hub whose MCPHub settings Fleet wrote still signs in with the fleet-management key and issues a key", async () => {
+  const home = hubHome({ bearerKeys: [{ id: "fleet-management", name: "Fleet local management", token: managementToken, enabled: true, kind: "system", accessType: "all" }] });
+  const api = fakeMcpHub({ groups: [{ id: "group-1", name: "hedge", servers: ["tickets", "calendar"] }] });
+  expect(await issueKey("box-2", fakeHub(home, { fetch: mcphubFetch(api) }))).toStartWith("mcphub_");
+  expect(api.calls.find((call) => call.path === "auth/keys" && call.method === "POST")?.body).toEqual({ name: "Hedge box-2", kind: "system", accessType: "groups", allowedGroups: ["hedge"] });
+});
+
 test("doctor passes a healthy gateway that refuses calls without a key and serves every server to the hedge group", async () => {
   const api = fakeMcpHub({ groups: [{ id: "group-1", name: "hedge", servers: ["tickets", "calendar"] }] });
   const hub = fakeHub(hubHome(), { fetch: mcphubFetch(api) });

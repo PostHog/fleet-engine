@@ -13,6 +13,7 @@ export type TunnelMachine = { home: string; devboxes: string[]; dialsHub: string
 
 const marker = "# Managed by Hedge hub SSH tunnels.";
 const hostsMarker = " # hedge-hub-tunnel";
+const ownedHostsLine = (line: string) => line.endsWith(hostsMarker) || line.endsWith(" # fleet-hub-tunnel");
 const unitName = (alias: string) => `hedge-ssh-${alias}.service`;
 const loopback = (port: number) => `-R 127.0.0.1:${port}:127.0.0.1:${port}`;
 
@@ -37,7 +38,7 @@ WantedBy=default.target
 }
 
 export function hostsWith(previous: string, host: string): string {
-  const lines = previous.split("\n").filter((line) => !line.endsWith(hostsMarker));
+  const lines = previous.split("\n").filter((line) => !ownedHostsLine(line));
   while (lines.at(-1) === "") lines.pop();
   if (lines.some((line) => line.split("#", 1)[0]!.trim().split(/\s+/).slice(1).includes(host))) throw new Error(`Keep unmanaged hosts entry for ${host}.`);
   return [...lines, `127.0.0.1 ${host}${hostsMarker}`, ""].join("\n");
@@ -86,12 +87,12 @@ async function withoutTunnels(mode: "remove" | "left", machine: TunnelMachine) {
   const directory = join(machine.home, ".config/systemd/user");
   const units = (await staleUnits(machine.home, directory, [])).sort().map((name) => join(directory, name));
   const hosts = (await readIfThere(machine.hosts)) ?? "";
-  const entry = hosts.split("\n").some((line) => line.endsWith(hostsMarker));
+  const entry = hosts.split("\n").some(ownedHostsLine);
   if (mode === "left") return machine.print(units.length || entry ? "Hub SSH tunnels: still here." : "Hub SSH tunnels: nothing left."), units.length || entry ? 0 : 1;
   await removeUnits(machine.home, units, marker, "tunnel", machine.run);
   if (entry) {
     if ((await lstat(machine.hosts)).isSymbolicLink()) throw new Error(`Keep linked hosts file: ${machine.hosts}`);
-    await must(machine.run, ["sudo", "-n", "tee", machine.hosts], hosts.split("\n").filter((line) => !line.endsWith(hostsMarker)).join("\n"));
+    await must(machine.run, ["sudo", "-n", "tee", machine.hosts], hosts.split("\n").filter((line) => !ownedHostsLine(line)).join("\n"));
   }
   machine.print("Hub SSH tunnels: removed.");
   return 0;

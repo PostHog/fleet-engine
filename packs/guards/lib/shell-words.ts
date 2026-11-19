@@ -427,7 +427,7 @@ export function parse(program: string, context: Context = { env: new Map(), inLo
         index = wrapper.index;
         chdir = wrapper.chdir ?? chdir;
       }
-      else if (basename(text) === "hedge" && texts[index + 1] === "heavy" && texts.includes("--", index)) index = texts.indexOf("--", index) + 1;
+      else if (["hedge", "fleet"].includes(basename(text)) && texts[index + 1] === "heavy" && texts.includes("--", index)) index = texts.indexOf("--", index) + 1;
       else break;
     }
     const name = texts[index] === undefined ? "" : basename(texts[index]);

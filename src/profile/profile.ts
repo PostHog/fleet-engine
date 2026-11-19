@@ -50,7 +50,9 @@ export async function saveAnswers(dir: string, answers: Partial<ProfileFile>, op
   refuseLegacyPath(dir);
   const path = profileFile(dir);
   const name = basename(path);
+  refuseLegacyPath(path);
   if (options.push) await pullUnder(dir, path, answers);
+  refuseLegacyPath(path);
   const current = (await readJson(path)) ?? { schema: 1 };
   if (current.schema !== 1) throw new ProfileError(`${path}: unknown schema ${String(current.schema)}`);
   const settings = { ...(current.settings as Record<string, unknown> | undefined), ...answers.settings };
@@ -148,6 +150,7 @@ export function placedMachine(machine: MachineFile, hub: string | undefined): Ma
 export async function saveMachine(home: string, machine: MachineFile) {
   if (machine.profileDir) refuseLegacyPath(machine.profileDir);
   const path = machinePath(home);
+  refuseLegacyPath(path);
   await mkdir(dirname(path), { recursive: true });
   await writePrivateFile(path, JSON.stringify(machine, null, 2) + "\n");
 }

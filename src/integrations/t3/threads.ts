@@ -6,7 +6,7 @@ import { t3StatePath, t3UserData } from "./server.ts";
 import type { T3Client, T3HttpClient } from "./session.ts";
 
 export type PullRequestWatch = { startedAt?: string; headSha?: string; passed?: boolean; checksPending?: boolean; failedChecks?: string[]; awaitingApproval?: string[] };
-export type ShellPullRequest = { repository: string; number: number; url: string; snapshot?: { state?: string; headBranch?: string } | null; watch?: PullRequestWatch | null };
+export type ShellPullRequest = { repository: string; number: number; url: string; source?: string; snapshot?: { state?: string; headBranch?: string } | null; watch?: PullRequestWatch | null };
 
 export type ShellThread = {
   id: string; title: string; projectId: string; status: string;

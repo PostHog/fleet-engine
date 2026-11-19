@@ -18,6 +18,7 @@ while [ -L "$runner" ]; do
 done
 if in_fleet_path "$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -L)" || in_fleet_path "$(CDPATH='' cd -- "$(dirname -- "$runner")" && pwd -P)"; then
   echo "Fleet is now Hedge. Run: curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh | sh" >&2
+  case "${2:-}" in PreToolUse | PostToolUse | UserPromptSubmit) exit 2 ;; esac
   exit 0
 fi
 hooks="$HOME/.config/hedge/hooks"

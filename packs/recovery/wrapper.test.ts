@@ -132,7 +132,7 @@ describe("the Claude reset wrapper", () => {
 
 type Instance = { driver: string; enabled?: boolean; config?: Record<string, unknown>; displayName?: string };
 
-async function t3With(providerInstances: Record<string, Instance>) {
+async function t3With(providerInstances: Record<string, Instance>, home = temp.make("home-")) {
   const settings = { providerInstances: structuredClone(providerInstances), theme: "dark" };
   const rpc = (tag: string, payload: unknown) => {
     if (tag === "server.getConfig") return { settings: structuredClone(settings) };
@@ -144,7 +144,6 @@ async function t3With(providerInstances: Record<string, Instance>) {
   };
   const stub = await startT3Stub({ shell: { projects: [], threads: [] } as ShellSnapshot, rpc });
   stubs.push(stub);
-  const home = temp.make("home-");
   const lines: string[] = [];
   const run = (mode: string) => claudeWrapperCommand([mode], { home, print: (line) => lines.push(line), session: { home: stub.home } });
   return { settings, run, lines, wrapperPath: join(home, ".config/hedge/recovery/claude") };
@@ -256,6 +255,15 @@ describe("hedge claude-wrapper", () => {
       spare: { driver: "claudeAgent", enabled: false },
     });
     expect(t3.lines).toContain("claudeAgent: kept your Claude binary /opt/my/claude.");
+    expect(await t3.run("check")).toBe(0);
+  });
+
+  test("moves an instance bound to Fleet's wrapper from before the rename to Hedge's", async () => {
+    const home = temp.make("home-");
+    const t3 = await t3With({ claudeAgent: { driver: "claudeAgent", config: { binaryPath: join(home, ".config/fleet/recovery/claude") } } }, home);
+    expect(await t3.run("check")).toBe(1);
+    expect(await t3.run("bind")).toBe(0);
+    expect(t3.settings.providerInstances).toEqual({ claudeAgent: { driver: "claudeAgent", config: { binaryPath: t3.wrapperPath } } });
     expect(await t3.run("check")).toBe(0);
   });
 

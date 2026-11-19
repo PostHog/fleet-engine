@@ -2,7 +2,6 @@ import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { acceptGap, checkout, cleanFixtures, fakeModel, graded, hubAt, reviewHead, verdict, type Checkout } from "./proof-testing.ts";
-import { withoutReceipt } from "./proof-receipt.ts";
 
 afterEach(cleanFixtures);
 
@@ -79,7 +78,7 @@ test("the body section shows each owed proof, the review and the judge in the te
     `| ui-walk | Walked the sender settings page | The new sender shows after a reload | \`${short(head)}\` (reused from \`${short(older)}\`) |`,
     `| prod-shape | Read the stored senders on one region | measured on production; details in the receipt | \`${short(head)}\` |`,
     "| cross-version | not run | gap, accepted | |",
-    `| Review | single reviewer (gpt-6.1-sol), round 1 | 0 findings: 0 fixed, 0 rejected, 0 other | \`${short(head)}\` |`,
+    `| Review | 1-lens panel (gpt-6.1-sol), round 1 | 0 findings: 0 fixed, 0 rejected, 0 other | \`${short(head)}\` |`,
     `| Proof judge | an independent model reads the evidence against the diff | ✅ passed at \`${short(head)}\` | |`,
     "",
     "**Not checked:** Safari; the mobile layout",
@@ -270,7 +269,7 @@ test("a dated model id of a reviewer passes the guard", async () => {
   await pr.commit("feature.txt", "greet new members by first name\n");
   await reviewAgain(pr, 2, "claude-sonnet-4-5-20250929");
   expect((await pr.hedge("receipt")).code).toBe(0);
-  expect(block(pr.githubBody())).toContain("single reviewer (gpt-6.1-sol, claude-sonnet-4-5-20250929)");
+  expect(block(pr.githubBody())).toContain("1-lens panel (gpt-6.1-sol, claude-sonnet-4-5-20250929)");
 });
 
 test("a fenced code line never starts or ends the testing section, and a tab after the hashes makes a heading", async () => {
@@ -805,7 +804,17 @@ test("code is left out of the page where the parser puts it, indented or fenced,
   for (const output of ["TOP=", "NUMBERED=", "QUOTED=", "ITEM=", "TABBED=", "TABLED=", "FIRST=", "CR_FIRST=", "CR_SECOND=", "TABLE_CODE=", "HEADED=", "MARKED=", "TASKED=", "DELIMITED=", "FENCED_LIST=", "FENCED_QUOTE=", "QUOTED_FENCE=", "QUOTED_BLANK=", "FORGED=", "BULK_", "$ stays as written", "HTML_ENTITY_OUT", "\uE003", "hedge proof run"]) expect(Bun.markdown.html(page)).not.toContain(output);
 });
 
-test("a receipt that Hedge wrote before the rename leaves the body with the next one, so the PR never shows two", () => {
-  const old = `## Testing\n\n<!-- fleet-proof-receipt head=${"a".repeat(40)} hash=1 -->\nold receipt\n<!-- /fleet-proof-receipt -->\n\nMore text.\n`;
-  expect(withoutReceipt(old)).toBe("## Testing\n\nMore text.\n");
+test("a receipt that Hedge wrote before the rename is replaced by the next one, so the PR never shows two", async () => {
+  const { pr, head } = await provedPr();
+  const legacy = `<!-- fleet-proof-receipt head=${"a".repeat(40)} hash=1 -->\nold receipt\n<!-- /fleet-proof-receipt -->\n\n`;
+  pr.pullRequestState({ body: template.replace("- [x] I ticked this box\n\n", `- [x] I ticked this box\n\n${legacy}`) });
+
+  expect((await pr.hedge("receipt")).code).toBe(0);
+
+  const body = pr.githubBody();
+  expect(body).not.toContain("fleet-proof-receipt");
+  expect(body).not.toContain("old receipt");
+  expect(body.match(/<!-- hedge-proof-receipt /g)).toHaveLength(1);
+  expect(block(body)).toContain(`head=${head}`);
+  expect(body.replace(block(body), "")).toBe(template.replace("- [x] I ticked this box\n\n", "- [x] I ticked this box\n\n\n\n"));
 });

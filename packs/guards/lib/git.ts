@@ -1,9 +1,9 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { withDirectories } from "./directories.ts";
 import { shortCluster } from "./kill.ts";
-import { commandsIn } from "./shell-words.ts";
+import { type Command, commandsIn } from "./shell-words.ts";
 
 export type Repo = { config: (key: string) => string | undefined; values: (key: string) => string[]; branch?: string; branches: string[]; refs: string[]; agents?: string; stack?: number };
 export type ReadRepo = (dir: string, selectors: string[]) => Repo | undefined;
@@ -31,7 +31,8 @@ const burstReason = (count: number, person: string) => `Hedge blocked this comma
   + "and bursts like that make GitHub fail many CI runs at startup. "
   + `Push in batches of at most ${largestForcePush} branches, about a minute apart. If that does not fit, stop and ask ${person}.`;
 
-const aliasReason = (person: string) => "Hedge blocked this command: `gh stack alias` makes a wrapper command that hides gh stack pushes from this guard. "
+const aliasReason = (person: string) => "Hedge blocked this command: it makes an alias or a wrapper command, such as `gh stack alias`, "
+  + "`gh alias set sp 'stack push'`, a shell alias, or `gh alias import`, that can hide gh stack pushes from this guard. "
   + `Run \`gh stack\` itself. If you need the alias, stop and ask ${person}.`;
 
 export const githubSlug = (url: string) => url.match(/github\.com[:/]+([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i)?.slice(1, 3).join("/");
@@ -124,6 +125,90 @@ function stackArgs(name: string, args: string[]): string[] | undefined {
 }
 
 const makesAlias = (args: string[]) => operandsOf(args)[1] === "alias" && !args.includes("--remove");
+/** `gh alias … --help` before any `--`, which only prints help; after `--` it is an operand, such as an import file. */
+const asksHelp = (args: string[]) => args.slice(0, args.includes("--") ? args.indexOf("--") : undefined).some((arg) => arg === "--help" || arg === "-h");
+
+function ghAliasHidesStack(name: string, args: string[]): boolean {
+  const [group, action, , expansion] = operandsOf(args);
+  if (name !== "gh" || group !== "alias" || asksHelp(args)) return false;
+  if (action === "import") return true;
+  if (action !== "set") return false;
+  return expansion === undefined || args.some((arg) => /^(?:-s|--shell)(?:=|$)/.test(arg)) || /^!|\bstack\b/.test(expansion);
+}
+
+/** gh's aliases, from the config directory the call names or inherits, resolved from the call's directory; undefined when the guard cannot tell where that is. */
+function ghAliases(env: ReadonlyMap<string, string>, directory: string | undefined): Record<string, unknown> | undefined {
+  const configHome = env.get("XDG_CONFIG_HOME") ?? process.env.XDG_CONFIG_HOME;
+  const named = (env.get("GH_CONFIG_DIR") ?? process.env.GH_CONFIG_DIR) || join(configHome || join(homedir(), ".config"), "gh");
+  if (!isAbsolute(named) && directory === undefined) return undefined;
+  try {
+    const config = Bun.YAML.parse(readFileSync(join(resolve(directory ?? "/", named), "config.yml"), "utf8")) as { aliases?: Record<string, unknown> } | null;
+    return config?.aliases ?? {};
+  } catch {
+    return {};
+  }
+}
+
+/** Words split as gh splits alias names and expansions (shlex): quotes and backslashes group; undefined for an open quote. */
+function shellSplit(text: string): string[] | undefined {
+  const words: string[] = [];
+  let word = "";
+  let started = false;
+  let quote: string | undefined;
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index]!;
+    if (quote === "'") {
+      if (char === "'") quote = undefined;
+      else word += char;
+    } else if (quote === '"') {
+      if (char === '"') quote = undefined;
+      else if (char === "\\" && '"\\$`'.includes(text[index + 1] ?? "x")) word += text[++index];
+      else word += char;
+    } else if (/\s/.test(char)) {
+      if (started) words.push(word);
+      word = "";
+      started = false;
+    } else {
+      started = true;
+      if (char === "'" || char === '"') quote = char;
+      else if (char === "\\") word += text[++index] ?? "";
+      else word += char;
+    }
+  }
+  if (quote) return undefined;
+  if (started) words.push(word);
+  return words;
+}
+
+/**
+ * The arguments gh runs after expanding the agent's own gh alias, matched like gh by its leading words, also a nested
+ * name such as `pr mine`; undefined for a shell alias, an expansion gh cannot split, or a config the guard cannot find.
+ */
+function expandedGh({ args, env }: Command, directory: string | undefined): string[] | undefined {
+  if (args[0] === "alias") return args;
+  const aliases = ghAliases(env, directory);
+  if (aliases === undefined) return undefined;
+  const [match] = Object.entries(aliases)
+    .map(([key, expansion]) => ({ words: shellSplit(key) ?? [], expansion }))
+    .filter(({ words }) => words.length > 0 && words.every((word, index) => args[index] === word))
+    .sort((a, b) => b.words.length - a.words.length);
+  if (match === undefined || typeof match.expansion !== "string") return args;
+  if (match.expansion.trimStart().startsWith("!")) return undefined;
+  return substituted(match.expansion, args.slice(match.words.length));
+}
+
+/** gh's alias expansion: `$1` and on take the matching argument, gh splits the result into words, and the arguments left over follow. */
+function substituted(expansion: string, rest: string[]): string[] | undefined {
+  const used = new Set<number>();
+  const text = expansion.replace(/\$(\d+)/g, (placeholder, index: string) => {
+    const value = rest[Number(index) - 1];
+    if (value === undefined) return placeholder;
+    used.add(Number(index));
+    return value;
+  });
+  const words = shellSplit(text);
+  return words && [...words, ...rest.filter((_, index) => !used.has(index + 1))];
+}
 
 function stackPushes(args: string[], repo: () => Repo | undefined): number {
   const [group, action, ...rest] = operandsOf(args);
@@ -308,8 +393,10 @@ export function gitRisk(command: string, cwd: string, person: string, mainPushRe
   };
   let forced = 0;
   for (const [call, directory] of withDirectories(commandsIn(command), cwd)) {
-    const stack = stackArgs(call.name, call.args);
-    if (stack && makesAlias(stack)) return aliasReason(person);
+    const called = call.name === "gh" ? expandedGh(call, directory) : call.args;
+    if (called === undefined) return aliasReason(person);
+    const stack = stackArgs(call.name, called);
+    if ((stack && makesAlias(stack)) || ghAliasHidesStack(call.name, called)) return aliasReason(person);
     if (stack) forced += stackPushes(stack, () => repoAt(directory, []));
     if (call.name !== "git") continue;
     const { dir, selectors, settings, sub, args } = gitCall(call.args, directory, call.env);

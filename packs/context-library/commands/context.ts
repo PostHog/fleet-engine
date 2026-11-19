@@ -5,6 +5,7 @@ import { runCommand } from "../../base/lib/command.ts";
 import { modelFor } from "../../base/lib/models.ts";
 import { redactSecrets } from "../../base/hooks/secret-guard.ts";
 import { capture, captureAgent, type Agent } from "../lib/capture.ts";
+import { hubSources, type Sources } from "../lib/source.ts";
 import { cacheFile, docUrl, librarySettings, writePointer } from "../lib/config.ts";
 import { runGit, type Git } from "../lib/git.ts";
 import { catalogName, parseDoc, readLibrary, related, renderCatalog, search, topicReport } from "../lib/library.ts";
@@ -13,7 +14,7 @@ import { syncLibrary } from "../lib/sync.ts";
 import { upstreamCommand } from "../lib/upstream.ts";
 
 type Env = Record<string, string | undefined>;
-export type ContextDeps = { env: Env; home: string; print: (line: string) => void; git: Git; agent: () => Agent; today: () => string; share: (owner: string) => ShareDeps };
+export type ContextDeps = { env: Env; home: string; print: (line: string) => void; git: Git; agent: () => Agent; sources: Sources; today: () => string; share: (owner: string) => ShareDeps };
 
 export const usage = `usage:
   hedge context search <word>... [--all]   Rank the library's documents; --all adds superseded ones
@@ -54,7 +55,7 @@ export async function contextCommand(args: string[], deps: ContextDeps): Promise
     const noteAt = words.indexOf("--note");
     const source = words[0]!;
     if (!/^https:\/\//.test(source) || (noteAt >= 0 && noteAt !== 1) || (noteAt < 0 && words.length !== 1) || words.length === 2) return deps.print(usage), 2;
-    const saved = await capture({ source, via: "cli", note: noteAt >= 0 ? words.slice(noteAt + 1).join(" ") : undefined }, { home: deps.home, library, agent: deps.agent(), git: deps.git, today: deps.today });
+    const saved = await capture({ source, via: "cli", note: noteAt >= 0 ? words.slice(noteAt + 1).join(" ") : undefined }, { home: deps.home, library, agent: deps.agent(), sources: deps.sources, git: deps.git, today: deps.today });
     deps.print(`${saved.updated ? "Updated" : "Saved"} ${saved.title}: ${join(root, saved.path)}\n${saved.url}`);
     if (!sharing) return 0;
     return printShared(await share({ title: saved.title, url: saved.url, text: saved.text }, deps.share(library.owner)), false, deps.print);
@@ -102,7 +103,8 @@ if (import.meta.main) {
       home: Bun.env.HOME ?? homedir(),
       print: (line) => console.log(line),
       git: runGit,
-      agent: () => captureAgent(modelFor("survey")),
+      agent: () => captureAgent(modelFor("survey"), Bun.env.HOME ?? homedir()),
+      sources: hubSources(Bun.env.HOME ?? homedir()),
       today: () => new Date().toISOString().slice(0, 10),
       share: (owner) => t3ShareDeps({ owner, host: hostname(), route: routerAgent(modelFor("survey")), skip: Bun.env.T3CODE_THREAD_ID ? [Bun.env.T3CODE_THREAD_ID] : [] }),
     }),

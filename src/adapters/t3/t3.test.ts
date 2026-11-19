@@ -796,6 +796,17 @@ describe("T3 on Linux", () => {
     expect(again.actions).toEqual([]);
   });
 
+  test("fails apply when t3 service install fails, so get.sh runs apply again", async () => {
+    const home = temp.make("home-");
+    const server = fakeServer();
+    const commands = runner(server, { service: "not installed" });
+    const run: CommandRunner = async (command, options) => (command.join(" ") === "t3 service install" ? { code: 1, stdout: "" } : commands.run(command, options));
+    const adapter = t3Adapter({ run, server: server.server, user: "octo", wait: async () => {}, env: {} });
+    const report = await apply(plan("linux", []), { home, adapters: [adapter] });
+    expect(report.ok).toBe(false);
+    expect(report.findings.map((finding) => finding.say)).toContain("t3 service install failed (exit 1). Run it yourself to see why, then run hedge apply.");
+  });
+
   test("installs the newest nightly the release feed names, so the installer skips GitHub's rate-limited releases API", async () => {
     const { commands, adapter } = setup({}, { t3: false });
     const report = await apply(plan("linux", []), { home: temp.make("home-"), adapters: [adapter] });
