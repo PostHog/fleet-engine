@@ -14,17 +14,30 @@
 - The base is the PR's base commit on GitHub, never a remote-tracking ref of
   the checkout. Each review records it, and a review whose base GitHub's base
   no longer holds, such as after a rewind, carries nothing. A file left in
-  conflict, a binary one too, never carries. A gate in a checkout without HEAD
-  stops before it calls GitHub.
+  conflict, a binary one too, never carries. A gate in a checkout without HEAD,
+  or without the commit that `--commit` names, stops before it calls GitHub.
+  The gate fails when GitHub's base moves between its reads. A review from an
+  older Hedge, which recorded no base, carries nothing, and the gate asks for
+  a final read.
 - A later round or final read reads only that net delta, from the latest
   reviewed head, so a merge of the base adds nothing to read, and a revert or
-  a deleted file stays in it.
+  a deleted file stays in it. A file left in conflict is in it with both
+  sides, and each lens must cover it. When Hedge cannot read the net delta, it
+  refuses the read and names the command that recovers, such as a full read.
+- A fixes round takes `--base` with the latest finished review, a final read
+  too. A `--scope full` read, the judge's diff, and the review rules start
+  from the PR's base commit on GitHub.
+- `hedge proof miss` saves the reviewed head and the base of a net delta, so
+  `hedge proof eval` replays the range of a later round or final read.
 - A review that finds no blocker or major spends no review budget. The final
   read that the gate asks for runs even when the budget is spent; the budget
   stops the fixes rounds after it. When the arbiter escalates, one final read
   of the net delta may still run, such as to confirm a revert. That read takes
   the stop once, and a blocker or major it finds goes to the user. An arbiter
-  that gives no verdict stops nothing.
+  that gives no verdict stops nothing, and an escalation that arrives after
+  the reviews changed is dropped. `review-start` prints the confirming read in
+  its JSON. The user's `--override` clears the stop before it marks its round
+  recorded, so a retry still clears it.
 
 ### Fleet is now Hedge
 

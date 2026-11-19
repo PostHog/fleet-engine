@@ -117,7 +117,7 @@ The proof state of a pull request at HEAD that the gate builds: each owed kind, 
 _Avoid_: Proof status, gate result
 
 **Net delta**:
-What HEAD changes past a reviewed head, with the base's own changes left out: the diff from the reviewed head merged with the base that HEAD contains to HEAD, plus each file that merge leaves in conflict. The base is the pull request's base commit on GitHub. An empty net delta carries the review to HEAD, while GitHub's base still holds the base the review recorded. Any other net delta takes a final read, which runs even when the review budget is spent, and later rounds and final reads read only it.
+What HEAD changes past a reviewed head, with the base's own changes left out: the diff from the reviewed head merged with the base that HEAD contains to HEAD, plus each file that merge leaves in conflict, which a read shows with both sides. The base is the pull request's base commit on GitHub. An empty net delta carries the review to HEAD, while GitHub's base still holds the base the review recorded. Any other net delta takes a final read, which runs even when the review budget is spent, and later rounds and final reads read only it.
 _Avoid_: Quiet delta, quiet commit
 
 **End-of-run report**:
