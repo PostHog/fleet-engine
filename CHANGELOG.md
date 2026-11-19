@@ -12,9 +12,20 @@
   once. It makes a fresh checkout of the engine in
   `~/.local/share/hedge/engine`. It never reuses the old checkout. It ignores
   a `FLEET_ENGINE_DIR` or `HEDGE_ENGINE_DIR` that leads into a Fleet path, by
-  its real path, or that is the Fleet checkout: its launcher is `fleet`, its
-  remote is `fleet-engine`, or the old `fleet` command runs it. It stops when
-  a Hedge folder is a link into a Fleet path.
+  its real path, or that is the Fleet checkout: its launcher is `fleet`, or
+  its remote is `fleet-engine`. It stops when a Hedge folder is a link into a
+  Fleet path.
+- Hedge moves only a Fleet engine in `~/.local/share/fleet/engine`. When
+  Fleet's `~/.local/bin/fleet` command, the one with the installer's
+  `# Fleet` line, runs an engine in another folder, or names a folder that
+  Hedge cannot read, such as one with an escaped apostrophe, `get.sh` stops
+  before it changes anything and names the folder. `hedge retire-fleet`, its
+  dry run, and `hedge apply` refuse on such a machine too. Stop Fleet's
+  services, cron jobs and `fleet:` tasks by hand and delete
+  `~/.local/bin/fleet`, or move the engine to `~/.local/share/fleet/engine`
+  and change the path in `~/.local/bin/fleet` to match, then run `get.sh`
+  again. A `~/.local/bin/fleet` without the `# Fleet` line is not Fleet's,
+  and Hedge ignores it.
 - On the first run, `get.sh` first runs `hedge retire-fleet`, also with
   `--install-only`. When it cannot show that each piece of Fleet stopped, it
   copies and applies nothing and exits 1. Stop what it names by hand, or
@@ -56,10 +67,9 @@
   them, so a preview at such a `--ref` stops nothing.
 - `hedge retire-fleet`, its dry run, and both checks in `hedge apply`, for
   Fleet's jobs and for its `fleet:` T3 tasks, act only on a machine with a
-  Fleet engine install: `~/.local/share/fleet/engine`, or a custom
-  `FLEET_ENGINE_DIR` checkout that Fleet's `~/.local/bin/fleet` command runs.
-  They use the same test that `get.sh` uses, and `get.sh` points `fleet` at
-  Hedge only after retire, never in a preview. On any other machine, such as
+  Fleet engine install in `~/.local/share/fleet/engine`. `get.sh` points
+  `fleet` at Hedge only after retire, never in a preview. On any other
+  machine, such as
   one that runs a private Fleet copy, retire stops nothing and says that the
   machine has no Fleet engine install, and apply does not wait for that
   copy's `fleet-*` units or `fleet:` tasks. They do not look up the
@@ -84,11 +94,13 @@
 - `hedge update` keeps the engine's origin when the profile still names
   `PostHog/fleet-engine`, so a Hedge checkout never looks like Fleet's.
 - `hedge update` refuses an engine ref whose commit has no `hedge` launcher
-  file before the checkout moves, and records nothing. A folder named
-  `hedge` does not count. It writes or removes its update notice only after
-  the engine moved, so a refused update leaves the notice as it was. It
-  refuses before anything moves when `~/.local/state/hedge`, with its links
-  resolved, leads into Fleet's state folder.
+  file before the checkout moves, and records nothing. Only a regular file
+  named `hedge` counts, not a folder or a link. It writes or removes its
+  update notice only after the new engine's packages installed, so a refused
+  or rolled-back update leaves the notice as it was. When it cannot write the
+  notice, it prints a warning and the update goes on. It refuses before
+  anything moves when `~/.local/state/hedge` or its `update.json`, with its
+  links resolved, leads into Fleet's state folder.
 - `hedge update` runs apply with the profile it pulled.
 - `hedge update` and `hedge refresh` use the Hedge copy of a profile that the
   machine file still names in a Fleet path, or refuse, before they pull.
