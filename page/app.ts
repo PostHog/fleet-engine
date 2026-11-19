@@ -112,6 +112,9 @@ function player(dialog: HTMLDialogElement) {
     video.src = button.dataset.video!;
     document.getElementById(dialog.getAttribute("aria-labelledby")!)!.textContent = button.dataset.title!;
     document.getElementById(dialog.getAttribute("aria-describedby")!)!.textContent = button.dataset.line!;
+    const page = dialog.querySelector<HTMLAnchorElement>(".player-page")!;
+    page.href = button.dataset.page!;
+    page.textContent = `Read how ${button.dataset.title} works`;
     dialog.showModal();
     if (!matchMedia("(prefers-reduced-motion: reduce)").matches) video.play().catch(() => {});
   });

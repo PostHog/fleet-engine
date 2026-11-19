@@ -235,16 +235,16 @@ describe("the site build", () => {
     const html = page("packs/index.html");
     const cards = html.split('<li class="pack-card').slice(1);
     const watched = cards.flatMap((card) => {
-      const buttons = [...card.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)].map((button) => [visibleText(button[2]!).trim(), attributesOf(button[1]!)["aria-label"]] as const);
-      const watch = buttons.filter(([label]) => label.startsWith("Watch"));
+      const buttons = [...card.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)].map((button) => visibleText(button[2]!).trim());
+      const watch = buttons.filter((label) => label.startsWith("Watch"));
       return watch.length ? [[card.match(/<a class="more" href="([a-z-]+)\/"/)![1], ...watch.flat()]] : [];
     });
     expect(watched).toEqual([
-      ["hub", "Watch · 29 s", "Watch · 29 s, the Hub video"],
-      ["pull-requests", "Watch · 29 s", "Watch · 29 s, the Quality gates video"],
-      ["orchestration", "Watch · 30 s", "Watch · 30 s, the Orchestration video"],
-      ["memory", "Watch · 29 s", "Watch · 29 s, the Memory video"],
-      ["slack", "Watch · 20 s", "Watch · 20 s, the Slack video"],
+      ["hub", "Watch · 29 s"],
+      ["pull-requests", "Watch · 29 s"],
+      ["orchestration", "Watch · 30 s"],
+      ["memory", "Watch · 29 s"],
+      ["slack", "Watch · 20 s"],
     ]);
     expect(html.match(/<dialog\b/g)).toHaveLength(1);
     expect(html.match(/<video\b/g)).toHaveLength(1);

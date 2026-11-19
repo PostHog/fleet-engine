@@ -155,12 +155,12 @@ ${pageJson ? `<script id="hedge-data" type="application/json">${JSON.stringify(p
     const video = packVideos[pack.name];
     if (!video) return "";
     const label = `Watch · ${Math.round(video.seconds)} s`;
-    return `<button type="button" class="watch" data-video="${videoPath(root, video.file)}" data-poster="${videoPath(root, video.poster)}" data-title="${esc(pack.title)}" data-line="${esc(roleOf(pack).line)}" aria-label="${label}, the ${esc(pack.title)} video">${uiIcons.play}${label}</button>`;
+    return `<button type="button" class="watch" data-video="${videoPath(root, video.file)}" data-poster="${videoPath(root, video.poster)}" data-title="${esc(pack.title)}" data-page="${esc(pack.name)}/" data-line="${esc(roleOf(pack).line)}" aria-label="${label}, the ${esc(pack.title)} video">${uiIcons.play}${label}</button>`;
   };
 
   const player = `<dialog class="player" aria-labelledby="player-title" aria-describedby="player-line">
   <div class="player-in">
-    <div class="player-head"><div><h2 id="player-title"></h2><p id="player-line" class="player-line"></p></div><button type="button" class="btn small player-close">Close</button></div>
+    <div class="player-head"><div><h2 id="player-title"></h2><p id="player-line" class="player-line"></p><a id="player-page" class="player-page" href="./"></a></div><button type="button" class="btn small player-close">Close</button></div>
     <video id="player-video" muted loop playsinline controls preload="none"></video>
   </div>
 </dialog>`;

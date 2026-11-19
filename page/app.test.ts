@@ -193,7 +193,7 @@ const watchButtons = (window: Window) => [...window.document.querySelectorAll("b
 const watchButton = (window: Window, title: string) => watchButtons(window).find((button) => accessibleName(button).endsWith(`the ${title} video`))!;
 const pathOf = (window: Window, url: string) => new URL(url, window.location.href).pathname;
 describe("the pack videos in a browser", () => {
-  test("each Watch button is named for its length and pack, and opens one large player with that pack's name, line, video and poster", () => {
+  test("each Watch button is named for its length and pack, and opens one large player with that pack's name, line, video, poster and a link to its page as text", () => {
     const window = visit("packs/index.html");
     const player = video(window, "dialog video");
     const textOf = (attribute: string) => window.document.getElementById(dialog(window).getAttribute(attribute)!)!.textContent;
@@ -201,11 +201,12 @@ describe("the pack videos in a browser", () => {
       const card = button.closest(".pack-card")!;
       const title = card.querySelector(".pack-name")!.textContent;
       button.click();
-      const shown = [accessibleName(button), dialog(window).open, textOf("aria-labelledby") === title, textOf("aria-describedby") === card.querySelector(".pack-line")!.textContent, pathOf(window, player.src), pathOf(window, player.poster), player.paused];
+      const link = window.document.querySelector("dialog a") as unknown as HTMLAnchorElement;
+      const shown = [accessibleName(button), dialog(window).open, textOf("aria-labelledby") === title, textOf("aria-describedby") === card.querySelector(".pack-line")!.textContent, pathOf(window, player.src), pathOf(window, player.poster), player.paused, link.textContent === `Read how ${title} works`, pathOf(window, link.href) === pathOf(window, (card.querySelector("a.more") as unknown as HTMLAnchorElement).href)];
       (window.document.querySelector("dialog button") as unknown as HTMLButtonElement).click();
       return shown;
     });
-    const row = (pack: string, name: string) => [name, true, true, true, `/hedge-engine/assets/video/${pack}.mp4`, `/hedge-engine/assets/video/${pack}.jpg`, false];
+    const row = (pack: string, name: string) => [name, true, true, true, `/hedge-engine/assets/video/${pack}.mp4`, `/hedge-engine/assets/video/${pack}.jpg`, false, true, true];
     expect(opened).toEqual([
       row("hub", "Watch · 29 s, the Hub video"),
       row("pull-requests", "Watch · 29 s, the Quality gates video"),
@@ -222,6 +223,15 @@ describe("the pack videos in a browser", () => {
     expect(video(window, "dialog video").paused).toBe(false);
     dialog(window).close();
     expect(video(window, "dialog video").paused).toBe(true);
+  });
+
+  test("a click on the dark area around the player closes it and stops the video, and a click inside it does not", () => {
+    const window = visit("packs/index.html");
+    watchButton(window, "Slack").click();
+    video(window, "dialog video").click();
+    expect([dialog(window).open, video(window, "dialog video").paused]).toEqual([true, false]);
+    (dialog(window) as unknown as HTMLElement).click();
+    expect([dialog(window).open, video(window, "dialog video").paused]).toEqual([false, true]);
   });
 
   test("a visitor who asks for reduced motion gets the player without autoplay, and presses play", () => {

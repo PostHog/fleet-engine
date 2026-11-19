@@ -246,7 +246,8 @@ label.pack-main::after { content: ""; position: absolute; inset: 0; border-radiu
 .player-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .player-head h2 { font-size: 1.3rem; }
 .player-line { margin-top: 4px; font-size: 0.93rem; line-height: 1.4; color: var(--muted); max-width: 70ch; }
-.player-close { box-shadow: 0 3px 0 var(--shadow); }
+.player-page { display: inline-block; margin-top: 6px; font-size: 0.93rem; }
+.player-close { flex: none; white-space: nowrap; box-shadow: 0 3px 0 var(--shadow); }
 .player video, .clip { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; background: #000; }
 .player video { max-height: calc(100dvh - 120px); border-radius: 12px; }
 .clip { border: 2px solid var(--ink); border-radius: 22px; box-shadow: 0 7px 0 var(--shadow); }
