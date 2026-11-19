@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isolateGit, spawnGit, tempDirs } from "../testing/git.ts";
 import { profilePath } from "./profile.ts";
@@ -40,27 +40,31 @@ const followsRedirects = (home: string) => {
 const cliOnBox = (home: string) => existsSync(join(boxHome(home, node), ".local/bin/coder"));
 const leftStep = (output: string) => output.split("\n").find((line) => line.startsWith(`  · Coder on ${node} is signed in another way, so Hedge left that sign-in alone.`)) ?? "";
 const sshConfig = (home: string) => readFileSync(join(boxHome(home, node), ".ssh/config"), "utf8");
+const ownSshConfig = "Host own-host\n  HostName 192.0.2.10\n";
+const keepsOwnSsh = (home: string) => {
+  mkdirSync(join(boxHome(home, node), ".ssh"), { recursive: true });
+  writeFileSync(join(boxHome(home, node), ".ssh/config"), ownSshConfig);
+};
 const notReached = (address: string) => `${node} does not reach Coder at ${address} over HTTPS, so Hedge makes no Coder token for it and sends none. Sign ${node} in to Coder yourself: install the Coder CLI there from your Coder deployment, run coder login there with an HTTPS address it reaches, and paste a token from ${address}/cli-auth. Then run hedge devbox add ${node} again.`;
 
 describe("hedge devbox add signs the workspace in to Coder", () => {
-  test("at this machine's Coder address, with the session file its Coder CLI reads, which only its owner can read", async () => {
+  test("at this machine's Coder address with its own coder login, which keeps the token out of every argv and writes it where only its owner can read it", async () => {
     const { home, add } = await signedUp();
     const box = fakeMachine(home, { "box:coder": 1 });
     expect(await add(box)).toBe(0);
-    expect(box.coderSsh).toEqual(["https://coder.example.com"]);
+    expect(coderFiles(home)).toEqual({ url: "https://coder.example.com", session: coderToken });
     expect(statSync(coderFile(home, "session")).mode & 0o777).toBe(0o600);
+    expect(sshConfig(home)).toBe("# coder https://coder.example.com\n");
     expect(box.calls.flatMap((call) => call.command).join(" ")).not.toContain(coderToken);
   });
 
-  test("and never writes the token through a file that already waits in its Coder folder", async () => {
-    const { home, add } = await signedUp();
-    const elsewhere = join(boxHome(home, node), "elsewhere");
-    signInOnBox(home, {});
-    writeFileSync(elsewhere, "", { mode: 0o644 });
-    for (const name of ["url.hedge", "session.hedge"]) symlinkSync(elsewhere, coderFile(home, name));
-    expect(await add(fakeMachine(home, { "box:coder": 1 }))).toBe(0);
-    expect(readFileSync(elsewhere, "utf8")).toBe("");
-    expect(coderFiles(home)).toEqual({ url: "https://coder.example.com", session: coderToken });
+  test("and removes the token it made when coder config-ssh fails after the sign-in", async () => {
+    const { home, io, add } = await signedUp();
+    keepsOwnSsh(home);
+    const box = fakeMachine(home, { "box:coder": 1 }, { coderConfigSshFails: true });
+    expect(await add(box)).toBe(1);
+    expect([box.coderTokens(), sshConfig(home)]).toEqual([[], ownSshConfig]);
+    expect(lastLine(io.output())).toBe(`hedge: Hedge could not sign ${node} in to Coder: error: could not write ~/.ssh/config.`);
   });
 
   test("installs the Coder CLI there from this machine's Coder address over HTTPS", async () => {
@@ -131,10 +135,11 @@ describe("hedge devbox add signs the workspace in to Coder", () => {
   ])("but leaves the workspace's own Coder sign-in %s as it is, makes no token, installs the Coder CLI, and lists a sign-in that points its SSH config at this machine's Coder address", async (_, files, boxEnv: Record<string, string>, variables) => {
     const { home, io, add } = await signedUp();
     signInOnBox(home, files);
+    keepsOwnSsh(home);
     const box = fakeMachine(home, { "box:coder": 1 }, { boxEnv });
     expect(await add(box)).toBe(0);
     expect(coderFiles(home)).toEqual(files);
-    expect([box.coderTokens(), box.coderSsh, cliOnBox(home)]).toEqual([[], [], true]);
+    expect([box.coderTokens(), sshConfig(home), cliOnBox(home)]).toEqual([[], ownSshConfig, true]);
     const output = io.output();
     expect(output).toContain(`  · Coder on ${node} is signed in another way, so Hedge leaves that sign-in alone and lists the sign-in to https://coder.example.com at the end.`);
     const step = leftStep(output.slice(output.lastIndexOf(`Left for you on ${node}:`)));
@@ -148,20 +153,33 @@ describe("hedge devbox add signs the workspace in to Coder", () => {
     expect(sshConfig(home)).toBe("# coder https://coder.example.com\n");
   });
 
-  test("but leaves a session path that is a directory as it is, makes no token, and lists the sign-in for the person", async () => {
+  test.each([
+    ["a session path that is a directory", "session", (path: string) => void mkdirSync(path)],
+    ["a url path that links to a file", "url", (path: string, elsewhere: string) => symlinkSync(elsewhere, path)],
+    ["a session path that is a FIFO, which no Coder command reads before the check", "session", (path: string) => void Bun.spawnSync(["mkfifo", path])],
+  ] as const)("but leaves %s as it is, makes no token, and lists a sign-in that first moves it aside", async (_, name, make) => {
     const { home, io, add } = await signedUp();
-    signInOnBox(home, { url: "https://coder.example.com" });
-    mkdirSync(coderFile(home, "session"));
+    const elsewhere = join(boxHome(home, node), "elsewhere");
+    signInOnBox(home, {});
+    writeFileSync(elsewhere, "https://coder.example.com");
+    keepsOwnSsh(home);
+    const path = coderFile(home, name);
+    make(path, elsewhere);
     const box = fakeMachine(home, { "box:coder": 1 });
     expect(await add(box)).toBe(0);
-    expect(readdirSync(coderFile(home, "session"))).toEqual([]);
-    expect([box.coderTokens(), box.coderSsh]).toEqual([[], []]);
-    expect(leftStep(io.output())).toStartWith(`  · Coder on ${node} is signed in another way, so Hedge left that sign-in alone. Sign it in to https://coder.example.com, so it reaches the hub and the other nodes by their coder. names. Run: ssh -t ${node} `);
+    expect([box.coderTokens(), sshConfig(home), readFileSync(elsewhere, "utf8")]).toEqual([[], ownSshConfig, "https://coder.example.com"]);
+    const output = io.output();
+    const step = leftStep(output.slice(output.lastIndexOf(`Left for you on ${node}:`)));
+    expect(step.slice(0, step.indexOf(" Run: "))).toBe(`  · Coder on ${node} is signed in another way, so Hedge left that sign-in alone. First move ${path} aside, then sign it in to https://coder.example.com, so it reaches the hub and the other nodes by their coder. names.`);
+    renameSync(path, `${path}.aside`);
+    expect(throughSsh(home, node, step.slice(step.indexOf(" Run: ") + " Run: ".length))).toBe(0);
+    expect([sshConfig(home), readFileSync(elsewhere, "utf8")]).toEqual(["# coder https://coder.example.com\n", "https://coder.example.com"]);
   });
 
-  test("and fails the write, and removes the token it made, when a session directory appears after the first check", async () => {
+  test("and removes the token it made when a session directory appears after the first check", async () => {
     const { home, io, add } = await signedUp();
     signInOnBox(home, { url: "https://coder.example.com" });
+    keepsOwnSsh(home);
     const box = fakeMachine(home, { "box:coder": 1 });
     const exec = box.machine.exec;
     box.machine.exec = async (command, run) => {
@@ -170,17 +188,31 @@ describe("hedge devbox add signs the workspace in to Coder", () => {
       return answer;
     };
     expect(await add(box)).toBe(1);
-    expect(readdirSync(coderFile(home, "session"))).toEqual([]);
-    expect([box.coderTokens(), box.coderSsh]).toEqual([[], []]);
-    expect(lastLine(io.output())).toBe(`hedge: Hedge could not write the Coder sign-in on ${node}, because it is signed in another way now.`);
+    expect([box.coderTokens(), readdirSync(coderFile(home, "session")), readFileSync(coderFile(home, "url"), "utf8"), sshConfig(home)]).toEqual([[], [], "https://coder.example.com", ownSshConfig]);
+    expect(lastLine(io.output())).toBe(`hedge: Hedge could not sign ${node} in to Coder, because it is signed in another way now.`);
+  });
+
+  test("and still lists a sign-in the person can do when it leaves another sign-in alone and cannot fetch the Coder CLI from this machine's Coder address", async () => {
+    const { home, io, add } = await signedUp();
+    const regional = "https://coder-eu.example.com";
+    signInOnBox(home, { url: regional, session: personCoderToken });
+    keepsOwnSsh(home);
+    const box = fakeMachine(home, { "box:coder": 1 }, { boxReachesCoderAt: regional });
+    expect(await add(box)).toBe(0);
+    expect([box.coderTokens(), sshConfig(home), cliOnBox(home), coderFiles(home)]).toEqual([[], ownSshConfig, false, { url: regional, session: personCoderToken }]);
+    const output = io.output();
+    expect(leftStep(output.slice(output.lastIndexOf(`Left for you on ${node}:`)))).toBe(`  · Coder on ${node} is signed in another way, so Hedge left that sign-in alone. Hedge could not fetch the Coder CLI from the hub's Coder address, https://coder.example.com, so install it on ${node} from your Coder deployment. Sign it in to Coder over HTTPS, at https://coder.example.com or another address it reaches, and run coder config-ssh --yes.`);
+    expect(await add(fakeMachine(home, {}, { boxReachesCoderAt: regional, boxCoderSameUser: true }))).toBe(0);
+    expect(sshConfig(home)).toBe(`# coder ${regional}\n`);
   });
 
   test("and lists no plain HTTP sign-in, and installs nothing, when it leaves another sign-in alone and this machine's Coder address is plain HTTP", async () => {
     const { home, io, add } = await signedUp();
     signInOnBox(home, { url: "https://other-coder.example.com", session: personCoderToken });
+    keepsOwnSsh(home);
     const box = fakeMachine(home, { "box:coder": 1 }, { coderAt: "http://coder.example.com" });
     expect(await add(box)).toBe(0);
-    expect([box.coderTokens(), box.coderSsh, cliOnBox(home)]).toEqual([[], [], false]);
+    expect([box.coderTokens(), sshConfig(home), cliOnBox(home)]).toEqual([[], ownSshConfig, false]);
     const output = io.output();
     expect(leftStep(output.slice(output.lastIndexOf(`Left for you on ${node}:`)))).toBe(`  · Coder on ${node} is signed in another way, so Hedge left that sign-in alone. Sign it in to Coder over HTTPS, at an address it reaches. The hub's Coder address, http://coder.example.com, is plain HTTP, so Hedge prints no sign-in command for it.`);
     expect(output).not.toContain("coder login 'http:");
@@ -192,9 +224,8 @@ describe("hedge devbox add signs the workspace in to Coder", () => {
     writeFileSync(join(boxHome(home, node), ".config/coderv2"), "");
     const box = fakeMachine(home, { "box:coder": 1 });
     expect(await add(box)).toBe(1);
-    expect(io.output()).toContain(`hedge: Hedge could not write the Coder sign-in on ${node}: `);
-    expect(box.coderTokens()).toEqual([]);
-    expect(box.coderSsh).toEqual([]);
+    expect(io.output()).toContain(`hedge: Hedge could not sign ${node} in to Coder: `);
+    expect([box.coderTokens(), existsSync(join(boxHome(home, node), ".ssh/config"))]).toEqual([[], false]);
   });
 
   test("and names the token and the command that removes it when its removal fails too", async () => {
