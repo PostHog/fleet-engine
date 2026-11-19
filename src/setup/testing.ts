@@ -101,7 +101,7 @@ export const onBox = (command: string[]) => (command[0] === "ssh" ? command.at(-
  * Each box's T3 environment id is env-<host>, except on the hosts withoutT3, where T3 never ran.
  * T3 here lists hereLinks as its linked environments, and unlink forgets one, or fails with unlinkFails. ssh never reaches the hosts named unreachable.
  */
-export function fakeMachine(home: string, polls: Partial<Record<SignInName, number>> = {}, options: { org?: boolean; createFails?: string; createFailsAfterMaking?: string; lookupFails?: string; publicRepos?: string[]; scopes?: string; failRun?: boolean; exits?: Partial<Record<SignInName, number>>; connectHere?: boolean; boxFiles?: Record<string, string>; hubDown?: boolean; hubUpdateFails?: string; boxCoderAt?: string; boxCoderSameUser?: boolean; claude?: Partial<Record<"claude" | "box:claude", ClaudeSignedIn>>; startedAt?: number; cliPrintsTunnel?: boolean; serverWithoutLinkState?: Array<"box" | "here">; runtimeOrigin?: string; runtimePid?: unknown; serverGone?: boolean; boxConnect?: { authenticated: unknown; linked: unknown }; hereConnect?: { desired?: unknown; authenticated?: unknown; linked?: unknown }; t3Home?: string; devServerUrl?: string; tunnelStartsAfter?: number; hereTunnelStartsAfter?: number; withoutT3?: string[]; hereLinks?: HereLink[]; unreachable?: string[]; unlinkFails?: string; hereStatusFailures?: number; installers?: Record<string, string> } = {}) {
+export function fakeMachine(home: string, polls: Partial<Record<SignInName, number>> = {}, options: { org?: boolean; createFails?: string; createFailsAfterMaking?: string; lookupFails?: string; publicRepos?: string[]; scopes?: string; failRun?: boolean; exits?: Partial<Record<SignInName, number>>; connectHere?: boolean; boxFiles?: Record<string, string>; hubDown?: boolean; hubUpdateFails?: string; boxCoderAt?: string; boxCoderSameUser?: boolean; claude?: Partial<Record<"claude" | "box:claude", ClaudeSignedIn>>; startedAt?: number; cliPrintsTunnel?: boolean; serverWithoutLinkState?: Array<"box" | "here">; runtimeOrigin?: string; runtimePid?: unknown; serverGone?: boolean; boxConnect?: { authenticated: unknown; linked: unknown }; hereConnect?: { desired?: unknown; authenticated?: unknown; linked?: unknown }; t3Home?: string; devServerUrl?: string; tunnelStartsAfter?: number; hereTunnelStartsAfter?: number; withoutT3?: string[]; hereLinks?: HereLink[]; unreachable?: string[]; unlinkFails?: string; hereStatusFailures?: number; installers?: Record<string, string>; installerEnv?: Record<string, string> } = {}) {
   const left: Record<SignInName, number> = { github: 0, claude: 0, chatgpt: 0, coder: 0, "box:github": 0, "box:claude": 0, "box:chatgpt": 0, "box:t3": 0, "box:coder": 0, ...polls };
   const started = new Set<SignInName>();
   const calls: Array<{ command: string[]; cwd?: string; timeoutMs?: number; input?: string }> = [];
@@ -216,8 +216,8 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
     hubLinked.push(linked);
     return result(true, `linked ${linked}`);
   };
-  const forReal = async (line: string, host: string, input?: string, bin?: string): Promise<ExecResult> => {
-    const child = Bun.spawn(["sh", "-c", line], { env: { HOME: boxHome(home, host), PATH: [bin, process.env.PATH ?? ""].filter(Boolean).join(":") }, stdin: input === undefined ? "ignore" : new Blob([input]), stdout: "pipe", stderr: "pipe" });
+  const forReal = async (line: string, host: string, input?: string, bin?: string, env: Record<string, string> = {}): Promise<ExecResult> => {
+    const child = Bun.spawn(["sh", "-c", line], { env: { PATH: [bin, process.env.PATH ?? ""].filter(Boolean).join(":"), ...env, HOME: boxHome(home, host) }, stdin: input === undefined ? "ignore" : new Blob([input]), stdout: "pipe", stderr: "pipe" });
     const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
     return { code, output: `${stdout}${stderr}`, stdout };
   };
@@ -303,6 +303,7 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
       const { hub } = remote?.includes(" --profile ") ? await pushedProfile() : {};
       if (hub && hub !== node && !options.hubDown) credentials.push({ node, issued: hubTook.has(node) });
       if (options.failRun) return 1;
+      if (remote?.includes('-o "$installer"') && options.installerEnv) return (await forReal(remote, node, undefined, undefined, options.installerEnv)).code;
       if (remote?.includes('-o "$installer"') && options.installers) return (await forReal(remote, node, undefined, installerBin(home, options.installers))).code;
       if (command.join(" ") === "sh -c coder login") left.coder = 0;
       return 0;

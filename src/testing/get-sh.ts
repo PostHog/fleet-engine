@@ -90,6 +90,7 @@ done
 case "$url" in
   https://github.com/pingdotgg/t3code/releases.atom) cat "${feed}" ;;
   https://github.com/pingdotgg/t3code/releases/download/*/SHA256SUMS) echo sums > "$out" ;;
+  https://raw.githubusercontent.com/PostHog/hedge/*/get.sh) cp "${join(repoRoot, "get.sh")}" "$out" ;;
   https://t3.codes/install.sh) echo '${t3Installer.replaceAll("'", "'\\''")}' > "$out" ;;
   https://github.com/cli/cli/releases/latest) printf 'https://github.com/cli/cli/releases/tag/v9.9.9' ;;
   *gh_9.9.9_linux_amd64.tar.gz) cp "${ghTar}" "$out" ;;
@@ -106,12 +107,14 @@ esac`);
     return dir;
   }
 
+  const shellEnv = (box: Sandbox) => ({ PATH: box.bin, HOME: box.home, HEDGE_ENGINE_REPO: engine.repo, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" });
+
   function getSh(box: Sandbox, args: string[], options: { env?: Record<string, string>; cwd?: string } = {}) {
     const outputFile = join(box.root, "output.log");
     const output = openSync(outputFile, "w");
     try {
       const result = Bun.spawnSync(["sh", join(repoRoot, "get.sh"), ...args], {
-        env: { PATH: box.bin, HOME: box.home, HEDGE_ENGINE_REPO: engine.repo, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", ...options.env },
+        env: { ...shellEnv(box), ...options.env },
         cwd: options.cwd,
         stdin: "ignore",
         stdout: output,
@@ -123,7 +126,7 @@ esac`);
     }
   }
 
-  return { temp, engine, sandbox, profile, getSh };
+  return { temp, engine, sandbox, profile, getSh, shellEnv };
 }
 
 function fakeBun(log: string) {
