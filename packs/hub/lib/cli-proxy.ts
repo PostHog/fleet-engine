@@ -240,7 +240,7 @@ async function doctor(machine: ProxyMachine, paths: Layout): Promise<void> {
 }
 
 async function pool(machine: ProxyMachine, paths: Layout, managementKey: string) {
-  const { files } = (await management(machine.fetch, managementKey, "auth-files")) as { files?: Array<AuthFile | null> };
+  const files = ((await management(machine.fetch, managementKey, "auth-files")) as { files?: Array<AuthFile | null> } | null)?.files;
   if (!Array.isArray(files) || !files.every((file): file is AuthFile => typeof file?.provider === "string")) throw new Error("The proxy answers with a list of subscriptions that Hedge cannot read.");
   const expired = files.filter((file) => (file.provider === "claude" || file.provider === "codex") && !file.disabled && loginExpired(file));
   const enabled = (agent: Agent) => files.filter((file) => file.provider === agent && !file.disabled && !expired.includes(file)).length;

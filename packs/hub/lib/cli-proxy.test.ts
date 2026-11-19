@@ -173,7 +173,7 @@ test("the doctor still fails with an empty pool while the proxy does not answer 
   await expect(cliProxy("doctor", refused.machine)).rejects.toThrow(`The proxy at ${proxyUrl} refuses this machine's key (HTTP 401).`);
   const silent = hubMachine({ home }, { credentials: [], silentModels: true });
   await expect(cliProxy("doctor", silent.machine)).rejects.toThrow(`The proxy at ${proxyUrl} does not answer.`);
-  for (const authFiles of [{}, { files: null }, { files: [{ name: "auth.json", disabled: false }] }, { files: [null] }]) {
+  for (const authFiles of [null, {}, { files: null }, { files: [{ name: "auth.json", disabled: false }] }, { files: [null] }]) {
     const unreadable = hubMachine({ home }, { authFiles, models: [] });
     await expect(cliProxy("doctor", unreadable.machine)).rejects.toThrow("a list of subscriptions that Hedge cannot read");
     await expect(cliProxy("accounts", hubMachine({ home }, { authFiles }).machine)).rejects.toThrow("a list of subscriptions that Hedge cannot read");
