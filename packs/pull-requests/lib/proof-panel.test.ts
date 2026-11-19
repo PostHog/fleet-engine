@@ -453,6 +453,88 @@ test("the gate needs a finished --lens panel round: a single reviewer never cove
   expect(after.output).toContain("review: HEAD reviewed in final read 1 by gpt-6.1-sol");
 });
 
+test("review-finish refuses a panel round, so the author cannot replace the findings of lenses that failed", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.txt", "greet\n");
+  await pr.fleet("require", "--none", "--reason", "docs only");
+  const reviewer = fakeModel(pr, "REVIEWER", "Looks fine to me.");
+  await pr.fleet("review", "--lens", "correctness");
+  expect((await pr.fleet("review", "--wait")).code).toBe(1);
+  writeFileSync(join(pr.repository, "review.md"), "No findings.\n");
+  const finish = () => pr.fleet("review-finish", "--round", "1", "--reviewer", "gpt-6.1-sol", "review.md");
+  await expect(finish()).rejects.toThrow("Round 1 is a panel round");
+  await expect(finish()).rejects.toThrow("fleet proof gap --kind panel");
+  expect(existsSync(join(pr.pullRequest, "reviews/1/findings.md"))).toBe(false);
+  expect((await pr.fleet("gate")).output).toContain("review: no finished panel round on the PR");
+
+  reviewer.answer(clean);
+  await pr.fleet("review");
+  expect((await pr.fleet("review", "--wait")).code).toBe(0);
+  await expect(finish()).rejects.toThrow("Round 1 is a panel round");
+  expect((await pr.fleet("gate")).code).toBe(0);
+});
+
+test("the gate counts a panel round only when its plan is published and every lens is done, whatever findings.md holds", async () => {
+  const status = (directory: string, name: string, state: string) => writeFileSync(join(directory, `lenses/${name}.json`), JSON.stringify({ state, attempts: 1 }));
+  const lens = (state: string) => (directory: string) => status(directory, "correctness", state);
+  const tamper: [string, (directory: string) => void][] = [
+    ["every lens failed", (directory) => { for (const name of ["correctness", "risk", "fresh-eyes"]) status(directory, name, "failed"); }],
+    ["one lens failed", lens("failed")],
+    ["one lens is still running", lens("running")],
+    ["one lens is queued", lens("queued")],
+    ["a lens has no status file", (directory) => rmSync(join(directory, "lenses/correctness.json"))],
+    ["panel.json is empty", (directory) => writeFileSync(join(directory, "panel.json"), "")],
+    ["panel.json is {}", (directory) => writeFileSync(join(directory, "panel.json"), "{}")],
+    ["panel.json is not JSON", (directory) => writeFileSync(join(directory, "panel.json"), "{")],
+    ["panel.json names no lens", (directory) => writeFileSync(join(directory, "panel.json"), JSON.stringify({ lenses: [] }))],
+    ["panel.json lenses is not a list", (directory) => writeFileSync(join(directory, "panel.json"), JSON.stringify({ lenses: { name: "correctness" } }))],
+    ["panel.json lenses holds null", (directory) => writeFileSync(join(directory, "panel.json"), JSON.stringify({ lenses: [null] }))],
+    ["panel.json names a lens outside the lenses directory", (directory) => { writeFileSync(join(directory, "done.json"), JSON.stringify({ state: "done" })); writeFileSync(join(directory, "panel.json"), JSON.stringify({ lenses: [{ name: "../done" }] })); }],
+    ["the author saved the findings", (directory) => { const path = join(directory, "round.json"); writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, "utf8")), capturedBy: "author" })); }],
+    ["the plan is staged but not published", (directory) => { const plan = readFileSync(join(directory, "panel.json")); rmSync(join(directory, "panel.json")); writeFileSync(join(directory, "panel.staged.json"), plan); }],
+  ];
+  for (const [label, change] of tamper) {
+    const pr = await checkout();
+    await pr.commit("feature.txt", "greet\n");
+    await pr.fleet("require", "--none", "--reason", "docs only");
+    fakeModel(pr, "REVIEWER", clean);
+    await pr.fleet("review", "--lens", "correctness");
+    expect((await pr.fleet("review", "--wait")).code).toBe(0);
+    expect((await pr.fleet("gate")).code).toBe(0);
+    change(join(pr.pullRequest, "reviews/1"));
+    const gate = await pr.fleet("gate");
+    expect({ label, code: gate.code }).toEqual({ label, code: 1 });
+    expect({ label, line: gate.output.includes("review: no finished panel round on the PR") }).toEqual({ label, line: true });
+    expect({ label, single: gate.output.includes("single-reviewer") }).toEqual({ label, single: false });
+  }
+
+  const staged = await checkout();
+  await staged.commit("feature.txt", "greet\n");
+  const reserved = JSON.parse((await staged.fleet("review-start", "--scope", "full")).output) as { directory: string };
+  writeFileSync(join(reserved.directory, "panel.staged.json"), JSON.stringify({ lenses: [{ name: "correctness" }] }));
+  writeFileSync(join(staged.repository, "review.md"), "No findings.\n");
+  await expect(staged.fleet("review-finish", "--round", "1", "--reviewer", "gpt-6.1-sol", "review.md")).rejects.toThrow("Round 1 is a panel round");
+});
+
+test("after a valid panel, a later panel round whose findings the author saved never covers HEAD", async () => {
+  const pr = await checkout();
+  const reviewed = await pr.commit("feature.txt", "greet\n");
+  await pr.fleet("require", "--none", "--reason", "docs only");
+  fakeModel(pr, "REVIEWER", clean);
+  await pr.fleet("review", "--lens", "correctness");
+  expect((await pr.fleet("review", "--wait")).code).toBe(0);
+  await pr.commit("feature.txt", "greet the member\n");
+  await pr.fleet("review", "--lens", "correctness", "--scope", "fixes", "--base", reviewed);
+  expect((await pr.fleet("review", "--wait")).code).toBe(0);
+  expect((await pr.fleet("gate")).code).toBe(0);
+
+  const path = join(pr.pullRequest, "reviews/2/round.json");
+  writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, "utf8")), capturedBy: "author" }));
+  const gate = await pr.fleet("gate");
+  expect(gate.code).toBe(1);
+  expect(gate.output).toContain("review: HEAD not reviewed");
+});
+
 test("a panel gap holds the gate until the user accepts it, and still needs a review at HEAD", async () => {
   const pr = await checkout();
   await pr.commit("feature.txt", "greet\n");

@@ -290,7 +290,14 @@ export async function reviewHead(pr: Checkout) {
   return pr.git("rev-parse", "HEAD");
 }
 
-export const markPanel = (pr: Checkout, round: string) => writeFileSync(join(pr.pullRequest, "reviews", round, "panel.json"), JSON.stringify({ lenses: [], changedFiles: [], cwd: pr.repository, readable: [] }));
+export function markPanel(pr: Checkout, round: string) {
+  const directory = join(pr.pullRequest, "reviews", round);
+  mkdirSync(join(directory, "lenses"), { recursive: true });
+  writeFileSync(join(directory, "lenses/correctness.json"), JSON.stringify({ state: "done", attempts: 1 }));
+  writeFileSync(join(directory, "panel.json"), JSON.stringify({ lenses: [{ name: "correctness", title: "Correctness", family: "gpt", model: "gpt-6.1-sol" }], changedFiles: [], cwd: pr.repository, readable: [] }));
+  const reservation = join(directory, "round.json");
+  writeFileSync(reservation, JSON.stringify({ ...JSON.parse(readFileSync(reservation, "utf8")), capturedBy: "fleet" }));
+}
 
 export const ledgerDecisions = (pr: Checkout) => {
   const path = join(pr.home, ".local/state/fleet/decisions.jsonl");
