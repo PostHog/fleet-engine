@@ -1106,13 +1106,20 @@ describe("the Git guard", () => {
     ["a placeholder that an earlier argument fills with another placeholder", "gh chain '$2' import", "gh alias set"],
     ["a shell alias nested under gh alias", "gh alias inspect", "gh alias set"],
     ["an alias from the config home of the command's own HOME", "HOME=HOMEDIR GH_CONFIG_DIR= gh other", "force-pushes 6 branches at once"],
+    ["an alias that runs another alias", "gh hop", "force-pushes 6 branches at once"],
+    ["an alias that runs itself", "gh loop", "gh alias set"],
+    ["an alias gh picks through a synonym of its group", "gh ext demo", "gh alias set"],
+    ["an alias gh picks past a flag", "gh alias --help=false local-demo", "gh alias set"],
+    ["an alias named like a gh alias subcommand that gh does not have", "gh alias rm", "force-pushes 6 branches at once"],
+    ["an alias with a space gh does not split", "gh nb", "gh alias set"],
+    ["an argument that a JavaScript replacement pattern would change", "gh sub \"$'\"", "gh alias set"],
     ["an alias from the XDG config home when the command empties an inherited GH_CONFIG_DIR", "GH_CONFIG_DIR= XDG_CONFIG_HOME=XDGDIR gh other", "force-pushes 6 branches at once"],
   ])("follows %s to the stack push it runs", async (_, command, refusal) => {
     const dir = await repo("feature");
     stackOf(dir, sixOpen);
     const home = homeWith(withGuards(), { "guards.person": "Robin" });
     mkdirSync(join(home, ".config/gh"), { recursive: true });
-    writeFileSync(join(home, ".config/gh/config.yml"), "aliases:\n    sp: stack push\n    s: stack\n    shp: '!gh stack push'\n    sn: stack $1\n    pr sp: stack push\n    qp: \"stack 'push'\"\n    commented: \"alias # note\\nimport aliases.yml\"\n    chain: alias $1 aliases.yml\n    alias inspect: '!printf ok'\n    co: pr checkout\n");
+    writeFileSync(join(home, ".config/gh/config.yml"), "aliases:\n    sp: stack push\n    s: stack\n    shp: '!gh stack push'\n    sn: stack $1\n    pr sp: stack push\n    qp: \"stack 'push'\"\n    commented: \"alias # note\\nimport aliases.yml\"\n    chain: alias $1 aliases.yml\n    alias inspect: '!printf ok'\n    hop: pr hopped\n    pr hopped: stack push\n    loop: loop\n    extension demo: stack push\n    alias local-demo: stack push\n    alias rm: stack push\n    nb: \"pr\\u00a0list\"\n    sub: alias $1 list\n    co: pr checkout\n");
     const other = join(home, "other-gh");
     mkdirSync(other);
     writeFileSync(join(other, "config.yml"), "aliases:\n    other: stack submit\n");
@@ -1131,7 +1138,7 @@ describe("the Git guard", () => {
     expect(denied.refusal).toContain(refusal);
   });
 
-  test.each(["gh alias set co 'pr checkout'", "gh alias list", "gh alias delete sp", "gh alias set --help", "cd - && GH_CONFIG_DIR=relative gh alias set --help"])("allows a gh alias that cannot push a stack: %s", async (command) => {
+  test.each(["gh alias set co 'pr checkout'", "gh alias list", "gh alias delete sp", "gh alias set --help", "cd - && GH_CONFIG_DIR=relative gh alias set --help", "gh alias import --help=true", "gh alias import --help=false --help"])("allows a gh alias that cannot push a stack: %s", async (command) => {
     expect(await preToolUse(homeWith(withGuards()), "claude", bash(command, await repo("feature")), { guardAsProcess: true })).toEqual({ code: 0, refusal: undefined });
   });
 
