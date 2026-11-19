@@ -16,7 +16,7 @@ const shellWord = (word: string) => `'${word.replaceAll("'", `'\\''`)}'`;
 
 function conflictDiff(run: Run, { reviewed, base }: Merged, head: string, path: string) {
   const lead = `# Conflict in ${path}: the merge of the reviewed head ${reviewed} with the base ${base} leaves it in conflict, and HEAD resolves it. Read both sides with git show ${shellWord(`${reviewed}:${path}`)} and git show ${shellWord(`${base}:${path}`)}.`;
-  return [`\n${lead}`, `# HEAD against the reviewed head:`, diffOf(run, reviewed, head, [path]), `# HEAD against the base:`, diffOf(run, base, head, [path])].join("\n");
+  return [reviewedDiff(`\n${lead}`), `# HEAD against the reviewed head:`, diffOf(run, reviewed, head, [path]), `# HEAD against the base:`, diffOf(run, base, head, [path])].join("\n");
 }
 
 function changedFiles(run: Run, from: string, to: string) {

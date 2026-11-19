@@ -5,7 +5,7 @@ import { modelFor, type ModelRow } from "../../base/lib/models.ts";
 import { numberSetting } from "../../base/lib/settings.ts";
 import { covers, hubLedger, refText, riskCalloutOf, tierOf, type Env, type Ledger, type PrRef, type Ssh } from "./decision-ledger.ts";
 import { ciOf, readPullRequest, type PullRequest, type Run } from "./pr-ci.ts";
-import { arbiterStopFile, askGap, authorOf, judgeDirectory, judgeGap, judgeGapProof, listStanding, parseVerdict, prDirectory, proofGate, pullRequestDirectory, readDecisions, readJson, receiptOf, reviewRecords, withBrokenConditions, writeJson, type Arbiter, type Decisions, type JudgeSummary, type ProofIdentity, type ProofSummary, type PushedHead } from "./proof.ts";
+import { arbiterStopFile, reviewLockFile, askGap, authorOf, judgeDirectory, judgeGap, judgeGapProof, listStanding, parseVerdict, prDirectory, proofGate, pullRequestDirectory, readDecisions, readJson, receiptOf, reviewRecords, withBrokenConditions, writeJson, type Arbiter, type Decisions, type JudgeSummary, type ProofIdentity, type ProofSummary, type PushedHead } from "./proof.ts";
 import { displayEntry } from "./proof-display.ts";
 import { receiptMarker } from "./proof-receipt.ts";
 import { cleanBaseMerge, devPullOf, diffOf, mergeBase, pullRequestDetails, remotesOf, topLevel } from "./proof-checkout.ts";
@@ -32,7 +32,7 @@ export const arbiterOf = ({ env, cwd }: Pick<GateContext, "env" | "cwd">): Arbit
 };
 
 const savedPath = (home: string, ref: PrRef, commit: string) => join(pullRequestDirectory(home, { ...ref, commit }), "gate-outcome", `${commit}.json`);
-const unhashed = new Set(["gate-outcome", "gate-record", "judge", "carried", "receipt.json", arbiterStopFile, displayEntry]);
+const unhashed = new Set(["gate-outcome", "gate-record", "judge", "carried", "receipt.json", arbiterStopFile, reviewLockFile, displayEntry]);
 
 async function proofFiles(home: string, ref: PrRef) {
   const root = prDirectory(home, ref);

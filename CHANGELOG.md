@@ -38,8 +38,12 @@
   `hedge proof eval` replays the range of a later round or final read through
   the same range builder as the live review, with each conflict's two sides.
 - A refused read names a command that the review budget lets run: once the
-  budget is spent, the full read it names takes the user's `--override`. The
-  conflict brief quotes each `git show` argument for the shell.
+  budget is spent, or a confirming read found a blocker or major, the full
+  read it names takes the user's `--override`. The command that replaces a
+  round an older Hedge reserved keeps its lenses, `--single`, and the
+  `--agent` that a later full read needs. The conflict brief quotes each
+  `git show` argument for the shell and redacts secrets in its paths, as in
+  Git's patch.
 - A review that finds no blocker or major spends no review budget. The final
   read that the gate asks for runs even when the budget is spent; the budget
   stops the fixes rounds after it. When the arbiter escalates, one final read
@@ -48,9 +52,12 @@
   that gives no verdict stops nothing, and an escalation that arrives after
   the reviews changed is dropped. `review-start` prints the confirming read in
   its JSON. The user's `--override` clears the stop before it marks its round
-  recorded, so a retry still clears it. A round reservation, an arbiter stop,
-  and the override that clears it each check the review history and write
-  under one lock per PR, so two runs never both pass the check.
+  recorded, so a retry still clears it. It clears only the stop it answered:
+  a stop that a later arbiter saves stays. A round reservation, an arbiter
+  stop, the override that clears it, and the findings that finish a review
+  each check the review history or write it under one lock per PR, so two
+  runs never both pass the check. The lock file stays out of the gate's
+  fingerprint.
 
 ### Fleet is now Hedge
 

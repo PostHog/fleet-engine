@@ -1,8 +1,8 @@
 import { closeSync, existsSync, openSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
-import { askGap, authorOf, finishReview, startGateRun, ledgerRoot, listStanding, panelCommit, proofDirectory, readJson, readOwed, recordGap, recordGapCommand, recordStanding, requireChoice, requireNone, devPr, requireProofs, requireReservation, respondToReview, reuseProof, reviewDirectory, reviewOfCommit, reviewRecords, roundId, roundQuestion, runOption, saveProof, startReview, stopOption, storeCapturedFindings, unfinishedReview, writeJson, markRecorded, readReservation, recordReceipt, roundDirectories, unrecordedElsewhere, type Arbiter, type Reservation, type CapturedBy, type ProofIdentity } from "./proof.ts";
+import { basename, dirname, join, resolve } from "node:path";
+import { askGap, authorOf, finishReview, startGateRun, ledgerRoot, listStanding, panelCommit, proofDirectory, readJson, readOwed, recordGap, recordGapCommand, recordStanding, requireChoice, stopIdOf, requireNone, devPr, requireProofs, requireReservation, respondToReview, reuseProof, reviewDirectory, reviewOfCommit, reviewRecords, roundId, roundQuestion, runOption, saveProof, startReview, stopOption, storeCapturedFindings, unfinishedReview, writeJson, markRecorded, readReservation, recordReceipt, roundDirectories, unrecordedElsewhere, type Arbiter, type Reservation, type CapturedBy, type ProofIdentity } from "./proof.ts";
 import { AnswerTaken, appendOnce, decideAlone, hearUser, ledgerHolds, ledgerOf } from "./decision-cli.ts";
 import { HubUnreachable, refText, thisMachine, type Decision, type Ssh } from "./decision-ledger.ts";
 import { readComment, runIn } from "./pr-ci.ts";
@@ -78,7 +78,7 @@ it finds still spends budget, and the budget stops the fixes rounds after it. Wh
 the stop with an id, and one final read of the net delta may still run without the arbiter, such as to confirm the
 revert of a fix. That read takes the stop once. A blocker or major it finds goes to the user, and only the user's
 --override runs another review; when it finds none, the next review asks the arbiter again. An arbiter that times out
-or gives no verdict stops nothing. The user's --override clears the stop once its decision is in the ledger. The arbiter is the lookup model of your AI plan; HEDGE_REVIEW_ARBITER replaces its
+or gives no verdict stops nothing. The user's --override clears the stop it answered once its decision is in the ledger; a newer stop stays. The arbiter is the lookup model of your AI plan; HEDGE_REVIEW_ARBITER replaces its
 command.`;
 
 const subcommands: Record<string, Subcommand> = {
@@ -576,11 +576,19 @@ first and needs the hub; a round whose decision is recorded finishes without it.
 type SingleRound = { round: number | "final"; id: string; directory: string; scope: string; base?: string; from: string; merged?: Merged; baseSha: string; phase?: string };
 type Pending = { reservation: Reservation; directory: string };
 
-function resumable({ reservation, directory }: Pending) {
+function resumable({ reservation, directory }: Pending, lenses?: string[]) {
   const { from, baseSha } = reservation;
   if (from && baseSha && (reservation.scope === "full" || reservation.merged)) return { from, baseSha };
-  throw new Error(`Review ${basename(directory)} was reserved by an older Hedge, which recorded no merged start or base on GitHub, so it cannot resume. Start a new one with rm -rf '${directory.replaceAll("'", `'\\''`)}' && hedge proof review ${reservedOptions(reservation)}`);
+  throw new Error(`Review ${basename(directory)} was reserved by an older Hedge, which recorded no merged start or base on GitHub, so it cannot resume. Start a new one with rm -rf '${directory.replaceAll("'", `'\\''`)}' && hedge proof review ${restartOptions(reservation, lenses)}`);
 }
+
+const restartOptions = (reservation: Reservation, lenses: string[] | undefined) => [
+  reservedOptions(reservation),
+  ...lenses ? lenses.map((lens) => `--lens ${lens}`) : reservation.scope === "full" ? ["--single"] : [],
+  reservation.scope === "full" && reservation.round !== 1 && "--agent '<your reason>'",
+].filter(Boolean).join(" ");
+
+const plannedLenses = (plan: Plan) => plan.arguments ?? (plan.lenses.some(({ name }) => name === "combined") ? [] : plan.lenses.map(({ name }) => name));
 
 async function runReview(options: Map<string, string>, head: ProofIdentity, context: CommandContext) {
   const { home, run } = context;
@@ -710,7 +718,7 @@ async function takeOverride(directory: string, options: Map<string, string>, hea
   const reservation = await readReservation(directory);
   if (!options.has("--override") || !reservation?.decision || reservation.recorded || reservation.decision.mark !== "🤖") return;
   const { decision } = await decisionOf(options, head, context);
-  await writeJson(join(directory, "round.json"), { ...reservation, decision } satisfies Reservation);
+  await writeJson(join(directory, "round.json"), { ...reservation, decision, clears: stopIdOf(dirname(directory)) } satisfies Reservation);
 }
 
 async function recordRound(directory: string, context: CommandContext) {
@@ -777,7 +785,7 @@ async function runPanel({ options, lists }: Parsed, head: ProofIdentity, context
   const pending = await unfinishedReview(context.home, head, "hedge");
   const planned = pending && (await readPlan(pending.directory) ?? await stagedPlan(pending.directory));
   const tier = planned ? planned.tier : tierOf(head, context);
-  const chosen = planned ? planned.arguments ?? (planned.lenses.some(({ name }) => name === "combined") ? [] : planned.lenses.map(({ name }) => name)) : ((options.get("--scope") ?? "full") === "full" && tier ? tierLenses[tier.name] : []);
+  const chosen = planned ? plannedLenses(planned) : ((options.get("--scope") ?? "full") === "full" && tier ? tierLenses[tier.name] : []);
   const lensArguments = withLenses(chosen, lists.get("--lens") ?? []);
   const requested = lensArguments.map((argument) => resolveLens(guide, argument, author, knowledge, env));
   const combined = planned ? planned.lenses.map(({ name }) => name).join() === "combined" : tier?.name === "read";
@@ -843,9 +851,9 @@ async function panelBriefs(reserved: { directory: string; from: string; merged?:
 
 async function rerunPanel(pending: Pending, options: Map<string, string>, head: ProofIdentity, lenses: Lens[], guide: PanelGuide, context: CommandContext) {
   const { directory, reservation } = pending;
-  const start = resumable(pending);
   const plan = await readPlan(directory) ?? await stagedPlan(directory);
   if (!plan) throw new Error(`${directory} is reserved for one reviewer. Run hedge proof review without --lens to retry it`);
+  const start = resumable(pending, plannedLenses(plan));
   const planned = plan.lenses.map((lens) => lens.name);
   if (lenses.map((lens) => lens.name).sort().join() !== [...planned].sort().join()) throw new Error(`The unfinished round runs the lenses ${planned.join(", ")}. Run hedge proof review without --lens to rerun its failed lenses; --lens <name>:same or :other moves one of them to that family`);
   return roundStep(directory, context, async () => {
