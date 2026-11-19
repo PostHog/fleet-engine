@@ -394,7 +394,7 @@ async function olderThanGrace(path: string, now: Date) {
 
 const guardGenerations = 10;
 
-export const stuckLock = (path: string) => `The lock ${path} is stuck: its holder is gone, and ${guardGenerations} takeovers of it stopped before they ended. Check that no hedge proof command runs on this PR, then run rm -f ${quote(path)} ${quote(path)}.reclaim-* and run this command again`;
+const stuckLock = (path: string) => `The lock ${path} is stuck: its holder is gone, and ${guardGenerations} takeovers of it stopped before they ended. Check that no hedge proof command runs on this PR, then run rm -f ${quote(path)} ${quote(path)}.reclaim-* and run this command again`;
 
 type Guarded = { lock?: string; stuck: boolean };
 

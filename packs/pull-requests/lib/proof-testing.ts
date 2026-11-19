@@ -33,8 +33,8 @@ const seedRepository = template(async (repository) => {
   }
 });
 
-export async function checkout() {
-  const directory = fixture("hedge-proof-checkout-");
+export async function checkout(prefix = "hedge-proof-checkout-") {
+  const directory = fixture(prefix);
   const [home, repository, bin, github] = ["home", "repository", "bin", "github"].map((name) => join(directory, name));
   for (const path of [home, bin, github]) mkdirSync(path);
   writeFileSync(join(bin, "gh"), `#!/bin/sh

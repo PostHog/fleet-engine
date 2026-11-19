@@ -1,11 +1,10 @@
 import { afterEach, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawnAsync } from "../../../src/testing/spawn.ts";
 import { answeredFindings, reviewedFindings } from "./proof.ts";
-import { stuckLock } from "./proof-panel.ts";
 import { checkout, cleanFixtures, exitedPid, fakeModel, lockHolder, finishRound, fixture, graded, markPanel, models, recordingModel, settings, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
@@ -703,31 +702,20 @@ test("a review takes over the budget lock of a hedge proof command that crashed,
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", fixes)).output).toContain(`"round":3`);
 });
 
-test("a budget lock whose holder is gone and whose takeovers all stopped midway names its lock files and the command that clears them, and the next review runs once they are gone", async () => {
-  const pr = await checkout();
+test.each(["hedge-proof-checkout-", "hedge-proof-o'brien-"])("a budget lock whose holder is gone and whose takeovers all stopped midway names its lock files and the command that clears them, and the next review runs once they are gone, in a home named %s", async (prefix) => {
+  const pr = await checkout(prefix);
   const { panel, lock } = await fixesRoundDue(pr);
   const dead = await exitedPid();
   const held = JSON.stringify({ pid: dead, token: "crashed" });
   writeFileSync(lock, held);
   const guard = `${lock}.reclaim-${createHash("sha256").update(held).digest("hex").slice(0, 16)}`;
   for (let generation = 1; generation <= 10; generation++) writeFileSync(generation === 1 ? guard : `${guard}.${generation}`, JSON.stringify({ pid: dead, token: `takeover-${generation}` }));
-  const clear = `rm -f '${lock}' '${lock}'.reclaim-*`;
+  const stuck = await pr.hedge("review-start", "--scope", "fixes", "--base", panel).then(() => "", (error: Error) => error.message);
+  const clear = stuck.match(/then run (rm -f .*) and run this command again/)?.[1] ?? "";
 
-  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", panel)).rejects.toThrow(`The lock ${lock} is stuck: its holder is gone, and 10 takeovers of it stopped before they ended. Check that no hedge proof command runs on this PR, then run ${clear} and run this command again`);
-  await spawnAsync(["sh", "-c", clear]);
-  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", panel)).output).toContain(`"round":2`);
-});
-
-test("the command that clears a stuck lock removes its files when the path holds an apostrophe", async () => {
-  const reviews = join(fixture("hedge-stuck-lock-"), "O'Brien", "reviews");
-  mkdirSync(reviews, { recursive: true });
-  const lock = join(reviews, "round.lock");
-  const files = [lock, `${lock}.reclaim-0123456789abcdef`, `${lock}.reclaim-0123456789abcdef.2`];
-  for (const file of files) writeFileSync(file, "{}");
-  const clear = stuckLock(lock).match(/then run (rm -f .*) and run this command again$/)![1]!;
-
+  expect(stuck).toContain(`The lock ${lock} is stuck: its holder is gone, and 10 takeovers of it stopped before they ended. Check that no hedge proof command runs on this PR, then run rm -f `);
   expect((await spawnAsync(["sh", "-c", clear])).exitCode).toBe(0);
-  expect(files.filter((file) => existsSync(file))).toEqual([]);
+  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", panel)).output).toContain(`"round":2`);
 });
 
 test("a review that leaves the arbiter while another command holds the budget lock stops before it reserves, and reserves once that command is done", async () => {
@@ -962,9 +950,9 @@ test("a review that lists only minor or nit items that lead with the severity an
 
   expect((await pr.hedge("gate")).output).not.toContain("has unanswered findings");
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", fix)).output).toContain(`"round":3`);
-  await finishWith(pr, "3", "- feature.txt:1 | minor (major if two members share a name) | the greeting drops the name\n- minor:42 | blocker | the build breaks on an empty name\n");
+  await finishWith(pr, "3", "- feature.txt:1 | minor (major if two members share a name) | the greeting drops the name\n- minor:42 | blocker | the build breaks on an empty name\n- minor: helpers.ts:42 | blocker | the helper throws on an empty name\n");
   await pr.commit("feature.txt", "greet each member\n");
-  expect((await pr.hedge("gate")).output).toContain("review: round 3 has unanswered findings 1, 2;");
+  expect((await pr.hedge("gate")).output).toContain("review: round 3 has unanswered findings 1, 2, 3;");
   await expect(pr.hedge("review-start", "--scope", "fixes", "--base", later)).rejects.toThrow("The review budget of 1 reviews is spent");
 });
 
