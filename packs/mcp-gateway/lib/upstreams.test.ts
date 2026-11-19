@@ -138,26 +138,38 @@ test("a local upstream whose folder is missing on the hub waits with a warning w
   expect(await upstreamsRegistered(hub)).toBe(true);
 });
 
-function movedNotes() {
+const atOldOrigin = { type: "streamable-http", url: "https://old.example.com/mcp", description: "Added by Hedge", startOnDemand: true };
+const oldOrigins = {
+  "an OAuth sign-in": (api: FakeMcpHub) => {
+    api.configs.notes = { ...atOldOrigin, oauth: { redirectUri: "http://127.0.0.1:3317/mcphub/oauth/callback", clientId: "old-client", clientSecret: "old-secret", accessToken: "old-access", refreshToken: "old-refresh" } };
+    api.oauthClients.notes = { clientId: "old-client", clientSecret: "old-secret" };
+  },
+  "per-user credentials": (api: FakeMcpHub) => {
+    api.configs.notes = { ...atOldOrigin, headers: { Authorization: "Bearer old-header" }, credentialTemplate: [{ target: "headers", name: "X-Api-Key" }] };
+    api.bindings.notes = { "headers.X-Api-Key": "old-binding" };
+  },
+};
+
+function movedNotes(from: keyof typeof oldOrigins = "an OAuth sign-in") {
   const { api, hub } = hubWith({ "notes.json": notes });
   return {
     api,
     hub,
     async moveFromOldOrigin() {
       await registerUpstreams(hub);
-      api.configs.notes = { type: "streamable-http", url: "https://old.example.com/mcp", description: "Added by Hedge", startOnDemand: true, headers: { Authorization: "Bearer old-header" }, credentialTemplate: [{ target: "headers", name: "X-Api-Key" }], oauth: { redirectUri: "http://127.0.0.1:3317/mcphub/oauth/callback" } };
-      api.bindings.notes = { "headers.X-Api-Key": "old-binding" };
-      api.oauthClients.notes = { clientId: "old-client", clientSecret: "old-secret" };
+      oldOrigins[from](api);
       api.received = [];
+      hub.printed.length = 0;
     },
     sentToNewOrigin: () => api.received.filter((sent) => typeof sent.url === "string" && new URL(sent.url).origin === "https://notes.example.com"),
   };
 }
 
-const oldCredentials = ["old-header", "old-binding", "old-client", "old-secret", "https://old.example.com"];
+const oldCredentials = ["old-header", "old-binding", "old-client", "old-secret", "old-access", "old-refresh", "https://old.example.com"];
+const signInAsked = "Notes is in the MCP gateway. To sign in to it, on the hub, run: hedge mcp-gateway sign-in";
 
-test("an upstream that moves to another origin receives none of the old origin's credentials at any point of the move, also those the gateway keeps by server name", async () => {
-  const moved = movedNotes();
+test.each(Object.keys(oldOrigins) as Array<keyof typeof oldOrigins>)("an upstream that moves to another origin receives none of the old origin's credentials at any point of the move, with %s that the gateway keeps by server name", async (from) => {
+  const moved = movedNotes(from);
   await moved.moveFromOldOrigin();
 
   await registerUpstreams(moved.hub);
@@ -180,6 +192,34 @@ test("when the gateway does not drop the old origin's sign-in, the upstream keep
 
   expect(moved.sentToNewOrigin().length).toBeGreaterThan(0);
   for (const old of oldCredentials) expect(JSON.stringify(moved.sentToNewOrigin())).not.toContain(old);
+});
+
+test("when the gateway does not turn the moved upstream back on, the next run turns it on and still asks for the sign-in", async () => {
+  const moved = movedNotes();
+  await moved.moveFromOldOrigin();
+  moved.api.failing = ['POST servers/notes/toggle {"enabled":true}'];
+
+  await expect(registerUpstreams(moved.hub)).rejects.toThrow();
+
+  expect(moved.api.configs.notes).toMatchObject({ url: "https://notes.example.com/mcp", enabled: false });
+  moved.api.failing = [];
+  await registerUpstreams(moved.hub);
+
+  expect(moved.api.configs.notes).toMatchObject({ url: "https://notes.example.com/mcp", enabled: true });
+  expect(moved.hub.printed).toEqual([signInAsked]);
+  for (const old of oldCredentials) expect(JSON.stringify(moved.sentToNewOrigin())).not.toContain(old);
+});
+
+test("a client registration at the old origin that ends after the gateway drops the sign-in does not reach the new origin", async () => {
+  const moved = movedNotes();
+  await moved.moveFromOldOrigin();
+  moved.api.lateRegistrations.notes = { clientId: "old-client", clientSecret: "old-secret" };
+
+  await registerUpstreams(moved.hub);
+
+  expect(moved.sentToNewOrigin().length).toBeGreaterThan(0);
+  for (const old of oldCredentials) expect(JSON.stringify(moved.sentToNewOrigin())).not.toContain(old);
+  expect(moved.hub.printed).toEqual([signInAsked]);
 });
 
 test("an upstream that Fleet added before the rename becomes Hedge's and keeps its sign-in at the same origin", async () => {

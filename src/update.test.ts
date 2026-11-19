@@ -4,9 +4,8 @@ import { join } from "node:path";
 import type { ProfileFile } from "./pack/types.ts";
 import { isolateGit, spawnGit, template, tempDirs } from "./testing/git.ts";
 import { spawnAsync } from "./testing/spawn.ts";
-import { noticePath, readNotice, update } from "./update.ts";
+import { noticePath, readNotice, releaseIn, releaseRefsAtHead, update } from "./update.ts";
 import { main } from "./cli.ts";
-import { hedgeOnMac } from "./legacy.ts";
 
 isolateGit();
 const temp = tempDirs();
@@ -64,6 +63,24 @@ async function run(engineDir: string, engine: ProfileFile["engine"], profileDir 
   };
   const code = await update({ home, engineDir, profileDir, engine, platform, print: (line) => lines.push(line), runApply });
   return { code, home, applied, appliedProfile, output: lines.join("\n"), version: await Bun.file(join(engineDir, "VERSION")).text() };
+}
+
+async function updateOnMac(engineRoot: string, profile?: object | string) {
+  const home = temp.make("home-");
+  if (profile !== undefined) {
+    const profileDir = temp.make("profile-");
+    writeFileSync(join(profileDir, "hedge.json"), typeof profile === "string" ? profile : JSON.stringify(profile));
+    mkdirSync(join(home, ".config/hedge"), { recursive: true });
+    writeFileSync(join(home, ".config/hedge/machine.json"), JSON.stringify({ schema: 1, role: "devbox", profileDir }));
+  }
+  const lines: string[] = [];
+  const code = await main(["update"], { home, engineRoot, platform: "darwin", env: {}, print: (line) => lines.push(line) });
+  return { code, output: lines.join("\n") };
+}
+
+function expectMacNoticeOnce(output: string) {
+  expect(output.split("Set up your hub at https://posthog.github.io/hedge/#start.").length).toBe(2);
+  expect(output.split("To stop the jobs of an earlier Fleet or Hedge on this Mac, run: curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh | sh").length).toBe(2);
 }
 
 describe("hedge update", () => {
@@ -129,15 +146,54 @@ describe("hedge update", () => {
 
     const failed = await run(engineDir, { repo: "Acme/fleet-engine", ref: "v0.1.0", channel: "release" });
 
-    expect(failed).toMatchObject({ code: 1, applied: 0, version: "v0.1.5" });
+    expect(failed).toMatchObject({ code: 1, version: "v0.1.5" });
     expect(await originOf(engineDir)).toBe(hedge);
 
     await spawnGit(engineDir, "config", "--remove-section", `url.${join(fork, "gone")}`);
     await spawnGit(engineDir, "config", `url.${fork}.insteadOf`, "https://github.com/Acme/fleet-engine.git");
     const retried = await run(engineDir, { repo: "Acme/fleet-engine", ref: "v0.1.0", channel: "release" });
 
-    expect(retried).toMatchObject({ code: 0, applied: 1, version: "fork v0.1.2" });
+    expect(retried).toMatchObject({ code: 0, version: "fork v0.1.2" });
     expect(await originOf(engineDir)).toBe("https://github.com/Acme/fleet-engine.git");
+  });
+
+  test("after the fork's packages do not install, keeps the Hedge origin, and the next update moves to the fork's fixed release", async () => {
+    const { engineDir, fork } = await hedgeReleaseWithOlderFork();
+    const hedge = await originOf(engineDir);
+    await spawnGit(engineDir, "config", `url.${fork}.insteadOf`, "https://github.com/Acme/fleet-engine.git");
+    const forkRelease = async (version: string, packageJson: object) => {
+      writeFileSync(join(fork, "package.json"), JSON.stringify(packageJson));
+      writeFileSync(join(fork, "VERSION"), `fork ${version}`);
+      await spawnGit(fork, "commit", "-q", "-am", version);
+      await spawnGit(fork, "tag", version);
+    };
+    await forkRelease("v0.1.3", { name: "engine", dependencies: { missing: "file:./missing" } });
+
+    const failed = await run(engineDir, { repo: "Acme/fleet-engine", ref: "v0.1.0", channel: "release" });
+
+    expect(failed).toMatchObject({ code: 1, version: "v0.1.5", output: expect.stringContaining("so the update was rolled back") });
+    expect(await originOf(engineDir)).toBe(hedge);
+
+    await forkRelease("v0.1.4", { name: "engine" });
+    const retried = await run(engineDir, { repo: "Acme/fleet-engine", ref: "v0.1.0", channel: "release" });
+
+    expect(retried).toMatchObject({ code: 0, version: "fork v0.1.4" });
+    expect(await originOf(engineDir)).toBe("https://github.com/Acme/fleet-engine.git");
+  });
+
+  test("leaves a tag the user made with the name of the release it moves to on the user's commit, and reads that release as the one installed", async () => {
+    const remote = await engineRemote(["v0.1.0", "v0.1.1"]);
+    const engineDir = await engineCheckout(remote, "v0.1.0");
+    const users = await spawnGit(engineDir, "rev-parse", "HEAD");
+    await spawnGit(engineDir, "tag", "v0.1.1");
+
+    const result = await run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" });
+    const again = await run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" });
+
+    expect(result).toMatchObject({ code: 0, version: "v0.1.1" });
+    expect(await spawnGit(engineDir, "rev-parse", "refs/tags/v0.1.1")).toBe(users);
+    expect(releaseIn((await spawnAsync(releaseRefsAtHead(engineDir))).stdout)).toBe("v0.1.1");
+    expect(again.output).toContain("Engine is at v0.1.1.");
   });
 
   test("keeps a tag the user made in the engine checkout when it moves to a newer release", async () => {
@@ -217,10 +273,33 @@ describe("hedge update", () => {
   test("on a Mac, an update whose engine fetch fails points once at the setup page and at the get.sh run that stops the old jobs", async () => {
     const engineDir = await engineCheckout(await engineRemote(["v0.1.0"]), "v0.1.0");
     await spawnGit(engineDir, "remote", "set-url", "origin", join(temp.make(), "gone"));
-    const result = await run(engineDir, { repo: "gone", ref: "v0.1.0", channel: "release" }, undefined, "darwin");
-    expect(result).toMatchObject({ code: 1, applied: 0 });
+    const result = await updateOnMac(engineDir, { schema: 1, engine: { repo: "gone", ref: "v0.1.0", channel: "release" }, sources: [], packs: [], plan: "both", settings: {}, workflows: {} });
+    expect(result.code).toBe(1);
     expect(result.output).toContain("could not fetch the engine");
-    expect(result.output.split(hedgeOnMac).length).toBe(2);
+    expectMacNoticeOnce(result.output);
+  });
+
+  test("on a Mac, an update with no profile points once at the setup page and at the get.sh run that stops the old jobs, not at a get.sh install", async () => {
+    const result = await updateOnMac(await engineCheckout(await engineRemote(["v0.1.0"]), "v0.1.0"));
+    expect(result.code).toBe(1);
+    expect(result.output).toContain("hedge: no profile on this machine.");
+    expect(result.output).not.toContain("Run get.sh");
+    expectMacNoticeOnce(result.output);
+  });
+
+  test("on a Mac, an update whose profile cannot be read points once at the setup page and at the get.sh run that stops the old jobs", async () => {
+    const result = await updateOnMac(await engineCheckout(await engineRemote(["v0.1.0"]), "v0.1.0"), "not json");
+    expect(result.code).toBe(1);
+    expect(result.output).toContain("hedge: ");
+    expectMacNoticeOnce(result.output);
+  });
+
+  test("on a Mac, an engine that is not on a release stays and the update does not point at a get.sh install", async () => {
+    const remote = await engineRemote(["v0.1.0"]);
+    const result = await run(await engineCheckout(remote, "main"), { repo: remote, ref: "v0.1.0", channel: "release" }, undefined, "darwin");
+    expect(result.code).toBe(0);
+    expect(result.output).toContain("is not a release, so hedge update does not move it back. Set engine.channel to track to follow main.");
+    expect(result.output).not.toContain("get.sh");
   });
 
   test("refuses an engine checkout with local changes", async () => {
@@ -307,13 +386,11 @@ describe("hedge update", () => {
     writeFileSync(join(remote, "VERSION"), "v0.2.0");
     await spawnGit(remote, "commit", "-q", "-am", "v0.2.0");
     await spawnGit(remote, "tag", "v0.2.0");
-    const onMac = await run(engineDir, { repo: remote, ref: "v0.1.1", channel: "release" }, undefined, "darwin");
+    const onMac = await updateOnMac(engineDir, { schema: 1, engine: { repo: remote, ref: "v0.1.1", channel: "release" }, sources: [], packs: [], plan: "both", settings: {}, workflows: {} });
     expect(onMac.code).toBe(1);
     expect(onMac.output).not.toContain("run get.sh again to repair it");
     expect(onMac.output).toContain(`so the update was rolled back. The engine stays at ${(await spawnGit(engineDir, "rev-parse", "HEAD")).slice(0, 7)}. Its packages did not install either.\n`);
-    expect(onMac.output).toContain("Set up your hub at https://posthog.github.io/hedge/#start.");
-    expect(onMac.output).toContain("To stop the jobs of an earlier Fleet or Hedge on this Mac, run: curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh | sh");
-    expect(onMac.output.split(hedgeOnMac).length).toBe(2);
+    expectMacNoticeOnce(onMac.output);
   });
 
   test("puts back the old engine's packages when the new engine's install fails halfway", async () => {
