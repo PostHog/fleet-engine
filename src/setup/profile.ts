@@ -143,6 +143,7 @@ async function makeProfile(context: ProfileContext) {
   }
 
   if (!found) await checkout(machine, home, dir, profileRepo);
+  const target = await saveTarget(machine, dir);
   await git(machine, dir, "config", "user.name", login);
   await git(machine, dir, "config", "user.email", `${login}@users.noreply.github.com`);
   await startFiles(dir, context, same(profileRepo, team) ? org : undefined);
@@ -160,8 +161,7 @@ async function makeProfile(context: ProfileContext) {
     await git(machine, dir, "commit", "-q", "-m", "Start my Hedge profile", "--", ...started);
   }
   await saveAnswers(dir, answers);
-  const branch = await pushBranch(machine, dir);
-  await git(machine, dir, "push", "-q", "-u", "origin", branch);
+  await git(machine, dir, "push", "-q", ...target);
   terminal.print(`  ✓ Saved your answers in ${profileRepo}. Every machine of yours reads it.`);
   await context.saved(dir);
 }
@@ -185,13 +185,25 @@ async function currentBranch(machine: Machine, dir: string) {
   return head.output.trim();
 }
 
-const published = async (machine: Machine, dir: string, branch: string) => (await machine.exec(["git", "-C", dir, "rev-parse", "--verify", "-q", `refs/remotes/origin/${branch}`])).code === 0;
+async function upstreamOf(machine: Machine, dir: string, branch: string) {
+  const setting = async (key: string) => {
+    const value = await machine.exec(["git", "-C", dir, "config", "--get", `branch.${branch}.${key}`]);
+    return value.code === 0 ? value.output.trim() : undefined;
+  };
+  const remote = await setting("remote");
+  const merge = await setting("merge");
+  return remote && merge ? { remote, merge } : undefined;
+}
 
-async function pushBranch(machine: Machine, dir: string) {
+async function saveTarget(machine: Machine, dir: string) {
+  if ((await machine.exec(["git", "-C", dir, "rev-parse", "--verify", "-q", "HEAD"])).code !== 0) {
+    await git(machine, dir, "symbolic-ref", "HEAD", "refs/heads/main");
+    return ["-u", "origin", "main"];
+  }
   const branch = await currentBranch(machine, dir);
-  if (await published(machine, dir, branch)) return branch;
-  await git(machine, dir, "branch", "-M", "main");
-  return "main";
+  const upstream = await upstreamOf(machine, dir, branch);
+  if (!upstream) throw new Error(`${dir} is on the branch ${branch}, which tracks no remote branch, so setup does not know where to save your answers. Run git -C ${dir} branch --set-upstream-to <remote>/<branch>, then run hedge setup again.`);
+  return [upstream.remote, `HEAD:${upstream.merge}`];
 }
 
 const isPrivate = (visibility: string | undefined) => visibility === "PRIVATE" || visibility === "INTERNAL";
@@ -226,9 +238,8 @@ async function checkout(machine: Machine, home: string, dir: string, repo: strin
     if (other !== undefined) throw new Error(`${dir} is a clone of ${other || "nothing"}, not ${repo}. Move it away, then run hedge setup again.`);
     await knowGitHub(machine, home, dir);
     await git(machine, dir, "fetch", "-q", "origin");
-    const branch = await currentBranch(machine, dir);
-    if (!(await published(machine, dir, branch))) return;
-    const merged = await machine.exec(["git", "-C", dir, "merge", "-q", "--ff-only", `origin/${branch}`]);
+    if ((await machine.exec(["git", "-C", dir, "rev-parse", "--verify", "-q", "@{upstream}"])).code !== 0) return;
+    const merged = await machine.exec(["git", "-C", dir, "merge", "-q", "--ff-only", "@{upstream}"]);
     if (merged.code !== 0) throw new Error(`${bothChanged(dir, repo)} Move ${dir} away, then run hedge setup again: it clones ${repo} and saves your answers on top.`);
     return;
   }

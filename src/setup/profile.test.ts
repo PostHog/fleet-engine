@@ -6,7 +6,7 @@ import type { FetchedSource, SourceRef } from "../pack/types.ts";
 import { isolateGit, spawnGit, tempDirs } from "../testing/git.ts";
 import { defaultSources } from "./defaults.ts";
 import { profileGuide, profilePath } from "./profile.ts";
-import { fakeMachine, hedgeSetup, githubHostKeys, githubRepo, machineFile, pushedAnswers } from "./testing.ts";
+import { fakeMachine, hedgeSetup, fakeGitHubHostKeys, githubRepo, machineFile, pushedAnswers } from "./testing.ts";
 
 isolateGit();
 const temp = tempDirs();
@@ -155,7 +155,28 @@ describe("hedge setup profile", () => {
     expect(existsSync(profilePath(home))).toBe(false);
   });
 
-  test("adds GitHub's host keys from gh api meta before it reaches a profile over SSH, and keeps the lines already there", async () => {
+  test("stops before it saves when the checkout's branch tracks no remote branch, and never renames that branch or moves a local main", async () => {
+    const home = temp.make("home-");
+    const { dotfiles, checkout } = await branchCheckout(home);
+    await spawnGit(checkout, "branch", "--unset-upstream");
+    await spawnGit(checkout, "update-ref", "-d", "refs/remotes/origin/hub");
+    await spawnGit(checkout, "checkout", "-q", "-b", "main");
+    await spawnGit(checkout, "commit", "-q", "--allow-empty", "-m", "Only on this machine's main");
+    await spawnGit(checkout, "checkout", "-q", "hub");
+    const localMain = await spawnGit(checkout, "rev-parse", "main");
+    const remoteMain = await spawnGit(dotfiles, "rev-parse", "main");
+    const remoteHub = await spawnGit(dotfiles, "rev-parse", "hub");
+
+    const rerun = await hedgeSetup(home, ["--non-interactive", "--plan", "codex"], []);
+
+    expect(rerun.code).toBe(1);
+    expect(rerun.output).toContain(`${checkout} is on the branch hub, which tracks no remote branch, so setup does not know where to save your answers.`);
+    expect(await spawnGit(checkout, "symbolic-ref", "--short", "HEAD")).toBe("hub");
+    expect(await spawnGit(checkout, "rev-parse", "main")).toBe(localMain);
+    expect([await spawnGit(dotfiles, "rev-parse", "main"), await spawnGit(dotfiles, "rev-parse", "hub")]).toEqual([remoteMain, remoteHub]);
+  });
+
+  test("adds the host keys of github.com, not of the host gh uses by default, before it reaches a profile over SSH, and keeps the lines already there", async () => {
     const home = temp.make("home-");
     const { dotfiles } = await branchCheckout(home, "git@github.com:nora/dotfiles.git");
     mkdirSync(join(home, ".ssh"));
@@ -164,7 +185,7 @@ describe("hedge setup profile", () => {
     const rerun = await hedgeSetup(home, ["--non-interactive", "--plan", "codex"], []);
 
     expect(rerun.code).toBe(0);
-    expect(readFileSync(join(home, ".ssh/known_hosts"), "utf8")).toBe(["example.com ssh-ed25519 AAAAexample", ...githubHostKeys.map((key) => `github.com ${key}`), ""].join("\n"));
+    expect(readFileSync(join(home, ".ssh/known_hosts"), "utf8")).toBe(["example.com ssh-ed25519 AAAAexample", ...fakeGitHubHostKeys.map((key) => `github.com ${key}`), ""].join("\n"));
     expect(JSON.parse(await spawnGit(dotfiles, "show", "hub:hedge.json")).plan).toBe("codex");
   });
 
