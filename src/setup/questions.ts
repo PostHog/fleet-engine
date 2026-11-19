@@ -1,6 +1,6 @@
-import { packAliases, packNamed, packsNamed, type PackAliases } from "../pack/aliases.ts";
+import { packAliases, packNamed, packsNamed } from "../pack/aliases.ts";
 import type { AiPlan, AvailableSource, LoadedPack, PackManifest, PackSetting, Preset, ProfileFile, SettingValue } from "../pack/types.ts";
-import { workflowDefaults, workflowOverrides } from "../profile/profile.ts";
+import { keptWorkflows, workflowDefaults } from "../profile/profile.ts";
 import { FlagError, hasPicks, parseSettingValue, type SetupFlags } from "./flags.ts";
 import type { Step, StepOutcome } from "./runner.ts";
 import { teamSources } from "./signins.ts";
@@ -84,15 +84,16 @@ export function settingSteps(context: QuestionContext, asked: PackSetting[]): St
     .map((setting) => ({ id: `setting:${setting.key}`, title: setting.question, minutes: 0.5, kind: "question" as const, run: () => askSetting(context, setting) }));
 }
 
+const presetWorkflows = (preset: Preset | undefined, saved: Draft) => ({ ...preset?.workflows, ...saved.workflows });
+
 function presetPacks(preset: Preset, catalog: Catalog) {
-  return packsNamed(catalogAliases(catalog), [...preset.packs, ...catalog.teamPacks]);
+  return [...new Set([...preset.packs, ...catalog.teamPacks])];
 }
 
 export const catalogAliases = (catalog: Pick<Catalog, "packs">) => packAliases(catalog.packs.map((pack) => pack.manifest));
 
-export function changedPacks(current: string[], add: string[], remove: string[], aliases: PackAliases) {
-  const removed = new Set(packsNamed(aliases, remove));
-  return [...new Set([...current, ...packsNamed(aliases, add)])].filter((name) => !removed.has(packNamed(aliases, name)));
+export function changedPacks(current: string[], add: string[], remove: string[]) {
+  return [...new Set([...current, ...add])].filter((name) => !remove.includes(name));
 }
 
 export function choosablePacks(catalog: Catalog) {
@@ -109,31 +110,31 @@ export function picksFrom(flags: SetupFlags, catalog: Catalog, saved: Draft = {}
   const presetId = flags.preset ?? defaultPreset;
   const preset = catalog.presets.find((item) => item.id === presetId);
   if (!preset) throw new FlagError(`--preset ${presetId}: choose ${catalog.presets.map((item) => item.id).join(", ")}`);
-  const start = saved.packs && flags.preset === undefined ? { packs: saved.packs, workflows: saved.workflows ?? {} } : { packs: presetPacks(preset, catalog), workflows: preset.workflows };
+  const kept = saved.packs && flags.preset === undefined;
   const aliases = catalogAliases(catalog);
   const names = new Set([...choosablePacks(catalog).map((manifest) => manifest.name), ...aliases.keys(), ...teamSources.map((team) => team.source.name)]);
   for (const name of [...flags.add, ...flags.remove]) {
     if (name === "base") throw new FlagError("the base pack is always on");
     if (!names.has(name)) throw new FlagError(`no pack named ${name}. Packs: ${[...names].join(", ")}`);
   }
-  const packs = changedPacks(start.packs, flags.add, flags.remove, aliases);
+  const packs = changedPacks(kept ? saved.packs! : presetPacks(preset, catalog), flags.add, flags.remove);
   const [unmet] = unmetNeeds(packs, catalog);
   if (unmet) throw new FlagError(`${title(unmet.pack, catalog.packs)} needs ${unmet.needs.map((name) => title(name, catalog.packs)).join(", ")}. Add ${unmet.needs.join(", ")}, or remove ${unmet.pack}.`);
   const manifests = catalog.packs.map((pack) => pack.manifest);
   const known = workflowDefaults(manifests);
   for (const id of Object.keys(flags.workflows)) if (!Object.hasOwn(known, id) && !laterWorkflow(catalog)) throw new FlagError(`--workflows: no workflow named ${id}`);
-  const unloaded = Object.fromEntries(Object.entries(start.workflows).filter(([id]) => !Object.hasOwn(known, id)));
-  return { packs, workflows: { ...unloaded, ...workflowOverrides({ ...start.workflows, ...flags.workflows }, manifests) } };
+  return { packs, workflows: keptWorkflows(saved.workflows ?? {}, { ...presetWorkflows(kept ? undefined : preset, saved), ...flags.workflows }, manifests) };
 }
 
 /** Picked packs whose required packs are not picked. */
 export function unmetNeeds(listed: string[], catalog: Pick<Catalog, "packs">) {
   const aliases = catalogAliases(catalog);
   const packs = packsNamed(aliases, listed);
+  const has = (name: string) => listed.includes(name) || listed.includes(packNamed(aliases, name));
   return catalog.packs
     .map((pack) => pack.manifest)
     .filter((manifest) => packs.includes(manifest.name))
-    .map((manifest) => ({ pack: manifest.name, needs: packsNamed(aliases, manifest.requires ?? []).filter((name) => name !== "base" && !packs.includes(name)) }))
+    .map((manifest) => ({ pack: manifest.name, needs: (manifest.requires ?? []).filter((name) => name !== "base" && !has(name)) }))
     .filter((item) => item.needs.length);
 }
 
@@ -169,17 +170,18 @@ async function askPacks(context: QuestionContext): Promise<StepOutcome> {
   const lines = [...presets.map((preset) => `${preset.name}  ${packList(presetPacks(preset, catalog), catalog)}`), "One by one"];
   const fallback = presets.findIndex((preset) => preset.id === defaultPreset);
   const index = await chooseFrom(terminal, lines, fallback, presets[fallback]!.name);
-  const chosen = index < presets.length ? { packs: presetPacks(presets[index]!, catalog), workflows: workflowOverrides(presets[index]!.workflows, catalog.packs.map((pack) => pack.manifest)) } : { packs: await oneByOne(terminal, catalog, picked.packs), workflows: picked.workflows };
+  const chosen = index < presets.length ? { packs: presetPacks(presets[index]!, catalog), workflows: keptWorkflows(draft.workflows ?? {}, presetWorkflows(presets[index], draft), catalog.packs.map((pack) => pack.manifest)) } : { packs: await oneByOne(terminal, catalog, picked.packs), workflows: picked.workflows };
   await context.answer(chosen);
   show(chosen);
 }
 
 async function oneByOne(terminal: Terminal, catalog: Catalog, current: string[]) {
+  const aliases = catalogAliases(catalog);
   const packs: string[] = [];
   for (const manifest of choosablePacks(catalog)) {
-    const on = current.includes(manifest.name);
+    const listed = current.filter((name) => packNamed(aliases, name) === manifest.name);
     terminal.print(`  ${packTitle(manifest)}: ${manifest.summary}`);
-    if (await yesNo(terminal, "  Turn it on?", on)) packs.push(manifest.name);
+    if (await yesNo(terminal, "  Turn it on?", listed.length > 0)) packs.push(...(listed.length ? listed : [manifest.name]));
   }
   for (const unmet of unmetNeeds(packs, catalog)) {
     terminal.print(`  ${title(unmet.pack, catalog.packs)} needs ${unmet.needs.map((name) => title(name, catalog.packs)).join(", ")}, so ${unmet.needs.length === 1 ? "it is" : "they are"} on too.`);

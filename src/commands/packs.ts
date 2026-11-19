@@ -1,4 +1,4 @@
-import { activeChoices, workflowDefaults, workflowOverrides } from "../profile/profile.ts";
+import { keptWorkflows, workflowDefaults } from "../profile/profile.ts";
 import { FlagError, parseSetupFlags } from "../setup/flags.ts";
 import { memoryRepo, namedMemory } from "../setup/profile.ts";
 import { catalogAliases, changedPacks, settingsFrom, title, unmetNeeds } from "../setup/questions.ts";
@@ -23,12 +23,11 @@ export async function packsCommand(args: string[], context: ChangeContext): Prom
   for (const id of Object.keys(flags.workflows)) if (!Object.hasOwn(defaults, id)) throw new FlagError(`--workflows: no workflow named ${id}`);
   const settings = settingsFrom(flags, { packs: context.packs });
 
-  const packs = changedPacks(context.profile.packs, flags.add, flags.remove, aliases);
+  const packs = changedPacks(context.profile.packs, flags.add, flags.remove);
   const listed = (list: string[], name: string) => list.some((item) => (aliases.get(item)?.pack ?? item) === name);
   const [unmet] = unmetNeeds(packs, { packs: context.packs });
   if (unmet) throw new FlagError(`${title(unmet.pack, context.packs)} needs ${unmet.needs.map((name) => title(name, context.packs)).join(", ")}. Add ${unmet.needs.join(", ")}, or remove ${unmet.pack}.`);
-  const elsewhere = Object.fromEntries(Object.entries(context.profile.workflows).filter(([id]) => !Object.hasOwn(defaults, id)));
-  const workflows = { ...elsewhere, ...workflowOverrides({ ...activeChoices(context.profile, known), ...flags.workflows }, known) };
+  const workflows = keptWorkflows(context.profile.workflows, flags.workflows, known);
   for (const manifest of known) {
     for (const workflow of manifest.workflows ?? []) {
       if (!workflow.risk) continue;
@@ -37,12 +36,12 @@ export async function packsCommand(args: string[], context: ChangeContext): Prom
       if (isOn && (!wasOn || flags.workflows[workflow.id] === true)) context.print(`Before you use ${workflow.name}: ${workflow.risk}`);
     }
   }
-  const after = context.preview({ packs, workflows }).workflows;
+  const after = context.preview({ packs, workflows, settings: { ...context.profile.settings, ...settings } }).workflows;
   for (const [id, on] of Object.entries(flags.workflows)) {
     const state = after.find((workflow) => workflow.id === id);
     if (on && state && !state.active && state.reason) context.print(`${id} is on in your profile, but stays off: ${state.reason}.`);
   }
-  if (flags.add.some((name) => (aliases.get(name)?.pack ?? name) === "memory") && listed(packs, "memory")) {
+  if (flags.add.includes("memory") && packs.includes("memory")) {
     const { named, kind } = namedMemory({ ...context.profile.settings, ...settings });
     const memory = await memoryRepo(context.machine, named, undefined, kind);
     await memory.make(context.print);

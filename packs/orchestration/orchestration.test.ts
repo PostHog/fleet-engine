@@ -1,4 +1,6 @@
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { join } from "node:path";
+import { jobsAdapter, type HedgeTask, type T3Tasks } from "../../src/adapters/jobs/adapter.ts";
 import type { AvailableSource } from "../../src/pack/types.ts";
 import { tempDirs } from "../../src/testing/git.ts";
 import { devbox, skillSources, engineSource, fileContent, mac, resolveEngine } from "../../src/testing/packs.ts";
@@ -83,10 +85,15 @@ describe("the Orchestration pack", () => {
     expect(result.jobs.find((job) => job.id === "signal-loop")?.task?.prompt).toContain("from an analytics MCP, such as PostHog's, when one is connected");
   });
 
-  test("keeps every loop lane a draft and never lets an unattended loop wait on a question", () => {
-    const manifest = engine.packs.find((pack) => pack.manifest.name === "pull-requests")!.manifest;
+  test("sends T3 each loop's task with a prompt that keeps every lane a draft and never waits on a question", async () => {
+    const settings = { "orchestration.loopProject": temp.make("repo-"), "orchestration.qualityArea": "src", "orchestration.ledgerRepo": "me/ledger" };
+    const result = withPack({ workflows: { "quality-loop": true, "signal-loop": true }, settings }, devbox);
+    const sent: HedgeTask[] = [];
+    const client: T3Tasks = { list: async () => [], upsert: async (task) => void sent.push(task), setEnabled: async () => {} };
+    const adapter = jobsAdapter({ run: async () => ({ code: 0, stdout: "" }), engineRoot: join(import.meta.dir, "../.."), t3: async () => client });
+    await adapter.apply({ ...result, jobs: result.jobs.filter((job) => job.task) }, { home: temp.make("home-"), dryRun: false, adopt: [] });
     for (const id of ["quality-loop", "signal-loop"]) {
-      const prompt = manifest.jobs!.find((job) => job.id === id)!.task!.prompt;
+      const prompt = sent.find((task) => task.id === `hedge:${id}`)!.prompt;
       expect(prompt).toContain("Every lane stops at a draft pull request: no lane runs stamp-pr or full-send, merges, or deploys");
       expect(prompt).toContain("Never ask a question");
       expect(prompt).toContain("NEEDS_HUMAN:");

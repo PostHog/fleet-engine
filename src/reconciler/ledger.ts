@@ -20,10 +20,10 @@ export const ledgerKey = (step: { pack: string; id: string }) => `${step.pack}/$
 export const undoVariable = "HEDGE_UNDO";
 
 /** The pack whose command line this is, when it is the undo, check or prerequisite of the ledger step that HEDGE_UNDO names, or the probe of its human step. */
-export async function undoingPack(home: string, env: Record<string, string | undefined>, command: string[]): Promise<string | undefined> {
+export async function undoingPack(home: string, env: Record<string, string | undefined>, command: string[], packOf: (name: string) => string): Promise<string | undefined> {
   const key = env[undoVariable];
   if (!key) return undefined;
-  const ledger = await readLedger(home);
+  const ledger = currentNames(await readLedger(home), packOf);
   const typed = asHedge(command);
   const same = (line: string[] | undefined) => line?.length === typed.length && asHedge(line).every((part, index) => part === typed[index]);
   const step = ledger.steps.find((item) => ledgerKey(item) === key);
@@ -61,20 +61,46 @@ const sorted = <T extends { pack: string; id: string }>(items: T[]) => [...items
 
 let queue: Promise<unknown> = Promise.resolve();
 
-/** Records or forgets one entry in the ledger as it is on disk now, under a lock, so another apply's entries survive and each step is kept as soon as it holds. */
-export function changeLedger<List extends keyof Ledger>(home: string, list: List, key: string, entry?: Ledger[List][number]): Promise<void> {
-  const change = queue.then(() => locked(home, () => rewrite(home, list, key, entry)));
+function serially<T>(home: string, work: () => Promise<T>): Promise<T> {
+  const change = queue.then(() => locked(home, work));
   queue = change.catch(() => undefined);
   return change;
 }
 
-async function rewrite<List extends keyof Ledger>(home: string, list: List, key: string, entry?: Ledger[List][number]) {
-  const ledger = await readLedger(home);
-  const kept = (ledger[list] as Array<{ pack: string; id: string }>).filter((item) => ledgerKey(item) !== key);
-  const next = { ...ledger, [list]: entry ? [...kept, entry] : kept };
+/** Records or forgets one entry in the ledger as it is on disk now, under a lock, so another apply's entries survive and each step is kept as soon as it holds. */
+export function changeLedger<List extends keyof Ledger>(home: string, list: List, key: string, entry?: Ledger[List][number]): Promise<void> {
+  return serially(home, async () => {
+    const ledger = await readLedger(home);
+    const kept = (ledger[list] as Array<{ pack: string; id: string }>).filter((item) => ledgerKey(item) !== key);
+    await write(home, ledger, { ...ledger, [list]: entry ? [...kept, entry] : kept });
+  });
+}
+
+export async function renameLedger(home: string, packOf: (name: string) => string): Promise<Ledger> {
+  const current = await readLedger(home);
+  if ([...current.steps, ...current.human].every((item) => packOf(item.pack) === item.pack)) return current;
+  return serially(home, async () => {
+    const ledger = await readLedger(home);
+    const renamed = currentNames(ledger, packOf);
+    await write(home, ledger, renamed);
+    return renamed;
+  });
+}
+
+export const currentNames = (ledger: Ledger, packOf: (name: string) => string): Ledger => ({ steps: renamedItems(ledger.steps, packOf), human: renamedItems(ledger.human, packOf) });
+
+function renamedItems<T extends { pack: string; id: string }>(items: T[], packOf: (name: string) => string): T[] {
+  const byKey = new Map<string, T>();
+  for (const item of items) {
+    const moved = { ...item, pack: packOf(item.pack) };
+    if (!byKey.has(ledgerKey(moved)) || moved.pack === item.pack) byKey.set(ledgerKey(moved), moved);
+  }
+  return [...byKey.values()];
+}
+
+async function write(home: string, before: Ledger, next: Ledger) {
   const text = (value: Ledger) => JSON.stringify({ version: 1, steps: sorted(value.steps), human: sorted(value.human) }, null, 2) + "\n";
-  if (text(next) === text(ledger)) return;
-  await writePrivateFile(inside(home, ledgerPath), text(next));
+  if (text(next) !== text(before)) await writePrivateFile(inside(home, ledgerPath), text(next));
 }
 
 const lockWaits = 400;

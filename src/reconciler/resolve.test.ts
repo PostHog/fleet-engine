@@ -231,6 +231,37 @@ describe("resolve", () => {
     expect(states({ "base-route": false }).slice(0, 3)).toEqual([["direct", true, undefined], ["after-direct", true, undefined], ["routed", false, "needs workflow base-route"]]);
   });
 
+  test("a fallback whose setting is answered stays on while the workflow it yields to waits for its own setting", () => {
+    const setting = (key: string) => ({ key, question: `${key}?`, type: "string" as const });
+    const flow = (id: string, fields: { yields?: string[] }) => ({ id, name: id, sentence: `${id}.`, default: true, settings: [`pair.${id}`], offUntilSet: [`pair.${id}`], ...fields });
+    const pair = withPack({ schema: 1, name: "pair", summary: "Pair.", settings: [setting("pair.fallback"), setting("pair.preferred")], workflows: [flow("fallback", { yields: ["preferred"] }), flow("preferred", {})] });
+    const states = plan({ packs: ["pair"], settings: { "pair.fallback": "set" } }, mac, [engine, pair]).workflows.filter((state) => state.pack === "pair").map(({ id, active, reason }) => [id, active, reason]);
+    expect(states).toEqual([["fallback", true, undefined], ["preferred", false, "waits for setting pair.preferred"]]);
+  });
+
+  test("asks the settings of a fallback that takes over from a workflow waiting for its setting", () => {
+    const pair = withPack({
+      schema: 1, name: "pair", summary: "Pair.",
+      settings: [{ key: "pair.preferred", question: "Preferred?", type: "string", ask: "never", optional: true }, { key: "pair.fallback", question: "Which fallback?", type: "string", ask: "setup" }],
+      workflows: [
+        { id: "fallback", name: "Fallback", sentence: "Fallback.", default: true, settings: ["pair.fallback"], yields: ["preferred"] },
+        { id: "preferred", name: "Preferred", sentence: "Preferred.", default: true, settings: ["pair.preferred"], offUntilSet: ["pair.preferred"] },
+      ],
+    });
+    const resolved = plan({ packs: ["pair"] }, mac, [engine, pair]);
+    expect(resolved.workflows.filter((state) => state.pack === "pair").map(({ id, active }) => [id, active])).toEqual([["fallback", true], ["preferred", false]]);
+    expect(resolved.ask.map((setting) => setting.key)).toContain("pair.fallback");
+    expect(resolved.unanswered.map((setting) => setting.key)).toEqual(["pair.fallback"]);
+  });
+
+  test("a workflow waits for an engine setting that only an inactive workflow of a later pack gives a default", () => {
+    const library = withPack({ schema: 1, name: "library", summary: "Library.", settings: [{ key: "context.repo", question: "Repo?", type: "string", ask: "never", optional: true }], workflows: [{ id: "shelf", name: "Shelf", sentence: "Shelf.", default: true, settings: ["context.repo"], offUntilSet: ["context.repo"] }] });
+    const later = withPack({ schema: 1, name: "later", summary: "Later.", settings: [{ key: "context.repo", question: "Repo?", type: "string", ask: "never", default: "me/context" }], workflows: [{ id: "archive", name: "Archive", sentence: "Archive.", default: false, settings: ["context.repo"] }] });
+    const resolved = plan({ packs: ["library", "later"] }, mac, [engine, library, later]);
+    expect(resolved.workflows.find((state) => state.id === "shelf")).toMatchObject({ active: false, reason: "waits for setting context.repo" });
+    expect(resolved.settings["context.repo"]).toBeUndefined();
+  });
+
   test("settles a chain of yields: the first stays on when the one it yields to yields in turn", () => {
     const flow = (id: string, yields: string[] = []) => ({ id, name: id, sentence: `${id}.`, default: true, yields });
     const chain = withPack({ schema: 1, name: "chain", summary: "Chain.", workflows: [flow("a", ["b"]), flow("b", ["c"]), flow("c")] });
@@ -924,5 +955,27 @@ describe("a pack that a profile names only by its old name", () => {
     const result = plan({ packs: ["library", "notes"], settings: {} }, mac, [engine, renamed]);
     expect(result.jobs.filter((job) => job.pack === "notes").map((job) => job.id)).toEqual(["recall-pull", "sweep"]);
     expect(result.files.some((item) => item.target.endsWith("skills/notes"))).toBe(true);
+  });
+
+  test("keeps a workflow outside the old name's workflows off, even when the profile turns it on", () => {
+    const result = plan({ packs: ["library"], settings: {}, workflows: { shared: true } }, mac, [engine, renamed]);
+    expect(result.workflows.filter((workflow) => workflow.pack === "notes").map(({ id, active }) => ({ id, active }))).toEqual([{ id: "recall", active: true }, { id: "shared", active: false }]);
+  });
+
+  test("meets a requirement written with the old name by the old name's workflows, and a requirement of the new name only by the new name", () => {
+    const needing = (name: string, requires: string) => ({ schema: 1, name, summary: "Needs notes.", requires: [requires] }) as PackManifest;
+    const sources = [engine, renamed, withPack(needing("old-reader", "library")), withPack(needing("new-reader", "notes"))];
+    const result = plan({ packs: ["library", "old-reader", "new-reader"], settings: {} }, mac, sources);
+    expect(result.packs.filter((pack) => pack.name.endsWith("reader")).map(({ name, available, reason }) => ({ name, available, reason }))).toEqual([
+      { name: "old-reader", available: true, reason: undefined },
+      { name: "new-reader", available: false, reason: "requires notes" },
+    ]);
+    expect(result.jobs.filter((job) => job.pack === "notes").map((job) => job.id)).toEqual(["recall-pull"]);
+  });
+
+  test("refuses an old name that a pack still has, or that two packs take", () => {
+    const taking = (name: string) => withPack({ schema: 1, name, summary: "Takes library.", aliases: [{ name: "library", workflows: [] }] } as PackManifest);
+    expect(() => plan({ packs: ["notes"], settings: {} }, mac, [engine, renamed, taking("boxes")])).toThrow("packs notes and boxes both take the old name library");
+    expect(() => plan({ packs: ["notes"], settings: {} }, mac, [engine, renamed, withPack({ schema: 1, name: "library", summary: "Still here." } as PackManifest)])).toThrow("pack notes takes the old name library, which another pack still has");
   });
 });

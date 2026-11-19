@@ -120,7 +120,8 @@
       "sentence": "Once you set context-library.repo to your private notes repo, a prompt about one of its topics gets links to its documents, hedge context searches and saves notes, and every machine pulls the repo every five minutes.",
       "offUntilSet": [
         "context-library.repo"
-      ]
+      ],
+      "instructions": "library.md"
     },
     {
       "id": "dream",

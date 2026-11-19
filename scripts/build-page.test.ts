@@ -94,7 +94,7 @@ describe("the site build", () => {
     expect(html.match(/<section class="box">/g)).toHaveLength(1);
     const switches = [...boxOf(html).matchAll(/<input type="checkbox" role="switch" class="switch" name="([^"]+)"[^>]*?( checked)?>/g)].map((match) => [match[1], Boolean(match[2])]);
     expect(switches).toEqual(["pull-requests", "orchestration", "communication", "memory"].map((pack) => [`start:${pack}`, true]));
-    expect(visibleText(boxOf(html))).toContain("Hub The hub links your boxes, keeps your pack secrets, and continues threads after a usage limit. Always on");
+    expect(visibleText(boxOf(html))).toContain("Hub The hub links your boxes and keeps your pack secrets. Turn on recovery, and it continues threads after a usage limit. Always on");
   });
 
   test("the landing page shows the Getting Started prompt after the box, with a link that opens it in T3 Code", () => {
@@ -119,22 +119,22 @@ describe("the site build", () => {
     expect(localTargets("index.html", html).filter((target) => /^packs\/.+\//.test(target))).toEqual([]);
   });
 
-  test("the packs page shows Base and Hub in every Hedge without a switch, then the picks in three groups, and leaves Integrations a pack off the site", async () => {
+  test("the packs page shows Base and Hub in every Hedge without a switch, then the picks in three groups, and leaves Integrations off the site", async () => {
     const groupsOf = (html: string) =>
-      [...html.matchAll(/<h2 class="group-head" id="group-\d+">([^<]+)<\/h2><ul class="pack-grid">([\s\S]*?)<\/ul><\/section>/g)].map((match) => [unescaped(match[1]!), [...match[2]!.matchAll(/<a class="more" href="([a-z-]+)\/"/g)].map((link) => link[1])]);
+      [...html.matchAll(/<section[^>]*aria-labelledby="(group-\d+)"[^>]*>([\s\S]*?)<\/section>/g)].map(([, id, body]) => [
+        visibleText(body!.match(new RegExp(`<h2[^>]*id="${id}"[^>]*>([\\s\\S]*?)</h2>`))![1]!).trim(),
+        [...body!.matchAll(/<li[\s\S]*?<\/li>/g)].map(([card]) => `${unescaped(card.match(/aria-label="([^"]+) details"/)![1]!)}${/type="checkbox"/.test(card) ? " (switch)" : ""}`),
+      ]);
     expect(groupsOf(page("packs/index.html"))).toEqual([
-      ["In every Hedge", ["base", "hub"]],
-      ["How your agents work", ["pull-requests", "orchestration", "communication", "guards"]],
-      ["What your agents know", ["memory"]],
-      ["What your agents reach", ["slack", "incident-io", "mcp-gateway"]],
+      ["In every Hedge", ["Base", "Hub"]],
+      ["How your agents work", ["Quality gates (switch)", "Orchestration (switch)", "Communication (switch)", "Guards (switch)"]],
+      ["What your agents know", ["Memory (switch)"]],
+      ["What your agents reach", ["Slack (switch)", "Paging (incident.io) (switch)", "MCP gateway (switch)"]],
     ]);
-    expect(page("packs/index.html")).not.toContain('id="pick-hub"');
     expect(visibleText(page("packs/hub/index.html"))).toContain("Every Hedge has this pack. You add nothing.");
     expect(Object.keys(files)).not.toContain("packs/integrations/index.html");
-    expect(JSON.parse(readFileSync(join(root, "packs/integrations/pack.json"), "utf8"))).toMatchObject({ name: "integrations", onSite: false });
-    expect(JSON.parse(readFileSync(join(root, "presets.json"), "utf8")).find((preset: { id: string }) => preset.id === "everything").packs).toContain("integrations");
     const team = await buildSite({ audience: "posthog", team: [teamPack()] });
-    expect(groupsOf(page("packs/index.html", team)).at(-1)).toEqual(["Your team's packs", ["posthog"]]);
+    expect(groupsOf(page("packs/index.html", team)).at(-1)).toEqual(["Your team's packs", ["Posthog (switch)"]]);
   });
 
   test("the packs page lets a visitor select every pack but Base, and links each pack's own page", () => {

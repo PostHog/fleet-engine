@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameS
 import { dirname, join } from "node:path";
 import type { AvailableSource, Plan } from "../../src/pack/types.ts";
 import { isolateGit, spawnGit, tempDirs } from "../../src/testing/git.ts";
-import { devbox, engineSource, resolveEngine, skillSources } from "../../src/testing/packs.ts";
+import { devbox, engineSource, fileContent, resolveEngine, skillSources } from "../../src/testing/packs.ts";
 import { contextCommand, type ContextDeps } from "./commands/context.ts";
 import { slackCapture } from "./handlers/slack-capture.ts";
 import { hook } from "./hooks/context-recall.ts";
@@ -119,9 +119,20 @@ describe("the context library of the Memory pack", () => {
     expect(withPack({ plan: "codex" }).files.map((file) => file.target)).toContain(".config/hedge/hooks/UserPromptSubmit/context-recall.ts");
   });
 
-  test("hands the Slack pack its capture handler only while the workflow is on", () => {
-    expect(withPack().handlers["slack-capture"]?.path).toEndWith("packs/memory/handlers/slack-capture.ts");
+  test("hands the Slack pack a capture handler that runs, only while the workflow is on", async () => {
+    const plan = withPack();
+    const child = Bun.spawn(["bun", plan.handlers["slack-capture"]!.path], { stdin: Buffer.from("{}"), stdout: "pipe", env: { PATH: process.env.PATH, HOME: temp.make("home-"), HEDGE_SETTINGS: JSON.stringify(plan.settings) } });
+    const [stdout, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
+    expect({ code, output: JSON.parse(stdout) }).toEqual({ code: 1, output: { failed: "the Slack capture needs an https source and the thread's text" } });
     expect(withPack({ workflows: { "context-library": false } }).handlers["slack-capture"]).toBeUndefined();
+  });
+
+  test("gives agents the library's rules only while the workflow is on", () => {
+    const rules = (plan: Plan) => fileContent(plan, ".agents/AGENTS.md");
+    expect(rules(withPack())).toContain("hedge context search");
+    expect(rules(withPack({ settings: { "memory.repo": "me/memory" } }))).not.toContain("hedge context search");
+    expect(rules(withPack({ workflows: { "context-library": false } }))).not.toContain("context library");
+    expect(rules(withPack({ packs: ["context-library"], workflows: { "context-library": true } }))).toContain("hedge context search");
   });
 });
 

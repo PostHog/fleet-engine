@@ -8,14 +8,14 @@ const hog = (name: string, alt = ""): Art => ({ file: `${name}.png`, alt });
 
 export const packCast: Record<string, Role> = {
   base: { art: hog("list-hog"), tone: "cream", line: "Every box gets safety rules, the model table, and nightly updates." },
-  "pull-requests": { art: hog("builder-hog-03"), tone: "yellow", line: "Every change passes proof, a second-model review and a QA swarm before it merges, and a nightly loop improves one area." },
+  "pull-requests": { art: hog("builder-hog-03"), tone: "yellow", line: "Every change passes proof, a second-model review and a QA swarm before it merges. Turn on a nightly loop, and it improves one area." },
   orchestration: { art: hog("professor-hog"), tone: "sky", line: "Big work becomes a map of tickets, one thread each." },
   communication: { art: hog("microphone-hog"), tone: "peach", line: "Agents write short, outcome-first updates in a voice you can make yours." },
-  memory: { art: hog("reading-hog"), tone: "mint", line: "Every box reads what your agents learn and what you save, and Dream tidies it each night." },
+  memory: { art: hog("reading-hog"), tone: "mint", line: "Every box reads what your agents learn and what you save. Turn on Dream, and it tidies the notes each night." },
   guards: { art: hog("police-hog"), tone: "lilac", line: "Hooks refuse risky shell commands and too-new packages." },
   slack: { art: hog("phone-pair-hogs"), tone: "cream", line: "Your own Slack message or reaction starts a thread." },
   "incident-io": { art: hog("warning-hog"), tone: "red", line: "An agent that watches a risky change rings your phone." },
-  hub: { art: hog("space-hog"), tone: "sky", line: "The hub links your boxes, keeps your pack secrets, and continues threads after a usage limit." },
+  hub: { art: hog("space-hog"), tone: "sky", line: "The hub links your boxes and keeps your pack secrets. Turn on recovery, and it continues threads after a usage limit." },
   "mcp-gateway": { art: hog("hog-welder"), tone: "mint", line: "Sign in once on the hub. Every box reaches Slack, Gmail, and your MCP servers." },
 };
 

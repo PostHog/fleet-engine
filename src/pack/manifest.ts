@@ -171,6 +171,7 @@ function checkShapes(raw: Record<string, unknown>, fail: (message: string) => ne
     need(item.yields === undefined || isStrings(item.yields), `${label}: yields must list workflow ids`);
     need(item.settings === undefined || isStrings(item.settings), `${label}: settings must list keys`);
     need(item.offUntilSet === undefined || (isStrings(item.offUntilSet) && item.offUntilSet.every((key) => (item.settings as string[] | undefined)?.includes(key))), `${label}: offUntilSet must list keys of its own settings`);
+    need(item.instructions === undefined || typeof item.instructions === "string", `${label}: instructions must be a path`);
   });
   each("jobs", (item, label) => {
     need(typeof item.id === "string" && isStrings(item.command), `${label}: needs an id and a command list`);
