@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync
 import { join } from "node:path";
 import { isolateGit, spawnGit, tempDirs } from "../testing/git.ts";
 import { profilePath } from "./profile.ts";
-import { overSsh, signInLimitMs } from "./devbox.ts";
+import { overSsh } from "./devbox.ts";
 import { boxHome, coderToken, fakeMachine, machineFile, personCoderToken, setUpToAdd, throughSsh } from "./testing.ts";
 
 isolateGit();
@@ -56,11 +56,10 @@ describe("hedge devbox add signs the workspace in to Coder", () => {
     expect(statSync(coderFile(home, "session")).mode & 0o777).toBe(0o600);
     expect(sshConfig(home)).toBe("# coder https://coder.example.com\n");
     expect(box.calls.flatMap((call) => call.command).join(" ")).not.toContain(coderToken);
-    expect(box.coderArgv()).toContain("login --use-token-as-session https://coder.example.com\n");
     expect(box.coderArgv()).not.toContain(coderToken);
   });
 
-  test("and renews an expired session in a session file anyone could read, which only its owner can read after the sign-in", async () => {
+  test("and renews an expired session in a session file anyone could read, which only its owner can read before coder login writes the new token", async () => {
     const { home, add } = await signedUp();
     signInOnBox(home, { url: "https://coder.example.com", session: "expired-session" });
     chmodSync(coderFile(home, "session"), 0o644);
@@ -69,22 +68,37 @@ describe("hedge devbox add signs the workspace in to Coder", () => {
     expect(statSync(coderFile(home, "session")).mode & 0o777).toBe(0o600);
   });
 
-  test("and removes the token it made when coder login does not finish in time", async () => {
+  test("and removes the token it made when timeout on the workspace ends coder login", async () => {
     const { home, io, add } = await signedUp();
     keepsOwnSsh(home);
-    const box = fakeMachine(home, { "box:coder": 1 }, { coderLoginHangs: true });
+    const box = fakeMachine(home, { "box:coder": 1 }, { signInTimesOut: true });
     expect(await add(box)).toBe(1);
-    expect(box.calls.find((call) => call.input?.includes(coderToken))?.timeoutMs).toBe(signInLimitMs);
-    expect([box.coderTokens(), sshConfig(home)]).toEqual([[], ownSshConfig]);
+    expect([box.coderTokens(), sshConfig(home), coderFiles(home), box.coderArgv()]).toEqual([[], ownSshConfig, {}, "version\n"]);
     expect(lastLine(io.output())).toBe(`hedge: Hedge could not sign ${node} in to Coder: coder login and coder config-ssh did not finish within 2 minutes.`);
   });
 
-  test("and names the token and the command that removes it when coder login does not finish in time and its removal fails too", async () => {
+  test("and names the token and the command that removes it when timeout on the workspace ends coder login and its removal fails too", async () => {
     const { home, io, add } = await signedUp();
-    const box = fakeMachine(home, { "box:coder": 1 }, { coderLoginHangs: true, coderTokenRemoveFails: true });
+    const box = fakeMachine(home, { "box:coder": 1 }, { signInTimesOut: true, coderTokenRemoveFails: true });
     expect(await add(box)).toBe(1);
     const [name] = box.coderTokens();
     expect(lastLine(io.output())).toBe(`hedge: Hedge could not sign ${node} in to Coder: coder login and coder config-ssh did not finish within 2 minutes. Hedge could not remove the token it made, ${name}. Remove it with coder tokens remove ${name}.`);
+  });
+
+  test("and names the token and the command that removes it when its removal does not finish in time", async () => {
+    const { home, io, add } = await signedUp();
+    const box = fakeMachine(home, { "box:coder": 1 }, { signInTimesOut: true, coderTokenRemoveHangs: true });
+    expect(await add(box)).toBe(1);
+    const [name] = box.coderTokens();
+    expect(lastLine(io.output())).toBe(`hedge: Hedge could not sign ${node} in to Coder: coder login and coder config-ssh did not finish within 2 minutes. Hedge could not remove the token it made, ${name}. Remove it with coder tokens remove ${name}.`);
+  });
+
+  test("and reports a coder login that the workspace killed before its time ran out as a failure with its output, not as a timeout", async () => {
+    const { home, io, add } = await signedUp();
+    const box = fakeMachine(home, { "box:coder": 1 }, { coderLoginKilled: true });
+    expect(await add(box)).toBe(1);
+    expect(box.coderTokens()).toEqual([]);
+    expect(lastLine(io.output())).toBe(`hedge: Hedge could not sign ${node} in to Coder: Killed.`);
   });
 
   test("and removes the token it made when coder config-ssh fails after the sign-in", async () => {
