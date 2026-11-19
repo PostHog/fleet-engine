@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { copyFile, lstat, mkdir, readFile, readlink, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { inLegacyPath } from "../legacy.ts";
+import { holdLock, stateLock } from "../lock.ts";
 
 // A conflict note explains what an unmanaged existing file loses when Hedge adopts it.
 export type DesiredFile = { target: string; conflict?: string } & ({ source: string } | { content: string });
@@ -163,11 +164,8 @@ export async function install(home: string, files: DesiredFile[], group = "core"
   await checkParents(home, statePath);
   const stateDirectory = dirname(inside(home, statePath));
   await mkdir(stateDirectory, { recursive: true, mode: 0o700 });
-  const lock = resolve(stateDirectory, "lock");
-  try { await mkdir(lock); } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error(`Another Hedge operation holds ${lock}. Remove it only if that operation has stopped.`);
-    throw error;
-  }
+  await checkParents(home, stateLock);
+  const held = holdLock(inside(home, stateLock));
   try {
     const actions = await plan(home, files, group, choices);
     const conflicts = actions.filter((action) => action.operation === "conflict");
@@ -223,5 +221,5 @@ export async function install(home: string, files: DesiredFile[], group = "core"
       throw error;
     }
     return { actions, backupRoot: release.length || completed.some((entry) => entry.backup) ? inside(home, backupRoot) : undefined };
-  } finally { await rm(lock, { recursive: true, force: true }); }
+  } finally { held.release(); }
 }

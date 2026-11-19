@@ -5,7 +5,7 @@ import { main } from "./cli.ts";
 import { filesAdapter } from "./reconciler/apply.ts";
 import { repoRoot } from "./testing/cli.ts";
 import { isolateGit, spawnGit, tempDirs } from "./testing/git.ts";
-import { tryLock } from "./lock.ts";
+import { stateLock, tryLock } from "./lock.ts";
 
 isolateGit();
 const temp = tempDirs();
@@ -104,13 +104,12 @@ describe("hedge refresh", () => {
   test("waits for another Hedge operation's lock and applies at the next run, though nothing new arrives", async () => {
     const box = await machine();
     await v2(box.repo);
-    const hedgeLock = join(box.home, ".local/state/hedge/lock");
-    mkdirSync(hedgeLock);
+    const held = tryLock(join(box.home, stateLock))!;
 
     expect(await box.hedge("refresh")).toBe(1);
     expect(box.read(guide)).toBe("Rules v1.\n");
 
-    rmSync(hedgeLock, { recursive: true });
+    held.release();
     expect(await box.hedge("refresh")).toBe(0);
     expect(box.read(guide)).toBe("Rules v2.\n");
   });
