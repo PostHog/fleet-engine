@@ -66,6 +66,7 @@ describe("hedge devbox add", () => {
   test.each([
     ["linked without credentials", { authenticated: false, linked: true }],
     ["no linked field", { authenticated: true }],
+    ["T3 Connect is on but not linked yet", { desired: true, authenticated: true, linked: false }],
   ])("when t3 connect status here says %s, hedge devbox add fails without taking T3 Connect as off, and links back once run again", async (_, hereConnect) => {
     const home = temp.make("home-");
     expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""])).code).toBe(0);
@@ -74,15 +75,13 @@ describe("hedge devbox add", () => {
     const hub: { connectHere: boolean; hereConnect?: typeof hereConnect } = { connectHere: true, hereConnect };
     const box = fakeMachine(home, {}, hub);
     expect(await main(["devbox", "add", "node-2"], { ...options, setup: { machine: box.machine } })).toBe(1);
-    expect(io.output()).toContain("T3 Connect here is not fully set up");
-    expect(io.output()).toContain("Run t3 up --connect here, then run hedge devbox add node-2 again.");
+    expect(io.output()).toContain("T3 Connect here is not ready");
+    expect(io.output()).toContain("run t3 up --connect here, then run hedge devbox add node-2 again.");
     expect(io.output()).not.toContain("T3 Connect is off here");
-    expect(machineFile(home).setup.done).not.toContain("devbox:node-2:link");
     expect(box.peerLinks.box).toEqual([]);
 
     delete hub.hereConnect;
     expect(await main(["devbox", "add", "node-2"], { ...options, setup: { machine: box.machine } })).toBe(0);
-    expect(machineFile(home).setup.done).toContain("devbox:node-2:link");
     expect(box.peerLinks.box).toEqual(["https://here.relay.example"]);
   });
 

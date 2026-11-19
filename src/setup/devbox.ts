@@ -275,7 +275,7 @@ async function linkedStatus(machine: Machine) {
   return state && isLinked(state) ? state : undefined;
 }
 
-const connectStatus = async (machine: Machine) => parsed<{ authenticated?: unknown; linked?: unknown; tunnelHostname?: unknown }>(await machine.exec(["t3", "connect", "status", "--json"]));
+const connectStatus = async (machine: Machine) => parsed<{ desired?: unknown; authenticated?: unknown; linked?: unknown; tunnelHostname?: unknown }>(await machine.exec(["t3", "connect", "status", "--json"]));
 
 const isLinked = (state: { authenticated?: unknown; linked?: unknown }) => state.authenticated === true && state.linked === true;
 
@@ -293,8 +293,8 @@ const tunnelStartPolls = 15;
 export async function addressHere(machine: Machine, rerun: string): Promise<{ on: boolean; address?: string }> {
   const state = await connectStatus(machine);
   if (!state) throw new Error(`T3 Code here did not answer t3 connect status. Check that T3 Code runs here, then run ${rerun} again.`);
-  if (state.linked === false) return { on: false };
-  if (!isLinked(state)) throw new Error(`T3 Connect here is not fully set up: t3 connect status says authenticated ${String(state.authenticated)} and linked ${String(state.linked)}. Run t3 up --connect here, then run ${rerun} again.`);
+  if (state.desired === false) return { on: false };
+  if (!isLinked(state)) throw new Error(`T3 Connect here is not ready: t3 connect status says authenticated ${String(state.authenticated)} and linked ${String(state.linked)}. Wait until T3 Code here is up, or run t3 up --connect here, then run ${rerun} again.`);
   const address = await connectAddressWithin(machine);
   return address ? { on: true, address } : { on: true };
 }
