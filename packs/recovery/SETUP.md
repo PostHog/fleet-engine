@@ -7,9 +7,9 @@ itself once the provider answers again. Recovery asks the provider through
 the hub's own-account proxy, so it needs own-account balancing. Without it,
 Recovery never knows that a provider has capacity, and continues nothing.
 
-1. Add `--add recovery` to the command in step 9, and add
+1. Add `--add recovery` to the command in item 2 of step 9, and add
    `provider-recovery=on,own-account-balancing=on` to `--workflows`.
-2. After the hub's `hedge update`, the proxy needs at least two of their
+2. Once item 2 of step 9 has turned it on, the proxy needs at least two of their
    own subscriptions. This prints the sign-in command that adds one:
 
    ```sh
@@ -21,8 +21,7 @@ Recovery never knows that a provider has capacity, and continues nothing.
    for each subscription, and follow what it prints.
 3. After step 9 adds the node, connect it to the proxy. On the hub,
    `hedge cli-proxy doctor` prints one `Connect <node>:` command per node.
-   Each one reads the hub's proxy key, so it runs on the hub, not on this
-   Mac:
+   Each one reads the hub's proxy key, so it runs on the hub:
 
    ```sh
    ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge cli-proxy doctor'

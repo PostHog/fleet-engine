@@ -1,8 +1,13 @@
 # Set up Hedge with the person
 
-You are an agent in T3 Code on the person's Mac. They pasted the prompt from
-the Hedge README or the Hedge page. Set up Hedge with them, from nothing to a
-passing `hedge doctor` on this Mac.
+You are an agent in T3 Code. The person pasted the prompt from the Hedge
+README or the Hedge page. Set up Hedge with them, from nothing to a passing
+`hedge doctor` on a **hub** and one or more **nodes**: Linux boxes in the
+cloud, such as Coder workspaces. Agents run only there.
+
+The machine you run on, usually their Mac, keeps only the T3 Code app and the
+Coder CLI. Install nothing from Hedge here: run every `hedge` command, and the
+Hedge install, on the hub over SSH.
 
 ## How you work
 
@@ -25,34 +30,34 @@ passing `hedge doctor` on this Mac.
 - **Say a word before you use it.** The first time you say a Hedge word to the
   person, such as workflow, pack, profile, hub, or node, explain it in one
   plain line.
-- **Speak to their choice.** Once they answer step 2, describe only the setup
-  they chose. When they chose a hub and nodes, never call the hub optional or
-  something for later.
 - **Keep it short.** One or two sentences per explanation.
 - **Run every command yourself.** The person answers, approves, and does their
-  own sign-ins in their browser. Just before a sign-in opens, say what it is
-  for.
+  own sign-ins in their browser. A sign-in on the hub prints a link and often
+  a one-time code: give both to the person, and say what the sign-in is for.
 - **Show, then tell.** Where a step names a visual, show it as a page in the
   chat when you can (T3 Code shows HTML pages that agents publish). Otherwise
   describe it in three lines of text.
-- **One PATH.** Your shell started before the install. Begin every command
-  that runs `hedge`, `gh`, `bun`, `claude`, `codex`, or `coder` with
+- **One PATH.** Your shell may have started before the Coder CLI was
+  installed, and a command over SSH does not read the box's login files.
+  Begin every command that runs `hedge`, `gh`, `bun`, `claude`, `codex`, `t3`,
+  or `coder`, here or over SSH, with
   `export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH";`.
 - **When a step fails.** Explain its last lines and fix what they name. When
-  it still fails, or the cause is not clear, offer `hedge triage`. It exists
-  after the install makes `~/.local/bin/hedge`. Run
-  `hedge triage --print --note "<the failed step and its last line>"` and
-  show the person the report. It opens a **public** issue for the Hedge
+  it still fails, or the cause is not clear, offer `hedge triage` on the hub.
+  It exists after the install makes `~/.local/bin/hedge` there. Run
+  `hedge triage --print --note "<the failed step and its last line>"` over SSH
+  and show the person the report. It opens a **public** issue for the Hedge
   maintainer, with private details taken out, so ask before you run the same
   command with `--send`. When `gh` is not signed in, `--send` saves the
   report to a file, says where, and exits 1. That exit is not a new failure.
 - **Terminal only for a terminal screen.** A command that draws its own
   screen in a terminal and reads the person's keys there, such as
-  `claude auth login` inside `hedge devbox add`, runs in a Terminal window:
-  write it to a file in `~/.cache/hedge-setup` that ends in `.command`, with
-  a `#!/bin/sh` line and the `PATH` line above, make it executable, and
-  `open` it. Ask them to tell you when it ends. Each step that needs this
-  says so.
+  `claude auth login` on the hub, runs in a Terminal window: write it to a
+  file in `~/.cache/hedge-setup` that ends in `.command`, with a `#!/bin/sh`
+  line and the `PATH` line above, make it executable, and `open` it. Ask them
+  to tell you when it ends. Each step that needs this says so. When you do
+  not run on a Mac, give the person the command to run in their own
+  terminal instead.
 
 ## Picks from the page
 
@@ -63,15 +68,15 @@ Ask everything else as the steps say. Without the list, ask every question.
 
 | Line | How to use it |
 | --- | --- |
-| `Where Hedge runs` | The answer to step 4. |
 | `Packs on the first setup` | The packs for step 6, picked one by one. `none` means no pack. Still ask the AI plan, and read each pack's setup note. |
-| `Packs once the hub runs` | The answer to item 8 of step 9. `none` means no pack, so skip item 8. |
+| `Packs once the hub runs` | The answer to item 2 of step 9. `none` means no pack, so skip item 2. |
 
 The page names packs only. Each pack's setup note still asks which of its
 workflows to turn on and which settings it needs.
 
 A prompt from an earlier page can carry more lines. Use them too:
 
+- `Where Hedge runs`: ignore it. Hedge now always runs on a hub and nodes.
 - `Workflows on the first setup` and `Workflows once the hub runs`: add the
   list to the command of that step as `--workflows`, without the spaces. Such
   a line wins over a workflow flag from a setup note.
@@ -80,7 +85,7 @@ A prompt from an earlier page can carry more lines. Use them too:
 
 ## While something runs
 
-Steps 1, 5, 7, and 9 start commands that take minutes. While one runs in the
+Steps 5, 7, and 9 start commands that take minutes. While one runs in the
 background, explain one of these, in two or three lines, and do not repeat
 one. Skip a topic that does not fit their picks:
 
@@ -88,100 +93,94 @@ one. Skip a topic that does not fit their picks:
   the inbox. They answer it there, on the Mac or the phone.
 - **The Slack trigger.** With the Slack pack, their own Slack message with
   `:t3code:` starts a thread about it.
-- **Threads on nodes.** T3 Code starts a thread on any linked machine. On a
-  node, the thread keeps working while the Mac sleeps.
-- **What runs each night.** Each machine runs `hedge update` every night, so
-  it takes the newest engine and their profile by itself. The last screen of
-  setup lists the other jobs under "Runs by itself".
+- **Threads on nodes.** T3 Code starts each new thread on a node. The thread
+  keeps working while the Mac sleeps or is closed.
+- **What runs each night.** The hub and each node run `hedge update` every
+  night, so they take the newest engine and their profile by themselves. The
+  last screen of setup lists the other jobs under "Runs by itself".
 
 Say whether the step runs once or again later. The install and each sign-in
-run once per machine. `hedge update` runs again every night by itself.
+run once per box. `hedge update` runs again every night by itself.
 
-## 1. Check the Mac and start the install
+## 1. Check this machine and Coder
 
-Run `uname -s` and `id -u`. Go on when the output is `Darwin` and a user ID
-other than `0`. On another system, tell the person that this guide is for a
-Mac, and point them at "Set it up by hand" in the README.
+Run `uname -s` and `id -u`. Go on when the user ID is not `0`. Hedge needs
+nothing else here but the Coder CLI.
 
-Then check for an earlier setup: `~/.local/bin/hedge packs` lists the packs
-and their workflows when Hedge already runs here. When it does, show the list
-and ask:
+**Coder CLI.** When `command -v coder` finds nothing, download
+`https://coder.com/install.sh` to `~/.cache/hedge-setup/coder-install.sh`,
+read it, and run it. It needs no Homebrew and no password:
 
-- **Change only what they name** (recommended): run `hedge packs` with
-  `--add`, `--remove`, and `--workflows` for each change, then go on to step
-  8. Everything else stays as it is.
+```sh
+sh ~/.cache/hedge-setup/coder-install.sh --method standalone --prefix "$HOME/.local"
+```
+
+When `coder whoami` fails, sign in. Read their Coder address from the `url`
+file in Coder's settings folder: `~/Library/Application Support/coderv2` on a
+Mac, `~/.config/coderv2` on Linux. Ask for the address only when that file is
+missing. Coder needs a session token: it lets this machine act as them in
+Coder, and they make one at `<coder address>/cli-auth`. Ask for it with the
+secret prompt, delivered as a file, and sign in with it:
+
+```sh
+CODER_SESSION_TOKEN="$(cat <file>)" coder login <coder address>
+```
+
+Without a secret prompt, run `coder login <coder address>` in a Terminal
+window, where it asks for the token itself. Coder is done when `coder whoami`
+passes. When they have no Coder deployment, tell them Hedge needs Linux boxes
+in the cloud that they reach over SSH, and point them at "Set it up by hand"
+in the README.
+
+**An earlier setup.** Run `coder list`. For each workspace whose name starts
+with `hedge-`, check whether Hedge runs there and whether it is the hub:
+
+```sh
+ssh coder.<name> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge hub status'
+```
+
+Run `coder config-ssh --yes` first when `ssh coder.<name>` finds no host.
+When a hub answers, show its packs with `hedge packs` there, and ask:
+
+- **Change only what they name** (recommended): run `hedge packs` on the hub
+  with `--add`, `--remove`, and `--workflows` for each change, then go on to
+  step 8. Everything else stays as it is.
 - **Run setup again**: setup reuses their profile repo and starts from its
   packs, workflows, and settings. In the step 7 command, leave out
   `--preset`, and name only what changes with `--add`, `--remove`, and
   `--workflows`. Everything else stays as it is. Files they changed by hand
-  are kept, and step 8 shows them.
+  are kept, and step 8 shows them. Skip step 5 for the hub.
 
-Also read `~/.local/state/hedge/state.json` when it exists. Its `groups`
-object has one name for each Hedge that manages files here. A name other
-than `hedge` is another Hedge, such as one the person set up by hand. Tell
-them now that setup stops at its files, and what happens then (see "Another
-Hedge keeps the files" in step 7). Ask them to stop what still runs that
-Hedge, such as a LaunchAgent, so it does not put its files back. Then start
-the install as below.
-
-Without an earlier setup, start the install now, so it runs while you ask
-and explain. Download the install script and the presets in one command,
-and read the script. Keep it in view, because a pipe into `sh` hides what
-runs:
-
-```sh
-mkdir -p ~/.cache/hedge-setup && curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh -o ~/.cache/hedge-setup/get.sh && curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/presets.json -o ~/.cache/hedge-setup/presets.json && cat ~/.cache/hedge-setup/get.sh
-```
-
-Tell the person in two lines what it adds when missing: the GitHub CLI, Bun,
-and the `t3` command, the engine in `~/.local/share/hedge/engine`, `hedge` in
-`~/.local/bin`, and one `PATH` line in their login file. They asked for this
-setup, so start it at once, in the background, and say they can tell you to
-stop it. When the script does more than this, tell them what, and ask before
-you start it.
-
-You run in T3 Code, so the app is there, and the script needs no Homebrew
-and no password. When `xcode-select -p` succeeds, start it in the background
-yourself:
-
-```sh
-sh ~/.cache/hedge-setup/get.sh --install-only
-```
-
-When `xcode-select -p` fails, the Command Line Tools are missing. A Mac
-window asks to install them, the person clicks **Install**, and the script
-waits for them. Run it in a Terminal window then, and ask them to tell you
-when it ends:
-
-```sh
-printf '#!/bin/sh\nsh ~/.cache/hedge-setup/get.sh --install-only\n' > ~/.cache/hedge-setup/install.command && chmod +x ~/.cache/hedge-setup/install.command && open ~/.cache/hedge-setup/install.command
-```
-
-Go on to step 2 while it runs. Use the wait (see "While something runs").
+An earlier Hedge or Fleet that runs on this Mac stays as it is. Hedge no
+longer installs here, so it does not touch those files. Tell the person they
+can remove it when the hub works.
 
 ## 2. Ask everything in one call
 
-Ask these questions now, in one call of your question tool. Then the install
-and the setup do not wait for the person. Setup notes can add questions
-later (step 6). Leave out each question that the picks from the page
-already answer. On a rerun of setup (step 1), leave out the Packs question:
-setup starts from the packs in their profile.
+Ask these questions now, in one call of your question tool. Then the
+creation and the setup do not wait for the person. Setup notes can add
+questions later (step 6). Leave out each question that the picks from the
+page already answer. On a rerun of setup (step 1), leave out the Packs
+question: setup starts from the packs in their profile.
 
 1. **New to you.** A multi-select question: "Which of these are new to you?"
    with T3 Code (the app you are talking in), Hedge (what it sets up),
-   Devboxes (Linux machines in the cloud, such as Coder workspaces, where
+   Cloud boxes (Linux machines in the cloud, such as Coder workspaces, where
    agents keep working while the Mac sleeps), and "None, I know all three".
-2. **Where Hedge runs**, with the options of step 4.
+2. **Nodes**, with the options of step 4.
 3. **Packs**, with the options of step 6.
 4. **AI plan**, with the options of step 6.
+
+Also find their GitHub login: run `gh api user --jq .login` when `gh` works
+here, and otherwise add it as a fifth question. Step 5 needs it.
 
 Each pick in question 1 adds an explainer to a later step:
 
 | New to | Add |
 | --- | --- |
-| T3 Code | In step 3: a **thread** is one agent conversation with its own task. A **worktree** is a separate checkout of the same repo, so several threads change code at once without touching each other. T3 Code shows every machine's threads on the Mac and the phone. |
+| T3 Code | In step 3: a **thread** is one agent conversation with its own task. A **worktree** is a separate checkout of the same repo, so several threads change code at once without touching each other. T3 Code shows every box's threads on the Mac and the phone. |
 | Hedge | In step 3: the picture, and one pack from step 6 with one of its workflows as an example. |
-| Devboxes | In step 4: what a hub and a node are, and why agents run better on them. |
+| Cloud boxes | In step 4: what a hub and a node are, and why agents run there. |
 
 When the packs are "One by one", ask the multi-select of step 6 right after.
 
@@ -189,103 +188,122 @@ When the packs are "One by one", ask the multi-select of step 6 right after.
 
 Fetch the picture from
 `https://raw.githubusercontent.com/PostHog/hedge/main/docs/hedge.svg`
-and show it. Then say: Hedge installs agent rules, skills, and workflows. A
+and show it. Then say: Hedge runs your agents in the cloud, not on your Mac.
+It installs agent rules, skills, and workflows on your hub and your nodes. A
 **workflow** is one way of working that agents follow, such as a draft pull
 request for every fix. A **pack** is a set of workflows that you turn on as
 a whole. Your answers go to your **profile**, a private GitHub repo named
-`hedge-profile`, so every machine you add gets the same setup. A team pack
-can keep its members' profiles in the team's GitHub org instead, as
+`hedge-profile`, so every box you add gets the same setup. A team pack can
+keep its members' profiles in the team's GitHub org instead, as
 `hedge-profile-<login>`, so teammates can read each other's setup.
 
-## 4. Where Hedge runs
+## 4. The hub and the nodes
 
-Step 2 asks "Mac only, or Mac plus a hub and nodes?", with these options,
-unless the picks from the page say where Hedge runs:
+Hedge sets up one **hub** with a 200 GB disk and one **node** with a 500 GB
+disk, both Linux boxes in the cloud that stay on while the Mac sleeps. The
+hub links the boxes, watches their disks, and keeps the secrets. The nodes
+are where threads do the work. Step 2 asks how many nodes, with these
+options:
 
-- **Mac only.** A full setup: the skills and rules of every pack they pick,
-  and the workflows that run on a Mac, run on this Mac. Agents stop when the Mac
-  sleeps. Workflows that need an always-on machine, such as the loops and
-  the PR digest, wait until a node runs. A hub and a node can come later.
-- **Mac plus a hub and one node.** Two Linux devboxes in the cloud that stay
-  on while the Mac sleeps: one **hub** with a 200 GB disk, which links your
-  machines and watches their disks, and one **node** with a 500 GB disk,
-  where threads do the work. Setup creates them at once, while the Mac is set
-  up. Add more nodes later, when the load grows.
-- **Mac plus a hub and two nodes.** The same, with two nodes, so twice as
-  many threads run at once. The hub and two nodes use all 3 machines of a
-  free T3 Connect account, so T3 Connect on this Mac then needs a paid T3
-  Chat plan. They can name more nodes in their own answer. Three or more
-  nodes need a paid T3 Chat plan.
+- **One node** (recommended): enough for a few threads at once. Add more
+  later, when the load grows.
+- **Two nodes**: twice as many threads at once. The hub, two nodes, and the
+  Mac use 4 machines of T3 Connect, so this needs a paid T3 Chat plan.
 
-Recommend a hub and one node when they use Coder, and Mac only otherwise.
-They use Coder when `command -v coder` finds the Coder CLI. Check it after
-the PATH line and before step 2, so the recommendation is ready in the same
-call.
-The picks from the page line `Mac plus a hub and a node` means one node.
-Below, "the nodes" means as many as they chose.
-
-By default, T3 Code on the Mac starts new threads on the nodes, not on the
-Mac or the hub: each `hedge devbox add` of a node sets this up. A choice they
-already made in T3 Code's load balancing settings stays.
+They can name more nodes in their own answer. Below, "the nodes" means as
+many as they chose.
 
 **T3 Connect's limit.** A free T3 Connect account links up to 3 machines.
-Each hub and node uses one, the Mac uses one when T3 Connect is on there, and
-so does every other machine already on their account, such as an old hub
-that they keep until its replacement works. Machines reached only over SSH or
-paired directly use none. Before step 5 creates anything, count the machines
-on their account, from the T3 Connect page in T3 Code's account menu, plus
-the new ones. When the count is over 3, say so and let them choose: fewer
-nodes, removing a machine they no longer use from that page, or a paid T3
-Chat plan, which they link in T3 Code's account menu under **T3 Chat** →
-**Link T3 Chat** (up to 10 machines with Pro).
+The hub, each node, and the Mac each use one, and so does every other
+machine already on their account, such as an old hub that they keep until
+its replacement works. Before step 5 creates anything, count the machines on
+their account, from the T3 Connect page in T3 Code's account menu, plus the
+new ones. When the count is over 3, say so and let them choose: fewer nodes,
+removing a machine they no longer use from that page, or a paid T3 Chat
+plan, which they link in T3 Code's account menu under **T3 Chat** → **Link
+T3 Chat** (up to 10 machines with Pro).
 
-The Mac is ready to use first in both cases. With a hub and nodes, step 5
-creates them while the Mac is set up, and step 9 sets them up after.
+## 5. Create the hub and the nodes
 
-When a pick from the page names a hub and nodes, repeat it with the disk
-sizes, and that you create them in step 5. They can tell you to stop.
+Create every workspace now, at once, and go on to step 6 while they start.
+Show each command as you start it.
 
-## 5. Install the tools
+1. **Names.** Use `hedge-hub` and `hedge-node-1`, `hedge-node-2`, and so on.
+   When `coder list` already has a workspace by that name that they do not
+   reuse, add the next free number instead, such as `hedge-hub-2`, so the
+   new box and the one it replaces never share a name. Ask for a name only
+   when they want another. Below, `<hub>` and `<node>` stand for them, and
+   `<name>` for any of them.
+2. **Template.** List them with `coder templates list`. When there is one,
+   use it; ask only when there are more. Read its parameters, the
+   `coder_parameter` blocks in its files:
 
-The install from step 1 runs in the background. It is done when
-`~/.local/bin/hedge help` prints the list of commands. When it stops with an
-error, explain its last lines, fix what they name, and run it again: it
-continues from where it stopped. Use the wait (see "While something runs").
+   ```sh
+   coder templates pull <template> ~/.cache/hedge-setup/template-<template>
+   ```
 
-With a hub and nodes, use this wait to create them. Run items 1 to 5 of
-step 9 now. On a rerun of setup, step 1 starts no install: run items 1 to 5
-before step 7.
+   When `coder templates pull` fails, open the template's page in the Coder
+   web app, `<coder address>/templates/<template>`, and ask the person to
+   read you the parameters and their allowed values from it.
 
-- After item 1, run `coder list`. When it lists a workspace whose name
-  starts with `hedge-`, an earlier setup may have made it. Ask the reuse
-  question of step 9 now, and show the list. Reuse means no `coder create`
-  for that workspace. When it lists none, do not ask.
-- In item 4, start each `coder create` in the background, all at once. They
-  take minutes. Continue with step 6 while they run, and read the output of
-  each one when it ends.
-- In item 5, run only `coder config-ssh --yes`. Before item 6 of step 9,
-  check that `ssh coder.<name> true` passes for each workspace.
+   Find the disk size, the region, and the dotfiles parameters. Ask for the
+   region and for each other parameter without a default, in one call. The
+   dotfiles parameter is their profile repo,
+   `https://github.com/<login>/hedge-profile`. On a first setup that repo
+   does not exist yet: `hedge setup` makes it in step 7 under that name. Until
+   then, the workspace's dotfiles script finds no repo and says so in its
+   start log. That is expected. From then on, each start of a workspace
+   applies their profile.
+3. **Create.** Pass every parameter of the template with its own
+   `--parameter`, also those where the default is right, so you see each
+   value Coder uses. Give the hub a 200 GB disk and each node a 500 GB disk.
+   `--preset none` stops the preset question that `--yes` does not skip:
+
+   ```sh
+   coder create <name> --template <template> --preset none --parameter <disk parameter>=<200 or 500> --parameter <region parameter>=<region> --parameter <dotfiles parameter>=https://github.com/<login>/hedge-profile --parameter <other parameter>=<value> --yes
+   ```
+
+   Write one `--parameter` for each parameter the template has. Never use
+   `--copy-parameters-from`: Coder then takes the copied workspace's values
+   over every `--parameter` you pass. Start the hub and the nodes at once,
+   each in the background. They take minutes; use the wait (see "While
+   something runs").
+4. **Read the parameters back.** When a create ends, read the parameters of
+   the workspace's new build from Coder:
+
+   ```sh
+   dir="$HOME/Library/Application Support/coderv2"; [ -d "$dir" ] || dir="$HOME/.config/coderv2"; url=$(cat "$dir/url"); token=$(cat "$dir/session"); build=$(curl -fsS -H "Coder-Session-Token: $token" "$url/api/v2/users/me/workspace/<name>" | sed -n 's/.*"latest_build":{"id":"\([^"]*\)".*/\1/p'); curl -fsS -H "Coder-Session-Token: $token" "$url/api/v2/workspacebuilds/$build/parameters"
+   ```
+
+   The step is done when each value matches what you passed. When one does
+   not, tell the person which, and fix it with
+   `coder update <name> --parameter <parameter>=<value>` before you go on.
+5. **Keep them running.** Agents work there while the Mac sleeps:
+   `coder schedule stop <name> manual`.
+6. **SSH.** Run `coder config-ssh --yes`. The step is done when
+   `ssh coder.<name> true` passes for each workspace.
 
 ## 6. What they want
 
 Step 2 asks these. Skip the packs question when the picks from the page name
 the packs:
 
-- **Packs.** One option per preset in `~/.cache/hedge-setup/presets.json`,
-  with its `blurb`, and "One by one". For one by one, ask a multi-select
-  question with the packs below whose row says "Always", plus those whose
-  row fits their answer in step 4. A pack whose row says "Step 9" needs a
-  hub that runs, so step 9 offers it. Base is always on.
-  [The Hedge page](https://posthog.github.io/hedge/) shows what each
-  pack does.
+- **Packs.** One option per preset in
+  `https://raw.githubusercontent.com/PostHog/hedge/main/presets.json`, with
+  its `blurb`, and "One by one". For one by one, ask a multi-select question
+  with the packs below whose row says "Always". A pack whose row says
+  "Step 9" needs a hub that runs, so step 9 offers it. Base is always on.
+  [The Hedge page](https://posthog.github.io/hedge/) shows what each pack
+  does.
 - **AI plan.** Claude, ChatGPT, or both: it decides the sign-ins and the
-  model defaults. Recommend the agent they set up in T3 Code
-  (`claude auth status` or `codex login status` passes).
+  model defaults. Recommend the agent they set up in T3 Code.
 
-For each pack they pick whose row names a setup note, read that note in
-`~/.local/share/hedge/engine` once the install is done, and follow it in
-step 7. Read only the notes of the packs they picked. Ask the questions of
-all the notes together, in one call, before step 7.
+For each pack they pick whose row names a setup note, read that note from
+the engine repo, such as
+`https://raw.githubusercontent.com/PostHog/hedge/main/packs/slack/SETUP.md`
+for the Slack pack, and follow it in step 7. Read only the notes of the packs they picked. Ask the questions of
+all the notes together, in one call, before step 7. A `hedge` command in a
+note runs on the hub over SSH, with the `PATH` line, as in step 7.
 
 | Pack | What it does | Offer it | Setup note |
 | --- | --- | --- | --- |
@@ -297,64 +315,110 @@ all the notes together, in one call, before step 7.
 | `context-library` | Agents find your plans, research, decisions and saved threads in a private notes repo, and you save new ones with one command. | Always | `packs/context-library/SETUP.md` |
 | `recovery` | Threads that stop on a usage limit or a provider outage continue once the provider answers again, and hedge providers says which provider has capacity. | Step 9 | `packs/recovery/SETUP.md` |
 | `guards` | Hooks stop an agent's shell commands from running network code, using GitHub outside your owners, pushing past review, or polling in loops. | Always | `packs/guards/SETUP.md` |
-| `slack` | Your own message, reaction, or mention in Slack starts a T3 thread about it. | With Mac only, or in step 9 | `packs/slack/SETUP.md` |
-| `incident-io` | An agent that watches a risky change pages you, and only you, through incident.io when it goes wrong. | With Mac only, or in step 9 | `packs/incident-io/SETUP.md` |
+| `slack` | Your own message, reaction, or mention in Slack starts a T3 thread about it. | Always | `packs/slack/SETUP.md` |
+| `incident-io` | An agent that watches a risky change pages you, and only you, through incident.io when it goes wrong. | Always | `packs/incident-io/SETUP.md` |
 | `hub` | One always-on devbox manages the others. It keeps your devboxes linked and watches their disks. | Step 9 | `packs/hub/SETUP.md` |
 | `mcp-gateway` | The hub signs in to your MCP servers once, and agents on every machine reach them through it. | Step 9 | `packs/mcp-gateway/SETUP.md` |
 
-## 7. Run setup with their answers
+## 7. Set up Hedge on the hub
 
-Build the command from the answers, so setup asks nothing twice:
+Every command in this step runs on the hub over SSH. Wait until
+`ssh coder.<hub> true` passes.
 
-```sh
-hedge setup --chat --preset <id> --plan <claude|codex|both> --devbox skip
-```
+1. **Sign the hub in to Coder.** The hub reaches the nodes over SSH through
+   Coder, so it needs its own Coder session. Make a token here and send it on
+   standard input, so it never shows in the chat:
 
-For one by one, use `--preset starter`, add `--remove pull-requests` when
-they did not pick it, and add `--add <pack>` once per other pack they picked.
+   ```sh
+   coder tokens create | ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; { command -v coder >/dev/null || { case $(uname -m) in x86_64) a=amd64;; aarch64|arm64) a=arm64;; *) exit 1;; esac; mkdir -p "$HOME/.local/bin" && curl -fsSL "<coder address>/bin/coder-linux-$a" -o "$HOME/.local/bin/coder" && chmod +x "$HOME/.local/bin/coder"; }; } && IFS= read -r token && CODER_SESSION_TOKEN="$token" coder login --use-token-as-session <coder address> && coder config-ssh --yes'
+   ```
 
-Start it in the background and read its output as it comes. One run does
-the whole setup: it waits for each sign-in that ends in the browser and opens
-the browser itself. While it runs:
+2. **Install.** Download the install script on the hub and read it. Keep it
+   in view, because a pipe into `sh` hides what runs:
 
-- **A sign-in starts** (`▶ Sign in to …`). Say what it is for, from the table
-  below, and give the person any one-time code the output shows. Setup goes
-  on by itself once they finish in the browser.
-- **`✓ Ready to use.`** Tell the person they can start a new thread in T3
-  Code now. The steps it names go on in the background; say what each one
-  does.
+   ```sh
+   ssh coder.<hub> 'mkdir -p ~/.cache/hedge-setup && curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh -o ~/.cache/hedge-setup/get.sh && cat ~/.cache/hedge-setup/get.sh'
+   ```
 
-When it ends with code `2`, it lists what it still needs:
+   Tell the person in two lines what it adds on the hub when missing: the
+   GitHub CLI, Bun, and the `t3` command, the engine in
+   `~/.local/share/hedge/engine`, `hedge` in `~/.local/bin`, and one `PATH`
+   line in its login file. When the script does more than this, tell them
+   what, and ask before you start it. Then start it in the background:
 
-- **A line `--set <pack.key>=<value>   <question>`.** Ask the question with
-  your question tool, then add `--set <pack.key>=<answer>` to the command.
-- **A line `Needs you: <sign-in>`, then `In a terminal, run: <command>`.**
-  Say what it is for. When the pack's setup note says how to give the
-  command its secrets, such as `hedge slack-trigger setup` in the Slack note,
-  follow the note: ask with the secret prompt and give the files to the
-  command. Only a command that draws its own terminal screen runs in Terminal
-  (see "Terminal only for a terminal screen").
+   ```sh
+   ssh coder.<hub> 'sh ~/.cache/hedge-setup/get.sh --install-only'
+   ```
 
-Then run the same command again. Every step skips what is done. On any other
-stop, read the last lines, explain them, and fix what they name. Use each
-wait (see "While something runs").
+   It is done when `~/.local/bin/hedge help` on the hub prints the list of
+   commands. When it stops with an error, explain its last lines, fix what
+   they name, and run it again: it continues from where it stopped.
+3. **Setup.** Build the command from the answers, so setup asks nothing
+   twice:
 
-| Sign-in | What it is for |
-| --- | --- |
-| GitHub | Once, with every permission Hedge needs: it creates their private `hedge-profile` repo, adds their SSH keys, and reads their org's packs. |
-| Claude | Claude Code on this Mac uses their Claude plan. |
-| ChatGPT | Codex on this Mac uses their ChatGPT plan. Setup checks it with a real request. With both plans, it comes after the Mac is ready to use, right after setup installs Codex. |
+   ```sh
+   ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge setup --chat --preset <id> --plan <claude|codex|both>'
+   ```
+
+   For one by one, use `--preset starter`, add `--remove pull-requests` when
+   they did not pick it, and add `--add <pack>` once per other pack they
+   picked.
+
+   Start it in the background and read its output as it comes. It waits for
+   each sign-in that ends in the browser. While it runs:
+
+   - **A sign-in starts** (`▶ Sign in to …`). Say what it is for, from the
+     table below, and give the person the link and any one-time code the
+     output shows. They open the link on the Mac or the phone. Setup goes on
+     by itself once they finish in the browser.
+   - **`✓ Ready to use.`** The hub is set up. The steps it names go on in the
+     background; say what each one does.
+
+   When it ends with code `2`, it lists what it still needs:
+
+   - **A line `--set <pack.key>=<value>   <question>`.** Ask the question with
+     your question tool, then add `--set <pack.key>=<answer>` to the command.
+   - **A line `Needs you: <sign-in>`, then `In a terminal, run: <command>`.**
+     Say what it is for. When the pack's setup note says how to give the
+     command its secrets, such as `hedge slack-trigger setup` in the Slack
+     note, follow the note: ask with the secret prompt and give the files to
+     the command over SSH. Only a command that draws its own terminal screen
+     runs in a Terminal window (see "Terminal only for a terminal screen").
+     Claude's sign-in is one: it prints a link, and the person pastes the
+     code from the browser back into the terminal. Run it as:
+
+     ```sh
+     ssh -t coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; claude auth login'
+     ```
+
+   Then run the same setup command again. Every step skips what is done. On
+   any other stop, read the last lines, explain them, and fix what they
+   name. Use each wait (see "While something runs").
+
+   | Sign-in | What it is for |
+   | --- | --- |
+   | GitHub | Once, with every permission Hedge needs: it creates their private `hedge-profile` repo, adds the hub's SSH key, and reads their org's packs. A code to type at a GitHub page. |
+   | Claude | Claude Code on the hub uses their Claude plan. In a Terminal window, as above. |
+   | ChatGPT | Codex on the hub uses their ChatGPT plan. A code to type at a ChatGPT page. Setup checks it with a real request. |
+
+4. **T3 Connect on the hub.** It lets T3 Code on the Mac and the phone reach
+   the hub. Start it in the background, and give the person the link it
+   prints to sign in to T3 Connect:
+
+   ```sh
+   ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; t3 up --connect --yes --headless'
+   ```
 
 ### Another Hedge keeps the files
 
 When setup stops with a `To do:` line that starts with `Another Hedge setup
-keeps`, the files it names belong to another Hedge on this Mac. Say how many
-files that is, and that they are the same kind of rules and guides Hedge
-installs. Ask:
+keeps`, the files it names belong to another Hedge on the hub, such as an
+earlier Fleet. Say how many files that is, and that they are the same kind
+of rules and guides Hedge installs. Ask:
 
 - **Take them over** (recommended): run the `hedge apply --adopt-from <name>`
-  that the line names, then the setup command again. Hedge copies the other
-  Hedge's state and every file or linked folder it replaces to
+  that the line names on the hub, then the setup command again. Hedge copies
+  the other Hedge's state and every file or linked folder it replaces to
   `~/.local/state/hedge/backups/`. A linked folder moves whole, with
   everything in it, so say which ones move. The other Hedge's files that
   this profile does not write stay where they are, except those inside a
@@ -364,23 +428,27 @@ installs. Ask:
 - **Stop here**: nothing changes, and setup cannot finish while the other
   Hedge keeps the files.
 
-## 8. Check the result
+## 8. Check the hub
 
 ```sh
-hedge doctor
+ssh coder.<name> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge doctor'
 ```
 
-The step is done when every line is explained to the person:
+Run it with the hub's name. The step is done when every line is explained to
+the person:
 
-- `Fix:` Hedge can repair it. Run `hedge apply`, then `hedge doctor` again.
-- `To do:` the person does it. Say exactly what and where.
+- `Fix:` Hedge can repair it. Run `hedge apply` there, then `hedge doctor`
+  again.
+- `To do:` the person does it. Say exactly what and where. When it names a
+  command that takes a token or a code, ask for it with the secret prompt
+  and give the file to the command over SSH, as its pack's setup note shows.
 - `Note:` information only.
-- `Everything matches your profile.` The Mac is set up.
+- `Everything matches your profile.` The box is set up.
 
 ### When Hedge kept something of theirs
 
-A line that starts with `Kept your` names a file or a setting that the person
-had before Hedge, which Hedge left as it was. Never show the raw key alone.
+A line that starts with `Kept your` names a file or a setting that was on the
+box before Hedge, which Hedge left as it was. Never show the raw key alone.
 Say in plain words what it controls, what Hedge's value does instead, and
 whether `hedge doctor` passes while it stays. Then ask:
 
@@ -398,236 +466,137 @@ whether `hedge doctor` passes while it stays. Then ask:
 
 Recommend taking Hedge's version, unless they set the value on purpose.
 
-Tell them that a new Terminal window has `hedge` on its `PATH`. With Mac
-only, go on to step 10. With a hub and nodes, go on to step 9.
+## 9. Add the hub packs and the nodes
 
-## 9. Add the hub and the nodes
+Run each item on the hub over SSH. `hedge devbox add` takes minutes; use each
+wait (see "While something runs").
 
-The default is one **hub** with a 200 GB disk and one **node** with a 500 GB
-disk, all Coder workspaces, with as many nodes as they chose in step 4. Run
-each item on this Mac. Items 1 to 5 start early, in step 5, so the
-workspaces are made while the Mac is set up. Items 6 to 10 run here, after
-the Mac is ready to use. The person chose a hub and nodes in step 2, so
-create them without asking again. Show each command as you start it.
-Creating a workspace and `hedge devbox add` take minutes; use each wait
-(see "While something runs").
-
-Before item 3 below, run `coder list`, and `hedge hub status` once Hedge is
-set up on this Mac. When either names a hub or a Hedge workspace, ask
-whether to reuse a hub:
-
-- **Reuse** the hub that `hedge hub status` names: skip items 3 to 7 for
-  it. It keeps its links and disk watch. A Coder workspace that runs Hedge
-  but is not named as the hub skips items 3 to 6 only.
-- **Make a new one** (recommended when no hub is named): when there is no
-  hub, or the old one is on another Coder deployment, another account, or a
-  disk under 200 GB.
-
-**Clean up what you replace.** When a new hub or node replaces an old
-workspace, clean up only after item 10 passes on the new one, and ask before
-you remove anything. A workspace from step 5 that `hedge devbox add` never
-touched is not a devbox yet. It needs only item 2, after the person says
-yes, and it can go at once:
-
-1. Run `hedge devbox remove coder.<old name>` on this Mac. It takes the old
-   host out of their profile, unlinks it in T3 Code here, and drops it from
-   load balancing. The hub stops its tunnel, disk watch, and link to that
-   host at its next `hedge update`. An old hub can go only after
-   `hedge hub here` named the new one. When it stops with an error, fix what
-   it names and run it again. When it says T3 Code here has no link it can
-   find, remove the old machine in T3 Code's Settings → Environments.
-2. Delete the old workspace with `coder delete <old name>`.
-
-When devboxes were new to them, explain the hub first: it is the one devbox
-that looks after the others. It keeps an SSH tunnel and a T3 link to every
-node, and cleans a node's disk before it fills. The node is where threads do
-the work. Each machine keeps working when the hub is down.
+When devboxes were new to them, explain the hub first: it is the one box that
+looks after the others. It keeps an SSH tunnel and a T3 link to every node,
+and cleans a node's disk before it fills. The node is where threads do the
+work. Each node keeps working when the hub is down.
 
 When step 7 printed that a team pack is ticked, such as `✓ You are in the
-<org> org, so the <pack> pack is ticked`, read that pack's setup note first,
-when it has one:
+<org> org, so the <pack> pack is ticked`, read that pack's setup note on the
+hub first, when it has one:
 
 ```sh
-~/.local/share/hedge/sources/<source>/packs/<pack>/SETUP.md
+ssh coder.<hub> 'cat ~/.local/share/hedge/sources/<source>/packs/<pack>/SETUP.md'
 ```
 
-`<source>` is the folder in `~/.local/share/hedge/sources` that holds the
-pack. A team pack may already have made a devbox in step 7, and its note
-says which template, parameters, and devbox to use. Where it differs from
-the steps below, follow the note. Step 5 made the workspaces before step 7,
-so when the note names another template, or a devbox that the pack already
-made, replace the early workspaces: see "Clean up what you replace".
+`<source>` is the folder in `~/.local/share/hedge/sources` on the hub that
+holds the pack. Its note can name another template, parameters, or a box the
+pack makes itself. Where it differs from the items below, follow the note.
+When it names another template than step 5 used, replace the nodes: see
+"Clean up what you replace".
 
-1. **Coder CLI.** When `command -v coder` finds nothing, download
-   `https://coder.com/install.sh` to
-   `~/.cache/hedge-setup/coder-install.sh`, read it, and run it. It needs
-   no Homebrew and no password:
-
-   ```sh
-   sh ~/.cache/hedge-setup/coder-install.sh --method standalone --prefix "$HOME/.local"
-   ```
-
-   When `coder whoami` fails, sign in. Read their Coder address from
-   `~/Library/Application Support/coderv2/url`, and ask for it only when
-   that file is missing.
-   Coder needs a session token: it lets this Mac act as them in Coder, and
-   they make one at `<coder address>/cli-auth`. Ask for it with the secret
-   prompt, delivered as a file, and sign in with it:
-
-   ```sh
-   CODER_SESSION_TOKEN="$(cat <file>)" coder login <coder address>
-   ```
-
-   Without a secret prompt, run `coder login` in a Terminal window, where it
-   asks for the token itself:
-
-   ```sh
-   printf '#!/bin/sh\nexport PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"\ncoder login %s\n' '<coder address>' > ~/.cache/hedge-setup/coder.command && chmod +x ~/.cache/hedge-setup/coder.command && open ~/.cache/hedge-setup/coder.command
-   ```
-
-   The step is done when `coder whoami` passes.
-2. **Template.** List them with `coder templates list`. When there is one,
-   use it; ask only when there are more. Read its parameters, the
-   `coder_parameter` blocks in its files:
-
-   ```sh
-   coder templates pull <template> ~/.cache/hedge-setup/template-<template>
-   ```
-
-   Find the disk size parameter. Ask for each parameter without a default.
-   When `coder templates pull` fails, open the template's page in the Coder
-   web app, `<coder address>/templates/<template>`, and ask the person to
-   read you the parameters and their allowed values from it.
-3. **Names.** Use `hedge-hub` and `hedge-node-1`, `hedge-node-2`, and so on.
-   When `coder list` already has a workspace by that name that they do not
-   reuse, add the next free number instead, such as `hedge-hub-2`, so the new
-   machine and the one it replaces never share a name. Ask for a name only
-   when they want another. Below, `<hub>` and `<node>` stand for them, and
-   `<name>` for any of them.
-4. **Create.** Create the hub with a 200 GB disk and each node with a 500 GB
-   disk, with every parameter on the command line, so Coder asks nothing.
-   `--preset none` stops the preset question that `--yes` does not skip, and
-   `--use-parameter-defaults` takes the default of every other parameter:
-
-   ```sh
-   coder create <name> --template <template> --preset none --use-parameter-defaults --parameter <disk parameter>=<200 or 500> --yes
-   ```
-
-   Start them all at once, each in the background.
-
-   Read each create's output when it ends. Once its workspace exists, keep
-   it running, because agents work there while the Mac sleeps:
-   `coder schedule stop <name> manual`.
-5. **SSH.** Run `coder config-ssh --yes`. The step is done when
-   `ssh coder.<name> true` passes for each workspace.
-6. **Hedge on the hub.** Run `hedge hub status` first. When it names a hub
-   that step 5 did not create, ask the reuse question above now. On
-   **Reuse**, delete the early hub with `coder delete <name>` after the
-   person says yes, and skip items 6 and 7. Otherwise, `hedge devbox add`
-   installs Hedge, applies their profile, and links T3 Code. It also signs
-   the workspace in to Coder, so the hub reaches the node over SSH. Its Claude
-   sign-in, `claude auth login` on the workspace, draws its own terminal
-   screen and reads a code there, so run it in a Terminal window:
-
-   ```sh
-   printf '#!/bin/sh\nexport PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"\nhedge devbox add %s\n' 'coder.<hub>' > ~/.cache/hedge-setup/devbox.command && chmod +x ~/.cache/hedge-setup/devbox.command && open ~/.cache/hedge-setup/devbox.command
-   ```
-
-   Before it opens, explain its sign-ins from the table in step 4 of
-   [Getting started](https://github.com/PostHog/hedge/blob/main/docs/getting-started.md).
-   Ask them to tell you when it prints that the host is their devbox now.
-7. **Name the hub.** Run `hedge hub here` on the hub. It saves
-   `coder.<hub>` as the hub in their profile:
+1. **Name the hub.** It saves `coder.<hub>` as the hub in their profile:
 
    ```sh
    ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge hub here'
    ```
 
-8. **Hub packs.** Ask with a multi-select question which of these to turn
+2. **Hub packs.** Ask with a multi-select question which of these to turn
    on, recommending Hub, unless the picks from the page name the packs for
    once the hub runs. Read the setup note of each one they pick, now:
 
-   - **Hub**: the hub links the machines and watches their disks.
+   - **Hub**: the hub links the boxes and watches their disks.
      `packs/hub/SETUP.md`
    - **MCP gateway**: the hub signs in to their MCP servers once.
      `packs/mcp-gateway/SETUP.md`
    - **Recovery**: threads that stop on a usage limit go on by themselves.
      `packs/recovery/SETUP.md`
-   - **Slack**, when they did not pick it in step 6: their own Slack
-     message starts a thread. `packs/slack/SETUP.md`
-   - **incident.io**, when they did not pick it in step 6: an agent that
-     watches a change pages them. `packs/incident-io/SETUP.md`
 
-   Turn them on here on the Mac. Start from this command, add
-   `--add <pack>` for each other pack they picked, and change or add the
-   flags their notes name. With picks from the page, leave out `--add hub`
-   when the line does not name `hub`:
+   Start from this command, add `--add <pack>` for each other pack they
+   picked, and change or add the flags their notes name. With picks from the
+   page, leave out `--add hub` when the line does not name `hub`:
 
    ```sh
-   hedge packs --add hub --workflows mcp-gateway=off
+   ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge packs --add hub --workflows mcp-gateway=off'
    ```
 
-   Then have the hub take the change now, not at its nightly update:
+3. **Each node.** Run `hedge devbox add` on the hub, for each node, one after
+   the other. It installs Hedge on the node, signs it in to Coder, GitHub,
+   Claude, and ChatGPT, applies their profile, turns on T3 Connect there, and
+   links T3 Code on the hub and the node. Its Claude sign-in draws its own
+   terminal screen, so run it in a Terminal window:
 
    ```sh
-   ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge update'
+   ssh -t coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge devbox add coder.<node>'
    ```
 
-9. **Hedge on the nodes.** Run `hedge devbox add` again in a Terminal window,
-   for each node, one after the other:
-
-   ```sh
-   printf '#!/bin/sh\nexport PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"\nhedge devbox add %s\n' 'coder.<node>' > ~/.cache/hedge-setup/devbox.command && chmod +x ~/.cache/hedge-setup/devbox.command && open ~/.cache/hedge-setup/devbox.command
-   ```
+   Before it opens, explain its sign-ins from the table in step 7, and the T3
+   Connect link: the person opens it and signs in, as for the hub. Ask them
+   to tell you when it prints that the host is their devbox now.
 
    It lists the node in their profile and has the hub take it before the
    node applies, so the hub's tunnels, disk watch, and credentials include
-   it. At the end, the hub links the node in T3 Code. It prints two lines
-   that start with `✓ The hub` when both worked. When it says the hub did
-   not answer, run the `hedge update` command from step 8 again. When it
-   says the hub has not linked the node yet, run this, with the node's name:
+   it. It prints two lines that start with `✓ The hub` when both worked.
+   When it says the hub did not answer, run `hedge update` on the hub. When
+   it says the hub has not linked the node yet, run
+   `hedge peers link coder.<node>` on the hub.
+4. **Check.** Run the `hedge doctor` of step 8 on each node, and on the hub
+   again. Explain each line as in step 8.
+
+To add a node later, when the load grows, create it as in step 5 with the
+next node name and a 500 GB disk, then run item 3 above for it, and its
+`hedge doctor`.
+
+**Clean up what you replace.** When a new hub or node replaces an old
+workspace, clean up only after item 4 passes on the new one, and ask before
+you remove anything. A workspace from step 5 that `hedge devbox add` never
+touched is not a devbox yet. It needs only the `coder delete`, after the
+person says yes, and it can go at once.
+
+1. Take the old box out of their profile, on the hub:
 
    ```sh
-   ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge peers link coder.<node>'
+   ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge devbox remove coder.<old name>'
    ```
 
-   The last line of `hedge devbox add` says which machines T3 Code on the
-   Mac starts new threads on. After the last node, ask them to quit and
-   reopen T3 Code once, so it reads that.
-10. **Check.** Run `hedge doctor` on the Mac, and on each workspace over SSH.
-    A command over SSH does not read the workspace's login files, so it sets
-    the `PATH` itself:
+   It takes the old host out of their profile and unlinks it in T3 Code on
+   the hub. The hub stops its tunnel, disk watch, and link to that host at
+   its next `hedge update`. An old hub can go only after `hedge hub here`
+   named the new one. When it stops with an error, fix what it names and run
+   it again.
+2. Delete the old workspace with `coder delete <old name>`, and remove it in
+   T3 Code's Settings → Environments on the Mac.
 
-    ```sh
-    ssh coder.<name> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge doctor'
-    ```
+## 10. Start threads on the nodes
 
-    Explain each line as in step 8. When a `To do:` line on the hub names a
-    command that takes a token or a code, ask for it with the secret prompt
-    and give the file to the command over SSH, as its pack's setup note
-    shows. Only a command that draws its own terminal screen runs in a
-    Terminal window, as `ssh -t coder.<hub>` with the same `PATH` line.
-
-To add a node later, when the load grows, run items 3, 4, 5 and 9 above
-again with the next node name and a 500 GB disk, then `hedge doctor` on it.
-
-Then go on to step 10.
-
-## 10. Hand over
-
-Add their profile as a T3 Code project named `hedge-profile`, so they can
-open a thread there. Skip it when T3 Code already lists that project:
+T3 Code on the Mac and the phone reaches the hub and the nodes through T3
+Connect. Ask the person to open T3 Code's **Settings → Environments** and
+check that the hub and each node are listed. When one is missing, pair it.
+Run this for that box, and give the person the URL and the token it prints:
 
 ```sh
-t3 project add --title hedge-profile ~/.local/share/hedge/profile
+ssh coder.<name> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; t3 pair --ttl 10m --label t3-app'
+```
+
+They add the box in **Settings → Environments** with that URL and token.
+
+Then make new threads start on the nodes. This setting lives in the T3 Code
+app on each device, so the person sets it: in **Settings → Environments →
+Load balancing**, turn it on, and set the hub and this Mac to **Manual
+only**. The nodes then take every new thread. Ask them to tell you when it
+is done, and to start one test thread to see it open on a node.
+
+## 11. Hand over
+
+Add their profile as a T3 Code project named `hedge-profile` on the hub, so
+they can open a thread there. Skip it when T3 Code already lists that
+project:
+
+```sh
+ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; t3 project add --title hedge-profile ~/.local/share/hedge/profile'
 ```
 
 Then give them these habits, one line each:
 
 - When something does not fit how you work, open a thread in the
-  `hedge-profile` project and say what to change. Every machine takes the
+  `hedge-profile` project and say what to change. Every box takes the
   change.
-- Hedge keeps itself up to date: each machine runs `hedge update` every night.
+- Hedge keeps itself up to date: each box runs `hedge update` every night.
 - **Side fix.** When an agent finds an unrelated problem, it hands the fix to
   a new thread with its own pull request, and stays on its task.
 - **Conductor.** For big work, one thread writes a map of tickets and starts

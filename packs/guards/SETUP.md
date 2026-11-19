@@ -7,7 +7,7 @@ risky ones, such as code piped from the network into a shell. A refusal tells
 the agent whom to ask. Every guard starts off, so the pack does nothing until
 they turn one on. Ask with your question tool, in one call:
 
-- **Which guards to turn on.** Recommend both of these on the Mac:
+- **Which guards to turn on.** Recommend both of these:
   - `shell-guards`: refuses network code piped into a shell, packages the
     project lacks, GitHub owners outside their list, `pkill -f`, skipped Git
     hooks, force pushes without a lease, and pushes to `main`. Add

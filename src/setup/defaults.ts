@@ -6,8 +6,6 @@ export const ownDevboxPacks = ["posthog"];
 
 export const needsHubPacks = ["hub", "mcp-gateway", "recovery"];
 
-export const prefersHubPacks = ["slack", "incident-io"];
-
 export const makesOwnDevbox = (packs: string[]) => packs.some((pack) => ownDevboxPacks.includes(pack));
 
 export const defaultSources: SourceRef[] = [

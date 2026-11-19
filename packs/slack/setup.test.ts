@@ -132,7 +132,7 @@ describe("hedge slack-trigger setup", () => {
     expect(slack.methods).toEqual(["apps.connections.open", "auth.test", "auth.test"]);
   });
 
-  for (const form of [{ where: "on the Mac", line: /^ *(printf .* \| hedge slack-trigger setup)$/m }, { where: "over SSH on the hub", line: /^ *(printf .* \| ssh coder\.<hub> '.*; hedge slack-trigger setup')$/m }]) {
+  for (const form of [{ where: "over SSH on the hub", line: /^ *(printf .* \| ssh coder\.<hub> '.*; hedge slack-trigger setup')$/m }]) {
     test(`the setup note's command ${form.where} pipes both tokens from the secret prompt's files into setup, which saves them without printing them`, async () => {
       const slack = slackStub();
       const home = temp.make("home-");

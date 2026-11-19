@@ -9,8 +9,8 @@ repo with `--set orchestration.tracker=<owner/name>`.
 
 Three workflows run by themselves on a schedule and start off:
 `quality-loop`, `signal-loop`, and `pr-digest`. Each runs on one machine only, on
-the first node the profile lists, or on the hub when there is no node. They
-never run on the Mac. While that node is stopped, they do not run; take it out
+the first node the profile lists, or on the hub when there is no node.
+While that node is stopped, they do not run; take it out
 with `hedge devbox remove <host>` and they move to the next node. Each needs
 answers:
 
@@ -22,7 +22,7 @@ answers:
 
 On a first setup, recommend them off: they run at night without a person,
 and they need a node and a repo the person works in. A preset can turn them
-on, such as `everything`. Setup on the Mac does not ask their answers, but the
+on, such as `everything`. Setup on the hub does not ask their answers, but the
 node refuses the profile without them. So with such a preset, add
 `--workflows quality-loop=off,signal-loop=off,pr-digest=off` to the setup
 command, or, when they want the loops now, add the three answers as `--set`

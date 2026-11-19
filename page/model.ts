@@ -97,7 +97,7 @@ function hubStep(data: PromptData, titles: string[]) {
 function noteStep(notes: PromptPack[]) {
   const source = notes.some((pack) => pack.setupNote!.includes("<source>")) ? ["   `<source>` is the folder in `~/.local/share/hedge/sources` that holds the pack."] : [];
   return [
-    'Read the setup note of each pack. Ask me what it asks, and collect the flags that it names. Where a note names "the setup command" or "the command in step 9", use the `hedge packs` command of this prompt. Do not run a step that a note puts after that command yet.',
+    'Read the setup note of each pack. Ask me what it asks, and collect the flags that it names. Where a note names "the setup command" or "the command in item 2 of step 9", use the `hedge packs` command of this prompt. Do not run a step that a note puts after that command yet.',
     ...notes.map((pack) => `   - ${pack.title}: ${pack.setupNote}`),
     ...source,
   ].join("\n");

@@ -90,7 +90,7 @@ describe("the install prompt", () => {
         "Hedge already runs on this machine. Ask me each choice with your question tool, and run every command yourself.",
         "",
         "1. Run `hedge update`, so this machine has the newest engine and packs. Then run `hedge packs`, and leave out each pack that is already on.",
-        '2. Read the setup note of each pack. Ask me what it asks, and collect the flags that it names. Where a note names "the setup command" or "the command in step 9", use the `hedge packs` command of this prompt. Do not run a step that a note puts after that command yet.',
+        '2. Read the setup note of each pack. Ask me what it asks, and collect the flags that it names. Where a note names "the setup command" or "the command in item 2 of step 9", use the `hedge packs` command of this prompt. Do not run a step that a note puts after that command yet.',
         "   - Memory: ~/.local/share/hedge/engine/packs/memory/SETUP.md",
         "   - Guards: ~/.local/share/hedge/engine/packs/guards/SETUP.md",
         "3. Turn the packs on with one command, and add the flags that the notes name:",
@@ -127,7 +127,7 @@ describe("the install prompt", () => {
     const hub = await hubWithHedge();
     expect(await hub.hedge(["hub", "status"])).toBe(0);
     expect(hub.output()).toContain("\nThe hub: not named.");
-    expect(readFileSync(join(root, "SETUP.md"), "utf8")).toContain("\n## 9. Add the hub and the nodes\n");
+    expect(readFileSync(join(root, "SETUP.md"), "utf8")).toContain("\n## 9. Add the hub packs and the nodes\n");
   });
 
   test("for a pack that needs a hub, updates the hub after the command and before the steps a note puts after it", () => {

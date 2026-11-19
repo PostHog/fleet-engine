@@ -10,7 +10,7 @@ import { devboxesOf } from "../packs/hub/lib/machine.ts";
 import { cliFixtures } from "../src/testing/cli.ts";
 import { fakeMachine, hedgeSetup, savedAnswers } from "../src/setup/testing.ts";
 import { isolateGit, tempDirs } from "../src/testing/git.ts";
-import { needsHubPacks, prefersHubPacks } from "../src/setup/defaults.ts";
+import { needsHubPacks } from "../src/setup/defaults.ts";
 import { promptLabels, startPrompt } from "../page/model.ts";
 import { pageData } from "./build-page.ts";
 
@@ -23,19 +23,29 @@ const root = join(import.meta.dir, "..");
 const guide = () => readFileSync(join(root, "SETUP.md"), "utf8");
 const notePaths = () => readdirSync(join(root, "packs")).map((pack) => join("packs", pack, "SETUP.md")).filter((path) => existsSync(join(root, path)));
 
+const blocksIn = (text: string) => [...text.matchAll(/^ *```\w*\n([\s\S]*?)^ *```$/gm)].map((match) => match[1]!.replace(/^ +/gm, ""));
+
 function codeIn(text: string) {
-  const blocks = [...text.matchAll(/^ *```\w*\n([\s\S]*?)^ *```$/gm)].map((match) => match[1]!.replace(/^ +/gm, ""));
+  const blocks = blocksIn(text);
   const spans = [...text.replace(/^ *```[\s\S]*?^ *```$/gm, "").matchAll(/`([^`\n]+)`/g)].map((match) => match[1]!);
   return [...blocks, ...spans];
 }
 const guidePath = "$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH";
 const manifests = async () => (await loadPacks(root)).map((pack) => pack.manifest);
-const hubStep = () => guide().slice(guide().indexOf("## 9. Add the hub and the node"));
 const words = (text: string) => text.replace(/\s+/g, " ");
+const step = (number: number) => {
+  const from = guide().indexOf(`\n## ${number}. `);
+  const to = guide().indexOf(`\n## ${number + 1}. `);
+  return guide().slice(from, to < 0 ? undefined : to);
+};
+const hubStep = () => step(9);
+const beforeSteps = (heading: string) => guide().slice(guide().indexOf(heading), guide().indexOf("\n## 1. "));
+const onHubLine = (command: string) => `ssh coder.<hub> 'export PATH="${guidePath}"; ${command}'`;
+const setupArgs = () => guide().match(/; hedge setup (--chat [^']+)'/)![1]!;
 
 function flagValues(flag: string) {
   const code = [guide(), ...notePaths().map((path) => readFileSync(join(root, path), "utf8"))].flatMap(codeIn).join("\n");
-  return [...code.matchAll(new RegExp(`${flag} (\\S+)`, "g"))].map((match) => match[1]!).filter((value) => !value.startsWith("<"));
+  return [...code.matchAll(new RegExp(`${flag} (\\S+)`, "g"))].map((match) => match[1]!.replace(/'$/, "")).filter((value) => !value.startsWith("<"));
 }
 
 const presets = () => JSON.parse(readFileSync(join(root, "presets.json"), "utf8")) as Array<{ id: string; packs: string[] }>;
@@ -76,23 +86,26 @@ describe("the agent setup guide", () => {
   });
 
   test("its hedge setup command sets up each preset to the end without asking the person anything", async () => {
-    const command = guide().match(/^hedge setup (.+)$/m);
-    expect(command).not.toBeNull();
     for (const preset of presets()) {
       const home = temp.make("home-");
-      const args = command![1]!.replace("<id>", preset.id).replace("<claude|codex|both>", "both").split(" ");
-      const result = await hedgeSetup(home, args, [], fakeMachine(home), undefined, 0, "darwin");
+      const args = setupArgs().replace("<id>", preset.id).replace("<claude|codex|both>", "both").split(" ");
+      const result = await hedgeSetup(home, args, [], fakeMachine(home));
       expect({ code: result.code, prompts: result.prompts, packs: savedAnswers(home).packs }).toEqual({ code: 0, prompts: [], packs: preset.packs });
     }
   });
 
-  test("its hedge setup command finishes in one run while the person signs in to GitHub, Claude, and ChatGPT in the browser", async () => {
-    const command = guide().match(/^hedge setup (.+)$/m)![1]!;
+  test("on the hub, its hedge setup command waits for GitHub and ChatGPT in the browser, stops for Claude, and finishes after the guide's Claude sign-in in a terminal", async () => {
     const home = temp.make("home-");
-    const args = command.replace("<id>", "everyday").replace("<claude|codex|both>", "both").split(" ");
-    const result = await hedgeSetup(home, args, [], fakeMachine(home, { github: 5, claude: 3, chatgpt: 4 }), undefined, 0, "darwin");
-    expect(result.code).toBe(0);
-    expect(result.output).toContain("✓ Ready to use. Start a new thread in T3 Code now.");
+    const args = setupArgs().replace("<id>", "everyday").replace("<claude|codex|both>", "both").split(" ");
+    const hub = fakeMachine(home, { github: 5, claude: 1, chatgpt: 4 });
+    const first = await hedgeSetup(home, args, [], hub);
+    expect(first.code).toBe(2);
+    expect(first.output).toContain("  Needs you: Sign in to Claude\n  In a terminal, run: claude auth login\n");
+    expect(codeIn(step(7))).toContain(`ssh -t coder.<hub> 'export PATH="${guidePath}"; claude auth login'\n`);
+    await hub.machine.run(["claude", "auth", "login"], { input: true });
+    const again = await hedgeSetup(home, args, [], hub);
+    expect(again.code).toBe(0);
+    expect(again.output).toContain("✓ Ready to use. Start a new thread in T3 Code now.");
   });
 
   test("offers every pack setup can turn on, in the words of its own summary", async () => {
@@ -112,18 +125,32 @@ describe("the agent setup guide", () => {
     expect(notes.map((note) => note.name).sort()).toEqual(held.sort());
   });
 
-  test("with a hub and a node, creates a 200 GB hub and a 500 GB node with every parameter given, so Coder asks nothing", () => {
-    expect(words(hubStep())).toContain("The default is one **hub** with a 200 GB disk and one **node** with a 500 GB disk");
-    expect(codeIn(hubStep()).find((code) => code.startsWith("coder create "))).toBe("coder create <name> --template <template> --preset none --use-parameter-defaults --parameter <disk parameter>=<200 or 500> --yes\n");
+  test("creates a 200 GB hub and 500 GB nodes in one coder create each, with every template parameter given and the profile repo as dotfiles", () => {
+    expect(words(step(4))).toContain("one **hub** with a 200 GB disk and one **node** with a 500 GB disk");
+    const creates = codeIn(step(5)).filter((code) => code.startsWith("coder create "));
+    expect(creates).toEqual(["coder create <name> --template <template> --preset none --parameter <disk parameter>=<200 or 500> --parameter <region parameter>=<region> --parameter <dotfiles parameter>=https://github.com/<login>/hedge-profile --parameter <other parameter>=<value> --yes\n"]);
+    expect(words(step(5))).toContain("Pass every parameter of the template with its own `--parameter`");
   });
 
-  test("with a hub and a node, reads the template's parameters when coder templates pull fails", () => {
-    expect(words(hubStep())).toContain("When `coder templates pull` fails, open the template's page in the Coder web app");
+  test("never copies parameters from another workspace, and says why", () => {
+    expect(blocksIn(guide()).filter((code) => code.includes("--copy-parameters-from"))).toEqual([]);
+    expect(words(step(5))).toContain("Never use `--copy-parameters-from`: Coder then takes the copied workspace's values over every `--parameter` you pass.");
   });
 
-  test("with a hub and a node, follows a team pack's own setup note first, at the path where setup keeps that team's pack", async () => {
+  test("reads each new workspace's build parameters back from Coder before it goes on", () => {
+    const readBack = codeIn(step(5)).find((code) => code.includes("/api/v2/workspacebuilds/"));
+    expect(readBack).toContain("/api/v2/users/me/workspace/<name>");
+    expect(readBack).toContain("/parameters");
+    expect(words(step(5))).toContain("The step is done when each value matches what you passed.");
+  });
+
+  test("reads the template's parameters when coder templates pull fails", () => {
+    expect(words(step(5))).toContain("When `coder templates pull` fails, open the template's page in the Coder web app");
+  });
+
+  test("follows a team pack's own setup note first, at the path where setup keeps that team's pack", async () => {
     expect(words(hubStep())).toContain("When step 7 printed that a team pack is ticked");
-    const notePath = codeIn(hubStep()).find((code) => code.includes("/packs/<pack>/SETUP.md"))?.trim();
+    const notePath = codeIn(hubStep()).join("\n").match(/~\/\S+\/packs\/<pack>\/SETUP\.md/)?.[0];
     const home = temp.make("home-");
     const cached = join(sourceCache(home), "team", "packs", "hub");
     cpSync(join(root, "packs", "hub"), cached, { recursive: true });
@@ -135,29 +162,34 @@ describe("the agent setup guide", () => {
     expect(existsSync(guidePathOfNote!)).toBe(true);
   });
 
-  test("with a hub and a node, keeps both running while the Mac sleeps", () => {
-    expect(codeIn(hubStep())).toContain("coder schedule stop <name> manual");
+  test("keeps the hub and the nodes running while the Mac sleeps", () => {
+    expect(codeIn(step(5))).toContain("coder schedule stop <name> manual");
   });
 
-  test("with a hub and a node, checks each workspace with a hedge doctor that sets the guide's PATH over SSH", () => {
-    expect(codeIn(hubStep())).toContain(`ssh coder.<name> 'export PATH="${guidePath}"; hedge doctor'\n`);
+  test("checks each workspace with a hedge doctor that sets the guide's PATH over SSH", () => {
+    expect(codeIn(guide())).toContain(`ssh coder.<name> 'export PATH="${guidePath}"; hedge doctor'\n`);
   });
 
-  test("with a hub and a node, says how to add a node later", () => {
-    expect(words(hubStep())).toContain("To add a node later, when the load grows, run items 3, 4, 5 and 9 above again with the next node name and a 500 GB disk");
+  test("says how to add a node later", () => {
+    expect(words(hubStep())).toContain("To add a node later, when the load grows, create it as in step 5 with the next node name and a 500 GB disk, then run item 3 above for it");
   });
 
-  test("with a hub and a node, installs Hedge on the hub, names it the hub there, turns the hub packs on, and only then adds the node", () => {
-    const code = codeIn(hubStep()).join("\n");
+  test("signs the hub in to Coder, sets Hedge up there, names it the hub, turns the hub packs on there, and only then adds each node from the hub", () => {
+    const code = codeIn(guide()).join("\n");
     const order = [
-      code.indexOf("hedge devbox add %s\\n' 'coder.<hub>'"),
-      code.indexOf(`ssh coder.<hub> 'export PATH="${guidePath}"; hedge hub here'`),
-      code.indexOf("hedge packs --add hub --workflows mcp-gateway=off"),
-      code.indexOf(`ssh coder.<hub> 'export PATH="${guidePath}"; hedge update'`),
-      code.indexOf("hedge devbox add %s\\n' 'coder.<node>'"),
+      code.indexOf("coder tokens create | ssh coder.<hub>"),
+      code.indexOf(`; hedge setup --chat `),
+      code.indexOf(onHubLine("hedge hub here")),
+      code.indexOf(onHubLine("hedge packs --add hub --workflows mcp-gateway=off")),
+      code.indexOf(`ssh -t coder.<hub> 'export PATH="${guidePath}"; hedge devbox add coder.<node>'`),
     ];
     expect(order.every((at) => at >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
+  test("installs nothing from Hedge on the Mac: every hedge command runs over SSH on a cloud box", () => {
+    const local = blocksIn(guide()).flatMap((code) => code.split("\n")).filter((line) => /(^|[;&|] *)(hedge|sh [^ ]*get\.sh) /.test(line) && !line.includes("ssh "));
+    expect(local).toEqual([]);
   });
 
   test("says how to use each line the page's prompt can carry", async () => {
@@ -167,17 +199,17 @@ describe("the agent setup guide", () => {
     expect(new Set(labels)).toEqual(new Set(Object.values(promptLabels).filter((label) => label !== promptLabels.intro)));
     const [, intro] = prompt.split("\n\n");
     expect(words(guide())).toContain(`\`${intro!.split("\n")[0]}\``);
-    const picks = guide().slice(guide().indexOf("## Picks from the page"), guide().indexOf("## 1. Check the Mac"));
+    const picks = beforeSteps("## Picks from the page");
     const rows = [...picks.matchAll(/^\| `([^`|]+)` \| [^|]+ \|$/gm)].map((match) => match[1]!);
     expect(rows).toEqual(labels);
   });
 
   test("still says how to use each line that only a prompt from the earlier page carries, and skips the hub packs when that prompt names none", () => {
-    const picks = words(guide().slice(guide().indexOf("## Picks from the page"), guide().indexOf("## 1. Check the Mac")));
+    const picks = words(beforeSteps("## Picks from the page"));
     expect(picks).toContain("A prompt from an earlier page can carry more lines. Use them too:");
     expect(picks).toContain("- `Workflows on the first setup` and `Workflows once the hub runs`: add the list to the command of that step as `--workflows`, without the spaces.");
     expect(picks).toContain("- `Setting`: add `--set <key>=<value>` to the setup command in step 7, once for each line.");
-    expect(picks).toContain("`none` means no pack, so skip item 8.");
+    expect(picks).toContain("`none` means no pack, so skip item 2.");
     expect(words(guide())).toContain("With picks from the page, leave out `--add hub` when the line does not name `hub`:");
   });
 
@@ -189,18 +221,17 @@ describe("the agent setup guide", () => {
     expect(text).toContain("The page names packs only. Each pack's setup note still asks which of its workflows to turn on and which settings it needs.");
   });
 
-  test("offers in step 9 the packs the page keeps for a hub, and Slack with Mac only or in step 9", () => {
+  test("offers in step 9 the packs the page keeps for a hub, and every other pack on the first setup", () => {
     const offer = (name: string) => guide().match(new RegExp(`^\\| \`${name}\` \\| [^|]+ \\| ([^|]+) \\|`, "m"))?.[1];
     expect(needsHubPacks.map(offer)).toEqual(needsHubPacks.map(() => "Step 9"));
-    expect(prefersHubPacks.map(offer)).toEqual(prefersHubPacks.map(() => "With Mac only, or in step 9"));
-    const others = packRows().map((row) => row.name).filter((name) => ![...needsHubPacks, ...prefersHubPacks].includes(name));
+    const others = packRows().map((row) => row.name).filter((name) => !needsHubPacks.includes(name));
     expect(others.map(offer)).toEqual(others.map(() => "Always"));
   });
 
   test("offers the Hub pack and the packs that need a running hub in step 9, each with its setup note", () => {
     const later = packRows().filter((row) => ["hub", "mcp-gateway", "recovery"].includes(row.name));
     expect(later.map((row) => row.note)).toEqual(["`packs/recovery/SETUP.md`", "`packs/hub/SETUP.md`", "`packs/mcp-gateway/SETUP.md`"]);
-    for (const name of ["hub", "mcp-gateway", "recovery", "slack"]) expect(words(hubStep())).toContain(`\`packs/${name}/SETUP.md\``);
+    for (const name of ["hub", "mcp-gateway", "recovery"]) expect(words(hubStep())).toContain(`\`packs/${name}/SETUP.md\``);
   });
 
   test("gives every command in the guide and the pack notes the same PATH, with Bun's Homebrew folders on it", () => {
@@ -217,23 +248,20 @@ describe("the agent setup guide", () => {
   });
 
   test("signs in to Coder with a token from the secret prompt, and says where to make it", () => {
-    expect(words(hubStep())).toContain("make one at `<coder address>/cli-auth`");
-    expect(codeIn(hubStep())).toContain('CODER_SESSION_TOKEN="$(cat <file>)" coder login <coder address>\n');
+    expect(words(step(1))).toContain("make one at `<coder address>/cli-auth`");
+    expect(codeIn(step(1))).toContain('CODER_SESSION_TOKEN="$(cat <file>)" coder login <coder address>\n');
   });
 
   test("explains a workflow in one plain line the first time it tells the person what Hedge is, whatever they know", () => {
-    const show = words(guide().slice(guide().indexOf("## 3. Show what Hedge is"), guide().indexOf("## 4. Where Hedge runs")));
+    const show = words(step(3));
     expect(show).toContain("A **workflow** is one way of working that agents follow, such as a draft pull request for every fix.");
     expect(show.indexOf("**workflow**")).toBeLessThan(show.indexOf("**pack**"));
   });
 
   test("uses each long wait to explain one thing, from each step that waits", () => {
-    const waits = words(guide().slice(guide().indexOf("## While something runs"), guide().indexOf("## 1. Check the Mac")));
+    const waits = words(beforeSteps("## While something runs"));
     for (const topic of ["**T3 Code's inbox.**", "**The Slack trigger.**", "**Threads on nodes.**", "**What runs each night.**"]) expect(waits).toContain(topic);
-    for (const step of ["## 1. Check the Mac and start the install", "## 5. Install the tools", "## 7. Run setup with their answers", "## 9. Add the hub and the node"]) {
-      const body = guide().slice(guide().indexOf(step));
-      expect(words(body.slice(0, body.indexOf("\n## ", 3)))).toContain("(see \"While something runs\")");
-    }
+    for (const number of [5, 7, 9]) expect([number, words(step(number))]).toEqual([number, expect.stringContaining("(see \"While something runs\")")]);
   });
 
   test("when the person takes Hedge's version of a kept file, the old file is in the backup folder the guide names", async () => {
@@ -257,13 +285,12 @@ describe("the agent setup guide", () => {
   });
 
   test("a second setup without --preset, as the guide says, reuses the profile and keeps its packs, workflows, and settings", async () => {
-    const step1 = words(guide().slice(guide().indexOf("## 1. Check the Mac"), guide().indexOf("## 2. Ask everything in one call")));
-    expect(step1).toContain("In the step 7 command, leave out `--preset`, and name only what changes with `--add`, `--remove`, and `--workflows`.");
-    const command = guide().match(/^hedge setup (.+)$/m)![1]!.replace("<claude|codex|both>", "both");
+    expect(words(step(1))).toContain("In the step 7 command, leave out `--preset`, and name only what changes with `--add`, `--remove`, and `--workflows`.");
+    const command = setupArgs().replace("<claude|codex|both>", "codex");
     const home = temp.make("home-");
     const box = fakeMachine(home);
-    const first = await hedgeSetup(home, [...command.replace("<id>", "everyday").split(" "), "--add", "guards", "--workflows", "package-age=on", "--set", "orchestration.tracker=nora/maps"], [], box, undefined, 0, "darwin");
-    const again = await hedgeSetup(home, [...command.replace("--preset <id> ", "").split(" "), "--add", "memory"], [], box, undefined, 0, "darwin");
+    const first = await hedgeSetup(home, [...command.replace("<id>", "everyday").split(" "), "--add", "guards", "--workflows", "package-age=on", "--set", "orchestration.tracker=nora/maps"], [], box);
+    const again = await hedgeSetup(home, [...command.replace("--preset <id> ", "").split(" "), "--add", "memory"], [], box);
     expect({ first: first.code, again: again.code }).toEqual({ first: 0, again: 0 });
     expect(again.output).toContain("Reusing your repo nora/hedge-profile");
     expect(savedAnswers(home).packs).toEqual([...presets().find((preset) => preset.id === "everyday")!.packs, "guards", "memory"]);
@@ -272,7 +299,8 @@ describe("the agent setup guide", () => {
   });
 
   test("the guide's cleanup runs hedge devbox remove, and a host it takes out of the profile leaves the hub's list of machines", () => {
-    expect(words(hubStep())).toContain("Run `hedge devbox remove coder.<old name>` on this Mac. It takes the old host out of their profile");
+    expect(codeIn(hubStep())).toContain(onHubLine("hedge devbox remove coder.<old name>") + "\n");
+    expect(words(hubStep())).toContain("It takes the old host out of their profile");
     const home = temp.make("home-");
     const profile = profilePath(home);
     mkdirSync(profile, { recursive: true });
@@ -284,9 +312,8 @@ describe("the agent setup guide", () => {
   });
 
   test("adds the profile as a T3 Code project at the folder where setup keeps it, under the name the habits use", () => {
-    const add = codeIn(guide()).find((code) => code.startsWith("t3 project add "))?.trim();
-    expect(add).toBe(`t3 project add --title hedge-profile ${profilePath("~")}`);
-    expect(words(guide().slice(guide().indexOf("## 10. Hand over")))).toContain("open a thread in the `hedge-profile` project");
+    expect(codeIn(step(11))).toContain(onHubLine(`t3 project add --title hedge-profile ${profilePath("~")}`) + "\n");
+    expect(words(step(11))).toContain("open a thread in the `hedge-profile` project");
   });
 
   test("fetches only files that are in the repo", () => {

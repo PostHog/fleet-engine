@@ -1,7 +1,6 @@
 # Setup note: Slack
 
-Read this when the person picks the Slack pack, in step 6 with Mac only or
-in step 9 with a hub.
+Read this when the person picks the Slack pack in step 6.
 
 Their own Slack message or reaction with their trigger emoji (default
 `:t3code:`, set by `slack.emoji`), or a mention of their Slack app, starts a
@@ -9,9 +8,8 @@ T3 thread. It needs their own Slack app. With the Context library pack on,
 their own `:brain:` reaction (set by `slack.captureEmoji`) saves the message's
 thread, its canvases, and the Wispr Flow meeting held with it to their context
 library, and sends its context to the open threads that need it.
-With Mac only, the trigger runs on the Mac and stops while the Mac sleeps.
-With a hub, the trigger runs on the hub, so it runs while the Mac sleeps,
-and the Slack app step below runs on the hub.
+The trigger runs on the hub, so it runs while the Mac sleeps, and the Slack
+app step below runs on the hub.
 
 1. The workflow starts off. Add `--workflows slack-thread=on` to the setup
    command.
@@ -24,7 +22,7 @@ and the Slack app step below runs on the hub.
       first line that this command prints:
 
       ```sh
-      hedge slack-trigger manifest
+      ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge slack-trigger manifest'
       ```
 
       Give them the link, and ask them to pick their workspace and create
@@ -39,16 +37,8 @@ and the Slack app step below runs on the hub.
       first:
 
       ```sh
-      printf '%s\n%s\n' "$(cat <app token file>)" "$(cat <user token file>)" | hedge slack-trigger setup
+      printf '%s\n%s\n' "$(cat <app token file>)" "$(cat <user token file>)" | ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge slack-trigger setup'
       ```
-
-   With a hub, run both commands on the hub instead, after the hub's
-   `hedge update`:
-
-   ```sh
-   ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge slack-trigger manifest'
-   printf '%s\n%s\n' "$(cat <app token file>)" "$(cat <user token file>)" | ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge slack-trigger setup'
-   ```
 
    It checks each token with Slack, and keeps them where only they can
    read them. When a token is wrong, it says which one and why, and ends
@@ -56,8 +46,8 @@ and the Slack app step below runs on the hub.
    both to setup again.
 
    Without a secret prompt, run `hedge slack-trigger setup` in a Terminal
-   window instead, as `ssh -t coder.<hub>` with a hub. It gives the link and
-   asks for both tokens itself.
+   window instead, as `ssh -t coder.<hub>`. It gives the link and asks for
+   both tokens itself.
 
 [Start a thread from Slack](https://github.com/PostHog/hedge/blob/main/docs/slack.md)
 explains the rest.
