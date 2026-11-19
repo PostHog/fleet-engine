@@ -1174,6 +1174,7 @@ describe("the Git guard", () => {
     ["a second aliases block indented deeper", "aliases:\n    sp: stack push\naliases:\n        sp: pr list\n"],
     ["a comment that gh ends at a next-line character", "aliases:\n    co: pr checkout # note\u0085    sp: stack push\n"],
     ["an alias that runs gh help, which an extension can take", "aliases:\n    sp: help\n"],
+    ["an alias that references a YAML anchor, which gh reads as the anchor's name", "x: &demo pr list\naliases:\n    sp: *demo\n"],
     ["an alias name that Bun reads as another number", "aliases:\n    001: stack push\n"],
     ["a quoted alias name, which gh unquotes", "aliases:\n    \"s'p'\": stack push\n"],
     ["a config that cannot be read", undefined],

@@ -203,7 +203,8 @@ function ghAliases(): Record<string, unknown> | undefined {
  * The aliases of a gh config. gh reads the first YAML document and the first of duplicate keys, and Bun the last, and Bun
  * reads a key such as `001` as `1`. So the config must be one block mapping with one `aliases` key, and one `name:` line
  * at the indent of its aliases for each alias Bun reads, spelled as Bun reads it. gh also breaks lines at U+0085, U+2028
- * and U+2029, and Bun does not, so those and a lone CR refuse it.
+ * and U+2029, and Bun does not, so those and a lone CR refuse it. gh reads a reference such as `*name` in the aliases as
+ * the anchor's name, and Bun as its value, so a reference there refuses it too.
  */
 function aliasesIn(text: string): Record<string, unknown> | undefined {
   if (/[\r\u0085\u2028\u2029](?<!\r(?=\n))/.test(text)) return undefined;
@@ -230,7 +231,9 @@ function aliasesIn(text: string): Record<string, unknown> | undefined {
       if (inAliases && !/^\s*(?:\{\}\s*)?(?:#.*)?$/.test(top[1] ?? "")) return undefined;
       continue;
     }
-    if (!inAliases || leading > (indent ??= leading)) continue;
+    if (!inAliases) continue;
+    if (/(?:^|[\s:,[{])\*/.test(line)) return undefined;
+    if (leading > (indent ??= leading)) continue;
     const key = /^\s+(.+?):(?:[ \t]|$)/.exec(line)?.[1];
     if (key === undefined) return undefined;
     keys.push(key);
