@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Finding } from "../../pack/types.ts";
@@ -8,7 +9,8 @@ import { localT3Server } from "../t3/session.ts";
 import type { T3Server } from "../t3/port.ts";
 
 export type FleetPiece = { kind: "launchd" | "systemd" | "container" | "t3"; name: string };
-export type OldTasks = { list(): Promise<Array<{ id: string; enabled: boolean }>>; setEnabled(id: string, enabled: boolean): Promise<void> };
+/** saved: the tasks T3 Code keeps while its server is stopped, which Hedge can read but not change. */
+export type OldTasks = { list(): Promise<Array<{ id: string; enabled: boolean }>>; setEnabled(id: string, enabled: boolean): Promise<void>; saved?: true };
 export type FleetOptions = { run?: CommandRunner; accountHome?: () => Promise<string | undefined>; uid?: number; tasks?: (home: string) => Promise<OldTasks | undefined> };
 /** retired: what retire stopped. left: each piece that is not verified stopped, with why. notes: what retire could not look at. */
 export type Retirement = { retired: string[]; left: string[]; notes: string[] };
@@ -18,7 +20,7 @@ const launchdPrefixes = ["dev.fleet.", "com.fleet."];
 const unitPrefix = "fleet-";
 const containerName = "fleet-mcphub";
 const containerLabel = "org.fleet.service";
-const taskPrefix = "fleet:";
+export const fleetTaskPrefix = "fleet:";
 const notLoaded = 113;
 
 const present = (path: string) => lstatSync(path, { throwIfNoEntry: false }) !== undefined;
@@ -33,14 +35,30 @@ const lines = (text: string) => text.split("\n").map((line) => line.trim()).filt
 const why = (output: { code: number; stderr?: string }) => (output.stderr ?? "").trim().split("\n").at(-1) || `exit ${output.code}`;
 export const describe = (piece: FleetPiece) => ({ launchd: `launchd agent ${piece.name}`, systemd: `systemd unit ${piece.name}`, container: `Docker container ${piece.name}`, t3: `T3 Code task ${piece.name}` })[piece.kind];
 
-/** The T3 Code scheduled tasks on this machine, or undefined while T3 Code is not running. */
+/** The T3 Code scheduled tasks on this machine: from its server, or from its state store while it is stopped. Undefined when T3 Code has neither. */
 export function scheduledTasks(server: T3Server = localT3Server) {
   return async (home: string): Promise<OldTasks | undefined> => {
-    if (!(await server.answering(home))) return undefined;
+    if (!(await server.answering(home))) return savedTasks(join(home, ".t3/userdata/statev2.sqlite"));
     return {
       list: () => server.session(home, async (rpc) => (await rpc.first<{ tasks: Array<{ id: string; enabled: boolean }> }>("scheduledTasks.subscribe", {})).tasks),
       setEnabled: (id, enabled) => server.session(home, async (rpc) => void (await rpc.call("scheduledTasks.setEnabled", { id, enabled }))),
     };
+  };
+}
+
+function savedTasks(store: string): OldTasks | undefined {
+  if (!present(store)) return undefined;
+  return {
+    saved: true,
+    async list() {
+      const db = new Database(store, { readonly: true });
+      try {
+        return db.query<{ id: string; enabled: number }, []>("select task_id as id, enabled from scheduled_tasks").all().map((row) => ({ id: row.id, enabled: row.enabled !== 0 }));
+      } finally {
+        db.close();
+      }
+    },
+    setEnabled: async () => Promise.reject(new Error("T3 Code is stopped")),
   };
 }
 
@@ -79,7 +97,7 @@ export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
     if (!tasks) found.notes.push("T3 Code is not running, so Hedge did not look at its scheduled tasks. hedge apply checks them once T3 Code runs.");
     else {
       try {
-        for (const task of await tasks.list()) if (task.id.startsWith(taskPrefix)) add("t3", task.id);
+        for (const task of await tasks.list()) if (task.id.startsWith(fleetTaskPrefix)) add("t3", task.id);
       } catch (error) {
         found.unclear.push(`T3 Code did not list its scheduled tasks (${(error as Error).message})`);
       }
@@ -111,7 +129,8 @@ export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
     }
     if (!tasks) return "T3 Code is not running";
     try {
-      return (await tasks.list()).find((task) => task.id === piece.name)?.enabled === true ? "it is still on" : undefined;
+      if ((await tasks.list()).find((task) => task.id === piece.name)?.enabled !== true) return undefined;
+      return tasks.saved ? "it is on in T3 Code, which is stopped. Start T3 Code so Hedge can turn it off" : "it is still on";
     } catch (error) {
       return `T3 Code did not list it (${(error as Error).message})`;
     }

@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { fleetAdapter } from "./adapters/fleet/adapter.ts";
+import { Database } from "bun:sqlite";
+import { fleetAdapter, scheduledTasks, type FleetOptions } from "./adapters/fleet/adapter.ts";
+import type { T3Server } from "./adapters/t3/port.ts";
 import { jobsAdapter } from "./adapters/jobs/adapter.ts";
 import type { CommandRunner } from "./adapters/run.ts";
 import { main } from "./cli.ts";
@@ -30,7 +32,18 @@ function engineWithService() {
   return root;
 }
 
-function machine(platform: NodeJS.Platform, home = oldInstall()) {
+/** T3 Code's state store, as T3 Code leaves it when its server stops. */
+function savedT3Tasks(home: string, tasks: Array<{ id: string; enabled: boolean }>) {
+  mkdirSync(join(home, ".t3/userdata"), { recursive: true });
+  const store = new Database(join(home, ".t3/userdata/statev2.sqlite"));
+  store.exec("pragma journal_mode=wal; create table scheduled_tasks (task_id text primary key, title text not null, enabled integer not null)");
+  for (const task of tasks) store.query("insert into scheduled_tasks values (?, ?, ?)").run(task.id, task.id, task.enabled ? 1 : 0);
+  store.close();
+}
+
+const stoppedT3: T3Server = { answering: async () => false, session: async () => Promise.reject(new Error("T3 Code is not running")) };
+
+function machine(platform: NodeJS.Platform, home = oldInstall(), tasks?: FleetOptions["tasks"]) {
   const systemd = fakeSystemd();
   const launchd = fakeLaunchd();
   const docker = fakeDocker();
@@ -42,7 +55,7 @@ function machine(platform: NodeJS.Platform, home = oldInstall()) {
     return { code: 127, stdout: "" };
   };
   const run = runners(crontab, systemd.run, launchd.run, docker.run);
-  const fleet = fleetAdapter({ run, uid: 501, accountHome: async () => home, tasks: async () => t3.client });
+  const fleet = fleetAdapter({ run, uid: 501, accountHome: async () => home, tasks: tasks ?? (async () => t3.client) });
   const adapters = (): Adapter[] => [fleet, filesAdapter, jobsAdapter({ run, engineRoot: repoRoot, uid: 501, accountHome: async () => home })];
   const engine = engineWithService();
   const hedge = async (args: string[]) => {
@@ -128,6 +141,22 @@ describe("hedge retire-fleet", () => {
     expect(retired.output).toContain("Hedge: launchd agent dev.fleet.recover: it is still loaded.");
     expect(retired.output).toContain("Hedge: T3 Code task fleet:pr-digest: it is still on.");
     expect(retired.output).toContain("Hedge: Docker did not answer (Cannot connect to the Docker daemon), so Hedge could not check the fleet-mcphub container.");
+  });
+
+  test("while T3 Code is stopped, reads the tasks it saved, and fails retire and apply while a fleet: task there is on", async () => {
+    const home = oldInstall();
+    savedT3Tasks(home, [{ id: "fleet:pr-digest", enabled: true }, { id: "fleet:off", enabled: false }, { id: "my-task", enabled: true }]);
+    const linux = machine("linux", home, scheduledTasks(stoppedT3));
+
+    const retired = await linux.hedge(["retire-fleet"]);
+    const applied = await linux.hedge(["apply", "--profile", profileDir(["watcher"])]);
+
+    expect(retired.code).toBe(1);
+    expect(retired.output).toContain("Hedge: T3 Code task fleet:pr-digest: it is on in T3 Code, which is stopped. Start T3 Code so Hedge can turn it off. Hedge could not verify that it stopped.");
+    expect(retired.output).not.toContain("fleet:off");
+    expect(applied.code).toBe(1);
+    expect(applied.output).toContain("The T3 Code task fleet:pr-digest from before the rename still runs (it is on in T3 Code, which is stopped. Start T3 Code so Hedge can turn it off), so Hedge started nothing.");
+    expect(linux.systemd.units.has("hedge-watch.service")).toBe(false);
   });
 
   test("on a machine without Fleet, or with a HOME that is not the account's, stops nothing", async () => {
