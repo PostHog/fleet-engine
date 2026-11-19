@@ -284,10 +284,13 @@ describe("a config entry that waits for a pack check", () => {
   test("with a todo, that exits 4 before a step and passes after it puts its config in within the same apply, and leaves no To do", async () => {
     const home = temp.make("home-");
     const { run } = stepping({ before: 4, after: 0 });
-    const waiting = [{ ...checks[0]!, todo: "Add an account to the proxy." }];
-    const applied = await apply(plan({ files: [], checks: waiting, config, steps }), { home, adapters: [providerConfigAdapter()], run: run(home) });
+    const waiting = plan({ files: [], checks: [{ ...checks[0]!, todo: "Add an account to the proxy." }], config, steps });
+    const options = { home, adapters: [providerConfigAdapter()], run: run(home) };
+    expect((await check(waiting, options)).findings).toEqual([{ id: "check:proxy-up", pack: "base", say: "Add an account to the proxy.", todo: true }]);
+    const applied = await apply(waiting, options);
     expect(applied).toMatchObject({ ok: true, findings: [] });
     expect(settings(home)).toEqual({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: "cat key" });
+    expect(await check(waiting, options)).toMatchObject({ ok: true, findings: [] });
   });
 
   test("that passes before a step and fails after it never puts its config in, and apply names the failed check", async () => {
