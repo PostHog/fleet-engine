@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { git, isolateGit, tempDirs } from "../testing/git.ts";
-import { boxHome, boxMachineFile, engineRoot, fakeMachine, githubRepo, nodeEngine, nodeHas, setUpToAdd } from "./testing.ts";
+import { boxHome, boxMachineFile, engineRoot, fakeMachine, githubRepo, nodeEngine, nodeHas, setUpToAdd, throughSsh } from "./testing.ts";
 
 isolateGit();
 const temp = tempDirs();
@@ -18,14 +18,6 @@ async function signedUp(setupArgs: string[] = []) {
 }
 
 const profileApplied = (home: string) => boxMachineFile(home, node).profileDir === join(boxHome(home, node), ".local/share/hedge/profile");
-const throughSsh = (home: string, printed: string) => {
-  const local = join(home, "fake-ssh");
-  mkdirSync(local, { recursive: true });
-  const onNode = `HOME='${boxHome(home, node)}' PATH='${join(boxHome(home, node), ".node/bin")}:/usr/bin:/bin'`;
-  writeFileSync(join(local, "ssh"), `#!/bin/sh\n[ "$1" != -t ] || shift\n[ "$1" = ${node} ] || exit 255\nshift\nexec env ${onNode} sh -c "$*"\n`, { mode: 0o755 });
-  writeFileSync(join(local, "sudo"), "#!/bin/sh\nexit 97\n", { mode: 0o755 });
-  return Bun.spawnSync(["sh", "-c", printed], { env: { HOME: home, PATH: `${local}:/usr/bin:/bin`, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" }, stdout: "ignore", stderr: "ignore" }).exitCode;
-};
 const linkedHere = ["https://box-1.relay.example"];
 const listed = (output: string, say: string) => output.split("\n").filter((line) => line.startsWith(`  · ${say}`)).length;
 const endList = (output: string) => output.slice(output.lastIndexOf(`Left for you on ${node}:`));
@@ -53,7 +45,7 @@ describe("hedge devbox add applies the profile on the node", () => {
     expect(left).toHaveLength(4);
     expect([listed(output, "Install the signed Git allowlist as root"), listed(output, "Install earlyoom as root")]).toEqual([1, 1]);
     const printed = left.slice(1, -1).map((line) => line.slice(line.indexOf(" Run: ") + " Run: ".length));
-    expect(printed.map((command) => throughSsh(home, command))).toEqual([0, 0]);
+    expect(printed.map((command) => throughSsh(home, node, command))).toEqual([0, 0]);
     expect([nodeHas(home, node, "allowlist"), nodeHas(home, node, "earlyoom")]).toEqual([true, true]);
   });
 

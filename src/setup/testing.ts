@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { main } from "../cli.ts";
 import type { FetchedSource, SourceRef } from "../pack/types.ts";
@@ -102,10 +102,10 @@ export const onBox = (command: string[]) => (command[0] === "ssh" ? command.at(-
  * takes every curl request which does not turn proxies off. The box's tunnel answers only after tunnelStartsAfter lookups, and the tunnel here only after hereTunnelStartsAfter.
  * Each box's T3 environment id is env-<host>, except on the hosts withoutT3, where T3 never ran.
  * T3 here lists hereLinks as its linked environments, and unlink forgets one, or fails with unlinkFails. T3 on the hub lists hubLinks. ssh never reaches the hosts named unreachable.
- * This machine is signed in to Coder at coderAt, https://coder.example.com unless set. A box answers Coder's build info, and serves the Coder CLI, only at boxReachesCoderAt, this machine's address unless set; coderRedirects makes the build info or the CLI answer with a redirect instead, which its curl follows when told to on the command line or in ~/.curlrc, unless -q comes first or --max-redirs is 0. Its curl refuses any other protocol than HTTPS when told --proto =https. Its Coder CLI signs in with the session and url files in ~/.config/coderv2 when they hold a token this machine made and has not removed, and an address it reaches, or personCoderToken at any address, as another Coder user unless boxCoderSameUser. Without such files a box is signed in as this machine's user while its box:coder sign-in passes. Shell commands on the box that touch ~/.config/coderv2 run with boxEnv. Here, coder tokens create and remove keep the list coderTokens returns, and coderTokenRemoveFails makes a removal fail. hedge peers link on the hub renews the node's link in the list T3 on the hub returns.
+ * This machine is signed in to Coder at coderAt, https://coder.example.com unless set. A box answers Coder's build info, and serves the Coder CLI, only at boxReachesCoderAt, this machine's address unless set; coderRedirects makes the build info or the CLI answer with a redirect instead, which its curl follows when told to on the command line or in ~/.curlrc, unless -q comes first or --max-redirs is 0. Its curl refuses any other protocol than HTTPS when told --proto =https. coderCli makes the CLI download answer with another status than 200, with no body, or with a CLI whose version fails. Every shell command on the box runs with boxEnv. Its Coder CLI signs in with CODER_SESSION_TOKEN and CODER_URL from boxEnv, or else the session and url files in ~/.config/coderv2, when they hold a token this machine made and has not removed, and an address it reaches, or personCoderToken at any address, as another Coder user unless boxCoderSameUser. Without them a box is signed in as this machine's user while its box:coder sign-in passes. The Coder CLI it downloads signs in with coder login, and its coder config-ssh writes ~/.ssh/config for CODER_URL, or else for the address in the url file. Here, coder tokens create and remove keep the list coderTokens returns, and coderTokenRemoveFails makes a removal fail. hedge peers link on the hub renews the node's link in the list T3 on the hub returns.
  * With node set, every other command on a box runs on a Node.
  */
-export function fakeMachine(home: string, polls: Partial<Record<SignInName, number>> = {}, options: { org?: boolean; createFails?: string; createFailsAfterMaking?: string; lookupFails?: string; publicRepos?: string[]; scopes?: string; failRun?: boolean; exits?: Partial<Record<SignInName, number>>; connectHere?: boolean; boxFiles?: Record<string, string>; hubDown?: boolean; hubUpdateFails?: string; boxCoderSameUser?: boolean; boxEnv?: Record<string, string>; coderRedirects?: Array<"probe" | "binary">; claude?: Partial<Record<"claude" | "box:claude", ClaudeSignedIn>>; startedAt?: number; cliPrintsTunnel?: boolean; serverWithoutLinkState?: Array<"box" | "here">; runtimeOrigin?: string; runtimePid?: unknown; serverGone?: boolean; boxConnect?: { authenticated: unknown; linked: unknown }; hereConnect?: { desired?: unknown; authenticated?: unknown; linked?: unknown }; t3Home?: string; devServerUrl?: string; tunnelStartsAfter?: number; hereTunnelStartsAfter?: number; withoutT3?: string[]; hereLinks?: HereLink[]; unreachable?: string[]; unlinkFails?: string; hereStatusFailures?: number; installers?: Record<string, string>; installerEnv?: Record<string, string>; hubLinks?: HereLink[]; boxReachesCoderAt?: string; coderAt?: string; coderTokenRemoveFails?: boolean; node?: Node } = {}) {
+export function fakeMachine(home: string, polls: Partial<Record<SignInName, number>> = {}, options: { org?: boolean; createFails?: string; createFailsAfterMaking?: string; lookupFails?: string; publicRepos?: string[]; scopes?: string; failRun?: boolean; exits?: Partial<Record<SignInName, number>>; connectHere?: boolean; boxFiles?: Record<string, string>; hubDown?: boolean; hubUpdateFails?: string; boxCoderSameUser?: boolean; boxEnv?: Record<string, string>; coderRedirects?: Array<"probe" | "binary">; coderCli?: "non-200" | "empty" | "broken"; claude?: Partial<Record<"claude" | "box:claude", ClaudeSignedIn>>; startedAt?: number; cliPrintsTunnel?: boolean; serverWithoutLinkState?: Array<"box" | "here">; runtimeOrigin?: string; runtimePid?: unknown; serverGone?: boolean; boxConnect?: { authenticated: unknown; linked: unknown }; hereConnect?: { desired?: unknown; authenticated?: unknown; linked?: unknown }; t3Home?: string; devServerUrl?: string; tunnelStartsAfter?: number; hereTunnelStartsAfter?: number; withoutT3?: string[]; hereLinks?: HereLink[]; unreachable?: string[]; unlinkFails?: string; hereStatusFailures?: number; installers?: Record<string, string>; installerEnv?: Record<string, string>; hubLinks?: HereLink[]; boxReachesCoderAt?: string; coderAt?: string; coderTokenRemoveFails?: boolean; node?: Node } = {}) {
   const left: Record<SignInName, number> = { github: 0, claude: 0, chatgpt: 0, coder: 0, "box:github": 0, "box:claude": 0, "box:chatgpt": 0, "box:t3": 0, "box:coder": 0, ...polls };
   const started = new Set<SignInName>();
   const calls: Array<{ command: string[]; cwd?: string; timeoutMs?: number; input?: string }> = [];
@@ -228,7 +228,7 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
     return result(true, `linked ${linked}`);
   };
   const forReal = async (line: string, host: string, input?: string, bin?: string, env: Record<string, string> = {}): Promise<ExecResult> => {
-    const child = Bun.spawn(["sh", "-c", line], { env: { PATH: [bin, process.env.PATH ?? ""].filter(Boolean).join(":"), ...env, HOME: boxHome(home, host) }, stdin: input === undefined ? "ignore" : new Blob([input]), stdout: "pipe", stderr: "pipe" });
+    const child = Bun.spawn(["sh", "-c", line], { env: { PATH: [bin, process.env.PATH ?? ""].filter(Boolean).join(":"), ...options.boxEnv, ...env, HOME: boxHome(home, host) }, stdin: input === undefined ? "ignore" : new Blob([input]), stdout: "pipe", stderr: "pipe" });
     const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
     return { code, output: `${stdout}${stderr}`, stdout };
   };
@@ -239,8 +239,8 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
   };
   const boxCoderSession = (host: string) => {
     const config = join(boxHome(home, host), ".config/coderv2");
-    const read = (name: string) => (existsSync(join(config, name)) ? readFileSync(join(config, name), "utf8") : undefined);
-    const [token, url] = [read("session"), read("url")];
+    const read = (name: string) => (existsSync(join(config, name)) && statSync(join(config, name)).isFile() ? readFileSync(join(config, name), "utf8") : undefined);
+    const [token, url] = [options.boxEnv?.CODER_SESSION_TOKEN || read("session"), options.boxEnv?.CODER_URL || read("url")];
     if (token === personCoderToken && url !== undefined) return { at: url, user: options.boxCoderSameUser ? coderUserId : otherCoderUserId };
     if (token !== undefined && coderTokens.has(token) && url === reachesCoderAt) return { at: url, user: coderUserId };
     return passes("box:coder") ? { at: coderAt, user: coderUserId } : undefined;
@@ -251,10 +251,10 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
     const signedIn = boxCoderSession(host);
     if (line === "coder whoami") return signedIn ? result(true, coderWhoami.replace("https://coder.example.com", signedIn.at)) : result(false, "You are not logged in");
     if (line === "coder whoami -o json") return signedIn ? result(true, coderWhoamiJson(signedIn.at, signedIn.user)) : result(false, "You are not logged in");
-    const network = () => coderNetwork(home, reachesCoderAt, options.coderRedirects ?? []);
+    const network = () => coderNetwork(home, reachesCoderAt, options.coderRedirects ?? [], options.coderCli);
     if (line.includes("/api/v2/buildinfo")) return forReal(line, host, input, network());
     if (line.includes("/bin/coder-linux-")) return forReal(line, host, input, undefined, { PATH: `${network()}:/usr/bin:/bin` });
-    if (line.includes("/coderv2")) return forReal(line, host, input, undefined, options.boxEnv);
+    if (line.includes("/coderv2")) return forReal(line, host, input);
     if (!options.node && line.includes(" doctor --profile ") && line.endsWith(" --to-do'")) return result(true, "[]\n");
     if (line === "t3 environment list --json") return result(true, JSON.stringify(hubLinks.map((link) => ({ urls: [], access: "full-access", status: "reachable", ...link }))));
     if (line === "coder config-ssh --yes") return signedIn ? (coderSsh.push(signedIn.at), result(true, "Updated \"~/.ssh/config\"")) : result(false, "You are not logged in");
@@ -349,10 +349,20 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
 
 const renewedUntil = "2099-01-01T00:00:00.000Z";
 
-function coderNetwork(home: string, reach: string, redirects: Array<"probe" | "binary">) {
+const downloadedCoder = `#!/bin/sh
+d="\${CODER_CONFIG_DIR:-\${XDG_CONFIG_HOME:-$HOME/.config}/coderv2}"
+case "$1" in
+version) ;;
+login) mkdir -p "$d" && printf %s "$2" > "$d/url" && printf %s person-login > "$d/session" ;;
+config-ssh) mkdir -p "$HOME/.ssh" && printf '# coder %s\\n' "\${CODER_URL:-$(cat "$d/url")}" > "$HOME/.ssh/config" ;;
+*) exit 1 ;;
+esac
+`;
+
+function coderNetwork(home: string, reach: string, redirects: Array<"probe" | "binary">, cli?: "non-200" | "empty" | "broken") {
   const bin = join(home, "coder-network");
   mkdirSync(bin, { recursive: true });
-  writeFileSync(join(bin, "coder-cli"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  writeFileSync(join(bin, "coder-cli"), cli === "empty" ? "" : cli === "broken" ? "#!/bin/sh\nexit 1\n" : downloadedCoder, { mode: 0o755 });
   const lines = [
     "#!/bin/sh",
     `out=; url=; prev=; https=; w=; hops=; follow=`,
@@ -362,7 +372,7 @@ function coderNetwork(home: string, reach: string, redirects: Array<"probe" | "b
     `moved=; case "$url" in '${reach}'/api/v2/buildinfo) moved=${redirects.includes("probe") ? 1 : ""} ;; '${reach}'/bin/coder-linux-*) moved=${redirects.includes("binary") ? 1 : ""} ;; esac`,
     `[ -z "$moved" ] || [ -n "$follow" ] || { [ -z "$out" ] || : > "$out"; [ -z "$w" ] || printf 302; exit 0; }`,
     `[ -z "$moved" ] || [ "$hops" != 0 ] || { echo "curl: (47) Maximum (0) redirects followed" >&2; exit 47; }`,
-    `case "$url" in '${reach}'/bin/coder-linux-*) cp '${join(bin, "coder-cli")}' "$out"; [ -z "$w" ] || printf 200; exit 0 ;; '${reach}'/api/v2/buildinfo) [ -z "$w" ] || printf 200; exit 0 ;; esac`,
+    `case "$url" in '${reach}'/bin/coder-linux-*) cp '${join(bin, "coder-cli")}' "$out"; [ -z "$w" ] || printf ${cli === "non-200" ? 203 : 200}; exit 0 ;; '${reach}'/api/v2/buildinfo) [ -z "$w" ] || printf 200; exit 0 ;; esac`,
     `echo "curl: (28) Failed to connect to $url: Connection timed out" >&2`,
     "exit 28",
   ];
@@ -428,6 +438,16 @@ function installerBin(home: string, installers: Record<string, string>) {
   writeFileSync(join(bin, "curl"), `#!/bin/sh\nout=; url=\nwhile [ $# -gt 0 ]; do case "$1" in -o) out=$2; shift ;; -*) ;; *) url=$1 ;; esac; shift; done\nref=\${url%/get.sh}; ref=\${ref##*/}\ncp "${bin}/$ref.sh" "$out"\n`, { mode: 0o755 });
   return bin;
 }
+
+/** Runs a printed command here, through a fake ssh that runs it on the host in the box's home, with env as its whole environment there. */
+export const throughSsh = (home: string, host: string, printed: string, env: Record<string, string> = {}) => {
+  const local = join(home, "fake-ssh");
+  mkdirSync(local, { recursive: true });
+  const onHost = [`HOME=${quote(boxHome(home, host))}`, `PATH=${quote(`${join(boxHome(home, host), ".node/bin")}:/usr/bin:/bin`)}`, ...Object.entries(env).map(([name, value]) => `${name}=${quote(value)}`)].join(" ");
+  writeFileSync(join(local, "ssh"), `#!/bin/sh\n[ "$1" != -t ] || shift\n[ "$1" = ${host} ] || exit 255\nshift\nexec env ${onHost} sh -c "$*"\n`, { mode: 0o755 });
+  writeFileSync(join(local, "sudo"), "#!/bin/sh\nexit 97\n", { mode: 0o755 });
+  return Bun.spawnSync(["sh", "-c", printed], { env: { HOME: home, PATH: `${local}:/usr/bin:/bin`, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" }, stdout: "ignore", stderr: "ignore" }).exitCode;
+};
 
 export const remote = (box: ReturnType<typeof fakeMachine>) => [...box.calls.map((call) => onBox(call.command)), ...box.starts.map(onBox), ...box.runs.map((run) => onBox(run.command))].filter(Boolean) as string[];
 

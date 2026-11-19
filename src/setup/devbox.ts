@@ -219,21 +219,19 @@ async function coderOnBox(host: string, box: Machine, context: DevboxContext) {
 
 const otherSignIn = 87;
 
-const noOtherSignIn = (address: string) => `d=${coderConfig} a=${quote(address)}; if [ -n "$CODER_SESSION_TOKEN" ] || [ "\${CODER_URL:-$a}" != "$a" ] || { [ -e "$d/url" ] && [ "$(cat "$d/url")" != "$a" ]; } || { [ ! -e "$d/url" ] && [ -e "$d/session" ]; }; then exit ${otherSignIn}; fi;`;
+const noOtherSignIn = (address: string) => `d=${coderConfig} a=${quote(address)} o=; for f in "$d/url" "$d/session"; do [ ! -L "$f" ] && { [ ! -e "$f" ] || [ -f "$f" ]; } || o=1; done; if [ -n "$o" ] || [ -n "$CODER_SESSION_TOKEN" ] || [ "\${CODER_URL:-$a}" != "$a" ] || { [ -e "$d/url" ] && [ "$(cat "$d/url")" != "$a" ]; } || { [ ! -e "$d/url" ] && [ -e "$d/session" ]; }; then printf '%s\\n' \${CODER_URL:+CODER_URL} \${CODER_SESSION_TOKEN:+CODER_SESSION_TOKEN}; exit ${otherSignIn}; fi;`;
 
 async function signInBox(host: string, box: Machine, context: DevboxContext, address: string) {
   const here = context.machine;
   const checked = await box.exec(["sh", "-c", noOtherSignIn(address)]);
-  if (checked.code === otherSignIn) return leaveSignIn(host, address, context), false;
+  if (checked.code === otherSignIn) return await leaveSignIn(host, box, address, checked.stdout.split("\n").filter(Boolean), context), false;
   if (checked.code !== 0) throw new Error(`Hedge could not read the Coder sign-in on ${host}: ${checked.output.trim()}`);
   if (!(await reachesOverHttps(box, address))) throw new Error(`${host} does not reach Coder at ${address} over HTTPS, so Hedge makes no Coder token for it and sends none. Sign ${host} in to Coder yourself: install the Coder CLI there from your Coder deployment, run coder login there with an HTTPS address it reaches, and paste a token from ${address}/cli-auth. Then run hedge devbox add ${host} again.`);
-  const download = `command -v coder >/dev/null || { case $(uname -m) in x86_64) a=amd64;; aarch64|arm64) a=arm64;; *) exit 1;; esac; b="$HOME/.local/bin" && mkdir -p "$b" && p=$(mktemp "$b/.coder.XXXXXX") && { c=$(curl -q --proto =https --max-redirs 0 -fsS --max-time 300 -w '%{http_code}' -o "$p" ${quote(`${address}/bin/coder-linux-`)}"$a") && [ "$c" = 200 ] && [ -s "$p" ] && chmod +x "$p" && "$p" version >/dev/null && mv -f "$p" "$b/coder"; s=$?; rm -f "$p"; [ $s = 0 ] || echo "the download answered HTTP $c and gave no Coder CLI" >&2; exit $s; }; }`;
-  const installed = await box.exec(["sh", "-c", download]);
-  if (installed.code !== 0) throw new Error(`Hedge could not install the Coder CLI on ${host} from ${address}: ${installed.output.trim()}`);
+  await installCoder(host, box, address);
   const name = `hedge-${Date.now().toString(36)}`;
   const token = await here.exec(["coder", "tokens", "create", "--name", name]);
   if (token.code !== 0 || !token.output.trim()) throw new Error(`Coder made no token for ${host}: ${token.output.trim()}`);
-  const write = `umask 077 && ${noOtherSignIn(address)} mkdir -p "$d" && u=$(mktemp "$d/.url.XXXXXX") && { s=$(mktemp "$d/.session.XXXXXX") && IFS= read -r token && printf %s "$a" > "$u" && printf %s "$token" > "$s" && mv -f "$u" "$d/url" && mv -f "$s" "$d/session"; c=$?; rm -f "$u" \${s:+"$s"}; exit $c; }`;
+  const write = `umask 077 && ${noOtherSignIn(address)} mkdir -p "$d" && u=$(mktemp "$d/.url.XXXXXX") && { s=$(mktemp "$d/.session.XXXXXX") && IFS= read -r token && printf %s "$a" > "$u" && printf %s "$token" > "$s" && mv -f "$u" "$d/url" && [ -f "$d/url" ] && mv -f "$s" "$d/session" && [ -f "$d/session" ]; c=$?; rm -f "$u" \${s:+"$s"}; exit $c; }`;
   const written = await box.exec(["sh", "-c", write], { input: `${token.stdout.trim()}\n` });
   if (written.code === 0) return true;
   const removed = (await here.exec(["coder", "tokens", "remove", name])).code === 0;
@@ -241,9 +239,19 @@ async function signInBox(host: string, box: Machine, context: DevboxContext, add
   throw new Error(`Hedge could not write the Coder sign-in on ${host}${written.code === otherSignIn ? ", because it is signed in another way now" : `: ${written.output.trim()}`}.${cleanup}`);
 }
 
-function leaveSignIn(host: string, address: string, context: DevboxContext) {
-  const step = { say: `Coder on ${host} is signed in another way, so Hedge left that sign-in alone. Sign it in to ${address}, so it reaches the hub and the other nodes by their coder. names.`, command: `coder login ${quote(address)} && coder config-ssh --yes` };
-  if (!context.leftForYou) throw new Error(`${step.say} Run on ${host}: ${step.command}. Then run ${again(context)} again.`);
+async function installCoder(host: string, box: Machine, address: string) {
+  const download = `command -v coder >/dev/null || { case $(uname -m) in x86_64) a=amd64;; aarch64|arm64) a=arm64;; *) exit 1;; esac; b="$HOME/.local/bin" && mkdir -p "$b" && p=$(mktemp "$b/.coder.XXXXXX") && { c=$(curl -q --proto =https --max-redirs 0 -fsS --max-time 300 -w '%{http_code}' -o "$p" ${quote(`${address}/bin/coder-linux-`)}"$a") && [ "$c" = 200 ] && [ -s "$p" ] && chmod +x "$p" && "$p" version >/dev/null && mv -f "$p" "$b/coder"; s=$?; rm -f "$p"; [ $s = 0 ] || echo "the download answered HTTP $c and gave no Coder CLI" >&2; exit $s; }; }`;
+  const installed = await box.exec(["sh", "-c", download]);
+  if (installed.code !== 0) throw new Error(`Hedge could not install the Coder CLI on ${host} from ${address}: ${installed.output.trim()}`);
+}
+
+async function leaveSignIn(host: string, box: Machine, address: string, variables: string[], context: DevboxContext) {
+  const https = address.startsWith("https://");
+  if (https) await installCoder(host, box, address);
+  const unset = variables.length ? ` First remove ${variables.join(" and ")} from the environment on ${host}, then sign` : " Sign";
+  const left = `Coder on ${host} is signed in another way, so Hedge left that sign-in alone.${unset}`;
+  const step: LeftStep = https ? { say: `${left} it in to ${address}, so it reaches the hub and the other nodes by their coder. names.`, command: `coder login ${quote(address)} && coder config-ssh --yes` } : { say: `${left} it in to Coder over HTTPS, at an address it reaches. The hub's Coder address, ${address}, is plain HTTP, so Hedge prints no sign-in command for it.` };
+  if (!context.leftForYou) throw new Error(`${step.say}${step.command ? ` Run on ${host}: ${step.command}.` : ""} Then run ${again(context)} again.`);
   context.leftForYou([step]);
 }
 

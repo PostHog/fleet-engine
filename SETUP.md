@@ -657,10 +657,16 @@ creates no node ends at step 8 (see step 1).
    and run `coder login` with an HTTPS address the node reaches. Then run
    `hedge devbox add` again.
    When the node is already signed in to Coder another way, at another
-   address or through `CODER_URL` or `CODER_SESSION_TOKEN`, it leaves that
-   sign-in alone and makes no token. It lists `coder login` with the hub's
-   Coder address among the steps for the person at the end. Ask the person
-   to run it only when the node should use the hub's Coder deployment.
+   address, through `CODER_URL` or `CODER_SESSION_TOKEN`, or with a `url`
+   or `session` path that is not a plain file, it leaves that sign-in alone
+   and makes no token. It installs a missing Coder CLI from the hub's Coder
+   address as above, and lists `coder login` with that address among the
+   steps for the person at the end. When `CODER_URL` or
+   `CODER_SESSION_TOKEN` is set on the node, the step says to remove it from
+   the node's environment first, because Coder reads these variables before
+   its files. When the hub's Coder address is plain HTTP, the step prints no
+   command: the person signs the node in over HTTPS. Ask the person to run
+   it only when the node should use the hub's Coder deployment.
 4. **Check.** Run the `hedge doctor` of step 8 on each node, and on the hub
    again. Explain each line as in step 8.
 

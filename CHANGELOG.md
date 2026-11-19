@@ -34,10 +34,13 @@
   only from an HTTP 200 answer with no redirect, and only after the
   downloaded CLI runs. When the node does not reach that address over
   HTTPS, it makes no token and names the sign-in the person does there.
-  When the node is signed in to Coder another way, at another address or
-  through `CODER_URL` or `CODER_SESSION_TOKEN`, it leaves that sign-in
-  alone, makes no token, and lists the sign-in among the steps for the
-  person. It removes a token that it could not write, or names the token
+  When the node is signed in to Coder another way, at another address,
+  through `CODER_URL` or `CODER_SESSION_TOKEN`, or with a `url` or
+  `session` path that is not a plain file, it leaves that sign-in alone,
+  makes no token, installs a missing Coder CLI as above, and lists the
+  sign-in among the steps for the person. That step names the variables
+  to remove first, and prints no command when the hub's Coder address is
+  plain HTTP. It removes a token that it could not write, or names the token
   and the command that removes it.
   After the node applies the profile, it asks the node's
   `hedge doctor --to-do` which steps are left. When the apply passed and
