@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, test } from "bun:test";
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, cpSync, existsSync, openSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { git, isolateGit, tempDirs } from "./git.ts";
 
@@ -113,12 +113,20 @@ esac`);
   }
 
   function getSh(box: Sandbox, args: string[], options: { env?: Record<string, string>; cwd?: string } = {}) {
-    const result = Bun.spawnSync(["sh", join(repoRoot, "get.sh"), ...args], {
-      env: { PATH: box.bin, HOME: box.home, HEDGE_ENGINE_REPO: engine.repo, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", ...options.env },
-      cwd: options.cwd,
-      stdin: "ignore",
-    });
-    return { code: result.exitCode, output: result.stdout.toString() + result.stderr.toString(), calls: existsSync(box.log) ? readFileSync(box.log, "utf8") : "" };
+    const outputFile = join(box.root, "output.log");
+    const output = openSync(outputFile, "w");
+    try {
+      const result = Bun.spawnSync(["sh", join(repoRoot, "get.sh"), ...args], {
+        env: { PATH: box.bin, HOME: box.home, HEDGE_ENGINE_REPO: engine.repo, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", ...options.env },
+        cwd: options.cwd,
+        stdin: "ignore",
+        stdout: output,
+        stderr: output,
+      });
+      return { code: result.exitCode, output: readFileSync(outputFile, "utf8"), calls: existsSync(box.log) ? readFileSync(box.log, "utf8") : "" };
+    } finally {
+      closeSync(output);
+    }
   }
 
   return { temp, engine, sandbox, profile, getSh };
