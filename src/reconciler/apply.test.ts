@@ -258,6 +258,38 @@ describe("a config entry that waits for a pack check", () => {
     expect(settings(home)).toEqual({ model: "opus", env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: "cat key" });
   });
 
+  const stepping = (codes: { before: number; after: number }) => {
+    let ran = false;
+    const seen: unknown[] = [];
+    const run = (home: string) => async ([command]: string[]) => {
+      if (command === "start-proxy") {
+        seen.push(settings(home)?.env?.ANTHROPIC_BASE_URL);
+        ran = true;
+      }
+      if (command === "proxy-check") return ran ? codes.after : codes.before;
+      return 0;
+    };
+    return { run, seen };
+  };
+  const steps = [{ id: "start-proxy", run: ["start-proxy"], pack: "base" }];
+
+  test("that exits 4 without a todo before a step and passes after it puts its config in within the same apply, and leaves no Fix", async () => {
+    const home = temp.make("home-");
+    const { run } = stepping({ before: 4, after: 0 });
+    const applied = await apply(plan({ files: [], checks, config, steps }), { home, adapters: [providerConfigAdapter()], run: run(home) });
+    expect(applied).toMatchObject({ ok: true, findings: [] });
+    expect(settings(home)).toEqual({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: "cat key" });
+  });
+
+  test("that passes before a step and fails after it takes the config back out before apply ends, and apply names the failed check", async () => {
+    const home = temp.make("home-");
+    const { run, seen } = stepping({ before: 0, after: 1 });
+    const applied = await apply(plan({ files: [], checks, config, steps }), { home, adapters: [providerConfigAdapter()], run: run(home) });
+    expect(seen).toEqual(["http://127.0.0.1:8317"]);
+    expect(applied.findings).toEqual([down]);
+    expect(settings(home)).toEqual({});
+  });
+
   test("doctor changes nothing, reports the failed check once, and fails", async () => {
     const home = temp.make("home-");
     await apply(plan({ files: [], checks, config }), { home, adapters: [providerConfigAdapter()], run: proxy(() => true) });

@@ -213,3 +213,20 @@ test("the route check on the hub fails, for Claude Code and Codex, while doctor 
   expect(code).toBe(1);
   expect(printed).toContain(`${files(home).plugin} does not match the pinned quota-ledger plugin 0.1.0.`);
 });
+
+test("once the profile turns the panel off, the route check on the hub fails while the panel's page or plugin is still there, whatever it holds, and passes once install removed them", async () => {
+  const { machine, home } = hub({ panel });
+  await cliProxy("install", machine);
+  writeFileSync(files(home).plugin, "tampered");
+  const check = async () => {
+    const run = hub({ home });
+    return [await cliProxy("check", run.machine), run.printed.join("\n")] as const;
+  };
+  const [code, printed] = await check();
+  expect(code).toBe(1);
+  expect(printed).toContain(`The Proxy panel is off, but ${files(home).page} and ${files(home).plugin} are still there, so the proxy may still serve or run them. Run hedge cli-proxy install.`);
+  rmSync(files(home).page);
+  expect((await check())[0]).toBe(1);
+  await cliProxy("install", hub({ home }).machine);
+  expect((await check())[0]).toBe(0);
+});

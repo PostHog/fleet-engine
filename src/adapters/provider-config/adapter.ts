@@ -6,7 +6,6 @@ import { spawnRunner, type CommandRunner } from "../run.ts";
 import { codexHookTrust, isTrustOf } from "./codex-hooks.ts";
 import { checkPath, get, json, keyPath, overlaps, remove, same, samePath, set, toml, type Document, type Field, type Format } from "./fields.ts";
 import { declaredMarketplaces, reconcilePlugins } from "./plugins.ts";
-import { staleKeys } from "./stale.ts";
 import { claudeJson, isMcpServer, reconcileServers, wantedServers } from "./claude-servers.ts";
 import { linkOnPath, optional, readState, withLock, writeWithBackups, type Write } from "./store.ts";
 
@@ -109,8 +108,6 @@ function owned(plan: Plan, target: Target): Field[] {
 function merge(target: Target, text: string | undefined, previous: Field[], wanted: Field[], adopt: boolean, options: { outage: boolean; gated: (path: string[]) => boolean; dropped: GatedField[]; configPath: string }): Merged {
   const current: Document = text === undefined ? {} : target.format.decode(text);
   const original = target.format.encode(current);
-  const edited = previous.filter((field) => get(current, field.path) !== undefined && !same(get(current, field.path), field.value));
-  const stale = options.outage ? [] : staleKeys(target.provider, current, (path) => target.owns(path) && !wanted.some((field) => overlaps(field.path, path)) && !edited.some((field) => overlaps(field.path, path)));
   const record: Field[] = [];
   const kept: string[] = [];
   const changed: string[] = [];
@@ -160,7 +157,7 @@ function merge(target: Target, text: string | undefined, previous: Field[], want
     .filter((field) => options.dropped.every((other) => other.check !== field.check || other.pack !== field.pack || untouched(other)))
     .filter((field) => !all.some((item) => overlaps(item.path, field.path)))
     .map((field) => field.path);
-  for (const path of [...stale, ...unrecorded]) {
+  for (const path of unrecorded) {
     if (get(current, path) === undefined) continue;
     remove(current, path);
     removed.push(path.join("."));

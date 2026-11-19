@@ -8,6 +8,7 @@ import { tempDirs } from "../../testing/git.ts";
 import { stateLock, tryLock } from "../../lock.ts";
 import { spawnRunner } from "../run.ts";
 import { providerConfigAdapter, type CommandRunner } from "./adapter.ts";
+import { snakeCase, trustedHash } from "./codex-hooks.ts";
 
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
@@ -69,17 +70,29 @@ function claudeCli(installed: string[] = []) {
 const adapters = (run = claudeCli().run) => [filesAdapter, providerConfigAdapter({ run })];
 
 describe("provider config", () => {
-  test("removes a stale proxy base URL with a backup, and keeps every key Hedge never wrote", async () => {
+  test("removes a proxy base URL it recorded with a backup, and keeps every key Hedge has no record of, even one beside the proxy URL", async () => {
     const home = temp.make("home-");
+    await apply(plan([{ provider: "claude", key: "env.ANTHROPIC_BASE_URL", value: "http://127.0.0.1:8317", pack: "hub" }]), { home, adapters: adapters() });
     const before = { model: "opus", env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317", ANTHROPIC_AUTH_TOKEN: "proxy-key", MY_FLAG: "1" }, permissions: { allow: ["Bash(ls)"] } };
     write(home, claude, before);
 
     const report = await apply(plan(), { home, adapters: adapters() });
 
-    expect(read(home, claude)).toEqual({ model: "opus", env: { MY_FLAG: "1" }, permissions: { allow: ["Bash(ls)"] } });
-    expect(report.actions).toContainEqual({ target: claude, operation: "replace", reason: "remove env.ANTHROPIC_BASE_URL, env.ANTHROPIC_AUTH_TOKEN" });
-    const [run] = backups(home);
+    expect(read(home, claude)).toEqual({ model: "opus", env: { ANTHROPIC_AUTH_TOKEN: "proxy-key", MY_FLAG: "1" }, permissions: { allow: ["Bash(ls)"] } });
+    expect(report.actions).toContainEqual({ target: claude, operation: "replace", reason: "remove env.ANTHROPIC_BASE_URL" });
+    const run = backups(home).at(-1);
     expect(JSON.parse(readFileSync(join(run!, claude), "utf8"))).toEqual(before);
+  });
+
+  test("keeps a proxy base URL that Hedge has no record of", async () => {
+    const home = temp.make("home-");
+    const settings = { env: { ANTHROPIC_BASE_URL: "http://localhost:8317/", ANTHROPIC_AUTH_TOKEN: "token" } };
+    write(home, claude, settings);
+
+    const report = await apply(plan(), { home, adapters: adapters() });
+
+    expect(read(home, claude)).toEqual(settings);
+    expect(report.actions).toEqual([]);
   });
 
   test("keeps a base URL that points at a gateway the user chose", async () => {
@@ -94,23 +107,17 @@ describe("provider config", () => {
     expect(backups(home)).toEqual([]);
   });
 
-  test("removes a stale Codex proxy provider and keeps the user's own providers", async () => {
+  test("keeps a Codex provider table and its selector that Hedge has no record of, though it points at the proxy port", async () => {
     const home = temp.make("home-");
-    write(home, codex, [
-      'model = "gpt-5"',
-      'model_provider = "hedge-proxy"',
-      "",
-      "[model_providers.hedge-proxy]",
-      'base_url = "http://hub.example.test:8317/v1"',
-      "",
-      "[model_providers.mine]",
-      'base_url = "https://llm.example.com/v1"',
-      "",
-    ].join("\n"));
+    const mine = { model: "gpt-5", model_provider: "my-proxy", model_providers: { "my-proxy": { name: "Mine", base_url: "http://127.0.0.1:8317/v1", request_max_retries: 9 }, "hedge-proxy": { base_url: "http://hub.example.test:8317/v1" } } };
+    write(home, codex, stringify(mine));
+    const hub = [{ provider: "codex" as const, key: "model_provider", value: "hedge-proxy", pack: "hub", after: "ready" }, { provider: "codex" as const, key: "model_providers.hedge-proxy", value: { base_url: "http://127.0.0.1:8317/v1" }, pack: "hub", after: "ready" }];
+    const waiting = { ...plan(hub), checks: [{ id: "ready", run: ["ready"], say: "Not ready.", pack: "hub" }] };
 
     await apply(plan(), { home, adapters: adapters() });
+    await apply(waiting, { home, adapters: adapters(), run: async () => 1 });
 
-    expect(parse(readFileSync(join(home, codex), "utf8"))).toEqual({ model: "gpt-5", model_providers: { mine: { base_url: "https://llm.example.com/v1" } } });
+    expect(parse(readFileSync(join(home, codex), "utf8"))).toEqual(mine);
   });
 
   test("keeps a proxy key that a pack owns", async () => {
@@ -185,7 +192,7 @@ describe("provider config", () => {
 
   test("previews changes without writing, and check fails until they are applied", async () => {
     const home = temp.make("home-");
-    write(home, claude, { env: { ANTHROPIC_BASE_URL: "http://localhost:8317/" } });
+    await apply(plan([{ provider: "claude", key: "env.ANTHROPIC_BASE_URL", value: "http://localhost:8317/" }]), { home, adapters: adapters() });
 
     const preview = await apply(plan(), { home, dryRun: true, adapters: adapters() });
     expect(preview.findings).toContainEqual({ id: `config:${claude}`, pack: "engine", say: `${claude} needs an update: remove env.ANTHROPIC_BASE_URL.`, repair: "apply" });
@@ -219,13 +226,16 @@ describe("provider config", () => {
     const home = temp.make("home-");
     const hook = { provider: "codex" as const, key: "hooks.UserPromptSubmit", value: [{ hooks: [{ type: "command", command: "hedge-guard", timeout: 10 }] }], after: "ready" };
     const waiting = { ...plan([hook]), checks: [{ id: "ready", run: ["ready"], say: "Not ready.", pack: "base" }], steps: [{ id: "prepare", run: ["prepare"], check: ["prepared"], pack: "base" }] };
-    const trusted = () => (parse(readFileSync(join(home, codex), "utf8")) as { hooks: { state: Record<string, unknown> } }).hooks.state;
+    const trustsEveryHook = () => {
+      const { hooks } = parse(readFileSync(join(home, codex), "utf8")) as { hooks: Record<string, unknown> & { state: Record<string, { trusted_hash?: string }> } };
+      const handlers = Object.entries(hooks).filter(([event]) => event !== "state").flatMap(([event, groups]) => (groups as Array<{ hooks: Array<Record<string, unknown>> }>).flatMap((group, index) => group.hooks.map((handler, at) => [event, group, handler, index, at] as const)));
+      return handlers.length > 0 && handlers.every(([event, group, handler, index, at]) => hooks.state[`${join(home, codex)}:${snakeCase(event)}:${index}:${at}`]?.trusted_hash === trustedHash(event, group, handler));
+    };
     await apply(waiting, { home, adapters: adapters(), run: async () => 0 });
-    const trust = trusted();
-    expect(Object.keys(trust)).toEqual([`${join(home, codex)}:user_prompt_submit:0:0`]);
+    expect(trustsEveryHook()).toBe(true);
     const failed = await apply(waiting, { home, adapters: adapters(), run: async (command) => (command[0] === "ready" ? 0 : 1) });
     expect(failed.findings.map((finding) => finding.id)).toEqual(["step:prepare"]);
-    expect(trusted()).toEqual(trust);
+    expect(trustsEveryHook()).toBe(true);
   });
 
   test("leaves a settings file alone when it is a link", async () => {
@@ -235,11 +245,11 @@ describe("provider config", () => {
     mkdirSync(join(home, ".claude"));
     symlinkSync(join(dotfiles, "settings.json"), join(home, claude));
 
-    const report = await apply(plan(), { home, adapters: adapters() });
+    const report = await apply(plan([{ provider: "claude", key: "model", value: "opus" }]), { home, adapters: adapters() });
 
     expect(lstatSync(join(home, claude)).isSymbolicLink()).toBe(true);
     expect(read(dotfiles, "settings.json")).toEqual({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" } });
-    expect(report.findings).toContainEqual({ id: `kept:${claude}`, pack: "engine", say: `Kept ${claude} because it is a link. Hedge would remove env.ANTHROPIC_BASE_URL there. Make it a plain file in a plain folder to let Hedge change it.` });
+    expect(report.findings).toContainEqual({ id: `kept:${claude}`, pack: "engine", say: `Kept ${claude} because it is a link. Hedge would set model there. Make it a plain file in a plain folder to let Hedge change it.` });
   });
 
   test("leaves a settings file it cannot read as it is", async () => {
@@ -258,7 +268,7 @@ describe("provider config", () => {
     write(dotfiles, "settings.json", { env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" } });
     symlinkSync(dotfiles, join(home, ".claude"));
 
-    const report = await apply(plan(), { home, adapters: adapters() });
+    const report = await apply(plan([{ provider: "claude", key: "model", value: "opus" }]), { home, adapters: adapters() });
 
     expect(read(dotfiles, "settings.json")).toEqual({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" } });
     expect(report.findings.map((finding) => finding.id)).toContain(`kept:${claude}`);
@@ -328,14 +338,6 @@ describe("provider config", () => {
     await apply(plan([{ provider: "claude", key: "env.C", value: "3" }]), { home, adapters: adapters() });
     await apply(plan(), { home, adapters: adapters() });
     expect(read(home, claude)).toEqual({ env: { A: "1", B: "2" } });
-  });
-
-  test("removes the token that went with a recorded proxy URL", async () => {
-    const home = temp.make("home-");
-    await apply(plan([{ provider: "claude", key: "env.ANTHROPIC_BASE_URL", value: "http://127.0.0.1:8317", pack: "hub" }]), { home, adapters: adapters() });
-    write(home, claude, { env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317", ANTHROPIC_AUTH_TOKEN: "key" } });
-    await apply(plan(), { home, adapters: adapters() });
-    expect(read(home, claude)).toEqual({});
   });
 
   test("keeps a key helper Hedge did not write, though it names a file beside the proxy key", async () => {
@@ -425,7 +427,7 @@ describe("provider config", () => {
     write(home, claude, { env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317", ANTHROPIC_AUTH_TOKEN: "secret" } });
     mkdirSync(join(home, ".local/state/hedge"), { recursive: true });
     symlinkSync(elsewhere, join(home, ".local/state/hedge/backups"));
-    await expect(apply(plan(), { home, adapters: [claudeCli().adapter] })).rejects.toThrow("is a link or not a directory");
+    await expect(apply(plan([{ provider: "claude", key: "model", value: "opus" }]), { home, adapters: [claudeCli().adapter] })).rejects.toThrow("is a link or not a directory");
     expect(readdirSync(elsewhere)).toEqual([]);
     expect(read(home, claude).env.ANTHROPIC_AUTH_TOKEN).toBe("secret");
   });

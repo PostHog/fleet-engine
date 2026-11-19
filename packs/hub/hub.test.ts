@@ -506,7 +506,17 @@ describe("the Own-account balancing workflow", () => {
         if (String(input).startsWith(proxyUrl)) routes.add(route());
         return reach(input, init);
       };
-      return { home, result, routes, route, options: { home, adapters: [providerConfigAdapter()], run: hedgeProxy(machine, result.engineRoot) } };
+      const atInstall: unknown[] = [];
+      const hooks = { beforeInstall: () => {} };
+      const served = hedgeProxy(machine, result.engineRoot);
+      const run = async (command: string[]) => {
+        if (command.at(-1) === "install") {
+          atInstall.push(route());
+          hooks.beforeInstall();
+        }
+        return served(command);
+      };
+      return { home, result, routes, route, atInstall, hooks, options: { home, adapters: [providerConfigAdapter()], run } };
     };
     const foreignPlugin = { ".local/share/hedge-cli-proxy/plugins/other.so": "plugin" };
     const unsafe: Array<[string, string | true | undefined]> = [["check:cli-proxy-client", "apply"], ["step:cli-proxy", "apply"], ["check:cli-proxy-accounts", true]];
@@ -520,13 +530,15 @@ describe("the Own-account balancing workflow", () => {
       expect(applied.findings.map((finding) => [finding.id, finding.todo ?? finding.repair])).toEqual(unsafe);
     });
 
-    test("after a successful apply, a plugin Hedge did not install appears while the proxy still lists the model: the next apply fails and takes the route out", async () => {
-      const { home, result, routes, route, options } = runningHub("claude", { credentials: [{ provider: "claude" }] });
+    test("after a successful apply, a plugin Hedge did not install appears while the proxy still lists the model: the next apply takes the route out before the proxy step runs, and fails", async () => {
+      const { home, result, routes, route, atInstall, options } = runningHub("claude", { credentials: [{ provider: "claude" }] });
       expect((await apply(result, options)).ok).toBe(true);
       expect(route()).toBe("http://127.0.0.1:8317");
       mkdirSync(join(dataDir(home), "plugins"), { recursive: true });
       writeFileSync(join(dataDir(home), "plugins/other.so"), "plugin");
+      atInstall.splice(0);
       const failed = await apply(result, options);
+      expect(atInstall).toEqual([undefined]);
       expect(route()).toBeUndefined();
       expect(failed.ok).toBe(false);
       expect(failed.findings.map((finding) => [finding.id, finding.todo ?? finding.repair])).toEqual(unsafe);
@@ -534,6 +546,19 @@ describe("the Own-account balancing workflow", () => {
       expect((await apply(result, options)).ok).toBe(false);
       expect(routes).toEqual(new Set([undefined]));
       expect(route()).toBeUndefined();
+    });
+
+    test("a plugin Hedge did not install that appears after the route check, while the proxy step runs, leaves no route when apply ends", async () => {
+      const { home, result, route, atInstall, hooks, options } = runningHub("claude", { credentials: [{ provider: "claude" }] });
+      hooks.beforeInstall = () => {
+        mkdirSync(join(dataDir(home), "plugins"), { recursive: true });
+        writeFileSync(join(dataDir(home), "plugins/other.so"), "plugin");
+      };
+      const applied = await apply(result, options);
+      expect(atInstall).toEqual(["http://127.0.0.1:8317"]);
+      expect(route()).toBeUndefined();
+      expect(applied.ok).toBe(false);
+      expect(applied.findings.map((finding) => [finding.id, finding.todo ?? finding.repair])).toEqual([unsafe[1], unsafe[2], unsafe[0]]);
     });
 
     test("with a running proxy that has a plugin Hedge did not install, a hedge-proxy Codex table of your own survives the failed step, and Codex keeps using it", async () => {

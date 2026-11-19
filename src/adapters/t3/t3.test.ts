@@ -344,12 +344,17 @@ describe("T3 adapter with a running server", () => {
     expect(again.actions).toEqual([]);
   });
 
-  test("applies a setting that waits for a passing check of a pack with a step in this apply, in the same apply", async () => {
+  test("applies a setting whose check first passes once a step of this apply ran, in the same apply", async () => {
     const home = temp.make("home-");
     const { server, adapter } = setup({ settings: { sidebarAutoSettleAfterDays: 7 } });
     const waiting = { ...plan("linux", [{ ...entry("sidebarAutoSettleAfterDays", 3), after: "ready" }]), checks: [{ id: "ready", run: ["ready"], say: "Not ready.", pack: "base" }], steps: [{ id: "prepare", run: ["prepare"], check: ["prepared"], pack: "base" }] };
-    const report = await apply(waiting, { home, adapters: [adapter], run: async () => 0 });
-    expect(report.ok).toBe(true);
+    let prepared = false;
+    const run = async ([command]: string[]) => {
+      if (command === "prepare") prepared = true;
+      return command === "prepared" || command === "ready" ? (prepared ? 0 : 1) : 0;
+    };
+    const report = await apply(waiting, { home, adapters: [adapter], run });
+    expect(report).toMatchObject({ ok: true, findings: [] });
     expect(server.state.settings.sidebarAutoSettleAfterDays).toBe(3);
   });
 

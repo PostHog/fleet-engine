@@ -263,8 +263,11 @@ async function accounts(machine: ProxyMachine, paths: Layout): Promise<number> {
 async function unsafe(machine: ProxyMachine, paths: Layout): Promise<string | undefined> {
   const others = await foreignPlugins(paths);
   if (others.length) return `Remove the plugins Hedge did not install: ${others.join(", ")}. While the Proxy panel is on, anyone with the management key can install plugins from CLIProxyAPI's plugin store, and the proxy runs them on the hub.`;
-  const pinned = machine.panel ? ([[paths.page, machine.panel.page, "management panel"], [paths.plugin, machine.panel.plugin, "quota-ledger plugin"]] as const) : [];
-  for (const [path, release, name] of pinned) {
+  if (!machine.panel) {
+    const left = [paths.page, paths.plugin].filter((path) => existsSync(path));
+    return left.length ? `The Proxy panel is off, but ${left.join(" and ")} ${left.length === 1 ? "is" : "are"} still there, so the proxy may still serve or run ${left.length === 1 ? "it" : "them"}. Run hedge cli-proxy install.` : undefined;
+  }
+  for (const [path, release, name] of [[paths.page, machine.panel.page, "management panel"], [paths.plugin, machine.panel.plugin, "quota-ledger plugin"]] as const) {
     if (!existsSync(path)) return `${path} is missing. Run hedge cli-proxy install.`;
     if (!(await assetReady(path, release))) return `${path} does not match the pinned ${name} ${release.version}. It may have come from an unpinned source, such as CLIProxyAPI's own panel download. Run hedge cli-proxy install.`;
   }
