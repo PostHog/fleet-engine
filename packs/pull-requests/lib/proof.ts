@@ -4,7 +4,7 @@ import { basename, dirname, extname, join } from "node:path";
 import { normalized, type HeardAnswer } from "./proof-answers.ts";
 import { agentRefusal, agentsAcceptance, covers, fold, keptOwed, panelRefusal, tierOf, usersAcceptance, type Decision, type DecisionState, type Ledger, type Mark, type PrRef, type Tier } from "./decision-ledger.ts";
 import type { Family, Usage } from "./proof-models.ts";
-import { quietReason, type DeltaKind, type QuietStep } from "./proof-delta.ts";
+import type { NetDelta as Delta } from "./proof-delta.ts";
 
 export type ProofIdentity = { repository: string; pr: number; commit: string };
 const sha = /^[0-9a-f]{40}$/;
@@ -222,17 +222,16 @@ function askUser(identity: ProofIdentity, stop: string) {
 
 export type CapturedBy = "hedge" | "author";
 export type DecisionMark = Pick<Decision, "mark" | "id">;
-export type ReviewRequest = { scope: string; base?: string; from?: string; decision?: Decision; phase?: string; arbiter: Arbiter; limits: ReviewLimits; cleanBaseMerge?: CleanBaseMerge; quietCommit?: QuietCommit; capturedBy?: CapturedBy; lock?: LockRound };
+export type ReviewRequest = { scope: string; base?: string; from?: string; decision?: Decision; phase?: string; arbiter: Arbiter; limits: ReviewLimits; cleanBaseMerge?: CleanBaseMerge; netDelta?: NetDelta; capturedBy?: CapturedBy; lock?: LockRound };
 export type Reserved = { round: number | "final"; id: string; directory: string };
 type Permit = { arbiter: Arbiter; limits: ReviewLimits };
 
 const reserveDecided = (reviews: string, name: string, record: object, decision: Decision | undefined, lock: LockRound | undefined) => reserve(reviews, name, { ...record, ...decision ? { decision } : {} }, lock);
 
-async function startFinalRead(home: string, identity: ProofIdentity, base: string | undefined, decision: Decision | undefined, phase: FinalReadPhase, permit: Permit, cleanBaseMerge: CleanBaseMerge, quietCommit: QuietCommit, capturedBy: CapturedBy, from: string | undefined, lock: LockRound | undefined): Promise<Reserved> {
+async function startFinalRead(home: string, identity: ProofIdentity, base: string | undefined, decision: Decision | undefined, phase: FinalReadPhase, permit: Permit, cleanBaseMerge: CleanBaseMerge, netDelta: NetDelta, capturedBy: CapturedBy, from: string | undefined, lock: LockRound | undefined): Promise<Reserved> {
   if (base === undefined) throw new Error("A final read needs --base with the latest reviewed commit");
   if (base === identity.commit) throw new Error("HEAD is already reviewed. Skip the final read.");
-  const quiet = decision ? undefined : reviewedThrough(identity.commit, new Set([base]), cleanBaseMerge, quietCommit);
-  if (quiet?.quiet.length) throw new Error(`HEAD needs no final read: final read carried from ${short(base)}: ${quietReason(quiet.kinds)}. hedge proof gate counts the carry. To read it anyway, pass --agent '<your reason>', or the user's --override`);
+  if (!decision && netDelta(base, identity.commit)?.files.length === 0) throw new Error(`HEAD needs no final read: nothing changed past ${short(base)} and the base. hedge proof gate counts the carry. To read it anyway, pass --agent '<your reason>', or the user's --override`);
   const reviews = join(pullRequestDirectory(home, identity), "reviews");
   for (let attempt = 1; attempt <= 100; attempt++) {
     const started = await reviewNames(reviews);
@@ -267,7 +266,7 @@ async function reservedAlone(reviews: string, counted: string[], name: string, r
 const coversReview = (base: string, reviewed: string, cleanBaseMerge: CleanBaseMerge) => reviewedThroughMerges(base, new Set([reviewed]), cleanBaseMerge) !== undefined;
 
 export async function startReview(home: string, identity: ProofIdentity, request: ReviewRequest): Promise<Reserved> {
-  const { scope, base, phase, decision, cleanBaseMerge = () => undefined, quietCommit = () => undefined, capturedBy = "author", lock } = request;
+  const { scope, base, phase, decision, cleanBaseMerge = () => undefined, netDelta = () => undefined, capturedBy = "author", lock } = request;
   const from = request.from ?? base;
   const permit = { arbiter: request.arbiter, limits: request.limits };
   if (!["full", "fixes", "final"].includes(scope)) throw new Error("Review scope must be full, fixes, or final");
@@ -276,7 +275,7 @@ export async function startReview(home: string, identity: ProofIdentity, request
   if (base !== undefined && scope === "full") throw new Error("--scope full reads the diff from the merge base. Drop --base");
   const reviews = join(pullRequestDirectory(home, identity), "reviews");
   await mkdir(reviews, { recursive: true, mode: 0o700 });
-  if (scope === "final") return startFinalRead(home, identity, base, decision, finalReadPhase(phase ?? "review"), permit, cleanBaseMerge, quietCommit, capturedBy, from, lock);
+  if (scope === "final") return startFinalRead(home, identity, base, decision, finalReadPhase(phase ?? "review"), permit, cleanBaseMerge, netDelta, capturedBy, from, lock);
   return startRound(home, identity, reviews, { scope, base, from, decision, permit, cleanBaseMerge, capturedBy, lock });
 }
 
@@ -987,82 +986,67 @@ async function finishedReviews(home: string, identity: ProofIdentity) {
 const reviewLabel = (name: string) => name.startsWith(finalReadPrefix) ? `final read ${name.slice(finalReadPrefix.length)}` : `round ${name}`;
 
 export type CleanBaseMerge = (commit: string) => string | undefined;
-export type QuietCommit = (commit: string) => QuietStep | undefined;
-type Carried = { commit: string; from: string; merges: string[]; quiet?: string[]; reason?: string; recordedAt: string };
+export type NetDelta = (reviewed: string, head: string) => Delta | undefined;
+type Carried = { commit: string; from: string; recordedAt: string };
 const carriedPath = (home: string, identity: ProofIdentity, commit: string) => join(pullRequestDirectory(home, identity), "carried", `${commit}.json`);
 const maxCarriedMerges = 20;
-const maxQuietCommits = 30;
+const maxCarriedHeads = 5;
 
 function reviewedThroughMerges(start: string, reviewed: Set<string>, cleanBaseMerge: CleanBaseMerge) {
-  const found = reviewedThrough(start, reviewed, cleanBaseMerge, () => undefined);
-  return found && { from: found.from, merges: found.merges };
-}
-
-function reviewedThrough(start: string, reviewed: Set<string>, cleanBaseMerge: CleanBaseMerge, quietCommit: QuietCommit) {
   const merges: string[] = [];
-  const quiet: string[] = [];
-  const kinds = new Set<DeltaKind>();
-  const cancelled = new Map<string, string>();
   let commit: string | undefined = start;
-  while (commit && merges.length <= maxCarriedMerges && quiet.length <= maxQuietCommits) {
-    const undone = cancelled.get(commit);
-    if (undone) { cancelled.delete(commit); commit = undone; continue; }
-    if (reviewed.has(commit) && !cancelled.size) return { from: commit, merges, quiet, kinds: [...kinds] };
+  while (commit && merges.length <= maxCarriedMerges) {
+    if (reviewed.has(commit)) return { from: commit, merges };
     const merged = cleanBaseMerge(commit);
-    if (merged) { merges.push(commit); commit = merged; continue; }
-    const step = quietCommit(commit);
-    if (!step) return undefined;
-    quiet.push(commit);
-    if (step.cancels) cancelled.set(step.cancels.commit, step.cancels.parent);
-    step.kinds.forEach((kind) => kinds.add(kind));
-    commit = step.parent;
+    if (!merged) return undefined;
+    merges.push(commit);
+    commit = merged;
   }
   return undefined;
 }
 
-async function carryForward(home: string, identity: ProofIdentity, reviewed: Set<string>, cleanBaseMerge: CleanBaseMerge, quietCommit: QuietCommit) {
-  const found = reviewedThrough(identity.commit, reviewed, cleanBaseMerge, quietCommit);
-  if (!found || (!found.merges.length && !found.quiet.length)) return undefined;
-  const quiet = found.quiet.length ? { quiet: found.quiet, reason: quietReason(found.kinds) } : {};
-  const carried: Carried = { commit: identity.commit, from: found.from, merges: found.merges, ...quiet, recordedAt: new Date().toISOString() };
+async function carryForward(home: string, identity: ProofIdentity, finished: FinishedReview[], netDelta: NetDelta) {
+  const heads = [...new Set(finished.map((review) => review.commit).reverse())].slice(0, maxCarriedHeads);
+  const from = heads.find((commit) => netDelta(commit, identity.commit)?.files.length === 0);
+  if (!from) return undefined;
+  const carried: Carried = { commit: identity.commit, from, recordedAt: new Date().toISOString() };
   await writeJson(carriedPath(home, identity, identity.commit), carried);
   return carried;
 }
 
 const panelHint = "Run hedge proof review, which runs the lenses of the PR's review tier, or, for a PR that the user's rules exempt from the swarm, record hedge proof gap --kind panel --reason <the exception>";
 
-async function reviewStatus(weigh: Weigh, cleanBaseMerge: CleanBaseMerge, quietCommit: QuietCommit): Promise<Status & { panelGap?: GapProof }> {
+async function reviewStatus(weigh: Weigh, netDelta: NetDelta): Promise<Status & { panelGap?: GapProof }> {
   const { home, identity, decisions } = weigh;
   const all = await finishedReviews(home, identity);
   const firstPanel = all.find((review) => review.panel);
-  if (firstPanel) return headReview(home, identity, all.filter((review) => review.finishedAt >= firstPanel.finishedAt), cleanBaseMerge, quietCommit);
+  if (firstPanel) return headReview(home, identity, all.filter((review) => review.finishedAt >= firstPanel.finishedAt), netDelta);
   const gap = await readJson<Gap | undefined>(gapPath(home, identity, "panel"), undefined);
   const weighed = await gapAcceptance(weigh, gap, "panel");
   const acceptance = weighed.acceptance;
   if (!gap && acceptance?.by !== "the user") return { problem: "missing", line: `review: no finished panel round on the PR${all.length ? `; ${all.length} single-reviewer review(s) do not count` : ""}. ${panelHint}`, ...lapseOf(weighed) };
   const panelGap = gapProof(gap, weighed, decisions);
   const line = `panel ${gapText(panelGap)}`;
-  const head = await headReview(home, identity, all, cleanBaseMerge, quietCommit);
+  const head = await headReview(home, identity, all, netDelta);
   if (!acceptance) return { problem: head.problem ?? "gap", line: `${head.line}; ${line}`, panelGap, ...countedGap(weighed) };
   return { ...head, line: `${head.line}; ${line}`, covered: head.covered && `${head.covered}, ${line}`, panelGap, ...countedGap(weighed) };
 }
 
-async function headReview(home: string, identity: ProofIdentity, finished: FinishedReview[], cleanBaseMerge: CleanBaseMerge, quietCommit: QuietCommit): Promise<Status> {
+const reviewedBy = (review: FinishedReview) => `${reviewLabel(review.name)}${review.reviewer ? ` by ${review.reviewer}` : ""}`;
+
+async function headReview(home: string, identity: ProofIdentity, finished: FinishedReview[], netDelta: NetDelta): Promise<Status> {
   const head = finished.filter((review) => review.commit === identity.commit).at(-1);
-  if (head) {
-    const covered = `${reviewLabel(head.name)}${head.reviewer ? ` by ${head.reviewer}` : ""}`;
-    return { problem: undefined, line: `review: HEAD reviewed in ${covered}`, covered };
-  }
-  const carried = await carryForward(home, identity, new Set(finished.map((review) => review.commit)), cleanBaseMerge, quietCommit);
-  if (carried?.reason) {
+  if (head) return { problem: undefined, line: `review: HEAD reviewed in ${reviewedBy(head)}`, covered: reviewedBy(head) };
+  const carried = await carryForward(home, identity, finished, netDelta);
+  if (carried) {
     const review = finished.filter((done) => done.commit === carried.from).at(-1)!;
-    const merges = carried.merges.length ? ` and ${carried.merges.length} clean merge(s) of the base` : "";
-    const covered = `final read carried from ${short(carried.from)}: ${carried.reason}`;
-    return { problem: undefined, line: `review: ${covered} (${reviewLabel(review.name)}${review.reviewer ? ` by ${review.reviewer}` : ""}; ${carried.quiet!.length} quiet commit(s)${merges})`, covered };
+    return { problem: undefined, line: `review: HEAD carried from ${short(carried.from)}: nothing changed past it and the base (${reviewedBy(review)})`, covered: `carried from ${short(carried.from)}` };
   }
-  if (carried) return { problem: undefined, line: `review: HEAD carried forward from the review of ${short(carried.from)} across ${carried.merges.length} clean merge(s) of the base`, covered: `carried from ${short(carried.from)}` };
   const latest = finished.at(-1);
-  return { problem: "missing", line: latest ? `review: HEAD not reviewed, last review covered ${short(latest.commit)}` : "review: HEAD not reviewed" };
+  if (!latest) return { problem: "missing", line: "review: HEAD not reviewed" };
+  const changed = netDelta(latest.commit, identity.commit)?.files.length;
+  const read = changed ? `; ${changed} file(s) changed past it and the base. Read them with hedge proof review --scope final --base ${latest.commit}` : "";
+  return { problem: "missing", line: `review: HEAD not reviewed, last review covered ${short(latest.commit)}${read}` };
 }
 
 async function responseStatuses(home: string, identity: ProofIdentity, body: string | undefined): Promise<Status[]> {
@@ -1104,7 +1088,7 @@ function headStatus(identity: ProofIdentity, before: PushedHead, after: PushedHe
 }
 
 /** devPull reads the dev PR that a prod PR waits on (hedge proof require --after-dev). */
-export type GateOptions = { ci: () => CiResult; pushedHead: () => PushedHead; ledger: Ledger; landed?: boolean; cleanBaseMerge?: CleanBaseMerge; quietCommit?: QuietCommit; now?: Date; devPull?: (dev: DevPr) => DevPull | Promise<DevPull> };
+export type GateOptions = { ci: () => CiResult; pushedHead: () => PushedHead; ledger: Ledger; landed?: boolean; cleanBaseMerge?: CleanBaseMerge; netDelta?: NetDelta; now?: Date; devPull?: (dev: DevPr) => DevPull | Promise<DevPull> };
 
 // A fenced block is an example, never the section: drop it before looking for the heading.
 const unfenced = (body: string) => body.replace(/^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?^ {0,3}\1[^\n]*$/gm, "");
@@ -1158,7 +1142,7 @@ async function readDev(dev: DevPr | undefined, devPull: GateOptions["devPull"]):
   catch (error) { return { ref: dev, error: (error as Error).message.trim().split("\n")[0] || "unknown error" }; }
 }
 
-export async function proofGate(home: string, identity: ProofIdentity, { ci, pushedHead, ledger, landed = false, cleanBaseMerge = () => undefined, quietCommit = () => undefined, now = new Date(), devPull }: GateOptions) {
+export async function proofGate(home: string, identity: ProofIdentity, { ci, pushedHead, ledger, landed = false, cleanBaseMerge = () => undefined, netDelta = () => undefined, now = new Date(), devPull }: GateOptions) {
   const before = pushedHead();
   const tier = "error" in before || before.body === undefined ? "ungraded" : tierOf(before.body);
   const decisions = await readDecisions(ledger);
@@ -1167,7 +1151,7 @@ export async function proofGate(home: string, identity: ProofIdentity, { ci, pus
   const dev = owed?.kinds.includes("dev-observed") ? await readDev(owed.afterDev, devPull) : undefined;
   const kinds = await Promise.all((owed?.kinds ?? []).map((kind) => kindStatus(weigh, kind, landed, cleanBaseMerge, dev)));
   const devResult = kinds.find((kind) => kind.dev)?.dev;
-  const review = await reviewStatus(weigh, cleanBaseMerge, quietCommit);
+  const review = await reviewStatus(weigh, netDelta);
   const responses = await responseStatuses(home, identity, landed || !("body" in before) ? undefined : before.body ?? "");
   const ciResult = ci();
   const head = headStatus(identity, before, pushedHead());

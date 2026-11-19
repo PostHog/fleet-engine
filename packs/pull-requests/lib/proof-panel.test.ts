@@ -489,7 +489,6 @@ test("a round after the PR merged its base reads and demands only the files the 
   const brief = reviewer.prompts().at(-1)!;
   expect(brief).toContain("+greet the member");
   expect(brief).not.toContain("the base moves on");
-  expect(brief).toContain("It leaves out 1 file(s) that a merge of the base brought in.");
 
   await pr.advanceBase("base.md", "the base moves again\n");
   await pr.git("merge", "-q", "--no-edit", "main");
@@ -499,7 +498,6 @@ test("a round after the PR merged its base reads and demands only the files the 
   const read = reviewer.prompts().at(-1)!;
   expect(read).toContain("+greet every member");
   expect(read).not.toContain("the base moves again");
-  expect(read).toContain("It leaves out 1 file(s) that a merge of the base brought in.");
 });
 
 test("after a base merge, a round keeps the PR's renames and non-ASCII file names whole", async () => {
@@ -522,7 +520,6 @@ test("after a base merge, a round keeps the PR's renames and non-ASCII file name
   expect(brief).toContain("rename from feature.txt");
   expect(brief).toContain("+greet the member");
   expect(brief).not.toContain("the base moves on");
-  expect(brief).toContain("It leaves out 1 file(s)");
 });
 
 test("a panel that fails to plan gives its round back, so the same command plans it again", async () => {

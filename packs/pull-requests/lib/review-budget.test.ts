@@ -307,7 +307,7 @@ test("the last read reads every fix since the panel commit with the Correctness 
 
   expect((await pr.hedge("review", "--scope", "final", "--base", fixes)).code).toBe(0);
   const prompt = reviewer.prompts().at(-1)!;
-  expect(prompt).toContain(`Review the change ${panel}..${head}`);
+  expect(prompt).toContain(`Review the change ${await pr.git("rev-parse", `${panel}^{tree}`)}..${head}`);
   expect(prompt).toContain("This is the last read: the diff holds every fix since the panel. Read it with the Correctness lens:\n\nTrace one concrete input through each new branch.");
   expect(prompt).toContain("-greet\n+greet the new member");
 });
@@ -340,61 +340,6 @@ test("hedge proof miss records --introduced-by-fix on the case", async () => {
   expect(cases.map((miss) => miss.introducedByFix)).toEqual([true, undefined]);
 });
 
-test("a revert of a PR commit, or a commit that only deletes test files, keeps the review, and a revert of a base commit does not", async () => {
-  const pr = await checkout();
-  pr.pullRequestState({ body: graded("non-critical", "medium") });
-  await pr.commit("feature.txt", "greet\n");
-  await pr.commit("feature.test.ts", "test(\"greets\", () => {});\n");
-  await pr.hedge("require", "--none", "--reason", "fixture");
-  await panelReview(pr);
-
-  const fix = await pr.commit("feature.txt", "greet the member\n");
-  expect((await pr.hedge("gate")).code).toBe(1);
-  await pr.git("revert", "--no-edit", fix);
-  const reverted = await pr.hedge("gate");
-  expect(reverted.code).toBe(0);
-  expect(reverted.output).toContain("revert of a PR commit");
-
-  await pr.git("rm", "-q", "feature.test.ts");
-  await pr.git("commit", "-q", "-m", "drop the test");
-  const deleted = await pr.hedge("gate");
-  expect(deleted.code).toBe(0);
-  expect(deleted.output).toContain("test-only delta");
-
-  const fixed = await pr.commit("feature.txt", "greet every member\n");
-  await pr.commit("feature.test.ts", "test(\"greets every member\", () => {});\n");
-  await pr.git("revert", "--no-edit", fixed);
-  const apart = await pr.hedge("gate");
-  expect(apart.code).toBe(0);
-  expect(apart.output).toContain("revert of a PR commit and test-only delta");
-
-  const branch = await pr.git("rev-parse", "--abbrev-ref", "HEAD");
-  const before = await pr.git("rev-parse", "HEAD");
-  await pr.git("checkout", "-q", "-b", "elsewhere", `${before}~1`);
-  const elsewhere = await pr.commit("feature.txt", "greet\n");
-  await pr.git("checkout", "-q", branch);
-  await pr.git("revert", "--no-edit", elsewhere);
-  expect((await pr.hedge("gate")).code).toBe(1);
-  await pr.git("reset", "-q", "--hard", before);
-
-  const again = await pr.commit("feature.txt", "greet the new member\n");
-  await pr.git("update-ref", "refs/remotes/origin/main", again);
-  await pr.git("revert", "--no-edit", again);
-  expect((await pr.hedge("gate")).code).toBe(1);
-});
-
-test("deleting a test file that code imports needs a new review", async () => {
-  const pr = await checkout();
-  pr.pullRequestState({ body: graded("non-critical", "medium") });
-  await pr.commit("policy.test.ts", "export const policy = 1;\n");
-  await pr.commit("app.ts", "import { policy } from \"./policy.test.ts\";\nexport const app = policy;\n");
-  await pr.hedge("require", "--none", "--reason", "fixture");
-  await panelReview(pr);
-  await pr.git("rm", "-q", "policy.test.ts");
-  await pr.git("commit", "-q", "-m", "drop the policy");
-  expect((await pr.hedge("gate")).code).toBe(1);
-});
-
 test("a known answer waits for the budget of its own phase", async () => {
   const pr = await checkout();
   pr.pullRequestState({ body: graded("non-critical", "medium") });
@@ -413,36 +358,6 @@ test("a known answer waits for the budget of its own phase", async () => {
 
   writeFileSync(join(pr.repository, "responses.md"), "1. known: listed under Known issues.\n");
   await expect(pr.hedge("respond", "--round", "final-2", "responses.md")).rejects.toThrow("only once the review budget of 2 reviews is spent; 1 ran");
-});
-
-test("a revert carries only from a reviewed commit before the reverted one", async () => {
-  const pr = await checkout();
-  pr.pullRequestState({ body: graded("non-critical", "medium") });
-  await pr.commit("feature.txt", "greet\n");
-  await pr.hedge("require", "--none", "--reason", "fixture");
-  const panel = await panelReview(pr);
-  const first = await pr.commit("feature.txt", "greet the member\n");
-  const second = await pr.commit("feature.txt", "greet the new member\n");
-  await pr.hedge("review-start", "--scope", "final", "--base", panel);
-  writeFileSync(join(pr.repository, "findings.md"), "No findings.\n");
-  await pr.hedge("review-finish", "--round", "final-1", "--reviewer", "gpt-6.1-sol", "findings.md");
-
-  await pr.git("revert", "--no-edit", second);
-  expect((await pr.hedge("gate")).code).toBe(1);
-  await pr.git("revert", "--no-edit", first);
-  const back = await pr.hedge("gate");
-  expect(back.code).toBe(0);
-  expect(back.output).toContain(`final read carried from ${panel.slice(0, 7)}: revert of a PR commit`);
-
-  const fix = await pr.commit("helper.txt", "names\n");
-  const later = await pr.commit("other.txt", "uses the names\n");
-  pr.env.HEDGE_REVIEW_ARBITER = continueArbiter();
-  await pr.hedge("review-start", "--scope", "final", "--base", second);
-  writeFileSync(join(pr.repository, "findings.md"), "No findings.\n");
-  await pr.hedge("review-finish", "--round", "final-2", "--reviewer", "gpt-6.1-sol", "findings.md");
-  expect(await pr.git("rev-parse", "HEAD")).toBe(later);
-  await pr.git("revert", "--no-edit", fix);
-  expect((await pr.hedge("gate")).code).toBe(1);
 });
 
 test("a review that another one overtakes while it weighs the budget backs out", async () => {

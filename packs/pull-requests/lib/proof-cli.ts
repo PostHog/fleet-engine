@@ -19,7 +19,7 @@ import { receiptBudget } from "./proof-receipt-page.ts";
 import { publisherSeam } from "./proof-receipt-publisher.ts";
 import { reviewPrompt } from "./proof-review.ts";
 import { leftOutNote, reviewRange } from "./proof-range.ts";
-import { quietCommitIn } from "./proof-delta.ts";
+import { netDeltaIn } from "./proof-delta.ts";
 import { baseRefs, baseTip, cleanBaseMerge, mergeBase, pullRequestDetails, remotesOf, reviewTier, tierCeiling, tierLenses, topLevel, type ReviewTier } from "./proof-checkout.ts";
 import { arbiterOf, finalGate, reviewLimit, type FinalGate } from "./proof-gate.ts";
 import { anchorCheck } from "./finding-anchors.ts";
@@ -381,16 +381,20 @@ required checks of the base branch, from its rulesets and branch protection, dec
 required. A stacked PR whose base requires nothing is held to the default branch's required checks. When no branch
 requires any, every check counts. On a draft, a required check named "<workflow> / <job>" that never reported counts
 as withheld from drafts when its workflow reported other checks on the commit and all of them passed. CI is unknown
-when GitHub does not answer for the rulesets or branch protection. A clean merge of the PR's base carries the review and the evidence of
-its other parent forward. The review needs a finished --lens panel round on the PR, and HEAD read by a panel round or
+when GitHub does not answer for the rulesets or branch protection. Evidence carries across a merge of the PR's base
+whose remerge diff is empty. The review needs a finished --lens panel round on the PR, and HEAD read by a panel round or
 by a review that finished after one, such as a final read; single-reviewer rounds alone never count. The first round
 of each review tier counts as the panel. Only blocker and major findings, findings without a severity, and the items of
 a TESTS block need an answer: minor and nit findings are noted. An accepted
-panel gap (gap --kind panel) stands in for the panel. The review also carries across quiet commits: a git revert of
-an earlier commit of the PR, and single-parent commits that only change, add, or delete test files, named *.test.*, *.spec.*, *_test.go, *_test.py or test_*.py, or snapshots in __snapshots__, as regular
-files with an unchanged mode. A mode change, a symlink, a comment, a file in a test folder, or a test
-file whose name other code holds, such as an import of limits.test.ts, needs a review. The gate then prints "final read carried from <sha>: test-only delta" or "revert of a PR commit", and the receipt in
-carried/<HEAD>.json names the quiet commits and the reason. Evidence does not carry across quiet commits.
+panel gap (gap --kind panel) stands in for the panel. The review also carries to HEAD when nothing changed past a
+reviewed head and the base. The gate merges each of the latest 5 reviewed heads, latest first, with the base that HEAD
+contains (git merge-tree --write-tree), and diffs that tree against HEAD. An empty diff carries the review, such as
+after a clean merge of the base, or a change and its revert: the gate prints "review: HEAD carried from <sha>: nothing
+changed past it and the base" and writes the receipt carried/<HEAD>.json, on which it never passes alone. Any other
+diff, a test-only or docs-only one too, takes a final read: the gate prints how many files changed and the command
+hedge proof review --scope final --base <sha>. A conflict that the merge leaves keeps its markers in the tree, so a file
+that HEAD resolved is in the diff. When the checkout lacks either commit, or has no remote of the PR's repository,
+nothing carries, and a missing commit never makes the gate read the PR's base branch from GitHub.
 When those checks pass, the judge runs read-only on the reviewer's row of the model table, as hedge proof review
 picks it. hedge hands it the diff from the merge base, CI, the owed kinds, the counted evidence, every review's
 findings and responses, and the coding standards in ~/.agents/guides/coding-standards.md. It answers four questions:
@@ -498,8 +502,10 @@ change the judge. Exit 1 when no case was scored.`,
     usage: "review-start [--scope full|fixes|final] [--base <reviewed-sha>] [--phase review|babysit] [--override <dated quote> [--thread <id>] | --agent <reason>]",
     summary: `Reserve a review round before you dispatch its reviewers. Round 1 is --scope full and takes no --base. A later
 round is --scope fixes, and a final read is --scope final; both take --base with the commit of the latest finished
-review. The printed id names the round for review-finish and respond. A final read of a HEAD that the gate carries
-across quiet commits is refused, unless --agent with your reason, or the user's --override, asks for it.
+review. The printed id names the round for review-finish and respond. A later round and a final read read only the net
+delta: their diff starts at their base merged with the base that HEAD contains, so a merge of the base adds nothing to
+read. A final read of a HEAD whose net delta is empty is refused, unless --agent with your reason, or the user's
+--override, asks for it.
 A later round with --agent, or the user's --override, may be --scope full: it reviews
 the whole PR diff at HEAD again, such as after a restack.
 ${overrideHelp}`,
@@ -610,13 +616,15 @@ async function reserveRound(options: Map<string, string>, head: ProofIdentity, c
   const scope = options.get("--scope") ?? "full";
   const base = options.has("--base") ? resolveCommit(options.get("--base")!, context.run) : undefined;
   const lastRead = scope === "final" && (options.get("--phase") ?? "review") === "review";
-  const from = lastRead ? await panelCommit(context.home, head) ?? base : rangeStart(scope, base, head, context.run);
+  const netDelta = netDeltaIn(context.run, () => baseRefs(head, context.run));
+  const start = lastRead ? await panelCommit(context.home, head) ?? base : base;
+  const from = scope === "full" ? mergeBase(head, context.run) : start && (netDelta(start, head.commit)?.tree ?? start);
   const { decision, ...permit } = await decisionOf(options, head, context);
   const tier = tierOf(head, context);
   if (tier.name === "read" && capturedBy === "hedge" && !panel && !decision && !await panelCommit(context.home, head)) throw new Error("A PR of the Read tier gets one read, and it is the panel: run hedge proof review, which runs its combined lens");
   const firstPanel = panel && !await panelCommit(context.home, head);
   const limits = firstPanel ? permit.limits : { ...permit.limits, ceiling: tierCeiling(tier, permit.limits.ceiling) };
-  const reserved = await startReview(context.home, head, { scope, base, from, ...permit, limits, decision, phase: options.get("--phase"), cleanBaseMerge: cleanBaseMerge(head, context.run), quietCommit: quietCommitIn(context.run, () => baseRefs(head, context.run)), capturedBy, lock: async (directory) => lockNewRound(directory, await context.lock()) });
+  const reserved = await startReview(context.home, head, { scope, base, from, ...permit, limits, decision, phase: options.get("--phase"), cleanBaseMerge: cleanBaseMerge(head, context.run), netDelta, capturedBy, lock: async (directory) => lockNewRound(directory, await context.lock()) });
   return { ...reserved, scope, base, from, phase: options.get("--phase") };
 }
 
