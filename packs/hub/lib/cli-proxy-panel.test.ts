@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { tempDirs } from "../../../src/testing/git.ts";
 import { cliProxy, panelUrl, proxyUrl, type Panel, type ProxyMachine } from "./cli-proxy.ts";
 import { fakeRun, modeOf, roleHome } from "./run-testing.ts";
@@ -229,4 +229,16 @@ test("once the profile turns the panel off, the route check on the hub fails whi
   expect((await check())[0]).toBe(1);
   await cliProxy("install", hub({ home }).machine);
   expect((await check())[0]).toBe(0);
+});
+
+test("once the profile turns the panel off, the route check on the hub fails while a dangling link sits at the panel's page or plugin", async () => {
+  for (const at of ["page", "plugin"] as const) {
+    const { machine, home } = hub();
+    await cliProxy("install", machine);
+    mkdirSync(dirname(files(home)[at]), { recursive: true });
+    symlinkSync(join(home, "nowhere"), files(home)[at]);
+    const run = hub({ home });
+    expect(await cliProxy("check", run.machine)).toBe(1);
+    expect(run.printed.join("\n")).toContain(`The Proxy panel is off, but ${files(home)[at]} is still there`);
+  }
 });

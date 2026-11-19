@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, renameSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { chmod, copyFile, lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -265,7 +265,7 @@ async function unsafe(machine: ProxyMachine, paths: Layout): Promise<string | un
   const others = await foreignPlugins(paths);
   if (others.length) return `Remove the plugins Hedge did not install: ${others.join(", ")}. While the Proxy panel is on, anyone with the management key can install plugins from CLIProxyAPI's plugin store, and the proxy runs them on the hub.`;
   if (!machine.panel) {
-    const left = [paths.page, paths.plugin].filter((path) => existsSync(path));
+    const left = [paths.page, paths.plugin].filter((path) => lstatSync(path, { throwIfNoEntry: false }));
     return left.length ? `The Proxy panel is off, but ${left.join(" and ")} ${left.length === 1 ? "is" : "are"} still there, so the proxy may still serve or run ${left.length === 1 ? "it" : "them"}. Run hedge cli-proxy install.` : undefined;
   }
   for (const [path, release, name] of [[paths.page, machine.panel.page, "management panel"], [paths.plugin, machine.panel.plugin, "quota-ledger plugin"]] as const) {
