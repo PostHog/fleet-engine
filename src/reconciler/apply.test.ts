@@ -332,7 +332,23 @@ describe("a pack check that waits for the person", () => {
     expect(await check(plan({ files: [], checks, steps, config }), options)).toMatchObject({ ok: true, findings: [] });
   });
 
-  test("that config waits for and that passes once a step ran replaces the first config findings, so a plugin that waited for the step's Claude Code leaves no Fix", async () => {
+  const claudeCli = (ready: () => boolean) => {
+    const installed: Array<{ id: string; scope: string }> = [];
+    const run: CommandRunner = async (command) => {
+      if (!ready()) return { code: 127, stdout: "" };
+      const scope = command.includes("--scope") ? command[command.indexOf("--scope") + 1]! : "user";
+      if (!["user", "project", "local"].includes(scope)) return { code: 1, stdout: "" };
+      if (command[2] === "list") return { code: 0, stdout: JSON.stringify(installed) };
+      if (command[2] === "install") installed.push({ id: command[3]!, scope });
+      if (command[2] === "uninstall") installed.splice(installed.findIndex((entry) => entry.id === command[3] && entry.scope === scope), 1);
+      return { code: 0, stdout: "" };
+    };
+    return { run, installed };
+  };
+  const context7 = "context7@claude-plugins-official";
+  const plugin = { provider: "claude" as const, key: `enabledPlugins.${context7}`, value: true, pack: "base" };
+
+  test("that config waits for and that passes once a step ran replaces the first config findings, so a plugin that waited for the step's Claude Code leaves no Fix and is installed for the user", async () => {
     const pool = installedPool();
     pool.set(0);
     let installed = false;
@@ -340,19 +356,30 @@ describe("a pack check that waits for the person", () => {
       if (command.join(" ") === "install-pool") installed = true;
       return pool.run(command);
     };
-    const plugins: string[] = [];
-    const claude: CommandRunner = async (command) => {
-      if (!installed) return { code: 127, stdout: "" };
-      if (command.join(" ") === "claude plugin list --json") return { code: 0, stdout: JSON.stringify(plugins.map((id) => ({ id, scope: "user" }))) };
-      if (command[2] === "install") plugins.push(command[3]!);
-      return { code: 0, stdout: "[]" };
-    };
-    const plugin = { provider: "claude" as const, key: "enabledPlugins.context7@claude-plugins-official", value: true, pack: "base" };
+    const claude = claudeCli(() => installed);
     const home = temp.make("home-");
-    const applied = await apply(plan({ files: [], checks, steps, config: [...config, plugin] }), { home, adapters: [providerConfigAdapter({ run: claude })], run });
+    const options = { home, adapters: [providerConfigAdapter({ run: claude.run })], run };
+    const applied = await apply(plan({ files: [], checks, steps, config: [...config, plugin] }), options);
     expect(applied).toMatchObject({ ok: true, findings: [] });
-    expect(plugins).toEqual(["context7@claude-plugins-official"]);
+    expect(claude.installed).toEqual([{ id: context7, scope: "user" }]);
     expect(settings(home).env).toEqual({ ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" });
+    expect(await check(plan({ files: [], checks, steps, config: [...config, plugin] }), options)).toMatchObject({ ok: true, findings: [] });
+    claude.installed.splice(0, 1, { id: context7, scope: "project" });
+    expect((await check(plan({ files: [], checks, steps, config: [...config, plugin] }), options)).findings).toEqual([{ id: `plugin:${context7}`, pack: "engine", say: `The Claude plugin ${context7} needs to be installed.`, repair: "apply" }]);
+  });
+
+  test("that config waits for and that passes once a step ran keeps the first pass's notice that an edited plugin is yours now", async () => {
+    const pool = installedPool();
+    pool.set(0);
+    const claude = claudeCli(() => true);
+    const home = temp.make("home-");
+    const options = { home, adapters: [providerConfigAdapter({ run: claude.run })], run: pool.run };
+    await apply(plan({ files: [], config: [plugin] }), options);
+    writeFileSync(join(home, ".claude/settings.json"), JSON.stringify({ enabledPlugins: { [context7]: false } }));
+    const applied = await apply(plan({ files: [], checks, steps, config }), options);
+    expect(applied.findings).toEqual([{ id: `plugin:${context7}`, pack: "engine", say: `Kept the Claude plugin ${context7}, which no pack enables any more, because it changed outside Hedge. It is yours now.` }]);
+    expect(settings(home).env).toEqual({ ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" });
+    expect(claude.installed).toEqual([{ id: context7, scope: "user" }]);
   });
 
   test("doctor reads one result of a check that config waits for, for both the config and the finding", async () => {

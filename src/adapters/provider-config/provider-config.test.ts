@@ -733,7 +733,7 @@ describe("Codex plugins", () => {
     const kept = await apply(plan([wants()]), { home, adapters: [cli.adapter] });
     expect(kept.findings.map((finding) => finding.say)).toContainEqual(`Kept the Codex plugin ${github} as you left it: it is disabled now, and Hedge installed it enabled.`);
     const released = await apply(plan(), { home, adapters: [cli.adapter] });
-    expect(released.findings.map((finding) => finding.say)).toContainEqual(expect.stringContaining("It is yours now"));
+    expect(released.findings).toContainEqual({ id: `plugin:codex:${github}`, pack: "engine", say: `Kept the Codex plugin ${github}, which no pack enables any more, because it changed outside Hedge. It is yours now.` });
     expect(cli.changes()).toEqual([["codex", "plugin", "add", github, "--json"]]);
     expect([...cli.installed.keys()]).toEqual([github]);
     await apply(plan(), { home, adapters: [cli.adapter] });

@@ -30,12 +30,19 @@
   steps, unless it passed or waited before them, and reports what it finds
   then. When it passes then, apply drops its old `Fix:` and writes the
   config that waits for it, so a hub whose proxy was stopped routes Claude
-  Code in one apply. That config pass replaces the lines of the first one,
-  so a Claude plugin that waited for Claude Code leaves no old `Fix:`. When
-  a step of the check's pack failed in that apply, the config stays out, so
-  a hub whose proxy step fails on a plugin Hedge did not install keeps
-  Claude Code on its own sign-in. `hedge doctor` reads one result of each
-  check for both the config and its line.
+  Code in one apply. That config pass replaces the lines of the first pass
+  that it reads again, so a Claude plugin that waited for Claude Code leaves
+  no old `Fix:`, and a notice such as "It is yours now" stays. When a step
+  of a pack fails, apply takes out the config that waits for a check of that
+  pack, also when the check passed before the step. So a hub whose proxy
+  step fails on a plugin Hedge did not install keeps Claude Code on its own
+  sign-in, even while the proxy runs. Apply still runs the check again and
+  reports what it finds. `hedge doctor` reads one result of each check for
+  both the config and its line.
+- When `hedge cli-proxy connect` fails on a box, the hub names the box and
+  the exit code. It never prints the box's output.
+- The notice that a Codex plugin is yours now no longer fails
+  `hedge doctor`, as for a Claude plugin.
 
 ### Hedge is cloud only
 

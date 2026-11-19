@@ -186,11 +186,13 @@ async function reconcile(plan: Plan, options: ApplyOptions): Promise<{ report: R
   await undo(items.filter((item) => item.cause !== "pack"));
   if (context.dryRun) return { report, checks: gated.checks };
   const settled = await waitingChecks(plan, run, gated.checks, report.findings, failed);
-  if (!settled.length) return { report, checks: gated.checks };
+  const withdrawn = gated.plan.config.filter((entry) => failed.has(entry.pack) && plan.checks.some((item) => item.pack === entry.pack && item.id === entry.after));
+  if (!settled.length && !withdrawn.length) return { report, checks: gated.checks };
   for (const adapter of adapters.filter((each) => each.name === "config")) {
-    const result = await adapter.apply(withSettled(plan, gated.plan, settled), context);
-    const stale = firstFindings.get(adapter) ?? [];
-    report.findings.splice(0, report.findings.length, ...report.findings.filter((finding) => !stale.includes(finding)), ...result.findings);
+    const result = await adapter.apply(secondPass(plan, gated.plan, settled, withdrawn), context);
+    const first = firstFindings.get(adapter) ?? [];
+    const stale = (finding: Finding) => first.includes(finding) && (finding.repair !== undefined || result.findings.some((fresh) => fresh.id === finding.id && fresh.pack === finding.pack));
+    report.findings.splice(0, report.findings.length, ...report.findings.filter((finding) => !stale(finding)), ...result.findings);
     report.actions.push(...result.actions);
     if (result.failed || result.blocked) report.ok = false;
   }
@@ -201,20 +203,21 @@ async function waitingChecks(plan: Plan, run: Runner, gated: Checked, findings: 
   const settled: Array<Owned<PackCheck>> = [];
   for (const item of plan.checks.filter((check) => check.todo)) {
     const before = gated.find(([ran]) => ran === item)?.[1];
-    if (before === 0 || before === waitsForPerson || (before !== undefined && failed.has(item.pack))) continue;
+    if (before === 0 || before === waitsForPerson) continue;
     const code = await run(item.run);
     const stale = findings.findIndex((finding) => finding.id === `check:${item.id}` && finding.pack === item.pack);
     findings.splice(stale < 0 ? findings.length : stale, stale < 0 ? 0 : 1, ...(code === 0 ? [] : [checkFinding(item, code)]));
-    if (code === 0 && before !== undefined) settled.push(item);
+    if (code === 0 && before !== undefined && !failed.has(item.pack)) settled.push(item);
   }
   return settled;
 }
 
-function withSettled(plan: Plan, gated: Plan, settled: Array<Owned<PackCheck>>): Plan {
+function secondPass(plan: Plan, gated: Plan, settled: Array<Owned<PackCheck>>, withdrawn: Plan["config"]): Plan {
   const passes = (pack: string, id?: string) => settled.some((item) => item.pack === pack && item.id === id);
-  const config = plan.config.filter((entry) => gated.config.includes(entry) || passes(entry.pack, entry.after));
-  const dropped = gated.dropped.filter((entry) => !entry.item.startsWith("config ") || !passes(entry.pack, entry.check));
-  return { ...gated, config, dropped };
+  const config = plan.config.filter((entry) => (gated.config.includes(entry) && !withdrawn.includes(entry)) || passes(entry.pack, entry.after));
+  const kept = gated.dropped.filter((entry) => !entry.item.startsWith("config ") || !passes(entry.pack, entry.check));
+  const failed = withdrawn.map((entry) => ({ pack: entry.pack, item: `config ${entry.provider}:${entry.key}`, reason: `a step of the ${entry.pack} pack failed`, check: entry.after, value: entry.value }));
+  return { ...gated, config, dropped: [...kept, ...failed] };
 }
 
 export async function check(plan: Plan, options: { home: string; adapters?: Adapter[]; run?: Runner }): Promise<Report> {

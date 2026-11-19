@@ -31,6 +31,8 @@ export function fakeProxy(proxy: Proxy = {}) {
   return { fetch, requests };
 }
 
+const startsProxy = (command: string[]) => ["systemctl --user restart hedge-cli-proxy.service", "systemctl --user enable --now hedge-cli-proxy.service"].includes(command.join(" "));
+
 export function proxyMachine(make: (prefix: string) => string, fields: Partial<ProxyMachine> = {}, proxy: Proxy = {}, options: { role?: string; checksum?: string } = {}) {
   const home = fields.home ?? roleHome(make("hedge-cli-proxy-"), options.role ?? "hub");
   const fake = fakeRun((command) => {
@@ -39,7 +41,7 @@ export function proxyMachine(make: (prefix: string) => string, fields: Partial<P
     const installed = existsSync(join(dataDir(home), "cli-proxy-api"));
     if (command[0]!.endsWith("cli-proxy-api")) return { stdout: installed ? `CLIProxyAPI Version: ${release.version}, Commit: x\n` : "", code: installed ? 0 : 127 };
     if (command[0] === "ss") return { stdout: "LISTEN 0 4096 127.0.0.1:8317 0.0.0.0:*\n" };
-    if (command[0] === "systemctl" && (command.includes("restart") || command.includes("--now"))) proxy.stopped = false;
+    if (startsProxy(command) && existsSync(join(home, ".config/systemd/user/hedge-cli-proxy.service"))) proxy.stopped = false;
     return undefined;
   });
   const { fetch, requests } = fakeProxy(proxy);

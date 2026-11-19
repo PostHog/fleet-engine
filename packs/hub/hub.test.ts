@@ -6,7 +6,7 @@ import { providerConfigAdapter } from "../../src/adapters/provider-config/adapte
 import { apply, check } from "../../src/reconciler/apply.ts";
 import { boxCommand } from "./lib/box-command.ts";
 import { cliProxy, codexProviderTable, type ProxyMachine } from "./lib/cli-proxy.ts";
-import { dataDir, proxyMachine, type Proxy } from "./lib/cli-proxy-testing.ts";
+import { clientKey, dataDir, proxyMachine, type Proxy } from "./lib/cli-proxy-testing.ts";
 import { Coder } from "./lib/coder.ts";
 import { fakeMachine } from "./lib/testing.ts";
 import type { AvailableSource, MachineFile, MachineRole, Plan, Profile } from "../../src/pack/types.ts";
@@ -488,8 +488,23 @@ describe("the Own-account balancing workflow", () => {
       const result = proxyOnly(plan({ ...balancing, plan: "claude" }, hub));
       const applied = await apply(result, { home, adapters: [providerConfigAdapter()], run: hedgeProxy(machine, result.engineRoot) });
       expect(applied.ok).toBe(false);
-      expect(applied.findings.map((finding) => [finding.id, finding.todo ?? finding.repair])).toEqual([["check:cli-proxy-client", "apply"], ["step:cli-proxy", "apply"], ["check:cli-proxy-accounts", true]]);
+      expect(applied.findings.map((finding) => [finding.id, finding.todo ?? finding.repair])).toEqual([["step:cli-proxy", "apply"], ["check:cli-proxy-accounts", true]]);
       expect(existsSync(join(home, ".claude/settings.json"))).toBe(false);
+    });
+
+    test("with a running proxy whose doctor finds a plugin Hedge did not install, one apply fails the step and takes back the route it wrote before the step", async () => {
+      const { machine, home } = proxyMachine((prefix) => temp.make(prefix), { plan: "claude", devboxes: [] }, { credentials: [{ provider: "claude" }] });
+      mkdirSync(join(home, ".config/hedge"), { recursive: true });
+      writeFileSync(join(home, ".config/hedge/cli-proxy.key"), `${clientKey}\n`);
+      mkdirSync(join(dataDir(home), "plugins"), { recursive: true });
+      writeFileSync(join(dataDir(home), "plugins/other.so"), "plugin");
+      const result = proxyOnly(plan({ ...balancing, plan: "claude" }, hub));
+      const applied = await apply(result, { home, adapters: [providerConfigAdapter()], run: hedgeProxy(machine, result.engineRoot) });
+      expect(applied.ok).toBe(false);
+      expect(applied.findings.map((finding) => [finding.id, finding.todo ?? finding.repair])).toEqual([["step:cli-proxy", "apply"], ["check:cli-proxy-accounts", true]]);
+      expect(applied.actions.map((action) => [action.target, action.operation])).toEqual([[".claude/settings.json", "create"], [".claude/settings.json", "replace"]]);
+      const settings = JSON.parse(readFileSync(join(home, ".claude/settings.json"), "utf8"));
+      expect([settings.env?.ANTHROPIC_BASE_URL, settings.apiKeyHelper]).toEqual([undefined, undefined]);
     });
 
     test("takes Claude Code off the proxy once its pool empties, and lists the To do", async () => {
