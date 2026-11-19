@@ -288,31 +288,24 @@ says what to do with a template parameter that holds one.
    instead; step 7 checks the repo again. Below, `<profile repo>` is the
    `owner/name` you found.
 4. **Create.** Give the hub a 200 GB disk and each node a 500 GB disk.
-   When the template has a secret or an ephemeral parameter, with a default
-   or without, never run `coder create` for it: the Coder CLI asks for each
-   parameter that a command leaves out, also with `--yes`, and prints the
-   default, so a secret would show in your output, and it refuses an
-   ephemeral parameter in `--parameter`. Ask the
-   person to create each workspace in the Coder web UI instead: they open
-   the template's create form; if the form shows a preset picker, they
-   pick **None**, so that no preset locks a field. They give the workspace
-   the name from item 1, and fill in the values you give them. They leave
-   a secret that has a default as it is, and type a secret without a
-   default themselves. Tell them first
-   that Coder keeps each value of the form with the workspace's build, so
-   anyone who can see the workspace can read the secret they type. Coder
-   does this for every workspace made from that template, so they decide
-   whether to type it. When they tell you the workspace name, go on with
-   item 5. A `coder restart`, and the web app's **Restart** button, drop
-   the values of ephemeral parameters, so never run `coder restart` for a
-   workspace made in the web form. Each time this guide or the check of
-   item 5 says to run `coder restart` for it, ask the person to open the
-   workspace in the web app, go to **Settings → Parameters**, and submit
-   the value you give them. An ephemeral parameter can start a one-time
-   action, such as restoring a snapshot, so ask which ones this build
-   needs, and leave the others at their defaults.
+   When the template has an ephemeral parameter, stop and tell the person:
+   this guide does not set up such a workspace, because Coder drops or
+   repeats ephemeral values on each restart. When the template has a
+   secret parameter, with a default or without, never run `coder create`
+   for it: the Coder CLI asks for each parameter that a command leaves
+   out, also with `--yes`, and prints the default, so a secret would show
+   in your output. Ask the person to create each workspace in the Coder
+   web UI instead: they open the template's create form; if the form shows
+   a preset picker, they pick **None**, so that no preset locks a field.
+   They give the workspace the name from item 1, and fill in the values
+   you give them. They leave a secret that has a default as it is, and
+   type a secret without a default themselves. Tell them first that Coder
+   keeps each value of the form with the workspace's build, so anyone who
+   can see the workspace can read the secret they type. Coder does this
+   for every workspace made from that template, so they decide whether to
+   type it. When they tell you the workspace name, go on with item 5.
 
-   When the template has neither, run `coder create`. Pass each
+   When the template has no secret parameter, run `coder create`. Pass each
    parameter with its own `--parameter`, also those where the default is
    right, so Coder asks nothing and you see each value it uses.
    `--preset none` stops the preset question that `--yes` does not skip:
@@ -350,9 +343,7 @@ says what to do with a template parameter that holds one.
    The step is done when every line starts with `ok`. Do what each `x` line
    says, and run the check again. To change a parameter that the template
    lets change, restart the workspace from this Mac with the new value:
-   `coder restart <name> --parameter <parameter>=<value> --yes`. For a
-   workspace made in the web form, the person sets it there, as item 4
-   says.
+   `coder restart <name> --parameter <parameter>=<value> --yes`.
    `coder update` changes nothing while the workspace uses the template's
    active version. A parameter that the template does not let change, such
    as the disk size or the region, needs a new workspace: ask, then
@@ -480,8 +471,6 @@ Every command in this step runs on the hub over SSH. Wait until
    GitHub org, change the dotfiles parameter of each workspace. Run it here
    on the Mac, never on the hub over SSH, because the restart stops the hub:
    `coder restart <name> --parameter <dotfiles parameter>=https://github.com/<repo> --yes`.
-   For a workspace made in the web form, the person sets it there, as
-   item 4 of step 5 says.
    Then run the check of step 5 again, and wait until
    `ssh coder.<name> true` passes. When the template does not let the
    parameter change, the box still works: its nightly `hedge update` keeps
