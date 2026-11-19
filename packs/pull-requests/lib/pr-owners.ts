@@ -1,14 +1,9 @@
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { type LinkedThread, listLinkedThreads, matchThread, readSnapshots, sendMessage, type ShellPullRequest, type ShellThread, type T3HttpClient, withT3Session } from "../../base/lib/t3/index.ts";
+import { type LinkedThread, listLinkedThreads, matchThread, readSnapshots, type ShellPullRequest, type ShellThread, type T3HttpClient, withT3Session } from "../../base/lib/t3/index.ts";
 import type { Gh } from "./gh.ts";
 
 export type Handover = { pr: string; from: string; to: string; at: string };
-export type HandoverT3 = {
-  threads: () => Promise<ShellThread[] | undefined>;
-  link: (threadId: string, url: string) => Promise<unknown>;
-  tell: (thread: ShellThread, text: string) => Promise<unknown>;
-};
 export type OwnerDeps = { threads: ShellThread[]; handovers: () => Promise<Handover[]>; prState: (url: string) => Promise<string> };
 
 export const handoverUsage = "Usage: fleet pr handover --pr <PR URL> --to <thread id>";
@@ -31,15 +26,13 @@ export function fullIdHint(threads: ShellThread[], id: string): string | undefin
   return matches.length === 1 ? matches[0]!.id : undefined;
 }
 
-const handoverMessage = (pr: string, from: string) => `PR handover: thread ${from} handed ${pr} over to this thread, which links it now and owns it. `
-  + `Read its live state, then carry it to merge or close as you would a PR you opened. Thread ${from} may settle now.`;
+export const linkedPullRequests = (thread: ShellThread) => (thread.pullRequests ?? []).filter((pr) => pr.source !== "stack-dismissed");
+const links = (thread: ShellThread, url: string) => linkedPullRequests(thread).some((link) => key(link.url) === key(url));
 
-const reason = (error: unknown) => (error as Error).message.split("\n")[0];
-
-export async function recordHandover(args: string[], home: string, from: string | undefined, now: Date, t3: HandoverT3): Promise<Handover> {
+export async function recordHandover(args: string[], home: string, from: string | undefined, now: Date, readThreads: () => Promise<ShellThread[] | undefined>): Promise<Handover> {
   const { pr, to } = parseHandover(args);
   if (!from) throw new Error("fleet pr handover runs inside a T3 thread: T3CODE_THREAD_ID names the thread that hands the PR over.");
-  const threads = await t3.threads().catch(() => undefined);
+  const threads = await readThreads().catch(() => undefined);
   if (!threads) throw new Error("fleet pr handover needs T3, and T3 did not answer; retry.");
   const taker = listedThread(threads, to);
   if (!taker) {
@@ -48,14 +41,9 @@ export async function recordHandover(args: string[], home: string, from: string 
   }
   if (!live(taker)) throw new Error(`Thread ${to} is settled, archived, or deleted, so it cannot own the PR. Hand it to an open thread.`);
   if (taker.id === from) throw new Error(`Thread ${to} is the thread that hands the PR over. Hand it to another open thread.`);
-  if (!(taker.pullRequests ?? []).some((link) => key(link.url) === key(pr))) {
-    await t3.link(taker.id, pr).catch((error) => {
-      throw new Error(`T3 did not link ${pr} on thread ${to}: ${reason(error)}. Ask that thread to link it with link_pull_request, then hand it over again.`);
-    });
+  if (!links(taker, pr)) {
+    throw new Error(`Thread ${to} does not link ${pr} yet. Send it a message with t3_thread_send that hands the PR over and asks it to link the PR with link_pull_request, then run the handover again.`);
   }
-  await t3.tell(taker, handoverMessage(pr, from)).catch((error) => {
-    throw new Error(`Thread ${to} links ${pr} now, but T3 did not deliver the handover message: ${reason(error)}. Hand it over again.`);
-  });
   const record: Handover = { pr: key(pr), from, to, at: now.toISOString() };
   await mkdir(dirname(handoverPath(home)), { recursive: true, mode: 0o700 });
   await appendFile(handoverPath(home), `${JSON.stringify(record)}\n`, { mode: 0o600 });
@@ -99,9 +87,9 @@ export function ownedPullRequests(threads: ShellThread[], id: string): ShellPull
   const root = rootOf(threads, target);
   if (root && threads.some((thread) => thread.id === root && live(thread))) return [];
   const family = threads.filter((thread) => thread.id === target.id || (rootOf(threads, thread) === target.id && live(thread)));
-  const others = new Set(threads.filter((thread) => live(thread) && !family.includes(thread)).flatMap((thread) => (thread.pullRequests ?? []).map((pr) => key(pr.url))));
-  const links = new Map(family.flatMap((thread) => thread.pullRequests ?? []).filter((pr) => seenOpen(pr.snapshot?.state)).map((pr) => [key(pr.url), pr]));
-  return [...links].filter(([known]) => !others.has(known)).map(([, pr]) => pr);
+  const others = new Set(threads.filter((thread) => live(thread) && !family.includes(thread)).flatMap((thread) => linkedPullRequests(thread).map((pr) => key(pr.url))));
+  const owned = new Map(family.flatMap(linkedPullRequests).filter((pr) => seenOpen(pr.snapshot?.state)).map((pr) => [key(pr.url), pr]));
+  return [...owned].filter(([known]) => !others.has(known)).map(([, pr]) => pr);
 }
 
 function handedOverBy(handovers: Handover[], threads: ShellThread[], id: string): Set<string> {
@@ -110,8 +98,7 @@ function handedOverBy(handovers: Handover[], threads: ShellThread[], id: string)
   const named = (value: string) => matchThread(threads, value, (thread) => thread.id);
   return new Set(handovers.filter(({ pr, from, to }) => {
     const taker = named(to);
-    return named(from) === settling && taker !== undefined && taker !== settling && live(taker)
-      && (taker.pullRequests ?? []).some((link) => key(link.url) === key(pr));
+    return named(from) === settling && taker !== undefined && taker !== settling && live(taker) && links(taker, pr);
   }).map(({ pr }) => key(pr)));
 }
 
@@ -119,6 +106,9 @@ export function unhandedLinks(threads: ShellThread[], id: string, handovers: Han
   const handed = handedOverBy(handovers, threads, id);
   return ownedLinks(threads, id).filter((url) => !handed.has(key(url)));
 }
+
+export const handOverFirst = "Or hand each over first: send the thread that takes it over a message with t3_thread_send that asks it to link the PR with link_pull_request, "
+  + "then run `fleet pr handover --pr <PR URL> --to <thread id>`, which counts only while that thread stays open and links the PR. Or close or merge the PR.";
 
 export async function settleRefusal(id: string, deps: OwnerDeps, person: string): Promise<string | undefined> {
   const open: string[] = [];
@@ -129,7 +119,7 @@ export async function settleRefusal(id: string, deps: OwnerDeps, person: string)
   if (!open.length) return undefined;
   return `Fleet blocked this settle: the thread owns open PR(s) ${open.join(", ")}, and no other open thread links them. `
     + `If ${person} parked them, snooze the thread until the park date instead. If they wait on someone else, snooze it until they move. `
-    + "Or hand each over first with `fleet pr handover --pr <PR URL> --to <thread id>`: it links the PR on that open thread and tells the thread. Or close or merge the PR.";
+    + handOverFirst;
 }
 
 export async function prState(gh: Gh, url: string): Promise<string> {
@@ -147,14 +137,6 @@ export const pinnedReason = (person: string, snoozeMark?: string) => `Fleet bloc
   + (snoozeMark
     ? `Only a snooze ${person} asks for in the thread applies: end the turn on a line that starts with ${snoozeMark} and names the wake time.`
     : `Only ${person} snoozes it, in T3.`);
-
-const operateScopes = ["orchestration:read", "orchestration:operate", "access:read"];
-
-export const liveHandoverT3 = (home: string): HandoverT3 => ({
-  threads: () => readT3Threads(home),
-  link: (threadId, url) => withT3Session((client) => client.callTool("link_pull_request", { threadId, url }), { home, scopes: operateScopes }),
-  tell: (thread, text) => withT3Session((client) => sendMessage(client, thread, text), { home, scopes: operateScopes }),
-});
 
 export function settleTarget(input: Record<string, unknown>, self: string | undefined): string | undefined {
   if (!guardedActions.includes(String(input.action))) return undefined;

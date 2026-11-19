@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { matchThread, type ShellThread, t3StatePath, t3UserData } from "../../base/lib/t3/index.ts";
-import { readHandovers, unhandedLinks } from "../../pull-requests/lib/pr-owners.ts";
+import { handOverFirst, readHandovers, unhandedLinks } from "../../pull-requests/lib/pr-owners.ts";
 import { closingLine, closingPark, closingSettings, killSwitch, type Marks } from "./closing-marks.ts";
 import { nestedSession, type ProcessTable } from "./proof-stop.ts";
 import { personName } from "./prose-question.ts";
@@ -66,7 +66,7 @@ export const snoozeTimeReason = (zone: string) => "Fleet blocked this stop: your
 export const ownsOpenReason = (urls: string[], person: string, marks: Marks) => `Fleet blocked this stop: your closing line settles this thread, or asks ${person} to, `
   + `but it owns open PR(s) ${urls.join(", ")}, and no other open thread links them. A settled thread drops out of ${person}'s view, and its PRs lose their owner. `
   + `If ${person} parked them, end on ${marks.snooze} with the park date. If they wait on someone else, end on ${marks.wait}. `
-  + "Or hand each over first with `fleet pr handover --pr <PR URL> --to <thread id>`: it links the PR on that open thread and tells the thread. Or close or merge the PR.";
+  + handOverFirst;
 
 const isSnoozed = (thread: ShellThread, now: Date) => Boolean(thread.snoozedUntil && Date.parse(thread.snoozedUntil) > now.getTime());
 

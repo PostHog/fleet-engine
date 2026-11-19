@@ -138,8 +138,9 @@ with:
 
 A line that ends on the done or the check mark is sent back once while the
 thread owns an open PR that no other open thread links. `fleet pr handover`
-links the PR on the open thread it names and tells that thread, and a handover
-counts only while that thread stays open and links the PR. The hook reads the
+records a handover only to an open thread that links the PR, and a handover
+counts only while that thread stays open and links it. A link the thread
+dismissed from a stack does not count. The hook reads the
 PR links from T3's shell snapshot and makes no GitHub call.
 
 The hook leaves the thread alone when it is a child thread, was delegated from

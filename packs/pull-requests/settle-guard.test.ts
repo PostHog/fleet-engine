@@ -8,7 +8,7 @@ import { tempDirs } from "../../src/testing/git.ts";
 import { guardSettle, type SettleDeps } from "./hooks/settle-guard.ts";
 import { prCommand } from "./lib/pr.ts";
 import { parseSettleCheck, settleCheckOver, settleCheckUsage } from "./lib/organize-guard.ts";
-import { handoverPath, recordHandover, threadsOwningPrs, type HandoverT3 } from "./lib/pr-owners.ts";
+import { handoverPath, recordHandover, threadsOwningPrs } from "./lib/pr-owners.ts";
 
 const temp = tempDirs();
 const stubs: T3Stub[] = [];
@@ -56,7 +56,8 @@ describe("the settle guard", () => {
       expect(denial?.hookSpecificOutput).toMatchObject({ hookEventName: "PreToolUse", permissionDecision: "deny" });
       expect(reasonOf(denial)).toBe("Fleet blocked this settle: the thread owns open PR(s) https://github.com/acme/app/pull/1, and no other open thread links them. "
         + "If Robin parked them, snooze the thread until the park date instead. If they wait on someone else, snooze it until they move. "
-        + "Or hand each over first with `fleet pr handover --pr <PR URL> --to <thread id>`: it links the PR on that open thread and tells the thread. Or close or merge the PR.");
+        + "Or hand each over first: send the thread that takes it over a message with t3_thread_send that asks it to link the PR with link_pull_request, "
+        + "then run `fleet pr handover --pr <PR URL> --to <thread id>`, which counts only while that thread stays open and links the PR. Or close or merge the PR.");
     }
   });
 
@@ -243,65 +244,44 @@ describe("the settle guard", () => {
       ["--to", "mcp:x", "--pr", "https://github.com/acme/app/pull/1", "extra"], ["--pr", "--to", "https://github.com/acme/app/pull/1", "mcp:x"],
       ["--pr", "https://github.com/acme/app/pull/1", "--to", "mcp x"], ["--pr", "https://github.com/acme/app/pull/1x", "--to", "mcp:x"], ["mcp:x", "--pr", "https://github.com/acme/app/pull/1", "mcp:y"],
     ]) await expect(prCommand(["handover", ...args], home)).rejects.toThrow("Usage: fleet pr handover --pr <PR URL> --to <thread id>");
-    await expect(recordHandover(["--pr", "https://github.com/acme/app/pull/1", "--to", "mcp:x"], home, undefined, new Date(), fakeT3([thread("mcp:x")]))).rejects.toThrow("fleet pr handover runs inside a T3 thread");
+    await expect(recordHandover(["--pr", "https://github.com/acme/app/pull/1", "--to", "mcp:x"], home, undefined, new Date(), async () => [thread("mcp:x", { pullRequests: [pr(1)] })])).rejects.toThrow("fleet pr handover runs inside a T3 thread");
     expect(() => statSync(handoverPath(home))).toThrow();
   });
 
-  function fakeT3(threads: ShellThread[] | undefined, fail: { link?: string; tell?: string } = {}): HandoverT3 & { calls: string[] } {
-    const calls: string[] = [];
-    return {
-      calls,
-      threads: async () => threads,
-      link: async (threadId, url) => { calls.push(`link ${threadId} ${url}`); if (fail.link) throw new Error(fail.link); },
-      tell: async (to, text) => { calls.push(`tell ${to.id} ${text}`); if (fail.tell) throw new Error(fail.tell); },
-    };
-  }
-  const hand = (home: string, to: string, t3: HandoverT3, url = "https://github.com/acme/app/pull/22") =>
-    recordHandover(["--pr", url, "--to", to], home, "mcp:me", new Date("2026-11-12T10:00:00Z"), t3);
+  const hand = (home: string, to: string, threads: ShellThread[] | undefined, url = "https://github.com/acme/app/pull/22") =>
+    recordHandover(["--pr", url, "--to", to], home, "mcp:me", new Date("2026-11-12T10:00:00Z"), async () => threads);
+  const dismissed = { ...pr(22), source: "stack-dismissed" };
+  const askToLink = "Send it a message with t3_thread_send that hands the PR over and asks it to link the PR with link_pull_request, then run the handover again.";
 
   test.each([
     ["T3 does not answer", undefined, "mcp:next", "fleet pr handover needs T3, and T3 did not answer; retry."],
     ["T3 does not list the thread", [thread("mcp:me")], "mcp:nobody", "T3 did not list thread mcp:nobody. Hand the PR to the full id t3_thread_list shows."],
-    ["the thread is a bare id", [thread("mcp:me"), thread("mcp:next")], "next", "T3 did not list thread next. Hand the PR to its full id mcp:next."],
-    ["the thread is settled", [thread("mcp:me"), thread("mcp:next", { settledAt: "x" })], "mcp:next", "Thread mcp:next is settled, archived, or deleted, so it cannot own the PR. Hand it to an open thread."],
-    ["the thread is archived", [thread("mcp:me"), thread("mcp:next", { archivedAt: "x" })], "mcp:next", "Thread mcp:next is settled, archived, or deleted, so it cannot own the PR. Hand it to an open thread."],
-    ["the thread is the one that hands it over", [thread("mcp:me")], "mcp:me", "Thread mcp:me is the thread that hands the PR over. Hand it to another open thread."],
-  ])("handover refuses when %s, and links, tells, and writes nothing", async (_, threads, to, message) => {
+    ["the thread is a bare id", [thread("mcp:me"), thread("mcp:next", { pullRequests: [pr(22)] })], "next", "T3 did not list thread next. Hand the PR to its full id mcp:next."],
+    ["the thread is settled", [thread("mcp:me"), thread("mcp:next", { settledAt: "x", pullRequests: [pr(22)] })], "mcp:next", "Thread mcp:next is settled, archived, or deleted, so it cannot own the PR. Hand it to an open thread."],
+    ["the thread is archived", [thread("mcp:me"), thread("mcp:next", { archivedAt: "x", pullRequests: [pr(22)] })], "mcp:next", "Thread mcp:next is settled, archived, or deleted, so it cannot own the PR. Hand it to an open thread."],
+    ["the thread is the one that hands it over", [thread("mcp:me", { pullRequests: [pr(22)] })], "mcp:me", "Thread mcp:me is the thread that hands the PR over. Hand it to another open thread."],
+    ["the thread does not link the PR", [thread("mcp:me"), thread("mcp:next", { pullRequests: [pr(23)] })], "mcp:next", `Thread mcp:next does not link https://github.com/acme/app/pull/22 yet. ${askToLink}`],
+    ["the thread only dismissed the PR from a stack", [thread("mcp:me"), thread("mcp:next", { pullRequests: [dismissed] })], "mcp:next", `Thread mcp:next does not link https://github.com/acme/app/pull/22 yet. ${askToLink}`],
+  ])("handover refuses when %s, and writes nothing", async (_, threads, to, message) => {
     const home = homeWith();
-    const t3 = fakeT3(threads);
-    await expect(hand(home, to, t3)).rejects.toThrow(message);
-    expect(t3.calls).toEqual([]);
+    await expect(hand(home, to, threads)).rejects.toThrow(message);
     expect(() => statSync(handoverPath(home))).toThrow();
   });
 
-  test("handover refuses and writes nothing when T3 refuses the link or the message", async () => {
-    const threads = [thread("mcp:me"), thread("mcp:next")];
+  test("handover records a PR the open receiving thread links, by its full id, privately and with lower-case URLs", async () => {
     const home = homeWith();
-    const refusedLink = fakeT3(threads, { link: "runtime_mode_escalation_denied" });
-    await expect(hand(home, "mcp:next", refusedLink)).rejects.toThrow("T3 did not link https://github.com/acme/app/pull/22 on thread mcp:next: runtime_mode_escalation_denied. Ask that thread to link it with link_pull_request, then hand it over again.");
-    expect(refusedLink.calls).toEqual(["link mcp:next https://github.com/acme/app/pull/22"]);
-    const refusedTell = fakeT3(threads, { tell: "thread_not_found" });
-    await expect(hand(home, "mcp:next", refusedTell)).rejects.toThrow("Thread mcp:next links https://github.com/acme/app/pull/22 now, but T3 did not deliver the handover message: thread_not_found. Hand it over again.");
-    expect(() => statSync(handoverPath(home))).toThrow();
-  });
-
-  test("handover links the PR on an open thread that does not link it yet, tells that thread, and the guard then lets the settle go", async () => {
-    const home = homeWith();
-    const me = thread("mcp:me", { pullRequests: [pr(22), pr(23)] });
-    const t3 = fakeT3([me, thread("thread:project:p-1:next"), thread("mcp:keeper", { pullRequests: [pr(23)] })]);
-    expect(await hand(home, "thread:project:p-1:next", t3, "https://github.com/Acme/App/pull/22")).toEqual({ pr: "https://github.com/acme/app/pull/22", from: "mcp:me", to: "thread:project:p-1:next", at: "2026-11-12T10:00:00.000Z" });
-    await hand(home, "mcp:keeper", t3, "https://github.com/ACME/app/pull/23");
-    expect(t3.calls).toEqual([
-      "link thread:project:p-1:next https://github.com/Acme/App/pull/22",
-      `tell thread:project:p-1:next PR handover: thread mcp:me handed https://github.com/Acme/App/pull/22 over to this thread, which links it now and owns it. `
-        + "Read its live state, then carry it to merge or close as you would a PR you opened. Thread mcp:me may settle now.",
-      `tell mcp:keeper PR handover: thread mcp:me handed https://github.com/ACME/app/pull/23 over to this thread, which links it now and owns it. `
-        + "Read its live state, then carry it to merge or close as you would a PR you opened. Thread mcp:me may settle now.",
-    ]);
+    const threads = [thread("mcp:me", { pullRequests: [pr(22)] }), thread("thread:project:p-1:next", { pullRequests: [pr(22)] })];
+    expect(await hand(home, "thread:project:p-1:next", threads, "https://github.com/Acme/App/pull/22")).toEqual({ pr: "https://github.com/acme/app/pull/22", from: "mcp:me", to: "thread:project:p-1:next", at: "2026-11-12T10:00:00.000Z" });
     expect(statSync(handoverPath(home)).mode & 0o777).toBe(0o600);
     expect(statSync(join(home, ".local/state/fleet")).mode & 0o777).toBe(0o700);
-    const linked = [me, thread("thread:project:p-1:next", { pullRequests: [pr(22)] }), thread("mcp:keeper", { pullRequests: [pr(23)] })];
-    expect(await guardSettle(organize({ action: "settle" }), home, deps(linked))).toBeUndefined();
+  });
+
+  test("a PR link the thread dismissed from a stack neither counts as owned nor as another thread's link", async () => {
+    const home = homeWith();
+    expect(await guardSettle(organize({ action: "settle" }), home, deps([thread("mcp:me", { pullRequests: [dismissed] })]))).toBeUndefined();
+    expect(reasonOf(await guardSettle(organize({ action: "settle" }), home, deps([thread("mcp:me", { pullRequests: [pr(22)] }), thread("mcp:next", { pullRequests: [dismissed] })])))).toContain("open PR(s) https://github.com/acme/app/pull/22, and");
+    handover(home, "mcp:me", "https://github.com/acme/app/pull/22", "mcp:next");
+    expect(reasonOf(await guardSettle(organize({ action: "settle" }), home, deps([thread("mcp:me", { pullRequests: [pr(22)] }), child("mcp:next", "mcp:me", { pullRequests: [dismissed] })])))).toContain("open PR(s) https://github.com/acme/app/pull/22, and");
   });
 
   test("lists each open top-level thread that owns an open PR for a box release", () => {
@@ -335,23 +315,19 @@ describe("the installed settle guard", () => {
     expect((await run(stub.home, organize({ action: "settle", threadId: "mcp:other" })))).toEqual({ stdout: "", stderr: "", code: 0 });
   });
 
-  test("fleet pr handover links the PR on the receiving thread and tells it through this machine's T3", async () => {
-    const stub = await startT3Stub({
-      shell: { projects: [], threads: [thread("mcp:me", { pullRequests: [pr(1)] }), thread("mcp:next")] },
-      tools: (name, args) => name === "link_pull_request" ? { linked: true } : name === "t3_thread_send" ? { threadId: args.threadId, messageId: "m-1", delivery: "queued" } : undefined,
-    });
+  test("fleet pr handover reads this machine's T3, and records a PR the receiving thread links", async () => {
+    const stub = await startT3Stub({ shell: { projects: [], threads: [thread("mcp:me", { pullRequests: [pr(1)] }), thread("mcp:next", { pullRequests: [pr(1)] }), thread("mcp:idle")] } });
     stubs.push(stub);
     const log = console.log;
     console.log = () => {};
     try {
-      expect(await prCommand(["handover", "--pr", "https://github.com/acme/app/pull/1", "--to", "mcp:next"], stub.home, { T3CODE_THREAD_ID: "mcp:me" }, new Date("2026-11-12T10:00:00Z"))).toBe(0);
+      const handTo = (to: string) => prCommand(["handover", "--pr", "https://github.com/acme/app/pull/1", "--to", to], stub.home, { T3CODE_THREAD_ID: "mcp:me" }, new Date("2026-11-12T10:00:00Z"));
+      await expect(handTo("mcp:idle")).rejects.toThrow("Thread mcp:idle does not link https://github.com/acme/app/pull/1 yet.");
+      expect(await handTo("mcp:next")).toBe(0);
     } finally {
       console.log = log;
     }
-    expect(stub.toolCalls).toEqual([
-      { name: "link_pull_request", args: { threadId: "mcp:next", url: "https://github.com/acme/app/pull/1" } },
-      { name: "t3_thread_send", args: { threadId: "mcp:next", message: expect.stringContaining("PR handover: thread mcp:me handed https://github.com/acme/app/pull/1"), mode: "queue", clientRequestId: expect.any(String) } },
-    ]);
+    expect(stub.toolCalls).toEqual([]);
     expect(readFileSync(handoverPath(stub.home), "utf8")).toContain('"to":"mcp:next"');
   });
 
