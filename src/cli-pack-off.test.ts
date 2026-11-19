@@ -194,8 +194,9 @@ describe("the library's upstream from before the Context library pack joined Mem
 
   for (const [label, change] of [
     ["that names another server", { name: "notes", title: "Notes" }],
-    ["that names another server and has no script", { name: "notes", title: "Notes", script: undefined }],
-    ["that names another server and has a blank script", { name: "notes", title: "Notes", script: " " }],
+    ["named context with no script", { script: undefined }],
+    ["named context with a blank script", { script: " " }],
+    ["named context with another server's script", { script: "/srv/notes/mcp/main.ts" }],
     ["named context with env 42", { env: 42 }],
   ] as const) {
     test(`a declaration ${label} stays, with its entry, and is reported again by a second apply`, async () => {
