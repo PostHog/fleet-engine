@@ -100,9 +100,10 @@ export function wisprStep(startedAt: string, meetings: Material["meetings"]): st
 }
 
 const notePath = /^notes\/[a-z0-9][a-z0-9-]*\.md$/;
+const instructionFile = /^notes\/(agents|claude|gemini)\.md$/;
 
 function newPath(worktree: string, wanted: string): string {
-  if (!notePath.test(wanted)) throw new Error(`the capture named ${JSON.stringify(wanted)} instead of one note under notes/; nothing was saved`);
+  if (!notePath.test(wanted) || instructionFile.test(wanted)) throw new Error(`the capture named ${JSON.stringify(wanted)} instead of one note under notes/; nothing was saved`);
   const folder = join(worktree, "notes");
   if (existsSync(folder) && !lstatSync(folder).isDirectory()) throw new Error("notes/ in the library is not a folder; nothing was saved");
   mkdirSync(folder, { recursive: true });

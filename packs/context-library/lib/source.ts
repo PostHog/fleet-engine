@@ -16,6 +16,7 @@ export const canvasId = /^F[A-Z0-9]{2,20}$/;
 const partLimit = 100_000;
 const meetingLimit = 5;
 const redirectLimit = 5;
+const pageByteLimit = 5 << 20;
 const wisprWindowHours = 1;
 
 export function gatewayRead(source: string): GatewayRead | undefined {
@@ -115,6 +116,19 @@ function namedPublicSite(url: URL): boolean {
   return url.protocol === "https:" && host.includes(".") && /^[a-z][a-z0-9-]*$/.test(top) && !["localhost", "local", "internal", "home", "lan", "corp", "intranet", "private"].includes(top);
 }
 
+async function limitedText(response: Response, url: string): Promise<string> {
+  const tooLarge = () => new Error(`${url} is larger than ${pageByteLimit >> 20} MB`);
+  if (Number(response.headers.get("content-length") ?? 0) > pageByteLimit) throw tooLarge();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for await (const chunk of response.body ?? []) {
+    size += chunk.byteLength;
+    if (size > pageByteLimit) throw tooLarge();
+    chunks.push(chunk);
+  }
+  return new TextDecoder().decode(Buffer.concat(chunks));
+}
+
 export async function readPage(source: string, fetcher: Fetch = fetch): Promise<string> {
   let url = source;
   for (let hop = 0; ; hop++) {
@@ -128,8 +142,8 @@ export async function readPage(source: string, fetcher: Fetch = fetch): Promise<
     }
     if (!response.ok) throw new Error(`${url} answered HTTP ${response.status}`);
     const type = response.headers.get("content-type")?.toLowerCase() ?? "";
-    if (type.includes("html")) return pageText(await response.text(), url);
-    if (/^text\/|json|xml/.test(type)) return response.text();
+    if (type.includes("html")) return pageText(await limitedText(response, url), url);
+    if (/^text\/|json|xml/.test(type)) return limitedText(response, url);
     throw new Error(`${url} sent ${type || "no content type"}, which fleet context add cannot read as text`);
   }
 }
