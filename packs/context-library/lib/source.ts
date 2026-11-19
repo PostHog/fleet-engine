@@ -21,7 +21,8 @@ const wisprWindowHours = 1;
 
 export function gatewayRead(source: string): GatewayRead | undefined {
   const url = new URL(source);
-  if (url.hostname === "slack.com" || url.hostname.endsWith(".slack.com")) {
+  const host = url.hostname.replace(/\.$/, "");
+  if (host === "slack.com" || host.endsWith(".slack.com")) {
     const thread = /^\/archives\/([A-Z0-9]+)\/p(\d{10})(\d{6})$/.exec(url.pathname);
     const replyOf = url.searchParams.get("thread_ts");
     if (thread) return { route: "slack", tool: "slack_read_thread", args: { channel_id: thread[1], message_ts: replyOf && /^\d{10}\.\d{6}$/.test(replyOf) ? replyOf : `${thread[2]}.${thread[3]}`, limit: 1000 } };
@@ -29,11 +30,11 @@ export function gatewayRead(source: string): GatewayRead | undefined {
     if (canvas && canvasId.test(canvas[1]!)) return { route: "slack", tool: "slack_read_canvas", args: { canvas_id: canvas[1] } };
     throw new Error(`${source} is neither a Slack thread nor a Slack canvas link`);
   }
-  if (url.hostname === "docs.google.com" && /^\/\w+\/d\/(?:e\/|[^/]+\/pub(?:html)?\/?$)/.test(url.pathname)) return undefined;
-  if (url.hostname === "docs.google.com" && url.pathname.startsWith("/document/d/")) return { route: "google-drive", tool: "get_document_text", args: { document_url: source } };
-  if (url.hostname === "docs.google.com" && url.pathname.startsWith("/presentation/d/")) return { route: "google-drive", tool: "get_presentation_text", args: { presentation_url: source } };
-  if (url.hostname === "docs.google.com" || url.hostname === "drive.google.com") return { route: "google-drive", tool: "fetch", args: { url: source } };
-  if (url.hostname === "notes.wisprflow.ai") return { route: "wispr-flow", tool: "resolve_share_link", args: { url: source, view_transcript: {} } };
+  if (host === "docs.google.com" && /^\/\w+\/d\/(?:e\/|[^/]+\/pub(?:html)?\/?$)/.test(url.pathname)) return undefined;
+  if (host === "docs.google.com" && url.pathname.startsWith("/document/d/")) return { route: "google-drive", tool: "get_document_text", args: { document_url: source } };
+  if (host === "docs.google.com" && url.pathname.startsWith("/presentation/d/")) return { route: "google-drive", tool: "get_presentation_text", args: { presentation_url: source } };
+  if (host === "docs.google.com" || host === "drive.google.com") return { route: "google-drive", tool: "fetch", args: { url: source } };
+  if (host === "notes.wisprflow.ai") return { route: "wispr-flow", tool: "resolve_share_link", args: { url: source, view_transcript: {} } };
   return undefined;
 }
 

@@ -120,11 +120,11 @@ const linkEnd = /[.,;:!?)\]}*_~|]+$/;
 const fenceOpener = /^((?:[ \t]*(?:>|[*+-](?=[ \t])|\d{1,9}[.)](?=[ \t])))*[ \t]*)(`{3,}|~{3,}|:{3,})([^\n]*)$/gm;
 const entityStart = /&(?!(?:amp|lt|gt|quot|apos);)(?=#|[a-z][a-z0-9]*;)/gi;
 const lines = (text: string) => text.replace(/\r\n?/g, "\n");
+const linkKey = (link: string) => link.replace(/\\(?=[!-/:-@[-`{-~])/g, "").replaceAll("&amp;", "&").replace(linkEnd, "");
 
 function readLinksOnly(text: string, read: Set<string>): string {
   return text.replace(/\\(?=[/:])/g, "").replace(linkLike, (link) => {
-    const bare = link.replace(linkEnd, "");
-    return read.has(bare) ? link : `(link removed)${link.slice(bare.length)}`;
+    return read.has(linkKey(link)) ? link : `(link removed)${link.slice(link.replace(linkEnd, "").length)}`;
   });
 }
 
@@ -132,14 +132,14 @@ function inert(text: string, read: Set<string>): string {
   return readLinksOnly(lines(text), read)
     .replace(entityStart, "&amp;")
     .replace(/!+\[/g, "[")
-    .replace(/<(?=[a-z/!?])/gi, "&lt;")
+    .replace(/<(?=[a-z/!?])(?![a-z][a-z0-9+.-]*:[^\s<>]*>)/gi, "&lt;")
     .replace(fenceOpener, (whole, prefix: string, fence: string, info: string) => (info.trim() && !(fence.startsWith("`") && info.includes("`")) ? `${prefix}${fence}text` : whole));
 }
 
 function readLinks(input: CaptureInput, material: Material, existing: Existing | undefined): Set<string> {
   const read = [input.source, input.note ?? "", ...material.parts.map((part) => part.text), ...(material.meetings ?? []).flatMap((meeting) => [meeting.text, meeting.link ?? ""]), existing?.text ?? ""].join("\n");
-  const found = [read, read.replaceAll("&amp;", "&")].flatMap((text) => text.replace(/\\(?=[/:])/g, "").match(linkLike) ?? []);
-  return new Set(found.flatMap((link) => [link, ...link.split("|")]).map((link) => link.replace(linkEnd, "")));
+  const found = read.replace(/\\(?=[/:])/g, "").match(linkLike) ?? [];
+  return new Set(found.flatMap((link) => [link, ...link.split("|")]).map(linkKey));
 }
 
 const withSource = (text: string, source: string) => text.replace(/^(\s*source:[ \t]*).*$/m, (_line, lead: string) => `${lead}${source}`);

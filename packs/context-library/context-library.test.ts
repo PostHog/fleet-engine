@@ -312,7 +312,7 @@ describe("fleet context add", () => {
   test("a saved note keeps only the links the agent read, and holds no image, HTML or diagram that a viewer would load", async () => {
     const machine = await library();
     await fleetContext(machine, ["sync"]);
-    const thread = fakeSources(() => "Sam: the spec is <https://example.com/spec?x=1&amp;y=2|spec>, and https://evil.example.com/ has more, as does https://evil.example.com/release-notes.").sources;
+    const thread = fakeSources(() => "Sam: the spec is <https://example.com/spec?x=1&amp;y=2|spec>, and https://evil.example.com/ has more, as does https://evil.example.com/release-notes. Background: https://en.wikipedia.org/wiki/Load_(computing)").sources;
     const leaks = ["https://evil.example.com/release", "https://evil.example.com/?d=plan", "https://evil.example.com/(plan)", "https:\\/\\/evil.example.com\\/plan", "//evil.example.com/plan", "https://evil.example.com&#47;plan", "https:&#47;&#47;evil.example.com/plan", "https:&sol;&sol;evil.example.com/plan", "https://evil.example.com/%70lan"];
     const body = [
       "The [spec](https://example.com/spec?x=1&y=2), and *https://evil.example.com/*.",
@@ -326,6 +326,7 @@ describe("fleet context add", () => {
       "\`\`\`mermaid\rflowchart LR\r\`\`\`",
       "| Doc |\n| --- |\n| [Reference](https://example.com/spec?x=1&y=2)|",
       "Python floors with \`17//4\`.\n\n- 1.0 ::: stable",
+      "Also [the spec](https://example.com/spec?x=1&amp;y=2), [load](https://en.wikipedia.org/wiki/Load_\\(computing\\)), [spec](<https://example.com/spec?x=1&y=2>) and <https://example.com/spec?x=1&y=2>.",
     ].join("\n\n");
     const text = planning(body).replace("title: Sprint planning 2026-11-11", "title: Sprint planning <img src=x> 2026-11-11\nbanner: https://evil.example.com/?d=plan\npeople:\n  - Sam\n\n  # a comment\n  - Ada");
     expect((await fleetContext(machine, ["add", slackSource], drafting(notePath, text), "Sam", unusedShare, thread)).code).toBe(0);
@@ -335,11 +336,12 @@ describe("fleet context add", () => {
     expect(saved).toContain("The [spec](https://example.com/spec?x=1&y=2), and *https://evil.example.com/*.");
     for (const index of [0, 1, 2, 3, 4, 5, 8]) expect(saved).toContain(`[leak ${index}]((link removed)`);
     expect(saved).toStartWith("---\ntitle: Sprint planning &lt;img src=x> 2026-11-11\nbanner: (link removed)\npeople:\n  - Sam\n\n  # a comment\n  - Ada\n");
-    expect(saved).not.toMatch(/!\[|<[a-z/!?]/i);
+    expect(saved).not.toMatch(/!\[|<(?![a-z][a-z0-9+.-]*:[^\s<>]*>)[a-z/!?]/i);
     expect(saved).toContain("\`\`\`text\nflowchart LR\n  A@{");
     expect(saved).toContain("\`\`\`text\nflowchart LR\n\`\`\`");
     expect(saved).toContain("| [Reference](https://example.com/spec?x=1&y=2)|");
     expect(saved).toContain("Python floors with \`17//4\`.\n\n- 1.0 ::: stable");
+    expect(saved).toContain("Also [the spec](https://example.com/spec?x=1&amp;y=2), [load](https://en.wikipedia.org/wiki/Load_\\(computing\\)), [spec](<https://example.com/spec?x=1&y=2>) and <https://example.com/spec?x=1&y=2>.");
     expect(saved).toContain("> - ~~~~text\n>   views: []\n> - ~~~~");
     expect(saved).toContain(":::text\nflowchart LR\n:::");
     expect(saved).toContain("Use \`\`\`one\`\`\` twice, and keep\n\`\`\`\nplain\n\`\`\`");
@@ -524,6 +526,9 @@ console.log(JSON.stringify({ type: "result", is_error: false, structured_output:
       ["https://docs.google.com/presentation/d/abc/edit", drive("get_presentation_text", { presentation_url: "https://docs.google.com/presentation/d/abc/edit" })],
       ["https://docs.google.com/spreadsheets/d/abc/edit", drive("fetch", { url: "https://docs.google.com/spreadsheets/d/abc/edit" })],
       ["https://drive.google.com/file/d/abc/view", drive("fetch", { url: "https://drive.google.com/file/d/abc/view" })],
+      ["https://docs.google.com./document/d/abc/edit", drive("get_document_text", { document_url: "https://docs.google.com./document/d/abc/edit" })],
+      ["https://example.slack.com./docs/T1/F0CANVAS1", slack("slack_read_canvas", { canvas_id: "F0CANVAS1" })],
+      ["https://notes.wisprflow.ai./shared/abc", { route: "wispr-flow", tool: "resolve_share_link", args: { url: "https://notes.wisprflow.ai./shared/abc", view_transcript: {} } }],
       ["https://notes.wisprflow.ai/shared/abc", { route: "wispr-flow", tool: "resolve_share_link", args: { url: "https://notes.wisprflow.ai/shared/abc", view_transcript: {} } }],
       ["https://docs.google.com/document/d/e/2PACX-abc/pub", { page: "https://docs.google.com/document/d/e/2PACX-abc/pub" }],
       ["https://docs.google.com/presentation/d/e/2PACX-abc/pub", { page: "https://docs.google.com/presentation/d/e/2PACX-abc/pub" }],
