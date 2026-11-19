@@ -154,7 +154,8 @@ ${pageJson ? `<script id="hedge-data" type="application/json">${JSON.stringify(p
   const watchButton = (root: string, pack: PagePack) => {
     const video = packVideos[pack.name];
     if (!video) return "";
-    return `<button type="button" class="watch" data-video="${videoPath(root, video.file)}" data-poster="${videoPath(root, video.poster)}" data-title="${esc(pack.title)}" data-line="${esc(roleOf(pack).line)}">${uiIcons.play}Watch · ${Math.round(video.seconds)} s<span class="sr">, the ${esc(pack.title)} video</span></button>`;
+    const label = `Watch · ${Math.round(video.seconds)} s`;
+    return `<button type="button" class="watch" data-video="${videoPath(root, video.file)}" data-poster="${videoPath(root, video.poster)}" data-title="${esc(pack.title)}" data-line="${esc(roleOf(pack).line)}" aria-label="${label}, the ${esc(pack.title)} video">${uiIcons.play}${label}</button>`;
   };
 
   const player = `<dialog class="player" aria-labelledby="player-title" aria-describedby="player-line">
