@@ -268,11 +268,11 @@ test("at the review budget hedge asks nothing for a fixes round, --agent cannot 
   const fixes = await pr.commit("feature.txt", "fix 1\n");
   await pr.hedge("review-start", "--scope", "fixes", "--base", reviewed);
   await finishRound(pr, "2");
-  const read = await pr.commit("feature.txt", "fix 2\n");
+  await pr.commit("feature.txt", "fix 2\n");
   await pr.hedge("review-start", "--scope", "final", "--base", fixes);
   await finishRound(pr, "final-1");
   await pr.commit("feature.txt", "fix 3\n");
-  const fourth = ["review-start", "--scope", "fixes", "--base", read];
+  const fourth = ["review-start", "--scope", "fixes", "--base", fixes];
 
   const refusal = pr.hedge(...fourth);
   await expect(refusal).rejects.toThrow("The review budget of 3 reviews is spent. hedge proof asks nothing more. For each open blocker or major, revert the fix that brought it in, or list it in a \"## Known issues\" section of the PR body");

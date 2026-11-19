@@ -33,12 +33,13 @@ export const arbiterOf = ({ env, cwd }: Pick<GateContext, "env" | "cwd">): Arbit
 
 const savedPath = (home: string, ref: PrRef, commit: string) => join(pullRequestDirectory(home, { ...ref, commit }), "gate-outcome", `${commit}.json`);
 const unhashed = new Set(["gate-outcome", "gate-record", "judge", "carried", "receipt.json", arbiterStopFile, reviewLockFile, displayEntry]);
+const hashed = (path: string) => { const top = path.split(sep)[0]!; return !unhashed.has(top) && ![arbiterStopFile, reviewLockFile].some((file) => top.startsWith(`${file}.`)); };
 
 async function proofFiles(home: string, ref: PrRef) {
   const root = prDirectory(home, ref);
   const entries = await readdir(root, { recursive: true, withFileTypes: true }).catch(() => []);
   const files = entries.filter((entry) => entry.isFile()).map((entry) => relative(root, join(entry.parentPath, entry.name)))
-    .filter((path) => !unhashed.has(path.split(sep)[0]!)).sort();
+    .filter(hashed).sort();
   const hash = createHash("sha256");
   for (const path of files) hash.update(`${path}\0`).update(await readFile(join(root, path))).update("\0");
   return hash.digest("hex");
@@ -70,7 +71,7 @@ export async function finalGate(head: ProofIdentity, context: GateContext, { lan
     landed, cleanBaseMerge: cleanBaseMerge(head, run), netDelta: netDeltaOf(head, run), ci: () => ciOf(home, head, run, now?.() ?? new Date()),
     pushedHead, ledger: hubLedger(home, env, ssh), now: now?.(), devPull: devPullOf(run),
   });
-  const judged: Judged = checked.code === 0 ? await judgeHead(head, checked, context, (pull as PullRequest | undefined)?.baseSha) : { code: checked.code, lines: [], covered: "", judge: { state: "skipped", lines: [] }, reason: checked.failure };
+  const judged: Judged = checked.code === 0 ? await judgeHead(head, checked, context) : { code: checked.code, lines: [], covered: "", judge: { state: "skipped", lines: [] }, reason: checked.failure };
   const shown = pull === undefined ? undefined : receiptMarker((pull as PullRequest).body);
   const stale = shown && shown.head !== head.commit ? [`receipt: the PR body shows the receipt of ${shown.head.slice(0, 7)}, not HEAD ${head.commit.slice(0, 7)}. Refresh it with hedge proof receipt`] : [];
   const gate = {
@@ -127,7 +128,7 @@ async function savedGate(home: string, ref: PrRef, pull: PullRequest, ledger: Le
   return JSON.stringify(saved.key) === JSON.stringify(key) ? saved : undefined;
 }
 
-async function judgeHead(head: ProofIdentity, checked: Checked, context: GateContext, baseSha: string | undefined): Promise<Judged> {
+async function judgeHead(head: ProofIdentity, checked: Checked, context: GateContext): Promise<Judged> {
   const { home, env, run, now } = context;
   const author = await authorOf(home, head);
   const row = reviewerRow(author, env);
@@ -140,7 +141,7 @@ async function judgeHead(head: ProofIdentity, checked: Checked, context: GateCon
     evidence: checked.evidence, reviews: await reviewRecords(home, head), rubric: await readRubric(home), references: skillReferences(home),
     conditions: [...checked.conditions, ...weighedGap?.condition ? [weighedGap.condition] : []], criticalPaths: await readCriticalPaths(home, head.repository, env),
   };
-  const outcome = await judgeDiff(head, known, row, context, baseSha);
+  const outcome = await judgeDiff(head, known, row, context);
   const verdict = (lines: string[], gap?: JudgeSummary["gap"]): JudgeSummary => ({ state: outcome.state, model: outcome.model, ...gap ? { gap } : {}, lines });
   if (riskRubric === undefined) outcome.lines.push("judge risk: not asked; ~/.agents/skills/merge-risk/SKILL.md is not installed");
   const reason = outcome.lines.find((line) => /^judge [a-z]+: fail\b/.test(line)) ?? outcome.lines[0];
@@ -161,9 +162,9 @@ async function judgeHead(head: ProofIdentity, checked: Checked, context: GateCon
   return { code: 1, lines, covered: "", judge: verdict(lines), reason };
 }
 
-async function judgeDiff(head: ProofIdentity, known: Omit<JudgeInput, "cwd" | "from" | "diff">, row: ModelRow, context: GateContext, baseSha: string | undefined) {
+async function judgeDiff(head: ProofIdentity, known: Omit<JudgeInput, "cwd" | "from" | "diff">, row: ModelRow, context: GateContext) {
   const { home, cwd, env, run, now } = context;
-  const from = mergeBase(head, run, baseSha);
+  const from = mergeBase(head, run);
   return judge({ ...known, cwd: topLevel(run) ?? cwd, from, diff: diffOf(from, known.commit, run) }, {
     ask: (request) => askModel("judge", row, request, env, reviewLimit(env)), model: modelLabel("judge", row, env), arbiter: arbiterOf(context),
     directory: judgeDirectory(home, head), commit: known.commit, now: now?.() ?? new Date(),

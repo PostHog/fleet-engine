@@ -11,54 +11,24 @@
   docs-only one too, takes a final read, and the gate prints the command. The
   quiet-commit walk, its test-file and revert checks, and their carry lines
   are gone.
-- The base is the PR's base commit on GitHub, never a remote-tracking ref of
-  the checkout. Each review records it, and a review whose base GitHub's base
-  no longer holds, such as after a rewind, carries nothing. A file left in
-  conflict, a binary one too, never carries. A gate in a checkout without HEAD,
-  or without the commit that `--commit` names, stops before it calls GitHub.
-  The gate fails when GitHub's base moves between its reads. A review from an
-  older Hedge, which recorded no base, carries nothing, and the gate asks for
-  a final read.
-- A later round or final read reads only that net delta, from the latest
-  reviewed head, so a merge of the base adds nothing to read, and a revert or
-  a deleted file stays in it. A file left in conflict is in it with both
-  sides, and each lens must cover it. When Hedge cannot read the net delta, it
-  refuses the read and names the command that recovers, such as a full read.
-- A fixes round takes `--base` with the latest finished review, a final read
-  too. A `--scope full` read, the judge's diff, and the review rules start
-  from the PR's base commit on GitHub.
-- A round records GitHub's base commit once, when it is reserved. Its diff,
-  its retries, its REVIEW.md rules, and the miss that `hedge proof miss`
-  saves read that commit, never a fresh read of the base. A fixes round or
-  final read always starts at the latest finished review, also when its
-  `--base` is a clean merge of it. An unfinished round that an older Hedge
-  reserved does not resume or publish: `hedge proof review`, its `--wait`,
-  and `review-finish` refuse it and print the `rm -rf` that deletes it, and
-  the command that reserved it then starts a new one.
-- `hedge proof miss` saves the reviewed head and the base of a net delta, so
-  `hedge proof eval` replays the range of a later round or final read through
-  the same range builder as the live review, with each conflict's two sides.
-- A refused read names a command that the review budget lets run: once the
-  budget is spent, or a confirming read found a blocker or major, the full
-  read it names takes the user's `--override`, also for a read that already
-  holds the user's `--override`. The conflict brief quotes each `git show`
-  argument for the shell. Hedge redacts known secrets in each diff, its
-  conflict headings too, as it did before.
+- The base of that net delta is the PR's base commit on GitHub, never a
+  remote-tracking ref of the checkout. A file left in conflict, a binary one
+  too, never carries. When the gate cannot read the net delta, nothing
+  carries, and it asks for the final read. The carry needs Git 2.38 or later
+  (`git merge-tree --write-tree`). A gate in a checkout without HEAD, or
+  without the commit that `--commit` names, stops before it calls GitHub. The
+  gate fails when GitHub's base moves between its reads.
 - A review that finds no blocker or major spends no review budget. The final
   read that the gate asks for runs even when the budget is spent; the budget
   stops the fixes rounds after it. When the arbiter escalates, one final read
-  of the net delta may still run, such as to confirm a revert. That read takes
-  the stop once, and a blocker or major it finds goes to the user. An arbiter
-  that gives no verdict stops nothing. `review-start` prints the confirming read in
-  its JSON. The user's `--override` clears the stop before it marks its round
-  recorded, so a retry still clears it. It clears only the stop it answered:
-  a stop that a later arbiter saves stays. Each command on the reviews of a
-  PR holds one lock per PR from its first read of the rounds and the stop to
-  its last write, through its waits on T3, the hub, the arbiter, or a
-  reviewer, so an answer always binds to the stop it read. A second command
-  stops and names the first. The lock file stays out of the gate's
-  fingerprint. A later round refuses to start while a panel is unfinished,
-  because its lenses publish their findings without the lock.
+  may still run, such as to confirm a revert. That read takes the stop once,
+  and a blocker or major it finds goes to the user: every later review then
+  takes the user's `--override`. An arbiter that gives no verdict stops
+  nothing. `review-start` prints the confirming read in its JSON.
+- Each command on the reviews of a PR holds one lock per PR from its first
+  read of the rounds and the stop to its last write, so an answer always binds
+  to the stop it read. A second command stops and names the first. The lock
+  and the stop stay out of the gate's fingerprint, their temporary files too.
 
 ### Fleet is now Hedge
 

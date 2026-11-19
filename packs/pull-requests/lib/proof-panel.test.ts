@@ -571,6 +571,7 @@ test("a round after the PR merged its base reads and demands only the files the 
   const brief = reviewer.prompts().at(-1)!;
   expect(brief).toContain("+greet the member");
   expect(brief).not.toContain("the base moves on");
+  expect(brief).toContain("It leaves out 1 file(s) that a merge of the base brought in.");
 
   await pr.advanceBase("base.md", "the base moves again\n");
   await pr.git("merge", "-q", "--no-edit", "main");
@@ -580,6 +581,7 @@ test("a round after the PR merged its base reads and demands only the files the 
   const read = reviewer.prompts().at(-1)!;
   expect(read).toContain("+greet every member");
   expect(read).not.toContain("the base moves again");
+  expect(read).toContain("It leaves out 1 file(s) that a merge of the base brought in.");
 });
 
 test("after a base merge, a round keeps the PR's renames and non-ASCII file names whole", async () => {
@@ -602,6 +604,7 @@ test("after a base merge, a round keeps the PR's renames and non-ASCII file name
   expect(brief).toContain("rename from feature.txt");
   expect(brief).toContain("+greet the member");
   expect(brief).not.toContain("the base moves on");
+  expect(brief).toContain("It leaves out 1 file(s)");
 });
 
 test("a panel that fails to plan gives its round back, so the same command plans it again", async () => {
@@ -808,7 +811,7 @@ test("a review at a newer commit waits for the command at an older commit that s
   await pr.commit("feature.txt", "greet\n");
   await pr.hedge("require", "--none", "--reason", "docs only");
   const reviewed = await reviewHead(pr);
-  const older = await pr.commit("feature.txt", "greet the member\n");
+  await pr.commit("feature.txt", "greet the member\n");
   const reviewer = fakeModel(pr, "REVIEWER", clean);
   const hub = hubAt(pr, "stalls after it lands an append");
   pr.env.HEDGE_REVIEW_ARBITER = "cat >/dev/null; echo CONTINUE";
@@ -818,11 +821,11 @@ test("a review at a newer commit waits for the command at an older commit that s
   hub.state.hub = "up";
   await pr.commit("feature.txt", "greet the new member\n");
 
-  await expect(pr.hedge("review", "--scope", "fixes", "--base", older)).rejects.toThrow(`Process ${process.pid}, another hedge proof command, works on the reviews in ${pr.pullRequest}`);
+  await expect(pr.hedge("review", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(`Process ${process.pid}, another hedge proof command, works on the reviews in ${pr.pullRequest}`);
   hub.releaseAppends();
   expect((await first).code).toBe(0);
   expect((await pr.hedge("review", "--wait", "--round", "final")).code).toBe(0);
-  const review = await pr.hedge("review", "--scope", "fixes", "--base", older);
+  const review = await pr.hedge("review", "--scope", "fixes", "--base", reviewed);
   expect(JSON.parse(review.output.split("\n")[0]!)).toMatchObject({ round: 2, id: "2" });
 
   const listed = (await pr.decide("list", "--pr", "example/product#42")).output.split("\n").filter((line) => line.startsWith("- "));

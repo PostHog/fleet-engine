@@ -1,8 +1,8 @@
 import { closeSync, existsSync, openSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
-import { askGap, authorOf, pullRequestDirectory, finishReview, startGateRun, ledgerRoot, listStanding, panelCommit, proofDirectory, readJson, readOwed, recordGap, recordGapCommand, recordStanding, requireChoice, stopIdOf, requireNone, devPr, requireProofs, requireReservation, respondToReview, reuseProof, reviewDirectory, reviewOfCommit, reviewRecords, roundId, roundQuestion, runOption, saveProof, startReview, stopOption, storeCapturedFindings, unfinishedReview, writeJson, markRecorded, readReservation, recordReceipt, roundDirectories, unrecordedElsewhere, type Arbiter, type Reservation, type CapturedBy, type ProofIdentity } from "./proof.ts";
+import { basename, join, resolve } from "node:path";
+import { askGap, authorOf, pullRequestDirectory, finishReview, startGateRun, ledgerRoot, listStanding, panelCommit, proofDirectory, readJson, readOwed, recordGap, recordGapCommand, recordStanding, requireChoice, requireNone, devPr, requireProofs, requireReservation, respondToReview, reuseProof, reviewDirectory, reviewOfCommit, reviewRecords, roundId, roundQuestion, runOption, saveProof, startReview, stopOption, storeCapturedFindings, unfinishedReview, writeJson, markRecorded, readReservation, recordReceipt, roundDirectories, unrecordedElsewhere, type Arbiter, type Reservation, type CapturedBy, type ProofIdentity } from "./proof.ts";
 import { AnswerTaken, appendOnce, decideAlone, hearUser, ledgerHolds, ledgerOf } from "./decision-cli.ts";
 import { HubUnreachable, refText, thisMachine, type Decision, type Ssh } from "./decision-ledger.ts";
 import { readComment, runIn } from "./pr-ci.ts";
@@ -18,9 +18,9 @@ import { runReceipt } from "./proof-receipt-command.ts";
 import { receiptBudget } from "./proof-receipt-page.ts";
 import { publisherSeam } from "./proof-receipt-publisher.ts";
 import { reviewPrompt } from "./proof-review.ts";
-import { reviewRange } from "./proof-range.ts";
-import { netDeltaIn, type Merged } from "./proof-delta.ts";
-import { cleanBaseMerge, mergeBase, pullRequestDetails, remotesOf, reviewTier, tierCeiling, tierLenses, topLevel, type ReviewTier } from "./proof-checkout.ts";
+import { leftOutNote, reviewRange } from "./proof-range.ts";
+import { netDeltaIn } from "./proof-delta.ts";
+import { baseTip, cleanBaseMerge, mergeBase, pullRequestDetails, remotesOf, reviewTier, tierCeiling, tierLenses, topLevel, type ReviewTier } from "./proof-checkout.ts";
 import { arbiterOf, finalGate, requireHead, reviewLimit, type FinalGate } from "./proof-gate.ts";
 import { anchorCheck } from "./finding-anchors.ts";
 import { reviewRules } from "./review-rules.ts";
@@ -76,10 +76,11 @@ findings hold no blocker or major, and no finding without a severity, spends not
 the fixes read, and the last read. A PR of the Read tier gets its one read and one final read of its fixes. The final
 read that the gate asks for, one whose net delta is not empty, runs even when the budget is spent; a blocker or major
 it finds still spends budget, and the budget stops the fixes rounds after it. When the arbiter escalates, hedge saves
-the stop with an id, and one final read of the net delta may still run without the arbiter, such as to confirm the
-revert of a fix. That read takes the stop once. A blocker or major it finds goes to the user, and only the user's
+the stop with an id, and one final read may still run without the arbiter, such as to confirm the revert of a
+fix. That read takes the stop once. A blocker or major it finds goes to the user, and only the user's
 --override runs another review; when it finds none, the next review asks the arbiter again. An arbiter that times out
-or gives no verdict stops nothing. The user's --override clears the stop it answered once its decision is in the ledger; a newer stop stays. The arbiter is the lookup model of your AI plan; HEDGE_REVIEW_ARBITER replaces its
+or gives no verdict stops nothing. After a read that confirmed a stop found a blocker or major, every later review
+takes the user's --override. The arbiter is the lookup model of your AI plan; HEDGE_REVIEW_ARBITER replaces its
 command.`;
 
 const subcommands: Record<string, Subcommand> = {
@@ -278,9 +279,8 @@ lenses; :same or :other moves a failed lens to the family that is up when the ot
 is done, hedge joins the answers under one heading per lens as the round's findings. On a PR of the Read tier the
 lenses run as one combined lens. Each reviewer runs without the user's settings, hooks, memory, and MCP servers, and
 hedge keeps its token use as usage in lenses/<name>.json, or in round.json for one reviewer.
-A final read, --scope final, reads the net delta past --base, the latest reviewed head, with the Correctness lens of
-PANEL.md. A file that the merge of that head with the PR's base leaves in conflict is in it with both sides, and each
-lens must cover it.
+A final read, --scope final, reads every fix from the commit of the first panel round to HEAD with the Correctness
+lens of PANEL.md.
 --wait waits up to 9 minutes for the panel of the unfinished round, the latest round, or --round, and prints each
 lens. Exit 0 when the round is finished, with its findings; 1 when a lens failed; 2 when lenses still run, so run
 --wait again; 4 when a lens stopped on spent quota. It restarts a lens whose worker died, and waits while another
@@ -400,17 +400,15 @@ panel gap (gap --kind panel) stands in for the panel. The review also carries to
 reviewed head and the base. The base is the PR's base commit that GitHub names when the gate reads the PR, never a
 remote-tracking ref of the checkout; the gate fetches it from a remote of the PR's repository when the checkout lacks
 it. The gate merges each of the latest 5 reviewed heads, latest first, with the base that HEAD contains (git
-merge-tree --write-tree), and diffs that tree against HEAD. An empty diff carries the review, such as
-after a clean merge of the base, or a change and its revert: the gate prints "review: HEAD carried from <sha>: nothing
-changed past it and the base" and writes the receipt carried/<HEAD>.json, on which it never passes alone. Any other
-diff, a test-only or docs-only one too, takes a final read: the gate prints how many files changed and the command
-hedge proof review --scope final --base <sha>. Each file that the merge leaves in conflict is in the diff, so a
+merge-tree --write-tree, Git 2.38 or later), and diffs that tree against HEAD. An empty diff carries the review, such
+as after a clean merge of the base, or a change and its revert: the gate prints "review: HEAD carried from <sha>:
+nothing changed past it and the base" and writes the receipt carried/<HEAD>.json, on which it never passes alone. Any
+other diff, a test-only or docs-only one too, takes a final read: the gate prints how many files changed and the
+command hedge proof review --scope final --base <sha>. Each file that the merge leaves in conflict is in the diff, so a
 conflict never carries, even one without markers, such as in a binary file. Nothing carries from a reviewed head when
-the checkout lacks it, when the PR's base cannot be read or fetched, or when the PR's base on GitHub no longer holds
-the base that its review recorded, such as after a rewind of the base: the gate then asks for a full read. A review
-that recorded no base, from an older hedge, carries nothing, and the gate asks for a final read. The gate fails when
-the PR's base on GitHub moves between its reads. The gate checks that the checkout holds HEAD, even a --commit, before
-it calls GitHub, and stops with the command that fetches it.
+the checkout lacks it, or when the PR's base cannot be read, fetched, or merged: the gate then asks for the same final
+read. The gate fails when the PR's base on GitHub moves between its reads. The gate checks that the checkout holds
+HEAD, even a --commit, before it calls GitHub, and stops with the command that fetches it.
 When those checks pass, the judge runs read-only on the reviewer's row of the model table, as hedge proof review
 picks it. hedge hands it the diff from the merge base, CI, the owed kinds, the counted evidence, every review's
 findings and responses, and the coding standards in ~/.agents/guides/coding-standards.md. It answers four questions:
@@ -464,8 +462,7 @@ receipt link once one is recorded. The gate's lines and hedge decision report co
 hedge proof review read the commit and said nothing about it. --commit is the reviewed commit that already held the
 problem. --finding says in one or two sentences what the reviewer should have flagged; record only a problem a
 person has checked. The CLI refuses a commit that no finished review of the PR read, because then no reviewer
-missed it. Each case keeps the diff range the review read, the PR's base commit on GitHub, whose REVIEW.md rules
-eval reads, the PR title and description, and the source, as one
+missed it. Each case keeps the diff range the review read, the PR title and description, and the source, as one
 JSON line in ${missesPath("~")}. hedge proof eval reruns the reviewer on every case. --introduced-by-fix marks a missed line
 that a review fix brought in, between the commit of the first panel round and HEAD.`,
     examples: [
@@ -482,13 +479,12 @@ that a review fix brought in, between the commit of the first panel round and HE
       const head = identity();
       const review = await reviewOfCommit(home, head);
       if (!review) throw new Error(`No finished review of ${head.repository}#${head.pr} read ${short(head.commit)}, so no reviewer missed it there. Pass --commit with the reviewed commit that held the problem`);
-      const base = review.merged?.reviewed ?? review.from;
-      if (!base) throw new Error(`The review of ${short(head.commit)} recorded no range, so the diff it read cannot be rebuilt`);
+      const base = review.from ?? mergeBase(head, run);
       if (base === head.commit) throw new Error(`Cannot rebuild the diff the review read: the base of ${head.repository}#${head.pr} already contains ${short(head.commit)}`);
       const pr = pullRequestDetails(head, run);
       const miss = await recordMiss(home, {
         repo: head.repository, pr: head.pr, commit: head.commit, source, finding, file: options.get("--file"), line, url: options.get("--url"),
-        base, ...review.merged ? { mergedWith: review.merged.base } : {}, ...review.baseSha ? { baseSha: review.baseSha } : {}, head: head.commit, scope: review.scope, round: review.label, reviewer: review.reviewer, title: pr.title, body: pr.body,
+        base, head: head.commit, scope: review.scope, round: review.label, reviewer: review.reviewer, title: pr.title, body: pr.body,
         ...flags.has("--introduced-by-fix") ? { introducedByFix: true } : {},
       }, now?.() ?? new Date());
       print(JSON.stringify({ id: miss.id, repo: miss.repo, pr: miss.pr, commit: miss.commit, source: miss.source, round: miss.round, ...miss.introducedByFix ? { introducedByFix: true } : {}, path: missesPath(home) }));
@@ -521,19 +517,10 @@ change the judge. Exit 1 when no case was scored.`,
     usage: "review-start [--scope full|fixes|final] [--base <reviewed-sha>] [--phase review|babysit] [--override <dated quote> [--thread <id>] | --agent <reason>]",
     summary: `Reserve a review round before you dispatch its reviewers. Round 1 is --scope full and takes no --base. A later
 round is --scope fixes, and a final read is --scope final; both take --base with the commit of the latest finished
-review. The printed id names the round for review-finish and respond. A later round and a final read read only the net
-delta: their diff starts at their base merged with the base that HEAD contains, so a merge of the base adds nothing to
-read. The diff starts at the latest reviewed head merged with the base, and the reviewer gets all of it, a revert or a
-deleted file too. The base is the PR's base commit on GitHub. Each round records it once, and its diff, its retries,
-and its REVIEW.md rules read that commit. A final read of a HEAD whose net delta is empty is refused, unless --agent
-with your reason, or the user's --override, asks for it. A later round or final read whose net delta hedge cannot read
-is refused, with the command that recovers, such as a full read, which names the user's --override once the review
-budget is spent or a read confirmed the arbiter's stop. An unfinished round that an older Hedge reserved does not resume: hedge proof review, its --wait,
-and review-finish refuse it and print the rm -rf that deletes it; then run the command that reserved it again.
-A --scope full round reads from where HEAD branched from the PR's base commit on GitHub. A final read
-whose net delta is not empty runs even when the review budget is spent. After an arbiter escalation, the one final
+review. The printed id names the round for review-finish and respond. A final read of a HEAD whose net delta is empty
+is refused, unless --agent with your reason, or the user's --override, asks for it. A final read whose net delta is
+not empty, or cannot be read, runs even when the review budget is spent. After an arbiter escalation, the one final
 read that may still run names the stop it confirms in the "confirms" field of the printed JSON.
-A later round refuses to start while a panel is unfinished; wait for it with hedge proof review --wait --round <id>.
 A later round with --agent, or the user's --override, may be --scope full: it reviews
 the whole PR diff at HEAD again, such as after a restack.
 ${overrideHelp}`,
@@ -567,8 +554,7 @@ needs the hub; a round whose decision is recorded finishes without it.`,
       const head = identity();
       return reviewStep(head, context, async () => {
         const directory = await reviewDirectory(context.home, head, round);
-        const reservation = await requireReservation(directory);
-        if (!existsSync(join(directory, "findings.md"))) resumable({ reservation, directory });
+        await requireReservation(directory);
         await recordRound(directory, context);
         context.print(await finishReview(context.home, head, round, resolve(context.cwd, findings[0]!), reviewer));
         return 0;
@@ -577,24 +563,14 @@ needs the hub; a round whose decision is recorded finishes without it.`,
   },
 };
 
-type SingleRound = { round: number | "final"; id: string; directory: string; scope: string; base?: string; from: string; merged?: Merged; baseSha: string; phase?: string };
-type Pending = { reservation: Reservation; directory: string };
-
-function resumable({ reservation, directory }: Pending) {
-  const { from, baseSha } = reservation;
-  if (from && baseSha && (reservation.scope === "full" || reservation.merged)) return { from, baseSha };
-  throw new Error(`Review ${basename(directory)} was reserved by an older Hedge, which recorded no merged start or base on GitHub, so it cannot resume. Delete it with rm -rf '${directory.replaceAll("'", `'\\''`)}', then run the hedge proof command that reserved it again`);
-}
-
-const plannedLenses = (plan: Plan) => plan.arguments ?? (plan.lenses.some(({ name }) => name === "combined") ? [] : plan.lenses.map(({ name }) => name));
-
+type SingleRound = { round: number | "final"; id: string; directory: string; scope: string; base?: string; from?: string; phase?: string };
 const runReview = (options: Map<string, string>, head: ProofIdentity, context: CommandContext) => reviewStep(head, context, async () => {
   const { home, run } = context;
   const author = await authorOf(home, head);
   const pending = await unfinishedReview(home, head, "hedge");
   if (pending) requireSameRequest(pending, options, run);
   const reserved: SingleRound = pending
-    ? { round: pending.reservation.round, id: basename(pending.directory), directory: pending.directory, scope: pending.reservation.scope, base: pending.reservation.base, ...resumable(pending), merged: pending.reservation.merged, phase: (pending.reservation as { phase?: string }).phase }
+    ? { round: pending.reservation.round, id: basename(pending.directory), directory: pending.directory, scope: pending.reservation.scope, base: pending.reservation.base, from: pending.reservation.from ?? rangeStart(pending.reservation.scope, pending.reservation.base, head, run), phase: (pending.reservation as { phase?: string }).phase }
     : await reserveHedgeReview(options, head, context);
   if (await readPlan(reserved.directory) || await stagedPlan(reserved.directory)) throw new Error(`${reserved.directory} is an unfinished panel. Rerun it with the same hedge proof review --lens command, or wait for it with --wait`);
   await takeOverride(reserved.directory, options, head, context);
@@ -622,15 +598,15 @@ async function askReviewer(reserved: SingleRound, head: ProofIdentity, author: F
   const row = reviewerRow(author, env);
   const limit = numberSetting("pull-requests.reviewTimeoutMinutes", env) * 60_000;
   const rubric = await readRubric(home);
-  const { from } = reserved;
+  const from = reserved.from!;
   const pr = pullRequestDetails(head, run);
-  const { files, diff } = reviewRange(run, reserved, head.commit);
-  const rules = reviewRules(files, reserved.baseSha, run);
+  const { files, leftOut, diff } = reviewRange(run, from, head.commit, mergeBase(head, run));
+  const rules = reviewRules(files, baseTip(head, run), run);
   const diffFile = join(reserved.directory, "diff.patch");
   await writeFile(diffFile, diff, { mode: 0o600 });
   const guide = reserved.round === "final" && (reserved.phase ?? "review") === "review" ? await panelGuideText(home) : undefined;
   const lens = guide && parseGuide(guide.text, guide.path).lenses.get("correctness")?.text;
-  const prompt = reviewPrompt({ scope: reserved.scope, from, commit: head.commit, diff, diffFile, crossFamily: familyOf(row) !== author, title: pr.title, body: pr.body, rubric, references: skillReferences(home), reviewRules: rules, lens });
+  const prompt = reviewPrompt({ scope: reserved.scope, from, commit: head.commit, diff, diffFile, note: leftOutNote(leftOut), crossFamily: familyOf(row) !== author, title: pr.title, body: pr.body, rubric, references: skillReferences(home), reviewRules: rules, lens });
   const answer = await askModel("reviewer", row, { prompt, cwd: topLevel(run) ?? cwd, readable: [join(home, ".agents/skills"), reserved.directory] }, env, limit);
   const label = reserved.round === "final" ? "The final read" : `Round ${reserved.round}`;
   if (!answer.ok && isQuotaExhausted(answer.cause)) {
@@ -657,17 +633,17 @@ async function reserveRound(options: Map<string, string>, head: ProofIdentity, c
   await settleStrandedRounds(head, context);
   const scope = options.get("--scope") ?? "full";
   const base = options.has("--base") ? resolveCommit(options.get("--base")!, context.run) : undefined;
+  const lastRead = scope === "final" && (options.get("--phase") ?? "review") === "review";
+  const from = lastRead ? await panelCommit(context.home, head) ?? base : rangeStart(scope, base, head, context.run);
   const netDelta = netDeltaIn(context.run, () => remotesOf(head.repository, context.run));
-  const baseSha = pullRequestDetails(head, context.run).baseSha;
-  if (!baseSha) throw new Error(`GitHub names no base commit of ${head.repository}#${head.pr}. Run the command again once GitHub answers`);
-  const from = scope === "full" ? mergeBase(head, context.run, baseSha) : undefined;
+  const baseSha = scope === "final" ? pullRequestDetails(head, context.run).baseSha : undefined;
   const { decision, ...permit } = await decisionOf(options, head, context);
   const tier = tierOf(head, context);
   if (tier.name === "read" && capturedBy === "hedge" && !panel && !decision && !await panelCommit(context.home, head)) throw new Error("A PR of the Read tier gets one read, and it is the panel: run hedge proof review, which runs its combined lens");
   const firstPanel = panel && !await panelCommit(context.home, head);
   const limits = firstPanel ? permit.limits : { ...permit.limits, ceiling: tierCeiling(tier, permit.limits.ceiling) };
   const reserved = await startReview(context.home, head, { scope, base, from, ...permit, limits, decision, phase: options.get("--phase"), cleanBaseMerge: cleanBaseMerge(head, context.run), netDelta, baseSha, capturedBy });
-  return { ...reserved, from: reserved.from!, baseSha, scope, base, phase: options.get("--phase") };
+  return { ...reserved, scope, base, from, phase: options.get("--phase") };
 }
 
 async function unrecordedRound(options: Map<string, string>, head: ProofIdentity, context: CommandContext) {
@@ -677,7 +653,7 @@ async function unrecordedRound(options: Map<string, string>, head: ProofIdentity
   return { round: pending.reservation.round, id: basename(pending.directory), directory: pending.directory };
 }
 
-function requireSameRequest({ reservation, directory }: Pending, options: Map<string, string>, run: Run) {
+function requireSameRequest({ reservation, directory }: { reservation: Reservation; directory: string }, options: Map<string, string>, run: Run) {
   if (!reservation.decision || reservation.recorded) return;
   const reserved = reservedOptions(reservation);
   if (reserved !== requestedOptions(options, reservation, run)) throw new Error(`Review round ${basename(directory)} at this HEAD is reserved with ${reserved}, and its decision is not recorded yet. Run its command again with ${reserved} to record it, or remove ${directory} to drop it`);
@@ -712,7 +688,7 @@ async function takeOverride(directory: string, options: Map<string, string>, hea
   const reservation = await readReservation(directory);
   if (!options.has("--override") || !reservation?.decision || reservation.recorded || reservation.decision.mark !== "🤖") return;
   const { decision } = await decisionOf(options, head, context);
-  await writeJson(join(directory, "round.json"), { ...reservation, decision, clears: stopIdOf(dirname(directory)) } satisfies Reservation);
+  await writeJson(join(directory, "round.json"), { ...reservation, decision } satisfies Reservation);
 }
 
 async function recordRound(directory: string, context: CommandContext) {
@@ -722,6 +698,8 @@ async function recordRound(directory: string, context: CommandContext) {
   catch (error) { if (error instanceof AnswerTaken) await rm(directory, { recursive: true, force: true }); throw error; }
   await markRecorded(directory);
 }
+
+const rangeStart = (scope: string, base: string | undefined, head: ProofIdentity, run: Run) => scope === "full" ? mergeBase(head, run) : base;
 
 function tierOf(head: ProofIdentity, { run }: CommandContext): ReviewTier {
   let body: string | undefined;
@@ -779,7 +757,7 @@ const runPanel = ({ options, lists }: Parsed, head: ProofIdentity, context: Comm
   const pending = await unfinishedReview(context.home, head, "hedge");
   const planned = pending && (await readPlan(pending.directory) ?? await stagedPlan(pending.directory));
   const tier = planned ? planned.tier : tierOf(head, context);
-  const chosen = planned ? plannedLenses(planned) : ((options.get("--scope") ?? "full") === "full" && tier ? tierLenses[tier.name] : []);
+  const chosen = planned ? planned.arguments ?? (planned.lenses.some(({ name }) => name === "combined") ? [] : planned.lenses.map(({ name }) => name)) : ((options.get("--scope") ?? "full") === "full" && tier ? tierLenses[tier.name] : []);
   const lensArguments = withLenses(chosen, lists.get("--lens") ?? []);
   const requested = lensArguments.map((argument) => resolveLens(guide, argument, author, knowledge, env));
   const combined = planned ? planned.lenses.map(({ name }) => name).join() === "combined" : tier?.name === "read";
@@ -819,20 +797,20 @@ async function startIdleLenses(directory: string, context: CommandContext) {
   return directory;
 }
 
-async function panelBriefs(reserved: { directory: string; from: string; merged?: Merged; baseSha: string }, head: ProofIdentity, lenses: Lens[], guide: PanelGuide, rubric: string, context: CommandContext) {
+async function panelBriefs(reserved: { directory: string; from?: string }, head: ProofIdentity, lenses: Lens[], guide: PanelGuide, rubric: string, context: CommandContext) {
   const { home, cwd, env, run } = context;
-  const { from } = reserved;
+  const from = reserved.from!;
   const pr = pullRequestDetails(head, run);
   const owed = await readOwed(home, head);
   const settled = (await reviewRecords(home, head)).filter((review) => review.responses).map((review) => `${review.label}:\n${review.responses!.trim()}`).join("\n\n");
-  const { files: changedFiles, diff } = reviewRange(run, reserved, head.commit);
+  const { files: changedFiles, leftOut, diff } = reviewRange(run, from, head.commit, mergeBase(head, run));
   const diffFile = join(reserved.directory, "diff.patch");
   await writeFile(diffFile, diff, { mode: 0o600 });
   const input = {
-    title: pr.title, body: pr.body, base: pr.baseRefName, from, commit: head.commit, diff, diffFile, settled,
+    title: pr.title, body: pr.body, base: pr.baseRefName, from, commit: head.commit, diff, diffFile, note: leftOutNote(leftOut), settled,
     owed: owed?.none ? `none (${owed.none.reason})` : owed?.kinds.join(", ") || "none recorded", rubric,
   };
-  const rules = reviewRules(changedFiles, reserved.baseSha, run);
+  const rules = reviewRules(changedFiles, baseTip(head, run), run);
   const briefed = lenses.map((lens) => ({ ...lens, knowledge: [rules, lens.knowledge].filter(Boolean).join("\n\n") }));
   const plan: Plan = {
     lenses: lenses.map((lens) => ({ name: lens.name, title: lens.title, ...castOf(lens, env) })),
@@ -841,18 +819,18 @@ async function panelBriefs(reserved: { directory: string; from: string; merged?:
   return { plan, briefs: new Map(briefed.map((lens) => [lens.name, lensBrief(guide, lens, input)])) };
 }
 
-async function rerunPanel(pending: Pending, options: Map<string, string>, head: ProofIdentity, lenses: Lens[], guide: PanelGuide, context: CommandContext) {
+async function rerunPanel(pending: { directory: string; reservation: { scope: string; base?: string; from?: string } }, options: Map<string, string>, head: ProofIdentity, lenses: Lens[], guide: PanelGuide, context: CommandContext) {
   const { directory, reservation } = pending;
   const plan = await readPlan(directory) ?? await stagedPlan(directory);
   if (!plan) throw new Error(`${directory} is reserved for one reviewer. Run hedge proof review without --lens to retry it`);
-  const start = resumable(pending);
   const planned = plan.lenses.map((lens) => lens.name);
   if (lenses.map((lens) => lens.name).sort().join() !== [...planned].sort().join()) throw new Error(`The unfinished round runs the lenses ${planned.join(", ")}. Run hedge proof review without --lens to rerun its failed lenses; --lens <name>:same or :other moves one of them to that family`);
   await takeOverride(directory, options, head, context);
   await recordRound(directory, context);
   if (await readPlan(directory)) {
     const casts = new Map(lenses.map((lens) => [lens.name, castOf(lens, context.env)]));
-    await requeueFailed(directory, casts, await panelBriefs({ directory, ...start, merged: reservation.merged }, head, lenses, guide, await readRubric(context.home), context));
+    const from = reservation.from ?? rangeStart(reservation.scope, reservation.base, head, context.run);
+    await requeueFailed(directory, casts, await panelBriefs({ directory, from }, head, lenses, guide, await readRubric(context.home), context));
   }
   return startIdleLenses(directory, context);
 }
@@ -871,8 +849,7 @@ async function knowledgeOf(values: string[], cwd: string) {
 async function waitForReview(options: Map<string, string>, head: ProofIdentity, context: CommandContext) {
   const pending = options.has("--round") ? undefined : await unfinishedReview(context.home, head, "hedge");
   const directory = pending?.directory ?? await reviewDirectory(context.home, head, roundOption(options));
-  const reservation = await requireReservation(directory);
-  if (!existsSync(join(directory, "findings.md"))) resumable({ reservation, directory });
+  await requireReservation(directory);
   await startStaged(head, directory, context);
   const restart = (name: string) => reviewStep(head, context, async () => { if (await lensIdle(directory, name)) await startLens(directory, name, context); }).catch(unless(ReviewsBusy));
   const code = await waitForPanel(directory, panelIO(context), restart, waitPolls);
