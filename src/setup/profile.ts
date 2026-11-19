@@ -194,18 +194,40 @@ async function upstreamOf(machine: Machine, dir: string, branch: string) {
   };
   const remote = await setting("remote");
   const merge = await setting("merge");
-  return remote && merge ? { remote, merge } : undefined;
+  if (!remote || !merge) return undefined;
+  if (remote === "origin") return merge;
+  const tracked = remote === "." ? `the local branch ${merge.replace(/^refs\/heads\//, "")}` : `${remote}/${merge.replace(/^refs\/heads\//, "")}`;
+  throw new Error(`${dir} is on the branch ${branch}, which tracks ${tracked}, not origin. Setup takes and saves your answers only on origin, the repo it checks. Run git -C ${dir} branch --set-upstream-to origin/<branch>, then run hedge setup again.`);
 }
 
-async function saveTarget(machine: Machine, dir: string) {
+/** The branch of origin that the checkout's branch tracks, or undefined when it is on no branch or tracks none. */
+async function trackedOnOrigin(machine: Machine, dir: string) {
+  const head = await machine.exec(["git", "-C", dir, "symbolic-ref", "-q", "--short", "HEAD"]);
+  return head.code === 0 ? upstreamOf(machine, dir, head.output.trim()) : undefined;
+}
+
+/** Fetches origin and moves the checkout's branch forward to the origin branch it tracks. Returns the failed merge, if any. */
+export async function takeOrigin(machine: Machine, home: string, dir: string) {
+  await knowGitHub(machine, home, dir);
+  await git(machine, dir, "fetch", "-q", "origin");
+  const merge = await trackedOnOrigin(machine, dir);
+  if (!merge) return undefined;
+  const fetched = `refs/remotes/origin/${merge.replace(/^refs\/heads\//, "")}`;
+  if ((await machine.exec(["git", "-C", dir, "rev-parse", "--verify", "-q", fetched])).code !== 0) return undefined;
+  const merged = await machine.exec(["git", "-C", dir, "merge", "-q", "--ff-only", fetched]);
+  return merged.code === 0 ? undefined : merged;
+}
+
+/** Where a save pushes: the origin branch the checkout's branch tracks. */
+export async function saveTarget(machine: Machine, dir: string) {
   if ((await machine.exec(["git", "-C", dir, "rev-parse", "--verify", "-q", "HEAD"])).code !== 0) {
     await git(machine, dir, "symbolic-ref", "HEAD", "refs/heads/main");
     return ["-u", "origin", "main"];
   }
   const branch = await currentBranch(machine, dir);
-  const upstream = await upstreamOf(machine, dir, branch);
-  if (!upstream) throw new Error(`${dir} is on the branch ${branch}, which tracks no remote branch, so setup does not know where to save your answers. Run git -C ${dir} branch --set-upstream-to <remote>/<branch>, then run hedge setup again.`);
-  return [upstream.remote, `HEAD:${upstream.merge}`];
+  const merge = await upstreamOf(machine, dir, branch);
+  if (!merge) throw new Error(`${dir} is on the branch ${branch}, which tracks no remote branch, so setup does not know where to save your answers. Run git -C ${dir} branch --set-upstream-to origin/<branch>, then run hedge setup again.`);
+  return ["origin", `HEAD:${merge}`];
 }
 
 const isPrivate = (visibility: string | undefined) => visibility === "PRIVATE" || visibility === "INTERNAL";
@@ -238,11 +260,7 @@ async function checkout(machine: Machine, home: string, dir: string, repo: strin
     const urls = (await machine.exec(["git", "-C", dir, "config", "--get-regexp", "^remote\\.origin\\.(push)?url$"])).output.trim().split("\n").map((line) => line.split(" ").slice(1).join(" "));
     const other = urls.find((url) => githubRepoOf(url)?.toLowerCase() !== repo.toLowerCase());
     if (other !== undefined) throw new Error(`${dir} is a clone of ${other || "nothing"}, not ${repo}. Move it away, then run hedge setup again.`);
-    await knowGitHub(machine, home, dir);
-    await git(machine, dir, "fetch", "-q", "origin");
-    if ((await machine.exec(["git", "-C", dir, "rev-parse", "--verify", "-q", "@{upstream}"])).code !== 0) return;
-    const merged = await machine.exec(["git", "-C", dir, "merge", "-q", "--ff-only", "@{upstream}"]);
-    if (merged.code !== 0) throw new Error(`${bothChanged(dir, repo)} Move ${dir} away, then run hedge setup again: it clones ${repo} and saves your answers on top.`);
+    if (await takeOrigin(machine, home, dir)) throw new Error(`${bothChanged(dir, repo)} Move ${dir} away, then run hedge setup again: it clones ${repo} and saves your answers on top.`);
     return;
   }
   if (existsSync(dir)) throw new Error(`${dir} exists and is not your profile. Move it away, then run hedge setup again.`);

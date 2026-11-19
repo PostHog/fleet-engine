@@ -47,7 +47,7 @@ describe("hedge setup with a devbox", () => {
     expect((await hedgeSetup(home, args, ["~/code/app"], fakeMachine(home))).output).toContain("could not push answers");
 
     const blocked = await hedgeSetup(home, ["--non-interactive", ...args], [], fakeMachine(home));
-    expect(blocked.output).toContain("could not push answers: ! [remote rejected] main -> main (pre-receive hook declined). Fix that, then try again.");
+    expect(blocked.output).toContain("could not push answers: ! [remote rejected] HEAD -> main (pre-receive hook declined). Fix that, then try again.");
     expect(blocked.output).not.toContain("▶ Install Hedge on node-1");
 
     rmSync(rejecting);

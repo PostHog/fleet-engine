@@ -14,8 +14,7 @@ import { humanStep, optionalStep, packSignIn, type HumanContext, type SignIn } f
 import { devboxQuestion, devboxSteps, hubSteps, notTakenByHub, profileForBox, type DevboxContext } from "./devbox.ts";
 import { doneScreen, finalCheck, repoName, runsByItself } from "./done.ts";
 import { readTimings, usableSeconds } from "../commands/triage-record.ts";
-import { existingProfile, profileStep } from "./profile.ts";
-import { knowGitHub } from "./known-hosts.ts";
+import { existingProfile, profileStep, saveTarget, takeOrigin } from "./profile.ts";
 import { runSteps, type Step } from "./runner.ts";
 import { chatgptSignIn, claudeSignIn, githubSignIn, memberSources } from "./signins.ts";
 import { Stopped, type Terminal } from "./terminal.ts";
@@ -207,7 +206,7 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
         if (outcome !== "unanswered" && machine.profileDir) {
           await fastForward(box, options.home, machine.profileDir);
           await reread(machine.profileDir);
-          await pushAnswers(machine.profileDir, { settings: changedSettings(base?.settings, progress.draft.settings) });
+          await pushAnswers(machine.profileDir, { settings: changedSettings(base?.settings, progress.draft.settings) }, await saveTarget(box, machine.profileDir));
           base = structuredClone(progress.draft);
         }
         return outcome;
@@ -317,10 +316,8 @@ function chatgptStep(signIn: SignIn, human: HumanContext, plan: Plan): Step {
 }
 
 async function fastForward(box: Machine, home: string, dir: string) {
-  if ((await box.exec(["git", "-C", dir, "rev-parse", "--abbrev-ref", "@{upstream}"])).code !== 0) return;
-  await knowGitHub(box, home, dir);
-  const pulled = await box.exec(["git", "-C", dir, "pull", "-q", "--ff-only"]);
-  if (pulled.code !== 0) throw new Error(`could not take the new commits of your profile in ${dir}: ${pulled.output.trim().split("\n").at(-1)}. Run git -C ${dir} pull, then run hedge setup again.`);
+  const failed = await takeOrigin(box, home, dir);
+  if (failed) throw new Error(`could not take the new commits of your profile in ${dir}: ${failed.output.trim().split("\n").at(-1)}. Run git -C ${dir} pull, then run hedge setup again.`);
 }
 
 function withInferred({ draft, inferred }: SetupProgress): Draft {

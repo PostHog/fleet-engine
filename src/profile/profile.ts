@@ -62,20 +62,20 @@ export async function saveAnswers(dir: string, answers: Partial<ProfileFile>, op
  * answers on top, and pushes once more. Settings merge key by key, so pass
  * only the settings this command changed.
  */
-export async function pushAnswers(dir: string, answers: Partial<ProfileFile>) {
+export async function pushAnswers(dir: string, answers: Partial<ProfileFile>, target: string[] = []) {
   refuseLegacyPath(dir);
   refuseLegacyPath(profileFile(dir));
   const head = await run(dir, "git", "rev-parse", "--verify", "HEAD");
   if (!head.ok) throw new ProfileError(`${dir}: has no commit to save answers on top of.`);
   await commitAnswers(dir, answers);
-  const pushed = await run(dir, "git", "push", "-q");
+  const pushed = await run(dir, "git", "push", "-q", ...target);
   if (pushed.ok) return;
   if (!pushedBehind(pushed.stderr)) throw pushFailed(dir, pushed.stderr);
   const dropped = await run(dir, "git", "reset", "-q", "--keep", head.stdout);
   if (!dropped.ok) throw new ProfileError(`${dir}: could not take the changes another machine pushed: ${gitReason(dropped.stderr) ?? "git reset failed"}. Run git -C ${dir} pull --rebase, then try again.`);
   await pullProfile(dir);
   await commitAnswers(dir, answers);
-  await push(dir);
+  await push(dir, target);
 }
 
 async function commitAnswers(dir: string, answers: Partial<ProfileFile>) {
@@ -108,8 +108,8 @@ export function bothChanged(dir: string, other: string) {
   return `${dir} and ${other} both have changes the other lacks.`;
 }
 
-async function push(dir: string) {
-  const pushed = await run(dir, "git", "push", "-q");
+async function push(dir: string, target: string[] = []) {
+  const pushed = await run(dir, "git", "push", "-q", ...target);
   if (!pushed.ok) throw pushFailed(dir, pushed.stderr);
 }
 

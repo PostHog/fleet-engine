@@ -176,6 +176,57 @@ describe("hedge setup profile", () => {
     expect([await spawnGit(dotfiles, "rev-parse", "main"), await spawnGit(dotfiles, "rev-parse", "hub")]).toEqual([remoteMain, remoteHub]);
   });
 
+  test("stops before it commits when the checkout's branch tracks a local branch, and moves neither branch", async () => {
+    const home = temp.make("home-");
+    const { dotfiles, checkout } = await branchCheckout(home);
+    await spawnGit(checkout, "branch", "-q", "main", "origin/main");
+    await spawnGit(checkout, "branch", "-q", "--set-upstream-to", "main");
+    const before = [await spawnGit(checkout, "rev-parse", "hub"), await spawnGit(checkout, "rev-parse", "main"), await spawnGit(dotfiles, "rev-parse", "hub")];
+
+    const rerun = await hedgeSetup(home, ["--non-interactive", "--plan", "codex"], []);
+
+    expect(rerun.code).toBe(1);
+    expect(rerun.output).toContain(`${checkout} is on the branch hub, which tracks the local branch main, not origin. Setup takes and saves your answers only on origin, the repo it checks. Run git -C ${checkout} branch --set-upstream-to origin/<branch>, then run hedge setup again.`);
+    expect([await spawnGit(checkout, "rev-parse", "hub"), await spawnGit(checkout, "rev-parse", "main"), await spawnGit(dotfiles, "rev-parse", "hub")]).toEqual(before);
+  });
+
+  test("stops before it commits when the checkout's branch tracks a remote other than origin, and pushes nothing there", async () => {
+    const home = temp.make("home-");
+    const { dotfiles, checkout } = await branchCheckout(home);
+    const mirror = githubRepo(home, "nora/public-mirror");
+    await spawnGit(home, "clone", "-q", "--bare", dotfiles, mirror);
+    await spawnGit(checkout, "remote", "add", "mirror", mirror);
+    await spawnGit(checkout, "fetch", "-q", "mirror");
+    await spawnGit(checkout, "branch", "-q", "--set-upstream-to", "mirror/hub");
+    const ahead = join(temp.make("mirror-"), "clone");
+    await spawnGit(home, "clone", "-q", "-b", "hub", mirror, ahead);
+    await spawnGit(ahead, "commit", "-q", "--allow-empty", "-m", "Only on the mirror");
+    await spawnGit(ahead, "push", "-q", "origin", "hub");
+    const before = [await spawnGit(checkout, "rev-parse", "hub"), await spawnGit(mirror, "rev-parse", "hub"), await spawnGit(dotfiles, "rev-parse", "hub")];
+
+    const rerun = await hedgeSetup(home, ["--non-interactive", "--plan", "codex"], []);
+
+    expect(rerun.code).toBe(1);
+    expect(rerun.output).toContain(`${checkout} is on the branch hub, which tracks mirror/hub, not origin.`);
+    expect([await spawnGit(checkout, "rev-parse", "hub"), await spawnGit(mirror, "rev-parse", "hub"), await spawnGit(dotfiles, "rev-parse", "hub")]).toEqual(before);
+  });
+
+  test("takes the commits another machine pushed to the origin branch it tracks, and saves on top of them", async () => {
+    const home = temp.make("home-");
+    const { dotfiles } = await branchCheckout(home);
+    const elsewhere = join(temp.make("elsewhere-"), "dotfiles");
+    await spawnGit(home, "clone", "-q", "-b", "hub", dotfiles, elsewhere);
+    writeFileSync(join(elsewhere, "about-me.md"), "# Changed on another machine\n");
+    await spawnGit(elsewhere, "commit", "-q", "-am", "Change about me");
+    await spawnGit(elsewhere, "push", "-q", "origin", "hub");
+
+    const rerun = await hedgeSetup(home, ["--non-interactive", "--plan", "codex"], []);
+
+    expect(rerun.code).toBe(0);
+    expect(JSON.parse(await spawnGit(dotfiles, "show", "hub:hedge.json")).plan).toBe("codex");
+    expect(await spawnGit(dotfiles, "show", "hub:about-me.md")).toBe("# Changed on another machine");
+  });
+
   test("adds the host keys of github.com, not of the host gh uses by default, before it reaches a profile over SSH, and keeps the lines already there", async () => {
     const home = temp.make("home-");
     const { dotfiles } = await branchCheckout(home, "git@github.com:nora/dotfiles.git");
