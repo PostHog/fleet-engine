@@ -309,6 +309,62 @@ describe("hedge import-fleet, which get.sh runs once the new engine is in place"
     expect(stateOf(home)).toEqual({ version: 1, groups: { hedge: { ".agents/AGENTS.md": record("new") } } } as never);
   });
 
+  test("after an import that stopped part way, the next import copies each file that is still missing and replaces none", async () => {
+    const home = temp.make("home-");
+    mkdirSync(join(home, ".config/fleet/hooks"), { recursive: true });
+    writeFileSync(join(home, ".config/fleet/kept.txt"), "mine\n");
+    writeFileSync(join(home, ".config/fleet/hooks/notes.md"), "notes\n");
+    mkdirSync(join(home, ".config/hedge/hooks"), { recursive: true });
+    writeFileSync(join(home, ".config/hedge/kept.txt"), "already here\n");
+
+    const first = await hedge(["import-fleet"], home);
+    rmSync(join(home, ".config/hedge/hooks/notes.md"));
+    const second = await hedge(["import-fleet"], home);
+
+    expect(first.output).toContain("Hedge: copied ~/.config/fleet to ~/.config/hedge.");
+    expect(readFileSync(join(home, ".config/hedge/kept.txt"), "utf8")).toBe("already here\n");
+    expect(second.output).toBe("");
+    expect(existsSync(join(home, ".config/hedge/hooks/notes.md"))).toBe(false);
+    expect(readdirSync(join(home, ".config/hedge")).filter((name) => name.includes(".partial"))).toEqual([]);
+  });
+
+  test("does not point the machine file at a profile copy whose profile file was a link", async () => {
+    const home = temp.make("home-");
+    const repo = join(home, ".local/share/fleet/profile");
+    cpSync(profileDir(), repo, { recursive: true });
+    const outside = join(temp.make("outside-"), "hedge.json");
+    renameSync(join(repo, "hedge.json"), outside);
+    symlinkSync(outside, join(repo, "hedge.json"));
+    git(repo, "init", "-q");
+    git(repo, "add", ".");
+    git(repo, "commit", "-q", "-m", "profile");
+    mkdirSync(join(home, ".config/fleet"), { recursive: true });
+    writeFileSync(join(home, ".config/fleet/machine.json"), JSON.stringify({ role: "devbox", profileDir: repo }));
+
+    await hedge(["import-fleet"], home);
+
+    expect(existsSync(join(home, ".local/share/hedge/profile/hedge.json"))).toBe(false);
+    expect(JSON.parse(readFileSync(join(home, ".config/hedge/machine.json"), "utf8"))).toEqual({ role: "devbox" });
+  });
+
+  test("copies the undo ledger with the ownership records when it is a Hedge step ledger, and leaves one that is not behind", async () => {
+    const ledger = { version: 1, steps: [{ pack: "base", id: "tool", check: ["fleet", "check"], undo: ["fleet", "undo"] }], human: [] };
+    const homes = [ledger, { version: 1, steps: [{ pack: "base" }] }].map((value) => {
+      const home = temp.make("home-");
+      mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
+      writeFileSync(join(home, ".local/state/fleet/state.json"), JSON.stringify({ version: 1, groups: {} }));
+      writeFileSync(join(home, ".local/state/fleet/steps.json"), JSON.stringify(value));
+      return home;
+    });
+
+    const results = await Promise.all(homes.map((home) => hedge(["import-fleet"], home)));
+
+    expect(results.map((result) => result.code)).toEqual([0, 0]);
+    expect(JSON.parse(readFileSync(join(homes[0]!, ".local/state/hedge/steps.json"), "utf8"))).toEqual(ledger);
+    expect(existsSync(join(homes[1]!, ".local/state/hedge/steps.json"))).toBe(false);
+    expect(results[1]!.output).toContain("Hedge: left ~/.local/state/fleet/steps.json behind, because it is not a Hedge step ledger.");
+  });
+
   test("refuses to copy through a link on the way to a new path, and writes nothing there", async () => {
     const home = temp.make("home-");
     mkdirSync(join(home, ".config/fleet"), { recursive: true });

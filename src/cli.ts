@@ -108,7 +108,7 @@ function inert(argv: string[], options: CliOptions) {
 
 /** get.sh runs this once the new engine is in place. */
 async function bringOverFleet(options: CliOptions) {
-  for (const line of await importFleet(options.home)) options.print(`Hedge: copied ${line}.`);
+  for (const line of await importFleet(options.home)) options.print(`Hedge: ${line}.`);
   return 0;
 }
 
