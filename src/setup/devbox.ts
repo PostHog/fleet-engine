@@ -208,7 +208,6 @@ const sameCoderUser = (here: CoderSession, box: CoderSession | undefined) => box
 
 const coderConfig = `"\${CODER_CONFIG_DIR:-\${XDG_CONFIG_HOME:-$HOME/.config}/coderv2}"`;
 
-/** Signs the workspace in to Coder at this machine's own Coder address with its own Coder CLI, then writes its SSH config, so it reaches the hub by its coder. name. This machine makes the token, and it reaches the workspace only on standard input over SSH, into the environment of that one coder login: Hedge sends it in no argv. A workspace already signed in as the same Coder user keeps its session, whatever address it reaches Coder by. A workspace signed in another way keeps that sign-in too, and its sign-in becomes a step for the person. */
 async function coderOnBox(host: string, box: Machine, context: DevboxContext) {
   const session = await coderSession(context.machine);
   if (!session) throw new Error(`Coder is not signed in on this machine. Run coder login <your Coder address> here, then hedge devbox add ${host} again.`);
@@ -224,6 +223,8 @@ async function configSsh(host: string, box: Machine) {
   if (ssh.code !== 0) throw new Error(`coder config-ssh failed on ${host}: ${ssh.output.trim()}`);
 }
 
+export const signInLimitMs = 2 * 60_000;
+const killed = 137;
 const otherSignIn = 87;
 const savedElsewhere = 88;
 
@@ -237,12 +238,13 @@ async function signInBox(host: string, box: Machine, context: DevboxContext, add
   const name = `hedge-${Date.now().toString(36)}`;
   const token = await here.exec(["coder", "tokens", "create", "--name", name]);
   if (token.code !== 0 || !token.output.trim()) throw new Error(`Coder made no token for ${host}: ${token.output.trim()}`);
-  const login = `${signInState(address)} IFS= read -r t && CODER_SESSION_TOKEN="$t" coder login --use-token-as-session "$a" && coder config-ssh --yes`;
-  const signedIn = await box.exec(["sh", "-c", login], { input: `${token.stdout.trim()}\n` });
+  const login = `${signInState(address)} { [ ! -f "$d/session" ] || chmod 600 "$d/session"; } && IFS= read -r t && CODER_SESSION_TOKEN="$t" coder login --use-token-as-session "$a" && coder config-ssh --yes`;
+  const signedIn = await box.exec(["sh", "-c", login], { input: `${token.stdout.trim()}\n`, timeoutMs: signInLimitMs });
   if (signedIn.code === 0) return;
   const removed = (await here.exec(["coder", "tokens", "remove", name])).code === 0;
   const cleanup = removed ? "" : ` Hedge could not remove the token it made, ${name}. Remove it with coder tokens remove ${name}.`;
-  throw new Error(`Hedge could not sign ${host} in to Coder${[otherSignIn, savedElsewhere].includes(signedIn.code) ? ", because it is signed in another way now" : `: ${signedIn.output.trim()}`}.${cleanup}`);
+  const why = [otherSignIn, savedElsewhere].includes(signedIn.code) ? ", because it is signed in another way now" : signedIn.code === killed ? `: coder login and coder config-ssh did not finish within ${signInLimitMs / 60_000} minutes` : `: ${signedIn.output.trim()}`;
+  throw new Error(`Hedge could not sign ${host} in to Coder${why}.${cleanup}`);
 }
 
 async function installCoder(box: Machine, address: string) {
