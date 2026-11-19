@@ -1097,6 +1097,8 @@ describe("the Git guard", () => {
     ["an alias with arguments", "gh s push", "gh alias set"],
     ["an alias with a positional argument", "gh sn push", "gh alias set"],
     ["a shell alias", "gh shp", "gh alias set"],
+    ["an alias that xargs runs", "echo 1 | xargs gh sp", "gh alias set"],
+    ["an alias that xargs runs by gh's path", "echo 1 | xargs -n1 /usr/bin/gh sp", "gh alias set"],
     ["an alias from a GH_CONFIG_DIR the command names", "GH_CONFIG_DIR=OTHER gh other", "sets or names GH_CONFIG_DIR"],
     ["an alias from a relative GH_CONFIG_DIR, read from the command's directory", "GH_CONFIG_DIR=rel-gh gh other", "sets or names GH_CONFIG_DIR"],
     ["a nested alias under a gh command", "gh pr sp", "gh alias set"],
@@ -1169,6 +1171,7 @@ describe("the Git guard", () => {
     ["a second YAML document after a flow mapping", "{aliases: {sp: stack push}}\n---\naliases: {}\n"],
     ["a flow mapping before a second aliases block", "aliases: {sp: stack push}\naliases:\n    sp: pr list\n"],
     ["a config that does not parse", "aliases:\n    sp: [stack push\n"],
+    ["an alias name that Bun reads as another number", "aliases:\n    001: stack push\n"],
     ["a quoted alias name, which gh unquotes", "aliases:\n    \"s'p'\": stack push\n"],
     ["a config that cannot be read", undefined],
   ])("refuses gh sp with %s", async (_, config) => {
@@ -1190,6 +1193,11 @@ describe("the Git guard", () => {
     "exec -c gh pr list",
     "sudo gh pr list",
     "doas gh pr list",
+    "env \"GH_CONFIG\"_DIR=/elsewhere gh pr list",
+    "env \"-i\" gh pr list",
+    "env GH_CONFIG$''_DIR=/elsewhere gh pr list",
+    "env $'\\x2di' gh pr list",
+    "unset GH_CONFIG\\\n_DIR; gh pr list",
   ])("refuses %s, which may move the config gh reads its aliases from", async (command) => {
     const home = homeWith(withGuards());
     expect((await preToolUse(home, "claude", bash(command, await repo("feature")), { guardAsProcess: true })).refusal).toContain("sets or names GH_CONFIG_DIR");

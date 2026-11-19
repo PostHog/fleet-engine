@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { withDirectories } from "./directories.ts";
 import { shortCluster } from "./kill.ts";
 import { type Command, commandsIn } from "./shell-words.ts";
@@ -166,12 +166,21 @@ const configRead = /\$(?:\{(?:GH_CONFIG_DIR|XDG_CONFIG_HOME|HOME)\}|(?:GH_CONFIG
 /** `sudo` and `doas` switch the user, and `env` or `exec` with an option can clear, unset or split the environment. */
 const environmentWrapper = /(?:^|[^\w.-])(?:(?:sudo|doas)(?![\w.-])|(?:env|exec)\s+-)/;
 
+/** A `$'…'` string with an escape that can spell a letter, such as `\x47`. */
+const escapedLetters = /\$'[^']*\\[xuUc0-7]/;
+/** The command as the shell joins its words: without line continuations, `$` before quotes, quotes and backslashes. */
+const unquoted = (command: string) => command.replace(/\\\r?\n/g, "").replace(/\$(?=["'])/g, "").replace(/["'\\]/g, "");
+
 /**
  * Whether gh may read another config than the one the agent's environment names: the command names a variable that
- * moves it other than to read it, or runs gh through a wrapper that changes the user or the environment. The guard
- * does not follow the shell's assignments, exports, tildes and unsets; it refuses them.
+ * moves it other than to read it, or runs gh through a wrapper that changes the user or the environment, also when
+ * quotes or escapes split those words. The guard does not follow the shell's assignments, exports, tildes and unsets;
+ * it refuses them.
  */
-const movesGhConfig = (command: string) => configVariable.test(command.replace(configRead, "")) || environmentWrapper.test(command);
+function movesGhConfig(command: string): boolean {
+  const words = unquoted(command);
+  return escapedLetters.test(command) || configVariable.test(words.replace(configRead, "")) || environmentWrapper.test(words);
+}
 
 /** gh's aliases from the config the agent's environment names; undefined when the guard cannot tell what gh reads. */
 function ghAliases(): Record<string, unknown> | undefined {
@@ -188,8 +197,9 @@ function ghAliases(): Record<string, unknown> | undefined {
 }
 
 /**
- * The aliases of a gh config. gh reads the first YAML document and the first of duplicate keys, and Bun the last, so the
- * config must be one block mapping, with as many lines at the indent of its aliases as Bun reads aliases.
+ * The aliases of a gh config. gh reads the first YAML document and the first of duplicate keys, and Bun the last, and Bun
+ * reads a key such as `001` as `1`. So the config must be one block mapping, with one `name:` line at the indent of its
+ * aliases for each alias Bun reads, spelled as Bun reads it.
  */
 function aliasesIn(text: string): Record<string, unknown> | undefined {
   let parsed: { aliases?: Record<string, unknown> } | null;
@@ -199,7 +209,7 @@ function aliasesIn(text: string): Record<string, unknown> | undefined {
     return undefined;
   }
   const aliases = parsed?.aliases ?? {};
-  let lines = 0;
+  const keys: string[] = [];
   let indent: number | undefined;
   let inAliases = false;
   for (const line of text.split(/\r?\n/)) {
@@ -212,9 +222,13 @@ function aliasesIn(text: string): Record<string, unknown> | undefined {
       if (inAliases && !/^\s*(?:\{\}\s*)?(?:#.*)?$/.test(top[1] ?? "")) return undefined;
       continue;
     }
-    if (inAliases && leading <= (indent ??= leading)) lines++;
+    if (!inAliases || leading > (indent ??= leading)) continue;
+    const key = /^\s+(.+?):(?:[ \t]|$)/.exec(line)?.[1];
+    if (key === undefined) return undefined;
+    keys.push(key);
   }
-  return lines === Object.keys(aliases).length ? aliases : undefined;
+  const sorted = (list: string[]) => [...list].sort().join("\n");
+  return sorted(keys) === sorted(Object.keys(aliases)) ? aliases : undefined;
 }
 
 /** gh's own alias subcommands, which run before any alias of the same name. */
@@ -248,6 +262,13 @@ function unsafeAliasWords(aliases: Record<string, unknown>): Set<string> | undef
     }
   }
   return new Set([...unsafe].map((name) => name.split(" ").at(-1)!));
+}
+
+/** The arguments after gh, also when `xargs` runs it by any path. */
+function ghArguments({ name, args }: Command): string[] | undefined {
+  if (name === "gh") return args;
+  const at = name === "xargs" ? args.findIndex((arg) => basename(arg) === "gh") : -1;
+  return at < 0 ? undefined : args.slice(at + 1);
 }
 
 const managesAliases = (args: string[]) => args[0] === "alias" && aliasActions.has(args[1] ?? "");
@@ -448,11 +469,11 @@ export function gitRisk(command: string, cwd: string, person: string, mainPushRe
   };
   let forced = 0;
   for (const [call, directory] of withDirectories(commandsIn(command), cwd)) {
-    if (call.name === "gh" && !managesAliases(call.args) && movesGhConfig(command)) return configReason(person);
-    const called = call.name === "gh" ? expandedGh(call.args) : call.args;
-    if (called === undefined) return aliasReason(person);
-    const stack = stackArgs(call.name, called);
-    if ((stack && makesAlias(stack)) || ghAliasHidesStack(call.name, called)) return aliasReason(person);
+    const ghArgs = ghArguments(call);
+    if (ghArgs && !managesAliases(ghArgs) && movesGhConfig(command)) return configReason(person);
+    if (ghArgs && !expandedGh(ghArgs)) return aliasReason(person);
+    const stack = stackArgs(call.name, call.args);
+    if ((stack && makesAlias(stack)) || ghAliasHidesStack(call.name, call.args)) return aliasReason(person);
     if (stack) forced += stackPushes(stack, () => repoAt(directory, []));
     if (call.name !== "git") continue;
     const { dir, selectors, settings, sub, args } = gitCall(call.args, directory, call.env);
