@@ -1215,9 +1215,33 @@ describe("the Git guard", () => {
     "env GH_CONFIG$''_DIR=/elsewhere gh pr list",
     "env $'\\x2di' gh pr list",
     "unset GH_CONFIG\\\n_DIR; gh pr list",
+    "gh pr list --head fix/env; env -i gh pr list",
+    "gh pr list && sudo gh pr list",
+    "git checkout fix/env | doas gh pr list",
+    "gh pr list $(env -i gh pr list)",
+    "gh pr list `sudo gh pr list`",
+    "{ env -i gh pr list; }",
+    "if env -i gh pr list; then :; fi",
+    "A=1 2>/dev/null env -i gh pr list",
+    "nohup env -i gh pr list",
+    "bash -c 'gh pr list; env -i gh pr list'",
+    "\"e\"nv -i gh pr list",
+    "./bin/env -i gh pr list",
   ])("refuses %s, which may move the config gh reads its aliases from", async (command) => {
     const home = homeWith(withGuards());
     expect((await preToolUse(home, "claude", bash(command, await repo("feature")), { guardAsProcess: true })).refusal).toContain("sets or names GH_CONFIG_DIR");
+  });
+
+  test.each([
+    "gh pr list --head fix/env",
+    "gh pr create --head env/setup --base main --title Setup --body Setup",
+    "gh pr checkout sudo",
+    "gh pr list --head fix/doas --json number",
+    "git checkout -b fix/env && gh pr list --head fix/env",
+    "GH_PAGER=cat gh pr view fix/sudo-env",
+  ])("allows %s, whose branch name holds a wrapper's name but runs no wrapper", async (command) => {
+    const home = homeWith(withGuards());
+    expect(await preToolUse(home, "claude", bash(command, await repo("feature")), { guardAsProcess: true })).toEqual({ code: 0, refusal: undefined });
   });
 
   test.each([

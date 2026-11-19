@@ -176,6 +176,14 @@ const configVariable = /\b(?:GH_CONFIG_DIR|XDG_CONFIG_HOME|HOME)\b/;
 const configRead = /\$(?:\{(?:GH_CONFIG_DIR|XDG_CONFIG_HOME|HOME)\}|(?:GH_CONFIG_DIR|XDG_CONFIG_HOME|HOME)\b)/g;
 /** `sudo` and `doas` switch the user, and `env` can clear or unset the environment, with options a redirection can separate. */
 const environmentWrapper = /(?:^|[^\w.-])(?:sudo|doas|env)(?![\w.-])/;
+const commandBreak = /[;&|()`{}\n]/;
+const beforeCommand = /^(?:[A-Za-z_]\w*=\S*|\d*[<>]\S*|if|then|else|elif|do|while|until|!)$/;
+const takesNoCommand = new Set(["gh", "git"]);
+const runsWrapper = (words: string) => words.split(commandBreak).some((part) => {
+  const tokens = part.trim().split(/\s+/);
+  const command = tokens.find((token) => !beforeCommand.test(token));
+  return !(command && takesNoCommand.has(basename(command))) && environmentWrapper.test(part);
+});
 /** The shell's `exec` can clear the environment too; `gh extension exec` also spells the word. */
 const execWord = /(?:^|[^\w.-])exec(?![\w.-])/g;
 
@@ -192,7 +200,7 @@ const unquoted = (command: string) => command.replace(/\\\r?\n/g, "").replace(/\
  */
 function movesGhConfig(command: string, extensionExecs: number): boolean {
   const words = unquoted(command);
-  return escapedLetters.test(command) || configVariable.test(words.replace(configRead, "")) || environmentWrapper.test(words)
+  return escapedLetters.test(command) || configVariable.test(words.replace(configRead, "")) || runsWrapper(words)
     || (words.match(execWord)?.length ?? 0) > extensionExecs;
 }
 
