@@ -7,6 +7,7 @@ import type { ModelAnswer } from "./proof-models.ts";
 import type { Slot } from "./proof-panel.ts";
 import { reviewedDiff, reviewPrompt } from "./proof-review.ts";
 import { reviewRules } from "./review-rules.ts";
+import { mergedTree } from "./proof-delta.ts";
 
 type Outcome = "caught" | "missed" | "skipped" | "failed";
 type CaseResult = { id: string; repo: string; pr: number; source: MissSource; outcome: Outcome; reason: string; reviewer?: string; findings?: string };
@@ -35,20 +36,22 @@ async function scoreCase(miss: Miss, io: EvalIO): Promise<CaseResult> {
   const checkout = io.checkoutOf(miss.repo);
   if (!checkout) return result("skipped", `no checkout of ${miss.repo}; run in one or pass --checkout ${miss.repo}=<path>`);
   const run = io.runIn(checkout);
-  const absent = [miss.base, miss.head].filter((commit) => run(["git", "cat-file", "-e", `${commit}^{commit}`]).code !== 0);
+  const absent = [miss.base, ...miss.mergedWith ? [miss.mergedWith] : [], miss.head].filter((commit) => run(["git", "cat-file", "-e", `${commit}^{commit}`]).code !== 0);
   if (absent.length) return result("skipped", `${absent.map(short).join(" and ")} missing in ${checkout}; fetch them there`);
+  const from = miss.mergedWith === undefined ? miss.base : mergedTree(run, miss.base, miss.mergedWith)?.tree;
+  if (!from) return result("failed", `cannot merge ${short(miss.base)} with the base ${short(miss.mergedWith!)}`);
   try {
     return await io.slot(async (slot) => {
-      const diff = run(["git", "diff", "--no-ext-diff", "--no-textconv", "--no-relative", miss.base, miss.head]);
-      if (diff.code !== 0) return result("failed", `cannot diff ${short(miss.base)}..${short(miss.head)} (${firstLine(diff.stderr)})`);
-      const changedFiles = run(["git", "diff", "--name-only", "--no-relative", miss.base, miss.head]).stdout.split("\n").filter(Boolean);
+      const diff = run(["git", "diff", "--no-ext-diff", "--no-textconv", "--no-relative", from, miss.head]);
+      if (diff.code !== 0) return result("failed", `cannot diff ${short(from)}..${short(miss.head)} (${firstLine(diff.stderr)})`);
+      const changedFiles = run(["git", "diff", "--name-only", "--no-relative", from, miss.head]).stdout.split("\n").filter(Boolean);
       const crossFamily = await io.crossFamily(miss);
       const findings = await inWorktree(checkout, miss.head, run, async (tree) => {
         const diffFile = join(dirname(tree), "diff.patch");
         const masked = reviewedDiff(diff.stdout);
         await writeFile(diffFile, masked, { mode: 0o600 });
         const prompt = reviewPrompt({
-          scope: miss.scope, from: miss.base, commit: miss.head, diff: masked, diffFile, crossFamily, title: miss.title, body: miss.body,
+          scope: miss.scope, from, commit: miss.head, diff: masked, diffFile, crossFamily, title: miss.title, body: miss.body,
           rubric: io.rubric, references: io.references, reviewRules: reviewRules(changedFiles, miss.base, run),
         });
         return io.review(miss, prompt, tree, dirname(tree), slot);
