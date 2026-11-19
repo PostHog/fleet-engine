@@ -76,6 +76,18 @@ test("a relay port on the proxy port is refused only while the workflow is on, b
   expect(hubForward(off, "box-lane")).toContain("8317:127.0.0.1:8317");
 });
 
+test("a box handed over to a proxy that serves no model yet keeps its own sign-in, and the hub says so", async () => {
+  const hub = fakeMachine(temp.make("hedge-hub-"), { settings: balancing, run: async () => ({ ...ok, code: 1 }) });
+  writeHome(hub.machine.home, { ".config/hedge/cli-proxy.key": `${clientKey}\n` });
+  const boxHome = roleHome(temp.make("hedge-box-"), "devbox");
+  const printed: string[] = [];
+  const box = (stdin: string): ProxyMachine => ({ home: boxHome, uid: 1000, user: "me", plan: "claude", devboxes: [], release: { version: "", url: "", sha256: "" }, run: async () => ok, fetch: async () => Response.json({ data: [], object: "list" }), now: () => 0, sleep: async () => {}, readStdin: async () => stdin, randomKey: () => clientKey, print: (line) => printed.push(line) });
+  const { coder } = fakeCoder({ ssh: async (_name, command, stdin) => (command.includes("cli-proxy connect") ? { ...ok, code: await cliProxy("connect", box(stdin ?? "")), stdout: printed.join("\n") } : ok) });
+  await handOver(coder, hub.machine, "box-lane");
+  expect(hub.lines).toContain("box-lane: The proxy at http://127.0.0.1:8317 lists no Claude model. On the hub, run hedge cli-proxy doctor. Run hedge apply: it keeps Claude Code on its own sign-in until the proxy serves it.");
+  expect(existsSync(join(boxHome, ".claude/settings.json"))).toBe(false);
+});
+
 test("a box handed over on the Codex plan sends Codex through the proxy without another apply", async () => {
   const hub = fakeMachine(temp.make("hedge-hub-"), { settings: balancing, run: async () => ({ ...ok, code: 1 }) });
   writeHome(hub.machine.home, { ".config/hedge/cli-proxy.key": `${clientKey}\n` });

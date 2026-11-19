@@ -3,7 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tryLockBox } from "./box-lock.ts";
 import { slugFor, type Coder, type Result } from "./coder.ts";
-import { proxyPort, relayPortOf } from "./run.ts";
+import { proxyPort, relayPortOf, untilServed } from "./run.ts";
 import { quote, remoteHedge, type Machine, type PeerLinkInput, type PeerMachine } from "./machine.ts";
 import { GatewayClientError, gatewayPort, localGatewayUrl, readGatewayClient, writePrivateFile, type GatewaySettings } from "../../mcp-gateway/lib/client.ts";
 import { boxPrefix, isBoxName } from "../../../src/hub/names.ts";
@@ -69,7 +69,8 @@ async function handOverProxy(coder: Pick<Coder, "ssh">, here: Machine, box: stri
   const key = join(here.home, proxyKeyPath);
   if (!existsSync(key)) return here.say(`skip ~/${proxyKeyPath}: this machine has none`);
   const connected = await coder.ssh(box, `umask 077 && ${remoteHedge("cli-proxy connect")}`, readFileSync(key, "utf8"));
-  if (connected.code !== 0) here.say(`${box} keeps its own sign-in: ${(connected.stderr || connected.stdout).trim()}`);
+  if (connected.code !== 0) return here.say(`${box} keeps its own sign-in: ${(connected.stderr || connected.stdout).trim()}`);
+  for (const line of connected.stdout.split("\n").filter((line) => line.endsWith(untilServed))) here.say(`${box}: ${line}`);
 }
 
 export async function handOver(coder: Pick<Coder, "ssh">, here: Machine, box: string): Promise<boolean> {

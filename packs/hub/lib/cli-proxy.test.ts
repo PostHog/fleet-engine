@@ -6,7 +6,6 @@ import { tempDirs } from "../../../src/testing/git.ts";
 import { claudeRoute, cliProxy, keyHelper, proxyUrl, type ProxyMachine } from "./cli-proxy.ts";
 import { archive, clientKey, dataDir, otherKey, proxyMachine, release, type Proxy } from "./cli-proxy-testing.ts";
 import { fakeRun, modeOf, roleHome } from "./run-testing.ts";
-import { waitsForPerson } from "../../../src/pack/types.ts";
 
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
@@ -227,7 +226,7 @@ test("too few subscriptions that work is a To do, which counts none whose login 
   expect(doctor.printed).toContain(todo);
   expect(doctor.printed).toContain(`CLI proxy: Warning: the Claude subscription bbbbcccc cannot refresh its login, so the proxy cannot use it and the balancer cannot read its usage. Sign it in again with: ${login(home, "claude")}. Or disable it in the management panel.`);
   const counted = hubMachine({ home }, { credentials });
-  expect(await cliProxy("accounts", counted.machine)).toBe(waitsForPerson);
+  expect(await cliProxy("accounts", counted.machine)).toBe(4);
   expect(counted.printed).toEqual([todo]);
 });
 
@@ -235,7 +234,7 @@ test("accounts waits for the person below hub.proxyAccounts, passes at it, fails
   const { machine, home } = hubMachine();
   await cliProxy("install", machine);
   const none = hubMachine({ home }, { credentials: [] });
-  expect(await cliProxy("accounts", none.machine)).toBe(waitsForPerson);
+  expect(await cliProxy("accounts", none.machine)).toBe(4);
   expect(none.printed.join("\n")).toContain("found 0. Until the proxy holds one, Claude Code keeps its own sign-in on each machine.");
   const enough = hubMachine({ home });
   expect(await cliProxy("accounts", enough.machine)).toBe(0);
@@ -243,7 +242,7 @@ test("accounts waits for the person below hub.proxyAccounts, passes at it, fails
   const one = hubMachine({ home, accounts: 1 }, { credentials: [{ provider: "claude" }] });
   expect(await cliProxy("accounts", one.machine)).toBe(0);
   const codex = hubMachine({ home, plan: "codex" }, { credentials: [{ provider: "codex" }, { provider: "claude" }, { provider: "claude" }] });
-  expect(await cliProxy("accounts", codex.machine)).toBe(waitsForPerson);
+  expect(await cliProxy("accounts", codex.machine)).toBe(4);
   expect(codex.printed.join("\n")).toContain(`found 1. Run on the hub, once for each subscription: ${login(home, "codex")}`);
   await expect(cliProxy("accounts", hubMachine({ home }, { down: true }).machine)).rejects.toThrow();
   await expect(cliProxy("accounts", client().machine)).rejects.toThrow("hub");
@@ -292,7 +291,7 @@ test("connect on a Codex plan checks the proxy for a Codex model, sends Codex to
   expect(noCodex.printed).toEqual([`The proxy at ${proxyUrl} lists no Codex model. Add one of your own Codex subscriptions to the hub's proxy. Run hedge apply: it keeps Codex on its own sign-in until the proxy serves it.`]);
   expect(readFileSync(keyFile(noCodex.home), "utf8")).toBe(`${clientKey}\n`);
   expect(existsSync(codexFile(noCodex.home))).toBe(false);
-  expect(await cliProxy("check", noCodex.machine, "codex")).toBe(waitsForPerson);
+  expect(await cliProxy("check", noCodex.machine, "codex")).toBe(4);
 
   const theirs = client({ plan: "codex" }, { models: ["gpt-6.1-sol"] });
   codexRouted(theirs.home, { ...mine, model_provider: "work" });
@@ -404,7 +403,7 @@ test("connect to a proxy that holds none of your subscriptions saves the key, ke
   expect(readFileSync(keyFile(home), "utf8")).toBe(`${clientKey}\n`);
   expect(readJson(settingsFile(home))).toEqual({ model: "opus" });
   expect(printed).toEqual([`The proxy at ${proxyUrl} lists no Claude model. On the hub, run hedge cli-proxy doctor. Run hedge apply: it keeps Claude Code on its own sign-in until the proxy serves it.`]);
-  expect(await cliProxy("check", machine)).toBe(waitsForPerson);
+  expect(await cliProxy("check", machine)).toBe(4);
   const refused = client({}, { models: [], refuses: true });
   await expect(cliProxy("connect", refused.machine)).rejects.toThrow("refuses this machine's key (HTTP 401). Nothing changed.");
   expect(existsSync(keyFile(refused.home))).toBe(false);
@@ -421,8 +420,8 @@ test("connect again after the pool empties saves the key, and leaves taking the 
     `The proxy at ${proxyUrl} lists no Claude model. On the hub, run hedge cli-proxy doctor. Run hedge apply: it keeps Claude Code on its own sign-in until the proxy serves it.`,
     `The proxy at ${proxyUrl} lists no Codex model. Add one of your own Codex subscriptions to the hub's proxy. Run hedge apply: it keeps Codex on its own sign-in until the proxy serves it.`,
   ]);
-  expect(await cliProxy("check", machine)).toBe(waitsForPerson);
-  expect(await cliProxy("check", machine, "codex")).toBe(waitsForPerson);
+  expect(await cliProxy("check", machine)).toBe(4);
+  expect(await cliProxy("check", machine, "codex")).toBe(4);
 });
 
 test("connect refuses a model list it cannot read, and saves no key", async () => {
@@ -507,7 +506,7 @@ test("the check fails without a saved key, waits for the person while the proxy 
 
   const refused = client({}, { models: ["gpt-6.1-sol"] });
   connected(refused.home);
-  expect(await cliProxy("check", refused.machine)).toBe(waitsForPerson);
+  expect(await cliProxy("check", refused.machine)).toBe(4);
   expect(refused.printed.join("\n")).toContain("lists no Claude model");
 
   const fresh = client({}, { down: true });
@@ -685,7 +684,7 @@ test("the Codex check judges the proxy before Hedge routes Codex, so apply can w
   expect(existsSync(codexFile(served.home))).toBe(false);
   const unserved = client();
   connected(unserved.home);
-  expect(await cliProxy("check", unserved.machine, "codex")).toBe(waitsForPerson);
+  expect(await cliProxy("check", unserved.machine, "codex")).toBe(4);
   expect(existsSync(codexFile(unserved.home))).toBe(false);
 });
 
@@ -704,7 +703,7 @@ test("a proxy that lists no Codex model holds back only the Codex check, which w
   connected(home);
   codexRouted(home);
   expect(await cliProxy("check", machine)).toBe(0);
-  expect(await cliProxy("check", machine, "codex")).toBe(waitsForPerson);
+  expect(await cliProxy("check", machine, "codex")).toBe(4);
   expect(printed.join("\n")).toContain(`The proxy at ${proxyUrl} lists no Codex model.`);
 });
 
@@ -747,7 +746,7 @@ test("a linked or unreadable Codex config is left alone and never breaks the Cla
   writeFileSync(real, stringify({ model_provider: "hedge-proxy", model_providers: { "hedge-proxy": hedgeProxy } }));
   symlinkSync(real, codexFile(linked.home));
   expect(await cliProxy("check", linked.machine)).toBe(0);
-  expect(await cliProxy("check", linked.machine, "codex")).toBe(waitsForPerson);
+  expect(await cliProxy("check", linked.machine, "codex")).toBe(4);
   expect(await cliProxy("disconnect", linked.machine)).toBe(0);
   expect(parse(readFileSync(real, "utf8"))).toEqual({ model_provider: "hedge-proxy", model_providers: { "hedge-proxy": hedgeProxy } });
 
@@ -756,7 +755,7 @@ test("a linked or unreadable Codex config is left alone and never breaks the Cla
   mkdirSync(join(broken.home, ".codex"), { recursive: true });
   writeFileSync(codexFile(broken.home), "model = [");
   expect(await cliProxy("check", broken.machine)).toBe(0);
-  expect(await cliProxy("check", broken.machine, "codex")).toBe(waitsForPerson);
+  expect(await cliProxy("check", broken.machine, "codex")).toBe(4);
   expect(readJson(settingsFile(broken.home)).env.ANTHROPIC_BASE_URL).toBe(proxyUrl);
   expect(readFileSync(codexFile(broken.home), "utf8")).toBe("model = [");
 });

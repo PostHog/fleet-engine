@@ -13,7 +13,7 @@ import type { Run } from "../../mcp-gateway/lib/hub.ts";
 import { isKeptForBoxes } from "../../../src/hub/names.ts";
 import { waitsForPerson } from "../../../src/pack/types.ts";
 import { refreshCodexCatalog } from "./codex-catalog.ts";
-import { must, proxyPort } from "./run.ts";
+import { must, proxyPort, untilServed } from "./run.ts";
 
 export { proxyPort, proxyUrl };
 export type ProxyMode = "plan" | "install" | "doctor" | "accounts" | "catalog" | "connect" | "disconnect" | "check" | "remove" | "left";
@@ -458,14 +458,14 @@ async function connect(machine: ProxyMachine): Promise<void> {
   await mkdir(dirname(keyPath(machine.home)), { recursive: true, mode: 0o700 });
   await writePrivateFile(keyPath(machine.home), `${key}\n`);
   const waiting = unserved(models, "claude");
-  if (agent === "claude" && waiting) machine.print(`${waiting} Run hedge apply: it keeps Claude Code on its own sign-in until the proxy serves it.`);
+  if (agent === "claude" && waiting) machine.print(`${waiting} Run hedge apply: it keeps Claude Code ${untilServed}`);
   else if (agent === "claude") {
     await sendClaude(machine.home, true);
     machine.print(`Claude Code uses your own-account proxy at ${proxyUrl} now. Restart open Claude Code sessions.`);
   }
   if (codex === undefined) return;
   const missing = typeof codex === "string" ? undefined : unserved(models, "codex");
-  if (missing) return machine.print(`${missing} Run hedge apply: it keeps Codex on its own sign-in until the proxy serves it.`);
+  if (missing) return machine.print(`${missing} Run hedge apply: it keeps Codex ${untilServed}`);
   const failed = typeof codex === "string" ? codex : await sendCodex(machine.home, agent === "claude");
   if (failed) return machine.print(`${failed} Codex keeps its own sign-in.`);
   machine.print(`Codex uses your own-account proxy at ${proxyUrl} now. Restart open Codex sessions.`);
