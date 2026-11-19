@@ -8,7 +8,7 @@ import { HubUnreachable, refText, thisMachine, type Decision, type Ssh } from ".
 import { readComment, runIn } from "./pr-ci.ts";
 import { askModel, family, familyOf, isQuotaExhausted, modelLabel, quotaExitCode, readRubric, reviewerRow, sessionFamily, skillReferences, type Family } from "./proof-models.ts";
 import { runProof, type RunIO } from "./proof-run.ts";
-import { combinedLens, parseGuide, lensBrief, lensIdle, lensLog, panelGuideText, panelLines, publishPanel, readPanelGuide, readPlan, recordWorker, requeueFailed, resolveLens, runLens, stagedPlan, stagePanel, waitForPanel, withRoundLock, withSlot, lockNewRound, processStart, roundLock, RoundBusy, RoundGone, type Lens, type LockOwner, type PanelGuide, type PanelIO, type Plan, type RoundLock, type StartTime } from "./proof-panel.ts";
+import { combinedLens, parseGuide, lensBrief, lensIdle, lensLog, panelGuideText, panelLines, publishPanel, readPanelGuide, readPlan, recordWorker, requeueFailed, resolveLens, runLens, stagedPlan, stagePanel, waitForPanel, withBudgetLock, withRoundLock, withSlot, lockNewRound, processStart, roundLock, RoundBusy, RoundGone, type Lens, type LockOwner, type PanelGuide, type PanelIO, type Plan, type RoundLock, type StartTime } from "./proof-panel.ts";
 import { evalsPath, promptTemplateHash, readRuns, reportLines, saveRun, scoreCases, type EvalIO } from "./proof-eval.ts";
 import { hashOf, missesPath, missSource, missSources, readMisses, recordMiss } from "./proof-misses.ts";
 import { githubRequest, publishProof, type GitHub } from "./proof-publish.ts";
@@ -626,7 +626,7 @@ async function reserveRound(options: Map<string, string>, head: ProofIdentity, c
   if (tier.name === "read" && capturedBy === "hedge" && !panel && !decision && !await panelCommit(context.home, head)) throw new Error("A PR of the Read tier gets one read, and it is the panel: run hedge proof review, which runs its combined lens");
   const firstPanel = panel && !await panelCommit(context.home, head);
   const limits = firstPanel ? permit.limits : { ...permit.limits, ceiling: tierCeiling(tier, permit.limits.ceiling) };
-  const reserved = await startReview(context.home, head, { scope, base, from, ...permit, limits, decision, phase: options.get("--phase"), cleanBaseMerge: cleanBaseMerge(head, context.run), quietCommit: quietCommitIn(context.run, () => baseRefs(head, context.run)), capturedBy, lock: async (directory) => lockNewRound(directory, await context.lock()), lockBudget: async (reviews, step) => withRoundLock(reviews, await context.lock(), step) });
+  const reserved = await startReview(context.home, head, { scope, base, from, ...permit, limits, decision, phase: options.get("--phase"), cleanBaseMerge: cleanBaseMerge(head, context.run), quietCommit: quietCommitIn(context.run, () => baseRefs(head, context.run)), capturedBy, lock: async (directory) => lockNewRound(directory, await context.lock()), lockBudget: async (reviews, step) => withBudgetLock(reviews, await context.lock(), step) });
   return { ...reserved, scope, base, from, phase: options.get("--phase") };
 }
 

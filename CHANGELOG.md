@@ -125,13 +125,16 @@
   a lock on the PR's reviews directory, and holds the lock only for these
   file reads and writes. Git, GitHub, and the arbiter run outside the lock.
   When another review started or ended meanwhile, it reserves nothing and
-  asks you to run it again. A reservation that hedge cannot read for any
+  asks you to run it again. This holds also when a dropped review comes back
+  under the same name and phase: each reservation has its own id in
+  `round.json`. A reservation that hedge cannot read for any
   reason other than a missing file stops the command with the read error,
   so the budget is never counted short. A review that
   finds the lock held stops and names the holder. hedge takes over a lock
   whose command on this machine is gone, and never one that a command on
   another machine holds: the message names the file to delete when that
-  command is gone. A final read takes the next free name in the reviews
+  command is gone. Panel slots and round locks keep their earlier rule: a
+  lens takes over a slot whose worker is gone, wherever that worker ran. A final read takes the next free name in the reviews
   directory, so a leftover directory without `round.json` never blocks it.
 
 ## v0.1.0

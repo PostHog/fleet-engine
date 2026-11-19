@@ -130,7 +130,7 @@ async function reserve(reviews: string, name: string, record: object, lock: Lock
   await mkdir(temporary, { mode: 0o700 });
   try {
     await lock?.(temporary);
-    await writeFile(join(temporary, "round.json"), JSON.stringify({ ...record, startedAt: new Date().toISOString() }) + "\n", { flag: "wx", mode: 0o600 });
+    await writeFile(join(temporary, "round.json"), JSON.stringify({ ...record, reservationId: crypto.randomUUID(), startedAt: new Date().toISOString() }) + "\n", { flag: "wx", mode: 0o600 });
     await rename(temporary, join(reviews, name));
     return true;
   } catch (error) {
@@ -152,21 +152,23 @@ function finalReadPhase(value: string): FinalReadPhase {
 }
 
 type Spending = "unfinished spends" | "finished only";
-type Spent = { spent: number; names: string[]; finished: string[]; round?: number };
+type Spent = { spent: number; names: string[]; reservations: string[]; finished: string[]; round?: number };
+type ReservedAs = { reservationId?: string; startedAt?: string; commit?: string; scope?: string; phase?: FinalReadPhase };
+const reservationOf = ({ reservationId, startedAt, commit, scope, phase }: ReservedAs) => JSON.stringify([reservationId, startedAt, commit, scope, phase]);
 
 async function reviewsSpent(reviews: string, phase: FinalReadPhase, spending: Spending): Promise<Spent> {
   const rounds = await Promise.all((await reviewNames(reviews)).map(async (name) => {
-    const round = await readJson<{ phase?: FinalReadPhase } | undefined>(join(reviews, name, "round.json"), undefined);
+    const round = await readJson<ReservedAs | undefined>(join(reviews, name, "round.json"), undefined);
     if (!round) return undefined;
     const findings = await readFile(join(reviews, name, "findings.md"), "utf8").catch(() => undefined);
     const leadsToFixes = findings === undefined ? spending === "unfinished spends" : unanswered(findings, "").length > 0;
-    return { name, finished: findings !== undefined, spends: (round.phase ?? "review") === phase && leadsToFixes };
+    return { name, reservation: reservationOf(round), finished: findings !== undefined, spends: (round.phase ?? "review") === phase && leadsToFixes };
   }));
   const present = rounds.filter((round) => round !== undefined).sort((a, b) => a.name.localeCompare(b.name));
-  return { spent: present.filter(({ spends }) => spends).length, names: present.map(({ name }) => name), finished: present.filter(({ finished }) => finished).map(({ name }) => name) };
+  return { spent: present.filter(({ spends }) => spends).length, names: present.map(({ name }) => name), reservations: present.map(({ reservation }) => reservation), finished: present.filter(({ finished }) => finished).map(({ name }) => name) };
 }
 
-const budgetState = ({ spent, names, finished, round }: Spent) => JSON.stringify([spent, names, finished, round]);
+const budgetState = ({ spent, names, reservations, finished, round }: Spent) => JSON.stringify([spent, names, reservations, finished, round]);
 
 async function reserveWeighed<T extends Spent>(reviews: string, lockBudget: LockBudget, snapshot: () => Promise<T>, permit: (weighed: T) => Promise<ArbiterVerdict | undefined>, reserveIt: (weighed: T, verdict: ArbiterVerdict | undefined) => Promise<Reserved>) {
   const before = await lockBudget(reviews, snapshot);
@@ -181,7 +183,6 @@ async function reserveWeighed<T extends Spent>(reviews: string, lockBudget: Lock
 }
 
 const weighAgain = "Run this command again to weigh it anew";
-const unlocked: LockBudget = (_reviews, step) => step();
 
 export type ArbiterVerdict = { verdict: "continue" | "escalate" | "unavailable"; reason: string; model: string };
 export type Arbiter = (prompt: string) => Promise<ArbiterVerdict>;
@@ -246,7 +247,7 @@ function askUser(identity: ProofIdentity, stop: string) {
 
 export type CapturedBy = "hedge" | "author";
 export type DecisionMark = Pick<Decision, "mark" | "id">;
-export type ReviewRequest = { scope: string; base?: string; from?: string; decision?: Decision; phase?: string; arbiter: Arbiter; limits: ReviewLimits; cleanBaseMerge?: CleanBaseMerge; quietCommit?: QuietCommit; capturedBy?: CapturedBy; lock?: LockRound; lockBudget?: LockBudget };
+export type ReviewRequest = { scope: string; base?: string; from?: string; decision?: Decision; phase?: string; arbiter: Arbiter; limits: ReviewLimits; cleanBaseMerge?: CleanBaseMerge; quietCommit?: QuietCommit; capturedBy?: CapturedBy; lock?: LockRound; lockBudget: LockBudget };
 export type Reserved = { round: number | "final"; id: string; directory: string };
 type Permit = { arbiter: Arbiter; limits: ReviewLimits };
 
@@ -286,7 +287,7 @@ async function startFinalRead(home: string, identity: ProofIdentity, base: strin
 const coversReview = (base: string, reviewed: string, cleanBaseMerge: CleanBaseMerge) => reviewedThroughMerges(base, new Set([reviewed]), cleanBaseMerge) !== undefined;
 
 export async function startReview(home: string, identity: ProofIdentity, request: ReviewRequest): Promise<Reserved> {
-  const { scope, base, phase, decision, cleanBaseMerge = () => undefined, quietCommit = () => undefined, capturedBy = "author", lock, lockBudget = unlocked } = request;
+  const { scope, base, phase, decision, cleanBaseMerge = () => undefined, quietCommit = () => undefined, capturedBy = "author", lock, lockBudget } = request;
   const from = request.from ?? base;
   const permit = { arbiter: request.arbiter, limits: request.limits };
   if (!["full", "fixes", "final"].includes(scope)) throw new Error("Review scope must be full, fixes, or final");

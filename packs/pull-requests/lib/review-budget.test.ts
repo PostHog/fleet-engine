@@ -1,11 +1,10 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
-import { hostname } from "node:os";
 import { join } from "node:path";
 import { spawnAsync } from "../../../src/testing/spawn.ts";
 import { reviewedFindings } from "./proof.ts";
-import { checkout, cleanFixtures, exitedPid, fakeModel, finishRound, fixture, graded, markPanel, models, recordingModel, settings, type Checkout } from "./proof-testing.ts";
+import { checkout, cleanFixtures, fakeModel, lockHolder, finishRound, fixture, graded, markPanel, models, recordingModel, settings, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
 
@@ -518,7 +517,7 @@ test("of two final reads that weigh the same budget and leave the arbiter togeth
   expect(reserved).toHaveLength(1);
   expect(reserved[0]!.value.output).toContain(`"id":"final-9"`);
   expect(stopped).toHaveLength(1);
-  expect(String(stopped[0]!.reason)).toMatch(/A review is unfinished\. Finish it before a final read\.|then run this command again/);
+  expect(String(stopped[0]!.reason)).toMatch(/A review is unfinished\. Finish it before a final read\.|then run this command again|Review final-9 started while this one weighed the budget/);
   await expect(pr.hedge("show", "--round", "final-10")).rejects.toThrow("has no reservation");
   await expect(pr.hedge("review-start", "--scope", "final", "--base", base)).rejects.toThrow("A review is unfinished");
 });
@@ -529,45 +528,80 @@ async function fixesRoundDue(pr: Checkout) {
   await pr.hedge("require", "--none", "--reason", "fixture");
   const panel = await panelReview(pr, "- feature.txt:1 | major | Correctness | the greeting drops the name | greet by name | anchor: greet");
   await pr.commit("feature.txt", "greet the member\n");
-  return { panel, lock: join(pr.pullRequest, "reviews", "round.lock") };
+  return { panel, reviews: join(pr.pullRequest, "reviews"), lock: join(pr.pullRequest, "reviews", "round.lock") };
 }
 
-test("a review takes over the budget lock of a hedge proof command on this machine that is gone", async () => {
+test("a review takes over the budget lock of a hedge proof command on this machine that crashed, and leaves the lock free for the next review", async () => {
   const pr = await checkout();
-  const { panel, lock } = await fixesRoundDue(pr);
-  writeFileSync(lock, JSON.stringify({ pid: await exitedPid(), host: hostname(), token: "gone", started: "Sun Oct 25 11:00:00 2026" }));
+  const { panel, reviews } = await fixesRoundDue(pr);
+  await (await lockHolder("budget", reviews)).crash();
 
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", panel)).output).toContain(`"round":2`);
-  expect(existsSync(lock)).toBe(false);
+  await finishRound(pr, "2");
+  const fixes = await pr.git("rev-parse", "HEAD");
+  await pr.commit("feature.txt", "greet the new member\n");
+  pr.env.HEDGE_REVIEW_ARBITER = continueArbiter();
+  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", fixes)).output).toContain(`"round":3`);
 });
 
-test("a review that leaves the arbiter while another command holds the budget lock stops before it reserves", async () => {
+test("a review that leaves the arbiter while another command holds the budget lock stops before it reserves, and reserves once that command is done", async () => {
   const pr = await checkout();
   pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 1, "pull-requests.reviewCeiling": 3 });
-  const { panel, lock } = await fixesRoundDue(pr);
+  const { panel, reviews, lock } = await fixesRoundDue(pr);
   const [started, go] = ["started", "go"].map((name) => join(pr.home, name));
   await spawnAsync(["mkfifo", started, go]);
-  pr.env.HEDGE_REVIEW_ARBITER = `cat >/dev/null; echo > "${started}"; read line < "${go}"; echo CONTINUE`;
+  pr.env.HEDGE_REVIEW_ARBITER = `cat >/dev/null; if mkdir "${pr.home}/first" 2>/dev/null; then echo > "${started}"; read line < "${go}"; fi; echo CONTINUE`;
 
   const waiting = pr.hedge("review-start", "--scope", "fixes", "--base", panel);
   await readFile(started, "utf8");
-  writeFileSync(lock, JSON.stringify({ pid: process.pid, host: hostname(), token: "reserving", started: "Sun Oct 25 11:00:00 2026" }));
-  await writeFile(go, "go\n");
-
-  await expect(waiting).rejects.toThrow(`Process ${process.pid}, another hedge proof command, works on ${join(pr.pullRequest, "reviews")} and holds its lock ${lock}. Wait for it to end, then run this command again`);
-  await expect(pr.hedge("show", "--round", "2")).rejects.toThrow("has no reservation");
+  const holder = await lockHolder("budget", reviews);
+  try {
+    await writeFile(go, "go\n");
+    await expect(waiting).rejects.toThrow(`Process ${holder.pid}, another hedge proof command, works on ${reviews} and holds its lock ${lock}. Wait for it to end, then run this command again`);
+    await expect(pr.hedge("show", "--round", "2")).rejects.toThrow("has no reservation");
+  } finally { expect(await holder.release()).toBe(0); }
+  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", panel)).output).toContain(`"round":2`);
 });
 
 test("a review never takes over the budget lock of a command on another machine and says how to clear it", async () => {
   const pr = await checkout();
-  const { panel, lock } = await fixesRoundDue(pr);
-  const pid = await exitedPid();
-  writeFileSync(lock, JSON.stringify({ pid, host: "another-machine", token: "elsewhere", started: "Sun Oct 25 11:00:00 2026" }));
+  const { panel, reviews, lock } = await fixesRoundDue(pr);
+  const holder = await lockHolder("budget", reviews, "another-machine");
+  await holder.crash();
 
-  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", panel)).rejects.toThrow(`Process ${pid} on another-machine, another hedge proof command, holds the lock ${lock}. hedge never takes over a lock from another machine: when that command is gone, delete ${lock}, then run this command again`);
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", panel)).rejects.toThrow(`Process ${holder.pid} on another-machine, another hedge proof command, holds the lock ${lock}. hedge never takes over a lock from another machine: when that command is gone, delete ${lock}, then run this command again`);
   await expect(pr.hedge("show", "--round", "2")).rejects.toThrow("has no reservation");
   rmSync(lock);
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", panel)).output).toContain(`"round":2`);
+});
+
+test("a fixes round backs out when a dropped unfinished final read is started again under the same name and phase while it weighs the budget", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: graded("non-critical", "medium") });
+  pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 2, "pull-requests.reviewCeiling": 3 });
+  await pr.commit("feature.txt", "greet\n");
+  await pr.hedge("require", "--none", "--reason", "fixture");
+  const panel = await panelReview(pr, "- feature.txt:1 | major | Correctness | the greeting drops the name | greet by name | anchor: greet");
+  const fix = await pr.commit("feature.txt", "greet the member\n");
+  await pr.hedge("review-start", "--scope", "fixes", "--base", panel);
+  writeFileSync(join(pr.repository, "findings.md"), "- major | feature.txt:1 | the member goes unnamed | anchor: greet the member\n");
+  await pr.hedge("review-finish", "--round", "2", "--reviewer", "gpt-6.1-sol", "findings.md");
+  await pr.commit("feature.txt", "greet the new member\n");
+  const babysit = JSON.parse((await pr.hedge("review-start", "--scope", "final", "--phase", "babysit", "--base", fix)).output.split("\n")[0]!);
+  expect(babysit).toMatchObject({ round: "final", id: "final-1" });
+  const [started, go] = ["started", "go"].map((name) => join(pr.home, name));
+  await spawnAsync(["mkfifo", started, go]);
+  pr.env.HEDGE_REVIEW_ARBITER = `cat >/dev/null; if mkdir "${pr.home}/first" 2>/dev/null; then echo > "${started}"; read line < "${go}"; fi; echo CONTINUE`;
+
+  const slow = pr.hedge("review-start", "--scope", "fixes", "--base", fix);
+  await readFile(started, "utf8");
+  rmSync(babysit.directory, { recursive: true, force: true });
+  expect((await pr.hedge("review-start", "--scope", "final", "--phase", "babysit", "--base", fix)).output).toContain(`"id":"final-1"`);
+  await writeFile(go, "go\n");
+
+  await expect(slow).rejects.toThrow("The reviews changed while this one weighed the budget. Run this command again to weigh it anew");
+  await expect(pr.hedge("show", "--round", "3")).rejects.toThrow("has no reservation");
+  await expect(pr.hedge("show", "--round", "final-1")).resolves.toMatchObject({ code: 0 });
 });
 
 test("a fixes round backs out when a dropped final read's name is reused in the same millisecond while it weighs the budget, so it never opens past the ceiling", async () => {

@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { cleanFixtures, settings, checkout, clean, verdict, fakeModel, recordingModel, fixture, stalledOnQuota, panelGuide, acceptGap, hubAt, exitedPid, reviewHead, models, type Checkout } from "./proof-testing.ts";
+import { cleanFixtures, settings, checkout, clean, verdict, fakeModel, recordingModel, fixture, stalledOnQuota, panelGuide, acceptGap, hubAt, exitedPid, lockHolder, reviewHead, models, type Checkout } from "./proof-testing.ts";
 import { askModel } from "./proof-models.ts";
 import { processStart, readPlan, withSlot, type PanelIO } from "./proof-panel.ts";
 
@@ -129,6 +129,21 @@ test("a lens waits for a free panel slot of the machine, and --wait restarts a l
   expect((await pr.hedge("review", "--wait")).code).toBe(0);
   expect(whileQueued).toEqual([expect.stringContaining("correctness: queued by gpt")]);
   expect(readdirSync(slots)).toEqual([]);
+});
+
+test("a lens takes over a panel slot that a crashed worker on another machine left, so the panel never waits on it", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.txt", "greet\n");
+  await pr.hedge("require", "--none", "--reason", "docs only");
+  fakeModel(pr, "REVIEWER", clean);
+  pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.panelSlots": 1 });
+  const slots = join(pr.home, ".local/state/hedge/proof/.panel-slots");
+  await (await lockHolder("slot", slots, "another-machine")).crash();
+
+  await pr.hedge("review", "--lens", "correctness");
+  expect((await pr.hedge("review", "--wait")).code).toBe(0);
+  expect((await pr.hedge("show")).output).not.toContain("queued");
+  expect(readdirSync(slots).filter((name) => !name.startsWith("."))).toEqual([]);
 });
 
 test("a lens reads the whole diff from the round directory and REVIEW.md from the tip of the base branch, and its findings need answers, not its COVERED list", async () => {

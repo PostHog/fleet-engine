@@ -1,6 +1,6 @@
 import { expect } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { gitEnv, template } from "../../../src/testing/git.ts";
 import { spawnAsync } from "../../../src/testing/spawn.ts";
@@ -189,6 +189,32 @@ printf '{"number":42,"url":"https://github.com/example/product/pull/42","baseRef
 export type Checkout = Awaited<ReturnType<typeof checkout>>;
 
 export const exitedPid = async () => (await spawnAsync(["true"])).pid;
+
+const lockHolderScript = `import { roundLock, withBudgetLock, withSlot } from ${JSON.stringify(join(import.meta.dir, "proof-panel.ts"))};
+const [kind, path, host] = process.argv.slice(2);
+const owner = { pid: process.pid, host, now: () => new Date(), startTime: async () => "Sun Oct 25 11:00:00 2026" };
+const hold = async () => { console.log("held"); await Bun.stdin.text(); };
+if (kind === "budget") await withBudgetLock(path, await roundLock(owner), hold);
+else await withSlot({ ...owner, env: {}, pause: async () => {}, slots: path, slotCount: 1, limit: 60000 }, hold);
+`;
+
+export async function lockHolder(kind: "budget" | "slot", path: string, host = hostname()) {
+  const script = join(fixture("hedge-lock-holder-"), "hold.ts");
+  writeFileSync(script, lockHolderScript);
+  const child = Bun.spawn([process.execPath, script, kind, path, host], { stdin: "pipe", stdout: "pipe", stderr: "inherit" });
+  const reader = child.stdout.getReader();
+  let said = "";
+  while (!said.includes("held")) {
+    const { done, value } = await reader.read();
+    if (done) throw new Error(`The lock holder exited with ${await child.exited} before it held ${path}`);
+    said += new TextDecoder().decode(value);
+  }
+  return {
+    pid: child.pid,
+    release: async () => { child.stdin.end(); return child.exited; },
+    crash: async () => { child.kill("SIGKILL"); await child.exited; },
+  };
+}
 
 export const panelGuide = `# QA swarm panel
 
