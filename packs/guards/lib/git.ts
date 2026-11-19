@@ -125,9 +125,12 @@ function stackArgs(name: string, args: string[]): string[] | undefined {
 }
 
 const makesAlias = (args: string[]) => operandsOf(args)[1] === "alias" && !args.includes("--remove");
+/** `gh alias … --help` before any `--`, which only prints help; after `--` it is an operand, such as an import file. */
+const asksHelp = (args: string[]) => args.slice(0, args.includes("--") ? args.indexOf("--") : undefined).some((arg) => arg === "--help" || arg === "-h");
+
 function ghAliasHidesStack(name: string, args: string[]): boolean {
   const [group, action, , expansion] = operandsOf(args);
-  if (name !== "gh" || group !== "alias" || args.includes("--help") || args.includes("-h")) return false;
+  if (name !== "gh" || group !== "alias" || asksHelp(args)) return false;
   if (action === "import") return true;
   if (action !== "set") return false;
   return expansion === undefined || args.some((arg) => /^(?:-s|--shell)(?:=|$)/.test(arg)) || /^!|\bstack\b/.test(expansion);
@@ -136,7 +139,7 @@ function ghAliasHidesStack(name: string, args: string[]): boolean {
 /** gh's aliases, from the config directory the call names or inherits, resolved from the call's directory; undefined when the guard cannot tell where that is. */
 function ghAliases(env: ReadonlyMap<string, string>, directory: string | undefined): Record<string, unknown> | undefined {
   const configHome = env.get("XDG_CONFIG_HOME") ?? process.env.XDG_CONFIG_HOME;
-  const named = env.get("GH_CONFIG_DIR") || process.env.GH_CONFIG_DIR || join(configHome || join(homedir(), ".config"), "gh");
+  const named = (env.get("GH_CONFIG_DIR") ?? process.env.GH_CONFIG_DIR) || join(configHome || join(homedir(), ".config"), "gh");
   if (!isAbsolute(named) && directory === undefined) return undefined;
   try {
     const config = Bun.YAML.parse(readFileSync(join(resolve(directory ?? "/", named), "config.yml"), "utf8")) as { aliases?: Record<string, unknown> } | null;
@@ -146,31 +149,65 @@ function ghAliases(env: ReadonlyMap<string, string>, directory: string | undefin
   }
 }
 
-const aliasWords = (name: string) => name.trim().split(/\s+/);
+/** Words split as gh splits alias names and expansions (shlex): quotes and backslashes group; undefined for an open quote. */
+function shellSplit(text: string): string[] | undefined {
+  const words: string[] = [];
+  let word = "";
+  let started = false;
+  let quote: string | undefined;
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index]!;
+    if (quote === "'") {
+      if (char === "'") quote = undefined;
+      else word += char;
+    } else if (quote === '"') {
+      if (char === '"') quote = undefined;
+      else if (char === "\\" && '"\\$`'.includes(text[index + 1] ?? "x")) word += text[++index];
+      else word += char;
+    } else if (/\s/.test(char)) {
+      if (started) words.push(word);
+      word = "";
+      started = false;
+    } else {
+      started = true;
+      if (char === "'" || char === '"') quote = char;
+      else if (char === "\\") word += text[++index] ?? "";
+      else word += char;
+    }
+  }
+  if (quote) return undefined;
+  if (started) words.push(word);
+  return words;
+}
 
 /**
  * The arguments gh runs after expanding the agent's own gh alias, matched like gh by its leading words, also a nested
- * name such as `pr mine`; undefined for a shell alias, quoting the guard does not parse, or a config it cannot find.
+ * name such as `pr mine`; undefined for a shell alias, an expansion gh cannot split, or a config the guard cannot find.
  */
 function expandedGh({ args, env }: Command, directory: string | undefined): string[] | undefined {
+  if (args[0] === "alias") return args;
   const aliases = ghAliases(env, directory);
   if (aliases === undefined) return undefined;
-  const [name] = Object.keys(aliases)
-    .filter((key) => aliasWords(key).every((word, index) => args[index] === word))
-    .sort((a, b) => aliasWords(b).length - aliasWords(a).length);
-  const expansion = name === undefined ? undefined : aliases[name];
-  if (name === undefined || typeof expansion !== "string") return args;
-  if (/^\s*!|['"\\]/.test(expansion)) return undefined;
-  return substituted(expansion, args.slice(aliasWords(name).length));
+  const [match] = Object.entries(aliases)
+    .map(([key, expansion]) => ({ words: shellSplit(key) ?? [], expansion }))
+    .filter(({ words }) => words.length > 0 && words.every((word, index) => args[index] === word))
+    .sort((a, b) => b.words.length - a.words.length);
+  if (match === undefined || typeof match.expansion !== "string") return args;
+  if (match.expansion.trimStart().startsWith("!")) return undefined;
+  return substituted(match.expansion, args.slice(match.words.length));
 }
 
-function substituted(expansion: string, rest: string[]): string[] {
+/** gh's alias expansion: `$1` and on take the matching argument, gh splits the result into words, and the arguments left over follow. */
+function substituted(expansion: string, rest: string[]): string[] | undefined {
   const used = new Set<number>();
-  const words = expansion.trim().split(/\s+/).map((word) => word.replace(/\$(\d+)/g, (_, index: string) => {
+  const text = expansion.replace(/\$(\d+)/g, (placeholder, index: string) => {
+    const value = rest[Number(index) - 1];
+    if (value === undefined) return placeholder;
     used.add(Number(index));
-    return rest[Number(index) - 1] ?? "";
-  }));
-  return [...words, ...rest.filter((_, index) => !used.has(index + 1))];
+    return value;
+  });
+  const words = shellSplit(text);
+  return words && [...words, ...rest.filter((_, index) => !used.has(index + 1))];
 }
 
 function stackPushes(args: string[], repo: () => Repo | undefined): number {

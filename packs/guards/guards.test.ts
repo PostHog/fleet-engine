@@ -65,17 +65,17 @@ async function preToolUseInstalled(home: string, provider: "claude" | "codex", c
 
 const hooksInProcess: Record<string, Hook> = { "guards.ts": guardsHook, "name-a-model.ts": nameAModelHook };
 
-async function hookProcess(path: string, provider: string, input: string, home: string): Promise<HookResult> {
+async function hookProcess(path: string, provider: string, input: string, home: string, env: Record<string, string> = {}): Promise<HookResult> {
   const { GH_CONFIG_DIR: _gh, XDG_CONFIG_HOME: _xdg, ...inherited } = process.env;
-  const child = Bun.spawn([process.execPath, path, provider], { cwd: dirname(dirname(path)), env: { ...inherited, HOME: home }, stdin: new Blob([input]), stdout: "pipe", stderr: "pipe" });
+  const child = Bun.spawn([process.execPath, path, provider], { cwd: dirname(dirname(path)), env: { ...inherited, HOME: home, ...env }, stdin: new Blob([input]), stdout: "pipe", stderr: "pipe" });
   const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
   return { code, stdout, stderr };
 }
 
-async function preToolUse(home: string, provider: "claude" | "codex", call: ToolCall | string, { guardAsProcess = false } = {}) {
+async function preToolUse(home: string, provider: "claude" | "codex", call: ToolCall | string, { guardAsProcess = false, env = {} as Record<string, string> } = {}) {
   const run: RunHook = async (path, hookProvider, input) => {
     const inProcess = hooksInProcess[basename(path)];
-    if (!inProcess || (guardAsProcess && basename(path) === "guards.ts")) return hookProcess(path, hookProvider, input, home);
+    if (!inProcess || (guardAsProcess && basename(path) === "guards.ts")) return hookProcess(path, hookProvider, input, home, env);
     try {
       return await inProcess(hookProvider, async () => input, home);
     } catch (error) {
@@ -1084,6 +1084,7 @@ describe("the Git guard", () => {
     "gh alias set sp - < aliases.txt",
     "gh alias import aliases.yml",
     "command gh alias set sp 'stack push'",
+    "gh alias import -- --help",
   ])("refuses a gh alias that can hide a stack push: %s", async (command) => {
     const denied = await preToolUse(homeWith(withGuards(), { "guards.person": "Robin" }), "claude", bash(command, await repo("feature")), { guardAsProcess: true });
     expect(denied.refusal).toContain("gh alias set");
@@ -1098,24 +1099,40 @@ describe("the Git guard", () => {
     ["an alias from a GH_CONFIG_DIR the command names", "GH_CONFIG_DIR=OTHER gh other", "force-pushes 6 branches at once"],
     ["an alias from a relative GH_CONFIG_DIR, read from the command's directory", "GH_CONFIG_DIR=rel-gh gh other", "force-pushes 6 branches at once"],
     ["a nested alias under a gh command", "gh pr sp", "force-pushes 6 branches at once"],
-    ["an alias whose expansion quotes its words", "gh qp", "gh alias set"],
+    ["an alias whose expansion quotes its words", "gh qp", "force-pushes 6 branches at once"],
+    ["an alias whose name gh unquotes", "gh pr mine", "force-pushes 6 branches at once"],
+    ["an alias from the XDG config home when the command empties an inherited GH_CONFIG_DIR", "GH_CONFIG_DIR= XDG_CONFIG_HOME=XDGDIR gh other", "force-pushes 6 branches at once"],
   ])("follows %s to the stack push it runs", async (_, command, refusal) => {
     const dir = await repo("feature");
     stackOf(dir, sixOpen);
     const home = homeWith(withGuards(), { "guards.person": "Robin" });
     mkdirSync(join(home, ".config/gh"), { recursive: true });
-    writeFileSync(join(home, ".config/gh/config.yml"), "aliases:\n    sp: stack push\n    s: stack\n    shp: '!gh stack push'\n    sn: stack $1\n    pr sp: stack push\n    qp: \"stack 'push'\"\n    co: pr checkout\n");
+    writeFileSync(join(home, ".config/gh/config.yml"), "aliases:\n    sp: stack push\n    s: stack\n    shp: '!gh stack push'\n    sn: stack $1\n    pr sp: stack push\n    qp: \"stack 'push'\"\n    \"'pr' mine\": stack push\n    co: pr checkout\n");
     const other = join(home, "other-gh");
     mkdirSync(other);
     writeFileSync(join(other, "config.yml"), "aliases:\n    other: stack submit\n");
     mkdirSync(join(dir, "rel-gh"));
     writeFileSync(join(dir, "rel-gh/config.yml"), "aliases:\n    other: stack submit\n");
-    const denied = await preToolUse(home, "claude", bash(command.replace("OTHER", other), dir), { guardAsProcess: true });
+    mkdirSync(join(home, "xdg/gh"), { recursive: true });
+    writeFileSync(join(home, "xdg/gh/config.yml"), "aliases:\n    other: stack submit\n");
+    const inherited = join(home, "inherited-gh");
+    mkdirSync(inherited);
+    writeFileSync(join(inherited, "config.yml"), "aliases:\n    other: pr list\n");
+    const denied = await preToolUse(home, "claude", bash(command.replace("OTHER", other).replace("XDGDIR", join(home, "xdg")), dir), { guardAsProcess: true, env: command.startsWith("GH_CONFIG_DIR= ") ? { GH_CONFIG_DIR: inherited } : {} });
     expect(denied.refusal).toContain(refusal);
   });
 
-  test.each(["gh alias set co 'pr checkout'", "gh alias list", "gh alias delete sp", "gh alias set --help"])("allows a gh alias that cannot push a stack: %s", async (command) => {
+  test.each(["gh alias set co 'pr checkout'", "gh alias list", "gh alias delete sp", "gh alias set --help", "cd - && GH_CONFIG_DIR=relative gh alias set --help"])("allows a gh alias that cannot push a stack: %s", async (command) => {
     expect(await preToolUse(homeWith(withGuards()), "claude", bash(command, await repo("feature")), { guardAsProcess: true })).toEqual({ code: 0, refusal: undefined });
+  });
+
+  test("allows an alias whose expansion quotes a value, as gh splits it", async () => {
+    const dir = await repo("feature");
+    stackOf(dir, sixOpen);
+    const home = homeWith(withGuards());
+    mkdirSync(join(home, ".config/gh"), { recursive: true });
+    writeFileSync(join(home, ".config/gh/config.yml"), "aliases:\n    bugs: 'issue list --label=\"good first issue\"'\n");
+    expect(await preToolUse(home, "claude", bash("gh bugs", dir), { guardAsProcess: true })).toEqual({ code: 0, refusal: undefined });
   });
 
   test("allows a program named gs that is not the gh stack wrapper", async () => {

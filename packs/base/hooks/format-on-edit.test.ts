@@ -230,6 +230,31 @@ describe("the format-on-edit hook", () => {
     expect(existsSync(join(repo, "formatted"))).toBe(true);
   });
 
+  test("never asks a git that a PATH entry outside the repository links into the repository", async () => {
+    const repo = await repository(undefined, { "*.ts": "prettier --write" });
+    tool(repo, "git", marks(repo), "tools");
+    tool(repo, "prettier", `touch "${join(repo, "formatted")}"`);
+    const bin = temp.make("bin-");
+    symlinkSync(join(repo, "tools/git"), join(bin, "git"));
+    await withPath(bin, () => edited(repo));
+    expect(existsSync(join(repo, "ran"))).toBe(false);
+  });
+
+  test("asks Git about node_modules without inherited Git settings, such as GIT_LITERAL_PATHSPECS, that make it list nothing", async () => {
+    const repo = await repository(undefined, { "*.ts": "prettier --write" });
+    tool(repo, "other.cjs", marks(repo), "node_modules/other/bin");
+    mkdirSync(join(repo, "node_modules/.bin"), { recursive: true });
+    symlinkSync("../other/bin/other.cjs", join(repo, "node_modules/.bin/prettier"));
+    await spawnGit(repo, "add", "-f", "node_modules/.bin/prettier");
+    process.env.GIT_LITERAL_PATHSPECS = "1";
+    try {
+      await edited(repo);
+    } finally {
+      delete process.env.GIT_LITERAL_PATHSPECS;
+    }
+    expect(existsSync(join(repo, "ran"))).toBe(false);
+  });
+
   test("gives a formatter only the PATH entries outside the repository, so a launcher such as env node cannot start a committed node", async () => {
     const repo = await repository(undefined, { "*.ts": "prettier --write" });
     tool(repo, "prettier", `echo "$PATH" > "${join(repo, "seen")}"`);

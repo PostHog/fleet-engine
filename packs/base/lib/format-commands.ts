@@ -59,13 +59,18 @@ export function safePath(root: string): string {
   }).join(delimiter);
 }
 
-/** Whether the repository commits anything under node_modules, such as a symlink that picks which installed file runs, or a submodule. */
+/**
+ * Whether the repository commits anything under node_modules, such as a symlink that picks which installed file runs, or
+ * a submodule. Git must not resolve into the repository, and runs without inherited GIT_ settings, such as
+ * GIT_LITERAL_PATHSPECS, that would make it list nothing.
+ */
 async function commitsNodeModules(root: string): Promise<boolean> {
   try {
     const PATH = safePath(root);
     const git = Bun.which("git", { PATH });
-    if (!git) return true;
-    const child = Bun.spawn([git, "-C", root, "ls-files", "-z", "--", ":(literal,icase)node_modules"], { stdin: "ignore", stdout: "pipe", stderr: "ignore", env: { ...process.env, PATH } });
+    if (!git || inside(root, realpathSync(git))) return true;
+    const env = { ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_"))), PATH };
+    const child = Bun.spawn([git, "-C", root, "ls-files", "-z", "--", ":(literal,icase)node_modules"], { stdin: "ignore", stdout: "pipe", stderr: "ignore", env });
     const [listed, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
     return code !== 0 || listed !== "";
   } catch {
