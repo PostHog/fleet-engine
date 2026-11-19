@@ -294,15 +294,19 @@ says what to do with a template parameter that holds one.
    default, so a secret would show in your output, and it refuses an
    ephemeral parameter in `--parameter`. Ask the
    person to create each workspace in the Coder web UI instead: they open
-   the template's create form, pick the preset **None** so that no preset
-   locks a field, give the workspace the name from item 1, and
-   fill in the values you give them. They leave a secret that has a default
-   as it is, and type a secret without a default themselves. Tell them first
+   the template's create form; if the form shows a preset picker, they
+   pick **None**, so that no preset locks a field. They give the workspace
+   the name from item 1, and fill in the values you give them. They leave
+   a secret that has a default as it is, and type a secret without a
+   default themselves. Tell them first
    that Coder keeps each value of the form with the workspace's build, so
    anyone who can see the workspace can read the secret they type. Coder
    does this for every workspace made from that template, so they decide
    whether to type it. When they tell you the workspace name, go on with
-   item 5.
+   item 5. A `coder restart` drops the values of ephemeral parameters, so
+   never run it for a workspace made in the web form: each restart this
+   guide asks for later, the person does in the web app too, where they
+   give the ephemeral values again and any new value you give them.
 
    When the template has neither, run `coder create`. Pass each
    parameter with its own `--parameter`, also those where the default is
