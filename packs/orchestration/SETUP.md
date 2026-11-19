@@ -22,11 +22,12 @@ answers:
 
 On a first setup, recommend them off: they run at night without a person,
 and they need a node and a repo the person works in. A preset can turn them
-on, such as `everything`. Setup on the hub does not ask their answers, but the
-node refuses the profile without them. So with such a preset, add
+on, such as `everything`. With such a preset, `hedge setup --chat` on the hub
+ends with code `2` and a `--set orchestration.<key>=<value>` line for each
+answer it needs, and applies nothing until it has them. So add
 `--workflows quality-loop=off,signal-loop=off,pr-digest=off` to the setup
-command, or, when they want the loops now, add the three answers as `--set`
-lines. Once a node runs, turn one on with its answers:
+command, or, when they want the loops now, ask the three answers before step
+7 and add them as `--set` lines. Once a node runs, turn one on with its answers:
 
 ```sh
 hedge packs --workflows quality-loop=on --set orchestration.loopProject=<folder> --set orchestration.qualityArea=<paths> --set orchestration.ledgerRepo=<owner/name>

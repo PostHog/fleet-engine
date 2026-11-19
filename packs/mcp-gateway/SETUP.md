@@ -21,9 +21,12 @@ hub, and it starts with no servers.
    ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge mcp-gateway sign-in'
    ```
 
-   The browser that opens each address runs here, not on the hub, so run
-   the `coder port-forward` line it prints here, in the background, before
-   the person opens the first address. Stop it when the sign-ins are done.
+   The browser that opens each address must reach the hub's gateway, so the
+   `coder port-forward` line it prints runs on the device whose browser opens
+   the addresses, usually the person's Mac, never on a node. When you run on
+   that device, run the line in the background. Otherwise give the person
+   the line to run in a terminal there. Start it before the person opens the
+   first address, and stop it when the sign-ins are done.
 
    `hedge mcp-gateway doctor` on the hub says what does not work.
 

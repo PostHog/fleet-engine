@@ -7,7 +7,8 @@ steps for you; this guide shows what it does.
 
 You need:
 
-- the T3 Code app on your Mac or your phone, signed in with T3 Connect;
+- the T3 Code app on your Mac, signed in with T3 Connect. You run this setup
+  from the Mac. Add T3 Code on your phone once the boxes are linked;
 - a GitHub account;
 - a Claude plan, a ChatGPT plan, or both;
 - a Coder deployment where you can create workspaces, and the Coder CLI on
@@ -21,8 +22,12 @@ You need:
 On your Mac, sign in to Coder and create two workspaces: a hub with a 200 GB
 disk and a node with a 500 GB disk. Give every template parameter with its
 own `--parameter`, so you see each value Coder uses. Set the dotfiles
-parameter to your profile repo, `https://github.com/<login>/hedge-profile`.
-`hedge setup` makes that repo in step 2 when it does not exist yet.
+parameter to your profile repo: `https://github.com/<login>/hedge-profile`,
+or `https://github.com/<login>/fleet-profile` when you have a profile from
+before the rename. `hedge setup` makes `hedge-profile` in step 2 when you
+have none. When setup prints another repo in step 2, such as a profile in a
+team's org, change the dotfiles parameter of each workspace with
+`coder update <workspace> --parameter <dotfiles parameter>=https://github.com/<repo>`.
 
 ```sh
 coder login <your Coder URL>
@@ -36,6 +41,15 @@ coder config-ssh --yes
 Add one `--parameter` for each other parameter of the template. Do not use
 `--copy-parameters-from`: Coder then takes the copied workspace's values
 over every `--parameter` you pass.
+
+`coder schedule stop <workspace> manual` turns off the stop schedule, but a
+build that is already running can keep a stop time from its template.
+[`scripts/check-workspace.sh`](../scripts/check-workspace.sh) checks both:
+`sh check-workspace.sh hedge-hub <parameter>=<value>...` prints `ok` for each
+parameter that has the value you passed, and for a workspace with no stop
+time. It prints no value and no token. When the disk size or the region is
+wrong and the template does not let it change, delete the workspace and
+create it again.
 
 Check that SSH works. With the default prefix, the workspace `hedge-hub` is
 the host `coder.hedge-hub`:
@@ -55,8 +69,16 @@ curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh | sh
 
 `get.sh` installs the GitHub CLI, Bun, and the `t3` command when they are
 missing. Then it starts `hedge setup`. Setup asks plain-language questions.
-Where it shows a default, press ↵ to take it. On a Mac, `get.sh` stops:
-Hedge runs on cloud boxes.
+Where it shows a default, press ↵ to take it. On a Mac, `get.sh` installs
+nothing: it only stops the jobs of an earlier Fleet or Hedge there.
+
+`get.sh` puts `~/.local/bin` and `~/.bun/bin` on your `PATH` in your login
+file, which this shell has already read. Before the next steps, put them on
+the `PATH` of this shell too, or open a new shell:
+
+```sh
+export PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH"
+```
 
 Setup asks you to sign in. A sign-in prints a link, and often a code. Open
 the link on your Mac or your phone:
@@ -65,7 +87,7 @@ the link on your Mac or your phone:
 | --- | --- |
 | GitHub | The code from the terminal on `github.com/login/device`, then your approval. Hedge asks for `repo`, `read:org`, `admin:public_key`, `admin:ssh_signing_key`, and `workflow` once, so it can make your profile repo, add your keys, and push to large repos, where GitHub can ask for `workflow` even when a push changes no workflow file. |
 | Claude | Your Claude account in the browser. Paste the code it shows back into the terminal. Only when your plan includes Claude. |
-| ChatGPT | The code from the terminal, on the page it prints. Only when your plan includes Codex. Setup checks the sign-in with a real request, because a stale sign-in still looks signed in. |
+| ChatGPT | The code from the terminal, on the page it prints. Only when your plan includes Codex. Setup checks the sign-in with a real request, because a stale sign-in still looks signed in. When your ChatGPT account or workspace turns device code sign-in off, turn it on in ChatGPT's settings under Security, or ask the workspace admin. Without it, run `ssh -L 1455:localhost:1455 coder.hedge-hub` on your Mac, run `codex login` in that SSH session, open the link it prints on the Mac, and run setup again. |
 
 Setup creates the private repo `hedge-profile` in your GitHub account and saves
 your answers there. When a team pack you picked names a profile org, setup
@@ -91,14 +113,18 @@ and sign in with the account that the T3 Code app uses.
 
 ## 4. Name the hub and add the node
 
-Still on the hub, sign it in to Coder, so it reaches the node over SSH. Then
-name it the hub, turn on the Hub pack, and add the node:
+Still on the hub, install the Coder CLI there when it is missing, and sign
+the hub in to Coder, so it reaches the node over SSH. The CLI comes from your
+Coder deployment, so its version matches. Then name the hub, turn on the Hub
+pack, and add the node. The MCP gateway starts off, because it needs Docker
+on the hub:
 
 ```sh
+command -v coder || { mkdir -p ~/.local/bin && curl -fsSL "<your Coder URL>/bin/coder-linux-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" -o ~/.local/bin/coder && chmod +x ~/.local/bin/coder; }
 coder login <your Coder URL>
 coder config-ssh --yes
 hedge hub here
-hedge packs --add hub
+hedge packs --add hub --workflows mcp-gateway=off
 hedge devbox add coder.hedge-node-1
 ```
 
