@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { freeBytes } from "./disk.ts";
 import { t3StatePath } from "./t3/index.ts";
+import { underLegacyPath } from "../../../src/legacy.ts";
 
 export { t3StatePath };
 
@@ -26,8 +27,9 @@ export type Facts = {
 
 export type Thread = { status: string | null; archived: boolean; deleted: boolean; settled: boolean; wake: string | null; pending: boolean; activeAt: number; openLead: boolean };
 export type Verdict = { path: string; remove: boolean; reason: string };
+/** home: the home folder whose paths from before the rename hold repositories that prune never touches. */
 export type PruneOptions = {
-  worktreeRoot: string; statePath: string; now: number;
+  worktreeRoot: string; statePath: string; now: number; home?: string;
   repos: string[];
   minIdleHours: number;
   unownedIdleHours: number;
@@ -342,6 +344,11 @@ function removeIfDecided(facts: Facts, verdict: Verdict, options: PruneOptions, 
   return removed.exitCode === 0 ? decided : failed(removed.stderr.toString().trim());
 }
 
+function fromBeforeTheRename(home: string, path: string): boolean {
+  const common = git(path, "rev-parse", "--path-format=absolute", "--git-common-dir");
+  return common.ok && underLegacyPath(home, common.out);
+}
+
 const device = (path: string) => { try { return statSync(path).dev; } catch { return -1; } };
 
 function evict(kept: Facts[], target: NonNullable<PruneOptions["evict"]>, options: PruneOptions, refresh: (path: string) => Facts, current: WithState): Verdict[] {
@@ -390,6 +397,11 @@ export function prune(options: PruneOptions): Verdict[] {
   const root = resolve(options.worktreeRoot);
   const current: WithState = (facts, latest) => withState(facts, latest, facts.path.startsWith(`${root}/`));
   for (const path of listCandidates(root, state.projects, options.repos)) {
+    if (options.home !== undefined && fromBeforeTheRename(options.home, path)) {
+      verdicts.push({ path, remove: false, reason: "its Git repository is in a Fleet path from before the rename" });
+      options.log(`kept: ${path} (${verdicts.at(-1)!.reason})`);
+      continue;
+    }
     const facts = current(inspect(path, { running: processDirectories(), seen }, branches, options), readState(options.statePath));
     const verdict = removeIfDecided(facts, decide(facts, options), options, (latest) => decide(current(facts, latest), options));
     if (!verdict.remove) kept.set(path, facts);
@@ -567,7 +579,7 @@ export type PruneContext = { home: string; env: Record<string, string | undefine
 export function pruneOptions(args: string[], log: (line: string) => void, { home, env, floorGigabytes }: PruneContext): { options: PruneOptions; auto: AutoOptions | null } {
   const state = join(env.XDG_STATE_HOME ?? join(home, ".local/state"), "hedge");
   const options: PruneOptions = {
-    worktreeRoot: join(home, ".t3/worktrees"), statePath: t3StatePath(join(home, ".t3/userdata")), now: Date.now(),
+    worktreeRoot: join(home, ".t3/worktrees"), statePath: t3StatePath(join(home, ".t3/userdata")), now: Date.now(), home,
     repos: [], minIdleHours: 6, unownedIdleHours: 24, agentIdleHours: 24, dryRun: false, fetch: true, log,
     sightingsPath: join(state, "worktree-sightings.json"), mergedPullRequest: mergedOnGitHub,
   };

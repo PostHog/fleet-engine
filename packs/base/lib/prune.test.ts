@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdir, mkdtemp, readdir, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rename, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { spawnAsync } from "../../../src/testing/spawn.ts";
 import { type AutoOptions, type CacheHost, cwdsFromLsof, decide, evictable, onlyDisposable, prune, pruneOptions, type PruneOptions, readSightings, readState, reclaimCaches, reclaimT3Versions, recordSightings, removeTreeCommand, t3StatePath, type Facts, type Verdict } from "./prune.ts";
 
@@ -720,4 +720,21 @@ test("a pass on a machine where T3 made no worktrees yet keeps nothing and fails
   const { options } = pruneOptions(["--no-fetch"], (line) => lines.push(line), { home, env: {}, floorGigabytes: 10 });
   expect(prune(options)).toEqual([]);
   expect(lines.at(-1)).toMatch(/^Done: 0 removed, 0 kept\. [\d.]+G free$/);
+});
+
+onLinux("prune keeps a landed worktree whose repository is a Fleet checkout from before the rename, and its other worktrees still go", async () => {
+  const { base, repo, root } = await repository();
+  const old = join(base, ".local/share/fleet/engine");
+  await mkdir(dirname(old), { recursive: true });
+  await rename(repo, old);
+  const backed = join(root, "engine", "backed");
+  await sh(old, "git", "worktree", "add", "-q", "-b", "backed", backed);
+  const elsewhere = await landedWorktrees("plain");
+  const statePath = t3State(join(base, "statev2.sqlite"), [backed, ...elsewhere.paths].map((worktreePath) => ({ worktreePath, settledAt })));
+
+  const verdicts = [...pass(base, root, statePath, { home: base }), ...pass(elsewhere.base, elsewhere.root, statePath, { home: base })];
+
+  expect(verdicts.find((verdict) => verdict.path === backed)).toMatchObject({ remove: false, reason: "its Git repository is in a Fleet path from before the rename" });
+  expect(await readdir(join(root, "engine"))).toEqual(["backed"]);
+  expect(await readdir(join(elsewhere.root, "repo"))).toEqual([]);
 });
