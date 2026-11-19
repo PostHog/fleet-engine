@@ -30,7 +30,7 @@ import { spawnRunner, type CommandRunner } from "./adapters/run.ts";
 import { become, canBecome, type Become } from "./runner/become.ts";
 import { trackCommand } from "./usage/usage.ts";
 import { asHedge } from "./reconciler/engine-command.ts";
-import { adoptLegacyEnv, fleetNotice, inAnyLegacyPath, isOldJob, profileFile, renamedPath, underLegacyPath, withLegacyNames } from "./legacy.ts";
+import { adoptLegacyEnv, fleetNotice, hedgeOnMac, inAnyLegacyPath, isOldJob, profileFile, renamedPath, underLegacyPath, withLegacyNames } from "./legacy.ts";
 import { importFleet, isCopyOf } from "./import-fleet.ts";
 import { fleetAdapter, type FleetAdapter } from "./adapters/fleet/adapter.ts";
 
@@ -247,8 +247,19 @@ async function change(command: keyof typeof changes | "hub", args: string[], opt
 }
 
 async function runUpdate(options: CliOptions) {
+  if (options.platform !== "darwin") return updateEngine(options);
+  const code = await updateEngine(options).catch((error: unknown) => {
+    if (!(error instanceof Error)) throw error;
+    (options.fail ?? options.print)(`hedge: ${error.message}`);
+    return 1;
+  });
+  if (code !== 0) options.print(hedgeOnMac);
+  return code;
+}
+
+async function updateEngine(options: CliOptions) {
   const machine = await loadMachine(options.home);
-  if (!machine?.profileDir) throw new Error("no profile on this machine. Run get.sh, or hedge apply --profile <dir>.");
+  if (!machine?.profileDir) throw new Error(options.platform === "darwin" ? "no profile on this machine." : "no profile on this machine. Run get.sh, or hedge apply --profile <dir>.");
   const profileDir = hedgeProfile(options, machine.profileDir);
   const profile = await loadProfile(profileDir);
   return update({
