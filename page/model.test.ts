@@ -162,10 +162,11 @@ describe("the install prompt", () => {
     expect(unparsedSnippets([dangling])).toHaveLength(1);
     const recovery = sshSnippets(readFileSync(join(root, "packs/recovery/SETUP.md"), "utf8"))
       .map((code) => withHub(code, hub))
-      .find((code) => code.includes("sh -s <<'SCRIPT'"))!;
+      .find((code) => /sh -s <<'(\w+)'/.test(code))!;
+    const delimiter = /sh -s <<'(\w+)'/.exec(recovery)![1]!;
     expect(filled).toContain(recovery);
     expect(remoteCommands(recovery)).toHaveLength(1);
-    const brokenRecovery = recovery.replace(/^SCRIPT$/m, "hedge doctor &&\nSCRIPT");
+    const brokenRecovery = recovery.replace(new RegExp(`^${delimiter}$`, "m"), `hedge doctor &&\n${delimiter}`);
     expect([unparsedSnippets([recovery]), unparsedSnippets([brokenRecovery])]).toEqual([[], [brokenRecovery]]);
     const run = filled.map((code) => code.split("\n").filter((line) => !/^\s*#/.test(line)).join("\n"));
     const hosts = run.flatMap((code) => [...code.matchAll(/\bssh((?:\s+-\S+)*)\s+([^\s'"]+)/g)].map((match) => match[2]!));
