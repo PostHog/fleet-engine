@@ -29,11 +29,14 @@ function showPrompt(id: string, text: string, status: string) {
 }
 
 function chooser(form: HTMLFormElement, data: PromptData) {
-  const switchOf = (pack: string) => form.elements.namedItem(`start:${pack}`) as HTMLInputElement;
-  let start: Start = { off: data.startPacks.filter((pack) => !switchOf(pack).checked) };
+  const switchOf = (pack: string) => form.elements.namedItem(`start:${pack}`) as HTMLInputElement | null;
+  let start: Start = { off: data.startPacks.filter((pack) => switchOf(pack)?.checked === false) };
 
   const show = () => {
-    for (const pack of data.startPacks) switchOf(pack).checked = !start.off.includes(pack);
+    for (const pack of data.startPacks) {
+      const box = switchOf(pack);
+      if (box) box.checked = !start.off.includes(pack);
+    }
     showPrompt("start", startPrompt(data, start), startStatus(data, start));
   };
 

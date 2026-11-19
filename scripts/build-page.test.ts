@@ -69,6 +69,13 @@ describe("the site build", () => {
     }
   });
 
+  test("every page loads the script and the styles of its own build, under names that change with their content, so a cached page never runs another build's script", () => {
+    const assets = Object.keys(files).filter((path) => /^assets\/[^/]+\.(js|css)$/.test(path));
+    expect(assets.map((path) => path.replace(/-[0-9a-f]{16}\./, "-<hash>."))).toEqual(["assets/site-<hash>.css", "assets/app-<hash>.js"]);
+    for (const path of assets) expect(path).toContain(`-${Bun.hash(files[path]!).toString(16).padStart(16, "0")}.`);
+    for (const [path, html] of pagesOf(files)) expect([path, assets.filter((asset) => !html.includes(`${asset}"`))]).toEqual([path, []]);
+  });
+
   test("the landing page's first screen says that Hedge runs agents in the cloud, not on the Mac, and why", () => {
     const hero = visibleText(page("index.html").match(/<section class="hero">[\s\S]*?<\/section>/)![0]).replaceAll(" ,", ",");
     expect(hero).toContain(
@@ -145,7 +152,7 @@ describe("the site build", () => {
 
   test("the public build names no item of a private team pack, and credits PostHog for the hedgehogs and the logo", async () => {
     for (const [path, html] of pagesOf(files)) expect([path, html.match(/hogli|coder|stamphog|reviewhog/gi)]).toEqual([path, null]);
-    expect(Buffer.from(files["assets/app.js"] as string).toString().match(/hogli|coder|stamphog|reviewhog/gi)).toBeNull();
+    expect(Buffer.from(files[Object.keys(files).find((path) => /^assets\/app-[0-9a-f]+\.js$/.test(path))!] as string).toString().match(/hogli|coder|stamphog|reviewhog/gi)).toBeNull();
     expect(data.packs.flatMap((pack) => pack.workflows).map((workflow) => workflow.id)).not.toContain("previews");
     expect(data.teamPacks).toEqual([]);
     for (const [path, html] of pagesOf(files)) {
@@ -280,7 +287,7 @@ describe("the site build", () => {
     const run = await spawnAsync(["bun", join(root, "scripts/build-page.ts"), "--audience", "posthog", "--source", source, "--out", out], { cwd: root });
     expect([run.exitCode, run.stderr]).toEqual([0, ""]);
     expect(readFileSync(join(out, "index.html"), "utf8")).toContain('"teamPacks":["posthog"]');
-    for (const path of ["packs/index.html", "packs/posthog/index.html", "assets/site.css", "assets/app.js", "assets/art/posthog-logo-light.svg", "assets/art/heart-hog.png"]) expect([path, existsSync(join(out, path))]).toEqual([path, true]);
+    for (const path of ["packs/index.html", "packs/posthog/index.html", "assets/art/posthog-logo-light.svg", "assets/art/heart-hog.png"]) expect([path, existsSync(join(out, path))]).toEqual([path, true]);
     const single = await spawnAsync(["bun", join(root, "scripts/build-page.ts"), "--out", join(out, "index.html")], { cwd: root });
     expect([single.exitCode, single.stderr.trim()]).toEqual([2, "build-page: --out takes a directory. The site has one HTML file for each route"]);
   });

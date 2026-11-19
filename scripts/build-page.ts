@@ -79,18 +79,23 @@ function pngSize(bytes: Uint8Array) {
   return { width: view.getUint32(16), height: view.getUint32(20) };
 }
 
+const named = (name: string, extension: string, content: string) => `assets/${name}-${Bun.hash(content).toString(16).padStart(16, "0")}.${extension}`;
+
 export async function buildSite(options: PageOptions): Promise<SiteFiles> {
   const data = await pageData(options);
   const bundle = await Bun.build({ entrypoints: [join(engineRoot, "page/app.ts")], root: engineRoot, target: "browser", minify: true });
   if (!bundle.success) throw new AggregateError(bundle.logs, "the page script did not build");
   const art = await Promise.all(artFiles().map(async (file) => [file, await Bun.file(join(artDir, file)).bytes()] as const));
   const sizes: ArtSizes = Object.fromEntries(art.filter(([file]) => file.endsWith(".png")).map(([file, bytes]) => [file, pngSize(bytes)]));
-  const routes = site(data, sizes);
+  const script = await bundle.outputs[0]!.text();
+  const styles = await Bun.file(join(engineRoot, "page/style.css")).text();
+  const assets = { script: named("app", "js", script), styles: named("site", "css", styles) };
+  const routes = site(data, sizes, assets);
   const shown = art.filter(([file]) => routes.some((route) => route.html.includes(`assets/art/${file}"`)));
   return {
     ...Object.fromEntries(routes.map((route) => [route.path, route.html])),
-    "assets/site.css": await Bun.file(join(engineRoot, "page/style.css")).text(),
-    "assets/app.js": await bundle.outputs[0]!.text(),
+    [assets.styles]: styles,
+    [assets.script]: script,
     ...Object.fromEntries(shown.map(([file, bytes]) => [`assets/art/${file}`, bytes])),
   };
 }

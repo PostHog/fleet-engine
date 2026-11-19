@@ -28,9 +28,11 @@ function visit(path: string, { from, files = site, url = `https://hedge.test/hed
   window.document.addEventListener("click", (event) => {
     if ((event.target as unknown as Element).closest("a")) event.preventDefault();
   });
-  window.eval(files["assets/app.js"] as string);
+  window.eval(files[scriptOf(files[path] as string)] as string);
   return window;
 }
+
+const scriptOf = (html: string) => html.match(/<script src="(?:\.\.?\/)*(assets\/[^"]+\.js)"/)![1]!;
 
 function carryStorage(from: Window, to: Window) {
   for (let index = 0; index < from.sessionStorage.length; index++) {
@@ -81,6 +83,16 @@ describe("the landing page in a browser", () => {
     button.click();
     expect(await window.navigator.clipboard.readText()).toBe(text(window, "start-text"));
     expect(button.textContent).toBe("Copied");
+  });
+
+  test("an older page whose chooser lacks a switch that the newer script knows still updates its prompt and copies it", async () => {
+    const older = { ...site, "index.html": (site["index.html"] as string).replace(/<input type="checkbox" role="switch" class="switch" name="start:communication"[^>]*>/, "") };
+    const window = visit("index.html", { files: older });
+    switchOf(window, "orchestration").click();
+    expect(line(window, "Packs on the first setup")).toBe("pull-requests, communication");
+    const button = window.document.querySelector('[data-copy="start-text"]') as unknown as HTMLButtonElement;
+    button.click();
+    expect(await window.navigator.clipboard.readText()).toBe(text(window, "start-text"));
   });
 
   test("opened from a folder on disk, every link to a route names its index.html, since a folder link opens a file listing there", () => {
