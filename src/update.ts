@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { closeSync, openSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { constants, tmpdir } from "node:os";
+import { constants } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { linkOnPath } from "./adapters/provider-config/store.ts";
 import { inside } from "./files/install.ts";
@@ -44,37 +44,34 @@ class Stopped extends Error {}
 
 type OnStop = "kill" | "finish";
 
-const running = new Set<Child>();
+const running = new Set<(signal: NodeJS.Signals) => void>();
 let stopping: NodeJS.Signals | undefined;
-
-function track<T extends Child>(start: () => T, onStop: OnStop = "kill"): T {
-  if (stopping && onStop === "kill") throw new Stopped();
-  const child = start();
-  if (onStop === "finish") return child;
-  running.add(child);
-  void child.exited.finally(() => running.delete(child));
-  return child;
-}
 
 const stop = (signal: NodeJS.Signals) => {
   stopping = signal;
-  for (const child of running) child.kill(signal);
+  for (const kill of running) kill(signal);
 };
 
-type StepIo = { cwd?: string; env?: Record<string, string | undefined>; stdio: ["ignore" | "inherit", number | "inherit", number | "inherit"] };
+async function whileRunning<T>(kill: (signal: NodeJS.Signals) => void, onStop: OnStop, work: Promise<T>) {
+  if (onStop === "kill") running.add(kill);
+  try {
+    return await work;
+  } finally {
+    running.delete(kill);
+  }
+}
 
-export function startStep(command: string[], io: StepIo): Child {
-  const child = Bun.spawn(command, { ...io, detached: true });
-  return {
-    exited: child.exited,
-    kill(signal = "SIGTERM") {
-      try {
-        process.kill(-child.pid, signal);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
-      }
-    },
-  };
+function signalGroup(pid: number, signal: NodeJS.Signals) {
+  try {
+    return process.kill(-pid, signal);
+  } catch (error) {
+    if (["ESRCH", "EPERM"].includes((error as NodeJS.ErrnoException).code ?? "")) return false;
+    throw error;
+  }
+}
+
+async function endGroup(pid: number) {
+  for (let waited = 0; signalGroup(pid, "SIGKILL") && waited < 5_000; waited += 10) await Bun.sleep(10);
 }
 
 const homeLock = ".local/state/hedge/update.lock";
@@ -96,16 +93,17 @@ async function takeLocks(home: string, engineDir: string): Promise<Held[] | stri
   const common = await git(engineDir, "rev-parse", "--git-common-dir");
   if (!common.ok) return `hedge update: ${engineDir} is not an engine checkout: ${common.err}`;
   const held: Held[] = [];
-  for (const path of [inside(home, homeLock), join(realpathSync(resolve(engineDir, common.out)), "hedge-update.lock")]) {
-    const lock = lockOnce(path);
-    if (lock && lock !== "link") {
+  try {
+    for (const path of [inside(home, homeLock), join(realpathSync(resolve(engineDir, common.out)), "hedge-update.lock")]) {
+      const lock = lockOnce(path);
+      if (!lock || lock === "link") return releaseAll(held), lock === "link" ? throughLink(path) : anotherUpdateRuns;
       held.push(lock);
-      continue;
     }
+    return held;
+  } catch (error) {
     releaseAll(held);
-    return lock === "link" ? throughLink(path) : anotherUpdateRuns;
+    throw error;
   }
-  return held;
 }
 
 const releaseAll = (held: Held[]) => held.reverse().forEach((lock) => lock.release());
@@ -131,16 +129,31 @@ export async function update(given: UpdateOptions): Promise<number> {
 async function updateAlone(options: Run): Promise<number> {
   const origin = await ready(options);
   if (!origin) return 1;
-  const before = (await git(options.engineDir, "rev-parse", "HEAD")).out;
-  const moved = options.engine.channel === "track" ? await trackMain(options, origin.url) : await followRelease(options, origin.url, origin.switched);
+  const moved = await moveAndInstall(options, origin);
   if (!moved) return 1;
-  const failed = await installPackages(options.engineDir, "kill");
-  if (failed !== undefined) return await rollBack(options, before, failed), 1;
   if (!(await recordRelease(options, moved))) return 1;
   if (!(await saveOrigin(options, origin))) return 1;
   const profileMoved = await pullProfile(options);
-  const applied = await track(options.runApply).exited;
+  if (stopping) throw new Stopped();
+  const apply = options.runApply();
+  const applied = await whileRunning((signal) => apply.kill(signal), "kill", apply.exited);
   return applied === 0 && !profileMoved ? 1 : applied;
+}
+
+async function moveAndInstall(options: Run, origin: Origin): Promise<Moved> {
+  const before = (await git(options.engineDir, "rev-parse", "HEAD")).out;
+  const install: Install = { started: false };
+  let done: Moved = false;
+  try {
+    const moved = options.engine.channel === "track" ? await trackMain(options, origin.url) : await followRelease(options, origin.url, origin.switched);
+    if (!moved) return false;
+    install.started = true;
+    install.failed = await installPackages(options.engineDir, "kill");
+    if (install.failed === undefined) done = moved;
+    return done;
+  } finally {
+    if (!done) await rollBack(options, before, install);
+  }
 }
 
 async function pullProfile(options: Run) {
@@ -252,36 +265,33 @@ async function checkOutRelease(options: Run, url: string, target: Version): Prom
 }
 
 async function installPackages(engineDir: string, onStop: OnStop) {
-  try {
-    const { code, out, err } = await piped([process.execPath, "install", "--frozen-lockfile", "--production"], { cwd: engineDir, timeout: 300_000, onStop });
-    return code === 0 ? undefined : (err || out).trim();
-  } catch (error) {
-    if (error instanceof Stopped) return "";
-    throw error;
-  }
+  const { code, out, err } = await piped([process.execPath, "install", "--frozen-lockfile", "--production"], { cwd: engineDir, timeout: 300_000, onStop });
+  return code === 0 ? undefined : (err || out).trim();
 }
 
-async function piped(command: string[], { cwd, env, timeout, onStop = "kill" }: { cwd?: string; env?: Record<string, string | undefined>; timeout: number; onStop?: OnStop }) {
-  const files = ["out", "err"].map((stream) => join(tmpdir(), `hedge-update-${randomUUID()}.${stream}`));
-  const fds = files.map((file) => openSync(file, "wx", 0o600));
-  try {
-    const child = track(() => startStep(command, { cwd, env, stdio: ["ignore", fds[0]!, fds[1]!] }), onStop);
-    const timer = setTimeout(() => child.kill("SIGTERM"), timeout);
-    const code = await child.exited.finally(() => clearTimeout(timer));
-    const [out, err] = files.map((file) => readFileSync(file, "utf8"));
-    return { code, out: out!, err: err! };
-  } finally {
-    fds.forEach((fd) => closeSync(fd));
-    files.forEach((file) => rmSync(file, { force: true }));
-  }
+async function piped(command: string[], { cwd, env, timeout, onStop }: { cwd?: string; env?: Record<string, string | undefined>; timeout: number; onStop: OnStop }) {
+  if (stopping && onStop === "kill") throw new Stopped();
+  const child = Bun.spawn(command, { cwd, env, stdin: "ignore", stdout: "pipe", stderr: "pipe", detached: true });
+  const output = Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  const timer = setTimeout(() => signalGroup(child.pid, "SIGTERM"), timeout);
+  const code = await whileRunning((signal) => signalGroup(child.pid, signal), onStop, child.exited.finally(() => clearTimeout(timer)));
+  await endGroup(child.pid);
+  const [out, err] = await output;
+  return { code, out, err };
 }
 
-async function rollBack(options: Run, before: string, installError: string) {
-  const failed = stopping ? `hedge update: stopped by ${stopping} while it installed the engine's packages in ${options.engineDir}` : `hedge update: could not install the engine's packages in ${options.engineDir}`;
+type Install = { started: boolean; failed?: string };
+
+async function rollBack(options: Run, before: string, install: Install) {
+  const head = await gitAs("finish", options.engineDir, "rev-parse", "HEAD");
+  const files = await gitAs("finish", options.engineDir, "status", "--porcelain");
+  if (!install.started && head.ok && head.out === before && files.ok && !files.out) return;
+  const failed = stopping ? `hedge update: stopped by ${stopping}` : install.failed !== undefined ? `hedge update: could not install the engine's packages in ${options.engineDir}` : "hedge update: could not finish moving the engine";
+  const detail = install.failed ? `\n${install.failed}` : "";
   const restored = await gitAs("finish", options.engineDir, "checkout", "-q", "--force", "--detach", before);
-  if (!restored.ok) return options.print(`${failed}, and could not roll the engine back to ${before.slice(0, 7)}: ${restored.err}. Run get.sh again to repair it.\n${installError}`);
+  if (!restored.ok) return options.print(`${failed}, and could not roll the engine back to ${before.slice(0, 7)}: ${restored.err}. Run get.sh again to repair it.${detail}`);
   const repair = (await installPackages(options.engineDir, "finish")) === undefined ? "" : " Its packages did not install either, so run get.sh again to repair it.";
-  options.print(`${failed}, so the update was rolled back. The engine stays at ${before.slice(0, 7)}.${repair}\n${installError}`.trimEnd());
+  options.print(`${failed}, so the update was rolled back. The engine stays at ${before.slice(0, 7)}.${repair}${detail}`);
 }
 
 async function saveNotice(home: string, newMajor: string | undefined) {
