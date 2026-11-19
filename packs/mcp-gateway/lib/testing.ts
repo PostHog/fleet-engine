@@ -49,7 +49,8 @@ export function mcphubFetch(state: FakeMcpHub) {
     const path = url.pathname.slice("/mcphub/api/".length);
     const body = init.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined;
     state.calls.push({ method, path, ...(body ? { body } : {}) });
-    if (state.failing.includes(`${method} ${path}`) || state.failing.includes(`${method} ${path} ${JSON.stringify(body)}`)) return new Response(null, { status: 500 });
+    const nth = state.calls.filter((call) => call.method === method && call.path === path).length;
+    if ([`${method} ${path}`, `${method} ${path} ${JSON.stringify(body)}`, `${method} ${path} #${nth}`].some((call) => state.failing.includes(call))) return new Response(null, { status: 500 });
     if (method === "GET" && path === "servers") return Response.json({ success: true, data: state.servers.map((name) => ({ name, status: "connected", tools: toolsOf(state, name) })) });
     if (method === "GET" && path === "groups") return Response.json({ success: true, data: state.groups });
     if (method === "POST" && path === "groups") {

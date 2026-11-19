@@ -222,6 +222,46 @@ test("a client registration at the old origin that ends after the gateway drops 
   expect(moved.hub.printed).toEqual([signInAsked]);
 });
 
+const lateOldTokens = (api: FakeMcpHub) => {
+  api.configs.notes!.oauth = { ...(api.configs.notes!.oauth as Record<string, unknown>), accessToken: "old-access", refreshToken: "old-refresh" };
+};
+
+test("when the gateway does not drop the sign-in again after it saves the new URL, the upstream stays off at its old URL, and the next run drops old tokens that arrive late before it turns the upstream on", async () => {
+  const moved = movedNotes();
+  await moved.moveFromOldOrigin();
+  moved.api.lateRegistrations.notes = { clientId: "old-client", clientSecret: "old-secret" };
+  moved.api.failing = ["POST servers/notes/oauth/disconnect #2"];
+
+  await expect(registerUpstreams(moved.hub)).rejects.toThrow();
+
+  expect(moved.api.configs.notes).toMatchObject({ url: "https://old.example.com/mcp", enabled: false });
+  lateOldTokens(moved.api);
+  moved.api.failing = [];
+  await registerUpstreams(moved.hub);
+
+  expect(moved.api.configs.notes).toMatchObject({ url: "https://notes.example.com/mcp", enabled: true });
+  expect(moved.sentToNewOrigin().length).toBeGreaterThan(0);
+  for (const old of oldCredentials) expect(JSON.stringify(moved.sentToNewOrigin())).not.toContain(old);
+  expect(moved.hub.printed).toEqual([signInAsked]);
+});
+
+test("when the gateway also does not take the old URL back, the run fails with the upstream off, and the next run drops the sign-in before it turns the upstream on", async () => {
+  const moved = movedNotes();
+  await moved.moveFromOldOrigin();
+  moved.api.failing = ["POST servers/notes/oauth/disconnect #2", "PUT servers/notes #2"];
+
+  await expect(registerUpstreams(moved.hub)).rejects.toThrow();
+
+  expect(moved.api.configs.notes).toMatchObject({ url: "https://notes.example.com/mcp", enabled: false });
+  moved.api.failing = [];
+  await registerUpstreams(moved.hub);
+
+  expect(moved.api.configs.notes).toMatchObject({ url: "https://notes.example.com/mcp", enabled: true });
+  expect(moved.sentToNewOrigin().length).toBeGreaterThan(0);
+  for (const old of oldCredentials) expect(JSON.stringify(moved.sentToNewOrigin())).not.toContain(old);
+  expect(moved.hub.printed).toEqual([signInAsked]);
+});
+
 test("an upstream that Fleet added before the rename becomes Hedge's and keeps its sign-in at the same origin", async () => {
   const fleets = { type: "streamable-http", url: "https://notes.example.com/mcp", description: "Added by Fleet", oauth: { redirectUri: "http://127.0.0.1:3317/mcphub/oauth/callback", refreshToken: "kept" } };
   const { api, hub } = hubWith({ "notes.json": notes }, { servers: ["tickets", "calendar", "notes"], configs: { notes: fleets } });
