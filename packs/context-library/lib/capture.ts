@@ -115,30 +115,34 @@ function newPath(worktree: string, wanted: string): string {
   throw new Error(`${wanted} and its numbered copies exist already; nothing was saved`);
 }
 
-const linkLike = /(?:[a-z][a-z0-9+.-]*:)?\/\/[^\s<>"'`]+/gi;
-const linkEnd = /[.,;:!?)\]}*_~]+$/;
-const fenceOpener = /^([ \t>*+\-\d.)]*)(`{3,}|~{3,}|:{3,})([^\n]*)$/gm;
+const linkLike = /(?:[a-z][a-z0-9+.-]*:|(?<![\w/]))\/\/[^\s<>"'`]+/gi;
+const linkEnd = /[.,;:!?)\]}*_~|]+$/;
+const fenceOpener = /^((?:[ \t]*(?:>|[*+-](?=[ \t])|\d{1,9}[.)](?=[ \t])))*[ \t]*)(`{3,}|~{3,}|:{3,})([^\n]*)$/gm;
 const entityStart = /&(?!(?:amp|lt|gt|quot|apos);)(?=#|[a-z][a-z0-9]*;)/gi;
+const lines = (text: string) => text.replace(/\r\n?/g, "\n");
 
-function readLinksOnly(text: string, read: string): string {
+function readLinksOnly(text: string, read: Set<string>): string {
   return text.replace(/\\(?=[/:])/g, "").replace(linkLike, (link) => {
     const bare = link.replace(linkEnd, "");
-    return read.includes(bare) ? link : `(link removed)${link.slice(bare.length)}`;
+    return read.has(bare) ? link : `(link removed)${link.slice(bare.length)}`;
   });
 }
 
-function inert(text: string, read: string): string {
-  return readLinksOnly(text, read)
+function inert(text: string, read: Set<string>): string {
+  return readLinksOnly(lines(text), read)
     .replace(entityStart, "&amp;")
     .replace(/!+\[/g, "[")
     .replace(/<(?=[a-z/!?])/gi, "&lt;")
     .replace(fenceOpener, (whole, prefix: string, fence: string, info: string) => (info.trim() && !(fence.startsWith("`") && info.includes("`")) ? `${prefix}${fence}text` : whole));
 }
 
-function readText(input: CaptureInput, material: Material, existing: Existing | undefined): string {
+function readLinks(input: CaptureInput, material: Material, existing: Existing | undefined): Set<string> {
   const read = [input.source, input.note ?? "", ...material.parts.map((part) => part.text), ...(material.meetings ?? []).flatMap((meeting) => [meeting.text, meeting.link ?? ""]), existing?.text ?? ""].join("\n");
-  return `${read}\n${read.replaceAll("&amp;", "&")}`;
+  const found = [read, read.replaceAll("&amp;", "&")].flatMap((text) => text.replace(/\\(?=[/:])/g, "").match(linkLike) ?? []);
+  return new Set(found.flatMap((link) => [link, ...link.split("|")]).map((link) => link.replace(linkEnd, "")));
 }
+
+const withSource = (text: string, source: string) => text.replace(/^(\s*source:[ \t]*).*$/m, (_line, lead: string) => `${lead}${source}`);
 
 function wisprOf(draft: Draft, input: CaptureInput, material: Material): string | undefined {
   if (!input.startedAt) return undefined;
@@ -162,13 +166,14 @@ export async function capture(input: CaptureInput, deps: CaptureDeps): Promise<C
     const topics = [...new Set(docs.flatMap((doc) => doc.topics))].sort();
     const draft = await deps.agent(capturePrompt(input, library, existing, deps.today(), material, topics));
     const wispr = wisprOf(draft, input, material);
-    const text = inert(draft.text, readText(input, material, existing));
+    const text = withSource(inert(draft.text, readLinks(input, material, existing)), input.source);
     if (found && existing && text === existing.text) {
       return { path: found.path, title: found.title, url: docUrl(library, found.path), updated: true, text: existing.text, wispr };
     }
     const path = existing?.path ?? newPath(worktree, draft.path);
+    const drafted = parseDoc(path, lines(draft.text)).source;
+    if (drafted !== input.source) throw new Error(`${path} names source ${drafted ?? "none"}, not ${input.source}; nothing was saved`);
     const doc = parseDoc(path, text);
-    if (doc.source !== input.source) throw new Error(`${path} names source ${doc.source ?? "none"}, not ${input.source}; nothing was saved`);
     const secrets = secretKinds(text);
     if (secrets.length) throw new Error(`${path} holds a secret (${secrets.join(", ")}); nothing was saved`);
     const commit = async () => {

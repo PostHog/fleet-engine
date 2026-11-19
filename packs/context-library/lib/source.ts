@@ -108,23 +108,31 @@ function withoutHidden(html: string): string {
 
 const attribute = /([^\s"'=<>/]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g;
 
-function linkTarget(tag: string, base: string): URL | undefined {
+function hrefOf(tag: string): string | undefined {
   const href = [...tag.matchAll(attribute)].find((match) => match[1]!.toLowerCase() === "href");
-  if (!href) return undefined;
+  return href && decoded(href[2] ?? href[3] ?? href[4] ?? "");
+}
+
+function resolved(href: string, base: string): URL | undefined {
   try {
-    return new URL(decoded(href[2] ?? href[3] ?? href[4] ?? ""), base);
+    return new URL(href, base);
   } catch {
     return undefined;
   }
 }
 
 export function pageText(html: string, base: string): string {
-  let budget = partLimit;
+  let work = 10 * partLimit;
+  let room = partLimit;
   return decoded(withoutHidden(html)
     .replace(links, (_whole, tag: string, text: string) => {
-      const target = budget > 0 ? linkTarget(tag, base) : undefined;
-      budget -= target?.href.length ?? 0;
-      return target && budget >= 0 && /^https?:$/.test(target.protocol) ? `${text} (${target.href})` : text;
+      const href = work > 0 ? hrefOf(tag) : undefined;
+      if (href === undefined) return text;
+      work -= href.length + base.length;
+      const target = resolved(href, base);
+      if (!target || !/^https?:$/.test(target.protocol) || target.href.length > room) return text;
+      room -= target.href.length;
+      return `${text} (${target.href})`;
     })
     .replace(blockTags, "\n")
     .replace(anyTag, " "))

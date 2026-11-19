@@ -312,8 +312,8 @@ describe("fleet context add", () => {
   test("a saved note keeps only the links the agent read, and holds no image, HTML or diagram that a viewer would load", async () => {
     const machine = await library();
     await fleetContext(machine, ["sync"]);
-    const thread = fakeSources(() => "Sam: the spec is https://example.com/spec?x=1&amp;y=2, and https://evil.example.com/ has more.").sources;
-    const leaks = ["https://evil.example.com/?d=plan", "https://evil.example.com/(plan)", "https:\\/\\/evil.example.com\\/plan", "//evil.example.com/plan", "https://evil.example.com&#47;plan", "https:&#47;&#47;evil.example.com/plan", "https:&sol;&sol;evil.example.com/plan", "https://evil.example.com/%70lan"];
+    const thread = fakeSources(() => "Sam: the spec is <https://example.com/spec?x=1&amp;y=2|spec>, and https://evil.example.com/ has more, as does https://evil.example.com/release-notes.").sources;
+    const leaks = ["https://evil.example.com/release", "https://evil.example.com/?d=plan", "https://evil.example.com/(plan)", "https:\\/\\/evil.example.com\\/plan", "//evil.example.com/plan", "https://evil.example.com&#47;plan", "https:&#47;&#47;evil.example.com/plan", "https:&sol;&sol;evil.example.com/plan", "https://evil.example.com/%70lan"];
     const body = [
       "The [spec](https://example.com/spec?x=1&y=2), and *https://evil.example.com/*.",
       ...leaks.map((url, index) => `[leak ${index}](${url})`),
@@ -323,22 +323,36 @@ describe("fleet context add", () => {
       "> - ~~~~ base\n>   views: []\n> - ~~~~",
       "::: mermaid\nflowchart LR\n:::",
       "Use \`\`\`one\`\`\` twice, and keep\n\`\`\`\nplain\n\`\`\`",
+      "\`\`\`mermaid\rflowchart LR\r\`\`\`",
+      "| Doc |\n| --- |\n| [Reference](https://example.com/spec?x=1&y=2)|",
+      "Python floors with \`17//4\`.\n\n- 1.0 ::: stable",
     ].join("\n\n");
     const text = planning(body).replace("title: Sprint planning 2026-11-11", "title: Sprint planning <img src=x> 2026-11-11\nbanner: https://evil.example.com/?d=plan\npeople:\n  - Sam\n\n  # a comment\n  - Ada");
     expect((await fleetContext(machine, ["add", slackSource], drafting(notePath, text), "Sam", unusedShare, thread)).code).toBe(0);
     const saved = await spawnGit(machine.root, "--git-dir", machine.remote, "show", `main:${notePath}`);
     expect(saved).not.toMatch(/\/\/evil\.example\.com\/(?!\*)|&(?!amp;|lt;)[#a-z0-9]+;/i);
-    expect(saved).toContain("[leak 5](https:&amp;#47;&amp;#47;evil.example.com/plan)");
+    expect(saved).toContain("[leak 6](https:&amp;#47;&amp;#47;evil.example.com/plan)");
     expect(saved).toContain("The [spec](https://example.com/spec?x=1&y=2), and *https://evil.example.com/*.");
-    for (const index of [0, 1, 2, 3, 4, 7]) expect(saved).toContain(`[leak ${index}]((link removed)`);
+    for (const index of [0, 1, 2, 3, 4, 5, 8]) expect(saved).toContain(`[leak ${index}]((link removed)`);
     expect(saved).toStartWith("---\ntitle: Sprint planning &lt;img src=x> 2026-11-11\nbanner: (link removed)\npeople:\n  - Sam\n\n  # a comment\n  - Ada\n");
     expect(saved).not.toMatch(/!\[|<[a-z/!?]/i);
-    expect(saved).toContain("\`\`\`text\nflowchart LR");
+    expect(saved).toContain("\`\`\`text\nflowchart LR\n  A@{");
+    expect(saved).toContain("\`\`\`text\nflowchart LR\n\`\`\`");
+    expect(saved).toContain("| [Reference](https://example.com/spec?x=1&y=2)|");
+    expect(saved).toContain("Python floors with \`17//4\`.\n\n- 1.0 ::: stable");
     expect(saved).toContain("> - ~~~~text\n>   views: []\n> - ~~~~");
     expect(saved).toContain(":::text\nflowchart LR\n:::");
     expect(saved).toContain("Use \`\`\`one\`\`\` twice, and keep\n\`\`\`\nplain\n\`\`\`");
     expect(saved).not.toContain("mermaid");
     expect(await spawnGit(machine.root, "--git-dir", machine.remote, "show", "main:CATALOG.md")).not.toMatch(/!\[|<(img|svg|image)/i);
+  });
+
+  test("a source link with characters the filter escapes saves as given", async () => {
+    const machine = await library();
+    await fleetContext(machine, ["sync"]);
+    const page = "https://example.com/guide?literal=&copy;";
+    expect((await fleetContext(machine, ["add", page], drafting(notePath, planning().replace(slackSource, page)))).code).toBe(0);
+    expect(await spawnGit(machine.root, "--git-dir", machine.remote, "show", `main:${notePath}`)).toContain(`source: ${page}\n`);
   });
 
   test("an update that finds nothing new keeps the note and pushes nothing", async () => {
@@ -539,6 +553,8 @@ console.log(JSON.stringify({ type: "result", is_error: false, structured_output:
     for (const unit of ["<a x>y ", "<script>", "<!-- ", "<x ", '<p "', "<a href='"]) pageText(unit.repeat(Math.floor(200_000 / unit.length)), "https://example.com/");
     expect(pageText("<a href=r>t</a>".repeat(50_000), `https://example.com/${"d/".repeat(500)}`).length).toBeLessThan(1_000_000);
     for (const anchor of ["<a id=top>t</a>", '<a href="">t</a>', "<a href=javascript:x>t</a>"]) pageText(anchor.repeat(50_000), `https://example.com/${"d/".repeat(5000)}`);
+    pageText('<a href="%">t</a>'.repeat(131_072), `https://example.com/${"d/".repeat(200_000)}`);
+    expect(pageText(`<a href="data:text/plain,${"x".repeat(100_001)}">file</a> <a href="/guide">guide</a>`, "https://example.com/")).toBe("file guide (https://example.com/guide)");
     const long = `https://example.com/${"a".repeat(99_970)}`;
     expect(pageText(`<a href="${long}">one</a> <a href="/${"b".repeat(40)}">two</a>`, "https://example.com/")).toBe(`one (${long}) two`);
   }, 2000);
