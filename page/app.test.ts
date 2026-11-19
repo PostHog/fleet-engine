@@ -19,40 +19,9 @@ afterEach(async () => {
 
 type Visit = { from?: Window; files?: SiteFiles; url?: string; motion?: "reduce" | "no-preference" };
 
-type Entry = { target: unknown; isIntersecting: boolean; intersectionRatio: number };
-type Watched = { callback: (entries: Entry[]) => void; thresholds: number[]; states: Map<unknown, string>; observed: unknown[] };
-type View = { shown: number; watched: Watched[] };
-const views = new WeakMap<Window, View>();
-const stateOf = (watch: Watched, shown: number) => `${shown > 0}:${watch.thresholds.filter((threshold) => shown > 0 && shown >= threshold).length}`;
-const deliver = (watch: Watched, targets: unknown[], shown: number) => {
-  if (targets.length) watch.callback(targets.map((target) => ({ target, isIntersecting: shown > 0, intersectionRatio: shown })));
-};
-
 function visit(path: string, { from, files = site, url = `https://hedge.test/hedge-engine/${path.replace(/index\.html$/, "")}`, motion = "no-preference" }: Visit = {}) {
   const window = new Window({ url, settings: { enableJavaScriptEvaluation: true, suppressInsecureJavaScriptEnvironmentWarning: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true, device: { prefersReducedMotion: motion } } });
   open.push(window);
-  const view: View = { shown: 0, watched: [] };
-  views.set(window, view);
-  Object.assign(window, {
-    IntersectionObserver: class {
-      watch: Watched;
-      constructor(callback: Watched["callback"], options: { threshold?: number | number[] } = {}) {
-        this.watch = { callback, thresholds: [options.threshold ?? 0].flat(), states: new Map(), observed: [] };
-        view.watched.push(this.watch);
-      }
-      observe(target: unknown) {
-        this.watch.observed.push(target);
-        this.watch.states.set(target, stateOf(this.watch, view.shown));
-        deliver(this.watch, [target], view.shown);
-      }
-      unobserve(target: unknown) {
-        this.watch.states.delete(target);
-      }
-      disconnect() {
-        this.watch.states.clear();
-      }
-    },
-  });
   if (from) carryStorage(from, window);
   window.document.addEventListener("click", (event) => {
     if ((event.target as unknown as Element).closest("a")) event.preventDefault();
@@ -205,24 +174,7 @@ const accessibleName = (element: Element) => {
 };
 const watchButtons = (window: Window) => [...window.document.querySelectorAll("button.watch")] as unknown as HTMLButtonElement[];
 const watchButton = (window: Window, title: string) => watchButtons(window).find((button) => accessibleName(button).endsWith(`the ${title} video`))!;
-const plays = (clip: HTMLVideoElement, seconds: number) => {
-  clip.play();
-  clip.currentTime += seconds;
-};
 const pathOf = (window: Window, url: string) => new URL(url, window.location.href).pathname;
-const queuedEarlier = (window: Window, shown: number) => {
-  for (const watch of views.get(window)!.watched) deliver(watch, watch.observed, shown);
-};
-const scrollTo = (window: Window, shown: number) => {
-  const view = views.get(window)!;
-  view.shown = shown;
-  for (const watch of view.watched) {
-    const changed = [...watch.states].filter(([, state]) => state !== stateOf(watch, shown)).map(([target]) => target);
-    for (const target of changed) watch.states.set(target, stateOf(watch, shown));
-    deliver(watch, changed, shown);
-  }
-};
-
 describe("the pack videos in a browser", () => {
   test("each Watch button is named for its length and pack, and opens one large player with that pack's name, line, video and poster", () => {
     const window = visit("packs/index.html");
@@ -255,67 +207,9 @@ describe("the pack videos in a browser", () => {
     expect(video(window, "dialog video").paused).toBe(true);
   });
 
-  test("a visitor who asks for reduced motion gets the player and the pack page's video without autoplay", () => {
-    const packs = visit("packs/index.html", { motion: "reduce" });
-    watchButton(packs, "Orchestration").click();
-    expect([dialog(packs).open, video(packs, "dialog video").paused]).toEqual([true, true]);
-    const page = visit("packs/orchestration/index.html", { motion: "reduce" });
-    scrollTo(page, 1);
-    expect(video(page, "video.clip").paused).toBe(true);
-  });
-
-  test("a pack page's video starts once at least half of it is in view, and then only the visitor plays or pauses it", () => {
-    const window = visit("packs/hub/index.html");
-    const clip = video(window, "video.clip");
-    expect(clip.paused).toBe(true);
-    scrollTo(window, 0.1);
-    expect(clip.paused).toBe(true);
-    scrollTo(window, 0.6);
-    expect(clip.paused).toBe(false);
-    scrollTo(window, 0);
-    expect(clip.paused).toBe(false);
-    clip.pause();
-    scrollTo(window, 1);
-    expect(clip.paused).toBe(true);
-  });
-
-  test("a pack page's video that the visitor paused at once, before it moved, stays paused when they scroll away and back", () => {
-    const window = visit("packs/hub/index.html");
-    const clip = video(window, "video.clip");
-    scrollTo(window, 1);
-    clip.pause();
-    scrollTo(window, 0);
-    scrollTo(window, 1);
-    expect([clip.paused, clip.currentTime]).toEqual([true, 0]);
-  });
-
-  test("a pack page's video that the visitor played and paused before it started on its own stays paused when they scroll to it", () => {
-    const window = visit("packs/hub/index.html");
-    const clip = video(window, "video.clip");
-    scrollTo(window, 0.4);
-    plays(clip, 1);
-    clip.pause();
-    scrollTo(window, 0.6);
-    expect(clip.paused).toBe(true);
-  });
-
-  test("a pack page's video that the visitor played and paused before its first frame, while less than half showed, stays paused when they scroll to it", () => {
-    const window = visit("packs/hub/index.html");
-    const clip = video(window, "video.clip");
-    scrollTo(window, 0.4);
-    clip.play();
-    clip.pause();
-    scrollTo(window, 0.6);
-    expect([clip.paused, clip.currentTime]).toEqual([true, 0]);
-  });
-
-  test("a pack page's video that the visitor played and paused stays paused when a visibility entry that the browser queued earlier arrives", () => {
-    const window = visit("packs/hub/index.html");
-    const clip = video(window, "video.clip");
-    scrollTo(window, 0.4);
-    clip.play();
-    clip.pause();
-    queuedEarlier(window, 0.6);
-    expect(clip.paused).toBe(true);
+  test("a visitor who asks for reduced motion gets the player without autoplay, and presses play", () => {
+    const window = visit("packs/index.html", { motion: "reduce" });
+    watchButton(window, "Orchestration").click();
+    expect([dialog(window).open, video(window, "dialog video").paused]).toEqual([true, true]);
   });
 });

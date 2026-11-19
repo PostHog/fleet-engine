@@ -103,12 +103,6 @@ function linksFromDisk() {
     link.setAttribute("href", link.getAttribute("href")!.replace(/\/(#.*)?$/, "/index.html$1"));
 }
 
-const calm = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-const start = (video: HTMLVideoElement) => {
-  if (!calm()) video.play().catch(() => {});
-};
-
 function player(dialog: HTMLDialogElement) {
   const video = dialog.querySelector("video")!;
   document.addEventListener("click", (event) => {
@@ -119,7 +113,7 @@ function player(dialog: HTMLDialogElement) {
     document.getElementById(dialog.getAttribute("aria-labelledby")!)!.textContent = button.dataset.title!;
     document.getElementById(dialog.getAttribute("aria-describedby")!)!.textContent = button.dataset.line!;
     dialog.showModal();
-    start(video);
+    if (!matchMedia("(prefers-reduced-motion: reduce)").matches) video.play().catch(() => {});
   });
   dialog.querySelector(".player-close")!.addEventListener("click", () => dialog.close());
   dialog.addEventListener("click", (event) => {
@@ -128,29 +122,12 @@ function player(dialog: HTMLDialogElement) {
   dialog.addEventListener("close", () => video.pause());
 }
 
-function clips() {
-  const videos = document.querySelectorAll<HTMLVideoElement>("video.clip");
-  if (!videos.length || calm() || !("IntersectionObserver" in window)) return;
-  const played = new WeakSet<HTMLVideoElement>();
-  const observer = new IntersectionObserver((entries) => {
-    for (const entry of entries) {
-      const video = entry.target as HTMLVideoElement;
-      if (entry.intersectionRatio >= 0.5 && !played.has(video)) start(video);
-    }
-  }, { threshold: 0.5 });
-  for (const video of videos) {
-    video.addEventListener("play", () => played.add(video));
-    observer.observe(video);
-  }
-}
-
 const chooserForm = document.getElementById("chooser") as HTMLFormElement | null;
 const pickerForm = document.getElementById("picker") as HTMLFormElement | null;
 if (chooserForm && data) chooser(chooserForm, data);
 if (pickerForm && data) picker(pickerForm, data);
 const playerDialog = document.querySelector<HTMLDialogElement>("dialog.player");
 if (playerDialog) player(playerDialog);
-clips();
 copyButtons();
 selectLinks();
 linksFromDisk();
