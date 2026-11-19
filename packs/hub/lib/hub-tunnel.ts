@@ -81,7 +81,7 @@ export async function hubTunnel(mode: MacTunnelMode, mac: MacTunnel): Promise<nu
   const forwards = `${ports.map((port) => `127.0.0.1:${port}`).join(" and ")} to ${mac.alias}`;
   if (mode === "remove") return await removeAgent(mac), mac.print("Hub tunnel: removed. This Mac no longer forwards ports to the hub."), 0;
   if (mode === "plan") return mac.print(`Hub tunnel plan: write ${agent} and load it at login. It forwards ${forwards}.`), 0;
-  if (mode === "install") await install(mac, ports, agent, domain, loaded);
+  if (mode === "install") await install(mac, ports, agent, domain);
   else await requireInstalled(mac.home, [wantedAgent(mac, ports, agent)], marker, "hub tunnel", "hedge hub-tunnel install");
   if (!(await loaded())) throw new Error("The launch agent is not loaded. Run hedge hub-tunnel install.");
   for (let attempt = 1; mac.gateway && !(await answers(mac)); attempt++) {
@@ -104,19 +104,42 @@ const agentLoaded = async (mac: MacTunnel) => (await mac.run(["launchctl", "prin
 const agentPath = (mac: Pick<MacTunnel, "home">) => join(mac.home, "Library/LaunchAgents", `${tunnelLabel}.plist`);
 
 const legacyLabel = "com.fleet.hub-tunnel";
+const notFound = 113;
+type OldTunnel = { path: string; target: string; loaded: boolean };
 
-/** Stops and turns off the agent that Hedge wrote before the rename, so it does not hold the ports beside the new one. Its file stays. */
-async function retireLegacyAgent(mac: MacTunnel) {
-  const content = await readIfThere(join(mac.home, "Library/LaunchAgents", `${legacyLabel}.plist`));
-  if (content === undefined || !ownedBy(content, marker)) return;
+/** Whether launchd runs target. An unexpected launchctl print exit stops the run before Hedge changes anything. */
+async function launched(mac: MacTunnel, target: string, what: string): Promise<boolean> {
+  const { code } = await mac.run(["launchctl", "print", target]);
+  if (code === 0 || code === notFound) return code === 0;
+  throw new Error(`Could not check whether launchd runs ${what} (launchctl print exit ${code}), so Hedge changed nothing.`);
+}
+
+/** The agent that Hedge wrote before the rename, while its file is there. */
+async function oldTunnel(mac: MacTunnel): Promise<OldTunnel | undefined> {
+  const path = join(mac.home, "Library/LaunchAgents", `${legacyLabel}.plist`);
+  const content = await readIfThere(path);
+  if (content === undefined || !ownedBy(content, marker)) return undefined;
   const target = `gui/${mac.uid}/${legacyLabel}`;
-  const loaded = async () => (await mac.run(["launchctl", "print", target])).code === 0;
-  if ((await loaded()) && ((await mac.run(["launchctl", "bootout", target])).code !== 0 || (await loaded()))) throw new Error(`launchd did not stop the hub tunnel from before the rename, so Hedge did not start the new one. Run launchctl bootout ${target}, then hedge hub-tunnel install.`);
-  if ((await mac.run(["launchctl", "disable", target])).code !== 0) throw new Error(`launchd did not turn off the hub tunnel from before the rename, so Hedge did not start the new one. Run launchctl disable ${target}, then hedge hub-tunnel install.`);
+  return { path, target, loaded: await launched(mac, target, "the hub tunnel from before the rename") };
+}
+
+/** Stops and turns off the old agent, so it does not hold the ports beside the new one. Its file stays. */
+async function stopOld(mac: MacTunnel, old: OldTunnel) {
+  const fix = `Run launchctl bootout ${old.target}, then hedge hub-tunnel install.`;
+  if (old.loaded && ((await mac.run(["launchctl", "bootout", old.target])).code !== 0 || (await mac.run(["launchctl", "print", old.target])).code !== notFound)) throw new Error(`launchd did not stop the hub tunnel from before the rename, so Hedge did not start the new one. ${fix}`);
+  if ((await mac.run(["launchctl", "disable", old.target])).code === 0) return;
+  await startOld(mac, old);
+  throw new Error(`launchd did not turn off the hub tunnel from before the rename, so Hedge did not start the new one. Run launchctl disable ${old.target}, then hedge hub-tunnel install.`);
+}
+
+async function startOld(mac: MacTunnel, old: OldTunnel) {
+  await mac.run(["launchctl", "enable", old.target]);
+  if (old.loaded) await mac.run(["launchctl", "bootstrap", `gui/${mac.uid}`, old.path]);
 }
 
 async function removeAgent(mac: MacTunnel) {
-  await retireLegacyAgent(mac);
+  const old = await oldTunnel(mac);
+  if (old) await stopOld(mac, old);
   const agent = agentPath(mac);
   await readOwned(mac.home, agent, marker, "hub tunnel");
   if (await agentLoaded(mac)) await mac.run(["launchctl", "bootout", agentTarget(mac)]);
@@ -125,21 +148,27 @@ async function removeAgent(mac: MacTunnel) {
 
 /** With nothing to forward, the doctor fails while an agent Hedge wrote is still on disk or loaded, and install and remove take it away. */
 async function withoutTunnel(mode: MacTunnelMode, mac: MacTunnel) {
-  const left = (await readOwned(mac.home, agentPath(mac), marker, "hub tunnel")) !== undefined || (mac.platform === "darwin" && (await agentLoaded(mac)));
+  const old = mac.platform === "darwin" ? await oldTunnel(mac) : undefined;
+  const left = (await readOwned(mac.home, agentPath(mac), marker, "hub tunnel")) !== undefined || (mac.platform === "darwin" && (await agentLoaded(mac))) || old?.loaded === true;
   if (left && mode === "doctor") throw new Error(`The hub tunnel should go. ${nothingToForward} Run hedge hub-tunnel install to remove it.`);
   if (left && (mode === "install" || mode === "remove")) await removeAgent(mac);
   return mac.print(`Hub tunnel: not needed. ${nothingToForward}`), 0;
 }
 
-async function install(mac: MacTunnel, ports: number[], agent: string, domain: string, loaded: () => Promise<boolean>) {
-  await retireLegacyAgent(mac);
+async function install(mac: MacTunnel, ports: number[], agent: string, domain: string) {
   const changed = await changedFiles(mac.home, [wantedAgent(mac, ports, agent)], marker, "hub tunnel");
+  const loaded = await launched(mac, agentTarget(mac), "the hub tunnel");
+  const old = await oldTunnel(mac);
+  if (old) await stopOld(mac, old);
   if (changed.length) {
-    if (await loaded()) await mac.run(["launchctl", "bootout", agentTarget(mac)]);
+    if (loaded) await mac.run(["launchctl", "bootout", agentTarget(mac)]);
     await writeFiles(changed);
     mac.print("Hub tunnel: launch agent written. Stop any port-forward you started by hand, so the agent can use the ports.");
   }
-  if (!(await loaded()) && (await mac.run(["launchctl", "bootstrap", domain, agent])).code !== 0) throw new Error("launchd did not load the hub tunnel.");
+  if (!(await agentLoaded(mac)) && (await mac.run(["launchctl", "bootstrap", domain, agent])).code !== 0) {
+    if (old) await startOld(mac, old);
+    throw new Error(old ? "launchd did not load the hub tunnel, so Hedge started the one from before the rename again." : "launchd did not load the hub tunnel.");
+  }
   if (!mac.gateway) return;
   const settings = { ...(mac.httpsHost ? { httpsHost: mac.httpsHost } : {}), relayPort: mac.relayPort };
   const client = await readGatewayClient(mac.home, settings);
