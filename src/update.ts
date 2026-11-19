@@ -42,6 +42,7 @@ export async function update(given: UpdateOptions): Promise<number> {
   if (!moved) return 1;
   const failed = await installPackages(options.engineDir);
   if (failed !== undefined) return await rollBack(options, before, failed), 1;
+  if (moved.notice) await saveNotice(options, moved.notice.newMajor);
   if (!(await recordRelease(options, moved))) return 1;
   if (!(await saveOrigin(options, origin))) return 1;
   const profileMoved = await pullProfile(options);
@@ -81,7 +82,7 @@ async function saveOrigin(options: UpdateOptions, origin: Origin) {
   return true;
 }
 
-type Moved = false | { release?: { tag: string; commit: string } };
+type Moved = false | { release?: { tag: string; commit: string }; notice?: { newMajor?: string } };
 
 async function recordRelease(options: UpdateOptions, moved: Exclude<Moved, false>) {
   if (!moved.release) return true;
@@ -98,7 +99,7 @@ async function withFetched(options: UpdateOptions, url: string, ref: string, use
     if (!fetched.ok) return options.print(`hedge update: could not fetch the engine: ${fetched.err}`), false;
     const commit = await git(options.engineDir, "rev-parse", "--verify", `${fetching}^{commit}`);
     if (!commit.ok) return options.print(`hedge update: could not read the fetched engine: ${commit.err}`), false;
-    if ((await git(options.engineDir, "cat-file", "-t", `${commit.out}:hedge`)).out !== "blob") return options.print(`hedge update: ${ref.replace(/^refs\/(?:heads|tags)\//, "")} has no hedge launcher, so it is an engine from before the rename. The engine stays where it is.`), false;
+    if (!/^100(?:755|644) blob /.test((await git(options.engineDir, "ls-tree", commit.out, "--", "hedge")).out)) return options.print(`hedge update: ${ref.replace(/^refs\/(?:heads|tags)\//, "")} has no hedge launcher, so it is an engine from before the rename. The engine stays where it is.`), false;
     return await use(commit.out);
   } finally {
     await git(options.engineDir, "update-ref", "-d", fetching);
@@ -130,6 +131,7 @@ async function releases(options: UpdateOptions, url: string) {
 
 async function followRelease(options: UpdateOptions, url: string, switched: boolean): Promise<Moved> {
   refuseLegacyPath(dirname(noticePath(options.home)));
+  refuseLegacyPath(noticePath(options.home));
   const versions = await releases(options, url);
   if (!versions) return false;
   const pin = parse(options.engine.ref);
@@ -139,8 +141,7 @@ async function followRelease(options: UpdateOptions, url: string, switched: bool
   const newer = versions.filter((version) => version.parts[0] > pin.parts[0]).sort(compare).at(-1);
   if (newer) options.print(`Hedge ${newer.tag} is out. It is a new major version, so this update stays on v${pin.parts[0]}.`);
   const moved = await moveToRelease(options, url, switched, versions, target);
-  if (moved) await saveNotice(options.home, newer?.tag);
-  return moved;
+  return moved && { ...moved, notice: { newMajor: newer?.tag } };
 }
 
 async function moveToRelease(options: UpdateOptions, url: string, switched: boolean, versions: Array<Version & { commit: string }>, target: Version): Promise<Moved> {
@@ -178,11 +179,15 @@ async function rollBack(options: UpdateOptions, before: string, installError: st
   options.print(`${failed}, so the update was rolled back. The engine stays at ${before.slice(0, 7)}.${repair}\n${installError}`);
 }
 
-async function saveNotice(home: string, newMajor: string | undefined) {
-  const path = noticePath(home);
-  if (!newMajor) return rm(path, { force: true });
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, JSON.stringify({ newMajor }) + "\n");
+async function saveNotice(options: UpdateOptions, newMajor: string | undefined) {
+  const path = noticePath(options.home);
+  try {
+    if (!newMajor) return await rm(path, { force: true });
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, JSON.stringify({ newMajor }) + "\n");
+  } catch (error) {
+    options.print(`hedge update: warning: could not ${newMajor ? "save" : "clear"} the new major notice in ${path}, so hedge doctor may name the wrong release: ${(error as Error).message}`);
+  }
 }
 
 function parse(tag: string): Version | undefined {
