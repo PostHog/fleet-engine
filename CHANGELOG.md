@@ -106,7 +106,12 @@
   `hedge proof respond`, so a finished review spends exactly when the gate
   asks for an answer to one of its findings. A review with only minor and nit
   findings spends nothing. A blocker, a major, a finding without a severity,
-  and a `TESTS` item count, and an unfinished review counts.
+  and a `TESTS` item count, and an unfinished review counts. An item reads as
+  minor or nit in the form `- file:line | minor | ...` and in the form
+  `1. minor, file:line: ...`.
+- A prose finding that a review writes beside only the notes of its Anchor
+  check is a finding. It gets the number after all other items, so an answer
+  that an older hedge took still answers the same item.
 - The ceiling never refuses a final read of a HEAD that `hedge proof gate`
   does not carry. It asks the gate's own question, from the same reviews,
   whatever `--base` names. A blocker or major that the read finds still
@@ -127,12 +132,14 @@
   When another review started or ended meanwhile, it reserves nothing and
   asks you to run it again. This holds also when a dropped review comes back
   under the same name and phase: each reservation has its own id in
-  `round.json`. A reservation that hedge cannot read for any
-  reason other than a missing file stops the command with the read error,
-  so the budget is never counted short. A review that
+  `round.json`. A reservation or findings file that hedge cannot read for
+  any reason other than a missing file stops the command with the read
+  error, so the budget is never counted short. A review that
   finds the lock held stops and names the holder. This lock, a round lock,
   and a panel slot follow one rule: hedge takes over the lock when the
-  process that holds it is gone. A
+  process that holds it is gone. When ten takeovers of a lock in a row
+  stopped before they ended, the command stops, names the lock files, and
+  gives the `rm` command that clears them. A
   final read takes the next free name in the reviews directory, so a
   leftover directory without `round.json` never blocks it.
 

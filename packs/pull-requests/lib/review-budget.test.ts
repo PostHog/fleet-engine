@@ -1,10 +1,11 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawnAsync } from "../../../src/testing/spawn.ts";
-import { reviewedFindings } from "./proof.ts";
-import { checkout, cleanFixtures, fakeModel, lockHolder, finishRound, fixture, graded, markPanel, models, recordingModel, settings, type Checkout } from "./proof-testing.ts";
+import { answeredFindings, reviewedFindings } from "./proof.ts";
+import { checkout, cleanFixtures, exitedPid, fakeModel, lockHolder, finishRound, fixture, graded, markPanel, models, recordingModel, settings, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
 
@@ -146,28 +147,38 @@ test("a TESTS item keeps its number when a stored review ends with an Anchor che
   expect((await pr.hedge("respond", "--round", "1", "responses.md")).code).toBe(0);
 });
 
-test("a prose finding stays a finding when the review lists only TESTS items and an Anchor check, so the gate asks for it", async () => {
+const anchorCheck = (notes: string[]) => ["", "## Anchor check", "", "hedge compared each finding's anchor with the diff and with earlier reviews of this PR.", "", ...notes, ""];
+const proseBesideTests = ["The greeting drops the name.", "TESTS:", "- feature.test.ts:3 asserts the call count of greet", ...anchorCheck(["- 1 finding quotes no anchor."])];
+const proseBaseItems = ["- 1 finding quotes no anchor.", "- feature.test.ts:3 asserts the call count of greet"];
+const storedShapes = [
+  { shape: "prose, TESTS items, and an Anchor check", findings: proseBesideTests.join("\n"), baseItems: proseBaseItems, baseAnswered: [1, 2], recovered: "The greeting drops the name." },
+  { shape: "findings and an Anchor check", findings: ["- major | feature.txt:1 | the greeting drops the name | anchor: greet", "- minor | feature.txt:1 | the word reads oddly | anchor: old", "TESTS:", "- feature.test.ts:3 asserts the call count of greet", ...anchorCheck(["- Not in the diff, so check it before triage: - minor | feature.txt:1 | the word reads oddly | anchor: old", "- 1 finding quotes no anchor."])].join("\n"), baseItems: ["- major | feature.txt:1 | the greeting drops the name | anchor: greet", "- minor | feature.txt:1 | the word reads oddly | anchor: old", "- Not in the diff, so check it before triage: - minor | feature.txt:1 | the word reads oddly | anchor: old", "- 1 finding quotes no anchor.", "- feature.test.ts:3 asserts the call count of greet"], baseAnswered: [1, 3, 4, 5], recovered: undefined },
+  { shape: "CRLF line endings, prose, TESTS items, and an Anchor check", findings: proseBesideTests.join("\r\n"), baseItems: proseBaseItems, baseAnswered: [1, 2], recovered: "The greeting drops the name." },
+];
+
+for (const { shape, findings, baseItems, baseAnswered, recovered } of storedShapes) test(`a response the base CLI accepted for a stored review with ${shape} answers the same items, and only a newly recovered prose finding needs an answer`, async () => {
   const pr = await checkout();
   pr.pullRequestState({ body: graded("non-critical", "medium") });
   await pr.commit("feature.txt", "new\n");
   await pr.hedge("require", "--none", "--reason", "fixture");
   await pr.hedge("review-start", "--scope", "full");
-  await finishWith(pr, "1", [
-    "The greeting drops the name.",
-    "TESTS:",
-    "- feature.test.ts:3 asserts the call count of greet",
-    "",
-    "## Anchor check",
-    "",
-    "hedge compared each finding's anchor with the diff and with earlier reviews of this PR.",
-    "",
-    "- 1 finding quotes no anchor.",
-    "",
-  ].join("\n"));
+  await finishWith(pr, "1", findings);
+  const answer = (number: number) => `${number}. rejected: the answer the base CLI took for item ${number}.`;
+  const saved = baseAnswered.map(answer).join("\n") + "\n";
+  writeFileSync(join(pr.pullRequest, "reviews/1/responses.md"), saved);
 
-  expect((await pr.hedge("gate")).output).toContain("review: round 1 has unanswered findings 1, 3;");
-  writeFileSync(join(pr.repository, "responses.md"), "3. fixed in 1a2b3c4: the test asserts the greeting.\n");
-  await expect(pr.hedge("respond", "--round", "1", "responses.md")).rejects.toThrow("Answer findings 1 too");
+  const read = answeredFindings(findings, saved).findings;
+  expect(read.slice(0, baseItems.length).map(({ text, answer }) => [text, answer?.text])).toEqual(baseItems.map((text, index) => [text, baseAnswered.includes(index + 1) ? answer(index + 1) : undefined]));
+  expect(read.slice(baseItems.length).map(({ text, answer }) => [text, answer])).toEqual(recovered ? [[recovered, undefined]] : []);
+  const recoveredNumber = baseItems.length + 1;
+  const gate = (await pr.hedge("gate")).output;
+  if (!recovered) { expect(gate).not.toContain("unanswered findings"); return; }
+  expect(gate).toContain(`review: round 1 has unanswered findings ${recoveredNumber};`);
+  writeFileSync(join(pr.repository, "responses.md"), saved);
+  await expect(pr.hedge("respond", "--round", "1", "responses.md")).rejects.toThrow(`Answer findings ${recoveredNumber} too`);
+  writeFileSync(join(pr.repository, "responses.md"), saved + `${recoveredNumber}. fixed in 1a2b3c4: the greeting names the member.\n`);
+  expect((await pr.hedge("respond", "--round", "1", "responses.md")).code).toBe(0);
+  expect((await pr.hedge("gate")).output).not.toContain("unanswered findings");
 });
 
 test("a review with only TESTS items and an Anchor check has no prose finding, so the gate asks only for the TESTS item", async () => {
@@ -691,6 +702,21 @@ test("a review takes over the budget lock of a hedge proof command that crashed,
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", fixes)).output).toContain(`"round":3`);
 });
 
+test("a budget lock whose holder is gone and whose takeovers all stopped midway names its lock files and the command that clears them, and the next review runs once they are gone", async () => {
+  const pr = await checkout();
+  const { panel, lock } = await fixesRoundDue(pr);
+  const dead = await exitedPid();
+  const held = JSON.stringify({ pid: dead, token: "crashed" });
+  writeFileSync(lock, held);
+  const guard = `${lock}.reclaim-${createHash("sha256").update(held).digest("hex").slice(0, 16)}`;
+  for (let generation = 1; generation <= 10; generation++) writeFileSync(generation === 1 ? guard : `${guard}.${generation}`, JSON.stringify({ pid: dead, token: `takeover-${generation}` }));
+  const clear = `rm -f '${lock}' '${lock}'.reclaim-*`;
+
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", panel)).rejects.toThrow(`The lock ${lock} is stuck: its holder is gone, and 10 takeovers of it stopped before they ended. Check that no hedge proof command runs on this PR, then run ${clear} and run this command again`);
+  await spawnAsync(["sh", "-c", clear]);
+  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", panel)).output).toContain(`"round":2`);
+});
+
 test("a review that leaves the arbiter while another command holds the budget lock stops before it reserves, and reserves once that command is done", async () => {
   const pr = await checkout();
   pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 1, "pull-requests.reviewCeiling": 3 });
@@ -907,6 +933,45 @@ test("a review whose only item to answer is a TESTS item spends review budget", 
 
   expect((await pr.hedge("gate")).output).toContain("review: round 2 has unanswered findings 1;");
   await expect(pr.hedge("review-start", "--scope", "fixes", "--base", fix)).rejects.toThrow("The review budget of 1 reviews is spent");
+});
+
+test("a review that lists only minor or nit items that lead with the severity and a comma needs no answer and spends no review budget, while a minor that may be a major still does", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: graded("non-critical", "medium") });
+  pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 10, "pull-requests.reviewCeiling": 1 });
+  await pr.commit("feature.txt", "greet\n");
+  await pr.hedge("require", "--none", "--reason", "fixture");
+  const panel = await cannedPanel(pr, { design: minor, others: lensAnswer("(none)") });
+  const fix = await pr.commit("feature.txt", "greet the member\n");
+  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", panel)).output).toContain(`"round":2`);
+  await finishWith(pr, "2", "# GPT-6.1 Sol final read 1\n\n1. minor, feature.txt:1: the word reads oddly.\n2. **nit**, feature.txt:1: the name could be shorter.\n");
+  const later = await pr.commit("feature.txt", "greet every member\n");
+
+  expect((await pr.hedge("gate")).output).not.toContain("has unanswered findings");
+  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", fix)).output).toContain(`"round":3`);
+  await finishWith(pr, "3", "- feature.txt:1 | minor (major if two members share a name) | the greeting drops the name\n");
+  await pr.commit("feature.txt", "greet each member\n");
+  expect((await pr.hedge("gate")).output).toContain("review: round 3 has unanswered findings 1;");
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", later)).rejects.toThrow("The review budget of 1 reviews is spent");
+});
+
+test.skipIf(process.getuid?.() === 0)("a findings file that cannot be read stops the next review with the read error, instead of counting its review as unfinished", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: graded("non-critical", "medium") });
+  pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 10, "pull-requests.reviewCeiling": 1 });
+  await pr.commit("feature.txt", "greet\n");
+  await pr.hedge("require", "--none", "--reason", "fixture");
+  const panel = await cannedPanel(pr, { design: minor, others: lensAnswer("(none)") });
+  const fix = await pr.commit("feature.txt", "greet the member\n");
+  await pr.hedge("review-start", "--scope", "fixes", "--base", panel);
+  await finishWith(pr, "2", "No findings.\n");
+  await pr.commit("feature.txt", "greet every member\n");
+  const findings = join(pr.pullRequest, "reviews", "2", "findings.md");
+  chmodSync(findings, 0o000);
+
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", fix)).rejects.toThrow(`EACCES: permission denied, open '${findings}'`);
+  chmodSync(findings, 0o600);
+  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", fix)).output).toContain(`"round":3`);
 });
 
 test("for a panel that mixes a prose-only lens with a lens that lists a minor, the review budget spends exactly when the gate asks for an answer", async () => {

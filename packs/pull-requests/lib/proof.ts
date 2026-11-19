@@ -157,11 +157,16 @@ type Spent = { spent: number; names: string[]; reservations: string[]; finished:
 type ReservedAs = { reservationId?: string; startedAt?: string; commit?: string; scope?: string; phase?: FinalReadPhase };
 const reservationOf = ({ reservationId, startedAt, commit, scope, phase }: ReservedAs) => JSON.stringify([reservationId, startedAt, commit, scope, phase]);
 
+async function savedFindings(directory: string) {
+  try { return await readFile(join(directory, "findings.md"), "utf8"); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
+}
+
 async function reviewsSpent(reviews: string, phase: FinalReadPhase, spending: Spending): Promise<Spent> {
   const rounds = await Promise.all((await reviewNames(reviews)).map(async (name) => {
     const round = await readJson<ReservedAs | undefined>(join(reviews, name, "round.json"), undefined);
     if (!round) return undefined;
-    const findings = await readFile(join(reviews, name, "findings.md"), "utf8").catch(() => undefined);
+    const findings = await savedFindings(join(reviews, name));
     const leadsToFixes = findings === undefined ? spending === "unfinished spends" : unanswered(findings, "").length > 0;
     return { name, reservation: reservationOf(round), finished: findings !== undefined, spends: (round.phase ?? "review") === phase && leadsToFixes };
   }));
@@ -486,7 +491,7 @@ export async function respondToReview(home: string, identity: ProofIdentity, rou
   const bytes = await readFile(responses);
   if (!bytes.toString().trim()) throw new Error(`${responses} is empty. Answer each finding: fixed in which commit, or rejected and why`);
   const directory = await roundDirectory(home, identity, round);
-  const findings = await readFile(join(directory, "findings.md"), "utf8").catch(() => undefined);
+  const findings = await savedFindings(directory);
   if (findings === undefined) throw new Error(`Review round ${round} has no findings yet`);
   const missing = unanswered(findings, bytes.toString());
   if (missing.length) throw new Error(`Answer findings ${missing.join(", ")} too: one line each, numbered in the order of findings.md, such as "${missing[0]}. fixed in 1a2b3c4: <how>", "${missing[0]}. rejected: <why>", or, at the review budget, "${missing[0]}. known: <why>" for a finding listed under Known issues. Minor and nit findings need no answer; a TESTS item gets a test-only rewrite or delete`);
@@ -510,7 +515,7 @@ const noFinding = /^(?:#.*|no findings\.?|findings:?|\(none\))$/i;
 
 const findingsBlock = /^\s*FINDINGS\b:?/;
 const testsBlock = /^\s*(?:#+\s*)?\**TESTS\b/;
-const flooredItem = /^\s*(?:[-*]|\d+[.)])\s+(?:[^|\n]*\|)?\s*\**(?:minor|nit)\**\s*\|/i;
+const flooredItem = /^\s*(?:[-*]|\d+[.)])\s+(?:(?:[^|\n]*\|)?\s*\**(?:minor|nit)\**\s*\||\**(?:minor|nit)\**,)/i;
 
 const anchorIntro = /^(?:fleet|hedge) compared each finding's anchor with the diff and with earlier reviews of this PR\.$/;
 const anchorNote = /^- (?:Not in the diff, so check it before triage: \S|Seen before in [^:\n]+: \S|\d+ findings? quotes? no anchor\.$)/;
@@ -562,14 +567,15 @@ function ladderFindings(findings: string) {
 const continued = /^\s+\S/;
 const lazyContinued = /^[^\s#]/;
 
-/** The findings, then the TESTS items. Each part on its own: prose without list items is one finding of its part. */
+/** The findings, then the TESTS items. Each part on its own: prose without list items is one finding of its part, and prose beside only Anchor check notes is one finding after all items, so no earlier number moves. */
 export function reviewedFindings(findings: string) {
   return reviewedItems(findings).map(({ text }) => text);
 }
 
 function reviewedItems(findings: string) {
   const { kept, tested } = reviewedLines(findings);
-  return [...listedItems(kept), ...listedItems(tested)];
+  const parts = [listedItems(kept), listedItems(tested)];
+  return [...parts.flatMap(({ items }) => items), ...parts.flatMap(({ recovered }) => recovered)];
 }
 
 function listedItems(reviewed: ReviewedLine[]) {
@@ -582,8 +588,9 @@ function listedItems(reviewed: ReviewedLine[]) {
     open = Boolean(line.trim()) && (findingItem.test(line) || joins);
   }
   const text = reviewed.flatMap(({ text: line, note }) => note || !line.trim() ? [] : [line.trim()]);
-  if (items.some(({ note }) => !note) || text.every((line) => noFinding.test(line))) return items;
-  return [{ text: text.join("\n"), note: false }, ...items];
+  if (items.some(({ note }) => !note) || text.every((line) => noFinding.test(line))) return { items, recovered: [] };
+  const prose = { text: text.join("\n"), note: false };
+  return items.length ? { items, recovered: [prose] } : { items: [prose], recovered: [] };
 }
 
 export type Answer = { verdict: "fixed" | "rejected" | "known"; text: string };
