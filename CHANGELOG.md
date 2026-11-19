@@ -26,6 +26,13 @@
   turn it on, or how to sign in over an SSH port forward.
 - Each page of the site carries its own script and styles, so a cached page
   always runs its own script.
+- `hedge devbox add` signs a node in to Coder at its own agent address when
+  the node cannot reach the hub's Coder address, and removes the token of a
+  failed sign-in. On the node, it runs the setup steps that need only
+  `sudo`, and lists the steps left for the person once, at the end. A rerun
+  keeps a node engine that runs the hub's engine commit. When T3 Code on the
+  hub already lists the node, it says so, and does not ask for
+  `hedge peers link`.
 
 ### Fleet is now Hedge
 

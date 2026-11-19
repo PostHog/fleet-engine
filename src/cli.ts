@@ -205,9 +205,11 @@ async function devbox(args: string[], options: CliOptions) {
   const terminal = options.terminal ?? { ...ttyTerminal(), print: options.print };
   const machine = { ...realMachine, ...options.setup?.machine };
   if (asksAddress(args)) return await printAddress({ terminal, machine });
-  const { plan } = await loadPlan(options, undefined, { fetch: false });
+  const { plan, sources } = await loadPlan(options, undefined, { fetch: false });
+  const profileDir = plan.machine.profileDir;
+  const nodeHuman = async (host: string) => (profileDir ? resolve(await loadProfile(profileDir), { schema: 1, role: "devbox", name: host, profileDir, ...(host.startsWith("coder.") ? { coder: true as const } : {}) }, sources).human : []);
   try {
-    return await devboxCommand(args, { home: options.home, terminal, machine, machineFile: plan.machine, plan });
+    return await devboxCommand(args, { home: options.home, terminal, machine, machineFile: plan.machine, plan, nodeHuman });
   } catch (error) {
     if (!(error instanceof FlagError)) throw error;
     options.print(`hedge devbox: ${error.message}`);

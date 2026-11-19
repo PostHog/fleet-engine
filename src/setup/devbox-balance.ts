@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { MachineFile } from "../pack/types.ts";
 import { loadProfile, saveMachine } from "../profile/profile.ts";
 import type { Machine } from "./commands.ts";
-import { overSsh, t3HomeGuard } from "./devbox.ts";
+import { boxEnvironmentId } from "./devbox.ts";
 import type { Terminal } from "./terminal.ts";
 
 export type BalanceContext = { home: string; terminal: Terminal; machine: Machine; machineFile: MachineFile };
@@ -62,11 +62,6 @@ async function environmentIds(context: BalanceContext, hosts: string[]) {
   return ids;
 }
 
-/** The id T3 Code on that host goes by, the key of its load balancing weight and of its link here. */
-export async function boxEnvironmentId(machine: Machine, host: string) {
-  return idOf((await overSsh(machine, host).exec(["sh", "-c", environmentIdScript])).stdout);
-}
-
 /** Drops a machine that left from T3 Code's load balancing on this Mac. */
 export async function forgetWeight(home: string, id: string) {
   const path = settingsPath(home);
@@ -78,8 +73,6 @@ export async function forgetWeight(home: string, id: string) {
 }
 
 const settingsPath = (home: string) => join(home, ".t3", "userdata", "client-settings.json");
-
-const environmentIdScript = `${t3HomeGuard} cat "\${T3CODE_HOME:-$HOME/.t3}/userdata/environment-id"`;
 
 function idOf(text: string) {
   const id = text.trim();

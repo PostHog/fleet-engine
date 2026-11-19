@@ -638,6 +638,11 @@ creates no node ends at step 8 (see step 1).
    When it says the hub did not answer, run `hedge update` on the hub. When
    it says the hub has not linked the node yet, run
    `hedge peers link coder.<node>` on the hub.
+
+   On the node, it runs each setup step that needs only `sudo`, such as the
+   Git allowlist and earlyoom. When a step still needs the person, such as a
+   key to paste, it stops with a list of those steps and the command for
+   each. Ask them to run each command, then run `hedge devbox add` again.
 4. **Check.** Run the `hedge doctor` of step 8 on each node, and on the hub
    again. Explain each line as in step 8.
 
