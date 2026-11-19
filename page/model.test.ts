@@ -29,7 +29,7 @@ const filledIn = (code: string): string => (/<[^<>\n]+>/.test(code) ? filledIn(c
 const parses = (code: string) => Bun.spawnSync(["sh", "-n"], { stdin: new TextEncoder().encode(filledIn(code)) }).exitCode === 0;
 const remoteCommands = (code: string) => [
   ...[...code.matchAll(/\bssh(?:\s+-\S+)*\s+[^\s'"]+\s+'([^']*)'/g)].map((match) => match[1]!),
-  ...[...code.matchAll(/\bssh(?:\s+-\S+)*\s+[^\s'"]+\s+sh -s <<-?'?([^'\s]+?)'?\n([\s\S]*?)^\1$/gm)].map((match) => match[2]!),
+  ...[...code.matchAll(/\bssh(?:\s+-\S+)*\s+[^\s'"]+\s+sh -s <<-?(['"]?)([^'"\s]+)\1\n([\s\S]*?)^\t*\2$/gm)].map((match) => match[3]!),
 ];
 const unparsedSnippets = (codes: string[]) => codes.filter((code) => !parses(code) || !remoteCommands(code).every(parses));
 const sshSnippets = (note: string) =>
@@ -162,11 +162,9 @@ describe("the install prompt", () => {
     expect(unparsedSnippets([dangling])).toHaveLength(1);
     const recovery = sshSnippets(readFileSync(join(root, "packs/recovery/SETUP.md"), "utf8"))
       .map((code) => withHub(code, hub))
-      .find((code) => /sh -s <<-?'?([^'\s]+)'?/.test(code))!;
-    const delimiter = /sh -s <<-?'?([^'\s]+)'?/.exec(recovery)![1]!;
+      .find((code) => code.includes("sh -s <<"))!;
     expect(filled).toContain(recovery);
-    expect(remoteCommands(recovery)).toHaveLength(1);
-    const brokenRecovery = recovery.replace(new RegExp(`^${delimiter}$`, "m"), `hedge doctor &&\n${delimiter}`);
+    const brokenRecovery = recovery.replace(/(sh -s <<[^\n]*\n)/, "$1fi\n");
     expect([unparsedSnippets([recovery]), unparsedSnippets([brokenRecovery])]).toEqual([[], [brokenRecovery]]);
     const run = filled.map((code) => code.split("\n").filter((line) => !/^\s*#/.test(line)).join("\n"));
     const hosts = run.flatMap((code) => [...code.matchAll(/\bssh((?:\s+-\S+)*)\s+([^\s'"]+)/g)].map((match) => match[2]!));

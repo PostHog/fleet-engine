@@ -38,9 +38,8 @@ parameters=$(api "workspacebuilds/$build/parameters") || { echo "Coder did not r
 template=$(api "templateversions/$version/rich-parameters") || { echo "Coder did not return the parameters of the template of $name." >&2; exit 1; }
 mutable=$(printf '%s' "$template" | json 'print map { "$_->{name}\n" } grep { $_->{mutable} } @{ decode_json(join "", <STDIN>) }') || { echo "Coder did not return the parameters of the template of $name." >&2; exit 1; }
 
-restart="From this Mac, run: coder restart $name --parameter"
 status=0
-printf '%s' "$parameters" | MUTABLE=$mutable RESTART=$restart json '
+printf '%s' "$parameters" | MUTABLE=$mutable json '
   my %got = map { $_->{name} => $_->{value} } @{ decode_json(join "", <STDIN>) };
   utf8::decode(my $names = $ENV{MUTABLE});
   my %mutable = map { $_ => 1 } split /\n/, $names;
@@ -49,14 +48,14 @@ printf '%s' "$parameters" | MUTABLE=$mutable RESTART=$restart json '
     my ($key, $value) = split /=/, $pair, 2;
     if (!exists $got{$key}) { print "x $key is not a parameter of this build.\n"; $bad = 1 }
     elsif ($got{$key} eq $value) { print "ok $key\n" }
-    elsif ($mutable{$key}) { print "x $key is not the value you passed. $ENV{RESTART} $key=<value> --yes\n"; $bad = 1 }
+    elsif ($mutable{$key}) { print "x $key is not the value you passed. In the Coder web app, set it under Settings, Parameters, and submit.\n"; $bad = 1 }
     else { print "x $key is not the value you passed, and the template does not let it change. Delete the workspace and create it again before setup.\n"; $bad = 1 }
   }
   exit $bad;
 ' "$@" || status=1
 
 if [ "$transition $state" != "start running" ]; then
-  echo "x $name does not run: its latest build is a $transition that is $state. $restart <parameter>=<value> --yes, with each parameter you passed, and check again."
+  echo "x $name does not run: its latest build is a $transition that is $state. Start it in the Coder web app, and check again."
   status=1
 elif [ "$schedule" = scheduled ]; then
   echo "x $name has a stop schedule. Run: coder schedule stop $name manual"

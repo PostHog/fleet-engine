@@ -17,8 +17,8 @@
   dotfiles. `scripts/check-workspace.sh` then checks that each workspace
   runs with no stop time, and the disk size, region, instance type, and
   dotfiles repo of its build. It takes no private value and prints no value
-  and no token. A changed parameter takes effect with `coder restart` from
-  the Mac. The agent sets Hedge up on
+  and no token. The person changes a parameter in the workspace's
+  **Settings → Parameters** in the Coder web app, never with the Coder CLI. The agent sets Hedge up on
   the hub over SSH, names the hub right after `hedge setup`, and adds the
   nodes from the hub.
 - On a box without a browser, ChatGPT signs in with a device code, and

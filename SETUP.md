@@ -342,10 +342,13 @@ says what to do with a template parameter that holds one.
 
    The step is done when every line starts with `ok`. Do what each `x` line
    says, and run the check again. To change a parameter that the template
-   lets change, restart the workspace from this Mac with the new value:
-   `coder restart <name> --parameter <parameter>=<value> --yes`.
-   `coder update` changes nothing while the workspace uses the template's
-   active version. A parameter that the template does not let change, such
+   lets change, ask the person to open the workspace in the Coder web app,
+   go to **Settings → Parameters**, set the value you give them, and
+   submit. Coder then builds the workspace again with that value. Never
+   change a parameter with the Coder CLI: `coder update` changes nothing
+   while the workspace uses the template's active version, and
+   `coder restart` can ask for a parameter and print its default, also a
+   secret's. A parameter that the template does not let change, such
    as the disk size or the region, needs a new workspace: ask, then
    `coder delete <name>` and create it again, before setup touches it.
 7. **SSH.** Run `coder config-ssh --yes`. The step is done when
@@ -468,10 +471,10 @@ Every command in this step runs on the hub over SSH. Wait until
    Setup prints the profile repo it uses, in a line
    `✓ Created the private repo <repo>` or `✓ Reusing your repo <repo>`. When
    that is not `<profile repo>` from step 5, such as a profile in a team's
-   GitHub org, change the dotfiles parameter of each workspace. Run it here
-   on the Mac, never on the hub over SSH, because the restart stops the hub:
-   `coder restart <name> --parameter <dotfiles parameter>=https://github.com/<repo> --yes`.
-   Then run the check of step 5 again, and wait until
+   GitHub org, change the dotfiles parameter of each workspace to
+   `https://github.com/<repo>` in the Coder web app, as step 5 says. The new
+   build stops the hub for a moment, so wait for it before the next SSH
+   command. Then run the check of step 5 again, and wait until
    `ssh coder.<name> true` passes. When the template does not let the
    parameter change, the box still works: its nightly `hedge update` keeps
    it on their profile.

@@ -190,15 +190,15 @@ describe("the agent setup guide", () => {
     expect(words(step(5))).toContain("A parameter that the template does not let change, such as the disk size or the region, needs a new workspace: ask, then `coder delete <name>` and create it again, before setup touches it.");
   });
 
-  test("changes a parameter with the restart from the Mac that the check names, never with coder update, which skips a workspace on the active template version", () => {
+  test("changes a parameter in the workspace's Settings in the Coder web app, as the check says, and never with the Coder CLI", () => {
     const docs = [guide(), readFileSync(join(root, "docs/getting-started.md"), "utf8")].map((text) => text.replace(/\s+/g, " "));
-    for (const text of docs) expect(text).not.toMatch(/`coder update [^`]*--parameter/);
-    expect(docs[0]).toContain("`coder restart <name> --parameter <parameter>=<value> --yes`");
-    expect(docs[0]).toContain("Run it here on the Mac, never on the hub over SSH, because the restart stops the hub: `coder restart <name> --parameter <dotfiles parameter>=https://github.com/<repo> --yes`");
-    expect(docs[1]).toContain("`coder restart <workspace> --parameter <dotfiles parameter>=https://github.com/<repo> --yes`");
+    for (const text of docs) expect(text).not.toMatch(/`coder (?:update|restart|start) [^`]*`/);
+    expect(docs[0]).toContain("ask the person to open the workspace in the Coder web app, go to **Settings → Parameters**, set the value you give them, and submit.");
+    expect(docs[0]).toContain("change the dotfiles parameter of each workspace to `https://github.com/<repo>` in the Coder web app, as step 5 says.");
+    expect(docs[1]).toContain("change the dotfiles parameter of each workspace to `https://github.com/<repo>` in the Coder web app: open the workspace, go to **Settings → Parameters**, set it, and submit.");
     const printed = fakeCoder(temp, { parameters: { instance_type: "m7g.xlarge" }, mutable: { instance_type: true } }).check(["instance_type=m7g.4xlarge"]);
     expect(printed.code).toBe(1);
-    expect(printed.output).toContain("x instance_type is not the value you passed. From this Mac, run: coder restart hedge-hub --parameter instance_type=<value> --yes\n");
+    expect(printed.output).toContain("x instance_type is not the value you passed. In the Coder web app, set it under Settings, Parameters, and submit.\n");
   });
 
   test("reads the template's parameters when coder templates pull fails", () => {
