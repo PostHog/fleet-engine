@@ -31,7 +31,8 @@ const burstReason = (count: number, person: string) => `Fleet blocked this comma
   + "and bursts like that make GitHub fail many CI runs at startup. "
   + `Push in batches of at most ${largestForcePush} branches, about a minute apart. If that does not fit, stop and ask ${person}.`;
 
-const aliasReason = (person: string) => "Fleet blocked this command: `gh stack alias` makes a wrapper command that hides gh stack pushes from this guard. "
+const aliasReason = (person: string) => "Fleet blocked this command: it makes an alias or a wrapper command, such as `gh stack alias`, "
+  + "`gh alias set sp 'stack push'`, a shell alias, or `gh alias import`, that can hide gh stack pushes from this guard. "
   + `Run \`gh stack\` itself. If you need the alias, stop and ask ${person}.`;
 
 export const githubSlug = (url: string) => url.match(/github\.com[:/]+([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i)?.slice(1, 3).join("/");
@@ -124,6 +125,13 @@ function stackArgs(name: string, args: string[]): string[] | undefined {
 }
 
 const makesAlias = (args: string[]) => operandsOf(args)[1] === "alias" && !args.includes("--remove");
+function ghAliasHidesStack(name: string, args: string[]): boolean {
+  const [group, action, , expansion] = operandsOf(args);
+  if (name !== "gh" || group !== "alias") return false;
+  if (action === "import") return true;
+  if (action !== "set") return false;
+  return expansion === undefined || args.some((arg) => /^(?:-s|--shell)(?:=|$)/.test(arg)) || /^!|\bstack\b/.test(expansion);
+}
 
 function stackPushes(args: string[], repo: () => Repo | undefined): number {
   const [group, action, ...rest] = operandsOf(args);
@@ -309,7 +317,7 @@ export function gitRisk(command: string, cwd: string, person: string, mainPushRe
   let forced = 0;
   for (const [call, directory] of withDirectories(commandsIn(command), cwd)) {
     const stack = stackArgs(call.name, call.args);
-    if (stack && makesAlias(stack)) return aliasReason(person);
+    if ((stack && makesAlias(stack)) || ghAliasHidesStack(call.name, call.args)) return aliasReason(person);
     if (stack) forced += stackPushes(stack, () => repoAt(directory, []));
     if (call.name !== "git") continue;
     const { dir, selectors, settings, sub, args } = gitCall(call.args, directory, call.env);

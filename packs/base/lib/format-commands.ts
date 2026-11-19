@@ -1,17 +1,34 @@
-import { existsSync, readFileSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative } from "node:path";
+import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
+import { basename, delimiter, dirname, isAbsolute, join, relative } from "node:path";
 
 export type LintStagedConfig = Record<string, unknown>;
 export type RunCommand = (command: string[], cwd: string, timeoutMs: number) => Promise<string | undefined>;
 export type FindFormatter = (name: string, root: string) => Promise<string | undefined>;
+type Formatter = { subcommands?: string[]; flags: string[]; values?: string[]; loadsCode?: true };
 
 const configFiles = [".lintstagedrc", ".lintstagedrc.json"];
-export const formatters = new Set([
-  "prettier", "biome", "eslint", "oxlint", "dprint", "stylelint", "markdownlint", "markdownlint-cli2",
-  "ruff", "black", "isort", "gofmt", "goimports", "rustfmt", "shfmt", "clang-format", "taplo", "yamlfmt",
-]);
-const shellSyntax = /['"`$|&;<>()\\*?{}[\]~#!]/;
-const touchesGit = /(^|[\s/])git(\s|$)/;
+export const formatters: Record<string, Formatter> = {
+  prettier: { loadsCode: true, flags: ["--write", "-w", "--check", "--list-different", "-l", "--ignore-unknown", "-u", "--no-error-on-unmatched-pattern", "--cache"], values: ["--log-level"] },
+  eslint: { loadsCode: true, flags: ["--fix", "--cache", "--quiet", "--no-warn-ignored", "--no-error-on-unmatched-pattern", "--report-unused-disable-directives"], values: ["--max-warnings"] },
+  oxlint: { loadsCode: true, flags: ["--fix", "--fix-suggestions", "--quiet", "--deny-warnings", "--no-error-on-unmatched-pattern"], values: ["--max-warnings"] },
+  stylelint: { loadsCode: true, flags: ["--fix", "--cache", "--quiet", "--allow-empty-input"], values: ["--max-warnings"] },
+  markdownlint: { loadsCode: true, flags: ["--fix"] },
+  "markdownlint-cli2": { loadsCode: true, flags: ["--fix", "--no-globs"] },
+  dprint: { loadsCode: true, subcommands: ["fmt", "check"], flags: ["--allow-no-files"] },
+  biome: { subcommands: ["check", "format", "lint"], flags: ["--write", "--apply", "--fix", "--unsafe", "--no-errors-on-unmatched", "--error-on-warnings"], values: ["--diagnostic-level", "--files-ignore-unknown", "--colors"] },
+  ruff: { subcommands: ["check", "format"], flags: ["--fix", "--unsafe-fixes", "--exit-non-zero-on-fix", "--force-exclude", "--quiet", "-q", "--no-cache", "--show-fixes"] },
+  black: { flags: ["--quiet", "-q", "--fast", "--preview", "--skip-string-normalization", "-S"], values: ["--line-length", "-l", "--target-version", "-t"] },
+  isort: { flags: ["--quiet", "-q", "--filter-files", "--atomic"], values: ["--profile"] },
+  gofmt: { flags: ["-w", "-s", "-l"] },
+  goimports: { flags: ["-w", "-l"] },
+  rustfmt: { flags: ["--check"], values: ["--edition"] },
+  shfmt: { flags: ["-w", "--write", "-s", "--simplify", "-ci", "-bn", "-sr", "-l", "-d"], values: ["-i", "--indent"] },
+  "clang-format": { flags: ["-i"], values: ["--style"] },
+  taplo: { subcommands: ["format", "fmt"], flags: [] },
+  yamlfmt: { flags: [] },
+};
+const toolPins = [".tool-versions", ".mise.toml", "mise.toml", ".mise.local.toml", "mise.local.toml", ".mise", "mise", ".config/mise.toml", ".config/mise", ".rtx.toml", ".prototools", ".python-version", ".node-version", ".nvmrc", ".go-version", "rust-toolchain", "rust-toolchain.toml"];
+const plainValue = /^[A-Za-z0-9_-]+$/;
 
 function matches(pattern: string, path: string): boolean {
   try {
@@ -21,27 +38,64 @@ function matches(pattern: string, path: string): boolean {
   }
 }
 
-async function untracked(root: string, path: string): Promise<boolean> {
+async function tracked(root: string, paths: string[]): Promise<boolean> {
   try {
-    const child = Bun.spawn(["git", "-C", root, "ls-files", "--", relative(root, path)], { stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+    const child = Bun.spawn(["git", "-C", root, "ls-files", "-z", "--", ...paths.map((path) => `:(literal,icase)${path}`)], { stdin: "ignore", stdout: "pipe", stderr: "ignore" });
     const [listed, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
-    return code === 0 && listed.trim() === "";
+    return code !== 0 || listed !== "";
   } catch {
-    return false;
+    return true;
   }
 }
 
+const isDirectory = (path: string) => lstatSync(path, { throwIfNoEntry: false })?.isDirectory() === true;
+const inside = (root: string, path: string) => !relative(root, path).startsWith("..") && !isAbsolute(relative(root, path));
+
+async function installedFormatter(name: string, root: string): Promise<string | undefined> {
+  const bin = join(root, "node_modules/.bin");
+  if (!isDirectory(join(root, "node_modules")) || !isDirectory(bin)) return undefined;
+  const local = join(bin, name);
+  const real = realpathSync(local);
+  const realRoot = realpathSync(root);
+  const paths = [relative(root, local), ...(inside(realRoot, real) ? [relative(realRoot, real)] : [])];
+  return (await tracked(root, paths)) ? undefined : real;
+}
+
+function onPath(name: string, root: string): string | undefined {
+  if (toolPins.some((pin) => existsSync(join(root, pin)))) return undefined;
+  const path = (process.env.PATH ?? "").split(delimiter).filter(isAbsolute).join(delimiter);
+  const found = Bun.which(name, { PATH: path });
+  if (!found || !isAbsolute(found)) return undefined;
+  const real = realpathSync(found);
+  return inside(root, found) || inside(realpathSync(root), real) ? undefined : found;
+}
+
 export const findFormatter: FindFormatter = async (name, root) => {
-  const local = join(root, "node_modules/.bin", name);
-  if (existsSync(local)) return (await untracked(root, local)) ? local : undefined;
-  const found = Bun.which(name);
-  return found && isAbsolute(found) && !found.startsWith(`${root}/`) ? found : undefined;
+  try {
+    if (existsSync(join(root, "node_modules/.bin", name))) return await installedFormatter(name, root);
+    return formatters[name]?.loadsCode ? undefined : onPath(name, root);
+  } catch {
+    return undefined;
+  }
 };
 
+function allowedArguments({ subcommands, flags, values = [] }: Formatter, args: string[]): boolean {
+  let index = 0;
+  if (subcommands && !subcommands.includes(args[index++] ?? "")) return false;
+  for (; index < args.length; index++) {
+    const [flag = "", ...joined] = args[index]!.split("=");
+    if (!joined.length && flags.includes(flag)) continue;
+    if (!values.includes(flag)) return false;
+    const value = joined.length ? joined.join("=") : args[++index];
+    if (!value || !plainValue.test(value)) return false;
+  }
+  return true;
+}
+
 async function formatterCommand(command: string, root: string, find: FindFormatter): Promise<string[] | undefined> {
-  if (shellSyntax.test(command) || touchesGit.test(command)) return undefined;
-  const [program, ...args] = command.split(/\s+/);
-  if (!formatters.has(program)) return undefined;
+  const [program = "", ...args] = command.split(/\s+/);
+  const formatter = Object.hasOwn(formatters, program) ? formatters[program] : undefined;
+  if (!formatter || !allowedArguments(formatter, args)) return undefined;
   const path = await find(program, root);
   return path ? [path, ...args] : undefined;
 }

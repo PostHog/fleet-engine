@@ -1073,6 +1073,26 @@ describe("the Git guard", () => {
     expect(denied.refusal).toContain("ask Robin");
   });
 
+  test.each([
+    "gh alias set sp 'stack push' && gh sp",
+    "gh alias set --clobber s stack && gh s push",
+    "gh alias set x 'ext exec stack push'",
+    "gh alias set --shell sp 'gh st''ack push'",
+    "gh alias set -s sp 'eval \"$CMD\"'",
+    "gh alias set sp '!sh ./p.sh'",
+    "gh alias set sp - < aliases.txt",
+    "gh alias import aliases.yml",
+    "command gh alias set sp 'stack push'",
+  ])("refuses a gh alias that can hide a stack push: %s", async (command) => {
+    const denied = await preToolUse(homeWith(withGuards(), { "guards.person": "Robin" }), "claude", bash(command, await repo("feature")), { guardAsProcess: true });
+    expect(denied.refusal).toContain("gh alias set");
+    expect(denied.refusal).toContain("ask Robin");
+  });
+
+  test.each(["gh alias set co 'pr checkout'", "gh alias list", "gh alias delete sp"])("allows a gh alias that cannot push a stack: %s", async (command) => {
+    expect(await preToolUse(homeWith(withGuards()), "claude", bash(command, await repo("feature")), { guardAsProcess: true })).toEqual({ code: 0, refusal: undefined });
+  });
+
   test("allows a program named gs that is not the gh stack wrapper", async () => {
     const dir = await repo("feature");
     stackOf(dir, sixOpen);
