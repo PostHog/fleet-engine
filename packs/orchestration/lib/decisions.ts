@@ -7,6 +7,7 @@ const usage = "Usage: fleet decisions <map URL | owner/repo#number | number>";
 const whoByMark: Record<string, string> = {
   "👤": "👤 Human", "👍": "👍 Accepted default", "🤖": "🤖 Agent", "✅": "✅ Unmarked (before 2026-11-13)",
 };
+const unmarked = whoByMark["✅"]!;
 const whoOrder = Object.values(whoByMark);
 const decisionLine = /^\s*[-*]\s*(👤|👍|🤖|✅)️?[\u{1F3FB}-\u{1F3FF}]?\s+\*\*(.+?)\*\*\s*(.+?)\s*$/u;
 
@@ -41,14 +42,15 @@ function decisionsInComments(comments: Comment[], label: string): Decision[] {
 function decisionsIn(text: string, where: string, at: string): Decision[] {
   return proseLines(text).flatMap((line) => {
     const match = line.match(decisionLine);
-    return match ? [{ who: whoByMark[match[1]!]!, question: match[2]!, answer: match[3]!, where, at }] : [];
+    if (!match || (match[1] === "✅" && !match[2]!.trim().endsWith("?"))) return [];
+    return [{ who: whoByMark[match[1]!]!, question: match[2]!, answer: match[3]!, where, at }];
   });
 }
 
 function newestPerQuestion(decisions: Decision[]): Decision[] {
   const byQuestion = new Map<string, Decision>();
-  const oldestFirst = decisions.toSorted((left, right) => left.at.localeCompare(right.at));
-  for (const decision of oldestFirst) byQuestion.set(decision.question.trim().toLowerCase(), decision);
+  const unmarkedFirst = decisions.toSorted((left, right) => Number(right.who === unmarked) - Number(left.who === unmarked) || left.at.localeCompare(right.at));
+  for (const decision of unmarkedFirst) byQuestion.set(decision.question.trim().toLowerCase(), decision);
   return [...byQuestion.values()];
 }
 
