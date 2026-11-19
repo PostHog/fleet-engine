@@ -21,9 +21,13 @@ const manifest = JSON.parse(readFileSync(join(import.meta.dir, "../../pack.json"
 const packNames = [manifest.name, ...(manifest.aliases ?? []).map((alias) => alias.name)];
 const declaresLibrary = (script: string) => packNames.some((name) => script.endsWith(join(sep, "packs", name, "mcp", "main.ts")));
 
+const plainStrings = (value: unknown) => typeof value === "object" && value !== null && !Array.isArray(value) && Object.values(value).every((entry) => typeof entry === "string");
+const complete = (upstream: Upstream) => upstream.kind !== "local" || (typeof upstream.script === "string" && (upstream.env === undefined || plainStrings(upstream.env)));
+
 const probed = (value: unknown) => {
   let upstream: Upstream;
   try { upstream = parseUpstream(value); } catch { return cannotTell; }
+  if (!complete(upstream)) return cannotTell;
   if (upstream.name !== "context") return 1;
   return upstream.kind === "local" && declaresLibrary(upstream.script) ? 0 : cannotTell;
 };

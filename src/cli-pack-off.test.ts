@@ -203,6 +203,20 @@ describe("the library's upstream from before the Context library pack joined Mem
     expect((await readLedger(home)).steps).toEqual([]);
   });
 
+  for (const [label, change] of [["named notes without a script", { name: "notes", title: "Notes", script: undefined }], ["named context with env 42", { env: 42 }]] as const) {
+    test(`a partly valid local declaration ${label} stays, with its entry, and is reported again by a second apply`, async () => {
+      const { home, hedge } = await upgraded(["context-library"], { "context-library": false });
+      const content = JSON.stringify({ ...JSON.parse(readFileSync(declaration(home), "utf8")), ...change });
+      writeFileSync(declaration(home), content);
+      for (const _ of [1, 2]) {
+        const applied = await hedge(["apply"]);
+        expect(applied.output).toContain("Hedge cannot tell whether step context-upstream of the memory pack still holds what it set, though its workflow context-library is off.");
+        expect(readFileSync(declaration(home), "utf8")).toBe(content);
+        expect((await readLedger(home)).steps.map((step) => step.id)).toEqual([upstream.id]);
+      }
+    });
+  }
+
   for (const content of ["{", "{}"]) {
     test(`a declaration Hedge cannot read as an upstream (${content}) stays and is reported again by a second apply`, async () => {
       const { home, hedge } = await upgraded(["context-library"], { "context-library": false });
