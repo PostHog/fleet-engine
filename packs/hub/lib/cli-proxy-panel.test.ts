@@ -245,3 +245,20 @@ test("once the profile turns the panel off, the route check on the hub fails whi
     expect(await cliProxy("check", hub({ home }).machine)).toBe(0);
   }
 });
+
+test("with the panel on, the route check on the hub fails while the panel's page or plugin is a link, even to a file with the pinned bytes, and passes once you remove the link and run install", async () => {
+  for (const at of ["page", "plugin"] as const) {
+    const { machine, home } = hub({ panel });
+    expect(await cliProxy("install", machine)).toBe(0);
+    const elsewhere = join(home, `pinned-${at}`);
+    writeFileSync(elsewhere, readFileSync(files(home)[at]));
+    rmSync(files(home)[at]);
+    symlinkSync(elsewhere, files(home)[at]);
+    const run = hub({ home, panel });
+    expect(await cliProxy("check", run.machine)).toBe(1);
+    expect(run.printed.join("\n")).toContain(`${files(home)[at]} is a link, which Hedge does not follow or replace. Remove it, then run hedge cli-proxy install.`);
+    rmSync(files(home)[at]);
+    expect(await cliProxy("install", hub({ home, panel }).machine)).toBe(0);
+    expect(await cliProxy("check", hub({ home, panel }).machine)).toBe(0);
+  }
+});
