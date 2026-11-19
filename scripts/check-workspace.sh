@@ -48,7 +48,10 @@ printf '%s' "$parameters" | TEMPLATE=$template RESTART=$restart json '
   exit $bad;
 ' "$@" || status=1
 
-if [ "$transition $state" != "start running" ]; then
+if [ "$state" = pending ] || [ "$state" = starting ] || [ "$state" = stopping ] || [ "$state" = canceling ]; then
+  echo "x $name is not ready: its latest build is a $transition that is $state. Wait until it ends, then run this check again."
+  status=1
+elif [ "$transition $state" != "start running" ]; then
   echo "x $name does not run: its latest build is a $transition that is $state. $restart <parameter>=<value> --yes, with each parameter you passed, and check again."
   status=1
 elif [ "$schedule" = scheduled ]; then
