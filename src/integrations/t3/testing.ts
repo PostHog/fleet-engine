@@ -158,7 +158,7 @@ async function untilRunning(stdout: ReadableStream<Uint8Array>): Promise<void> {
   reader.releaseLock();
 }
 
-const writingTools = ["t3_thread_send"];
+const writingTools = ["t3_thread_send", "link_pull_request"];
 
 async function mcp(request: Request, fixture: T3Fixture, toolCalls: T3Stub["toolCalls"], operates: boolean): Promise<Response> {
   const body = await request.json() as { id?: number; method: string; params?: { name: string; arguments: Record<string, unknown> } };
@@ -204,6 +204,10 @@ const toolContracts: Record<string, { required: string[]; rules: Record<string, 
     },
   },
   t3_project_list: { required: [], rules: { environmentId: isString, cursor: nonNegativeInt, limit: pageLimit } },
+  link_pull_request: {
+    required: [],
+    rules: { environmentId: isString, host: isString, number: positiveInt, repository: isString, threadId: isString, url: isString },
+  },
   t3_thread_send: {
     required: ["threadId", "message"],
     rules: {

@@ -78,7 +78,7 @@ async function reporting(wait: ReviewWait, name: string, run: () => Promise<bool
 }
 
 async function check(wait: ReviewWait, dryRun: boolean): Promise<boolean> {
-  const nodes = await search(wait);
+  const nodes = await search(wait, dryRun);
   const now = wait.now();
   const waiting = waitingPrs(nodes);
   const previous = readState(wait.statePath);
@@ -150,7 +150,7 @@ async function graphqlQuota(wait: ReviewWait): Promise<{ remaining?: number; res
   }
 }
 
-async function search(wait: ReviewWait): Promise<SearchNode[]> {
+async function search(wait: ReviewWait, dryRun: boolean): Promise<SearchNode[]> {
   const q = [baseQuery, wait.qualifiers.trim()].filter(Boolean).join(" ");
   const nodes: SearchNode[] = [];
   let after: string | undefined;
@@ -158,7 +158,7 @@ async function search(wait: ReviewWait): Promise<SearchNode[]> {
   for (;;) {
     const args = ["api", "graphql", "-f", `query=${graphQuery}`, "-f", `q=${q}`, ...(after ? ["-f", `after=${after}`] : [])];
     const out = await wait.gh(args).catch(async (error: Error) => {
-      if (waited || !/rate limit/i.test(error.message)) throw error;
+      if (dryRun || waited || !/rate limit/i.test(error.message)) throw error;
       const quota = await graphqlQuota(wait);
       const reset = quota.reset * 1000 - wait.now();
       if (quota.remaining !== 0 || !(reset > 0 && reset < quotaWaitMs)) throw error;

@@ -66,8 +66,7 @@ export const snoozeTimeReason = (zone: string) => "Fleet blocked this stop: your
 export const ownsOpenReason = (urls: string[], person: string, marks: Marks) => `Fleet blocked this stop: your closing line settles this thread, or asks ${person} to, `
   + `but it owns open PR(s) ${urls.join(", ")}, and no other open thread links them. A settled thread drops out of ${person}'s view, and its PRs lose their owner. `
   + `If ${person} parked them, end on ${marks.snooze} with the park date. If they wait on someone else, end on ${marks.wait}. `
-  + "Or hand each over first: the thread that takes it over links it with link_pull_request, and "
-  + "`fleet pr handover --pr <PR URL> --to <thread id>` counts only while the thread it names stays open and links the PR. Or close or merge the PR.";
+  + "Or hand each over first with `fleet pr handover --pr <PR URL> --to <thread id>`: it links the PR on that open thread and tells the thread. Or close or merge the PR.";
 
 const isSnoozed = (thread: ShellThread, now: Date) => Boolean(thread.snoozedUntil && Date.parse(thread.snoozedUntil) > now.getTime());
 
