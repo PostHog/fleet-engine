@@ -57,7 +57,7 @@ function localTargets(path: string, html: string) {
 describe("the site build", () => {
   test("writes one page for the landing, one for the packs, and one for every pack", () => {
     expect(pagesOf(files).map(([path]) => path)).toEqual(["index.html", "packs/index.html", ...data.packs.map((pack) => `packs/${pack.name}/index.html`)]);
-    expect(data.packs.map((pack) => pack.name)).toEqual(["base", "pull-requests", "orchestration", "communication", "integrations", "memory", "context-library", "guards", "slack", "incident-io", "hub", "mcp-gateway", "recovery"]);
+    expect(data.packs.map((pack) => pack.name)).toEqual(["base", "hub", "pull-requests", "orchestration", "communication", "guards", "memory", "slack", "incident-io", "mcp-gateway"]);
   });
 
   test("every link and asset on every page leads to a file of the site, from any folder the site is served under", () => {
@@ -93,8 +93,8 @@ describe("the site build", () => {
     const html = page("index.html");
     expect(html.match(/<section class="box">/g)).toHaveLength(1);
     const switches = [...boxOf(html).matchAll(/<input type="checkbox" role="switch" class="switch" name="([^"]+)"[^>]*?( checked)?>/g)].map((match) => [match[1], Boolean(match[2])]);
-    expect(switches).toEqual(["pull-requests", "orchestration", "communication"].map((pack) => [`start:${pack}`, true]));
-    expect(visibleText(boxOf(html))).toContain("Hub One always-on devbox links and watches the others. Always on");
+    expect(switches).toEqual(["pull-requests", "orchestration", "communication", "memory"].map((pack) => [`start:${pack}`, true]));
+    expect(visibleText(boxOf(html))).toContain("Hub The hub links your boxes, keeps your pack secrets, and continues threads after a usage limit. Always on");
   });
 
   test("the landing page shows the Getting Started prompt after the box, with a link that opens it in T3 Code", () => {
@@ -112,11 +112,29 @@ describe("the site build", () => {
     const html = page("index.html");
     const boxed = [...data.startPacks, ...data.hubStartPacks];
     const others = data.packs.filter((pack) => !boxed.includes(pack.name));
-    expect(others.map((pack) => pack.title)).toEqual(["Base", "Integrations", "Memory", "Context library", "Guards", "Slack", "incident.io", "MCP gateway", "Recovery"]);
+    expect(others.map((pack) => pack.title)).toEqual(["Base", "Guards", "Slack", "Paging (incident.io)", "MCP gateway"]);
     const text = visibleText(html);
     expect(others.filter((pack) => new RegExp(`\\b${pack.title}\\b`).test(text)).map((pack) => pack.title)).toEqual([]);
     expect(localTargets("index.html", html).filter((target) => target.startsWith("packs/"))).toEqual(expect.arrayContaining(["packs/index.html"]));
     expect(localTargets("index.html", html).filter((target) => /^packs\/.+\//.test(target))).toEqual([]);
+  });
+
+  test("the packs page shows Base and Hub in every Hedge without a switch, then the picks in three groups, and leaves Integrations a pack off the site", async () => {
+    const groupsOf = (html: string) =>
+      [...html.matchAll(/<h2 class="group-head" id="group-\d+">([^<]+)<\/h2><ul class="pack-grid">([\s\S]*?)<\/ul><\/section>/g)].map((match) => [unescaped(match[1]!), [...match[2]!.matchAll(/<a class="more" href="([a-z-]+)\/"/g)].map((link) => link[1])]);
+    expect(groupsOf(page("packs/index.html"))).toEqual([
+      ["In every Hedge", ["base", "hub"]],
+      ["How your agents work", ["pull-requests", "orchestration", "communication", "guards"]],
+      ["What your agents know", ["memory"]],
+      ["What your agents reach", ["slack", "incident-io", "mcp-gateway"]],
+    ]);
+    expect(page("packs/index.html")).not.toContain('id="pick-hub"');
+    expect(visibleText(page("packs/hub/index.html"))).toContain("Every Hedge has this pack. You add nothing.");
+    expect(Object.keys(files)).not.toContain("packs/integrations/index.html");
+    expect(JSON.parse(readFileSync(join(root, "packs/integrations/pack.json"), "utf8"))).toMatchObject({ name: "integrations", onSite: false });
+    expect(JSON.parse(readFileSync(join(root, "presets.json"), "utf8")).find((preset: { id: string }) => preset.id === "everything").packs).toContain("integrations");
+    const team = await buildSite({ audience: "posthog", team: [teamPack()] });
+    expect(groupsOf(page("packs/index.html", team)).at(-1)).toEqual(["Your team's packs", ["posthog"]]);
   });
 
   test("the packs page lets a visitor select every pack but Base, and links each pack's own page", () => {
@@ -197,15 +215,15 @@ describe("the site build", () => {
     expect(Object.keys(team)).toContain("assets/art/heart-hog.png");
   });
 
-  test("the credits name the source of every picture in the art folder, and the folder holds no picture that no build shows but the Mac scene, kept for a later page", async () => {
+  test("the credits name the source of every picture in the art folder, and the folder holds no picture that no build shows but the ones kept for a later page", async () => {
     const artDir = join(root, "page/art");
-    const keptUnshown = ["laptop-hog-02.png"];
+    const keptUnshown = ["desk-hog.png", "hospital-hog.png", "laptop-hog-02.png"];
     const held = readdirSync(artDir).filter((name) => !name.endsWith(".md") && name !== "LICENSE");
     const credits = readFileSync(join(artDir, "README.md"), "utf8");
     expect(held.filter((name) => !new RegExp(`^\\| \`${name}\` \\| \`[^\`]+/${name}\` \\| \`[0-9a-f]{40}\` \\|$`, "m").test(credits))).toEqual([]);
     expect(readFileSync(join(artDir, "LICENSE"), "utf8")).toStartWith("Copyright (c) 2020-2026 PostHog Inc.");
     const team = await buildSite({ audience: "posthog", team: [teamPack()] });
-    expect(held.filter((name) => !(`assets/art/${name}` in team))).toEqual(keptUnshown);
+    expect(held.filter((name) => !(`assets/art/${name}` in team)).toSorted()).toEqual(keptUnshown);
     expect(held.length).toBeGreaterThan(15);
   });
 
@@ -240,7 +258,7 @@ describe("the site build", () => {
     const teamData = await pageData({ audience: "posthog", team });
     const site = await buildSite({ audience: "posthog", team });
     expect(teamData.teamPacks).toEqual(["posthog"]);
-    expect(startPrompt(teamData, firstStart)).toContain("- Packs on the first setup: pull-requests, orchestration, communication, posthog\n");
+    expect(startPrompt(teamData, firstStart)).toContain("- Packs on the first setup: pull-requests, orchestration, communication, memory, posthog\n");
     expect(startPrompt(teamData, { off: teamData.startPacks })).toContain("- Packs on the first setup: posthog\n");
     const landing = page("index.html", site);
     expect(promptOn(landing, "start")).toBe(startPrompt(teamData, firstStart));
@@ -272,7 +290,7 @@ describe("the site build", () => {
 
   test("the public build shows the Hub pack without its box workflow and box settings", () => {
     const hub = data.packs.find((pack) => pack.name === "hub")!;
-    expect(hub.workflows.map((workflow) => workflow.id)).toEqual(["disk-watch", "linked-hub", "dream", "own-account-balancing", "proxy-panel"]);
+    expect(hub.workflows.map((workflow) => workflow.id)).toEqual(["disk-watch", "linked-hub", "own-account-balancing", "proxy-panel", "provider-recovery"]);
     expect(hub.settings.map((setting) => setting.key).filter((key) => key.startsWith("hub.box"))).toEqual([]);
     expect(Object.keys(data.needLabels)).not.toContain("coder");
   });

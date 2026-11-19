@@ -510,7 +510,7 @@ describe("saving to the context library", () => {
     expect(captures).toHaveLength(2);
   });
 
-  test("without the Context library pack, :brain: does nothing, and slack.captureEmoji picks another emoji", async () => {
+  test("without the context library, :brain: does nothing, and slack.captureEmoji picks another emoji", async () => {
     expect(triggerOf({ type: "reaction_added", user: ownerId, reaction: "brain", item: { type: "message", channel: "C1", ts: "1.1" } }, owner)).toBeUndefined();
     const { slack, ran, end } = await listening(() => ({ code: 0, stdout: JSON.stringify(captured) }), { env: { HEDGE_SETTINGS: settings() } });
     slack.send({ type: "reaction_added", user: ownerId, reaction: "brain", item: { type: "message", channel: "C1", ts: "200.2" } });
@@ -970,7 +970,8 @@ describe("where the trigger runs", () => {
     expect(unset.unanswered).toEqual([]);
   });
 
-  test("is off by default", () => {
-    expect(runsHere(resolve({ packs: ["slack"], workflows: {} }))).toBe(false);
+  test("is on with the pack, and off once turned off", () => {
+    expect(runsHere(resolve({ packs: ["slack"], workflows: {} }))).toBe(true);
+    expect(runsHere(resolve({ packs: ["slack"], workflows: { "slack-thread": false } }))).toBe(false);
   });
 });

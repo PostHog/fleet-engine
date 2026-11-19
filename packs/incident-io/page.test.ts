@@ -261,6 +261,15 @@ test("with a hub, the hub's copy of the profile decides whether a page goes out,
   expect(incident.received).toHaveLength(1);
 });
 
+test("picking the pack turns paging on, with no workflow to switch on", async () => {
+  const incident = fakeIncidentIo();
+  const home = machineHome(profile({ workflows: {}, migrations: ["picks-turn-on"] }), { role: "linux", name: "solo-1" });
+  const path = bunPath();
+  await spawnHedge(home, path, ["page", "setup", incident.url], `${token}\n`);
+  expect(await spawnHedge(home, path, fire)).toMatchObject({ code: 0 });
+  expect(incident.received).toHaveLength(1);
+});
+
 test("setup from a node saves the token on the hub over SSH standard input, never in ssh's arguments or the node's home", async () => {
   const incident = fakeIncidentIo();
   const { node, nodeSetup, nodeHome, hubHome, sshCalls } = linked();

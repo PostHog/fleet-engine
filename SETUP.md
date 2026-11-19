@@ -380,17 +380,15 @@ command only once step 7 has named the hub.
 
 | Pack | What it does | Offer it | Setup note |
 | --- | --- | --- | --- |
-| `pull-requests` | Every fix or feature ends as a proven, reviewed draft pull request, and ship words take it to merged. | Always | None |
+| `pull-requests` | Every change passes proof, a second-model review and a QA swarm before it merges, and a nightly loop improves one area. | Always | None |
 | `orchestration` | Big work becomes a map of tickets that a conductor thread works through, and side work gets its own thread. | Always | `packs/orchestration/SETUP.md` |
 | `communication` | Agents write in your voice, give short updates, and share plans and previews as links. | Always | None |
 | `integrations` | Claude Code and Codex get the official GitHub, Context7, and Convex plugins, and Claude can hand work to Codex. | Always | None |
-| `memory` | Agents on all your machines share what they learn through your own private memory repo. | Always | `packs/memory/SETUP.md` |
-| `context-library` | Agents find your plans, research, decisions and saved threads in a private notes repo, and you save new ones with one command. | Always | `packs/context-library/SETUP.md` |
-| `recovery` | Threads that stop on a usage limit or a provider outage continue once the provider answers again, and hedge providers says which provider has capacity. | Step 9 | `packs/recovery/SETUP.md` |
+| `memory` | One private repo holds what your agents learn and what you save, and every box reads it. | Always | `packs/memory/SETUP.md` |
 | `guards` | Hooks stop an agent's shell commands from running network code, using GitHub outside your owners, pushing past review, or polling in loops. | Always | `packs/guards/SETUP.md` |
 | `slack` | Your own message, reaction, or mention in Slack starts a T3 thread about it. | Always | `packs/slack/SETUP.md` |
 | `incident-io` | An agent that watches a risky change pages you, and only you, through incident.io when it goes wrong. | Always | `packs/incident-io/SETUP.md` |
-| `hub` | One always-on devbox manages the others. It keeps your devboxes linked and watches their disks. | Step 9 | `packs/hub/SETUP.md` |
+| `hub` | The hub links your boxes, cleans their disks, keeps your pack secrets, and pools your subscriptions, so threads go on after a usage limit. | Step 9 | `packs/hub/SETUP.md` |
 | `mcp-gateway` | The hub signs in to your MCP servers once, and agents on every machine reach them through it. | Step 9 | `packs/mcp-gateway/SETUP.md` |
 
 ## 7. Set up Hedge on the hub
@@ -603,12 +601,11 @@ creates no node ends at step 8 (see step 1).
    `presets.json`, or Hub alone for one by one. Read the setup note of each
    one they pick, now:
 
-   - **Hub**: the hub links the boxes and watches their disks.
+   - **Hub**: the hub links the boxes, watches their disks, and with
+     provider recovery continues threads after a usage limit.
      `packs/hub/SETUP.md`
    - **MCP gateway**: the hub signs in to their MCP servers once.
      `packs/mcp-gateway/SETUP.md`
-   - **Recovery**: threads that stop on a usage limit go on by themselves.
-     `packs/recovery/SETUP.md`
 
    Start from this command, add `--add <pack>` for each other pack they
    picked, and change or add the flags their notes name. With picks from the

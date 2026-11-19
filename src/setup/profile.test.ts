@@ -38,11 +38,12 @@ describe("hedge setup profile", () => {
       sources: defaultSources,
       settings: {},
       workflows: {},
+      migrations: ["picks-turn-on"],
       packs: ["pull-requests"],
       plan: "claude",
     });
     const guide = await spawnGit(githubRepo(home, "nora/hedge-profile"), "show", "main:README.md");
-    expect(guide).toContain("### Pull requests");
+    expect(guide).toContain("### Quality gates");
     expect(guide).toContain("| `pull-requests.freeReviews` |");
   });
 
@@ -217,7 +218,7 @@ describe("hedge setup profile", () => {
     expect(rerun.prompts).toEqual(["Press ↵ to keep them, or e to change them: "]);
     expect(rerun.output).toContain("  ✓ Reusing your repo nora/hedge-profile");
     expect(rerun.output).not.toContain("Created the private repo");
-    expect(await pushedAnswers(home)).toMatchObject({ packs: ["pull-requests", "orchestration", "communication"], plan: "both", settings: { "memory.repo": "nora/hedge-memory" } });
+    expect(await pushedAnswers(home)).toMatchObject({ packs: ["pull-requests", "orchestration", "communication", "memory"], plan: "both", settings: { "memory.repo": "nora/hedge-memory" } });
     expect(await spawnGit(githubRepo(home, "nora/hedge-profile"), "rev-list", "--count", "main")).toBe("3");
   });
 

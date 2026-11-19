@@ -41,7 +41,7 @@ const input = (window: Window, selector: string) => window.document.querySelecto
 const text = (window: Window, id: string) => window.document.getElementById(id)!.textContent;
 const line = (window: Window, label: string) => text(window, "start-text").match(new RegExp(`^- ${label}: (.*)$`, "m"))?.[1];
 const switchOf = (window: Window, pack: string) => input(window, `input[name="start:${pack}"]`);
-const switches = (window: Window) => ["pull-requests", "orchestration", "communication"].filter((pack) => switchOf(window, pack).checked);
+const switches = (window: Window) => ["pull-requests", "orchestration", "communication", "memory"].filter((pack) => switchOf(window, pack).checked);
 const selected = (window: Window) => [...window.document.querySelectorAll('input[name="pack"]')].flatMap((box) => ((box as unknown as HTMLInputElement).checked ? [(box as unknown as HTMLInputElement).value] : []));
 const command = (window: Window) => text(window, "install-text").match(/^ {3}(hedge packs .*)$/m)?.[1];
 const shown = (window: Window, id: string) => !(window.document.getElementById(id) as unknown as HTMLElement).hidden;
@@ -50,23 +50,24 @@ const t3Prompt = (window: Window, id: string) => new URL((window.document.getEle
 describe("the landing page in a browser", () => {
   test("a switch rewrites the prompt under the box, its T3 Code link, and the status for a screen reader", () => {
     const window = visit("index.html");
-    expect([line(window, "Packs on the first setup"), line(window, "Packs once the hub runs")]).toEqual(["pull-requests, orchestration, communication", "hub"]);
+    expect([line(window, "Packs on the first setup"), line(window, "Packs once the hub runs")]).toEqual(["pull-requests, orchestration, communication, memory", "hub"]);
     switchOf(window, "communication").click();
-    expect([line(window, "Packs on the first setup"), line(window, "Packs once the hub runs")]).toEqual(["pull-requests, orchestration", "hub"]);
+    expect([line(window, "Packs on the first setup"), line(window, "Packs once the hub runs")]).toEqual(["pull-requests, orchestration, memory", "hub"]);
     expect(t3Prompt(window, "start")).toBe(text(window, "start-text"));
     const shownName = (pack: string) => switchOf(window, pack).getAttribute("aria-label")!.replace(/ on the first setup$/, "");
-    expect(text(window, "start-status")).toBe(`The prompt now sets up ${shownName("pull-requests")} and ${shownName("orchestration")} first.`);
-    expect(shownName("pull-requests")).toBe("Pull requests");
+    expect(text(window, "start-status")).toBe(`The prompt now sets up ${shownName("pull-requests")}, ${shownName("orchestration")}, and ${shownName("memory")} first.`);
+    expect(shownName("pull-requests")).toBe("Quality gates");
     switchOf(window, "communication").click();
-    expect(line(window, "Packs on the first setup")).toBe("pull-requests, orchestration, communication");
+    expect(line(window, "Packs on the first setup")).toBe("pull-requests, orchestration, communication, memory");
   });
 
-  test("switching Pull requests off switches Orchestration off, and switching Orchestration on brings Pull requests back", () => {
+  test("switching Quality gates off switches Orchestration off, and switching Orchestration on brings Quality gates back", () => {
     const window = visit("index.html");
     switchOf(window, "pull-requests").click();
-    expect(switches(window)).toEqual(["communication"]);
-    expect(line(window, "Packs on the first setup")).toBe("communication");
+    expect(switches(window)).toEqual(["communication", "memory"]);
+    expect(line(window, "Packs on the first setup")).toBe("communication, memory");
     switchOf(window, "communication").click();
+    switchOf(window, "memory").click();
     expect(line(window, "Packs on the first setup")).toBe("none");
     expect(text(window, "start-status")).toBe("The prompt now sets up no pack first.");
     switchOf(window, "orchestration").click();
@@ -87,7 +88,7 @@ describe("the landing page in a browser", () => {
     const older = { ...site, "index.html": (site["index.html"] as string).replace(/<input type="checkbox" role="switch" class="switch" name="start:communication"[^>]*>/, "") };
     const window = visit("index.html", { files: older });
     switchOf(window, "orchestration").click();
-    expect(line(window, "Packs on the first setup")).toBe("pull-requests, communication");
+    expect(line(window, "Packs on the first setup")).toBe("pull-requests, communication, memory");
     const button = window.document.querySelector('[data-copy="start-text"]') as unknown as HTMLButtonElement;
     button.click();
     expect(await window.navigator.clipboard.readText()).toBe(text(window, "start-text"));
@@ -109,7 +110,7 @@ describe("the Packs page in a browser", () => {
     input(window, "#pick-memory").click();
     expect([shown(window, "install-empty"), shown(window, "install-full"), text(window, "install-count")]).toEqual([false, true, "1 pack selected"]);
     input(window, "#pick-guards").click();
-    expect([text(window, "install-count"), command(window)]).toEqual(["2 packs selected", "hedge packs --add memory --add guards"]);
+    expect([text(window, "install-count"), command(window)]).toEqual(["2 packs selected", "hedge packs --add guards --add memory"]);
     expect(t3Prompt(window, "install")).toBe(text(window, "install-text"));
     input(window, "#pick-memory").click();
     input(window, "#pick-guards").click();
@@ -146,7 +147,7 @@ describe("the Packs page in a browser", () => {
     packs.dispatchEvent(restored);
     expect(selected(packs)).toEqual(["communication", "memory"]);
     input(packs, "#pick-guards").click();
-    expect(command(packs)).toBe("hedge packs --add communication --add memory --add guards");
+    expect(command(packs)).toBe("hedge packs --add communication --add guards --add memory");
   });
 
   test("leaves out a remembered pack that this site does not have", () => {

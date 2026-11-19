@@ -4,15 +4,15 @@ Read this when the person picks the Slack pack in step 6.
 
 Their own Slack message or reaction with their trigger emoji (default
 `:t3code:`, set by `slack.emoji`), or a mention of their Slack app, starts a
-T3 thread. It needs their own Slack app. With the Context library pack on,
+T3 thread. It needs their own Slack app. With the context library of the Memory pack on,
 their own `:brain:` reaction (set by `slack.captureEmoji`) saves the message's
 thread, its canvases, and the Wispr Flow meeting held with it to their context
 library, and sends its context to the open threads that need it.
 The trigger runs on the hub, so it runs while the Mac sleeps, and the Slack
 app step below runs on the hub.
 
-1. The workflow starts off. Add `--workflows slack-thread=on` to the setup
-   command.
+1. The workflow starts on with the pack. To leave it off, add
+   `--workflows slack-thread=off` to the setup command.
 2. Setup asks `slack.userId` as a `--set` line. Tell them where to find it:
    in Slack, open their profile, then **More**, then **Copy member ID**.
 3. Setup then stops at the Slack app step, which needs the app's two

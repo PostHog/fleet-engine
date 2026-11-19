@@ -1,16 +1,30 @@
 {
   "schema": 1,
   "name": "memory",
-  "summary": "Agents on all your machines share what they learn through your own private memory repo.",
-  "day": "A trap one agent hits on your laptop is a note the next agent reads on your devbox, minutes later.",
-  "cost": "You need a small private GitHub repo. It syncs every five minutes.",
-  "risk": "Agents write notes about you and your work into the memory repo. Keep it private.",
+  "aliases": [
+    {
+      "name": "context-library",
+      "workflows": [
+        "context-library"
+      ]
+    }
+  ],
+  "settingPrefixes": [
+    "hub"
+  ],
+  "summary": "One private repo holds what your agents learn and what you save, and every box reads it.",
+  "day": "A trap one agent hits on your hub is a note the next agent reads on a node, minutes later. You mention last week's planning in a prompt, and the agent gets a link to the note about it before it starts.",
+  "cost": "You need a small private GitHub repo. It syncs every five minutes, and saving a link runs one short agent. Dream, when you turn it on, spends your AI plan's usage each night.",
+  "risk": "Agents write notes about you and your work into the repo, read it on every prompt, and saving a link writes a note from other people's text into it. Keep the repo private.",
   "instructions": "AGENTS.md",
   "guides": [
     {
       "guide": "memory",
       "path": "memory.md"
     }
+  ],
+  "skills": [
+    "skills/dream"
   ],
   "settings": [
     {
@@ -32,6 +46,48 @@
         "value": "memory",
         "unlessSet": "memory.repo"
       }
+    },
+    {
+      "key": "context-library.repo",
+      "question": "Which private GitHub repo holds your context library, such as you/notes?",
+      "type": "string",
+      "ask": "never",
+      "fromContext": {
+        "value": "{repo}"
+      },
+      "optional": true
+    },
+    {
+      "key": "context-library.path",
+      "question": "Which folder holds the checkout of your context library?",
+      "type": "string",
+      "default": "~/dev/context-library",
+      "ask": "never",
+      "fromContext": {
+        "value": "{path}",
+        "unlessSet": "context-library.repo"
+      }
+    },
+    {
+      "key": "context-library.url",
+      "question": "Which web address opens a document of the library, before its path? Leave it empty for the repo's page on GitHub.",
+      "type": "string",
+      "default": "",
+      "ask": "never"
+    },
+    {
+      "key": "context-library.owner",
+      "question": "Whose library is it, as the related context names it, such as Sam? Leave it empty for \"your library\".",
+      "type": "string",
+      "default": "",
+      "ask": "never"
+    },
+    {
+      "key": "hub.dreamSessions",
+      "question": "How many sessions may one Dream run send to an analyst model? Each one spends model tokens.",
+      "type": "number",
+      "default": 150,
+      "ask": "never"
     }
   ],
   "workflows": [
@@ -47,6 +103,39 @@
         "memory.subtree"
       ],
       "sentence": "Agents on every machine read and write one private memory repo, which syncs every five minutes."
+    },
+    {
+      "id": "context-library",
+      "name": "Context library",
+      "default": true,
+      "needs": [
+        "gh"
+      ],
+      "settings": [
+        "context-library.repo",
+        "context-library.path",
+        "context-library.url",
+        "context-library.owner"
+      ],
+      "sentence": "Once you set context-library.repo to your private notes repo, a prompt about one of its topics gets links to its documents, hedge context searches and saves notes, and every machine pulls the repo every five minutes.",
+      "offUntilSet": [
+        "context-library.repo"
+      ]
+    },
+    {
+      "id": "dream",
+      "name": "Dream",
+      "default": false,
+      "needs": [
+        "hub",
+        "gh"
+      ],
+      "settings": [
+        "hub.alias",
+        "hub.dreamSessions"
+      ],
+      "sentence": "Each night, the hub reads the day's agent sessions from every machine and opens one draft pull request that adds to, condenses, and prunes your shared memory.",
+      "risk": "Every run sends your agent sessions to an analyst model and spends your AI plan's usage, so it starts off. Your session text stays on the hub for 14 days."
     }
   ],
   "config": [
@@ -80,6 +169,11 @@
       "path": "hooks/memory-recall.ts",
       "target": ".config/hedge/hooks/PreToolUse/memory-recall.ts",
       "workflow": "shared-memory"
+    },
+    {
+      "path": "hooks/context-recall.ts",
+      "target": ".config/hedge/hooks/UserPromptSubmit/context-recall.ts",
+      "workflow": "context-library"
     }
   ],
   "jobs": [
@@ -93,6 +187,87 @@
         "every": "5m"
       },
       "workflow": "shared-memory"
+    },
+    {
+      "id": "context-sync",
+      "command": [
+        "hedge",
+        "context",
+        "sync"
+      ],
+      "schedule": {
+        "every": "5m"
+      },
+      "workflow": "context-library"
+    },
+    {
+      "id": "dream",
+      "command": [
+        "hedge",
+        "dream",
+        "run"
+      ],
+      "schedule": {
+        "every": "1d",
+        "at": "04:10"
+      },
+      "roles": [
+        "hub"
+      ],
+      "workflow": "dream"
     }
-  ]
+  ],
+  "steps": [
+    {
+      "id": "context-upstream",
+      "run": [
+        "hedge",
+        "context",
+        "upstream",
+        "install"
+      ],
+      "check": [
+        "hedge",
+        "context",
+        "upstream",
+        "doctor"
+      ],
+      "undo": [
+        "hedge",
+        "context",
+        "upstream",
+        "remove"
+      ],
+      "roles": [
+        "hub"
+      ],
+      "on": [
+        "linux"
+      ],
+      "workflow": "context-library"
+    }
+  ],
+  "handlers": [
+    {
+      "seam": "slack-capture",
+      "path": "handlers/slack-capture.ts",
+      "workflow": "context-library"
+    }
+  ],
+  "subcommands": {
+    "dream": [
+      "digest",
+      "run",
+      "collect",
+      "prepare",
+      "analyze",
+      "audit",
+      "logs",
+      "search",
+      "publish",
+      "scorecard",
+      "budget",
+      "help"
+    ]
+  }
 }

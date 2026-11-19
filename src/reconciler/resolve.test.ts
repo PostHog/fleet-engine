@@ -892,3 +892,37 @@ describe("a step's undo", () => {
     await expect(loadPacks(team([{ ...step, undo: "box-off" as unknown as string[] }]).dir)).rejects.toThrow("steps auto-box: undo must be a command list");
   });
 });
+
+describe("a pack that a profile names only by its old name", () => {
+  const renamed = withPack(
+    {
+      schema: 1,
+      name: "notes",
+      title: "Notes",
+      summary: "Keeps notes.",
+      aliases: [{ name: "library", workflows: ["recall"] }],
+      workflows: [
+        { id: "recall", name: "Recall", sentence: "Recalls notes.", default: true },
+        { id: "shared", name: "Shared", sentence: "Shares notes.", default: true },
+      ],
+      jobs: [
+        { id: "recall-pull", command: ["pull"], schedule: { every: "5m" }, workflow: "recall" },
+        { id: "sweep", command: ["sweep"], schedule: { every: "1d" } },
+      ],
+      skills: ["skills/notes"],
+    } as PackManifest,
+    { "skills/notes/SKILL.md": "# Notes\n" },
+  );
+
+  test("gets only what the old name's workflows hold", () => {
+    const result = plan({ packs: ["library"], settings: {} }, mac, [engine, renamed]);
+    expect(result.jobs.filter((job) => job.pack === "notes").map((job) => job.id)).toEqual(["recall-pull"]);
+    expect(result.files.some((item) => item.target.endsWith("skills/notes"))).toBe(false);
+  });
+
+  test("gets the whole pack once the profile names it", () => {
+    const result = plan({ packs: ["library", "notes"], settings: {} }, mac, [engine, renamed]);
+    expect(result.jobs.filter((job) => job.pack === "notes").map((job) => job.id)).toEqual(["recall-pull", "sweep"]);
+    expect(result.files.some((item) => item.target.endsWith("skills/notes"))).toBe(true);
+  });
+});

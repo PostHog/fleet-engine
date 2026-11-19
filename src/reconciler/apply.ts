@@ -6,7 +6,7 @@ import { cannotTell } from "../pack/types.ts";
 import type { Action, CatalogEntry, Finding, HumanStep, Owned, PackCheck, Plan, Report } from "../pack/types.ts";
 import { engineCommand } from "./engine-command.ts";
 import { changeLedger, ledgerKey, readLedger, undoVariable, type Ledger, type LedgerStep } from "./ledger.ts";
-import { hublessReason } from "./resolve.ts";
+import { hublessReason, listedPack } from "./resolve.ts";
 import { withLegacyNames } from "../legacy.ts";
 
 export type AdapterContext = { home: string; dryRun: boolean; adopt: string[]; adoptFrom?: string[] };
@@ -91,7 +91,7 @@ export async function apply(plan: Plan, options: { home: string; dryRun?: boolea
   const unknown = context.adopt.filter((target) => !adoptable.has(target));
   if (unknown.length) throw new Error(`nothing to adopt at ${unknown.join(", ")}: no part of your profile writes it`);
   const report: Report = { ok: true, actions: [], findings: [], humanLeft: [] };
-  report.findings.push(...packFindings(plan), ...hubFindings(plan));
+  report.findings.push(...packFindings(plan), ...hubFindings(plan), ...waitingFindings(plan));
   if (plan.unanswered.length) {
     report.ok = false;
     report.findings.push(...plan.unanswered.map((setting) => ({ id: `unanswered:${setting.key}`, pack: setting.key.split(".")[0] ?? "", say: `${setting.question} Answer it with hedge set ${setting.key}=<value>.`, repair: "human" as const })));
@@ -112,7 +112,7 @@ export async function apply(plan: Plan, options: { home: string; dryRun?: boolea
     report.ok = false;
     if (!context.dryRun) return report;
   }
-  const before = await readLedger(options.home);
+  const before = await movedLedger(options.home, plan, context.dryRun);
   const record = async (key: string, step?: LedgerStep) => {
     if (!context.dryRun) await changeLedger(options.home, "steps", key, step);
   };
@@ -190,7 +190,7 @@ export async function check(plan: Plan, options: { home: string; adapters?: Adap
     if (await waits(step)) continue;
     if (step.check && (await run(step.check)) !== 0) report.findings.push({ id: `step:${step.id}`, pack: step.pack, say: `Step ${step.id} of the ${step.pack} pack does not pass its check.`, repair: "apply" });
   }
-  const ledger = await readLedger(options.home);
+  const ledger = moved(await readLedger(options.home), plan);
   for (const { step, cause } of undoItems(plan, ledger.steps)) {
     if (report.actions.some((action) => action.target === `step ${step.pack}/${step.id}`)) report.findings.push({ id: `undo:${step.id}`, pack: step.pack, say: `${stillHolds(step, cause)} Run hedge apply to undo it.`, repair: "apply" });
   }
@@ -351,6 +351,31 @@ function unreachable(plan: Plan) {
   const packs = plan.packs.filter((pack) => !pack.available && pack.reason?.startsWith("not found; unreachable")).map((pack) => `the ${pack.name} pack`);
   const skills = plan.dropped.filter((item) => item.reason === "its source is unreachable").map((item) => `${item.item} of ${item.pack}`);
   return [...packs, ...skills];
+}
+
+function moved(ledger: Ledger, plan: Plan): Ledger {
+  return { steps: ledger.steps.map((step) => ({ ...step, pack: listedPack(plan, step.pack) })), human: ledger.human.map((step) => ({ ...step, pack: listedPack(plan, step.pack) })) };
+}
+
+async function movedLedger(home: string, plan: Plan, dryRun: boolean): Promise<Ledger> {
+  const ledger = await readLedger(home);
+  const renamed = moved(ledger, plan);
+  if (dryRun) return renamed;
+  for (const [index, step] of ledger.steps.entries()) {
+    if (step.pack === renamed.steps[index]!.pack) continue;
+    await changeLedger(home, "steps", ledgerKey(step));
+    await changeLedger(home, "steps", ledgerKey(renamed.steps[index]!), renamed.steps[index]);
+  }
+  for (const [index, step] of ledger.human.entries()) {
+    if (step.pack === renamed.human[index]!.pack) continue;
+    await changeLedger(home, "human", ledgerKey(step));
+    await changeLedger(home, "human", ledgerKey(renamed.human[index]!), renamed.human[index]);
+  }
+  return renamed;
+}
+
+function waitingFindings(plan: Plan): Finding[] {
+  return plan.workflows.filter((workflow) => workflow.unset).map((workflow) => ({ id: `waits:${workflow.id}`, pack: workflow.pack, say: `Workflow ${workflow.id} stays off until you set ${workflow.unset}. Set it with hedge set ${workflow.unset}=<value>.` }));
 }
 
 function packFindings(plan: Plan): Finding[] {

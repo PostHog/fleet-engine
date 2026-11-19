@@ -35,6 +35,7 @@ export type Workflow = {
   yields?: string[];
   default: boolean;
   settings?: string[];
+  offUntilSet?: string[];
   risk?: string;
 };
 
@@ -132,9 +133,14 @@ export type ModelRow = { role: string; work: string; provider: "claude" | "codex
 
 export type GuideEntry = { guide: string; section?: string; path: string };
 
+export type PackAlias = { name: string; workflows: string[] };
+
 export type PackManifest = {
   schema: 1;
   name: string;
+  aliases?: PackAlias[];
+  settingPrefixes?: string[];
+  onSite?: false;
   title?: string;
   summary: string;
   audience?: Audience;
@@ -197,6 +203,7 @@ export type ProfileFile = {
   plan: AiPlan;
   settings: Record<string, SettingValue>;
   workflows: Record<string, boolean>;
+  migrations?: string[];
   devboxes?: string[];
   /** The SSH name of the machine that runs the hub's items. */
   hub?: string;
@@ -234,7 +241,8 @@ export type Plan = {
   os: Os;
   ai: AiPlan;
   packs: ResolvedPack[];
-  workflows: Array<{ id: string; pack: string; active: boolean; reason?: string }>;
+  aliases?: Record<string, string>;
+  workflows: Array<{ id: string; pack: string; active: boolean; reason?: string; unset?: string }>;
   files: DesiredFile[];
   config: Array<Owned<ConfigEntry>>;
   owners: Record<string, string>;

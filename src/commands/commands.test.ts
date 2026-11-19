@@ -150,7 +150,7 @@ describe("hedge packs", () => {
     expect((await hedge(home, ["packs", "--add", "orchestration"])).code).toBe(0);
     const result = await hedge(home, ["packs", "--remove", "pull-requests"]);
     expect(result.code).toBe(2);
-    expect(result.output).toStartWith("hedge packs: Orchestration needs Pull requests. Add pull-requests, or remove orchestration.");
+    expect(result.output).toStartWith("hedge packs: Orchestration needs Quality gates. Add pull-requests, or remove orchestration.");
     expect((await pushed()).packs).toEqual(["pull-requests", "orchestration"]);
   });
 
@@ -186,6 +186,23 @@ describe("hedge packs", () => {
       expect(result.output).toStartWith(message);
     }
     expect((await pushed()).packs).toEqual(["pull-requests"]);
+  });
+});
+
+describe("hedge packs with a profile that still names an old pack", () => {
+  test("shows the pack under its new name, and --add or --remove with the old name changes that pack", async () => {
+    const { home, elsewhere, pushed } = await machineWithProfile();
+    await elsewhere((file) => ({ ...file, packs: ["pull-requests", "context-library"] }));
+    const added = await hedge(home, ["packs", "--add", "recovery"]);
+    expect(added.code).toBe(0);
+    expect(await pushed()).toMatchObject({ packs: ["pull-requests", "context-library", "hub"] });
+    const listed = await hedge(home, ["packs"]);
+    expect(listed.output).toContain("  ✓ memory  ");
+    expect(listed.output).toContain("  ✓ hub  ");
+    expect(listed.output).not.toContain("context-library  ");
+    const removed = await hedge(home, ["packs", "--remove", "memory"]);
+    expect(removed.code).toBe(0);
+    expect((await pushed()).packs).toEqual(["pull-requests", "hub"]);
   });
 });
 

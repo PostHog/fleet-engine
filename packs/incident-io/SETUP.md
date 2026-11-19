@@ -10,8 +10,8 @@ The token lives on the hub, and every node pages through it.
 [Page you through incident.io](https://github.com/PostHog/hedge/blob/main/docs/incident-io.md)
 explains how it works and its risks. Tell them the risks before step 3.
 
-1. The workflow starts off. Add `--workflows page-owner=on` to the setup
-   command.
+1. The workflow starts on with the pack. To leave it off, add
+   `--workflows page-owner=off` to the setup command.
 2. **Check the prerequisites.** Ask with your question tool whether they
    have all three. incident.io can page only a user with an **On-call**
    seat.

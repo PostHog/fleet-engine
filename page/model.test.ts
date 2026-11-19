@@ -59,18 +59,18 @@ async function hedgeCommands() {
 describe("the Getting started prompt", () => {
   const readmePrompt = () => readFileSync(join(root, "README.md"), "utf8").match(/```text\n\s*(Set up Hedge[^\n]+)\n/)![1]!;
 
-  test("is the README's prompt plus the three packs the hub's first setup turns on by default, and the Hub pack for once the hub runs", () => {
-    expect(startPrompt(data, firstStart)).toBe(`${readmePrompt()}\n\nMy picks from the Hedge page:\n- Packs on the first setup: pull-requests, orchestration, communication\n- Packs once the hub runs: hub`);
+  test("is the README's prompt plus the four packs the hub's first setup turns on by default, and the Hub pack for once the hub runs", () => {
+    expect(startPrompt(data, firstStart)).toBe(`${readmePrompt()}\n\nMy picks from the Hedge page:\n- Packs on the first setup: pull-requests, orchestration, communication, memory\n- Packs once the hub runs: hub`);
   });
 
   test("a pack that is switched off leaves the first setup, and comes back when it is switched on", () => {
-    expect(line(startPrompt(data, flip(firstStart, "communication")), "Packs on the first setup")).toBe("pull-requests, orchestration");
+    expect(line(startPrompt(data, flip(firstStart, "communication")), "Packs on the first setup")).toBe("pull-requests, orchestration, memory");
     expect(startPrompt(data, flip(firstStart, "communication", "communication"))).toBe(startPrompt(data, firstStart));
     expect(line(startPrompt(data, flip(firstStart, "communication")), "Packs once the hub runs")).toBe("hub");
   });
 
   test("switches only the packs of the first setup", () => {
-    expect(startPrompt(data, flip(firstStart, "hub", "memory", "base"))).toBe(startPrompt(data, firstStart));
+    expect(startPrompt(data, flip(firstStart, "hub", "slack", "base"))).toBe(startPrompt(data, firstStart));
   });
 
   test("its first setup packs, as the guide's one by one command, are the packs setup turns on", async () => {
@@ -97,17 +97,17 @@ describe("the install prompt", () => {
   test("names the selected packs, finds the hub first, runs every command there, and names each setup note and one hedge packs command that adds them", () => {
     expect(installPrompt(data, select("guards", "memory", "communication"))).toBe(
       [
-        "Add these Hedge packs to my setup with me: Communication, Memory, and Guards.",
+        "Add these Hedge packs to my setup with me: Communication, Guards, and Memory.",
         "",
         "Hedge runs on my hub and my nodes in the cloud, not on my Mac. Run each command of this prompt on the hub, over SSH with the `PATH` line of https://raw.githubusercontent.com/PostHog/hedge/main/SETUP.md when you run elsewhere. Install nothing from Hedge here. Ask me each choice with your question tool, and run every command yourself.",
         "",
         '1. Find my hub. List my cloud boxes as step 1 of https://raw.githubusercontent.com/PostHog/hedge/main/SETUP.md does, and run `hedge hub status` over SSH on each one that runs, until one names the hub. Do not ask a `hedge` on this Mac: an earlier setup can leave one here. The name after "The hub:" is the SSH name of the hub. In each SSH command of a note, put that whole name in place of the host that holds `<hub>`. When every box prints "The hub: not named", or no box runs Hedge, I have no hub yet. Tell me, and offer to set one up first with steps 5, 7, and 9 of https://raw.githubusercontent.com/PostHog/hedge/main/SETUP.md. To make a box that already runs Hedge the hub, skip step 5 for it.',
         "2. Run `hedge update` on the hub, so it has the newest engine and packs. Then run `hedge packs` there, and leave out each pack that is already on.",
         '3. Read the setup note of each pack. Ask me what it asks, and collect the flags that it names. Where a note names "the setup command" or "the command in item 2 of step 9", use the `hedge packs` command of this prompt. Do not run a step that a note puts after that command yet.',
-        "   - Memory: ~/.local/share/hedge/engine/packs/memory/SETUP.md",
         "   - Guards: ~/.local/share/hedge/engine/packs/guards/SETUP.md",
+        "   - Memory: ~/.local/share/hedge/engine/packs/memory/SETUP.md",
         "4. Turn the packs on with one command on the hub, and add the flags that the notes name:",
-        "   hedge packs --add communication --add memory --add guards",
+        "   hedge packs --add communication --add guards --add memory",
         "5. Do the steps that each note puts after the command.",
         "6. Run `hedge doctor` on the hub, and explain each line. Do each `To do:` line with me, and say what a sign-in is for before it opens.",
         "7. My nodes take the change at their next `hedge update`. To give it to one now, run `hedge update` there.",
@@ -130,7 +130,7 @@ describe("the install prompt", () => {
   });
 
   test("for any selection, finds the hub with hedge hub status in the words it prints, sends a box without a hub to the setup guide's steps 5, 7, and 9, and never says Hedge runs on the machine it is pasted on", async () => {
-    for (const selected of [select("communication"), select("recovery"), select("memory", "slack"), everyPack()]) {
+    for (const selected of [select("communication"), select("mcp-gateway"), select("memory", "slack"), everyPack()]) {
       const text = installPrompt(data, selected);
       expect(step(text, "Find my hub")).toStartWith("1. Find my hub. List my cloud boxes as step 1 of https://raw.githubusercontent.com/PostHog/hedge/main/SETUP.md does, and run `hedge hub status` over SSH on each one that runs");
       expect(step(text, "Find my hub")).not.toMatch(/hedge-`|command -v hedge/);
@@ -154,14 +154,14 @@ describe("the install prompt", () => {
     const hub = box.output().match(/The hub: (\S+)\.$/m)![1]!;
     const text = installPrompt(data, everyPack());
     expect(step(text, "Find my hub")).toContain('The name after "The hub:" is the SSH name of the hub. In each SSH command of a note, put that whole name in place of the host that holds `<hub>`.');
-    const notes = [...text.matchAll(/^ {3}- [^:]+: ~\/\.local\/share\/hedge\/engine\/(\S+)$/gm)].map((match) => readFileSync(join(root, match[1]!), "utf8"));
+    const notes = [...[...text.matchAll(/^ {3}- [^:]+: ~\/\.local\/share\/hedge\/engine\/(\S+)$/gm)].map((match) => match[1]!), "packs/hub/SETUP.md"].map((path) => readFileSync(join(root, path), "utf8"));
     const filled = notes.flatMap(sshSnippets).map((code) => withHub(code, hub));
     expect(filled.filter((code) => code.includes("<hub>"))).toEqual([]);
     expect(unparsedSnippets(filled)).toEqual([]);
     expect(filled.flatMap(remoteCommands).length).toBeGreaterThan(filled.length / 2);
     const dangling = `ssh ${hub} 'hedge doctor &&'`;
     expect(unparsedSnippets([dangling])).toHaveLength(1);
-    const recovery = sshSnippets(readFileSync(join(root, "packs/recovery/SETUP.md"), "utf8"))
+    const recovery = sshSnippets(readFileSync(join(root, "packs/hub/SETUP.md"), "utf8"))
       .map((code) => withHub(code, hub))
       .find((code) => code.includes("sh -s <<"))!;
     expect(filled).toContain(recovery);
@@ -183,7 +183,7 @@ describe("the install prompt", () => {
 
   test("names the setup note of every pack that has one, at the path where a machine that runs Hedge keeps it", () => {
     const named = [...installPrompt(data, everyPack()).matchAll(/^ {3}- [^:]+: ~\/\.local\/share\/hedge\/engine\/(\S+)$/gm)].map((match) => match[1]!);
-    const held = readdirSync(join(root, "packs")).filter((pack) => existsSync(join(root, "packs", pack, "SETUP.md")));
+    const held = readdirSync(join(root, "packs")).filter((pack) => existsSync(join(root, "packs", pack, "SETUP.md")) && data.packs.some((item) => item.name === pack && !item.always));
     expect(named.toSorted()).toEqual(held.map((pack) => `packs/${pack}/SETUP.md`).toSorted());
   });
 

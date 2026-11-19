@@ -13,8 +13,8 @@ source. The alert route on that source escalates to your user directly.
 knows no people. When someone changes the route, `hedge page` pages whoever
 the route names. Check the route before you rely on it.
 
-The workflow, `page-owner`, starts off. Turn it on with
-`hedge packs --add incident-io --workflows page-owner=on`. Its
+The workflow, `page-owner`, starts on with the pack. Turn it on with
+`hedge packs --add incident-io`. Its
 [setup note](../packs/incident-io/SETUP.md) walks through the incident.io
 side. While the workflow is off, `hedge page` refuses to send, and the
 saved source stays. With a hub, the hub's copy of your profile decides. To

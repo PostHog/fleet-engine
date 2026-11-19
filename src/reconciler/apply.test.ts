@@ -5,6 +5,7 @@ import type { Plan } from "../pack/types.ts";
 import { tempDirs } from "../testing/git.ts";
 import { providerConfigAdapter } from "../adapters/provider-config/adapter.ts";
 import { apply, check, filesAdapter, type Adapter } from "./apply.ts";
+import { changeLedger, ledgerKey, readLedger } from "./ledger.ts";
 
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
@@ -226,6 +227,42 @@ describe("apply", () => {
     const report = await apply(plan({ steps }), { home });
     expect(report.findings).toEqual([]);
     expect(existsSync(join(home, "marked"))).toBe(true);
+  });
+});
+
+describe("a step whose pack now has a new name", () => {
+  const upstream = { id: "context-upstream", pack: "memory", run: ["install"], check: ["doctor"], undo: ["remove"] };
+  const moved = (home: string) => changeLedger(home, "steps", "context-library/context-upstream", { pack: "context-library", id: "context-upstream", check: ["doctor"], undo: ["remove"] });
+  const memoryPlan = plan({ aliases: { "context-library": "memory" }, packs: [{ name: "base", source: "engine", ref: "main", available: true }, { name: "memory", source: "engine", ref: "main", available: true }], steps: [upstream] });
+
+  test("stays installed: apply moves its ledger entry to the new name and undoes nothing", async () => {
+    const home = temp.make("home-");
+    await moved(home);
+    const ran: string[] = [];
+    const report = await apply(memoryPlan, { home, run: async (command) => (ran.push(command[0]!), 0) });
+    expect(report.ok).toBe(true);
+    expect(ran).not.toContain("remove");
+    expect((await readLedger(home)).steps.map(ledgerKey)).toEqual(["memory/context-upstream"]);
+  });
+
+  test("a dry run plans no undo and leaves the ledger as it was", async () => {
+    const home = temp.make("home-");
+    await moved(home);
+    const ran: string[] = [];
+    const report = await apply(memoryPlan, { home, dryRun: true, run: async (command) => (ran.push(command[0]!), 0) });
+    expect(ran).not.toContain("remove");
+    expect(report.actions.filter((action) => action.operation === "remove")).toEqual([]);
+    expect((await readLedger(home)).steps.map(ledgerKey)).toEqual(["context-library/context-upstream"]);
+  });
+});
+
+describe("a workflow that waits for a setting", () => {
+  test("is named with the command that sets it, and the apply still passes", async () => {
+    const home = temp.make("home-");
+    const report = await apply(plan({ workflows: [{ id: "context-library", pack: "memory", active: false, reason: "waits for setting context-library.repo", unset: "context-library.repo" }] }), { home });
+    expect(report.ok).toBe(true);
+    expect(report.findings).toContainEqual({ id: "waits:context-library", pack: "memory", say: "Workflow context-library stays off until you set context-library.repo. Set it with hedge set context-library.repo=<value>." });
+    expect(readFileSync(join(home, ".agents/AGENTS.md"), "utf8")).toBe("rules\n");
   });
 });
 

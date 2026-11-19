@@ -16,7 +16,7 @@ export async function loadProfile(dir: string): Promise<Profile> {
   const path = profileFile(dir);
   const file = await readJson(path);
   if (!file) throw new ProfileError(`${path}: missing`);
-  const profile = checkProfile({ ...file, workflows: file.workflows ?? {}, settings: file.settings ?? {}, sources: file.sources ?? [] }, path);
+  const profile = checkProfile(withPicksOn({ ...file, workflows: file.workflows ?? {}, settings: file.settings ?? {}, sources: file.sources ?? [] }), path);
   const aboutMe = Bun.file(join(dir, "about-me.md"));
   return { ...profile, dir, ...((await aboutMe.exists()) ? { aboutMe: await aboutMe.text() } : {}) };
 }
@@ -53,7 +53,7 @@ export async function saveAnswers(dir: string, answers: Partial<ProfileFile>, op
   refuseLegacyPath(path);
   if (options.push) await pullUnder(dir, path, answers);
   refuseLegacyPath(path);
-  const current = (await readJson(path)) ?? { schema: 1 };
+  const current = withPicksOn((await readJson(path)) ?? { schema: 1 });
   if (current.schema !== 1) throw new ProfileError(`${path}: unknown schema ${String(current.schema)}`);
   const settings = { ...(current.settings as Record<string, unknown> | undefined), ...answers.settings };
   await writeFile(path, JSON.stringify({ ...current, ...answers, settings, schema: 1 }, null, 2) + "\n");
@@ -92,6 +92,25 @@ async function push(dir: string) {
 function gitReason(stderr: string) {
   const line = stderr.split("\n").map((text) => withoutCredentials(text).replace(/\s+/g, " ").trim()).find((text) => text && !text.startsWith("To ") && !text.startsWith("hint:"));
   return line?.replace(/\.$/, "");
+}
+
+export const picksTurnOn = "picks-turn-on";
+
+const pickedWorkflows: Array<{ workflow: string; packs: string[] }> = [
+  { workflow: "slack-thread", packs: ["slack"] },
+  { workflow: "page-owner", packs: ["incident-io"] },
+  { workflow: "context-library", packs: ["memory", "context-library"] },
+  { workflow: "shell-guards", packs: ["guards"] },
+  { workflow: "package-age", packs: ["guards"] },
+];
+
+export function withPicksOn(file: Record<string, unknown>): Record<string, unknown> {
+  const migrations = Array.isArray(file.migrations) ? (file.migrations as unknown[]) : [];
+  if (migrations.includes(picksTurnOn)) return file;
+  const packs = Array.isArray(file.packs) ? (file.packs as unknown[]) : [];
+  const workflows = isRecord(file.workflows) ? file.workflows : {};
+  const kept = pickedWorkflows.filter(({ workflow, packs: names }) => workflows[workflow] === undefined && names.some((name) => packs.includes(name)));
+  return { ...file, ...(kept.length ? { workflows: { ...workflows, ...Object.fromEntries(kept.map(({ workflow }) => [workflow, false])) } } : {}), migrations: [...migrations, picksTurnOn] };
 }
 
 export function workflowDefaults(packs: PackManifest[]): Record<string, boolean> {
@@ -189,6 +208,7 @@ function checkProfile(file: Record<string, unknown>, path: string): ProfileFile 
   }
   if (!isRecord(file.settings) || !Object.values(file.settings).every((value) => ["string", "number", "boolean"].includes(typeof value))) fail("settings must map keys to text, numbers, or true and false");
   if (!isRecord(file.workflows) || !Object.values(file.workflows).every((value) => typeof value === "boolean")) fail("workflows must map ids to true or false");
+  if (file.migrations !== undefined && !(Array.isArray(file.migrations) && file.migrations.every((item) => typeof item === "string"))) fail("migrations must list names");
   if (file.hub !== undefined && !(typeof file.hub === "string" && validHost(file.hub))) fail("hub must be the SSH name of a machine");
   if (file.overrides !== undefined && !isRecord(file.overrides)) fail("overrides must be an object");
   const config = isRecord(file.overrides) ? file.overrides.config : undefined;

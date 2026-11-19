@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { PackManifest, ProfileFile } from "../pack/types.ts";
 import { isolateGit, spawnGit, template, tempDirs } from "../testing/git.ts";
-import { activeChoices, loadMachine, loadProfile, ProfileError, saveAnswers, saveMachine, thisMachine, workflowOverrides } from "./profile.ts";
+import { activeChoices, loadMachine, loadProfile, picksTurnOn, ProfileError, saveAnswers, saveMachine, thisMachine, workflowOverrides } from "./profile.ts";
 
 isolateGit();
 const temp = tempDirs();
@@ -75,6 +75,33 @@ describe("profile", () => {
     await saveAnswers(dir, { plan: "claude" });
     const saved = JSON.parse(readFileSync(join(dir, "hedge.json"), "utf8"));
     expect(saved).toMatchObject({ plan: "claude", settings: { "orchestration.tracker": "me/hedge-profile" } });
+  });
+});
+
+describe("a pick that turns its main workflow on", () => {
+  const older = { ...profile, packs: ["slack", "guards", "memory", "incident-io"], workflows: { "shell-guards": true } };
+
+  test("leaves that workflow off in an older profile that never set it, writes that once at the next save, and then keeps the person's choice", async () => {
+    const dir = await profileRepo(older);
+    const kept = { "shell-guards": true, "slack-thread": false, "page-owner": false, "context-library": false, "package-age": false };
+    expect(await loadProfile(dir)).toMatchObject({ workflows: kept, migrations: [picksTurnOn] });
+    expect(JSON.parse(readFileSync(join(dir, "hedge.json"), "utf8"))).toEqual(older);
+    await saveAnswers(dir, { plan: "claude" });
+    expect(JSON.parse(readFileSync(join(dir, "hedge.json"), "utf8"))).toMatchObject({ plan: "claude", workflows: kept, migrations: [picksTurnOn] });
+    await saveAnswers(dir, { workflows: { "shell-guards": true } });
+    expect((await loadProfile(dir)).workflows).toEqual({ "shell-guards": true });
+  });
+
+  test("leaves a workflow the profile already set, and a pack it does not list, as they are", async () => {
+    const dir = await profileRepo({ ...profile, packs: ["slack"], workflows: { "slack-thread": true } });
+    expect((await loadProfile(dir)).workflows).toEqual({ "slack-thread": true });
+  });
+
+  test("turns the workflow on in a profile that a new setup starts", async () => {
+    const dir = temp.make("profile-");
+    await spawnGit(dir, "init", "-q", "-b", "main");
+    await saveAnswers(dir, { ...profile, packs: ["slack", "guards"] });
+    expect(await loadProfile(dir)).toMatchObject({ packs: ["slack", "guards"], workflows: {}, migrations: [picksTurnOn] });
   });
 });
 

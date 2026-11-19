@@ -1,3 +1,4 @@
+import { namedPresets } from "../pack/aliases.ts";
 import { join } from "node:path";
 import { loadPacks } from "../pack/manifest.ts";
 import { cachedSource, fetchSource } from "../pack/sources.ts";
@@ -338,8 +339,8 @@ function notFetched(ref: SourceRef): FetchedSource {
 
 /** The engine's packs plus each team source this machine has fetched, such as an org's private pack. */
 export async function loadCatalog(engineRoot: string, team: SourceRef[], home: string): Promise<Catalog> {
-  const presets = (await Bun.file(join(engineRoot, "presets.json")).json()) as Preset[];
   const engine: AvailableSource = { ref: { name: "engine", repo: engineRepo, ref: "main" }, dir: engineRoot, packs: await loadPacks(engineRoot) };
+  const presets = namedPresets((await Bun.file(join(engineRoot, "presets.json")).json()) as Preset[], engine.packs.map((pack) => pack.manifest));
   const catalog: Catalog = {
     presets,
     sources: [engine],

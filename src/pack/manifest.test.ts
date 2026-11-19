@@ -52,6 +52,19 @@ describe("loadPacks", () => {
     expect(loadPacks(sourceWith({ base: { ...base, settings } }))).rejects.toThrow("setting hub.heavySlots must start with base.");
   });
 
+  test("lets a setting start with an old name of the pack or a prefix the pack lists, and no other", async () => {
+    const settings = [{ ...base.settings[0], key: "old.heavySlots" }, { ...base.settings[0], key: "hub.cap" }];
+    const renamed = { ...base, settings, aliases: [{ name: "old", workflows: ["heavy"] }] };
+    const [pack] = await loadPacks(sourceWith({ base: { ...renamed, settingPrefixes: ["hub"] } }));
+    expect(pack!.manifest.settings!.map((setting) => setting.key)).toEqual(["old.heavySlots", "hub.cap"]);
+    expect(loadPacks(sourceWith({ base: renamed }))).rejects.toThrow("setting hub.cap must start with base. or old.");
+  });
+
+  test("rejects an old name that is the pack's own, or that names a workflow the pack does not have", async () => {
+    expect(loadPacks(sourceWith({ base: { ...base, aliases: [{ name: "base", workflows: [] }] } }))).rejects.toThrow("aliases base: name must be another pack name");
+    expect(loadPacks(sourceWith({ base: { ...base, aliases: [{ name: "old", workflows: ["missing"] }] } }))).rejects.toThrow("alias old names unknown workflow missing");
+  });
+
   test("lets any pack declare identity.signer, which the engine reads", async () => {
     const signer = { key: "identity.signer", question: "Which key signs?", type: "choice", choices: [{ value: "ssh", label: "SSH" }], default: "ssh" };
     const packs = await loadPacks(sourceWith({ base, team: { schema: 1, name: "team", summary: "Team rules.", settings: [signer] } }));

@@ -31,11 +31,11 @@ describe("the Orchestration pack", () => {
     expect(links).toEqual(expect.arrayContaining(["wayfinder", "grilling", "research", "prototype", "domain-modeling", "setup-matt-pocock-skills", "codebase-design"]));
   });
 
-  test("keeps maps and side threads on, the loops off, and asks nothing by default", () => {
+  test("keeps maps and side threads on, the loops of the Quality gates pack off, and asks nothing by default", () => {
     const result = withPack({}, devbox);
     const orchestration = result.workflows.filter((workflow) => workflow.pack === "orchestration");
     expect(orchestration.filter((workflow) => workflow.active).map((workflow) => workflow.id)).toEqual(["maps", "side-threads", "question-guard"]);
-    expect(orchestration.filter((workflow) => loops.includes(workflow.id)).map((workflow) => workflow.reason)).toEqual(["turned off", "turned off", "turned off"]);
+    expect(result.workflows.filter((workflow) => loops.includes(workflow.id)).map((workflow) => [workflow.pack, workflow.reason])).toEqual(loops.map(() => ["pull-requests", "turned off"]));
     expect(result.jobs.filter((job) => job.pack === "orchestration")).toEqual([]);
     expect(result.unanswered).toEqual([]);
   });
@@ -69,7 +69,7 @@ describe("the Orchestration pack", () => {
     const workflows = { "quality-loop": true, "pr-digest": true };
     expect(withPack({ workflows }, devbox).unanswered.map((setting) => setting.key)).toEqual(["orchestration.loopProject", "orchestration.qualityArea", "orchestration.ledgerRepo"]);
     const result = withPack({ workflows, settings: { "orchestration.loopProject": "my-repo", "orchestration.qualityArea": "src", "orchestration.ledgerRepo": "me/ledger" } }, devbox);
-    const jobs = result.jobs.filter((job) => job.pack === "orchestration");
+    const jobs = result.jobs.filter((job) => loops.includes(job.id));
     expect(jobs.map((job) => [job.id, job.runner, job.task?.project, job.task?.modelRole])).toEqual([
       ["quality-loop", "t3", "my-repo", "implementation"],
       ["pr-digest", "t3", "my-repo", "lookup"],
@@ -84,7 +84,7 @@ describe("the Orchestration pack", () => {
   });
 
   test("keeps every loop lane a draft and never lets an unattended loop wait on a question", () => {
-    const manifest = engine.packs.find((pack) => pack.manifest.name === "orchestration")!.manifest;
+    const manifest = engine.packs.find((pack) => pack.manifest.name === "pull-requests")!.manifest;
     for (const id of ["quality-loop", "signal-loop"]) {
       const prompt = manifest.jobs!.find((job) => job.id === id)!.task!.prompt;
       expect(prompt).toContain("Every lane stops at a draft pull request: no lane runs stamp-pr or full-send, merges, or deploys");

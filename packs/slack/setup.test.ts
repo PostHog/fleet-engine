@@ -299,7 +299,7 @@ describe("the Slack app step", () => {
   test("asks for the Slack app in the foreground, only while Start a thread from Slack is on", () => {
     const step = plan().human.find((item) => item.pack === "slack")!;
     expect(step).toMatchObject({ id: "slack-app", interactive: true, workflow: "slack-thread" });
-    expect(resolveEngine(sources, { packs: ["slack"], settings: { "slack.userId": ownerId } }, mac).human.filter((item) => item.pack === "slack")).toEqual([]);
+    expect(resolveEngine(sources, { packs: ["slack"], workflows: { "slack-thread": false }, settings: { "slack.userId": ownerId } }, mac).human.filter((item) => item.pack === "slack")).toEqual([]);
   });
 
 

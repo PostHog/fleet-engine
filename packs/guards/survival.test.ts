@@ -25,9 +25,9 @@ describe("the package age workflow", () => {
   };
 
   test("runs hedge package-age as a step on every machine, with its own check", () => {
-    expect(plan({}).steps.map((step) => step.id)).not.toContain("package-age");
+    expect(plan({ "package-age": false }).steps.map((step) => step.id)).not.toContain("package-age");
     for (const machine of [devbox, mac]) {
-      expect(plan({ "package-age": true }, machine).steps.find((step) => step.id === "package-age")).toMatchObject({ run: ["hedge", "package-age"], check: ["hedge", "package-age", "--check"] });
+      expect(plan({}, machine).steps.find((step) => step.id === "package-age")).toMatchObject({ run: ["hedge", "package-age"], check: ["hedge", "package-age", "--check"] });
     }
   });
 
