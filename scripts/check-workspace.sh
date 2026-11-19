@@ -24,7 +24,7 @@ fields=$(printf '%s' "$workspace" | NAME=$name json '
 read -r build version transition state deadline schedule <<FIELDS
 $fields
 FIELDS
-case $state in pending | starting | stopping | canceling)
+case $state in pending | starting | stopping | canceling | deleting)
   echo "x $name is not ready: its latest build is a $transition that is $state. Wait until it ends, then run this check again."
   exit 1 ;;
 esac

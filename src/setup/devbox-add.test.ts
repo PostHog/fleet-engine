@@ -44,7 +44,23 @@ describe("hedge devbox add", () => {
     hub.serverWithoutLinkState = [];
     expect(await main(["devbox", "add", "node-2"], { ...options, setup: { machine: box.machine } })).toBe(0);
     expect(box.peerLinks.box).toEqual(["https://here.relay.example"]);
-    expect(box.peerLinks.here).toEqual(["https://box-1.relay.example", "https://box-1.relay.example"]);
+    expect(box.peerLinks.here).toEqual(["https://box-1.relay.example"]);
+  });
+
+  test("when t3 connect status fails here, hedge devbox add fails without taking T3 Connect as off, and links back once run again", async () => {
+    const home = temp.make("home-");
+    expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""])).code).toBe(0);
+    const io = scripted([]);
+    const options = { home, engineRoot, platform: "linux" as const, print: io.terminal.print, terminal: io.terminal };
+    const box = fakeMachine(home, {}, { connectHere: true, hereStatusFailures: 1 });
+    expect(await main(["devbox", "add", "node-2"], { ...options, setup: { machine: box.machine } })).toBe(1);
+    expect(io.output()).toContain("T3 Code here did not answer t3 connect status. Check that T3 Code runs here, then run hedge devbox add node-2 again.");
+    expect(io.output()).not.toContain("T3 Connect is off here");
+    expect(box.peerLinks.box).toEqual([]);
+
+    expect(await main(["devbox", "add", "node-2"], { ...options, setup: { machine: box.machine } })).toBe(0);
+    expect(box.peerLinks.box).toEqual(["https://here.relay.example"]);
+    expect(box.peerLinks.here).toEqual(["https://box-1.relay.example"]);
   });
 
   test("hedge devbox address prints this machine's T3 Connect address from its live T3 server when the T3 CLI does not print it, and says when there is none", async () => {
@@ -60,7 +76,13 @@ describe("hedge devbox add", () => {
     expect(await address(fakeMachine(home))).toEqual([1, "hedge: T3 Connect is off on this machine. Turn it on with t3 up --connect."]);
     const without = fakeMachine(home, {}, { connectHere: true, serverWithoutLinkState: ["here"] });
     expect(await address(without)).toEqual([1, "hedge: T3 Connect is on here, but T3 Code gives no tunnel address for this machine yet."]);
-    expect(without.sleeps.length).toBeGreaterThan(0);
+  });
+
+  test("hedge devbox address prints this machine's T3 Connect address when this machine has no Hedge profile", async () => {
+    const home = temp.make("home-");
+    const io = scripted([]);
+    const code = await main(["devbox", "address"], { home, engineRoot, platform: "linux", print: io.terminal.print, terminal: io.terminal, setup: { machine: fakeMachine(home, {}, { connectHere: true }).machine } });
+    expect([code, io.output()]).toEqual([0, "https://here.relay.example"]);
   });
 
   test("when ChatGPT's sign-in fails on a node, hedge devbox add says to run hedge devbox add for that node again, not hedge setup", async () => {

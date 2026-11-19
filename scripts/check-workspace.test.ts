@@ -59,7 +59,7 @@ describe("the setup guide's workspace check", () => {
 
   test("fails while a build still runs, and says only to wait and check again, before it compares any parameter", () => {
     const mismatched = { ...built, disk_size: "100", instance_type: "m7g.xlarge" };
-    for (const build of [{ transition: "start", status: "pending" }, { transition: "start", status: "starting" }, { transition: "stop", status: "stopping" }, { transition: "stop", status: "canceling" }]) {
+    for (const build of [{ transition: "start", status: "pending" }, { transition: "start", status: "starting" }, { transition: "stop", status: "stopping" }, { transition: "stop", status: "canceling" }, { transition: "delete", status: "deleting" }]) {
       const result = coder({ parameters: mismatched, mutable: template, build }).check(passed);
       expect([build, result.code, result.output]).toEqual([build, 1, `x hedge-hub is not ready: its latest build is a ${build.transition} that is ${build.status}. Wait until it ends, then run this check again.\n`]);
     }

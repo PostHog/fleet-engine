@@ -27,7 +27,8 @@ if [ "$(uname -s)" = Darwin ]; then
       printf 'Hedge: %s\n' "the launchd job $label of an earlier Fleet or Hedge still runs. Stop it with: launchctl bootout $target" >&2
       off=
     fi
-    if ! launchctl print-disabled "gui/$uid" 2>/dev/null | grep -F "\"$label\" =>" | grep -Eq '=> (disabled|true)$'; then
+    listed=$(launchctl print-disabled "gui/$uid" 2>/dev/null) && listed_ok=yes || listed_ok=
+    if [ -z "$listed_ok" ] || ! printf '%s\n' "$listed" | grep -F "\"$label\" =>" | grep -Eq '=> (disabled|true)$'; then
       printf 'Hedge: %s\n' "launchd still has the job $label of an earlier Fleet or Hedge turned on, so it starts again at the next login. Turn it off with: launchctl disable $target" >&2
       off=
     fi

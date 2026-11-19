@@ -21,7 +21,6 @@ export async function devboxCommand(args: string[], context: DevboxCommandContex
     terminal.print("Add one with hedge devbox add <ssh host>.");
     return 0;
   }
-  if (args.length === 1 && args[0] === "address") return await printAddress(context);
   const [action, host, ...rest] = args;
   if ((action !== "add" && action !== "remove") || !host || rest.length || !validHost(host)) throw new FlagError(usage);
   if (action === "remove") return await removeDevbox(host, context), 0;
@@ -58,8 +57,10 @@ export async function devboxCommand(args: string[], context: DevboxCommandContex
   return 0;
 }
 
-async function printAddress({ machine, terminal }: DevboxCommandContext) {
-  const here = await addressHere(machine);
+export const asksAddress = (args: string[]) => args.length === 1 && args[0] === "address";
+
+export async function printAddress({ machine, terminal }: Pick<DevboxCommandContext, "machine" | "terminal">) {
+  const here = await addressHere(machine, "hedge devbox address");
   if (!here.on) throw new Error("T3 Connect is off on this machine. Turn it on with t3 up --connect.");
   if (!here.address) throw new Error("T3 Connect is on here, but T3 Code gives no tunnel address for this machine yet.");
   terminal.print(here.address);

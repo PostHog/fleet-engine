@@ -271,9 +271,13 @@ async function connectAddress(machine: Machine): Promise<string | undefined> {
 }
 
 async function linkedStatus(machine: Machine) {
-  const state = parsed<{ authenticated?: unknown; linked?: unknown; tunnelHostname?: unknown }>(await machine.exec(["t3", "connect", "status", "--json"]));
-  return state?.authenticated === true && state.linked === true ? state : undefined;
+  const state = await connectStatus(machine);
+  return state && isLinked(state) ? state : undefined;
 }
+
+const connectStatus = async (machine: Machine) => parsed<{ authenticated?: unknown; linked?: unknown; tunnelHostname?: unknown }>(await machine.exec(["t3", "connect", "status", "--json"]));
+
+const isLinked = (state: { authenticated?: unknown; linked?: unknown }) => state.authenticated === true && state.linked === true;
 
 /** Waits a bounded time for a tunnel that is still starting after T3 Connect links. */
 async function connectAddressWithin(machine: Machine): Promise<string | undefined> {
@@ -286,8 +290,10 @@ async function connectAddressWithin(machine: Machine): Promise<string | undefine
 
 const tunnelStartPolls = 15;
 
-export async function addressHere(machine: Machine): Promise<{ on: boolean; address?: string }> {
-  if (!(await linkedStatus(machine))) return { on: false };
+export async function addressHere(machine: Machine, rerun: string): Promise<{ on: boolean; address?: string }> {
+  const state = await connectStatus(machine);
+  if (!state) throw new Error(`T3 Code here did not answer t3 connect status. Check that T3 Code runs here, then run ${rerun} again.`);
+  if (!isLinked(state)) return { on: false };
   const address = await connectAddressWithin(machine);
   return address ? { on: true, address } : { on: true };
 }
@@ -380,7 +386,7 @@ async function linkBothWays(host: string, box: Machine, context: DevboxContext) 
   if (limit) throw new Error(`${host} has no T3 Connect tunnel: T3 Code there says ${limit}. Free one: run t3 connect logout on a machine that no longer needs T3 Connect, or unlink it in T3 Connect. Then run ${restartCommand} on ${host}, and run ${again(context)} again.`);
   if (!boxAddress) throw new Error(`${host} has no T3 Connect address yet. Update T3 Code on ${host}, then run ${again(context)} again.`);
   await link(box, host, boxAddress, context.machine, here);
-  const connectHere = await addressHere(context.machine);
+  const connectHere = await addressHere(context.machine, again(context));
   if (connectHere.address) await link(context.machine, here, connectHere.address, box, host);
   else if (connectHere.on) throw new Error(`T3 Connect is on here, but Hedge could not find this machine's tunnel address. Update T3 Code here, then run ${again(context)} again so ${host} links back.`);
   else context.terminal.print(`  · ${host} does not link back to this machine, because T3 Connect is off here. Turn it on with t3 up --connect, and T3 Code on ${host} can pair with this machine.`);

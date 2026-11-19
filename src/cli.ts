@@ -18,7 +18,7 @@ import { FlagError } from "./setup/flags.ts";
 import type { ChangeContext } from "./commands/change.ts";
 import { packsCommand } from "./commands/packs.ts";
 import { setCommand, settingsCommand } from "./commands/settings.ts";
-import { devboxCommand } from "./commands/devbox.ts";
+import { asksAddress, devboxCommand, printAddress } from "./commands/devbox.ts";
 import { hubCommand } from "./commands/hub.ts";
 import { triageCommand } from "./commands/triage.ts";
 import { recordSetup } from "./commands/triage-record.ts";
@@ -185,10 +185,12 @@ async function reconcile(command: "apply" | "doctor", args: string[], options: C
 }
 
 async function devbox(args: string[], options: CliOptions) {
-  const { plan } = await loadPlan(options, undefined, { fetch: false, remember: false });
   const terminal = options.terminal ?? { ...ttyTerminal(), print: options.print };
+  const machine = { ...realMachine, ...options.setup?.machine };
+  if (asksAddress(args)) return await printAddress({ terminal, machine });
+  const { plan } = await loadPlan(options, undefined, { fetch: false, remember: false });
   try {
-    return await devboxCommand(args, { home: options.home, terminal, machine: { ...realMachine, ...options.setup?.machine }, machineFile: plan.machine, plan });
+    return await devboxCommand(args, { home: options.home, terminal, machine, machineFile: plan.machine, plan });
   } catch (error) {
     if (!(error instanceof FlagError)) throw error;
     options.print(`hedge devbox: ${error.message}`);

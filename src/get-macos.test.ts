@@ -15,7 +15,7 @@ describe("get.sh on macOS", () => {
     expect(readdirSync(box.home)).toEqual([]);
   });
 
-  function launchd(box: Sandbox, options: { failDisable?: string[]; keepRunning?: string[] } = {}) {
+  function launchd(box: Sandbox, options: { failDisable?: string[]; keepRunning?: string[]; printDisabledFails?: boolean } = {}) {
     const loaded = join(box.root, "loaded");
     const disabled = join(box.root, "disabled");
     const agents = join(box.home, "Library/LaunchAgents");
@@ -26,7 +26,7 @@ case "$1" in
   bootout) case " ${(options.keepRunning ?? []).join(" ")} " in *" $label "*) exit 5 ;; esac; grep -vx "$label" "${loaded}" > "${loaded}.new"; mv "${loaded}.new" "${loaded}" ;;
   disable) case " ${(options.failDisable ?? []).join(" ")} " in *" $label "*) exit 1 ;; esac; echo "$label" >> "${disabled}" ;;
   print) grep -qx "$label" "${loaded}" || exit 113 ;;
-  print-disabled) echo 'disabled services = {'; while read -r off; do printf '\\t"%s" => disabled\\n' "$off"; done < "${disabled}"; echo '}' ;;
+  print-disabled) echo 'disabled services = {'; while read -r off; do printf '\\t"%s" => disabled\\n' "$off"; done < "${disabled}"; echo '}'; ${options.printDisabledFails ? "exit 1" : ":"} ;;
 esac`);
     const login = () => {
       for (const plist of readdirSync(agents)) {
@@ -39,7 +39,7 @@ esac`);
     return { loaded, agents, login };
   }
 
-  function earlierJobs(box: Sandbox, options: { failDisable?: string[]; keepRunning?: string[] } = {}) {
+  function earlierJobs(box: Sandbox, options: { failDisable?: string[]; keepRunning?: string[]; printDisabledFails?: boolean } = {}) {
     const jobs = launchd(box, options);
     mkdirSync(jobs.agents, { recursive: true });
     for (const label of ["dev.fleet.nightly", "dev.hedge.update", "com.apple.other"]) writeFileSync(join(jobs.agents, `${label}.plist`), "<plist/>\n");
@@ -85,6 +85,15 @@ esac`);
       ].join("\n"),
     );
     expect(jobs.login()).toEqual(["com.apple.other", "com.fleet.mcphub", "dev.fleet.nightly"]);
+  });
+
+  onLinuxHost("does not take a job as turned off when launchctl print-disabled lists it but fails", () => {
+    const box = sandbox("Darwin");
+    earlierJobs(box, { printDisabledFails: true });
+    const result = getSh(box, []);
+    expect(result.code).toBe(1);
+    expect(result.output).not.toContain("stopped and turned off");
+    expect(result.output).toEndWith("Hedge: these launchd jobs of an earlier Fleet or Hedge are not off yet: com.fleet.mcphub, dev.fleet.nightly, dev.hedge.update. Run the commands above, then run get.sh again.\n");
   });
 
   onLinuxHost("says so and exits 1 when a job of an earlier Fleet or Hedge does not stop", () => {
