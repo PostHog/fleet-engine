@@ -257,7 +257,7 @@ test("an agent answers an arbiter escalation itself with --agent on a graded PR,
   expect((await pr.hedge("show", "--round", "3")).output).toContain(`decided by 🤖 decision ${round.decision.id}`);
 });
 
-test("at the review budget hedge asks nothing, --agent cannot pass it, and only the user's --override runs another review", async () => {
+test("at the review budget hedge asks nothing for a fixes round, --agent cannot pass it, and only the user's --override runs it", async () => {
   const pr = await checkout();
   pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.reviewCeiling": 3 });
   pr.pullRequestState({ body: graded("non-critical", "medium") });
@@ -268,11 +268,11 @@ test("at the review budget hedge asks nothing, --agent cannot pass it, and only 
   const fixes = await pr.commit("feature.txt", "fix 1\n");
   await pr.hedge("review-start", "--scope", "fixes", "--base", reviewed);
   await finishRound(pr, "2");
-  const last = await pr.commit("feature.txt", "fix 2\n");
+  await pr.commit("feature.txt", "fix 2\n");
   await pr.hedge("review-start", "--scope", "final", "--base", fixes);
   await finishRound(pr, "final-1");
   await pr.commit("feature.txt", "fix 3\n");
-  const fourth = ["review-start", "--scope", "final", "--base", last];
+  const fourth = ["review-start", "--scope", "fixes", "--base", fixes];
 
   const refusal = pr.hedge(...fourth);
   await expect(refusal).rejects.toThrow("The review budget of 3 reviews is spent. hedge proof asks nothing more. For each open blocker or major, revert the fix that brought it in, or list it in a \"## Known issues\" section of the PR body");
@@ -297,8 +297,7 @@ test("the review settings set how many reviews run free and where the loop stops
   await finishRound(pr, "2");
   await expect(pr.hedge("review-start", "--scope", "fixes", "--base", head)).rejects.toThrow("The review budget of 2 reviews is spent");
   await pr.commit("feature.txt", "fixed\n");
-  await expect(pr.hedge("review-start", "--scope", "final", "--base", head)).rejects.toThrow("The review budget of 2 reviews is spent");
-  await expect(pr.hedge("review-start", "--scope", "final", "--base", head, "--phase", "babysit")).resolves.toMatchObject({ code: 0 });
+  await expect(pr.hedge("review-start", "--scope", "final", "--base", head)).resolves.toMatchObject({ code: 0 });
 });
 
 test("without a replacement command, the arbiter runs the lookup row of the model table with its provider, model, and effort", async () => {

@@ -97,8 +97,8 @@ export function reviewTier(identity: ProofIdentity, run: Run, body: string | und
 
 export function pullRequestDetails(identity: ProofIdentity, run: Run) {
   try {
-    const { title, body, base } = readPullRequest(identity, run);
-    return { title, body, baseRefName: base };
+    const { title, body, base, baseSha } = readPullRequest(identity, run);
+    return { title, body, baseRefName: base, baseSha };
   } catch (error) {
     throw new Error(`Cannot read ${identity.repository}#${identity.pr} over GitHub's REST API (${(error as Error).message})`);
   }

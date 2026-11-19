@@ -8,19 +8,37 @@ const testFiles = [
 ];
 export const isTestFile = (path: string) => testFiles.some((pattern) => pattern.test(path));
 
-export type NetDelta = { tree: string; files: string[] };
+export type ReviewedHead = { commit: string; baseSha?: string };
+export type NetDelta = { tree: string; files: string[] } | { unread: string };
 
-export function netDeltaIn(run: Run, baseRefs: () => string[]) {
-  let bases: string[] | undefined;
-  return (reviewed: string, head: string): NetDelta | undefined => {
-    if ([reviewed, head].some((commit) => run(["git", "cat-file", "-e", `${commit}^{commit}`]).code !== 0)) return undefined;
-    bases ??= (() => { try { return baseRefs(); } catch { return []; } })();
-    const base = bases.map((ref) => run(["git", "merge-base", head, ref])).find((result) => result.code === 0)?.stdout.trim();
-    if (!base) return undefined;
-    const merged = run(["git", "merge-tree", "--write-tree", "--no-messages", reviewed, base]);
-    const tree = merged.code <= 1 ? /^[0-9a-f]{40,64}$/.exec(merged.stdout.split("\n")[0] ?? "")?.[0] : undefined;
-    if (!tree) return undefined;
+const short = (commit: string) => commit.slice(0, 7);
+const fullRead = "Read the whole PR again with hedge proof review --scope full and --agent '<your reason>'";
+
+export function netDeltaIn(run: Run, remotes: () => string[]) {
+  const present = (commit: string) => run(["git", "cat-file", "-e", `${commit}^{commit}`]).code === 0;
+  const fetched = new Map<string, boolean>();
+  const verified = (base: string) => {
+    if (!fetched.has(base)) {
+      if (!present(base)) for (const remote of remotes()) if (run(["git", "fetch", "--quiet", "--no-tags", "--no-write-fetch-head", remote, base]).code === 0) break;
+      fetched.set(base, present(base));
+    }
+    return fetched.get(base)!;
+  };
+  const holds = (ancestor: string, commit: string) => run(["git", "merge-base", "--is-ancestor", ancestor, commit]).code === 0;
+  return (reviewed: ReviewedHead, head: string, base: string | undefined): NetDelta => {
+    const missing = [reviewed.commit, head].find((commit) => !present(commit));
+    if (missing) return { unread: `the checkout lacks ${short(missing)}, so nothing carries` };
+    if (!base) return { unread: "GitHub names no base commit of the PR, so nothing carries" };
+    if (!verified(base)) return { unread: `the checkout lacks the PR's base ${short(base)} and cannot fetch it, so nothing carries` };
+    if (!reviewed.baseSha) return { unread: `the review of ${short(reviewed.commit)} recorded no base, so nothing carries. ${fullRead}` };
+    if (!present(reviewed.baseSha) || !holds(reviewed.baseSha, base)) return { unread: `the PR's base on GitHub no longer holds ${short(reviewed.baseSha)}, the base that review stood on, so nothing carries. ${fullRead}` };
+    const contained = run(["git", "merge-base", head, base]);
+    if (contained.code !== 0) return { unread: `HEAD shares no history with the PR's base ${short(base)}, so nothing carries` };
+    const merged = run(["git", "merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", reviewed.commit, contained.stdout.trim()]);
+    const [tree = "", ...conflicted] = merged.code <= 1 ? merged.stdout.split("\0") : [];
+    if (!/^[0-9a-f]{40,64}$/.test(tree)) return { unread: `git cannot merge ${short(reviewed.commit)} with the base here, so nothing carries` };
     const changed = run(["git", "diff", "--name-only", "-z", "--no-renames", "--no-relative", "--no-ext-diff", "--ignore-submodules=none", tree, head]);
-    return changed.code === 0 ? { tree, files: changed.stdout.split("\0").filter(Boolean) } : undefined;
+    if (changed.code !== 0) return { unread: `git cannot diff the merged tree of ${short(reviewed.commit)} against HEAD here, so nothing carries` };
+    return { tree, files: [...new Set([...conflicted, ...changed.stdout.split("\0")].filter(Boolean))].sort() };
   };
 }

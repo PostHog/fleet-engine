@@ -20,7 +20,7 @@ import { publisherSeam } from "./proof-receipt-publisher.ts";
 import { reviewPrompt } from "./proof-review.ts";
 import { leftOutNote, reviewRange } from "./proof-range.ts";
 import { netDeltaIn } from "./proof-delta.ts";
-import { baseRefs, baseTip, cleanBaseMerge, mergeBase, pullRequestDetails, remotesOf, reviewTier, tierCeiling, tierLenses, topLevel, type ReviewTier } from "./proof-checkout.ts";
+import { baseTip, cleanBaseMerge, mergeBase, pullRequestDetails, remotesOf, reviewTier, tierCeiling, tierLenses, topLevel, type ReviewTier } from "./proof-checkout.ts";
 import { arbiterOf, finalGate, reviewLimit, type FinalGate } from "./proof-gate.ts";
 import { anchorCheck } from "./finding-anchors.ts";
 import { reviewRules } from "./review-rules.ts";
@@ -573,7 +573,7 @@ async function runReview(options: Map<string, string>, head: ProofIdentity, cont
 
 async function printConfirmingRead(directory: string, { print }: CommandContext) {
   const confirms = (await readReservation(directory))?.confirms;
-  if (confirms) print(`This final read confirms the arbiter's stop (${confirms}). It starts no other review: take each blocker or major it finds to the user.`);
+  if (confirms) print(`This final read confirms the arbiter's stop (${confirms.reason}). It starts no other review: take each blocker or major it finds to the user.`);
 }
 
 async function printSavedReview({ round, id, directory }: SingleRound, { print }: CommandContext) {
@@ -626,17 +626,16 @@ async function reserveRound(options: Map<string, string>, head: ProofIdentity, c
   await settleStrandedRounds(head, context);
   const scope = options.get("--scope") ?? "full";
   const base = options.has("--base") ? resolveCommit(options.get("--base")!, context.run) : undefined;
-  const lastRead = scope === "final" && (options.get("--phase") ?? "review") === "review";
-  const netDelta = netDeltaIn(context.run, () => baseRefs(head, context.run));
-  const start = lastRead ? await panelCommit(context.home, head) ?? base : base;
-  const from = scope === "full" ? mergeBase(head, context.run) : start && (netDelta(start, head.commit)?.tree ?? start);
+  const netDelta = netDeltaIn(context.run, () => remotesOf(head.repository, context.run));
+  const from = scope === "full" ? mergeBase(head, context.run) : undefined;
   const { decision, ...permit } = await decisionOf(options, head, context);
   const tier = tierOf(head, context);
   if (tier.name === "read" && capturedBy === "hedge" && !panel && !decision && !await panelCommit(context.home, head)) throw new Error("A PR of the Read tier gets one read, and it is the panel: run hedge proof review, which runs its combined lens");
   const firstPanel = panel && !await panelCommit(context.home, head);
   const limits = firstPanel ? permit.limits : { ...permit.limits, ceiling: tierCeiling(tier, permit.limits.ceiling) };
-  const reserved = await startReview(context.home, head, { scope, base, from, ...permit, limits, decision, phase: options.get("--phase"), cleanBaseMerge: cleanBaseMerge(head, context.run), netDelta, capturedBy, lock: async (directory) => lockNewRound(directory, await context.lock()) });
-  return { ...reserved, scope, base, from, phase: options.get("--phase") };
+  const baseSha = pullRequestDetails(head, context.run).baseSha;
+  const reserved = await startReview(context.home, head, { scope, base, from, ...permit, limits, decision, phase: options.get("--phase"), cleanBaseMerge: cleanBaseMerge(head, context.run), netDelta, baseSha, capturedBy, lock: async (directory) => lockNewRound(directory, await context.lock()) });
+  return { ...reserved, scope, base, phase: options.get("--phase") };
 }
 
 async function unrecordedRound(options: Map<string, string>, head: ProofIdentity, context: CommandContext) {

@@ -106,7 +106,7 @@ test("a prose finding stays a finding when the review also lists TESTS items", (
   expect(items).toEqual(["The greeting drops the name.", "- a.test.ts:1 asserts a mock"]);
 });
 
-test("a test-only diff at low merge risk gets the Read tier: one combined Correctness and Risk lens on the other family, then, once both find a major, no more reads", async () => {
+test("a test-only diff at low merge risk gets the Read tier: one combined Correctness and Risk lens on the other family, then, once both find a major, no fixes round", async () => {
   const pr = await checkout();
   pr.pullRequestState({ body: graded("non-critical", "low") });
   await pr.commit("feature.test.ts", Array.from({ length: 80 }, (_, line) => `test("greets ${line}", () => {});`).join("\n") + "\n");
@@ -128,9 +128,8 @@ test("a test-only diff at low merge risk gets the Read tier: one combined Correc
   expect((await pr.hedge("gate")).code).toBe(1);
   reviewer.answer("FINDINGS:\n- helper.ts:1 | major | Correctness | the name drops the member | name the member | anchor: member\nCOVERED: helper.ts\n");
   expect((await pr.hedge("review", "--scope", "final", "--base", reviewed)).code).toBe(0);
-  const read = await pr.git("rev-parse", "HEAD");
   await pr.commit("helper.ts", "export const name = \"new member\";\n");
-  await expect(pr.hedge("review", "--scope", "final", "--base", read)).rejects.toThrow("The review budget of 2 reviews is spent.");
+  await expect(pr.hedge("review", "--scope", "fixes", "--base", reviewed)).rejects.toThrow("The review budget of 2 reviews is spent.");
 });
 
 test("a 120-line diff at low merge risk gets the Pair tier: correctness and risk on the other family and fresh eyes on the author's", async () => {
@@ -291,7 +290,7 @@ test("an unfinished panel reruns with its own lenses after the merge risk change
   expect((await pr.hedge("review", "--wait")).code).toBe(0);
 });
 
-test("the last read reads every fix since the panel commit with the Correctness lens", async () => {
+test("the last read reads what changed since the latest review with the Correctness lens", async () => {
   const pr = await checkout();
   pr.pullRequestState({ body: graded("non-critical", "medium") });
   const panel = await pr.commit("feature.txt", "greet\n");
@@ -306,9 +305,9 @@ test("the last read reads every fix since the panel commit with the Correctness 
 
   expect((await pr.hedge("review", "--scope", "final", "--base", fixes)).code).toBe(0);
   const prompt = reviewer.prompts().at(-1)!;
-  expect(prompt).toContain(`Review the change ${await pr.git("rev-parse", `${panel}^{tree}`)}..${head}`);
-  expect(prompt).toContain("This is the last read: the diff holds every fix since the panel. Read it with the Correctness lens:\n\nTrace one concrete input through each new branch.");
-  expect(prompt).toContain("-greet\n+greet the new member");
+  expect(prompt).toContain(`Review the change ${await pr.git("rev-parse", `${fixes}^{tree}`)}..${head}`);
+  expect(prompt).toContain("This is the last read: the diff holds what changed since the latest review, without the base's own changes. Read it with the Correctness lens:\n\nTrace one concrete input through each new branch.");
+  expect(prompt).toContain("-greet the member\n+greet the new member");
 });
 
 test("a first final read from the panel commit reads with the Correctness lens too", async () => {
@@ -323,7 +322,7 @@ test("a first final read from the panel commit reads with the Correctness lens t
   reviewer.answer("No findings.");
 
   expect((await pr.hedge("review", "--scope", "final", "--base", panel)).code).toBe(0);
-  expect(reviewer.prompts().at(-1)!).toContain("This is the last read: the diff holds every fix since the panel. Read it with the Correctness lens");
+  expect(reviewer.prompts().at(-1)!).toContain("This is the last read: the diff holds what changed since the latest review, without the base's own changes. Read it with the Correctness lens");
 });
 
 test("hedge proof miss records --introduced-by-fix on the case", async () => {

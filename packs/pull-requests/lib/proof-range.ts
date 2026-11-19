@@ -7,7 +7,7 @@ export type ReviewRange = { files: string[]; leftOut: string[]; diff: string };
 
 export function reviewRange(run: Run, from: string, head: string, branched: string): ReviewRange {
   const changed = changedFiles(run, from, head);
-  const own = from === branched ? undefined : new Set(changedFiles(run, branched, head).flat());
+  const own = from === branched || startsAtNetDelta(run, from) ? undefined : new Set(changedFiles(run, branched, head).flat());
   const kept = changed.filter((paths) => !own || paths.some((path) => own.has(path)));
   const files = kept.map(last);
   const leftOut = changed.filter((paths) => !kept.includes(paths)).map(last);
@@ -39,6 +39,7 @@ function diffOf(run: Run, from: string, to: string, files?: string[]) {
   return reviewedDiff(result.stdout);
 }
 
+const startsAtNetDelta = (run: Run, from: string) => run(["git", "cat-file", "-t", from]).stdout.trim() === "tree";
 const last = (paths: string[]) => paths[paths.length - 1]!;
 const short = (commit: string) => commit.slice(0, 7);
 const firstLine = (text: string) => text.trim().split("\n")[0] ?? "";
