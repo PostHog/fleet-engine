@@ -102,7 +102,6 @@ function environmentApiKeyDead(host: string | undefined) {
 export const codexProbeTimeoutMs = 20_000;
 
 const fileStore = 'cli_auth_credentials_store="file"';
-const signInGone = /\b401\b|unauthorized|not logged in|log in again|sign in again|\b(?:token|session|sign-?in|login|credentials?)\b[^.\n]{0,40}\bexpired\b|\bexpired\s+(?:token|session|sign-?in|login|credentials?)\b/i;
 const codexConfig = ["sh", "-c", 'cat "${CODEX_HOME:-$HOME/.codex}/config.toml"'];
 
 async function codexStore(machine: Machine) {
@@ -138,10 +137,9 @@ export function chatgptSignIn(machine: Machine, models: ModelRow[]): SignIn {
         const command = ["codex", "exec", "--ephemeral", "--sandbox", "read-only", "--ignore-user-config", "-c", storeOption(), "--skip-git-repo-check", ...(model ? ["--model", model] : []), "Reply with the word ok."];
         const reply = await machine.exec(command, { cwd: dir, timeoutMs: codexProbeTimeoutMs });
         if (reply.code === 0) return true;
-        if (signInGone.test(reply.output)) return false;
         const status = await machine.exec(["codex", "login", "status"]);
-        if (status.code === 0) throw new SignInKept(`Codex is signed in, but its test request failed: ${probeError(reply.output)}. Setup keeps that sign-in and starts no new one.`);
-        if (signInGone.test(status.output)) return false;
+        if (status.code !== 0 && status.output.split("\n").some((line) => line.trim() === "Not logged in")) return false;
+        if (status.code === 0) throw new SignInKept(`Codex is signed in, but its test request failed: ${probeError(reply.output)}. Setup keeps that sign-in and starts no new one. To replace it, run codex logout first.`);
         throw new SignInKept(`Codex's test request failed: ${probeError(reply.output)}, and codex login status could not tell whether Codex is signed in: ${probeError(status.output)}. Setup keeps the sign-in it may have and starts no new one.`);
       } finally {
         rmSync(dir, { recursive: true, force: true });

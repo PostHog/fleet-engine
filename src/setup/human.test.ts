@@ -346,7 +346,7 @@ describe("ChatGPT's check", () => {
     const box = fakeMachine(home, { chatgpt: 99 }, { codexProbe: { output: "ERROR: You hit your spend cap set by the owner of your workspace.\n", loggedIn: true } });
     const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "codex"], ["", ""], box);
     expect(result.code).toBe(2);
-    expect(result.output).toContain("  Needs you: Sign in to ChatGPT\n  Codex is signed in, but its test request failed: You hit your spend cap set by the owner of your workspace. Setup keeps that sign-in and starts no new one. Fix that, then run hedge setup again.\n");
+    expect(result.output).toContain("  Needs you: Sign in to ChatGPT\n  Codex is signed in, but its test request failed: You hit your spend cap set by the owner of your workspace. Setup keeps that sign-in and starts no new one. To replace it, run codex logout first. Fix that, then run hedge setup again.\n");
     expect(result.output).not.toContain("hedge: ");
     expect(result.output).not.toContain("▶ Sign in to ChatGPT");
     expect(box.codexCredential()).toBe("kept");
@@ -362,13 +362,21 @@ describe("ChatGPT's check", () => {
     expect(box.codexCredential()).toBe("kept");
   });
 
-  test("an expired certificate is not an expired sign-in: setup keeps the sign-in Codex reports and starts no device sign-in", async () => {
+  test("a token refresh that fails on an expired certificate keeps the sign-in codex login status reports, and starts no device sign-in", async () => {
     const home = temp.make("home-");
-    const box = fakeMachine(home, { chatgpt: 99 }, { codexProbe: { output: "ERROR: error sending request for url (https://chatgpt.com/backend-api/codex/responses): invalid peer certificate: certificate expired\n", loggedIn: true } });
+    const box = fakeMachine(home, { chatgpt: 99 }, { codexProbe: { output: "ERROR: Failed to refresh token: certificate expired\n", loggedIn: true } });
     const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "codex"], ["", ""], box);
     expect(result.code).toBe(2);
-    expect(result.output).toContain("Codex is signed in, but its test request failed: error sending request for url (https://chatgpt.com/backend-api/codex/responses): invalid peer certificate: certificate expired. Setup keeps that sign-in and starts no new one.");
-    expect(box.starts.filter((command) => command.includes("--device-auth"))).toEqual([]);
+    expect(result.output).toContain("Codex is signed in, but its test request failed: Failed to refresh token: certificate expired. Setup keeps that sign-in and starts no new one.");
+    expect(box.codexCredential()).toBe("kept");
+  });
+
+  test("a test request that says the sign-in expired keeps the sign-in codex login status still reports, and says how to replace it", async () => {
+    const home = temp.make("home-");
+    const box = fakeMachine(home, { chatgpt: 99 }, { codexProbe: { output: "ERROR: unexpected status 401 Unauthorized: token expired\n", loggedIn: true } });
+    const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "codex"], ["", ""], box);
+    expect(result.code).toBe(2);
+    expect(result.output).toContain("Codex is signed in, but its test request failed: unexpected status 401 Unauthorized: token expired. Setup keeps that sign-in and starts no new one. To replace it, run codex logout first. Fix that, then run hedge setup again.");
     expect(box.codexCredential()).toBe("kept");
   });
 
@@ -382,9 +390,9 @@ describe("ChatGPT's check", () => {
     expect(box.codexCredential()).toBe("kept");
   });
 
-  test("starts a new sign-in when the test request says the sign-in expired, though Codex still reports one, and a later Codex session can use the new one", async () => {
+  test("starts a new sign-in when codex login status says Codex is not logged in, and a later Codex session can use the new one", async () => {
     const home = temp.make("home-");
-    const box = fakeMachine(home, { chatgpt: 1 }, { exits: { chatgpt: 0 }, codexProbe: { output: "ERROR: unexpected status 401 Unauthorized: token expired\n", loggedIn: true } });
+    const box = fakeMachine(home, { chatgpt: 1 }, { exits: { chatgpt: 0 }, codexProbe: { output: "ERROR: unexpected status 401 Unauthorized\n", loggedIn: false } });
     const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "codex"], ["", ""], box);
     expect(result.code).toBe(0);
     expect(box.codexCredential()).toBe("replaced");
@@ -392,7 +400,7 @@ describe("ChatGPT's check", () => {
   });
 
   const failsAfterSignIn = { exits: { chatgpt: 0 }, codexProbe: { output: "ERROR: unexpected status 401 Unauthorized\n", loggedIn: false, afterSignIn: "ERROR: You hit your spend cap.\n" } };
-  const keptAfterSignIn = "  Codex is signed in, but its test request failed: You hit your spend cap. Setup keeps that sign-in and starts no new one. Fix that, then run";
+  const keptAfterSignIn = "  Codex is signed in, but its test request failed: You hit your spend cap. Setup keeps that sign-in and starts no new one. To replace it, run codex logout first. Fix that, then run";
 
   test("when the test request fails after a completed device sign-in, setup ends with code 2, keeps the new sign-in, and says to run it again", async () => {
     const home = temp.make("home-");
@@ -422,7 +430,7 @@ describe("ChatGPT with own-account balancing", () => {
     const box = fakeMachine(home, { chatgpt: 99 }, { codexProbe: { output: "ERROR: You hit your spend cap.\n", loggedIn: true } });
     const result = await hedgeSetup(home, balanced, [], box);
     expect(result.code).toBe(0);
-    expect(result.output).toContain("  To do: Sign in to ChatGPT. With own-account balancing on, Codex goes through the proxy on the hub once it holds one of your ChatGPT subscriptions, so setup does not need this sign-in. Codex here needs it only until then. Codex is signed in, but its test request failed: You hit your spend cap. Setup keeps that sign-in and starts no new one. Fix that, then run hedge setup again.\n");
+    expect(result.output).toContain("  To do: Sign in to ChatGPT. With own-account balancing on, Codex goes through the proxy on the hub once it holds one of your ChatGPT subscriptions, so setup does not need this sign-in. Codex here needs it only until then. Codex is signed in, but its test request failed: You hit your spend cap. Setup keeps that sign-in and starts no new one. To replace it, run codex logout first. Fix that, then run hedge setup again.\n");
     expect(result.output).not.toContain("Run: codex login");
   });
 

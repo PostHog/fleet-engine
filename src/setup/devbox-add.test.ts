@@ -184,7 +184,7 @@ describe("hedge devbox add", () => {
     const io = scripted([]);
     const box = fakeMachine(home, { "box:chatgpt": 1 }, { exits: { "box:chatgpt": 0 }, boxCodexAfterSignIn: "ERROR: You hit your spend cap.\n" });
     await main(["devbox", "add", "coder.hedge-node-1"], { home, engineRoot, platform: "linux", print: io.terminal.print, terminal: io.terminal, setup: { machine: box.machine } });
-    expect(io.output()).toContain("Codex is signed in, but its test request failed: You hit your spend cap. Setup keeps that sign-in and starts no new one. Fix that, then run hedge devbox add coder.hedge-node-1 again.");
+    expect(io.output()).toContain("Codex is signed in, but its test request failed: You hit your spend cap. Setup keeps that sign-in and starts no new one. To replace it, run codex logout first. Fix that, then run hedge devbox add coder.hedge-node-1 again.");
     expect(io.output()).not.toContain("hedge setup again");
   });
 
