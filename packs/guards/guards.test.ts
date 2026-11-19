@@ -1143,7 +1143,7 @@ describe("the Git guard", () => {
     expect(denied.refusal).toContain(refusal);
   });
 
-  test.each(["gh alias set co 'pr checkout'", "gh alias list", "gh alias delete sp", "gh alias set --help", "cd $HOME/dev && gh pr list", "echo ${HOME} ${XDG_CONFIG_HOME} && gh pr list", "cd - && GH_CONFIG_DIR=relative gh alias set --help", "gh alias import --help=true", "gh alias import --help=false --help", "gh alias import -h --help=false"])("allows a gh alias that cannot push a stack: %s", async (command) => {
+  test.each(["gh alias set co 'pr checkout'", "gh alias list", "gh alias delete sp", "gh alias set --help", "cd $HOME/dev && gh pr list", "echo ${HOME} ${XDG_CONFIG_HOME} && gh pr list", "gh alias import --help=true", "gh alias import --help=false --help", "gh alias import -h --help=false"])("allows a gh alias that cannot push a stack: %s", async (command) => {
     expect(await preToolUse(homeWith(withGuards()), "claude", bash(command, await repo("feature")), { guardAsProcess: true })).toEqual({ code: 0, refusal: undefined });
   });
 
@@ -1198,6 +1198,10 @@ describe("the Git guard", () => {
     "doas gh pr list",
     "env 2>/dev/null -i gh pr list",
     "exec >/dev/null -c gh pr list",
+    "echo gh ext\nexec -c gh pr list",
+    "A='gh ext' exec -c gh pr list",
+    "env -i gh alias list",
+    "cd - && GH_CONFIG_DIR=relative gh alias set --help",
     "env \"GH_CONFIG\"_DIR=/elsewhere gh pr list",
     "env \"-i\" gh pr list",
     "env GH_CONFIG$''_DIR=/elsewhere gh pr list",

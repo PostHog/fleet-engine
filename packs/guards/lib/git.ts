@@ -163,11 +163,10 @@ function ghAliasHidesStack(name: string, args: string[]): boolean {
 /** The variables that move gh's config directory, and a read of one as `$NAME` or `${NAME}`. */
 const configVariable = /\b(?:GH_CONFIG_DIR|XDG_CONFIG_HOME|HOME)\b/;
 const configRead = /\$(?:\{(?:GH_CONFIG_DIR|XDG_CONFIG_HOME|HOME)\}|(?:GH_CONFIG_DIR|XDG_CONFIG_HOME|HOME)\b)/g;
-/**
- * `sudo` and `doas` switch the user, and `env` or `exec` can clear or unset the environment, with options a redirection
- * can separate. `gh extension exec` is not the shell's `exec`.
- */
-const environmentWrapper = /(?:^|[^\w.-])(?:sudo|doas|env|(?<!\bext(?:ensions?)?\s+)exec)(?![\w.-])/;
+/** `sudo` and `doas` switch the user, and `env` can clear or unset the environment, with options a redirection can separate. */
+const environmentWrapper = /(?:^|[^\w.-])(?:sudo|doas|env)(?![\w.-])/;
+/** The shell's `exec` can clear the environment too; `gh extension exec` also spells the word. */
+const execWord = /(?:^|[^\w.-])exec(?![\w.-])/g;
 
 /** A `$'…'` string with an escape that can spell a letter, such as `\x47`. */
 const escapedLetters = /\$'[^']*\\[xuUc0-7]/;
@@ -177,12 +176,13 @@ const unquoted = (command: string) => command.replace(/\\\r?\n/g, "").replace(/\
 /**
  * Whether gh may read another config than the one the agent's environment names: the command names a variable that
  * moves it other than to read it, or uses a wrapper that can change the user or the environment, also when quotes or
- * escapes split those words. The guard does not follow the shell's assignments, exports, tildes and unsets;
- * it refuses them.
+ * escapes split those words. `exec` may appear only once for each `gh extension exec` call the shell reader found. The
+ * guard does not follow the shell's assignments, exports, tildes and unsets; it refuses them.
  */
-function movesGhConfig(command: string): boolean {
+function movesGhConfig(command: string, extensionExecs: number): boolean {
   const words = unquoted(command);
-  return escapedLetters.test(command) || configVariable.test(words.replace(configRead, "")) || environmentWrapper.test(words);
+  return escapedLetters.test(command) || configVariable.test(words.replace(configRead, "")) || environmentWrapper.test(words)
+    || (words.match(execWord)?.length ?? 0) > extensionExecs;
 }
 
 /** gh's aliases from the config the agent's environment names; undefined when the guard cannot tell what gh reads. */
@@ -479,12 +479,17 @@ export function gitRisk(command: string, cwd: string, person: string, mainPushRe
     return repos.get(key);
   };
   let forced = 0;
-  for (const [call, directory] of withDirectories(commandsIn(command), cwd)) {
-    const ghArgs = ghArguments(call);
-    if (ghArgs && !managesAliases(ghArgs) && movesGhConfig(command)) return configReason(person);
-    if (ghArgs && !expandedGh(ghArgs)) return aliasReason(person);
+  const calls = commandsIn(command);
+  const extensionExecs = calls.filter((call) => {
+    const [group, action] = operandsOf(ghArguments(call) ?? []);
+    return extensionGroups.has(group ?? "") && action === "exec";
+  }).length;
+  for (const [call, directory] of withDirectories(calls, cwd)) {
     const stack = stackArgs(call.name, call.args);
     if ((stack && makesAlias(stack)) || ghAliasHidesStack(call.name, call.args)) return aliasReason(person);
+    const ghArgs = ghArguments(call);
+    if (ghArgs && movesGhConfig(command, extensionExecs)) return configReason(person);
+    if (ghArgs && !expandedGh(ghArgs)) return aliasReason(person);
     if (stack) forced += stackPushes(stack, () => repoAt(directory, []));
     if (call.name !== "git") continue;
     const { dir, selectors, settings, sub, args } = gitCall(call.args, directory, call.env);
