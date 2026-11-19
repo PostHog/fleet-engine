@@ -81,6 +81,29 @@ function packSource(home: string) {
   return { profile, release: () => cacheLock.release() };
 }
 
+function sourceWithCommand() {
+  const repo = temp.make("source-");
+  const commit = (word: string) => {
+    mkdirSync(join(repo, "packs/extra/commands"), { recursive: true });
+    writeFileSync(join(repo, "packs/extra/pack.json"), JSON.stringify({ schema: 1, name: "extra", summary: "Extra." }));
+    writeFileSync(join(repo, "packs/extra/commands/hello.ts"), `await Bun.write(Bun.env.HOME + "/hello.txt", ${JSON.stringify(word)});\n`);
+    git(repo, "add", ".");
+    git(repo, "commit", "-q", "-m", word);
+  };
+  git(repo, "init", "-q", "-b", "main");
+  commit("saved");
+  git(repo, "checkout", "-q", "-b", "candidate");
+  commit("candidate");
+  git(repo, "checkout", "-q", "main");
+  const profile = (ref: string, url = repo) => {
+    const dir = profileDir(["extra"]);
+    const answers = JSON.parse(readFileSync(join(dir, "hedge.json"), "utf8"));
+    writeFileSync(join(dir, "hedge.json"), JSON.stringify({ ...answers, sources: [{ name: "extra", repo: url, ref }] }));
+    return dir;
+  };
+  return { repo, profile };
+}
+
 function startsFleetDuringFetch(linux: ReturnType<typeof machine>) {
   const { profile, release } = packSource(linux.home);
   linux.clock.sleep = async () => {
@@ -544,38 +567,80 @@ describe("hedge apply while Fleet still runs", () => {
 
   test("an apply --profile that a Fleet unit stops while Hedge fetches the same source at another ref leaves the saved profile's pack commands off that checkout", async () => {
     const linux = machine("linux");
-    const withCommand = (word: string) => {
-      const repo = temp.make("source-");
-      mkdirSync(join(repo, "packs/extra/commands"), { recursive: true });
-      writeFileSync(join(repo, "packs/extra/pack.json"), JSON.stringify({ schema: 1, name: "extra", summary: "Extra." }));
-      writeFileSync(join(repo, "packs/extra/commands/hello.ts"), `await Bun.write(Bun.env.HOME + "/hello.txt", ${JSON.stringify(word)});\n`);
-      git(repo, "init", "-q", "-b", "main");
-      git(repo, "add", ".");
-      git(repo, "commit", "-q", "-m", word);
-      const profile = profileDir(["extra"]);
-      const answers = JSON.parse(readFileSync(join(profile, "hedge.json"), "utf8"));
-      writeFileSync(join(profile, "hedge.json"), JSON.stringify({ ...answers, sources: [{ name: "extra", repo, ref: "main" }] }));
-      return profile;
-    };
+    const source = sourceWithCommand();
     const hello = join(linux.home, "hello.txt");
-    expect((await linux.hedge(["apply", "--profile", withCommand("saved")])).code).toBe(0);
-    const candidate = withCommand("candidate");
+    expect((await linux.hedge(["apply", "--profile", source.profile("main")])).code).toBe(0);
     const cacheLock = holdLock(join(linux.home, ".local/share/hedge/sources/extra.lock"));
     linux.clock.sleep = async () => {
       linux.systemd.units.set("fleet-watch.service", { active: true, enabled: true });
       cacheLock.release();
     };
-    expect((await linux.hedge(["apply", "--profile", candidate])).code).toBe(1);
+    expect((await linux.hedge(["apply", "--profile", source.profile("candidate")])).code).toBe(1);
 
     const refused = await linux.hedge(["hello"]);
 
     expect(refused.code).not.toBe(0);
     expect(existsSync(hello)).toBe(false);
-    expect(refused.output).toContain(`The pack source extra did not load: the cached checkout is not main of `);
+    expect(refused.output).toContain("The pack source extra at main did not load: the cached checkout is not main; run hedge apply.");
     expect((await linux.hedge(["retire-fleet"])).code).toBe(0);
     expect((await linux.hedge(["apply"])).code).toBe(0);
     expect((await linux.hedge(["hello"])).code).toBe(0);
     expect(readFileSync(hello, "utf8")).toBe("saved");
+  });
+
+  test("a pack command waits while an apply works in its source's cache, so it never loads the checkout that a refused apply left", async () => {
+    const linux = machine("linux");
+    const source = sourceWithCommand();
+    const hello = join(linux.home, "hello.txt");
+    expect((await linux.hedge(["apply", "--profile", source.profile("main")])).code).toBe(0);
+    const cacheLock = holdLock(join(linux.home, ".local/share/hedge/sources/extra.lock"));
+    let candidate: Awaited<ReturnType<typeof linux.hedge>> | undefined;
+    let naps = 0;
+    linux.clock.sleep = async () => {
+      const nap = ++naps;
+      if (nap === 1) candidate = await linux.hedge(["apply", "--profile", source.profile("candidate")]);
+      if (nap === 2) {
+        linux.systemd.units.set("fleet-watch.service", { active: true, enabled: true });
+        cacheLock.release();
+      }
+    };
+
+    const ran = await linux.hedge(["hello"]);
+
+    expect(candidate?.code).toBe(1);
+    expect(ran.code).not.toBe(0);
+    expect(ran.output).toContain("The pack source extra at main did not load: the cached checkout is not main; run hedge apply.");
+    expect(existsSync(hello)).toBe(false);
+  });
+
+  test("after an apply falls back to the last good checkout because the new ref does not fetch, the new profile's pack commands run that checkout", async () => {
+    const linux = machine("linux");
+    const source = sourceWithCommand();
+    expect((await linux.hedge(["apply", "--profile", source.profile("main")])).code).toBe(0);
+
+    const moved = await linux.hedge(["apply", "--profile", source.profile("gone")]);
+    const ran = await linux.hedge(["hello"]);
+
+    expect(moved.code).toBe(0);
+    expect(moved.output).toContain("using main instead");
+    expect(ran.code).toBe(0);
+    expect(readFileSync(join(linux.home, "hello.txt"), "utf8")).toBe("saved");
+  });
+
+  test("a source URL with a token in it stays out of apply, refresh, and the unknown-command message", async () => {
+    const linux = machine("linux");
+    const source = sourceWithCommand();
+    expect((await linux.hedge(["apply", "--profile", source.profile("main")])).code).toBe(0);
+    const token = ["ghp", "q".repeat(30)].join("_");
+    const secretProfile = source.profile("main", `https://hedge:${token}@127.0.0.1:9/extra.git`);
+
+    const applied = await linux.hedge(["apply", "--profile", secretProfile]);
+    const unknown = await linux.hedge(["no-such-command"]);
+    const refreshed = await linux.hedge(["refresh"]);
+
+    for (const output of [applied.output, unknown.output, refreshed.output]) expect(output).not.toContain(token);
+    expect(unknown.output).toContain("The pack source extra at main did not load: the cached checkout is not main; run hedge apply.");
+    expect(refreshed.output).toContain("https://127.0.0.1:9/extra.git");
   });
 
   test("hedge doctor with no profile yet, as get.sh leaves a machine where an old job still runs, names that job before it says the profile is missing", async () => {

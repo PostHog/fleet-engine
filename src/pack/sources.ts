@@ -14,8 +14,15 @@ export type Clock = { sleep(ms: number): Promise<void> };
 
 const realClock: Clock = { sleep: (ms) => Bun.sleep(ms) };
 
-/** What the cache last loaded successfully: the source's repository, ref, and commit. */
-type Good = { repo: string; ref: string; commit: string };
+/** What the cache last loaded successfully: the source's repository, ref, and commit, and the ref a profile asked for when Hedge fell back to this one. */
+type Good = { repo: string; ref: string; commit: string; asked?: string };
+
+export const withoutUserinfo = (text: string) => text.replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, "$1");
+
+function cleaned(source: FetchedSource): FetchedSource {
+  if ("error" in source) return { ...source, error: withoutUserinfo(source.error) };
+  return source.stale === undefined ? source : { ...source, stale: withoutUserinfo(source.stale) };
+}
 
 export async function fetchSources(refs: SourceRef[], cacheRoot: string): Promise<FetchedSource[]> {
   return Promise.all(refs.map((ref) => fetchSource(ref, cacheRoot)));
@@ -33,7 +40,7 @@ export async function fetchSource(ref: SourceRef, cacheRoot: string, loadLimitMs
   const lock = await waitLock(cacheLock(cacheRoot, ref.name), clock.sleep, cacheWaitMs);
   if (!lock) return { ref, error: `another Hedge run kept working in ${dir} for over ${cacheWaitMs / 60_000} minutes` };
   try {
-    return await fetchLocked(ref, dir, loadLimitMs);
+    return cleaned(await fetchLocked(ref, dir, loadLimitMs));
   } finally {
     lock.release();
   }
@@ -93,6 +100,7 @@ async function fallBack(ref: SourceRef, dir: string, repo: string, good: Good | 
   if (!(await git(dir, "checkout", "-q", "--detach", good.commit)).ok) return { ref, error: reason };
   const loaded = await load(dir, loadLimitMs);
   if ("error" in loaded) return { ref, error: reason };
+  await saveGood(dir, { repo: good.repo, ref: good.ref, commit: good.commit, ...(good.ref === ref.ref ? {} : { asked: ref.ref }) });
   return { ref, dir, packs: loaded.packs, stale: good.ref === ref.ref ? reason : `${reason}; using ${good.ref} instead` };
 }
 
@@ -181,7 +189,8 @@ export async function advanceSource(ref: SourceRef, cacheRoot: string, from: str
   const lock = tryLock(cacheLock(cacheRoot, ref.name));
   if (!lock) return { state: "busy" };
   try {
-    return await advanceLocked(ref, dir, from, loadLimitMs);
+    const advanced = await advanceLocked(ref, dir, from, loadLimitMs);
+    return "say" in advanced ? { ...advanced, say: withoutUserinfo(advanced.say) } : advanced;
   } finally {
     lock.release();
   }
@@ -214,13 +223,22 @@ async function advanceLocked(ref: SourceRef, dir: string, from: string, loadLimi
   return { state: "moved", commit: tip, source: { ref, dir, packs: loaded.packs } };
 }
 
-export async function cachedSource(ref: SourceRef, cacheRoot: string): Promise<FetchedSource> {
-  const dir = join(cacheRoot, ref.name);
+/** Loads a source from its cache while no other Hedge run works in it, and only when the checkout is what the profile asks for. */
+export async function cachedSource(ref: SourceRef, cacheRoot: string, clock: Clock = realClock): Promise<FetchedSource> {
+  const dir = cacheDir(ref, cacheRoot);
+  if (typeof dir !== "string") return { ref, error: dir.error };
   if (!existsSync(join(dir, ".git"))) return { ref, error: "never fetched; run hedge apply" };
-  const good = await lastGood(dir);
-  const head = (await git(dir, "rev-parse", "HEAD")).stdout;
-  if (good?.repo !== repoUrl(ref.repo) || good.ref !== ref.ref || good.commit !== head) return { ref, error: `the cached checkout is not ${ref.ref} of ${ref.repo}; run hedge apply` };
-  return { ref, dir, packs: await loadPacks(dir) };
+  const lock = await waitLock(cacheLock(cacheRoot, ref.name), clock.sleep, cacheWaitMs);
+  if (!lock) return { ref, error: `another Hedge run kept working in ${dir} for over ${cacheWaitMs / 60_000} minutes` };
+  try {
+    const good = await lastGood(dir);
+    const head = (await git(dir, "rev-parse", "HEAD")).stdout;
+    const asked = good?.ref === ref.ref || good?.asked === ref.ref;
+    if (good?.repo !== repoUrl(ref.repo) || !asked || good.commit !== head) return { ref, error: `the cached checkout is not ${ref.ref}; run hedge apply` };
+    return { ref, dir, packs: await loadPacks(dir) };
+  } finally {
+    lock.release();
+  }
 }
 
 async function hasPackTs(dir: string) {

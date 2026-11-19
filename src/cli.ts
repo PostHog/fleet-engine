@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { loadPacks } from "./pack/manifest.ts";
-import { cachedSource, fetchSource, sourceCache } from "./pack/sources.ts";
+import { cachedSource, fetchSource, sourceCache, withoutUserinfo } from "./pack/sources.ts";
 import { cannotTell } from "./pack/types.ts";
 import type { AvailableSource, CatalogEntry, FetchedSource, Finding, LoadedPack, MachineFile, PackCode, Plan, Report, SourceRef } from "./pack/types.ts";
 import { loadMachine, loadProfile, pullProfile, saveMachine, thisMachine } from "./profile/profile.ts";
@@ -284,7 +284,7 @@ async function runPackCommand(name: string, args: string[], options: CliOptions)
   const command = plan.commands[name];
   if (!command) {
     const owner = sources.flatMap((source) => ("error" in source ? [] : source.packs)).find((pack) => existsSync(join(pack.dir, "commands", `${name}.ts`)) || Object.hasOwn(pack.code?.commands ?? {}, name));
-    const unloaded = sources.flatMap((source) => ("error" in source ? [`The pack source ${source.ref.name} did not load: ${source.error}.`] : []));
+    const unloaded = sources.flatMap((source) => ("error" in source ? [`The pack source ${source.ref.name} at ${source.ref.ref} did not load: ${withoutUserinfo(source.error)}.`] : []));
     options.print(owner ? `hedge ${name} comes from the ${owner.manifest.title ?? owner.manifest.name} pack, which is off. Turn it on with hedge packs.` : [`hedge: unknown command ${name}`, ...unloaded].join("\n") + `\n\n${usage}`);
     return 2;
   }
@@ -521,7 +521,7 @@ async function loadPlan(options: CliOptions, profileFlag: string | undefined, mo
   const cache = sourceCache(options.home);
   const known = (ref: SourceRef) => mode.fetched?.find((source) => source.ref.name === ref.name && !("error" in source));
   const engine: AvailableSource = { ref: { name: "engine", repo: profile.engine.repo, ref: profile.engine.ref }, dir: options.engineRoot, packs: await loadPacks(options.engineRoot) };
-  const sources = [engine, ...(await Promise.all(profile.sources.map((ref) => known(ref) ?? (mode.fetch ? fetchSource(ref, cache, undefined, options.clock) : cachedSource(ref, cache)))))];
+  const sources = [engine, ...(await Promise.all(profile.sources.map((ref) => known(ref) ?? (mode.fetch ? fetchSource(ref, cache, undefined, options.clock) : cachedSource(ref, cache, options.clock)))))];
   const plan = resolve(profile, machine, sources);
   const changed = saved?.profileDir !== profileDir || saved.role !== plan.machine.role || saved.coder !== plan.machine.coder || saved.name !== plan.machine.name;
   const remember = async () => {
