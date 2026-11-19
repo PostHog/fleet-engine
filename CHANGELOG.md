@@ -76,6 +76,10 @@
   `PostHog/fleet-engine`, so a Hedge checkout never looks like Fleet's.
 - `hedge update` and `hedge refresh` use the Hedge copy of a profile that the
   machine file still names in a Fleet path, or refuse, before they pull.
+- `hedge update` runs one at a time. It holds an `flock` lock on
+  `~/.local/state/hedge/update.lock` from the fetch to the end of apply. A
+  second `hedge update`, such as the nightly one while you run it by hand,
+  changes nothing, says "another hedge update is running", and exits 1.
 - Hedge operations that change the machine take an `flock` lock on
   `~/.local/state/hedge/hedge.lock`. The system lets go of it when the
   process ends, so an import or apply stopped with Ctrl-C does not block the

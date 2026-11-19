@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, constants, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ProfileFile } from "./pack/types.ts";
 import { isolateGit, spawnGit, template, tempDirs } from "./testing/git.ts";
@@ -64,10 +64,36 @@ async function pinSavedBySetup(engineDir: string) {
   return (await pushedAnswers(home)).engine;
 }
 
+function within<T>(work: Promise<T>, limitMs: number, what: string): Promise<T> {
+  let timer: Timer | undefined;
+  const late = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error(`${what} within ${limitMs} ms`)), limitMs)));
+  return Promise.race([work, late]).finally(() => clearTimeout(timer));
+}
+
+function pausePoint() {
+  const dir = temp.make("pause-");
+  const reached = join(dir, "reached");
+  const resume = join(dir, "resume");
+  Bun.spawnSync(["mkfifo", reached, resume]);
+  const held = [openSync(reached, constants.O_RDWR), openSync(resume, constants.O_RDWR)];
+  const safetyMs = 3_000;
+  return {
+    shell: `echo > '${reached}'; read _ < '${resume}'`,
+    reached: async () => {
+      const read = await spawnAsync(["head", "-n", "1", reached], { signal: AbortSignal.timeout(safetyMs) });
+      if (read.exitCode !== 0) throw new Error(`the paused run did not reach its pause within ${safetyMs} ms`);
+    },
+    resume: () => writeSync(held[1]!, "\n"),
+    end: async (paused: Promise<unknown>) => {
+      writeSync(held[1]!, "\n");
+      await within(paused.catch(() => undefined), safetyMs, "the paused run did not end").finally(() => held.forEach((fd) => closeSync(fd)));
+    },
+  };
+}
+
 const originOf = async (engineDir: string) => (await spawnGit(engineDir, "config", "--get", "remote.origin.url")).trim();
 
-async function run(engineDir: string, engine: ProfileFile["engine"], profileDir = temp.make("profile-")) {
-  const home = temp.make("home-");
+async function run(engineDir: string, engine: ProfileFile["engine"], profileDir = temp.make("profile-"), home = temp.make("home-")) {
   const lines: string[] = [];
   let applied = 0;
   let appliedProfile: string | undefined;
@@ -282,21 +308,18 @@ describe("hedge update", () => {
     expect(result).toMatchObject({ code: 0, version: "main" });
   });
 
-  test("two hedge update runs that fetch the same tag at the same time each install the commit that they fetched, and neither loses its fetched ref", async () => {
+  test("two hedge update runs that fetch the same tag at the same time each install the commit that they fetched", async () => {
     const remote = await engineRemote(["v0.1.0", "v0.1.1"]);
     const engineDir = await engineCheckout(remote, "v0.1.0");
     const realGit = Bun.which("git")!;
     const bin = temp.make("bin-");
-    const fetched = join(bin, "fetched");
-    const resume = join(bin, "resume");
-    await spawnAsync(["mkfifo", fetched, resume]);
-    writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = -C ] && [ "$3" = fetch ] && mkdir "${bin}/paused" 2>/dev/null; then "${realGit}" "$@"; status=$?; echo > "${fetched}"; read _ < "${resume}"; exit $status; fi\nexec "${realGit}" "$@"\n`, { mode: 0o755 });
+    const pause = pausePoint();
+    writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = -C ] && [ "$3" = fetch ] && mkdir "${bin}/paused" 2>/dev/null; then "${realGit}" "$@"; status=$?; ${pause.shell}; exit $status; fi\nexec "${realGit}" "$@"\n`, { mode: 0o755 });
     const path = process.env.PATH;
     process.env.PATH = `${bin}:${path}`;
+    const first = run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" });
     try {
-      const firstFetched = spawnAsync(["cat", fetched]);
-      const first = run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" });
-      await firstFetched;
+      await pause.reached();
       writeFileSync(join(remote, "VERSION"), "v0.1.1 retagged");
       await spawnGit(remote, "commit", "-q", "-am", "v0.1.1 retagged");
       await spawnGit(remote, "tag", "-f", "v0.1.1");
@@ -304,12 +327,43 @@ describe("hedge update", () => {
       const second = await run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" });
       expect(second).toMatchObject({ code: 0, version: "v0.1.1 retagged" });
 
-      await spawnAsync(["sh", "-c", 'echo > "$1"', "sh", resume]);
+      pause.resume();
       expect(await first).toMatchObject({ code: 0, version: "v0.1.1" });
     } finally {
       process.env.PATH = path;
+      await pause.end(first);
     }
-    expect(await spawnGit(engineDir, "for-each-ref", "refs/hedge/fetching")).toBe("");
+  });
+
+  test("a second hedge update while the first installs packages exits 1, says that another update runs, and leaves the engine alone; the first then installs its release", async () => {
+    const remote = await engineRemote(["v0.1.0"]);
+    const engineDir = await engineCheckout(remote, "v0.1.0");
+    const home = temp.make("home-");
+    const pause = pausePoint();
+    const release = async (version: string, scripts?: Record<string, string>) => {
+      writeFileSync(join(remote, "package.json"), JSON.stringify({ name: "engine", ...(scripts ? { scripts } : {}) }));
+      writeFileSync(join(remote, "VERSION"), version);
+      await spawnGit(remote, "commit", "-q", "-am", version);
+      await spawnGit(remote, "tag", version);
+    };
+    await release("v0.2.0", { postinstall: pause.shell });
+    const first = run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" }, undefined, home);
+    try {
+      await pause.reached();
+      const installing = await spawnGit(engineDir, "rev-parse", "HEAD");
+      await release("v0.2.1");
+
+      const second = await run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" }, undefined, home);
+
+      expect(second).toMatchObject({ code: 1, applied: 0, version: "v0.2.0", output: "hedge update: another hedge update is running. Run it again when that one ends." });
+      expect(await spawnGit(engineDir, "rev-parse", "HEAD")).toBe(installing);
+      pause.resume();
+      expect(await first).toMatchObject({ code: 0, applied: 1, version: "v0.2.0" });
+      expect(await spawnGit(engineDir, "rev-parse", "HEAD")).toBe(installing);
+      expect(await pinSavedBySetup(engineDir)).toEqual({ repo: "PostHog/hedge", ref: "v0.2.0", channel: "release" });
+    } finally {
+      await pause.end(first);
+    }
   });
 
   async function triageEngineLine(engineDir: string) {

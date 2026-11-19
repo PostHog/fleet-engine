@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { tryLock } from "./lock.ts";
 import { repoUrl, withoutUserinfo } from "./pack/sources.ts";
 import type { ProfileFile } from "./pack/types.ts";
 import { engineRepo } from "./setup/defaults.ts";
@@ -32,8 +33,20 @@ export async function readNotice(home: string): Promise<string | undefined> {
   return notice.newMajor ? `Hedge ${notice.newMajor} is out. It is a new major version, so hedge update does not apply it. Read its changelog, then change the engine ref in your profile.` : undefined;
 }
 
+const updateLock = (home: string) => join(home, ".local", "state", "hedge", "update.lock");
+
 export async function update(given: UpdateOptions): Promise<number> {
   const options = { ...given, print: (line: string) => given.print(withoutUserinfo(line)) };
+  const held = tryLock(updateLock(options.home));
+  if (!held) return options.print("hedge update: another hedge update is running. Run it again when that one ends."), 1;
+  try {
+    return await updateAlone(options);
+  } finally {
+    held.release();
+  }
+}
+
+async function updateAlone(options: UpdateOptions): Promise<number> {
   const origin = await ready(options);
   if (!origin) return 1;
   const before = (await git(options.engineDir, "rev-parse", "HEAD")).out;
