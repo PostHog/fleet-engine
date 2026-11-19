@@ -92,6 +92,7 @@ esac`);
     ["--dry-run as the value of --profile", ["--profile", "--dry-run"], undefined],
     ["--force as the value of --profile", ["--profile", "--force"], undefined],
     ["an empty --ref", ["--ref", ""], undefined],
+    ["an empty --profile", ["--profile", ""], undefined],
     ["sudo", [], "echo 0"],
   ] as const) {
     onLinuxHost(`with ${why}, stops before it touches a launchd job`, () => {
