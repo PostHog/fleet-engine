@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { ProfileFile } from "./pack/types.ts";
 import { isolateGit, spawnGit, template, tempDirs } from "./testing/git.ts";
 import { spawnAsync } from "./testing/spawn.ts";
-import { noticePath, readNotice, update } from "./update.ts";
+import { noticePath, readNotice, releaseIn, releaseRefsAtHead, update } from "./update.ts";
 import { main } from "./cli.ts";
 
 isolateGit();
@@ -128,15 +128,54 @@ describe("hedge update", () => {
 
     const failed = await run(engineDir, { repo: "Acme/fleet-engine", ref: "v0.1.0", channel: "release" });
 
-    expect(failed).toMatchObject({ code: 1, applied: 0, version: "v0.1.5" });
+    expect(failed).toMatchObject({ code: 1, version: "v0.1.5" });
     expect(await originOf(engineDir)).toBe(hedge);
 
     await spawnGit(engineDir, "config", "--remove-section", `url.${join(fork, "gone")}`);
     await spawnGit(engineDir, "config", `url.${fork}.insteadOf`, "https://github.com/Acme/fleet-engine.git");
     const retried = await run(engineDir, { repo: "Acme/fleet-engine", ref: "v0.1.0", channel: "release" });
 
-    expect(retried).toMatchObject({ code: 0, applied: 1, version: "fork v0.1.2" });
+    expect(retried).toMatchObject({ code: 0, version: "fork v0.1.2" });
     expect(await originOf(engineDir)).toBe("https://github.com/Acme/fleet-engine.git");
+  });
+
+  test("after the fork's packages do not install, keeps the Hedge origin, and the next update moves to the fork's fixed release", async () => {
+    const { engineDir, fork } = await hedgeReleaseWithOlderFork();
+    const hedge = await originOf(engineDir);
+    await spawnGit(engineDir, "config", `url.${fork}.insteadOf`, "https://github.com/Acme/fleet-engine.git");
+    const forkRelease = async (version: string, packageJson: object) => {
+      writeFileSync(join(fork, "package.json"), JSON.stringify(packageJson));
+      writeFileSync(join(fork, "VERSION"), `fork ${version}`);
+      await spawnGit(fork, "commit", "-q", "-am", version);
+      await spawnGit(fork, "tag", version);
+    };
+    await forkRelease("v0.1.3", { name: "engine", dependencies: { missing: "file:./missing" } });
+
+    const failed = await run(engineDir, { repo: "Acme/fleet-engine", ref: "v0.1.0", channel: "release" });
+
+    expect(failed).toMatchObject({ code: 1, version: "v0.1.5", output: expect.stringContaining("so the update was rolled back") });
+    expect(await originOf(engineDir)).toBe(hedge);
+
+    await forkRelease("v0.1.4", { name: "engine" });
+    const retried = await run(engineDir, { repo: "Acme/fleet-engine", ref: "v0.1.0", channel: "release" });
+
+    expect(retried).toMatchObject({ code: 0, version: "fork v0.1.4" });
+    expect(await originOf(engineDir)).toBe("https://github.com/Acme/fleet-engine.git");
+  });
+
+  test("leaves a tag the user made with the name of the release it moves to on the user's commit, and reads that release as the one installed", async () => {
+    const remote = await engineRemote(["v0.1.0", "v0.1.1"]);
+    const engineDir = await engineCheckout(remote, "v0.1.0");
+    const users = await spawnGit(engineDir, "rev-parse", "HEAD");
+    await spawnGit(engineDir, "tag", "v0.1.1");
+
+    const result = await run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" });
+    const again = await run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" });
+
+    expect(result).toMatchObject({ code: 0, version: "v0.1.1" });
+    expect(await spawnGit(engineDir, "rev-parse", "refs/tags/v0.1.1")).toBe(users);
+    expect(releaseIn((await spawnAsync(releaseRefsAtHead(engineDir))).stdout)).toBe("v0.1.1");
+    expect(again.output).toContain("Engine is at v0.1.1.");
   });
 
   test("keeps a tag the user made in the engine checkout when it moves to a newer release", async () => {

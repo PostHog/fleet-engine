@@ -6,6 +6,7 @@ import { bothChanged, loadProfile, saveAnswers } from "../profile/profile.ts";
 import type { Machine } from "./commands.ts";
 import { defaultSources, engineRepo } from "./defaults.ts";
 import { profileFile } from "../legacy.ts";
+import { releaseIn, releaseRefsAtHead } from "../update.ts";
 import type { Draft } from "./questions.ts";
 import type { Step } from "./runner.ts";
 import { Stopped, type Terminal } from "./terminal.ts";
@@ -248,9 +249,9 @@ async function startFiles(dir: string, context: ProfileContext, sharedWith: stri
 
 /** The engine ref this profile pins: the release tag the engine runs on, or main on the track channel. */
 async function enginePin({ machine, engineRoot }: ProfileContext): Promise<ProfileFile["engine"]> {
-  const tag = await machine.exec(["git", "-C", engineRoot, "describe", "--tags", "--exact-match", "--match", "v[0-9]*"]);
-  const ref = tag.output.trim();
-  return tag.code === 0 && /^v\d+\.\d+\.\d+$/.test(ref) ? { repo: engineRepo, ref, channel: "release" } : { repo: engineRepo, ref: "main", channel: "track" };
+  const refs = await machine.exec(releaseRefsAtHead(engineRoot));
+  const ref = refs.code === 0 ? releaseIn(refs.output) : undefined;
+  return ref ? { repo: engineRepo, ref, channel: "release" } : { repo: engineRepo, ref: "main", channel: "track" };
 }
 
 async function git(machine: Machine, dir: string, ...args: string[]) {
