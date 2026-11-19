@@ -1096,20 +1096,25 @@ describe("the Git guard", () => {
     ["an alias with a positional argument", "gh sn push", "force-pushes 6 branches at once"],
     ["a shell alias", "gh shp", "gh alias set"],
     ["an alias from a GH_CONFIG_DIR the command names", "GH_CONFIG_DIR=OTHER gh other", "force-pushes 6 branches at once"],
+    ["an alias from a relative GH_CONFIG_DIR, read from the command's directory", "GH_CONFIG_DIR=rel-gh gh other", "force-pushes 6 branches at once"],
+    ["a nested alias under a gh command", "gh pr sp", "force-pushes 6 branches at once"],
+    ["an alias whose expansion quotes its words", "gh qp", "gh alias set"],
   ])("follows %s to the stack push it runs", async (_, command, refusal) => {
     const dir = await repo("feature");
     stackOf(dir, sixOpen);
     const home = homeWith(withGuards(), { "guards.person": "Robin" });
     mkdirSync(join(home, ".config/gh"), { recursive: true });
-    writeFileSync(join(home, ".config/gh/config.yml"), "aliases:\n    sp: stack push\n    s: stack\n    shp: '!gh stack push'\n    sn: stack $1\n    co: pr checkout\n");
+    writeFileSync(join(home, ".config/gh/config.yml"), "aliases:\n    sp: stack push\n    s: stack\n    shp: '!gh stack push'\n    sn: stack $1\n    pr sp: stack push\n    qp: \"stack 'push'\"\n    co: pr checkout\n");
     const other = join(home, "other-gh");
     mkdirSync(other);
     writeFileSync(join(other, "config.yml"), "aliases:\n    other: stack submit\n");
+    mkdirSync(join(dir, "rel-gh"));
+    writeFileSync(join(dir, "rel-gh/config.yml"), "aliases:\n    other: stack submit\n");
     const denied = await preToolUse(home, "claude", bash(command.replace("OTHER", other), dir), { guardAsProcess: true });
     expect(denied.refusal).toContain(refusal);
   });
 
-  test.each(["gh alias set co 'pr checkout'", "gh alias list", "gh alias delete sp"])("allows a gh alias that cannot push a stack: %s", async (command) => {
+  test.each(["gh alias set co 'pr checkout'", "gh alias list", "gh alias delete sp", "gh alias set --help"])("allows a gh alias that cannot push a stack: %s", async (command) => {
     expect(await preToolUse(homeWith(withGuards()), "claude", bash(command, await repo("feature")), { guardAsProcess: true })).toEqual({ code: 0, refusal: undefined });
   });
 

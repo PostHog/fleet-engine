@@ -21,7 +21,6 @@ export const formatters: Record<string, Formatter> = {
   dprint: { loadsCode: true, subcommands: ["fmt", "check"], flags: ["--allow-no-files"] },
   biome: { subcommands: ["check", "format", "lint"], flags: ["--write", "--apply", "--fix", "--unsafe", "--no-errors-on-unmatched", "--error-on-warnings"], values: ["--diagnostic-level", "--files-ignore-unknown", "--colors"] },
   ruff: { subcommands: ["check", "format"], flags: ["--fix", "--unsafe-fixes", "--exit-non-zero-on-fix", "--force-exclude", "--quiet", "-q", "--no-cache", "--show-fixes"], values: ["--line-length", "--target-version"], always: ["--no-cache"] },
-  black: { loadsCode: true, flags: ["--quiet", "-q", "--fast", "--preview", "--skip-string-normalization", "-S"], values: ["--line-length", "-l", "--target-version", "-t"] },
   isort: { flags: ["--quiet", "-q", "--filter-files", "--atomic"], values: ["--profile"] },
   gofmt: { flags: ["-w", "-s", "-l"] },
   goimports: { flags: ["-w", "-l"] },
@@ -42,9 +41,31 @@ function matches(pattern: string, path: string): boolean {
   }
 }
 
-async function tracked(path: string): Promise<boolean> {
+export function inside(root: string, path: string): boolean {
+  const rel = relative(root, path);
+  return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+}
+
+/** The agent's PATH without relative entries or entries inside the repository, for the formatter lookup and every child it starts. */
+export function safePath(root: string): string {
+  const realRoot = realpathSync(root);
+  return (process.env.PATH ?? "").split(delimiter).filter((entry) => {
+    if (!isAbsolute(entry) || inside(root, entry)) return false;
+    try {
+      return !inside(realRoot, realpathSync(entry));
+    } catch {
+      return false;
+    }
+  }).join(delimiter);
+}
+
+/** Whether the repository commits anything under node_modules, such as a symlink that picks which installed file runs, or a submodule. */
+async function commitsNodeModules(root: string): Promise<boolean> {
   try {
-    const child = Bun.spawn(["git", "-C", dirname(path), "ls-files", "-z", "--", `:(literal,icase)${basename(path)}`], { stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+    const PATH = safePath(root);
+    const git = Bun.which("git", { PATH });
+    if (!git) return true;
+    const child = Bun.spawn([git, "-C", root, "ls-files", "-z", "--", ":(literal,icase)node_modules"], { stdin: "ignore", stdout: "pipe", stderr: "ignore", env: { ...process.env, PATH } });
     const [listed, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
     return code !== 0 || listed !== "";
   } catch {
@@ -52,22 +73,16 @@ async function tracked(path: string): Promise<boolean> {
   }
 }
 
-export function inside(root: string, path: string): boolean {
-  const rel = relative(root, path);
-  return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
-}
-
 async function installedFormatter(name: string, root: string): Promise<string | undefined> {
   const realRoot = realpathSync(root);
   const real = realpathSync(join(root, "node_modules/.bin", name));
   if (!inside(join(realRoot, "node_modules"), real)) return undefined;
-  return (await tracked(real)) ? undefined : real;
+  return (await commitsNodeModules(realRoot)) ? undefined : real;
 }
 
 function onPath(name: string, root: string): string | undefined {
   if (toolPins.some((pin) => existsSync(join(root, pin)))) return undefined;
-  const path = (process.env.PATH ?? "").split(delimiter).filter(isAbsolute).join(delimiter);
-  const found = Bun.which(name, { PATH: path });
+  const found = Bun.which(name, { PATH: safePath(root) });
   if (!found || !isAbsolute(found)) return undefined;
   const real = realpathSync(found);
   return inside(root, found) || inside(realpathSync(root), real) ? undefined : found;

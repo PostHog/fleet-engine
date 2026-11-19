@@ -16,7 +16,7 @@ const root = "/repo";
 const config = {
   "*.{md,mdx}": "prettier --write",
   "web/**/*.{ts,tsx}": ["biome check --write", "eslint --fix"],
-  "*.py": ["ruff check --fix", "ruff format", "black", "uv run --no-sync ty check"],
+  "*.py": ["ruff check --fix", "ruff format", "uv run --no-sync ty check"],
   "!(generated/*)*.rs": "rustfmt",
   "scripts/*.sh": "git add --chmod=+x",
   "web/**/manifest.tsx": ["prettier --write", "sh -c 'pnpm build && git add web/index.tsx'"],
@@ -35,7 +35,7 @@ const commandsAt = async (path: string) => (await commandsFor(path)).map((comman
 describe("the lint-staged commands for an edited file", () => {
   test("are the repository's formatter commands, matched as lint-staged matches, resolved to the installed formatter, with the file last", async () => {
     expect(await commandsFor("docs/guide.md")).toEqual([["/bin/prettier", "--write", "/repo/docs/guide.md"]]);
-    expect(await commandsAt("backend/models.py")).toEqual(["/bin/ruff check --fix --no-cache", "/bin/ruff format --no-cache", "/bin/black"]);
+    expect(await commandsAt("backend/models.py")).toEqual(["/bin/ruff check --fix --no-cache", "/bin/ruff format --no-cache"]);
     expect(await commandsAt("web/app/run.ts")).toEqual(["/bin/biome check --write", "/bin/eslint --fix"]);
     expect(await commandsAt("web/app/manifest.tsx")).toEqual(["/bin/biome check --write", "/bin/eslint --fix", "/bin/prettier --write"]);
     expect(await commandsAt("src/main.go")).toEqual(["/bin/gofmt -w"]);
@@ -211,6 +211,38 @@ describe("the format-on-edit hook", () => {
     expect(existsSync(join(repo, "ran"))).toBe(false);
   });
 
+  test("never runs an installed file that a committed symlink in node_modules picks", async () => {
+    const repo = await repository(undefined, { "*.ts": "prettier --write" });
+    tool(repo, "other.cjs", marks(repo), "node_modules/other/bin");
+    mkdirSync(join(repo, "node_modules/.bin"), { recursive: true });
+    symlinkSync("../other/bin/other.cjs", join(repo, "node_modules/.bin/prettier"));
+    await spawnGit(repo, "add", "-f", "node_modules/.bin/prettier");
+    await edited(repo);
+    expect(existsSync(join(repo, "ran"))).toBe(false);
+  });
+
+  test("never asks a git from a PATH entry inside the repository whether the formatter is committed", async () => {
+    const repo = await repository(undefined, { "*.ts": "prettier --write" });
+    tool(repo, "git", marks(repo), "tools");
+    tool(repo, "prettier", `touch "${join(repo, "formatted")}"`);
+    await withPath(join(repo, "tools"), () => edited(repo));
+    expect(existsSync(join(repo, "ran"))).toBe(false);
+    expect(existsSync(join(repo, "formatted"))).toBe(true);
+  });
+
+  test("gives a formatter only the PATH entries outside the repository, so a launcher such as env node cannot start a committed node", async () => {
+    const repo = await repository(undefined, { "*.ts": "prettier --write" });
+    tool(repo, "prettier", `echo "$PATH" > "${join(repo, "seen")}"`);
+    const file = join(repo, "src/x.ts");
+    writeFileSync(file, "x");
+    const script = `const { formatAfterEdit } = await import(${JSON.stringify(join(import.meta.dir, "format-on-edit.ts"))}); await formatAfterEdit({ tool_name: "Edit", tool_input: { file_path: ${JSON.stringify(file)} } });`;
+    const child = Bun.spawn([process.execPath, "-e", script], { env: { ...process.env, PATH: `${join(repo, "tools")}:relative:${process.env.PATH}` }, stdout: "ignore", stderr: "ignore" });
+    await child.exited;
+    const seen = readFileSync(join(repo, "seen"), "utf8").trim().split(":");
+    expect(seen.length).toBeGreaterThan(1);
+    expect(seen.filter((entry) => entry.startsWith(repo) || entry === "relative")).toEqual([]);
+  });
+
   test("never runs an installed formatter whose real file is committed, such as a workspace package's bin", async () => {
     const repo = await repository(undefined, { "*.ts": "prettier --write" });
     tool(repo, "prettier.sh", marks(repo), "packages/tool/bin");
@@ -241,7 +273,6 @@ describe("the format-on-edit hook", () => {
   test.each([
     ["a formatter that loads code from the repository's config, such as eslint.config.js, before its packages are installed", "eslint --fix", () => undefined],
     ["a formatter whose version the repository pins for a version manager, which can point the pin at a committed path", "ruff format", (repo: string) => writeFileSync(join(repo, ".tool-versions"), "ruff path:./tools\n")],
-    ["a formatter that reads a pickled cache the repository can point at, such as Black", "black", () => undefined],
   ])("never runs from PATH %s", async (_, command, plant) => {
     const repo = await repository(undefined, { "*.ts": command });
     plant(repo);
@@ -284,7 +315,7 @@ describe("the format-on-edit hook", () => {
     ["a config file", ["prettier --write -c x.mjs", "prettier --write --config x.mjs", "prettier --write --config=x.mjs", "ruff check --fix --config x.toml", "clang-format -i --style=file:../x"]],
     ["a cache, which can be a committed symlink out of the repository", ["eslint --fix --cache", "prettier --write --cache", "stylelint --fix --cache", "eslint --fix --cache-location /tmp/x"]],
     ["any other option that reads or writes a file", ["eslint --fix --rulesdir rules", "eslint --fix -f ./report.js", "gofmt -w -cpuprofile /tmp/x", "prettier --write --ignore-path=../x"]],
-    ["a path or a value with one", ["prettier --write ../outside", "prettier --write /etc/hosts", "eslint --fix --max-warnings=../x", "eslint --fix --max-warnings ./x", "black -l x.py"]],
+    ["a path or a value with one", ["prettier --write ../outside", "prettier --write /etc/hosts", "eslint --fix --max-warnings=../x", "eslint --fix --max-warnings ./x", "shfmt -w -i x.py"]],
     ["a subcommand the formatter does not rewrite with", ["biome migrate --write", "ruff --fix", "taplo lint", "dprint upgrade"]],
     ["quotes around an argument", ["prettier --write \"--plugin=./x.mjs\"", "prettier --write '--plugin=./x.mjs'"]],
   ])("never runs an installed formatter given %s", async (_, commands) => {
@@ -294,7 +325,7 @@ describe("the format-on-edit hook", () => {
   });
 
   test("runs installed formatters with their own flags and plain values, and Ruff without its cache", async () => {
-    const commands = ["eslint --fix --max-warnings=0", "eslint --fix --max-warnings 0", "black -l 100 -q", "shfmt -w -i 2", "clang-format -i --style=Google", "prettier --write --single-quote --print-width 100", "ruff format --line-length 88"];
+    const commands = ["eslint --fix --max-warnings=0", "eslint --fix --max-warnings 0", "shfmt -w -i 2", "clang-format -i --style=Google", "prettier --write --single-quote --print-width 100", "ruff format --line-length 88"];
     const repo = await installedRepo(commands);
     await edited(repo);
     const file = join(repo, "src/x.ts");

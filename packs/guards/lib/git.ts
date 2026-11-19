@@ -1,8 +1,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { withDirectories } from "./directories.ts";
-import { ghGroups } from "./gh.ts";
 import { shortCluster } from "./kill.ts";
 import { type Command, commandsIn } from "./shell-words.ts";
 
@@ -128,30 +127,41 @@ function stackArgs(name: string, args: string[]): string[] | undefined {
 const makesAlias = (args: string[]) => operandsOf(args)[1] === "alias" && !args.includes("--remove");
 function ghAliasHidesStack(name: string, args: string[]): boolean {
   const [group, action, , expansion] = operandsOf(args);
-  if (name !== "gh" || group !== "alias") return false;
+  if (name !== "gh" || group !== "alias" || args.includes("--help") || args.includes("-h")) return false;
   if (action === "import") return true;
   if (action !== "set") return false;
   return expansion === undefined || args.some((arg) => /^(?:-s|--shell)(?:=|$)/.test(arg)) || /^!|\bstack\b/.test(expansion);
 }
 
-function ghAliases(env: ReadonlyMap<string, string>): Record<string, unknown> {
+/** gh's aliases, from the config directory the call names or inherits, resolved from the call's directory; undefined when the guard cannot tell where that is. */
+function ghAliases(env: ReadonlyMap<string, string>, directory: string | undefined): Record<string, unknown> | undefined {
   const configHome = env.get("XDG_CONFIG_HOME") ?? process.env.XDG_CONFIG_HOME;
-  const dir = env.get("GH_CONFIG_DIR") || process.env.GH_CONFIG_DIR || join(configHome || join(homedir(), ".config"), "gh");
+  const named = env.get("GH_CONFIG_DIR") || process.env.GH_CONFIG_DIR || join(configHome || join(homedir(), ".config"), "gh");
+  if (!isAbsolute(named) && directory === undefined) return undefined;
   try {
-    const config = Bun.YAML.parse(readFileSync(join(dir, "config.yml"), "utf8")) as { aliases?: Record<string, unknown> } | null;
+    const config = Bun.YAML.parse(readFileSync(join(resolve(directory ?? "/", named), "config.yml"), "utf8")) as { aliases?: Record<string, unknown> } | null;
     return config?.aliases ?? {};
   } catch {
     return {};
   }
 }
 
-function expandedGh({ args, env }: Command): string[] | undefined {
-  const [group] = operandsOf(args);
-  if (group === undefined || group === "stack" || ghGroups.has(group)) return args;
-  const expansion = ghAliases(env)[group];
-  if (typeof expansion !== "string") return args;
-  if (expansion.trimStart().startsWith("!")) return undefined;
-  return substituted(expansion, args.slice(args.indexOf(group) + 1));
+const aliasWords = (name: string) => name.trim().split(/\s+/);
+
+/**
+ * The arguments gh runs after expanding the agent's own gh alias, matched like gh by its leading words, also a nested
+ * name such as `pr mine`; undefined for a shell alias, quoting the guard does not parse, or a config it cannot find.
+ */
+function expandedGh({ args, env }: Command, directory: string | undefined): string[] | undefined {
+  const aliases = ghAliases(env, directory);
+  if (aliases === undefined) return undefined;
+  const [name] = Object.keys(aliases)
+    .filter((key) => aliasWords(key).every((word, index) => args[index] === word))
+    .sort((a, b) => aliasWords(b).length - aliasWords(a).length);
+  const expansion = name === undefined ? undefined : aliases[name];
+  if (name === undefined || typeof expansion !== "string") return args;
+  if (/^\s*!|['"\\]/.test(expansion)) return undefined;
+  return substituted(expansion, args.slice(aliasWords(name).length));
 }
 
 function substituted(expansion: string, rest: string[]): string[] {
@@ -346,7 +356,7 @@ export function gitRisk(command: string, cwd: string, person: string, mainPushRe
   };
   let forced = 0;
   for (const [call, directory] of withDirectories(commandsIn(command), cwd)) {
-    const called = call.name === "gh" ? expandedGh(call) : call.args;
+    const called = call.name === "gh" ? expandedGh(call, directory) : call.args;
     if (called === undefined) return aliasReason(person);
     const stack = stackArgs(call.name, called);
     if ((stack && makesAlias(stack)) || ghAliasHidesStack(call.name, called)) return aliasReason(person);
