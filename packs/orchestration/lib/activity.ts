@@ -2,6 +2,7 @@ import {
   isWaiting, lastActivityAt, listLinkedProjects, listLinkedThreads, readLinkedItemText, readLinkedMessages, readLinkedThread, readLinkedThreadWords, readSnapshots, readThread, readThreadWords, readTurnItems, withT3Session,
   type LinkedThread, type ShellPullRequest, type ShellSnapshot, type ShellThread, type T3Client, type T3HttpClient, type T3SessionOptions, type ThreadWord,
 } from "../../base/lib/t3/index.ts";
+import { linkedPullRequests } from "../../pull-requests/lib/pr-owners.ts";
 import { liveStatuses, pickMachine, readEachMachine, readMachines, type MachineReport } from "./machines.ts";
 
 export type Work = {
@@ -75,12 +76,12 @@ export async function readOpenWork(client: T3Client): Promise<OpenWork[]> {
   const childPullRequests = new Map<string, ShellPullRequest[]>();
   for (const child of open.filter((thread) => thread.lineage?.parentThreadId)) {
     const root = child.lineage!.rootThreadId ?? child.lineage!.parentThreadId!;
-    childPullRequests.set(root, [...childPullRequests.get(root) ?? [], ...child.pullRequests ?? []]);
+    childPullRequests.set(root, [...childPullRequests.get(root) ?? [], ...linkedPullRequests(child)]);
   }
   return open.filter((thread) => !thread.lineage?.parentThreadId).map((thread) => ({
     id: thread.id, title: thread.title, project: projects.get(thread.projectId) ?? thread.projectId,
     status: thread.activityRunStatus ?? thread.status, branch: thread.branch ?? null,
-    pullRequests: uniqueByUrl([...thread.pullRequests ?? [], ...childPullRequests.get(thread.id) ?? []]),
+    pullRequests: uniqueByUrl([...linkedPullRequests(thread), ...childPullRequests.get(thread.id) ?? []]),
     messages: [], snoozedUntil: thread.snoozedUntil ?? null, waiting: Boolean(thread.pendingRuntimeRequest), updatedAt: lastActivityAt(thread),
   }));
 }

@@ -79,7 +79,7 @@ test("the body section shows each owed proof, the review and the judge in the te
     `| ui-walk | Walked the sender settings page | The new sender shows after a reload | \`${short(head)}\` (reused from \`${short(older)}\`) |`,
     `| prod-shape | Read the stored senders on one region | measured on production; details in the receipt | \`${short(head)}\` |`,
     "| cross-version | not run | gap, accepted | |",
-    `| Review | single reviewer (gpt-6.1-sol), round 1 | 0 findings: 0 fixed, 0 rejected, 0 other | \`${short(head)}\` |`,
+    `| Review | 1-lens panel (gpt-6.1-sol), round 1 | 0 findings: 0 fixed, 0 rejected, 0 other | \`${short(head)}\` |`,
     `| Proof judge | an independent model reads the evidence against the diff | ✅ passed at \`${short(head)}\` | |`,
     "",
     "**Not checked:** Safari; the mobile layout",
@@ -270,7 +270,7 @@ test("a dated model id of a reviewer passes the guard", async () => {
   await pr.commit("feature.txt", "greet new members by first name\n");
   await reviewAgain(pr, 2, "claude-sonnet-4-5-20250929");
   expect((await pr.hedge("receipt")).code).toBe(0);
-  expect(block(pr.githubBody())).toContain("single reviewer (gpt-6.1-sol, claude-sonnet-4-5-20250929)");
+  expect(block(pr.githubBody())).toContain("1-lens panel (gpt-6.1-sol, claude-sonnet-4-5-20250929)");
 });
 
 test("a fenced code line never starts or ends the testing section, and a tab after the hashes makes a heading", async () => {

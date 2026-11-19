@@ -520,8 +520,9 @@ ${overrideHelp}`,
     usage: "review-finish --round <number|final-n> --reviewer <model> <findings.md>",
     summary: `Save the findings of a reserved round after its reviewers finish. --round takes the id that review-start
 printed. --reviewer names the model that wrote them; the gate prints it. The findings file must not be empty; write
-"No findings." when the reviewer found none. When the round's decision is not recorded yet, review-finish records it
-first and needs the hub; a round whose decision is recorded finishes without it.`,
+"No findings." when the reviewer found none. A panel round of hedge proof review --lens takes no findings here: Hedge
+saves them once every lens is done. When the round's decision is not recorded yet, review-finish records it first and
+needs the hub; a round whose decision is recorded finishes without it.`,
     examples: ["hedge proof review-finish --round 1 --reviewer gpt-6.2-sol findings.md", "hedge proof review-finish --round final-1 --reviewer claude-opus-5-5 findings.md"],
     options: ["--round", "--findings", "--reviewer"],
     run: async ({ options, files }, identity, context) => {

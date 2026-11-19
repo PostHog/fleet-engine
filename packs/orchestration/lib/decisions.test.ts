@@ -127,6 +127,106 @@ test("hedge decisions counts answers in the map's comments next to its body and 
   ].join("\n"));
 });
 
+test("hedge decisions leaves out an old ✅ progress note whose bold text asks no question", async () => {
+  const body = ["- ✅ **#55 closed** (conductor) Handoff verified", "- ✅ **Old question?** Old answer"].join("\n");
+  const lines: string[] = [];
+
+  await runDecisions(["acme/maps#1"], { ...fixtureFetchers({ issues: [issueNode(repository, 1)], discussions: { "acme/maps#1": { body, comments: [] } } }), tracker: () => "", print: (line) => lines.push(line) });
+
+  expect(lines.join("\n")).toBe([
+    "| Question | Answer | Who | Where |",
+    "| --- | --- | --- | --- |",
+    `| Old question? | Old answer | ✅ Old mark (retired 2026-11-13) | [map #1](https://github.com/${repository}/issues/1) |`,
+    "",
+    "Involvement: no human-in-the-loop tickets.",
+  ].join("\n"));
+});
+
+test("hedge decisions leaves out a question with no answer, under any mark", async () => {
+  const body = ["- ✅ **Which queue?**   ", "- 👤 **Which bus?**   ", "- ✅ **Which store?** Postgres"].join("\n");
+  const lines: string[] = [];
+
+  await runDecisions(["acme/maps#1"], { ...fixtureFetchers({ issues: [issueNode(repository, 1)], discussions: { "acme/maps#1": { body, comments: [] } } }), tracker: () => "", print: (line) => lines.push(line) });
+
+  expect(lines.join("\n")).toBe([
+    "| Question | Answer | Who | Where |",
+    "| --- | --- | --- | --- |",
+    `| Which store? | Postgres | ✅ Old mark (retired 2026-11-13) | [map #1](https://github.com/${repository}/issues/1) |`,
+    "",
+    "Involvement: no human-in-the-loop tickets.",
+  ].join("\n"));
+});
+
+test("hedge decisions keeps a marked answer over an old ✅ answer to the same question, earlier or later", async () => {
+  const body = ["- 👤 **Which store?** Postgres", "- ✅ **Which store?** SQLite", "- ✅ **Which queue?** Redis"].join("\n");
+  const comments = [{ author: "ada", body: "- ✅ **Which store?** MySQL", url: url(1, "c1"), createdAt: "2026-11-01T09:00:00Z", updatedAt: "2026-11-20T09:00:00Z" }];
+  const lines: string[] = [];
+
+  await runDecisions(["acme/maps#1"], { ...fixtureFetchers({ issues: [issueNode(repository, 1)], discussions: { "acme/maps#1": { body, comments } } }), tracker: () => "", print: (line) => lines.push(line) });
+
+  const where = `[map #1](https://github.com/${repository}/issues/1)`;
+  expect(lines.join("\n")).toBe([
+    "| Question | Answer | Who | Where |",
+    "| --- | --- | --- | --- |",
+    `| Which store? | Postgres | 👤 Human | ${where} |`,
+    `| Which queue? | Redis | ✅ Old mark (retired 2026-11-13) | ${where} |`,
+    "",
+    "Involvement: no human-in-the-loop tickets.",
+  ].join("\n"));
+});
+
+test("hedge decisions lists a marked answer where it was given, not where an old ✅ answer to it stood", async () => {
+  const body = ["- ✅ **Which queue?** Redis", "- 🤖 **Which bus?** Kafka"].join("\n");
+  const comments = [{ author: "ada", body: "- 🤖 **Which queue?** SQS", url: url(1, "c1"), createdAt: "2026-11-14T09:00:00Z", updatedAt: "2026-11-14T09:00:00Z" }];
+  const lines: string[] = [];
+
+  await runDecisions(["acme/maps#1"], { ...fixtureFetchers({ issues: [issueNode(repository, 1)], discussions: { "acme/maps#1": { body, comments } } }), tracker: () => "", print: (line) => lines.push(line) });
+
+  expect(lines.join("\n")).toBe([
+    "| Question | Answer | Who | Where |",
+    "| --- | --- | --- | --- |",
+    `| Which bus? | Kafka | 🤖 Agent | [map #1](https://github.com/${repository}/issues/1) |`,
+    `| Which queue? | SQS | 🤖 Agent | [map](${url(1, "c1")}) |`,
+    "",
+    "Involvement: no human-in-the-loop tickets.",
+  ].join("\n"));
+});
+
+test("hedge decisions lists a newer ✅ answer where its question first stood", async () => {
+  const body = ["- ✅ **Which cache?** Memcached", "- ✅ **Which lock?** etcd"].join("\n");
+  const comments = [{ author: "ada", body: "- ✅ **Which cache?** Redis", url: url(1, "c1"), createdAt: "2026-11-14T09:00:00Z", updatedAt: "2026-11-14T09:00:00Z" }];
+  const lines: string[] = [];
+
+  await runDecisions(["acme/maps#1"], { ...fixtureFetchers({ issues: [issueNode(repository, 1)], discussions: { "acme/maps#1": { body, comments } } }), tracker: () => "", print: (line) => lines.push(line) });
+
+  expect(lines.join("\n")).toBe([
+    "| Question | Answer | Who | Where |",
+    "| --- | --- | --- | --- |",
+    `| Which cache? | Redis | ✅ Old mark (retired 2026-11-13) | [map](${url(1, "c1")}) |`,
+    `| Which lock? | etcd | ✅ Old mark (retired 2026-11-13) | [map #1](https://github.com/${repository}/issues/1) |`,
+    "",
+    "Involvement: no human-in-the-loop tickets.",
+  ].join("\n"));
+});
+
+test("hedge decisions shows old ✅ lines as their own group after the three marks", async () => {
+  const body = ["- ✅ **Old question?** Old answer", "- 🤖 **Agent question?** Took A", "- 👤 **Human question?** His answer"].join("\n");
+  const lines: string[] = [];
+
+  await runDecisions(["acme/maps#1"], { ...fixtureFetchers({ issues: [issueNode(repository, 1)], discussions: { "acme/maps#1": { body, comments: [] } } }), tracker: () => "", print: (line) => lines.push(line) });
+
+  const where = `[map #1](https://github.com/${repository}/issues/1)`;
+  expect(lines.join("\n")).toBe([
+    "| Question | Answer | Who | Where |",
+    "| --- | --- | --- | --- |",
+    `| Human question? | His answer | 👤 Human | ${where} |`,
+    `| Agent question? | Took A | 🤖 Agent | ${where} |`,
+    `| Old question? | Old answer | ✅ Old mark (retired 2026-11-13) | ${where} |`,
+    "",
+    "Involvement: no human-in-the-loop tickets.",
+  ].join("\n"));
+});
+
 test("hedge decisions ignores an example decision inside a longer fence", async () => {
   const body = ["- 👤 **Which store?** Postgres", "````md", "Write answers like this:", "```", "- 🤖 **Which store?** An example", "```", "````"].join("\n");
   const lines: string[] = [];

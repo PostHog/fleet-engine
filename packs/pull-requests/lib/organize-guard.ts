@@ -1,11 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { matchThread, type ShellThread, t3UserData } from "../../base/lib/t3/index.ts";
+import { type ShellThread, t3UserData } from "../../base/lib/t3/index.ts";
 import { closingSettings } from "../../orchestration/lib/closing-marks.ts";
 import { remoteLauncher } from "../../../src/hub/ssh.ts";
 import { runGh } from "./gh.ts";
-import { isOrganize, pinnedReason, prState, readHandovers, readT3Threads, settleRefusal, settleTarget } from "./pr-owners.ts";
+import { fullIdHint, guardedActions, isOrganize, listedThread, pinnedReason, prState, readHandovers, readT3Threads, settleRefusal, settleTarget } from "./pr-owners.ts";
 
 export type RemoteAnswer = { refusal?: string };
 export type SettleCheck = (home: string, environmentId: string, action: string, threadId: string) => Promise<RemoteAnswer | undefined>;
@@ -68,7 +68,9 @@ export type SettleDeps = {
 
 const fallbackPerson = "the person who runs this machine";
 const noAnswer = (action: string) => `Hedge blocked this ${action}: T3 did not answer; retry, or ${action} in the T3 UI.`;
-const unlisted = (action: string, id: string) => `Hedge blocked this ${action}: T3 did not list thread ${id}, so Hedge cannot see whether it is pinned; retry, or ${action} in the T3 UI.`;
+const unlisted = (action: string, id: string, full: string | undefined) => `Hedge blocked this ${action}: T3 did not list thread ${id}, so Hedge cannot check its pin or its PRs. `
+  + `T3 takes only a full thread id: pass ${full ?? "the id t3_thread_list shows, with environmentId for a thread on another machine"}, or ${action} in the T3 UI.`;
+const unnamed = (action: string) => `Hedge blocked this ${action}: the call names no thread, and T3CODE_THREAD_ID is unset, so Hedge cannot tell which thread it ${action}s. Pass threadId, or ${action} in the T3 UI.`;
 const deny = (reason: string) => ({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } });
 
 export function personName(home: string): string {
@@ -85,22 +87,22 @@ export async function organizeRefusal(action: string, id: string, home: string, 
   const threads = await deps.threads(home, machine).catch(() => undefined);
   if (!threads) return action === "snooze" && failOpen ? undefined : noAnswer(action);
   const person = personName(home);
-  const target = matchThread(threads, id, (thread) => thread.id);
-  if (!target && !failOpen && action !== "archive") return unlisted(action, id);
-  if (action !== "archive" && target?.pinnedAt) {
+  const target = listedThread(threads, id);
+  if (!target) return action === "snooze" && failOpen ? undefined : unlisted(action, id, fullIdHint(threads, id));
+  if (action !== "archive" && target.pinnedAt) {
     const { marks, parking } = closingSettings(home);
     return pinnedReason(person, parking && marks.snooze);
   }
   if (action === "snooze") return undefined;
-  return settleRefusal(id, { threads, handovers: () => readHandovers(home), prState: deps.prState }, person);
+  return settleRefusal(target.id, { threads, handovers: () => readHandovers(home), prState: deps.prState }, person);
 }
 
 export async function guardSettle(call: ToolCall, home: string, deps: SettleDeps) {
   if (!isOrganize(call.tool_name)) return undefined;
   const input = call.tool_input ?? {};
-  const id = settleTarget(input, deps.self);
-  if (!id) return undefined;
   const action = String(input.action);
+  const id = settleTarget(input, deps.self);
+  if (!id) return guardedActions.includes(action) && action !== "snooze" ? deny(unnamed(action)) : undefined;
   const machine = typeof input.environmentId === "string" && input.environmentId ? input.environmentId : undefined;
   if (machine && deps.settleCheck) {
     const remote = await deps.settleCheck(home, machine, action, id).catch(() => null);

@@ -237,8 +237,12 @@ test("the judge shows a runner file's command as untrusted data after the fixed 
   const [path] = run.evidence();
   const name = path!.split("/").at(-1)!;
   const { prompt } = await judgePrompt(judgeInput(run.repo, [{ kind: "live-run", line: "live-run: evidence at HEAD", directory: join(run.prDirectory, head, "live-run") }]));
-  const section = prompt.slice(prompt.indexOf("### live-run: evidence at HEAD"), prompt.indexOf("## Reviews"));
-  expect(section).toBe(`### live-run: evidence at HEAD
+  const section = prompt.slice(prompt.indexOf("### live-run"), prompt.indexOf("## Reviews"));
+  expect(section).toBe(`### live-run
+
+<untrusted source="the gate's line for live-run">
+live-run: evidence at HEAD
+</untrusted>
 
 ${mark(head)}
 
@@ -266,7 +270,7 @@ test("an author file, a tampered runner file and a malformed record read exactly
     return prompt.slice(prompt.indexOf("### live-run"), prompt.indexOf("## Reviews"));
   };
   const authorName = `${sha256("typed by hand\n")}.log`;
-  const today = `### live-run: evidence at HEAD\n\n<untrusted source="live-run evidence ${authorName}">\ntyped by hand\n</untrusted>\n\n`;
+  const today = `### live-run\n\n<untrusted source="the gate's line for live-run">\nlive-run: evidence at HEAD\n</untrusted>\n\n<untrusted source="live-run evidence ${authorName}">\ntyped by hand\n</untrusted>\n\n`;
   expect(await section()).toBe(today);
 
   expect(await run.run("--kind", "live-run", "--", "echo", "measured")).toBe(0);

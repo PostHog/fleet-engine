@@ -5,6 +5,7 @@ import { normalized, type HeardAnswer } from "./proof-answers.ts";
 import { agentRefusal, agentsAcceptance, covers, fold, keptOwed, panelRefusal, tierOf, usersAcceptance, type Decision, type DecisionState, type Ledger, type Mark, type PrRef, type Tier } from "./decision-ledger.ts";
 import type { Family, Usage } from "./proof-models.ts";
 import { quietReason, type DeltaKind, type QuietStep } from "./proof-delta.ts";
+import { panelOutcome } from "./proof-panel.ts";
 
 export type ProofIdentity = { repository: string; pr: number; commit: string };
 const sha = /^[0-9a-f]{40}$/;
@@ -425,6 +426,7 @@ export async function finishReview(home: string, identity: ProofIdentity, round:
   const bytes = await readFile(findings);
   if (!bytes.toString().trim()) throw new Error(`${findings} is empty. Save the reviewer's findings, or "No findings." when it found none`);
   const directory = await roundDirectory(home, identity, round);
+  if (await panelOutcome(directory) !== "none") throw new Error(`Round ${round} is a panel round, and Hedge saves its findings once every lens is done. Rerun its failed lenses with hedge proof review, or wait for the running ones with hedge proof review --wait. For a PR that the user's rules exempt from the swarm, record hedge proof gap --kind panel --reason <the exception> instead`);
   await storeFindings(directory, identity, round, bytes, reviewer.trim(), "author");
   return directory;
 }
@@ -976,10 +978,11 @@ async function finishedReviews(home: string, identity: ProofIdentity) {
   const reviews = join(pullRequestDirectory(home, identity), "reviews");
   const finished: FinishedReview[] = [];
   for (const name of await reviewNames(reviews)) {
-    const reservation = await readJson<(ProofIdentity & { reviewer?: string }) | undefined>(join(reviews, name, "round.json"), undefined);
+    const reservation = await readJson<(ProofIdentity & { reviewer?: string; capturedBy?: CapturedBy }) | undefined>(join(reviews, name, "round.json"), undefined);
     const findings = await stat(join(reviews, name, "findings.md"), { bigint: true }).catch(() => undefined);
-    const panel = await access(join(reviews, name, "panel.json")).then(() => true, () => false);
-    if (reservation && findings) finished.push({ name, commit: reservation.commit, reviewer: reservation.reviewer, finishedAt: findings.mtimeNs, panel });
+    const panel = await panelOutcome(join(reviews, name));
+    const counted = panel === "none" || (panel === "finished" && reservation?.capturedBy === "hedge");
+    if (reservation && findings && counted) finished.push({ name, commit: reservation.commit, reviewer: reservation.reviewer, finishedAt: findings.mtimeNs, panel: panel === "finished" });
   }
   return finished.sort((a, b) => (a.finishedAt < b.finishedAt ? -1 : a.finishedAt > b.finishedAt ? 1 : 0));
 }

@@ -22,6 +22,8 @@ export const rawReason = `Hedge blocked this command: it merges a PR or posts \`
 export const otherEndpointReason = `Hedge blocked this call: it writes \`/trunk merge\` somewhere other than a new PR comment, such as an edited comment or a review. Enqueue with ${oneShape}.`;
 export const splitStringReason = "Hedge blocked this command: `env -S` runs a command line that the merge gate cannot read. Write the gh, trunk, or curl command out as its own words.";
 export const shellAliasReason = "Hedge blocked this command: it runs a gh alias that the merge gate cannot read, a shell alias or one with arguments. Write the gh command out.";
+const pipedVia = " (piped body)";
+const pipedNote = " A piped body cannot be read, so the gate counts it as an enqueue. If the comment does not post `/trunk merge`, send it with `--body`, a heredoc, or a file instead.";
 const unnamedReason = (what: string) => `Hedge blocked this command: it ${what} without naming the PR, so the merge gate cannot check it. Name the PR by number and repository: ${oneShape}.`;
 
 /** Parses guards.merge-gate-exempt: owner/repo or owner/* entries, separated by commas or spaces. */
@@ -114,9 +116,13 @@ function repositoryOf(gh: Gh, found: Command, cwd: string | undefined, io: Inten
   return cwd ? io.checkoutRepo(resolve(cwd, found.chdir ?? ".")) : undefined;
 }
 
+const stdinPath = /^(?:-|\/dev\/stdin|\/dev\/fd\/\d+|\/proc\/(?:self|\d+)\/fd\/\d+)$/;
+const home = (path: string) => path === "~" ? homedir() : path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
+
 function sentTexts(found: Command, cwd: string | undefined, io: IntentIO, inline: string[], files: string[]) {
-  const piped = files.includes("-") && !found.stdin;
-  const read = files.map((path) => path === "-" ? found.stdin?.body ?? "" : io.readText(resolve(cwd ?? ".", found.chdir ?? ".", path)));
+  const paths = files.map((path) => stdinPath.test(path) ? "-" : path);
+  const piped = paths.includes("-") && !found.stdin;
+  const read = paths.map((path) => path === "-" ? found.stdin?.body ?? "" : io.readText(resolve(cwd ?? ".", found.chdir ?? ".", home(path))));
   const texts = [...inline, ...read.filter((text) => text !== undefined), found.stdin?.body ?? ""];
   return { texts: [...texts, ...texts.flatMap(jsonStrings)], unread: read.includes(undefined), piped };
 }
@@ -130,9 +136,33 @@ const builtAtRunTime = /[$`]/;
 const sendsEnqueue = ({ texts, unread }: { texts: string[]; unread: boolean }, raw: string) =>
   unread || texts.some((text) => enqueueLine.test(text)) || (texts.some((text) => builtAtRunTime.test(text)) && mentionsEnqueue.test(raw));
 
-const httpWrites = (args: string[]) => args.some((arg, index) =>
-  (/^(?:-X|--request)$/.test(arg) && !/^(?:GET|HEAD)$/i.test(args[index + 1] ?? "")) || /^-X(?!GET|HEAD)\w+/i.test(arg) || /^--request=(?!GET|HEAD)/i.test(arg)
-  || /^(?:-d|--data(?:-\w+)?|--json|-F|--form|-T|--upload-file)(?:=|$)/.test(arg) || /^(?:PUT|POST|PATCH)$/i.test(arg));
+const readOptions = {
+  curl: { flags: "sSiILfvk", valued: "HoAwm", long: ["silent", "show-error", "include", "head", "location", "fail", "verbose", "insecure", "compressed"], longValued: ["header", "output", "user-agent", "write-out", "max-time", "connect-timeout"] },
+  wget: { flags: "qvNS", valued: "OoUT", long: ["quiet", "verbose", "no-verbose", "server-response"], longValued: ["header", "output-document", "output-file", "user-agent", "timeout"] },
+};
+const readMethod = /^(?:GET|HEAD)$/i;
+
+function httpWrites(tool: "curl" | "wget", args: string[]): boolean {
+  const { flags, valued, long, longValued } = readOptions[tool];
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index]!;
+    if (!arg.startsWith("-") || arg === "-" || (tool === "wget" && arg === "-nv")) continue;
+    if (arg.startsWith("--")) {
+      const [name = "", value] = arg.slice(2).split(/=(.*)/s);
+      if (long.includes(name) && value === undefined) continue;
+      if (longValued.includes(name)) { if (value === undefined) index++; continue; }
+      if (["request", "method"].includes(name) && readMethod.test(value ?? args[++index] ?? "")) continue;
+      return true;
+    }
+    let at = 1;
+    while (at < arg.length && flags.includes(arg[at]!)) at++;
+    if (at === arg.length) continue;
+    if (valued.includes(arg[at]!)) { if (at === arg.length - 1) index++; continue; }
+    if (tool === "curl" && arg[at] === "X" && readMethod.test(arg.slice(at + 1) || args[++index] || "")) continue;
+    return true;
+  }
+  return false;
+}
 
 const payloadFiles = (args: string[]) => args.flatMap((arg, index) => {
   const attached = arg.match(/^(?:--data(?:-\w+)?|--json|--form|-F|-d)=?(.+)$/)?.[1] ?? arg.match(/^-T(.+)$/)?.[1];
@@ -165,7 +195,7 @@ function commandIntent(found: Command, raw: string, cwd: string | undefined, io:
   if (["curl", "wget", "http", "https", "xh"].includes(name)) {
     const payloads = payloadFiles(found.args).map((path) => path === "-" ? found.stdin?.body : io.readText(resolve(cwd ?? ".", found.chdir ?? ".", path)));
     const sent = [...found.args, found.stdin?.body ?? "", ...payloads.filter((text) => text !== undefined)].join("\n");
-    const writes = name === "curl" || name === "wget" ? httpWrites(found.args) || found.args.some((arg) => /^-[a-zA-Z]*[XdFT]/.test(arg)) : true;
+    const writes = name === "curl" || name === "wget" ? httpWrites(name, found.args) : true;
     const opaque = payloads.includes(undefined) && /github/i.test(raw);
     return writes && (opaque || mentionsEnqueue.test(sent) || graphqlMerge.test(sent) || restMerge.test(sent)) ? { targets: [], refusal: rawReason } : { targets: [] };
   }
@@ -178,13 +208,13 @@ function commandIntent(found: Command, raw: string, cwd: string | undefined, io:
     const sent = sentTexts(found, cwd, io, values(gh, "-b", "--body"), values(gh, "-F", "--body-file"));
     if (!sent.piped && !sendsEnqueue(sent, raw)) return { targets: [] };
     const named = namedPr(gh, found, cwd, io);
-    return named ? { targets: [{ ...named, via: `gh ${gh.group} comment` }] } : { targets: [], refusal: unnamedReason("posts `/trunk merge`") };
+    return named ? { targets: [{ ...named, via: `gh ${gh.group} comment${sent.piped ? pipedVia : ""}` }] } : { targets: [], refusal: unnamedReason("posts `/trunk merge`") };
   }
   if (gh.group === "pr" && gh.action === "review") {
     return sendsEnqueue(sentTexts(found, cwd, io, values(gh, "-b", "--body"), values(gh, "-F", "--body-file")), raw) ? { targets: [], refusal: otherEndpointReason } : { targets: [] };
   }
   if (gh.group === "pr" && gh.action === "merge") {
-    if (values(gh, "--disable-auto").some((value) => value.toLowerCase() !== "false")) return { targets: [] };
+    if (values(gh, "--disable-auto").some((value) => /^(?:|1|t|true)$/i.test(value))) return { targets: [] };
     const named = namedPr(gh, found, cwd, io);
     return named ? { targets: [{ ...named, via: "gh pr merge" }] } : { targets: [], refusal: unnamedReason("merges a PR") };
   }
@@ -203,7 +233,7 @@ function commandIntent(found: Command, raw: string, cwd: string | undefined, io:
   const method = (values(gh, "-X", "--method").at(-1) ?? (fields.length || values(gh, "--input").length ? "POST" : "GET")).toUpperCase();
   if (method === "GET") return { targets: [] };
   const comment = endpoint.match(/^repos\/([\w.-]+\/[\w.-]+)\/issues\/(\d+)\/comments$/);
-  if (comment && method === "POST" && sent.piped) return { targets: [{ repository: comment[1]!, pr: Number(comment[2]), via: "gh api issues/<n>/comments" }] };
+  if (comment && method === "POST" && sent.piped) return { targets: [{ repository: comment[1]!, pr: Number(comment[2]), via: `gh api issues/<n>/comments${pipedVia}` }] };
   const merge = endpoint.match(/^repos\/([\w.-]+\/[\w.-]+)\/pulls\/(\d+)\/merge$/);
   if (merge) return { targets: [{ repository: merge[1]!, pr: Number(merge[2]), via: "gh api pulls/<n>/merge" }] };
   if (!enqueues) return { targets: [] };
@@ -244,7 +274,7 @@ export function mergeIntent(call: ToolCall, command: string, exempt: string[], i
   let intent: MergeIntent = { targets: [] };
   if (shellTools.has(tool)) {
     if (!command) return intent;
-    if (/(?:^|[\s;&|(])env\b[^\n;&|]*\s(?:-\w*S|--split-string)\b/.test(command) && /\b(?:gh|trunk|curl|wget)\b/.test(command)) return { targets: [], refusal: splitStringReason };
+    if (/(?:^|[\s;&|(/])env\b[^\n;&|]*\s(?:-[a-zA-Z]*S|--split-string)/.test(command) && /\b(?:gh|trunk|curl|wget)\b/.test(command)) return { targets: [], refusal: splitStringReason };
     let commands: Command[];
     try { commands = commandsIn(command); }
     catch { return mentionsEnqueue.test(command) || graphqlMerge.test(command) || restMerge.test(command) ? { targets: [], refusal: rawReason } : intent; }
@@ -256,8 +286,8 @@ export function mergeIntent(call: ToolCall, command: string, exempt: string[], i
         const stack = dirs.get(found.scope) ?? [cwdIn(found.scope) ?? "."];
         const to = found.args.find((arg) => !arg.startsWith("-") && !arg.startsWith("+"));
         if (name === "popd") { if (stack.length > 1) stack.pop(); }
-        else if (name === "pushd") stack.push(resolve(stack.at(-1)!, to ?? homedir()));
-        else stack.splice(-1, 1, resolve(stack.at(-1)!, to ?? homedir()));
+        else if (name === "pushd") stack.push(resolve(stack.at(-1)!, home(to ?? "~")));
+        else stack.splice(-1, 1, resolve(stack.at(-1)!, home(to ?? "~")));
         dirs.set(found.scope, stack);
         continue;
       }
@@ -343,7 +373,7 @@ export async function mergeGateRisk(intent: MergeIntent, io: GateIO, person: str
   if (!missing.length) return undefined;
   const hub = hubError ? ` The decision ledger could not be read (${hubError}), so only this machine's gate records counted.` : "";
   return `Hedge blocked this merge: \`hedge proof gate\` has not passed at the head of ${missing.join("; ")}. A missing proof store, a pass at an older head, or a pass that a later failed run at the same head replaced does not count.${hub} `
-    + `Run the gate on each head until it exits 0, then enqueue again. ${overrideHint(person)}`;
+    + `Run the gate on each head until it exits 0, then enqueue again. ${overrideHint(person)}${intent.targets.some((target) => target.via.endsWith(pipedVia)) ? pipedNote : ""}`;
 }
 
 export const mergeGateDeadlineMs = 15_000;
