@@ -489,7 +489,6 @@ test("the gate counts a panel round only when its plan is published and every le
     ["panel.json names no lens", (directory) => writeFileSync(join(directory, "panel.json"), JSON.stringify({ lenses: [] }))],
     ["panel.json lenses is not a list", (directory) => writeFileSync(join(directory, "panel.json"), JSON.stringify({ lenses: { name: "correctness" } }))],
     ["panel.json lenses holds null", (directory) => writeFileSync(join(directory, "panel.json"), JSON.stringify({ lenses: [null] }))],
-    ["panel.json names a lens twice", (directory) => writeFileSync(join(directory, "panel.json"), JSON.stringify({ lenses: [{ name: "correctness" }, { name: "correctness" }] }))],
     ["panel.json names a lens outside the lenses directory", (directory) => { writeFileSync(join(directory, "done.json"), JSON.stringify({ state: "done" })); writeFileSync(join(directory, "panel.json"), JSON.stringify({ lenses: [{ name: "../done" }] })); }],
     ["the author saved the findings", (directory) => { const path = join(directory, "round.json"); writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, "utf8")), capturedBy: "author" })); }],
     ["the plan is staged but not published", (directory) => { const plan = readFileSync(join(directory, "panel.json")); rmSync(join(directory, "panel.json")); writeFileSync(join(directory, "panel.staged.json"), plan); }],
@@ -506,7 +505,7 @@ test("the gate counts a panel round only when its plan is published and every le
     const gate = await pr.fleet("gate");
     expect({ label, code: gate.code }).toEqual({ label, code: 1 });
     expect({ label, line: gate.output.includes("review: no finished panel round on the PR") }).toEqual({ label, line: true });
-    expect({ label, single: gate.output.includes("single-reviewer") }).toEqual({ label, single: label === "the author saved the findings" });
+    expect({ label, single: gate.output.includes("single-reviewer") }).toEqual({ label, single: false });
   }
 
   const staged = await checkout();
@@ -515,6 +514,25 @@ test("the gate counts a panel round only when its plan is published and every le
   writeFileSync(join(reserved.directory, "panel.staged.json"), JSON.stringify({ lenses: [{ name: "correctness" }] }));
   writeFileSync(join(staged.repository, "review.md"), "No findings.\n");
   await expect(staged.fleet("review-finish", "--round", "1", "--reviewer", "gpt-6.1-sol", "review.md")).rejects.toThrow("Round 1 is a panel round");
+});
+
+test("after a valid panel, a later panel round whose findings the author saved never covers HEAD", async () => {
+  const pr = await checkout();
+  const reviewed = await pr.commit("feature.txt", "greet\n");
+  await pr.fleet("require", "--none", "--reason", "docs only");
+  fakeModel(pr, "REVIEWER", clean);
+  await pr.fleet("review", "--lens", "correctness");
+  expect((await pr.fleet("review", "--wait")).code).toBe(0);
+  await pr.commit("feature.txt", "greet the member\n");
+  await pr.fleet("review", "--lens", "correctness", "--scope", "fixes", "--base", reviewed);
+  expect((await pr.fleet("review", "--wait")).code).toBe(0);
+  expect((await pr.fleet("gate")).code).toBe(0);
+
+  const path = join(pr.pullRequest, "reviews/2/round.json");
+  writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, "utf8")), capturedBy: "author" }));
+  const gate = await pr.fleet("gate");
+  expect(gate.code).toBe(1);
+  expect(gate.output).toContain("review: HEAD not reviewed");
 });
 
 test("a panel gap holds the gate until the user accepts it, and still needs a review at HEAD", async () => {

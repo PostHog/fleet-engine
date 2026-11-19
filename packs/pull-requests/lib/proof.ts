@@ -981,7 +981,8 @@ async function finishedReviews(home: string, identity: ProofIdentity) {
     const reservation = await readJson<(ProofIdentity & { reviewer?: string; capturedBy?: CapturedBy }) | undefined>(join(reviews, name, "round.json"), undefined);
     const findings = await stat(join(reviews, name, "findings.md"), { bigint: true }).catch(() => undefined);
     const panel = await panelOutcome(join(reviews, name));
-    if (reservation && findings && panel !== "unfinished") finished.push({ name, commit: reservation.commit, reviewer: reservation.reviewer, finishedAt: findings.mtimeNs, panel: panel === "finished" && reservation.capturedBy === "fleet" });
+    const counted = panel === "none" || (panel === "finished" && reservation?.capturedBy === "fleet");
+    if (reservation && findings && counted) finished.push({ name, commit: reservation.commit, reviewer: reservation.reviewer, finishedAt: findings.mtimeNs, panel: panel === "finished" });
   }
   return finished.sort((a, b) => (a.finishedAt < b.finishedAt ? -1 : a.finishedAt > b.finishedAt ? 1 : 0));
 }

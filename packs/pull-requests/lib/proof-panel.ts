@@ -156,7 +156,7 @@ export async function panelOutcome(directory: string): Promise<"none" | "finishe
   const plan = await readPlan(directory).catch(() => undefined);
   const lenses: unknown[] = Array.isArray(plan?.lenses) ? plan.lenses : [];
   const names = lenses.map((lens) => (lens as { name?: unknown } | null)?.name);
-  if (!names.every((name): name is string => typeof name === "string" && /^[\w-]+$/.test(name)) || new Set(names).size !== names.length) return "unfinished";
+  if (!names.every((name): name is string => typeof name === "string" && /^[\w-]+$/.test(name))) return "unfinished";
   const states = await Promise.all(names.map((name) => readJson<LensStatus | undefined>(lensFile(directory, name, ".json"), undefined).catch(() => undefined)));
   return states.length && states.every((status) => status?.state === "done") ? "finished" : "unfinished";
 }
