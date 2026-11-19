@@ -99,7 +99,7 @@ function withoutHidden(html: string): string {
       at = hidden.lastIndex;
       continue;
     }
-    const closing = open[1] ? new RegExp(`<\\/${open[1]}\\s*>`, "gi") : /-->/g;
+    const closing = open[1] ? new RegExp(`<\\/${open[1]}\\s*>`, "gi") : /--!?>/g;
     closing.lastIndex = hidden.lastIndex;
     if (!closing.exec(html)) return kept;
     at = hidden.lastIndex = closing.lastIndex;

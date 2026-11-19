@@ -578,7 +578,7 @@ console.log(JSON.stringify({ type: "result", is_error: false, structured_output:
     const html = `<html><head><title>Plan &amp; scope</title><script>steal()</script><style>p{}</style></head><body><p data-x="a>b">Load&nbsp;test &#x2192; ship&#0; &mdash; <a href="/spec?x=1&amp;y=2">the spec</a>, <a href="javascript:steal()">bad</a> <a data-href="https://evil.example.com/" href="/real">real</a></p><!-- hidden --></body></html>`;
     expect(await readPage(url, answering(html, "text/html; charset=utf-8"))).toBe("Plan & scope\nLoad test → ship — the spec (https://example.com/spec?x=1&y=2), bad real (https://example.com/real)");
     expect(await readPage(url, answering("# Notes", "text/markdown"))).toBe("# Notes");
-    expect(await readPage(url, answering("<svg/><p>Release notes</p><template-card>Meeting notes</template-card><svg><text>art</text></svg><script/>metadata</script><p>Visible</p>", "text/html"))).toBe("Release notes\nMeeting notes\nVisible");
+    expect(await readPage(url, answering("<svg/><p>Release notes</p><template-card>Meeting notes</template-card><svg><text>art</text></svg><script/>metadata</script><p>Visible</p><!-- note --!><p>After</p><!-- end -->", "text/html"))).toBe("Release notes\nMeeting notes\nVisible\nAfter");
     await expect(readPage(url, answering("x", "text/html", 404))).rejects.toThrow(`${url} answered HTTP 404`);
     await expect(readPage(url, answering("x", "application/pdf"))).rejects.toThrow("cannot read as text");
   });
