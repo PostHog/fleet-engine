@@ -561,20 +561,18 @@ test("the ceiling never refuses a final read of a HEAD the gate does not carry, 
   await expect(pr.hedge("review-start", "--scope", "final", "--base", await pr.git("rev-parse", "HEAD~1"), "--agent", "One more read checks the test.")).rejects.toThrow("The review budget of 2 reviews is spent");
 });
 
-test("the ceiling refuses a final read of a HEAD that the gate carries across a revert of the latest reviewed fix, whatever --base names", async () => {
+test("a HEAD that the gate carries across a revert of the latest reviewed fix needs no final read, and with --agent meets the ceiling, whatever --base names", async () => {
   const pr = await checkout();
   const { panel, fix } = await atCeiling(pr);
   await pr.git("revert", "--no-edit", fix);
 
   expect((await pr.hedge("gate")).output).toContain(`review: final read carried from ${panel.slice(0, 7)}: revert of a PR commit`);
-  await expect(pr.hedge("review-start", "--scope", "final", "--base", fix)).rejects.toThrow("The review budget of 2 reviews is spent");
+  await expect(pr.hedge("review-start", "--scope", "final", "--base", fix)).rejects.toThrow(`HEAD needs no final read: final read carried from ${panel.slice(0, 7)}: revert of a PR commit`);
+  await expect(pr.hedge("review-start", "--scope", "final", "--base", panel)).rejects.toThrow(`HEAD needs no final read: final read carried from ${panel.slice(0, 7)}: revert of a PR commit`);
   await expect(pr.hedge("review-start", "--scope", "final", "--base", fix, "--agent", "The revert needs a read.")).rejects.toThrow("The review budget of 2 reviews is spent");
-  await expect(pr.hedge("review-start", "--scope", "final", "--base", panel)).rejects.toThrow("HEAD needs no final read");
 });
 
-test("the ceiling lets a final read run when the gate does not carry HEAD across 21 clean base merges, though --base names the first merge", async () => {
-  const pr = await checkout();
-  const { fix } = await atCeiling(pr);
+async function merge21BaseCommits(pr: Checkout, fix: string) {
   const merges = await spawnAsync(["sh", "-ec", `git checkout -q main
 for i in $(seq 21); do echo "$i" > base.txt; git add base.txt; git commit -qm "Base $i"; done
 git update-ref refs/remotes/origin/main HEAD
@@ -583,6 +581,23 @@ for i in $(seq 20 -1 0); do git merge -q --no-edit "main~$i"; done`], { cwd: pr.
   expect(merges.exitCode).toBe(0);
   const first = await pr.git("rev-parse", "HEAD~20");
   expect(await pr.git("rev-parse", `${first}^1`)).toBe(fix);
+  return first;
+}
+
+test("the ceiling lets a final read run when the gate does not carry HEAD across 21 clean base merges, though --base names the first merge", async () => {
+  const pr = await checkout();
+  const { fix } = await atCeiling(pr);
+  const first = await merge21BaseCommits(pr, fix);
+
+  expect((await pr.hedge("gate")).output).toContain(`review: HEAD not reviewed, last review covered ${fix.slice(0, 7)}`);
+  expect((await pr.hedge("review-start", "--scope", "final", "--base", first)).output).toContain(`"round":"final"`);
+});
+
+test("a test-only commit after 21 clean base merges gets its final read without --agent, since the gate does not carry HEAD", async () => {
+  const pr = await checkout();
+  const { fix } = await atCeiling(pr);
+  const first = await merge21BaseCommits(pr, fix);
+  await pr.commit("feature.test.ts", "test(\"greets the member\", () => {});\n");
 
   expect((await pr.hedge("gate")).output).toContain(`review: HEAD not reviewed, last review covered ${fix.slice(0, 7)}`);
   expect((await pr.hedge("review-start", "--scope", "final", "--base", first)).output).toContain(`"round":"final"`);

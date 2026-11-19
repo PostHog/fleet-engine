@@ -74,8 +74,8 @@ final reads of the babysit phase count apart. Only a review that leads to fixes 
 findings hold no blocker, major, or finding without a severity spends nothing, and an unfinished one counts. The
 budget never refuses a final read of a HEAD that the gate does not carry; a blocker or major that it finds still
 counts, so the fixes rounds after it stop at the ceiling. The default budget is the panel, the fixes read, and the last read. On
-a PR of the Read tier the ceiling is two reviews that count: its one read and one final read of its fixes. A further
-final read runs only when the gate does not carry HEAD. The arbiter is the lookup model of your AI plan;
+a PR of the Read tier the ceiling is two reviews that count: its one read and one final read of its fixes. At the
+ceiling, a further final read runs only when the gate does not carry HEAD; below it, --agent still reads a carried HEAD. The arbiter is the lookup model of your AI plan;
 HEDGE_REVIEW_ARBITER replaces its command.`;
 
 const subcommands: Record<string, Subcommand> = {
@@ -236,7 +236,7 @@ with the merge time and the time it was saved.`,
     summary: `Without --lens, --scope full runs the panel of the PR's review tier, which hedge picks from the merge-risk grade
 of the PR description and the authored production lines of the diff: lines outside tests, docs, lockfiles, and
 generated files. Read: grade low or no grade, and under 50 authored lines; one combined Correctness and Risk lens on the
-other family, and one final read of its fixes that counts, with more only when the gate does not carry HEAD. Pair:
+other family, and one final read of its fixes that counts; at that ceiling, more run only when the gate does not carry HEAD. Pair:
 any other grade but high, or a grade hedge cannot read; the lenses correctness:other, risk:other, and fresh-eyes:same.
 Panel: grade high; the lenses fresh-eyes, correctness, risk, design, and anti-overengineering. --lens adds lenses to the tier's set, such as security, ui, systems, or a
 Team perspective; it never removes one. The output and hedge proof show name the tier and why. An unfinished panel

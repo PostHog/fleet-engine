@@ -110,6 +110,8 @@
   does not carry. It asks the gate's own question, from the same reviews,
   whatever `--base` names. A blocker or major that the read finds still
   counts, so the fixes rounds after it stop at the ceiling.
+- A final read without `--agent` stops with "HEAD needs no final read" only
+  when the gate carries HEAD across quiet commits, whatever `--base` names.
 - A lens that writes its `FINDINGS` header in bold keeps its findings. The
   gate asks for their answers, and they count toward the review budget.
 

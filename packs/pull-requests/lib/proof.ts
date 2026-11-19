@@ -244,19 +244,19 @@ const reserveDecided = (reviews: string, name: string, record: object, decision:
 async function startFinalRead(home: string, identity: ProofIdentity, base: string | undefined, decision: Decision | undefined, phase: FinalReadPhase, permit: Permit, cleanBaseMerge: CleanBaseMerge, quietCommit: QuietCommit, capturedBy: CapturedBy, from: string | undefined, lock: LockRound | undefined): Promise<Reserved> {
   if (base === undefined) throw new Error("A final read needs --base with the latest reviewed commit");
   if (base === identity.commit) throw new Error("HEAD is already reviewed. Skip the final read.");
-  const quiet = decision ? undefined : reviewedThrough(identity.commit, new Set([base]), cleanBaseMerge, quietCommit);
-  if (quiet?.quiet.length) throw new Error(`HEAD needs no final read: final read carried from ${short(base)}: ${quietReason(quiet.kinds)}. hedge proof gate counts the carry. To read it anyway, pass --agent '<your reason>', or the user's --override`);
   const reviews = join(pullRequestDirectory(home, identity), "reviews");
   for (let attempt = 1; attempt <= 100; attempt++) {
     const started = await reviewNames(reviews);
     const finished = await finishedReviews(home, identity);
+    const carried = gateCarry(identity, finished, cleanBaseMerge, quietCommit).found;
+    if (!decision && carried?.quiet.length) throw new Error(`HEAD needs no final read: final read carried from ${short(carried.from)}: ${quietReason(carried.kinds)}. hedge proof gate counts the carry. To read it anyway, pass --agent '<your reason>', or the user's --override`);
     if (finished.length < started.length) throw new Error("A review is unfinished. Finish it before a final read.");
     const latest = finished.at(-1);
     if (!latest) throw new Error("A final read needs a finished earlier review");
     if (!coversReview(base, latest.commit, cleanBaseMerge)) throw new Error(`Final read base must be the latest reviewed commit ${latest.commit}, or a clean base merge the gate carried it to`);
     const spent = await reviewsSpent(reviews, started, phase);
     const { free, ceiling } = permit.limits;
-    const stop = gateCarry(identity, finished, cleanBaseMerge, quietCommit).found && spent >= ceiling ? budgetSpent(permit.limits) : undefined;
+    const stop = carried && spent >= ceiling ? budgetSpent(permit.limits) : undefined;
     const verdict = await permitReview(home, identity, spent >= free, stop, decision, permit);
     let read = 1;
     while (started.includes(finalReadPrefix + read)) read++;
