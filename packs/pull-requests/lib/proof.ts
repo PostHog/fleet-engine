@@ -247,10 +247,11 @@ async function startFinalRead(home: string, identity: ProofIdentity, base: strin
     if (!latest) throw new Error("A final read needs a finished earlier review");
     if (!coversReview(base, latest.commit, cleanBaseMerge)) throw new Error(`Final read base must be the latest reviewed commit ${latest.commit}, or a clean base merge the gate carried it to`);
     const unfinished = finished.length < started.length;
-    if (!decision && carried?.quiet.length) throw new Error(`HEAD needs no final read: final read carried from ${short(carried.from)}: ${quietReason(carried.kinds)}. hedge proof gate counts the carry.${unfinished ? "" : " To read it anyway, pass --agent '<your reason>', or the user's --override"}`);
-    if (unfinished) throw new Error("A review is unfinished. Finish it before a final read.");
     const spent = await reviewsSpent(reviews, started, phase);
     const { free, ceiling } = permit.limits;
+    const retry = unfinished ? "" : ` To read it anyway, pass ${spent < ceiling ? "--agent '<your reason>', or " : ""}the user's --override`;
+    if (!decision && carried?.quiet.length) throw new Error(`HEAD needs no final read: final read carried from ${short(carried.from)}: ${quietReason(carried.kinds)}. hedge proof gate counts the carry.${retry}`);
+    if (unfinished) throw new Error("A review is unfinished. Finish it before a final read.");
     const stop = carried && spent >= ceiling ? budgetSpent(permit.limits) : undefined;
     const verdict = await permitReview(home, identity, spent >= free, stop, decision, permit);
     let read = 1;

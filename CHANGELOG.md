@@ -113,6 +113,10 @@
   counts, so the fixes rounds after it stop at the ceiling.
 - A final read without `--agent` stops with "HEAD needs no final read" only
   when the gate carries HEAD across quiet commits, whatever `--base` names.
+  Its advice names only the retries that can run: `--agent` only while the
+  budget is left, and no retry while a review is unfinished.
+- `hedge proof respond` takes a "known" answer only when the reviews that
+  count reach the ceiling. A review with no blocker or major does not count.
 
 ## v0.1.0
 
