@@ -82,7 +82,7 @@ const fleetCommand = /^exec sh '(.*)\/fleet' "\$@"$/m;
 
 export function customFleetEngine(home: string, next: string): string | undefined {
   const engine = join(home, legacyEngine);
-  if (lstatSync(engine, { throwIfNoEntry: false })?.isSymbolicLink()) return `${engine} is a link to ${real(engine)}, and Hedge finds and stops only a Fleet engine that sits in ${engine} itself, so Hedge changed nothing. Stop Fleet's services, cron jobs and fleet: tasks in T3 Code by hand and delete the link ${engine}, or move the engine to ${engine} in place of the link. Then run ${next} again.`;
+  if (lstatSync(engine, { throwIfNoEntry: false })?.isSymbolicLink()) return `${engine} is a link, and Hedge finds and stops only a Fleet engine that sits in ${engine} itself, so Hedge changed nothing. Run ls -l ${engine} to see where it points. Stop Fleet's services, cron jobs and fleet: tasks in T3 Code by hand and delete the link ${engine}, or move the engine to ${engine} in place of the link. Then run ${next} again.`;
   const wrapper = join(home, ".local/bin/fleet");
   let text: string;
   try {

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { lstatSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { checkParents } from "./files/install.ts";
 import { refuseLegacyPath } from "./legacy.ts";
 import { repoUrl, withoutUserinfo } from "./pack/sources.ts";
 import type { ProfileFile } from "./pack/types.ts";
@@ -38,6 +39,7 @@ export async function update(given: UpdateOptions): Promise<number> {
   const options = { ...given, print: (line: string) => given.print(withoutUserinfo(line)) };
   const origin = await ready(options);
   if (!origin) return 1;
+  if (!(await stateFolderReady(options))) return 1;
   const before = (await git(options.engineDir, "rev-parse", "HEAD")).out;
   const moved = options.engine.channel === "track" ? await trackMain(options, origin.url) : await followRelease(options, origin.url, origin.switched);
   if (!moved) return 1;
@@ -49,6 +51,16 @@ export async function update(given: UpdateOptions): Promise<number> {
   const profileMoved = await pullProfile(options);
   const applied = await options.runApply();
   return applied === 0 && !profileMoved ? 1 : applied;
+}
+
+async function stateFolderReady(options: UpdateOptions) {
+  try {
+    await checkParents(options.home, ".local/state/hedge/update.json");
+    return true;
+  } catch (error) {
+    options.print(`hedge update: ${(error as Error).message}. hedge apply keeps its state in ${dirname(noticePath(options.home))} and stops when a folder on that path is a link or not a folder, so hedge update changed nothing. Make each one a real folder, then run hedge update again.`);
+    return false;
+  }
 }
 
 async function pullProfile(options: UpdateOptions) {
@@ -181,10 +193,8 @@ async function rollBack(options: UpdateOptions, before: string, installError: st
 async function saveNotice(options: UpdateOptions, newMajor: string | undefined) {
   const path = noticePath(options.home);
   try {
-    for (const each of [dirname(path), path]) {
-      refuseLegacyPath(each);
-      if (lstatSync(each, { throwIfNoEntry: false })?.isSymbolicLink()) throw new Error(`${each} is a link, so Hedge does not write the update notice there.`);
-    }
+    refuseLegacyPath(path);
+    if (lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink()) throw new Error(`${path} is a link, so Hedge does not write the update notice there.`);
     if (!newMajor) return await rm(path, { force: true });
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, JSON.stringify({ newMajor }) + "\n");

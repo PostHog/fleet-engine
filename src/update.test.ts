@@ -526,17 +526,61 @@ describe("hedge update", () => {
   });
 
   const fleetsOwn = "fleet's own\n";
-  const noticeCases: Array<[string, string[], (home: string, outside: string) => string]> = [
-    ["Hedge's state folder links into Fleet's, and Fleet's notice is a file", ["v0.1.0", "v0.1.1", "v1.0.0"], (home) => {
+  const stateUnder = (home: string) => () => readdirSync(join(home, ".local/state"), { recursive: true, withFileTypes: true }).map((entry) => {
+    const path = join(entry.parentPath, entry.name);
+    return `${path} ${entry.isSymbolicLink() ? `-> ${readlinkSync(path)}` : entry.isFile() ? readFileSync(path, "utf8") : "folder"}`;
+  }).sort();
+
+  async function releaseThatReadsState(remote: string, version: string) {
+    const install = join(engineRoot, "src/files/install.ts");
+    writeFileSync(join(remote, "hedge"), `[ "$1" = apply ] || exit 64\n"${process.execPath}" -e 'const { checkParents } = await import("${install}"); await checkParents(process.env.HOME, ".local/state/hedge/state.json")' || exit 1\ncat "$(dirname "$0")/VERSION" > "$HOME/applied"\n`);
+    writeFileSync(join(remote, "VERSION"), version);
+    await spawnGit(remote, "add", ".");
+    await spawnGit(remote, "commit", "-q", "-m", version);
+    await spawnGit(remote, "tag", version);
+  }
+
+  const stateFolderCases: Array<[string, (home: string) => void]> = [
+    ["links into Fleet's, and Fleet's notice is a file", (home) => {
       writeFileSync(join(home, ".local/state/fleet/update.json"), fleetsOwn);
       symlinkSync(join(home, ".local/state/fleet"), join(home, ".local/state/hedge"));
-      return `${dirname(noticePath(home))} is in a Fleet path from before the rename, so Hedge does not write there.`;
     }],
-    ["Hedge's state folder links into Fleet's, and Fleet's notice links out of that folder", ["v0.1.0", "v0.1.1"], (home, outside) => {
-      symlinkSync(outside, join(home, ".local/state/fleet/update.json"));
+    ["links into Fleet's, and Fleet's notice links out of that folder", (home) => {
+      symlinkSync(join(temp.make("outside-"), "notice.json"), join(home, ".local/state/fleet/update.json"));
       symlinkSync(join(home, ".local/state/fleet"), join(home, ".local/state/hedge"));
-      return `${dirname(noticePath(home))} is in a Fleet path from before the rename, so Hedge does not write there.`;
     }],
+    ["is a file", (home) => writeFileSync(join(home, ".local/state/hedge"), "not a folder\n")],
+  ];
+
+  test.each(stateFolderCases)("refuses before the engine moves when Hedge's state folder %s, which the new engine's apply cannot read, and exits 1, applies nothing and writes no file in Fleet's state", async (_kind, arrange) => {
+    const remote = await engineRemote(["v0.1.0", "v1.0.0"]);
+    const engineDir = await engineCheckout(remote, "v0.1.0");
+    await releaseThatReadsState(remote, "v0.1.1");
+    const home = temp.make("home-");
+    mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
+    arrange(home);
+    const state = stateUnder(home);
+    const before = state();
+
+    const result = await cliUpdate(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" }, home);
+
+    expect(result).toMatchObject({ code: 1, applied: false, version: "v0.1.0" });
+    expect(result.output).toContain(`hedge update: Parent is not a real directory: ${join(home, ".local/state/hedge")}. hedge apply keeps its state in ${join(home, ".local/state/hedge")}`);
+    expect(result.output).toContain("so hedge update changed nothing.");
+    expect(state()).toEqual(before);
+  });
+
+  test("updates and applies through a release whose apply reads Hedge's state folder when that folder is absent", async () => {
+    const remote = await engineRemote(["v0.1.0"]);
+    const engineDir = await engineCheckout(remote, "v0.1.0");
+    await releaseThatReadsState(remote, "v0.1.1");
+
+    const result = await cliUpdate(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" });
+
+    expect(result).toMatchObject({ code: 0, applied: true, version: "v0.1.1" });
+  });
+
+  const noticeCases: Array<[string, string[], (home: string, outside: string) => string]> = [
     ["Hedge's state folder is real but its update.json links to Fleet's notice", ["v0.1.0", "v0.1.1", "v1.0.0"], (home) => {
       writeFileSync(join(home, ".local/state/fleet/update.json"), fleetsOwn);
       mkdirSync(join(home, ".local/state/hedge"));
@@ -548,9 +592,10 @@ describe("hedge update", () => {
       symlinkSync(join(home, ".local/state/fleet/update.json"), noticePath(home));
       return `${noticePath(home)} is a link, so Hedge does not write the update notice there.`;
     }],
-    ["Hedge's state folder is a file", ["v0.1.0", "v0.1.1", "v1.0.0"], (home) => {
-      writeFileSync(join(home, ".local/state/hedge"), "not a folder\n");
-      return "ENOTDIR";
+    ["Hedge's state folder is real but its update.json links out of it", ["v0.1.0", "v0.1.1"], (home, outside) => {
+      mkdirSync(join(home, ".local/state/hedge"));
+      symlinkSync(outside, noticePath(home));
+      return `${noticePath(home)} is a link, so Hedge does not write the update notice there.`;
     }],
   ];
 
@@ -562,10 +607,7 @@ describe("hedge update", () => {
     writeFileSync(outside, fleetsOwn);
     mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
     const reason = arrange(home, outside);
-    const state = () => readdirSync(join(home, ".local/state"), { recursive: true, withFileTypes: true }).map((entry) => {
-      const path = join(entry.parentPath, entry.name);
-      return `${path} ${entry.isSymbolicLink() ? `-> ${readlinkSync(path)}` : entry.isFile() ? readFileSync(path, "utf8") : "folder"}`;
-    }).sort();
+    const state = stateUnder(home);
     const before = state();
 
     const result = await cliUpdate(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" }, home);

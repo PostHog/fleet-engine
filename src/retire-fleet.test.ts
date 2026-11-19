@@ -653,20 +653,20 @@ describe("hedge retire-fleet", () => {
     expect(existsSync(join(custom.home, ".local/state/hedge/state.json"))).toBe(false);
   });
 
-  const withLinkedEngine = () => {
+  const withLinkedEngine = (target = "a checkout") => {
     const linked = withFleetCommand(".local/share/fleet/engine");
     const link = join(linked.home, ".local/share/fleet/engine");
     const checkout = join(linked.home, "src/fleet-engine");
-    mkdirSync(checkout, { recursive: true });
+    if (target === "a checkout") mkdirSync(checkout, { recursive: true });
     rmSync(link, { recursive: true });
     symlinkSync(checkout, link);
-    const refusal = `Hedge: ${link} is a link to ${checkout}, and Hedge finds and stops only a Fleet engine that sits in ${link} itself, so Hedge changed nothing.`;
+    const refusal = `Hedge: ${link} is a link, and Hedge finds and stops only a Fleet engine that sits in ${link} itself, so Hedge changed nothing. Run ls -l ${link} to see where it points.`;
     const files = () => readdirSync(linked.home, { recursive: true }).map(String).sort();
     return { ...linked, refusal, files };
   };
 
-  test("on a machine whose default Fleet engine folder is a link, retire and its dry run refuse, name the link and where it points, and change nothing", async () => {
-    const linked = withLinkedEngine();
+  test.each(["a checkout", "a missing folder"])("on a machine whose default Fleet engine folder is a link to %s, retire and its dry run refuse, name only the link and how to see where it points, and change nothing", async (target) => {
+    const linked = withLinkedEngine(target);
     const before = linked.files();
 
     const retired = await linked.hedge(["retire-fleet"]);
@@ -680,7 +680,7 @@ describe("hedge retire-fleet", () => {
     expect(linked.files()).toEqual(before);
   });
 
-  test("on a machine whose default Fleet engine folder is a link, apply refuses, names the link and where it points, and starts and changes nothing", async () => {
+  test("on a machine whose default Fleet engine folder is a link, apply refuses, names only the link and how to see where it points, and starts and changes nothing", async () => {
     const linked = withLinkedEngine();
     const profile = profileDir(["watcher"]);
     const before = linked.files();
