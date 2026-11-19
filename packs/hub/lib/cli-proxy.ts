@@ -12,11 +12,11 @@ import { refuseLinks, writePrivateFile, type Fetch } from "../../mcp-gateway/lib
 import type { Run } from "../../mcp-gateway/lib/hub.ts";
 import { isKeptForBoxes } from "../../../src/hub/names.ts";
 import { waitsForPerson } from "../../../src/pack/types.ts";
-import { recordWritten } from "../../../src/adapters/provider-config/adapter.ts";
+import { codexProvider, codexProviderTable, keyHelper } from "../../../src/adapters/provider-config/proxy-route.ts";
 import { refreshCodexCatalog } from "./codex-catalog.ts";
 import { must, proxyPort } from "./run.ts";
 
-export { proxyPort, proxyUrl };
+export { codexProvider, codexProviderTable, keyHelper, proxyPort, proxyUrl };
 export type ProxyMode = "plan" | "install" | "doctor" | "accounts" | "catalog" | "connect" | "disconnect" | "check" | "remove" | "left";
 export type Release = { version: string; url: string; sha256: string };
 export type Panel = { page: Release; plugin: Release; historyDays: number };
@@ -27,7 +27,6 @@ export type ProxyMachine = {
 };
 
 export const keyPath = (home: string) => join(home, ".config/hedge/cli-proxy.key");
-export const keyHelper = 'cat "$HOME/.config/hedge/cli-proxy.key"';
 const fleetKeyHelper = 'cat "$HOME/.config/fleet/cli-proxy.key"';
 const ownHelper = (helper: unknown) => helper === keyHelper || helper === fleetKeyHelper;
 export const panelUrl = `${proxyUrl}/management.html`;
@@ -349,14 +348,8 @@ export async function claudeRoute(home: string, on: boolean): Promise<(() => Pro
     if (settings.env && !Object.keys(env).length) delete settings.env;
     if (ownHelper(settings.apiKeyHelper)) delete settings.apiKeyHelper;
   }
-  const own = async () => {
-    if (on) await recordWritten(home, ".claude/settings.json", [{ path: ["env", "ANTHROPIC_BASE_URL"], value: proxyUrl, pack: "hub" }, { path: ["apiKeyHelper"], value: keyHelper, pack: "hub" }]);
-  };
-  if (JSON.stringify(settings) === before) return own;
-  return async () => {
-    await own();
-    await replaceUnchanged(path, text, `${JSON.stringify(settings, null, 2)}\n`);
-  };
+  if (JSON.stringify(settings) === before) return async () => {};
+  return () => replaceUnchanged(path, text, `${JSON.stringify(settings, null, 2)}\n`);
 }
 
 async function replaceUnchanged(path: string, before: string | undefined, after: string): Promise<void> {
@@ -373,9 +366,7 @@ async function replaceUnchanged(path: string, before: string | undefined, after:
 
 const sendClaude = async (home: string, on: boolean) => (await claudeRoute(home, on))?.();
 
-export const codexProvider = "hedge-proxy";
-const codexUrl = `${proxyUrl}/v1`;
-export const codexProviderTable = { name: "Hedge CLI proxy", base_url: codexUrl, wire_api: "responses", auth: { command: "/bin/sh", args: ["-c", keyHelper] } };
+const codexUrl = codexProviderTable.base_url;
 const fleetProvider = "fleet-proxy";
 const fleetProviderTable = { name: "Fleet CLI proxy", base_url: codexUrl, wire_api: "responses", auth: { command: "/bin/sh", args: ["-c", fleetKeyHelper] } };
 
@@ -452,11 +443,7 @@ async function codexRoute(home: string): Promise<string | (() => Promise<void>)>
   if (table !== undefined && !reachesProxy(table)) return ownTable(path);
   config.model_provider = codexProvider;
   config.model_providers = { ...providers, [codexProvider]: table ?? codexProviderTable };
-  const written = [{ path: ["model_provider"], value: codexProvider, pack: "hub" }, ...(table === undefined || Bun.deepEquals(table, codexProviderTable) ? [{ path: ["model_providers", codexProvider], value: codexProviderTable, pack: "hub" }] : [])];
-  return async () => {
-    await recordWritten(home, ".codex/config.toml", written);
-    await replaceUnchanged(path, text, `${stringify(config)}\n`);
-  };
+  return () => replaceUnchanged(path, text, `${stringify(config)}\n`);
 }
 
 async function sendCodex(home: string, besideClaude: boolean): Promise<string | undefined> {

@@ -200,7 +200,7 @@ async function reconcile(plan: Plan, options: ApplyOptions): Promise<{ report: R
 
 const waitsForCheck = (plan: Plan, entry: Plan["config"][number]) => entry.after !== undefined && !plan.human.some((step) => step.pack === entry.pack && step.id === entry.after);
 
-const droppedConfig = (entry: Plan["config"][number]): Plan["dropped"][number] => ({ pack: entry.pack, item: `config ${entry.provider}:${entry.key}`, reason: `check ${entry.after} does not pass`, check: entry.after, value: entry.value });
+const droppedConfig = (entry: Plan["config"][number]): Plan["dropped"][number] => ({ pack: entry.pack, item: `config ${entry.provider}:${entry.key}`, reason: `check ${entry.after} does not pass`, check: entry.after });
 
 export async function check(plan: Plan, options: { home: string; adapters?: Adapter[]; run?: Runner }): Promise<Report> {
   const run = viaEngine(plan, options.run ?? spawnRunner(options.home, plan.machine.profileDir));

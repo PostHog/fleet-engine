@@ -6,6 +6,7 @@ import { spawnRunner, type CommandRunner } from "../run.ts";
 import { codexHookTrust, isTrustOf } from "./codex-hooks.ts";
 import { checkPath, get, json, keyPath, overlaps, remove, same, samePath, set, toml, type Document, type Field, type Format } from "./fields.ts";
 import { declaredMarketplaces, reconcilePlugins } from "./plugins.ts";
+import { proxyRoute } from "./proxy-route.ts";
 import { claudeJson, isMcpServer, reconcileServers, wantedServers } from "./claude-servers.ts";
 import { linkOnPath, optional, readState, withLock, writeWithBackups, type Write } from "./store.ts";
 
@@ -64,7 +65,7 @@ async function reconcileFiles(plan: Plan, home: string, dryRun: boolean, adopt: 
     const fields = owned(plan, target);
     let merged: Merged;
     try {
-      merged = merge(target, before, old, fields, adopt.includes(target.path), { outage, gated: gatedPath(gated, target.provider), dropped: gatedFields(plan, target), configPath: join(home, target.path) });
+      merged = merge(target, before, old, fields, adopt.includes(target.path), { outage, gated: gatedPath(gated, target.provider), configPath: join(home, target.path) });
     } catch (error) {
       keepOld();
       result.findings.push({ id: `kept:${target.path}`, pack: "engine", say: `Kept ${target.path} as it is: Hedge cannot read it (${(error as Error).message}). Fix the file, then run hedge apply.`, repair: "human" });
@@ -105,7 +106,7 @@ function owned(plan: Plan, target: Target): Field[] {
   return fields;
 }
 
-function merge(target: Target, text: string | undefined, previous: Field[], wanted: Field[], adopt: boolean, options: { outage: boolean; gated: (path: string[]) => boolean; dropped: GatedField[]; configPath: string }): Merged {
+function merge(target: Target, text: string | undefined, previous: Field[], wanted: Field[], adopt: boolean, options: { outage: boolean; gated: (path: string[]) => boolean; configPath: string }): Merged {
   const current: Document = text === undefined ? {} : target.format.decode(text);
   const original = target.format.encode(current);
   const record: Field[] = [];
@@ -152,15 +153,14 @@ function merge(target: Target, text: string | undefined, previous: Field[], want
       removed.push(field.path.join("."));
     }
   }
-  const untouched = (field: GatedField) => get(current, field.path) === undefined || same(get(current, field.path), field.value);
-  const unrecorded = options.dropped
-    .filter((field) => options.dropped.every((other) => other.check !== field.check || other.pack !== field.pack || untouched(other)))
-    .filter((field) => !all.some((item) => overlaps(item.path, field.path)))
-    .map((field) => field.path);
-  for (const path of unrecorded) {
-    if (get(current, path) === undefined) continue;
-    remove(current, path);
-    removed.push(path.join("."));
+  const route = proxyRoute[target.provider] ?? [];
+  const held = route.filter((field) => get(current, field.path) !== undefined);
+  const hedges = held.every((field) => same(get(current, field.path), field.value));
+  const wantedRoute = route.some((field) => all.some((item) => overlaps(item.path, field.path)));
+  const outageKeeps = options.outage && !route.some((field) => options.gated(field.path));
+  for (const field of hedges && !wantedRoute && !outageKeeps ? held : []) {
+    remove(current, field.path);
+    removed.push(field.path.join("."));
   }
   const reason = [changed.length ? `set ${changed.join(", ")}` : "", removed.length ? `remove ${removed.join(", ")}` : ""].filter(Boolean).join("; ");
   const after = target.format.encode(current);
@@ -189,17 +189,6 @@ function gatedKeys(plan: Plan) {
   return plan.dropped.flatMap((entry) => (entry.check && entry.item.startsWith("config ") ? [entry.item.slice("config ".length)] : []));
 }
 
-type GatedField = Field & { check: string };
-
-/** The config entries of this target that the gate dropped, with Hedge's value. Entries that wait for the same check leave together, even during an outage and without a record, unless one of them holds another value. */
-function gatedFields(plan: Plan, target: Target): GatedField[] {
-  return plan.dropped.flatMap((entry) => {
-    if (!entry.check || entry.value === undefined || !entry.item.startsWith(`config ${target.provider}:`)) return [];
-    const path = keyPath(entry.item.slice(`config ${target.provider}:`.length));
-    return target.owns(path) ? [{ path, value: entry.value, pack: entry.pack, check: entry.check }] : [];
-  });
-}
-
 /** Whether a path overlaps a config key of this provider that the gate dropped, so an outage does not keep it. */
 function gatedPath(gated: string[], provider: Provider) {
   const paths = gated.filter((key) => key.startsWith(`${provider}:`)).map((key) => keyPath(key.slice(provider.length + 1)));
@@ -209,15 +198,6 @@ function gatedPath(gated: string[], provider: Provider) {
 /** True while an enabled pack is missing because its source cannot be fetched. Its settings must not look departed. */
 export function sourceOutage(plan: Plan) {
   return plan.packs.some((pack) => !pack.available && (pack.reason ?? "").startsWith("not found; unreachable"));
-}
-
-export async function recordWritten(home: string, target: string, fields: Field[]) {
-  await withLock(home, async () => {
-    const before = await readState(home, recordTarget);
-    const record = await readFieldRecord(home);
-    record[target] = [...(record[target] ?? []).filter((old) => !fields.some((field) => overlaps(field.path, old.path))), ...fields];
-    await writeWithBackups(home, [{ target: recordTarget, before, after: `${JSON.stringify(record, null, 2)}\n` }]);
-  });
 }
 
 export async function readFieldRecord(home: string, target = recordTarget): Promise<FieldRecord> {

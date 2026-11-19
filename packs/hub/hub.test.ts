@@ -310,15 +310,35 @@ describe("the Own-account balancing workflow", () => {
     expect(await codexConfig(mac)).toBeUndefined();
   });
 
-  test("after connect on a devbox, turning balancing off takes the Claude and Codex routes that connect wrote off at the next apply", async () => {
+  const connectedDevbox = (files: Record<string, string> = {}) => {
     const { machine, home } = proxyMachine((prefix) => temp.make(prefix), { plan: "both" }, { models: ["claude-sonnet-5-5", "gpt-6.1-sol"] }, { role: "devbox" });
-    expect(await cliProxy("connect", machine)).toBe(0);
-    expect(parse(readFileSync(join(home, ".codex/config.toml"), "utf8"))).toEqual({ model_provider: "hedge-proxy", model_providers: { "hedge-proxy": codexProviderTable } });
+    for (const [path, text] of Object.entries(files)) {
+      mkdirSync(join(home, path, ".."), { recursive: true });
+      writeFileSync(join(home, path), text);
+    }
     const off = plan({ packs: ["hub"], plan: "both" }, devbox);
-    const report = await apply({ ...off, config: off.config.filter((entry) => entry.pack === "hub"), checks: [], steps: [], jobs: [], human: [] }, { home, adapters: [providerConfigAdapter()], run: async () => 0 });
-    expect(report.ok).toBe(true);
-    expect(parse(readFileSync(join(home, ".codex/config.toml"), "utf8"))).toEqual({});
+    const applyOff = () => apply({ ...off, config: off.config.filter((entry) => entry.pack === "hub"), checks: [], steps: [], jobs: [], human: [] }, { home, adapters: [providerConfigAdapter()], run: async () => 0 });
+    const codex = () => parse(readFileSync(join(home, ".codex/config.toml"), "utf8"));
+    return { machine, home, applyOff, codex };
+  };
+
+  test("on a devbox that connect sent to the proxy, with no record of it, turning balancing off takes Hedge's exact Claude and Codex routes off at the next apply", async () => {
+    const { machine, home, applyOff, codex } = connectedDevbox();
+    expect(await cliProxy("connect", machine)).toBe(0);
+    expect(codex()).toEqual({ model_provider: "hedge-proxy", model_providers: { "hedge-proxy": codexProviderTable } });
+    expect(existsSync(join(home, ".config/hedge/provider-fields.json"))).toBe(false);
+    expect((await applyOff()).ok).toBe(true);
+    expect(codex()).toEqual({});
     expect(JSON.parse(readFileSync(join(home, ".claude/settings.json"), "utf8"))).toEqual({});
+  });
+
+  test("your own hedge-proxy selector with a Codex table of your own stays, selector and table, after connect and after turning balancing off", async () => {
+    const mine = { model_provider: "hedge-proxy", model_providers: { "hedge-proxy": { ...codexProviderTable, name: "Mine" } } };
+    const { machine, applyOff, codex } = connectedDevbox({ ".codex/config.toml": stringify(mine) });
+    expect(await cliProxy("connect", machine)).toBe(0);
+    expect(codex()).toEqual(mine);
+    expect((await applyOff()).ok).toBe(true);
+    expect(codex()).toEqual(mine);
   });
 
   test("sends Claude Code to the loopback proxy, and keeps the client key out of the settings: Claude reads it from a private file", () => {
