@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { fleetAdapter, scheduledTasks, type FleetOptions } from "./adapters/fleet/adapter.ts";
@@ -342,7 +342,8 @@ describe("hedge apply while Fleet still runs", () => {
   test("on Linux, exits 1, writes and starts nothing, and names hedge retire-fleet; after retire, it starts the new unit", async () => {
     const linux = machine("linux");
     linux.systemd.units.set("fleet-watch.service", { active: true, enabled: true });
-    const profile = profileDir(["watcher"]);
+    const { profile, release } = packSource(linux.home);
+    release();
 
     const held = await linux.hedge(["apply", "--profile", profile]);
 
@@ -350,6 +351,7 @@ describe("hedge apply while Fleet still runs", () => {
     expect(held.output).toContain("The systemd unit fleet-watch.service from before the rename still runs (it is active), so Hedge started nothing. Run hedge retire-fleet, then hedge apply.");
     expect(linux.systemd.units.has("hedge-watch.service")).toBe(false);
     expect(nothingWritten(linux.home)).toBe(true);
+    expect(readdirSync(join(linux.home, ".local/share/hedge/sources")).filter((name) => !name.endsWith(".lock"))).toEqual([]);
 
     expect((await linux.hedge(["retire-fleet"])).code).toBe(0);
     expect((await linux.hedge(["apply", "--profile", profile])).code).toBe(0);

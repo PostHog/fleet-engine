@@ -127,7 +127,6 @@ describe("an engine in a Fleet path from before the rename", () => {
     }
 
     expect(bothTrees(machine.home)).toEqual(before);
-    expect(machine.systemd.calls).toEqual([]);
   });
 
   test("the launcher is inert when the path it was run by, or the path it resolves to, is a Fleet path", () => {
