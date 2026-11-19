@@ -650,23 +650,27 @@ creates no node ends at step 8 (see step 1).
    then run `hedge devbox add` again.
 
    It signs the node in to Coder only at the hub's own Coder address, the
-   one the hub's Coder CLI uses. It writes the new token straight into the
-   node's Coder CLI files over SSH. When the node does not reach that
-   address over HTTPS, it makes no token and sends none, and it stops with
-   the sign-in the person does on the node: install the Coder CLI there,
-   and run `coder login` with an HTTPS address the node reaches. Then run
-   `hedge devbox add` again.
+   one the hub's Coder CLI uses. It sends a new token over SSH to the
+   node's own `coder login --use-token-as-session`, as in step 7. When the
+   node does not reach that address over HTTPS, it makes no token and
+   sends none, and it stops with the sign-in the person does on the node:
+   install the Coder CLI there, and run `coder login` with an HTTPS address
+   the node reaches. Then run `hedge devbox add` again.
    When the node is already signed in to Coder another way, at another
-   address, through `CODER_URL` or `CODER_SESSION_TOKEN`, or with a `url`
-   or `session` path that is not a plain file, it leaves that sign-in alone
-   and makes no token. It installs a missing Coder CLI from the hub's Coder
-   address as above, and lists `coder login` with that address among the
-   steps for the person at the end. When `CODER_URL` or
-   `CODER_SESSION_TOKEN` is set on the node, the step says to remove it from
-   the node's environment first, because Coder reads these variables before
-   its files. When the hub's Coder address is plain HTTP, the step prints no
-   command: the person signs the node in over HTTPS. Ask the person to run
-   it only when the node should use the hub's Coder deployment.
+   address as another user, through `CODER_URL` or `CODER_SESSION_TOKEN`,
+   or with a `url` or `session` path that is not a plain file, it leaves
+   that sign-in alone and makes no token. It installs a missing Coder CLI
+   from the hub's Coder address as above, and lists `coder login` with that
+   address among the steps for the person at the end. The step first names
+   each path to move aside, such as `~/.config/coderv2/session` when it is a
+   directory or a link, and each variable to remove from the node's
+   environment, because Coder reads these variables before its files. When
+   the hub's Coder address is plain HTTP, the step prints no command: the
+   person signs the node in over HTTPS. When the Coder CLI could not be
+   fetched from the hub's Coder address, the step says so: the person
+   installs it from their Coder deployment and signs in at an HTTPS address
+   the node reaches. Ask the person to run it only when the node should use
+   the hub's Coder deployment.
 4. **Check.** Run the `hedge doctor` of step 8 on each node, and on the hub
    again. Explain each line as in step 8.
 

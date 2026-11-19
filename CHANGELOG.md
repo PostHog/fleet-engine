@@ -27,21 +27,25 @@
 - Each page of the site carries its own script and styles, so a cached page
   always runs its own script.
 - `hedge devbox add` signs a node in to Coder only at the hub's own Coder
-  address, and only over HTTPS, checked with no redirect followed. It
-  writes the new token into the node's Coder CLI files over SSH, through
-  new owner-only files, so the token travels in no HTTP request during
-  setup. It installs a missing Coder CLI only from that address over HTTPS,
-  only from an HTTP 200 answer with no redirect, and only after the
-  downloaded CLI runs. When the node does not reach that address over
-  HTTPS, it makes no token and names the sign-in the person does there.
-  When the node is signed in to Coder another way, at another address,
-  through `CODER_URL` or `CODER_SESSION_TOKEN`, or with a `url` or
-  `session` path that is not a plain file, it leaves that sign-in alone,
-  makes no token, installs a missing Coder CLI as above, and lists the
-  sign-in among the steps for the person. That step names the variables
-  to remove first, and prints no command when the hub's Coder address is
-  plain HTTP. It removes a token that it could not write, or names the token
-  and the command that removes it.
+  address, and only over HTTPS, checked with no redirect followed. The
+  node's own Coder CLI signs in with `coder login --use-token-as-session`:
+  the new token goes over SSH on standard input into the environment of
+  that one command, never into an argument. It installs a missing Coder CLI
+  only from that address over HTTPS, only from an HTTP 200 answer with no
+  redirect, and only after the downloaded CLI runs. When the node does not
+  reach that address over HTTPS, it makes no token and names the sign-in
+  the person does there.
+  Before it runs any Coder command on the node, it checks the node's Coder
+  `url` and `session` paths and its environment with the shell alone. When
+  a path is not a plain file, `CODER_URL` or `CODER_SESSION_TOKEN` is set,
+  or the node is signed in at another address as another user, it leaves
+  that sign-in alone, makes no token, installs a missing Coder CLI as
+  above, and lists the sign-in among the steps for the person. That step
+  names the paths to move aside and the variables to remove first. It
+  prints no command when the hub's Coder address is plain HTTP, and says so
+  when the Coder CLI could not be fetched from the hub's Coder address. It
+  removes the token when `coder login` or `coder config-ssh` fails, or
+  names the token and the command that removes it.
   After the node applies the profile, it asks the node's
   `hedge doctor --to-do` which steps are left. When the apply passed and
   the node finds nothing but those steps, it goes on with the sign-ins,
