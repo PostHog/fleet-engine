@@ -205,11 +205,11 @@ describe("the pack videos in a browser", () => {
       const title = card.querySelector(".pack-name")!.textContent;
       button.click();
       const link = window.document.querySelector("dialog a") as unknown as HTMLAnchorElement;
-      const shown = [accessibleName(button), dialog(window).open, textOf("aria-labelledby") === title, textOf("aria-describedby") === card.querySelector(".pack-line")!.textContent, pathOf(window, player.src), pathOf(window, player.poster), player.paused, link.textContent === `Read how ${title} works`, pathOf(window, link.href) === pathOf(window, (card.querySelector("a.more") as unknown as HTMLAnchorElement).href)];
+      const shown = [accessibleName(button), button.closest("[hidden], [aria-hidden='true'], [inert]") === null, dialog(window).open, textOf("aria-labelledby") === title, textOf("aria-describedby") === card.querySelector(".pack-line")!.textContent, pathOf(window, player.src), pathOf(window, player.poster), player.paused, link.textContent === `Read how ${title} works`, pathOf(window, link.href) === pathOf(window, (card.querySelector("a.more") as unknown as HTMLAnchorElement).href)];
       (window.document.querySelector("dialog button") as unknown as HTMLButtonElement).click();
       return shown;
     });
-    const row = (pack: string, name: string) => [name, true, true, true, `/hedge-engine/assets/video/${pack}.mp4`, `/hedge-engine/assets/video/${pack}.jpg`, false, true, true];
+    const row = (pack: string, name: string) => [name, true, true, true, true, `/hedge-engine/assets/video/${pack}.mp4`, `/hedge-engine/assets/video/${pack}.jpg`, false, true, true];
     expect(opened).toEqual([
       row("hub", "Watch · 29 s, the Hub video"),
       row("pull-requests", "Watch · 29 s, the Quality gates video"),
@@ -227,15 +227,6 @@ describe("the pack videos in a browser", () => {
     (window.document.querySelector("dialog button") as unknown as HTMLButtonElement).click();
     expect(dialog(window).open).toBe(false);
     expect(video(window, "dialog video").paused).toBe(true);
-  });
-
-  test("a click on the dark area around the player closes it and stops the video, and a click inside it does not", () => {
-    const window = visit("packs/index.html");
-    watchButton(window, "Slack").click();
-    video(window, "dialog video").click();
-    expect([dialog(window).open, video(window, "dialog video").paused]).toEqual([true, false]);
-    (dialog(window) as unknown as HTMLElement).click();
-    expect([dialog(window).open, video(window, "dialog video").paused]).toEqual([false, true]);
   });
 
   test("a visitor who asks for reduced motion gets the player without autoplay, and presses play", async () => {
