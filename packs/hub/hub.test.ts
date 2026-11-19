@@ -616,6 +616,22 @@ describe("the Own-account balancing workflow", () => {
       expect(route()).toBeUndefined();
     });
 
+    test("on a routed hub with its own ANTHROPIC_AUTH_TOKEN, a plugin Hedge did not install takes the route out anyway, and a To do names the token without its value", async () => {
+      const { home, result, route, options } = runningHub("claude", { credentials: [{ provider: "claude" }] });
+      expect((await apply(result, options)).ok).toBe(true);
+      const settings = join(home, ".claude/settings.json");
+      writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, "utf8")), env: { ANTHROPIC_BASE_URL: proxyUrl, ANTHROPIC_AUTH_TOKEN: "my-token" } }));
+      mkdirSync(join(dataDir(home), "plugins"), { recursive: true });
+      writeFileSync(join(dataDir(home), "plugins/other.so"), "plugin");
+      const failed = await apply(result, options);
+      expect(route()).toBeUndefined();
+      expect(JSON.parse(readFileSync(settings, "utf8"))).toEqual({ env: { ANTHROPIC_AUTH_TOKEN: "my-token" } });
+      expect(failed.ok).toBe(false);
+      const todo = failed.findings.find((finding) => finding.id === "route:.claude/settings.json");
+      expect(todo).toEqual({ id: "route:.claude/settings.json", pack: "engine", say: "Took Hedge's proxy route out of .claude/settings.json, because the proxy fails its check. Without the route, Claude Code would send your env.ANTHROPIC_AUTH_TOKEN to Anthropic. Remove env.ANTHROPIC_AUTH_TOKEN from .claude/settings.json.", todo: true });
+      expect(JSON.stringify(failed.findings)).not.toContain("my-token");
+    });
+
     test("a job the Jobs adapter refuses still lets apply take the route to a proxy that turned unsafe out, and apply fails with the job's reason", async () => {
       const { home, result, route, options } = runningHub("claude", { credentials: [{ provider: "claude" }] });
       expect((await apply(result, options)).ok).toBe(true);

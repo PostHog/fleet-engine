@@ -115,19 +115,19 @@ function merge(target: Target, text: string | undefined, previous: Field[], want
   const changed: string[] = [];
   const removed: string[] = [];
   const route = proxyRoute[target.provider];
-  const onRoute = (path: string[]) => route?.paths.some((item) => samePath(item, path)) ?? false;
+  const onRoute = (field: Field) => route?.fields.some((item) => samePath(item.path, field.path) && same(item.value, field.value)) ?? false;
   const oldOf = (field: Field) => previous.find((item) => samePath(item.path, field.path));
   const keeps = (field: Field) => {
     const value = get(current, field.path);
     const old = oldOf(field);
     return !same(value, field.value) && value !== undefined && !(old && same(value, old.value)) && !adopt;
   };
-  const routeHeld = wanted.some((field) => onRoute(field.path) && keeps(field));
+  const routeHeld = wanted.some((field) => onRoute(field) && keeps(field));
   const reconcile = (fields: Field[]) => {
     const applied: Field[] = [];
     for (const field of fields) {
       const old = oldOf(field);
-      if (keeps(field) || (routeHeld && onRoute(field.path))) {
+      if (keeps(field) || (routeHeld && onRoute(field))) {
         if (keeps(field)) kept.push(field.path.join("."));
         if (old) record.push(old);
         continue;
@@ -162,10 +162,12 @@ function merge(target: Target, text: string | undefined, previous: Field[], want
     else if (get(current, field.path) !== undefined) leaving.push(field);
   }
   const trial = structuredClone(current);
-  for (const field of leaving.filter((item) => onRoute(item.path))) remove(trial, field.path);
-  const stranded = leaving.some((field) => onRoute(field.path)) && !route?.strands(current) ? route?.strands(trial) : undefined;
+  const routeLeaving = leaving.filter(onRoute);
+  for (const field of leaving) remove(trial, field.path);
+  const stranded = routeLeaving.length > 0 && !route?.strands(current) ? route?.strands(trial) : undefined;
+  const checkFails = routeLeaving.some((field) => options.gated(field.path));
   for (const field of leaving) {
-    if (stranded && onRoute(field.path)) {
+    if (stranded && !checkFails && onRoute(field)) {
       record.push(field);
       continue;
     }
@@ -174,7 +176,9 @@ function merge(target: Target, text: string | undefined, previous: Field[], want
   }
   const reason = [changed.length ? `set ${changed.join(", ")}` : "", removed.length ? `remove ${removed.join(", ")}` : ""].filter(Boolean).join("; ");
   const after = target.format.encode(current);
-  const todo = stranded && `Kept Hedge's proxy route in ${target.path}: without it, ${stranded.harm}. Remove ${stranded.path} from ${target.path}, then run hedge apply to take the route out.`;
+  const todo = stranded && (checkFails
+    ? `Took Hedge's proxy route out of ${target.path}, because the proxy fails its check. Without the route, ${stranded.harm}. Remove ${stranded.path} from ${target.path}.`
+    : `Kept Hedge's proxy route in ${target.path}: without it, ${stranded.harm}. Remove ${stranded.path} from ${target.path}, then run hedge apply to take the route out.`);
   return { record, kept, reason, after: after === original ? undefined : after, document: current, ...(todo ? { todo } : {}) };
 }
 

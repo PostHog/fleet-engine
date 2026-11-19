@@ -101,6 +101,17 @@ describe("provider config", () => {
     expect(taken.findings.map((finding) => finding.id)).not.toContain(`route:${claude}`);
   });
 
+  test("a profile's own Claude gateway and key helper are set field by field: a key helper you edited stays, and the gateway is still set", async () => {
+    const home = temp.make("home-");
+    write(home, claude, { apiKeyHelper: "my-helper" });
+    const gateway = [{ provider: "claude" as const, key: "env.ANTHROPIC_BASE_URL", value: "https://gateway.example.com", pack: "team" }, { provider: "claude" as const, key: "apiKeyHelper", value: "team-helper", pack: "team" }];
+
+    const report = await apply(plan(gateway), { home, adapters: adapters() });
+
+    expect(read(home, claude)).toEqual({ apiKeyHelper: "my-helper", env: { ANTHROPIC_BASE_URL: "https://gateway.example.com" } });
+    expect(report.findings.map((finding) => finding.say)).toContain(`Kept your apiKeyHelper in ${claude}. Run hedge apply --adopt ${claude} to take Hedge's value.`);
+  });
+
   test("keeps a proxy base URL that Hedge has no record of", async () => {
     const home = temp.make("home-");
     const settings = { env: { ANTHROPIC_BASE_URL: "http://localhost:8317/", ANTHROPIC_AUTH_TOKEN: "token" } };
