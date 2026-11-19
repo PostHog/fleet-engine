@@ -1093,6 +1093,7 @@ describe("the Git guard", () => {
   test.each([
     ["an alias set before", "gh sp", "force-pushes 6 branches at once"],
     ["an alias with arguments", "gh s push", "force-pushes 6 branches at once"],
+    ["an alias with a positional argument", "gh sn push", "force-pushes 6 branches at once"],
     ["a shell alias", "gh shp", "gh alias set"],
     ["an alias from a GH_CONFIG_DIR the command names", "GH_CONFIG_DIR=OTHER gh other", "force-pushes 6 branches at once"],
   ])("follows %s to the stack push it runs", async (_, command, refusal) => {
@@ -1100,7 +1101,7 @@ describe("the Git guard", () => {
     stackOf(dir, sixOpen);
     const home = homeWith(withGuards(), { "guards.person": "Robin" });
     mkdirSync(join(home, ".config/gh"), { recursive: true });
-    writeFileSync(join(home, ".config/gh/config.yml"), "aliases:\n    sp: stack push\n    s: stack\n    shp: '!gh stack push'\n    co: pr checkout\n");
+    writeFileSync(join(home, ".config/gh/config.yml"), "aliases:\n    sp: stack push\n    s: stack\n    shp: '!gh stack push'\n    sn: stack $1\n    co: pr checkout\n");
     const other = join(home, "other-gh");
     mkdirSync(other);
     writeFileSync(join(other, "config.yml"), "aliases:\n    other: stack submit\n");

@@ -151,7 +151,16 @@ function expandedGh({ args, env }: Command): string[] | undefined {
   const expansion = ghAliases(env)[group];
   if (typeof expansion !== "string") return args;
   if (expansion.trimStart().startsWith("!")) return undefined;
-  return [...expansion.trim().split(/\s+/), ...args.slice(args.indexOf(group) + 1)];
+  return substituted(expansion, args.slice(args.indexOf(group) + 1));
+}
+
+function substituted(expansion: string, rest: string[]): string[] {
+  const used = new Set<number>();
+  const words = expansion.trim().split(/\s+/).map((word) => word.replace(/\$(\d+)/g, (_, index: string) => {
+    used.add(Number(index));
+    return rest[Number(index) - 1] ?? "";
+  }));
+  return [...words, ...rest.filter((_, index) => !used.has(index + 1))];
 }
 
 function stackPushes(args: string[], repo: () => Repo | undefined): number {

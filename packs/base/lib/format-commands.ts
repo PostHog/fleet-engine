@@ -21,18 +21,18 @@ export const formatters: Record<string, Formatter> = {
   dprint: { loadsCode: true, subcommands: ["fmt", "check"], flags: ["--allow-no-files"] },
   biome: { subcommands: ["check", "format", "lint"], flags: ["--write", "--apply", "--fix", "--unsafe", "--no-errors-on-unmatched", "--error-on-warnings"], values: ["--diagnostic-level", "--files-ignore-unknown", "--colors"] },
   ruff: { subcommands: ["check", "format"], flags: ["--fix", "--unsafe-fixes", "--exit-non-zero-on-fix", "--force-exclude", "--quiet", "-q", "--no-cache", "--show-fixes"], values: ["--line-length", "--target-version"], always: ["--no-cache"] },
-  black: { flags: ["--quiet", "-q", "--fast", "--preview", "--skip-string-normalization", "-S"], values: ["--line-length", "-l", "--target-version", "-t"] },
+  black: { loadsCode: true, flags: ["--quiet", "-q", "--fast", "--preview", "--skip-string-normalization", "-S"], values: ["--line-length", "-l", "--target-version", "-t"] },
   isort: { flags: ["--quiet", "-q", "--filter-files", "--atomic"], values: ["--profile"] },
   gofmt: { flags: ["-w", "-s", "-l"] },
   goimports: { flags: ["-w", "-l"] },
-  rustfmt: { flags: ["--check"], values: ["--edition"] },
   shfmt: { flags: ["-w", "--write", "-s", "--simplify", "-ci", "-bn", "-sr", "-l", "-d"], values: ["-i", "--indent"] },
   "clang-format": { flags: ["-i"], values: ["--style"] },
   taplo: { subcommands: ["format", "fmt"], flags: [] },
   yamlfmt: { flags: [] },
 };
-const toolPins = [".tool-versions", ".mise.toml", "mise.toml", ".mise.local.toml", "mise.local.toml", ".mise", "mise", ".config/mise.toml", ".config/mise", ".rtx.toml", ".prototools", ".python-version", ".node-version", ".nvmrc", ".go-version", "rust-toolchain", "rust-toolchain.toml"];
+const toolPins = [".tool-versions", ".mise.toml", "mise.toml", ".mise.local.toml", "mise.local.toml", ".mise", "mise", ".config/mise.toml", ".config/mise", ".rtx.toml", ".prototools", ".python-version", ".node-version", ".nvmrc", ".go-version"];
 const plainValue = /^[A-Za-z0-9_-]+$/;
+const globSyntax = /[*?[\]{}]/;
 
 function matches(pattern: string, path: string): boolean {
   try {
@@ -42,9 +42,9 @@ function matches(pattern: string, path: string): boolean {
   }
 }
 
-async function tracked(root: string, path: string): Promise<boolean> {
+async function tracked(path: string): Promise<boolean> {
   try {
-    const child = Bun.spawn(["git", "-C", root, "ls-files", "-z", "--", `:(literal,icase)${path}`], { stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+    const child = Bun.spawn(["git", "-C", dirname(path), "ls-files", "-z", "--", `:(literal,icase)${basename(path)}`], { stdin: "ignore", stdout: "pipe", stderr: "ignore" });
     const [listed, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
     return code !== 0 || listed !== "";
   } catch {
@@ -61,7 +61,7 @@ async function installedFormatter(name: string, root: string): Promise<string | 
   const realRoot = realpathSync(root);
   const real = realpathSync(join(root, "node_modules/.bin", name));
   if (!inside(join(realRoot, "node_modules"), real)) return undefined;
-  return (await tracked(root, relative(realRoot, real))) ? undefined : real;
+  return (await tracked(real)) ? undefined : real;
 }
 
 function onPath(name: string, root: string): string | undefined {
@@ -117,7 +117,7 @@ export async function formatCommands(config: LintStagedConfig, root: string, fil
 
 function fileInside(root: string, file: string): boolean {
   try {
-    return statSync(file).isFile() && inside(realpathSync(root), realpathSync(file));
+    return !globSyntax.test(file) && statSync(file).isFile() && inside(realpathSync(root), realpathSync(file));
   } catch {
     return false;
   }
