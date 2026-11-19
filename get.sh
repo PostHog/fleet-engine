@@ -42,6 +42,46 @@ in_fleet_path() {
   return 1
 }
 
+# The path with every link resolved, also the links above a part of it that does not exist yet.
+real_path() {
+  rest=
+  path=$1
+  while [ ! -d "$path" ]; do
+    rest="/${path##*/}$rest"
+    path=${path%/*}
+    [ -n "$path" ] || path=/
+  done
+  printf '%s%s\n' "$(CDPATH='' cd -- "$path" && pwd -P)" "$rest"
+}
+
+leads_into_fleet() { in_fleet_path "$1" || in_fleet_path "$(real_path "$1")"; }
+
+# The first link on the way to a path that leads into a Fleet path.
+fleet_link() {
+  path=$1
+  while [ "$path" != "$HOME" ] && [ -n "$path" ]; do
+    if [ -L "$path" ] && leads_into_fleet "$path"; then first=$path; fi
+    path=${path%/*}
+  done
+  printf '%s\n' "${first:-$1}"
+}
+
+refuse_fleet() {
+  first=
+  ! leads_into_fleet "$1" || fail "$(fleet_link "$1") leads into a Fleet path from before the rename. Move that link away, then run get.sh again."
+}
+
+old_launcher() { sed -n "s|^exec sh '\\(.*\\)/fleet' \"\\\$@\"\$|\\1|p" "$HOME/.local/bin/fleet" 2>/dev/null; }
+
+# A checkout of the engine from before the rename: its launcher is fleet, its remote is fleet-engine, or the old fleet command runs it.
+fleet_checkout() {
+  [ -d "$1" ] || return 1
+  { [ -e "$1/fleet" ] && [ ! -e "$1/hedge" ]; } && return 0
+  case "$(git -C "$1" remote get-url origin 2>/dev/null)" in */fleet-engine|*/fleet-engine.git) return 0 ;; esac
+  recorded=$(old_launcher)
+  [ -n "$recorded" ] && [ -d "$recorded" ] && [ "$(real_path "$recorded")" = "$(real_path "$1")" ]
+}
+
 setting ENGINE_REPO "https://github.com/$engine_slug.git"
 engine_repo=$value
 setting ENGINE_REF main
@@ -49,11 +89,14 @@ ref=$value
 setting ENGINE_DIR "$default_engine_dir"
 engine_dir=$value
 case "$engine_dir" in /*) ;; *) engine_dir="$PWD/$engine_dir" ;; esac
-real_engine_dir=$( (CDPATH='' cd -- "$engine_dir" 2>/dev/null && pwd -P) || printf '%s' "$engine_dir")
-if in_fleet_path "$engine_dir" || in_fleet_path "$real_engine_dir"; then
+if [ -n "$from" ] && leads_into_fleet "$engine_dir"; then
   say "$from points into a Fleet path from before the rename, so the engine goes to $default_engine_dir."
   engine_dir=$default_engine_dir
+elif [ -n "$from" ] && fleet_checkout "$engine_dir"; then
+  say "$engine_dir is the engine from before the rename, so the engine goes to $default_engine_dir."
+  engine_dir=$default_engine_dir
 fi
+for destination in "$engine_dir" "$HOME/.local/state/hedge"; do refuse_fleet "$destination"; done
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -317,16 +360,24 @@ login_path
 say "Engine ready at $ref in $engine_dir."
 
 machine="$HOME/.config/hedge/machine.json"
-set_up=; [ ! -e "$machine" ] || set_up=1
+# While this is there, the machine file came from Fleet and apply has not passed yet, so the next run applies again.
+pending="$HOME/.local/state/hedge/fleet-apply-pending"
+[ -e "$machine" ] || : >"$pending"
 [ "${launcher##*/}" != hedge ] || sh "$launcher" import-fleet || fail "could not copy the setup from before the rename."
+grep -q '"profileDir"' "$machine" 2>/dev/null || rm -f "$pending"
 
 [ -z "$install_only" ] || exit 0
 
+if [ "${launcher##*/}" = hedge ] && ! sh "$launcher" retire-fleet; then
+  fail "Fleet may still run, so Hedge applied nothing. Stop each piece named above by hand, then run get.sh again."
+fi
 if [ -n "$profile" ]; then
   exec sh "$launcher" apply --profile "$profile" "$@"
 fi
-if [ -z "$set_up" ] && [ $# -eq 0 ] && grep -q '"profileDir"' "$machine" 2>/dev/null; then
-  exec sh "$launcher" apply
+if [ -e "$pending" ] && [ $# -eq 0 ]; then
+  sh "$launcher" apply || exit $?
+  rm -f "$pending"
+  exit 0
 fi
 if [ ! -t 0 ] && (: </dev/tty) 2>/dev/null; then
   exec sh "$launcher" setup "$@" </dev/tty
