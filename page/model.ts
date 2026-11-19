@@ -89,9 +89,8 @@ export const startStatus = (data: PromptData, start: Start) => {
 
 export const installCommand = (selected: string[]) => `hedge packs ${selected.map((name) => `--add ${name}`).join(" ")}`;
 
-function hubStep(data: PromptData, titles: string[]) {
-  const one = titles.length === 1;
-  return `${one ? "This pack needs" : "These packs need"} a hub: ${listed(titles)}. Run \`hedge hub status\`. When it prints "The hub: not named", I have no hub yet. Tell me, leave ${one ? "that pack" : "those packs"} out, and offer to add a hub and a node first with step 9 of https://raw.githubusercontent.com/${data.engineRepo}/main/SETUP.md. Otherwise the name after "The hub:" is the SSH name of the hub. Use it as the host of each SSH command in a note.`;
+function findHub(guide: string, notes: boolean) {
+  return `Find my hub. Run \`hedge hub status\` where Hedge runs: here when \`command -v hedge\` finds it, or else over SSH on one of my cloud boxes whose name starts with \`hedge-\`. The name after "The hub:" is the SSH name of the hub. ${notes ? "Use it as `<hub>` in each SSH command of a note. " : ""}When it prints "The hub: not named", or no box runs Hedge, I have no hub yet. Tell me, and offer to set one up first with steps 5, 7, and 9 of ${guide}. To make a box that already runs Hedge the hub, skip step 5 for it.`;
 }
 
 function noteStep(notes: PromptPack[]) {
@@ -106,22 +105,21 @@ function noteStep(notes: PromptPack[]) {
 export function installPrompt(data: PromptData, selected: string[]) {
   const packs = data.packs.filter((pack) => selected.includes(pack.name));
   if (!packs.length) return "";
+  const guide = `https://raw.githubusercontent.com/${data.engineRepo}/main/SETUP.md`;
   const notes = packs.filter((pack) => pack.setupNote);
-  const onHub = packs.filter((pack) => data.needsHubPacks.includes(pack.name)).map((pack) => pack.title);
   const steps = [
-    "Run `hedge update`, so this machine has the newest engine and packs. Then run `hedge packs`, and leave out each pack that is already on.",
-    ...(onHub.length ? [hubStep(data, onHub)] : []),
+    findHub(guide, notes.length > 0),
+    "Run `hedge update` on the hub, so it has the newest engine and packs. Then run `hedge packs` there, and leave out each pack that is already on.",
     ...(notes.length ? [noteStep(notes)] : []),
-    `Turn the packs on with one command${notes.length ? ", and add the flags that the notes name" : ""}:\n   ${installCommand(packs.map((pack) => pack.name))}`,
-    ...(onHub.length ? ["Run `hedge update` on the hub over SSH, so the hub has the packs before a note's next step needs them."] : []),
+    `Turn the packs on with one command on the hub${notes.length ? ", and add the flags that the notes name" : ""}:\n   ${installCommand(packs.map((pack) => pack.name))}`,
     ...(notes.length ? ["Do the steps that each note puts after the command."] : []),
-    "Run `hedge doctor`, and explain each line. Do each `To do:` line with me, and say what a sign-in is for before it opens.",
-    "My other machines take the change at their next `hedge update`. To give it to one now, run `hedge update` there.",
+    "Run `hedge doctor` on the hub, and explain each line. Do each `To do:` line with me, and say what a sign-in is for before it opens.",
+    "My nodes take the change at their next `hedge update`. To give it to one now, run `hedge update` there.",
   ];
   return [
     `Add ${packs.length === 1 ? "this Hedge pack" : "these Hedge packs"} to my setup with me: ${listed(packs.map((pack) => pack.title))}.`,
     "",
-    "Hedge already runs on this machine. Ask me each choice with your question tool, and run every command yourself.",
+    `Hedge runs on my hub and my nodes in the cloud, not on my Mac. Run each command of this prompt on the hub, over SSH with the \`PATH\` line of ${guide} when you run elsewhere. Install nothing from Hedge here. Ask me each choice with your question tool, and run every command yourself.`,
     "",
     ...steps.map((step, index) => `${index + 1}. ${step}`),
   ].join("\n");

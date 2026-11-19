@@ -82,22 +82,23 @@ describe("the install prompt", () => {
     expect(installPrompt(data, [])).toBe("");
   });
 
-  test("names the selected packs, each setup note, and one hedge packs command that adds them", () => {
+  test("names the selected packs, finds the hub first, runs every command there, and names each setup note and one hedge packs command that adds them", () => {
     expect(installPrompt(data, select("guards", "memory", "communication"))).toBe(
       [
         "Add these Hedge packs to my setup with me: Communication, Memory, and Guards.",
         "",
-        "Hedge already runs on this machine. Ask me each choice with your question tool, and run every command yourself.",
+        "Hedge runs on my hub and my nodes in the cloud, not on my Mac. Run each command of this prompt on the hub, over SSH with the `PATH` line of https://raw.githubusercontent.com/PostHog/hedge/main/SETUP.md when you run elsewhere. Install nothing from Hedge here. Ask me each choice with your question tool, and run every command yourself.",
         "",
-        "1. Run `hedge update`, so this machine has the newest engine and packs. Then run `hedge packs`, and leave out each pack that is already on.",
-        '2. Read the setup note of each pack. Ask me what it asks, and collect the flags that it names. Where a note names "the setup command" or "the command in item 2 of step 9", use the `hedge packs` command of this prompt. Do not run a step that a note puts after that command yet.',
+        '1. Find my hub. Run `hedge hub status` where Hedge runs: here when `command -v hedge` finds it, or else over SSH on one of my cloud boxes whose name starts with `hedge-`. The name after "The hub:" is the SSH name of the hub. Use it as `<hub>` in each SSH command of a note. When it prints "The hub: not named", or no box runs Hedge, I have no hub yet. Tell me, and offer to set one up first with steps 5, 7, and 9 of https://raw.githubusercontent.com/PostHog/hedge/main/SETUP.md. To make a box that already runs Hedge the hub, skip step 5 for it.',
+        "2. Run `hedge update` on the hub, so it has the newest engine and packs. Then run `hedge packs` there, and leave out each pack that is already on.",
+        '3. Read the setup note of each pack. Ask me what it asks, and collect the flags that it names. Where a note names "the setup command" or "the command in item 2 of step 9", use the `hedge packs` command of this prompt. Do not run a step that a note puts after that command yet.',
         "   - Memory: ~/.local/share/hedge/engine/packs/memory/SETUP.md",
         "   - Guards: ~/.local/share/hedge/engine/packs/guards/SETUP.md",
-        "3. Turn the packs on with one command, and add the flags that the notes name:",
+        "4. Turn the packs on with one command on the hub, and add the flags that the notes name:",
         "   hedge packs --add communication --add memory --add guards",
-        "4. Do the steps that each note puts after the command.",
-        "5. Run `hedge doctor`, and explain each line. Do each `To do:` line with me, and say what a sign-in is for before it opens.",
-        "6. My other machines take the change at their next `hedge update`. To give it to one now, run `hedge update` there.",
+        "5. Do the steps that each note puts after the command.",
+        "6. Run `hedge doctor` on the hub, and explain each line. Do each `To do:` line with me, and say what a sign-in is for before it opens.",
+        "7. My nodes take the change at their next `hedge update`. To give it to one now, run `hedge update` there.",
       ].join("\n"),
     );
   });
@@ -106,8 +107,8 @@ describe("the install prompt", () => {
     const text = installPrompt(data, select("communication"));
     expect(text.split("\n")[0]).toBe("Add this Hedge pack to my setup with me: Communication.");
     expect(text).not.toMatch(/\bnotes?\b/);
-    expect(text).toContain("3. Run `hedge doctor`");
-    expect(text).toContain("2. Turn the packs on with one command:\n   hedge packs --add communication\n");
+    expect(text).toContain("4. Run `hedge doctor` on the hub");
+    expect(text).toContain("3. Turn the packs on with one command on the hub:\n   hedge packs --add communication\n");
   });
 
   test("selecting a pack selects the packs it requires, and taking one back takes back the packs that require it", () => {
@@ -116,32 +117,21 @@ describe("the install prompt", () => {
     expect(select("base")).toEqual([]);
   });
 
-  test("for a pack that needs a hub, checks for the hub before it reads a note, in the words hedge hub status prints", async () => {
-    const text = installPrompt(data, select("memory", "recovery", "hub"));
-    expect(step(text, "need a hub")).toBe(
-      '2. These packs need a hub: Hub and Recovery. Run `hedge hub status`. When it prints "The hub: not named", I have no hub yet. Tell me, leave those packs out, and offer to add a hub and a node first with step 9 of https://raw.githubusercontent.com/PostHog/hedge/main/SETUP.md. Otherwise the name after "The hub:" is the SSH name of the hub. Use it as the host of each SSH command in a note.',
-    );
-    expect(installPrompt(data, select("recovery"))).toContain("2. This pack needs a hub: Recovery.");
-    expect(installPrompt(data, select("recovery"))).toContain("leave that pack out");
-    expect(installPrompt(data, select("memory", "slack"))).not.toContain("hub");
-    const hub = await hubWithHedge();
-    expect(await hub.hedge(["hub", "status"])).toBe(0);
-    expect(hub.output()).toContain("\nThe hub: not named.");
-    expect(readFileSync(join(root, "SETUP.md"), "utf8")).toContain("\n## 9. Add the hub packs and the nodes\n");
-  });
-
-  test("for a pack that needs a hub, updates the hub after the command and before the steps a note puts after it", () => {
-    const steps = installPrompt(data, select("recovery")).split("\n").filter((item) => /^\d+\. /.test(item)).map((item) => item.replace(/^\d+\. /, "").split(/[.,:]/)[0]);
-    expect(steps).toEqual([
-      "Run `hedge update`",
-      "This pack needs a hub",
-      "Read the setup note of each pack",
-      "Turn the packs on with one command",
-      "Run `hedge update` on the hub over SSH",
-      "Do the steps that each note puts after the command",
-      "Run `hedge doctor`",
-      "My other machines take the change at their next `hedge update`",
-    ]);
+  test("for any selection, finds the hub with hedge hub status in the words it prints, sends a box without a hub to the setup guide's steps 5, 7, and 9, and never says Hedge runs on the machine it is pasted on", async () => {
+    for (const selected of [select("communication"), select("recovery"), select("memory", "slack"), everyPack()]) {
+      const text = installPrompt(data, selected);
+      expect(step(text, "Find my hub")).toStartWith("1. Find my hub. Run `hedge hub status`");
+      expect(text).toContain("offer to set one up first with steps 5, 7, and 9 of https://raw.githubusercontent.com/PostHog/hedge/main/SETUP.md");
+      expect(text).not.toContain("Hedge already runs on this machine");
+    }
+    const box = await hubWithHedge();
+    expect(await box.hedge(["hub", "status"])).toBe(0);
+    expect(box.output()).toContain("\nThe hub: not named.");
+    expect(await box.hedge(["hub", "here", "coder.hedge-hub"])).toBe(0);
+    expect(await box.hedge(["hub", "status"])).toBe(0);
+    expect(box.output()).toContain("\nThe hub: coder.hedge-hub");
+    const guide = readFileSync(join(root, "SETUP.md"), "utf8");
+    for (const heading of ["\n## 5. Create the hub and the nodes\n", "\n## 7. Set up Hedge on the hub\n", "\n## 9. Add the hub packs and the nodes\n"]) expect(guide).toContain(heading);
   });
 
   test("names only hedge commands that exist", async () => {
