@@ -83,6 +83,23 @@ async function waitForPerson(signIn: SignIn, { terminal, machine, nonInteractive
   return signIn.after?.();
 }
 
+export function optionalStep(signIn: SignIn, terminal: Terminal, notNeeded: string): Step {
+  return {
+    id: signIn.id,
+    title: signIn.title,
+    minutes: signIn.minutes,
+    kind: "auto",
+    async run() {
+      const failed = await signIn.probe().then(
+        (passed) => (passed ? undefined : ""),
+        (error: unknown) => ` Its check failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      if (failed === undefined) return void terminal.print(`  ✓ ${signIn.title}: already done`);
+      terminal.print(`  To do: ${signIn.title}. ${notNeeded} ${howToStart(signIn)}.${failed}`);
+    },
+  };
+}
+
 function howToStart({ command, interactive, url, why }: SignIn) {
   const open = url ? `open ${url}` : undefined;
   if (!command) return open ? `Open ${url}` : why;

@@ -1,14 +1,14 @@
 import { join } from "node:path";
 import { loadPacks } from "../pack/manifest.ts";
 import { cachedSource, fetchSource } from "../pack/sources.ts";
-import type { AvailableSource, FetchedSource, MachineFile, Preset, Profile, SetupProgress, SourceRef } from "../pack/types.ts";
+import type { AvailableSource, FetchedSource, MachineFile, Plan, Preset, Profile, SetupProgress, SourceRef } from "../pack/types.ts";
 import { loadMachine, loadProfile, saveAnswers, saveMachine, thisMachine } from "../profile/profile.ts";
 import { resolve } from "../reconciler/resolve.ts";
 import { defaultSources, engineRepo, makesOwnDevbox } from "./defaults.ts";
 import { FlagError, hasPicks, parseSetupFlags, type SetupFlags } from "./flags.ts";
 import { answered, packList, packsStep, picksFrom, title, plansStep, settingSteps, settingsFrom, waitsForTeams, type Catalog, type Draft, type QuestionContext } from "./questions.ts";
 import { realMachine, type Machine } from "./commands.ts";
-import { humanStep, packSignIn, type HumanContext } from "./human.ts";
+import { humanStep, optionalStep, packSignIn, type HumanContext, type SignIn } from "./human.ts";
 import { devboxQuestion, devboxSteps, hubSteps, notTakenByHub, profileForBox, type DevboxContext } from "./devbox.ts";
 import { doneScreen, finalCheck, repoName, runsByItself } from "./done.ts";
 import { readTimings, usableSeconds } from "../commands/triage-record.ts";
@@ -281,12 +281,19 @@ function setupSteps(context: QuestionContext, machine: MachineFile, options: Set
     ...(sshDevbox ? [devbox.question] : []),
     ...settingSteps(context, devboxAsk).map(devbox.pushed),
     ...(plan.ai === "codex" ? [] : [humanStep(claudeSignIn(box), human)]),
-    ...(plan.ai === "claude" ? [] : [humanStep(chatgptSignIn(box, plan.models), human)].map((step) => (plan.ai === "both" ? later(step) : step))),
+    ...(plan.ai === "claude" ? [] : [chatgptStep(chatgptSignIn(box, plan.models), human, plan)].map((step) => (plan.ai === "both" ? later(step) : step))),
     ...(sshDevbox ? (machine.devboxes ?? []).flatMap((host) => devbox.steps(host, plan)).map(later) : []),
   ];
 }
 
 const later = (step: Step): Step => ({ ...step, later: true });
+
+const proxyServesCodex = "With own-account balancing on, Codex goes through the proxy on the hub once it holds one of your ChatGPT subscriptions, so setup does not need this sign-in. Codex here needs it only until then.";
+
+function chatgptStep(signIn: SignIn, human: HumanContext, plan: Plan): Step {
+  const balanced = plan.workflows.some((workflow) => workflow.id === "own-account-balancing" && workflow.active);
+  return balanced ? optionalStep(signIn, human.terminal, proxyServesCodex) : humanStep(signIn, human);
+}
 
 async function fastForward(box: Machine, home: string, dir: string) {
   if ((await box.exec(["git", "-C", dir, "rev-parse", "--abbrev-ref", "@{upstream}"])).code !== 0) return;

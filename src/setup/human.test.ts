@@ -320,6 +320,24 @@ describe("ChatGPT's check", () => {
   });
 });
 
+describe("ChatGPT with own-account balancing", () => {
+  test("setup passes without this machine's ChatGPT sign-in, and leaves a To do line that says why", async () => {
+    const home = temp.make("home-");
+    const box = fakeMachine(home, { chatgpt: 99 });
+    const result = await hedgeSetup(home, ["--non-interactive", "--preset", "starter", "--plan", "both", "--add", "hub", "--workflows", "own-account-balancing=on,mcp-gateway=off", "--set", "hub.alias=coder.hedge-hub"], [], box);
+    expect(result.code).toBe(0);
+    expect(result.output).toContain(`  To do: Sign in to ChatGPT. With own-account balancing on, Codex goes through the proxy on the hub once it holds one of your ChatGPT subscriptions, so setup does not need this sign-in. Codex here needs it only until then. Run: codex login -c 'cli_auth_credentials_store="file"' --device-auth.`);
+    expect(box.starts).not.toContainEqual(codexLogin);
+  });
+
+  test("still needs the sign-in when balancing is off", async () => {
+    const home = temp.make("home-");
+    const result = await hedgeSetup(home, ["--non-interactive", "--preset", "starter", "--plan", "both", "--add", "hub", "--workflows", "mcp-gateway=off", "--set", "hub.alias=coder.hedge-hub"], [], fakeMachine(home, { chatgpt: 99 }));
+    expect(result.code).toBe(2);
+    expect(result.output).toContain("  Needs you: Sign in to ChatGPT");
+  });
+});
+
 describe("a pack's sign-in", () => {
   const killed = 143;
 
