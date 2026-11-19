@@ -71,7 +71,7 @@ describe("the setup guide's workspace check", () => {
     );
   });
 
-  test("fails on a build that ended without a running start, before it reads any parameter: names the web app button for each state, and asks before it retries a delete", () => {
+  test("fails on a build that ended without a running start, before it reads any parameter: sends the person to the action the web app offers, and asks before a delete", () => {
     const builds = [
       { transition: "stop", status: "stopped" },
       { transition: "start", status: "failed" },
@@ -84,12 +84,11 @@ describe("the setup guide's workspace check", () => {
     for (const build of builds) {
       const result = coder({ parameters: built, mutable: template, build }).check(passed);
       const advice = build.transition === "delete"
-        ? `x hedge-hub has a delete build that is ${build.status}, so its name stays taken. Ask the person whether it should go. If so, they press Retry in the Coder web app until it is gone, and you create it again. If not, they ask the Coder admin to restore it.\n`
-        : build.status === "failed"
-          ? `x hedge-hub does not run: its latest build is a ${build.transition} that failed. Ask the person to press Retry in the Coder web app, and Start when it has stopped, then run this check again.\n`
-          : `x hedge-hub does not run: its latest build is a ${build.transition} that is ${build.status}. Ask the person to press Start in the Coder web app, then run this check again.\n`;
-      expect([build, result.code, result.output, result.argv.match(/\/api\/v2\/\S*parameters/g)]).toEqual([build, 1, advice, null]);
+        ? `x hedge-hub has a delete build that is ${build.status}, so its name stays taken. Ask the person whether it should go. If so, they delete it from the workspace's menu in the Coder web app, and you create it again when it is gone. If not, they get it running with the action that the Coder web app offers for it, then run this check again.\n`
+        : `x hedge-hub does not run: its latest build is a ${build.transition} that is ${build.status}. Ask the person to get it running with the action that the Coder web app offers for it, such as Start, Retry, or Update and start, then run this check again.\n`;
+      expect([build, result.code, result.output, result.requests]).toEqual([build, 1, advice, []]);
     }
+    expect(coder({ parameters: built, mutable: template }).check(passed).requests).toEqual(["https://coder.test/api/v2/workspacebuilds/build-1/parameters", "https://coder.test/api/v2/templateversions/version-1/rich-parameters"]);
   });
 
   test("fails while a build still runs, and says only to wait and check again, before it compares any parameter", () => {

@@ -194,7 +194,7 @@ describe("the agent setup guide", () => {
     const texts = [guide(), readFileSync(join(root, "docs/getting-started.md"), "utf8")];
     const wrappedSpans = (text: string) => [...text.replace(/^ *```[\s\S]*?^ *```$/gm, "").replace(/\s+/g, " ").matchAll(/`([^`]+)`/g)].map((match) => match[1]!);
     const commands = texts.flatMap((text) => [...codeIn(text), ...wrappedSpans(text)]);
-    expect(commands.filter((code) => /(?:^|[;&|(]\s*)coder\s+["']?(?:update|restart|start)["']?\s+\S/m.test(code))).toEqual([]);
+    expect(commands.filter((code) => /\bcoder\b[^\n`]*?\s["']?(?:update|restart|start)["']?\s+\S/.test(code))).toEqual([]);
     for (const text of texts) expect(text.replace(/\s+/g, " ")).toContain("**Settings → Parameters**");
     const printed = fakeCoder(temp, { parameters: { instance_type: "m7g.xlarge" }, mutable: { instance_type: true } }).check(["instance_type=m7g.4xlarge"]);
     expect([printed.code, printed.output]).toEqual([1, "x instance_type is not the value you passed. In the Coder web app, set it under Settings, Parameters, and submit.\nok hedge-hub runs and stays on\n"]);

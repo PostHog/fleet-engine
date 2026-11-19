@@ -1,4 +1,4 @@
-import { chmodSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { tempDirs } from "./git.ts";
 
@@ -34,6 +34,7 @@ esac`);
 IFS= read -r header
 [ "$header" = "Coder-Session-Token: ${token}" ] || { echo "curl: (22) 401" >&2; exit 22; }
 for url; do :; done
+echo "$url" >> "${dir}/requests.log"
 case "$url" in
   https://coder.test/api/v2/workspacebuilds/build-1/parameters) cat "${dir}/parameters.json" ;;
   https://coder.test/api/v2/templateversions/version-1/rich-parameters) cat "${dir}/rich-parameters.json"${templateTransferFails ? '; echo "curl: (18) transfer closed" >&2; exit 18' : ""} ;;
@@ -41,7 +42,8 @@ case "$url" in
 esac`);
   const check = (args: string[], env: Record<string, string> = {}) => {
     const run = Bun.spawnSync(["sh", script, "hedge-hub", ...args], { env: { PATH: `${dir}:/usr/bin:/bin`, HOME: dir, LANG: "C", ...env } });
-    return { code: run.exitCode, output: run.stdout.toString() + run.stderr.toString(), argv: readFileSync(join(dir, "argv.log"), "utf8"), environment: readFileSync(join(dir, "env.log"), "utf8") };
+    const requests = existsSync(join(dir, "requests.log")) ? readFileSync(join(dir, "requests.log"), "utf8").split("\n").filter(Boolean) : [];
+    return { code: run.exitCode, output: run.stdout.toString() + run.stderr.toString(), argv: readFileSync(join(dir, "argv.log"), "utf8"), environment: readFileSync(join(dir, "env.log"), "utf8"), requests };
   };
   return { check };
 }
