@@ -24,10 +24,11 @@ says that Hedge runs on cloud boxes and points at the setup page.
 
 **Test.** `src/get-macos.test.ts › get.sh on macOS › stops before it installs or writes anything, says that Hedge runs on cloud boxes, and points at the setup page`
 
-## Mac code left for a later prune
+## Mac code kept for outside engineers
 
 The engine still holds code that runs only on a Mac. Nothing in the setup
-path reaches it now. A later change removes it, with its tests.
+path reaches it now. It stays for a later map that lets engineers outside
+PostHog run Hedge on their own machines, a Mac among them.
 
 | Code | What it did on the Mac |
 | --- | --- |
