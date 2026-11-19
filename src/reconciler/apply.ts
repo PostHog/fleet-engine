@@ -111,8 +111,26 @@ async function reconcile(plan: Plan, options: ApplyOptions): Promise<{ report: R
   report.findings.push(...gated.issued, ...gated.failed.map((step) => humanFinding(step, context.dryRun)));
   if (!context.dryRun && gated.failed.some(repairedByHedge)) report.ok = false;
   const afterSteps = adapters.filter((adapter) => adapter.name === "config");
+  const configure = async () => {
+    const checks: Checked = [];
+    for (const item of plan.checks.filter((check) => check.todo || plan.config.some((entry) => entry.pack === check.pack && entry.after === check.id))) checks.push([item, await run(item.run)]);
+    report.findings.push(...checks.filter(([, code]) => code !== 0).map(([item, code]) => checkFinding(item, code)));
+    const passing = (entry: Plan["config"][number]) => checks.some(([item, code]) => item.pack === entry.pack && item.id === entry.after && code === 0);
+    const waiting = plan.config.filter((entry) => waitsForCheck(plan, entry));
+    const configured = { ...gated.plan, config: plan.config.filter((entry) => (waiting.includes(entry) ? passing(entry) : gated.plan.config.includes(entry))), dropped: [...gated.plan.dropped, ...waiting.filter((entry) => !passing(entry)).map(droppedConfig)] };
+    for (const adapter of afterSteps) {
+      const result = await adapter.apply(configured, context);
+      report.actions.push(...result.actions);
+      report.findings.push(...result.findings);
+      if (result.failed || result.blocked) report.ok = false;
+    }
+    return { report, checks };
+  };
   for (const adapter of adapters.filter((each) => !afterSteps.includes(each))) {
-    const result = await adapter.apply(gated.plan, context);
+    const result = await adapter.apply(gated.plan, context).catch(async (error: unknown) => {
+      await configure();
+      throw error;
+    });
     report.actions.push(...result.actions);
     report.findings.push(...result.findings);
     if (result.failed) report.ok = false;
@@ -183,19 +201,7 @@ async function reconcile(plan: Plan, options: ApplyOptions): Promise<{ report: R
     if (!heldCodes.includes(await run(step.probe, { [undoVariable]: ledgerKey(step) }))) await changeLedger(options.home, "human", ledgerKey(step));
   }
   await undo(items.filter((item) => item.cause !== "pack"));
-  const checks: Checked = [];
-  for (const item of plan.checks.filter((check) => check.todo || plan.config.some((entry) => entry.pack === check.pack && entry.after === check.id))) checks.push([item, await run(item.run)]);
-  report.findings.push(...checks.filter(([, code]) => code !== 0).map(([item, code]) => checkFinding(item, code)));
-  const passing = (entry: Plan["config"][number]) => checks.some(([item, code]) => item.pack === entry.pack && item.id === entry.after && code === 0);
-  const waiting = plan.config.filter((entry) => waitsForCheck(plan, entry));
-  const configured = { ...gated.plan, config: plan.config.filter((entry) => (waiting.includes(entry) ? passing(entry) : gated.plan.config.includes(entry))), dropped: [...gated.plan.dropped, ...waiting.filter((entry) => !passing(entry)).map(droppedConfig)] };
-  for (const adapter of afterSteps) {
-    const result = await adapter.apply(configured, context);
-    report.actions.push(...result.actions);
-    report.findings.push(...result.findings);
-    if (result.failed || result.blocked) report.ok = false;
-  }
-  return { report, checks };
+  return configure();
 }
 
 const waitsForCheck = (plan: Plan, entry: Plan["config"][number]) => entry.after !== undefined && !plan.human.some((step) => step.pack === entry.pack && step.id === entry.after);

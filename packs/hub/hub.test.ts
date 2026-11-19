@@ -2,6 +2,7 @@ import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse, stringify } from "smol-toml";
+import { jobsAdapter } from "../../src/adapters/jobs/adapter.ts";
 import { providerConfigAdapter } from "../../src/adapters/provider-config/adapter.ts";
 import { apply, check } from "../../src/reconciler/apply.ts";
 import { boxCommand } from "./lib/box-command.ts";
@@ -573,6 +574,17 @@ describe("the Own-account balancing workflow", () => {
       expect(route()).toBeUndefined();
       expect(failed.ok).toBe(false);
       expect(failed.findings.map((finding) => [finding.id, finding.todo ?? finding.repair])).toEqual(unsafe);
+    test("a job the Jobs adapter refuses still lets apply take the route to a proxy that turned unsafe out, and apply fails with the job's reason", async () => {
+      const { home, result, route, options } = runningHub("claude", { credentials: [{ provider: "claude" }] });
+      expect((await apply(result, options)).ok).toBe(true);
+      expect(route()).toBe("http://127.0.0.1:8317");
+      mkdirSync(join(dataDir(home), "plugins"), { recursive: true });
+      writeFileSync(join(dataDir(home), "plugins/other.so"), "plugin");
+      const badJob: Plan = { ...result, jobs: [{ id: "bad id", command: ["hedge", "box", "sweep"], schedule: { every: "always" }, pack: "hub" }] };
+      await expect(apply(badJob, { ...options, adapters: [jobsAdapter(), providerConfigAdapter()] })).rejects.toThrow("job id bad id of the hub pack may hold only");
+      expect(route()).toBeUndefined();
+    });
+
       routes.clear();
       expect((await apply(result, options)).ok).toBe(false);
       expect(routes).toEqual(new Set([undefined]));
