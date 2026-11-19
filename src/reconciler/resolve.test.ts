@@ -262,6 +262,17 @@ describe("resolve", () => {
     expect(resolved.settings["context.repo"]).toBeUndefined();
   });
 
+  test("releases a workflow waiting for a setting that the fallback of another held workflow supplies, and keeps holding a workflow whose own fallback supplies its setting", () => {
+    const cloud = withPack({ schema: 1, name: "cloud", summary: "Cloud.", settings: [{ key: "cloud.token", question: "Token?", type: "string", ask: "never", optional: true }], workflows: [{ id: "cloud", name: "Cloud", sentence: "Cloud.", default: true, settings: ["cloud.token"], offUntilSet: ["cloud.token"] }] });
+    const local = withPack({ schema: 1, name: "local", summary: "Local.", settings: [{ key: "context.repo", question: "Repo?", type: "string", ask: "never", default: "me/context" }], workflows: [{ id: "local", name: "Local", sentence: "Local.", default: true, settings: ["context.repo"], yields: ["cloud"] }] });
+    const shelf = withPack({ schema: 1, name: "shelf", summary: "Shelf.", settings: [{ key: "context.repo", question: "Repo?", type: "string", ask: "never", optional: true }], workflows: [{ id: "shelf", name: "Shelf", sentence: "Shelf.", default: true, settings: ["context.repo"], offUntilSet: ["context.repo"] }] });
+    const resolved = plan({ packs: ["shelf", "cloud", "local"] }, mac, [engine, cloud, local, shelf]);
+    expect(resolved.workflows.filter((state) => state.pack !== "base").map(({ id, active, reason }) => [id, active, reason])).toEqual([["shelf", true, undefined], ["cloud", false, "waits for setting cloud.token"], ["local", true, undefined]]);
+    expect(resolved.settings["context.repo"]).toBe("me/context");
+    const own = withPack({ schema: 1, name: "own", summary: "Own.", settings: [{ key: "own.key", question: "Key?", type: "string", ask: "never", default: "from-fallback" }], workflows: [{ id: "preferred", name: "Preferred", sentence: "Preferred.", default: true, offUntilSet: ["own.key"] }, { id: "fallback", name: "Fallback", sentence: "Fallback.", default: true, settings: ["own.key"], yields: ["preferred"] }] });
+    expect(plan({ packs: ["own"] }, mac, [engine, own]).workflows.filter((state) => state.pack === "own").map(({ id, active, reason }) => [id, active, reason])).toEqual([["preferred", false, "waits for setting own.key"], ["fallback", true, undefined]]);
+  });
+
   test("settles a chain of yields: the first stays on when the one it yields to yields in turn", () => {
     const flow = (id: string, yields: string[] = []) => ({ id, name: id, sentence: `${id}.`, default: true, yields });
     const chain = withPack({ schema: 1, name: "chain", summary: "Chain.", workflows: [flow("a", ["b"]), flow("b", ["c"]), flow("c")] });

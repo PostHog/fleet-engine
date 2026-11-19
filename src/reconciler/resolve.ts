@@ -301,18 +301,23 @@ function activateWorkflows(profile: Profile, machine: MachineFile, order: Candid
   return activeIds(states);
 }
 
+/** Holds each workflow whose setting stays unset until nothing changes. A held workflow is released once the active workflows supply its setting, and a workflow held again after its release stays held, so the loop ends. */
 function settledWorkflows(profile: Profile, machine: MachineFile, order: Candidate[], names: Set<string>, byOldName: ByOldName) {
   const held = new Map<string, string>();
+  const released = new Set<string>();
   for (;;) {
     const states = workflowStates(profile, machine, order, names, byOldName, held);
-    const waiting = unsetGates(profile, machine, order, activeIds(states), held);
-    if (!waiting.size) return states;
-    for (const [id, key] of waiting) held.set(id, key);
+    const waiting = unsetGates(profile, machine, order, activeIds(states));
+    const freed = [...held.keys()].filter((id) => !waiting.has(id) && !released.has(id));
+    const added = [...waiting].filter(([id]) => !held.has(id));
+    if (!freed.length && !added.length) return states;
+    for (const id of freed) held.delete(id), released.add(id);
+    for (const [id, key] of added) held.set(id, key);
   }
 }
 
-function unsetGates(profile: Profile, machine: MachineFile, order: Candidate[], active: Set<string>, held: Map<string, string>) {
-  const gated = order.flatMap(({ manifest }) => manifest.workflows ?? []).filter((workflow) => workflow.offUntilSet && !held.has(workflow.id));
+function unsetGates(profile: Profile, machine: MachineFile, order: Candidate[], active: Set<string>) {
+  const gated = order.flatMap(({ manifest }) => manifest.workflows ?? []).filter((workflow) => workflow.offUntilSet);
   return new Map(gated.flatMap((workflow) => {
     const settings = machineDefaults(activeSettings(order, new Set([...active, workflow.id])), machine);
     const values = settingValues(settings, answersOf(profile, settings));
