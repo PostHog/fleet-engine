@@ -156,14 +156,14 @@ test("install and doctor run only on the hub and never as root", async () => {
   await expect(cliProxy("install", hubMachine({ uid: 0 }).machine)).rejects.toThrow("not root");
 });
 
-test("the doctor passes with enough of your own subscriptions, and prints how to connect each devbox without the key", async () => {
+test("the doctor passes with enough of your own subscriptions, and prints how to connect each devbox and run hedge apply there, without the key", async () => {
   const { machine, home } = hubMachine();
   await cliProxy("install", machine);
   const doctor = hubMachine({ home });
   expect(await cliProxy("doctor", doctor.machine)).toBe(0);
   expect(doctor.calls).toContain("systemctl --user is-active --quiet hedge-cli-proxy.service");
   expect(doctor.requests.filter((request) => request.path.startsWith("/v0/management")).every((request) => request.auth === `Bearer ${otherKey}`)).toBe(true);
-  expect(doctor.printed.join("\n")).toContain(`ssh devbox-1 'sh "$HOME/.local/share/hedge/engine/hedge" cli-proxy connect' < ~/.config/hedge/cli-proxy.key`);
+  expect(doctor.printed.join("\n")).toContain(`Connect devbox-1: ssh devbox-1 'sh "$HOME/.local/share/hedge/engine/hedge" cli-proxy connect && sh "$HOME/.local/share/hedge/engine/hedge" apply' < ~/.config/hedge/cli-proxy.key`);
   expect(doctor.printed.join("\n")).not.toContain("box-lane");
   expect(doctor.printed.join("\n")).not.toContain(clientKey);
 });

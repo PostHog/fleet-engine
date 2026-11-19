@@ -236,7 +236,7 @@ async function doctor(machine: ProxyMachine, paths: Layout): Promise<void> {
   if (!existsSync(paths.catalog)) machine.print(`CLI proxy: Warning: ${paths.catalog} is missing, so Codex does not offer the ultrafast tier. Run hedge cli-proxy catalog.`);
   if (!existsSync(paths.registry)) machine.print(`CLI proxy: Warning: ${paths.registry} is missing, so the proxy does not route the models upstream does not list yet. Run hedge cli-proxy catalog.`);
   if (machine.panel) machine.print(`Open the management panel at ${panelUrl} on the hub, or on a devbox through its tunnel, and sign in with the MANAGEMENT_PASSWORD in ${paths.management}.`);
-  for (const devbox of machine.devboxes.filter((name) => !isKeptForBoxes(name))) machine.print(`Connect ${devbox}: ssh ${devbox} ${quote('sh "$HOME/.local/share/hedge/engine/hedge" cli-proxy connect')} < ~/.config/hedge/cli-proxy.key`);
+  for (const devbox of machine.devboxes.filter((name) => !isKeptForBoxes(name))) machine.print(`Connect ${devbox}: ssh ${devbox} ${quote('sh "$HOME/.local/share/hedge/engine/hedge" cli-proxy connect && sh "$HOME/.local/share/hedge/engine/hedge" apply')} < ~/.config/hedge/cli-proxy.key`);
 }
 
 async function pool(machine: ProxyMachine, paths: Layout, managementKey: string) {

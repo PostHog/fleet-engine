@@ -24,7 +24,10 @@ Recovery never knows that a provider has capacity, and continues nothing.
    for each subscription, and follow what it prints.
 3. After step 9 adds the node, connect it to the proxy. On the hub,
    `hedge cli-proxy doctor` prints one `Connect <node>:` command per node.
-   Each one reads the hub's proxy key, so it runs on the hub:
+   Each one reads the hub's proxy key, so it runs on the hub. It saves the
+   key on the node, then runs `hedge apply` on that node. Connect alone
+   only saves the key: the node uses the proxy only after `hedge apply`
+   runs there.
 
    ```sh
    ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge cli-proxy doctor'
@@ -39,3 +42,7 @@ Recovery never knows that a provider has capacity, and continues nothing.
    <the command after Connect <node>:>
    SCRIPT
    ```
+
+   Read the `To do:` and `Fix:` lines that `hedge apply` prints for the
+   node. If connect fails, it runs no `hedge apply` and changes nothing:
+   fix what it prints, then run the same command again.
