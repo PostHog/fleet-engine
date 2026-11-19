@@ -1,24 +1,19 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { main } from "../cli.ts";
 import { isolateGit, spawnGit, tempDirs } from "../testing/git.ts";
 import { profilePath } from "./profile.ts";
-import { boxHome, engineRoot, fakeMachine, hedgeSetup, machineFile, nodeHas, nodeLog, scripted } from "./testing.ts";
+import { coderToken, fakeMachine, machineFile, setUpToAdd } from "./testing.ts";
 
 isolateGit();
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
 
 const node = "coder.hedge-node-1";
-const guarded = ["--add", "guards", "--workflows", "git-allowlist=on,oom-survival=on"];
 
 async function signedUp(setupArgs: string[] = []) {
   const home = temp.make("home-");
-  expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "claude", ...setupArgs], ["", ""])).code).toBe(0);
-  const io = scripted([]);
-  const add = (box: ReturnType<typeof fakeMachine>) => main(["devbox", "add", node], { home, engineRoot, platform: "linux", print: io.terminal.print, terminal: io.terminal, setup: { machine: box.machine } });
-  return { home, io, add };
+  return { home, ...(await setUpToAdd(home, node, setupArgs)) };
 }
 
 async function nameHub(home: string, hub: string) {
@@ -30,13 +25,30 @@ async function nameHub(home: string, hub: string) {
 }
 
 const lastLine = (output: string) => output.split("\n").at(-1);
+const tokenSent = (box: ReturnType<typeof fakeMachine>) => box.calls.some((call) => call.input?.includes(coderToken));
 
 describe("hedge devbox add signs the workspace in to Coder", () => {
-  test("at the workspace's own agent address when it cannot reach this machine's Coder address", async () => {
+  test("at the workspace's own agent address when it answers there over HTTPS and not at this machine's Coder address", async () => {
     const { home, add } = await signedUp();
-    const box = fakeMachine(home, { "box:coder": 1 }, { boxReachesCoderAt: "http://coder.internal" });
+    const box = fakeMachine(home, { "box:coder": 1 }, { boxReachesCoderAt: "https://coder-eu.example.com", boxAgentUrl: "https://coder-eu.example.com/" });
     expect(await add(box)).toBe(0);
-    expect(box.coderSsh).toEqual(["http://coder.internal"]);
+    expect(box.coderSsh).toEqual(["https://coder-eu.example.com"]);
+  });
+
+  test("but makes no token and sends none when the workspace answers only at a plain HTTP agent address, and names the sign-in left for the person", async () => {
+    const { home, io, add } = await signedUp();
+    const box = fakeMachine(home, { "box:coder": 1 }, { boxReachesCoderAt: "http://coder.internal" });
+    expect(await add(box)).toBe(1);
+    expect(box.coderTokens()).toEqual([]);
+    expect(tokenSent(box)).toBe(false);
+    expect(io.output()).toContain(`${node} reaches Coder only at its agent address, http://coder.internal, which is plain HTTP, so Hedge sends no token there. Sign ${node} in yourself: run ssh -t ${node} 'PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH"; coder login http://coder.internal', and paste a token from https://coder.example.com/cli-auth.`);
+  });
+
+  test("and passes over an address that answers with a sign-in redirect instead of Coder", async () => {
+    const { home, add } = await signedUp();
+    const box = fakeMachine(home, { "box:coder": 1 }, { coderRedirectsAt: "https://coder.example.com", boxReachesCoderAt: "https://coder-eu.example.com", boxAgentUrl: "https://coder-eu.example.com" });
+    expect(await add(box)).toBe(0);
+    expect(box.coderSsh).toEqual(["https://coder-eu.example.com"]);
   });
 
   test("and removes the token it made when the sign-in there fails", async () => {
@@ -47,57 +59,50 @@ describe("hedge devbox add signs the workspace in to Coder", () => {
     expect(box.coderTokens()).toEqual([]);
   });
 
+  test("and names the token and the command that removes it when its removal fails too", async () => {
+    const { home, io, add } = await signedUp();
+    const box = fakeMachine(home, { "box:coder": 1 }, { coderLoginFails: true, coderTokenRemoveFails: true });
+    expect(await add(box)).toBe(1);
+    const [name] = box.coderTokens();
+    expect(io.output()).toContain(`Hedge could not remove the token it made, ${name}. Remove it with coder tokens remove ${name}.`);
+  });
+
   test("and makes no token when the workspace reaches Coder at no address", async () => {
     const { home, io, add } = await signedUp();
     const box = fakeMachine(home, { "box:coder": 1 }, { boxReachesCoderAt: "https://elsewhere.example" });
     expect(await add(box)).toBe(1);
-    expect(io.output()).toContain(`${node} reaches Coder neither at https://coder.example.com nor at its own agent address`);
+    expect(io.output()).toContain(`${node} reaches Coder neither at https://coder.example.com nor at its own agent address, http://coder.internal.`);
     expect(box.coderTokens()).toEqual([]);
   });
 });
 
-describe("hedge devbox add applies the profile on the node", () => {
-  test("runs the node's root steps itself when sudo there asks no password", async () => {
-    const { home, add } = await signedUp(guarded);
-    expect(await add(fakeMachine(home, {}, { node: { rootSteps: ["allowlist", "earlyoom"] } }))).toBe(0);
-    expect([nodeHas(home, node, "allowlist"), nodeHas(home, node, "earlyoom")]).toEqual([true, true]);
-  });
-
-  test("lists the steps left for the person once, at the end, when sudo there asks a password", async () => {
-    const { home, io, add } = await signedUp(guarded);
-    expect(await add(fakeMachine(home, {}, { node: { password: true, rootSteps: ["allowlist", "earlyoom"] } }))).toBe(1);
-    const left = io.output().slice(io.output().lastIndexOf("hedge: "));
-    expect(left).toContain(`Do what is left for you on ${node}, and fix what it says above, then run hedge devbox add ${node} again. Left for you:`);
-    expect(left).toContain(`  · Install the signed Git allowlist as root.`);
-    expect(left).toContain(`Run: ssh -t ${node} 'hedge guards allowlist stage ~/.local/state/hedge/git-allowlist && sudo sh ~/.local/state/hedge/git-allowlist/install.sh'`);
-    expect(lastLine(io.output())).toStartWith("  · Install earlyoom as root");
-    expect(lastLine(io.output())).toEndWith(`Run: ssh -t ${node} 'sudo sh ~/.local/share/hedge/guards/earlyoom.sh'`);
-  });
-
-  test("keeps the node's engine when it runs this machine's engine commit, and applies the profile with it", async () => {
-    const { home, add } = await signedUp();
-    const commit = Bun.spawnSync(["git", "-C", engineRoot, "rev-parse", "HEAD"]).stdout.toString().trim();
-    expect(await add(fakeMachine(home, {}, { node: { engineAt: commit } }))).toBe(0);
-    expect(nodeLog(home, node)).toEqual([`hedge apply --profile ${join(boxHome(home, node), ".local/share/hedge/profile")}`]);
-  });
-
-  test("installs the engine again with get.sh when the node runs another engine commit", async () => {
-    const { home, add } = await signedUp();
-    expect(await add(fakeMachine(home, {}, { node: { engineAt: "0".repeat(40) } }))).toBe(0);
-    expect(nodeLog(home, node)[0]).toStartWith("get.sh --ref main --profile ");
-  });
-});
-
 describe("hedge devbox add links the node from the hub", () => {
-  const listed = [{ environmentId: `env-${node}`, label: "hedge-node-1" }];
+  const listed = (status: string) => [{ environmentId: `env-${node}`, label: "hedge-node-1", status }];
 
-  test("says the hub reaches the node, without hedge peers link, when T3 Code on the hub lists it", async () => {
+  test("says the hub reaches the node, and links nothing anew, when T3 Code on the hub reaches it", async () => {
     const { home, io, add } = await signedUp();
     await nameHub(home, "coder.hedge-hub");
-    const box = fakeMachine(home, {}, { hubLinks: listed });
+    const box = fakeMachine(home, {}, { hubLinks: listed("reachable") });
     expect(await add(box)).toBe(0);
     expect(lastLine(io.output())).toBe(`✓ The hub, coder.hedge-hub, reaches ${node} in T3 Code.`);
     expect(box.hubLinked).toEqual([]);
+  });
+
+  test("links the node again when T3 Code on the hub lists its link as expired", async () => {
+    const { home, io, add } = await signedUp();
+    await nameHub(home, "coder.hedge-hub");
+    const box = fakeMachine(home, {}, { hubLinks: listed("expired") });
+    expect(await add(box)).toBe(0);
+    expect(box.hubLinked).toEqual([node]);
+    expect(lastLine(io.output())).toBe(`✓ The hub, coder.hedge-hub, linked ${node} in T3 Code.`);
+  });
+
+  test("names the link's state and a repair that runs over plain SSH when the hub cannot link an unreachable node", async () => {
+    const { home, io, add } = await signedUp();
+    await nameHub(home, "coder.hedge-hub");
+    const box = fakeMachine(home, {}, { hubLinks: listed("unreachable"), hubUpdateFails: "hedge update: the release channel needs a version tag as the engine ref." });
+    expect(await add(box)).toBe(0);
+    expect(lastLine(io.output())).toBe(`· The hub, coder.hedge-hub, lists ${node} in T3 Code as unreachable. Its daily hedge peers renew links it, or run ssh coder.hedge-hub 'PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH"; hedge peers link ${node}' now.`);
   });
 
   test("run on the hub, reads T3 Code here, and says the hub reaches the node when the hub's own update fails", async () => {
@@ -105,7 +110,7 @@ describe("hedge devbox add links the node from the hub", () => {
     await nameHub(home, "coder.hedge-hub");
     const saved = machineFile(home);
     writeFileSync(join(home, ".config/hedge/machine.json"), JSON.stringify({ ...saved, name: "coder.hedge-hub" }));
-    const box = fakeMachine(home, {}, { hereLinks: listed, hubUpdateFails: "hedge update: the release channel needs a version tag as the engine ref." });
+    const box = fakeMachine(home, {}, { hereLinks: listed("reachable"), hubUpdateFails: "hedge update: the release channel needs a version tag as the engine ref." });
     expect(await add(box)).toBe(0);
     expect(lastLine(io.output())).toBe(`✓ The hub, coder.hedge-hub, reaches ${node} in T3 Code.`);
   });

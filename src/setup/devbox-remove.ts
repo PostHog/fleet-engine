@@ -2,12 +2,10 @@ import type { MachineFile } from "../pack/types.ts";
 import { loadProfile, pullProfile, saveAnswers, saveMachine } from "../profile/profile.ts";
 import type { Machine } from "./commands.ts";
 import { forgetWeight } from "./devbox-balance.ts";
-import { boxEnvironmentId, t3Links } from "./devbox.ts";
+import { boxEnvironmentId, t3Links, type T3Link as Link } from "./devbox.ts";
 import type { Terminal } from "./terminal.ts";
 
 export type RemoveContext = { home: string; terminal: Terminal; machine: Machine; machineFile: MachineFile };
-
-type Link = { environmentId: string; label?: string };
 
 /** Takes a replaced hub or node out of the profile and this machine's list, unlinks it in T3 Code here, and drops its load balancing weight. It unlinks first, so a failed unlink changes nothing and a second run tries again; the profile is pushed on every run, so a push that failed before reaches the remote now. The hub stops its tunnel, disk watch and link at its next hedge update. */
 export async function removeDevbox(host: string, context: RemoveContext) {

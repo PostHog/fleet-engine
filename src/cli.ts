@@ -45,8 +45,9 @@ const usage = `Hedge: one setup for T3 Code, agents, and your workflows
                      Answer a few questions and set up this machine
   hedge apply [--profile <dir>] [--adopt <path>]... [--adopt-from <name>]... [--skip <pack>/<step>]... [--dry-run]
                      Put your profile's packs onto this machine
-  hedge doctor [--profile <dir>]
-                     Check this machine against your profile without changing it
+  hedge doctor [--profile <dir>] [--to-do]
+                     Check this machine against your profile without changing it,
+                     or print the steps left for you as JSON
   hedge update       Move the engine and your profile forward, then apply
   hedge refresh      Fetch the pack sources that follow a branch, and when one moved,
                      update the files, skills, guides, and instructions of your packs
@@ -175,6 +176,7 @@ async function triage(args: string[], options: CliOptions) {
 async function reconcile(command: "apply" | "doctor", args: string[], options: CliOptions) {
   const flags = parseFlags(args);
   const doctor = command === "doctor";
+  if (flags.toDo && !doctor) throw new Error("unknown option --to-do");
   const preview = doctor || flags.dryRun;
   const holds = () => fleetOf(options).holds(options.home, options.platform);
   const held = await holds();
@@ -189,6 +191,7 @@ async function reconcile(command: "apply" | "doctor", args: string[], options: C
   const adapters = (options.adapters ?? engineAdapters)();
   const issue: Issuer = (entries, node) => issueCredentials(entries, node, plan, sources, options);
   const report = doctor ? await check(plan, { home: options.home, adapters, run: options.run }) : await apply(plan, { home: options.home, adopt: flags.adopt, adoptFrom: flags.adoptFrom, skip: flags.skip, dryRun: flags.dryRun, adapters, run: options.run, issue, progress: options.print });
+  if (flags.toDo) return options.print(JSON.stringify(report.humanLeft.map(({ pack, id, say, command }) => ({ pack, id, say, ...(command ? { command } : {}) })))), 0;
   if (doctor) {
     const drifted = await drift(plan, report.humanLeft);
     report.findings.push(...drifted);
@@ -205,11 +208,9 @@ async function devbox(args: string[], options: CliOptions) {
   const terminal = options.terminal ?? { ...ttyTerminal(), print: options.print };
   const machine = { ...realMachine, ...options.setup?.machine };
   if (asksAddress(args)) return await printAddress({ terminal, machine });
-  const { plan, sources } = await loadPlan(options, undefined, { fetch: false });
-  const profileDir = plan.machine.profileDir;
-  const nodeHuman = async (host: string) => (profileDir ? resolve(await loadProfile(profileDir), { schema: 1, role: "devbox", name: host, profileDir, ...(host.startsWith("coder.") ? { coder: true as const } : {}) }, sources).human : []);
+  const { plan } = await loadPlan(options, undefined, { fetch: false });
   try {
-    return await devboxCommand(args, { home: options.home, terminal, machine, machineFile: plan.machine, plan, nodeHuman });
+    return await devboxCommand(args, { home: options.home, terminal, machine, machineFile: plan.machine, plan });
   } catch (error) {
     if (!(error instanceof FlagError)) throw error;
     options.print(`hedge devbox: ${error.message}`);
@@ -538,7 +539,7 @@ async function loadPlan(options: CliOptions, profileFlag: string | undefined, mo
 }
 
 function parseFlags(args: string[]) {
-  const flags: { profile?: string; adopt: string[]; adoptFrom: string[]; skip: string[]; dryRun: boolean } = { adopt: [], adoptFrom: [], skip: [], dryRun: false };
+  const flags: { profile?: string; adopt: string[]; adoptFrom: string[]; skip: string[]; dryRun: boolean; toDo: boolean } = { adopt: [], adoptFrom: [], skip: [], dryRun: false, toDo: false };
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     const value = () => {
@@ -551,6 +552,7 @@ function parseFlags(args: string[]) {
     else if (arg === "--adopt-from") flags.adoptFrom.push(value());
     else if (arg === "--skip") flags.skip.push(value());
     else if (arg === "--dry-run") flags.dryRun = true;
+    else if (arg === "--to-do") flags.toDo = true;
     else throw new Error(`unknown option ${arg}`);
   }
   return flags;

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
-import type { AiPlan, HumanStep, ModelRow, Owned } from "../pack/types.ts";
+import type { AiPlan, ModelRow } from "../pack/types.ts";
 import { restartCommand } from "../adapters/t3/service.ts";
 import { canBeDevbox } from "../hub/names.ts";
 import { onHub, quote } from "../hub/ssh.ts";
@@ -16,6 +16,7 @@ import type { Terminal } from "./terminal.ts";
 export const skipDevbox = "skip";
 const boxProfile = "$HOME/.local/share/hedge/profile";
 const boxEngine = "$HOME/.local/share/hedge/engine";
+const remotePath = `PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH";`;
 
 /** The concrete hosts in ~/.ssh/config: Host entries without wildcards or negations. */
 export function sshHosts(home: string): string[] {
@@ -37,7 +38,7 @@ export function overSsh(machine: Machine, host: string): Machine {
   const line = (command: string[], scratch = false) => {
     const words = command.map(quote).join(" ");
     const body = scratch ? `d=$(mktemp -d) && cd "$d" && ${words}; s=$?; cd / && rm -rf "$d"; exit $s` : words;
-    return `PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH"; ${body}`;
+    return `${remotePath} ${body}`;
   };
   const batch = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15", host];
   return {
@@ -63,10 +64,7 @@ export type DevboxContext = {
   /** The profile's clone URL and the engine ref it pins, so the box runs what this machine runs. */
   profile(): Promise<{ url: string; engineRef: string }>;
   rerun?: string;
-  /** The engine this machine runs. A node already at its commit keeps its engine and applies the profile with it. */
   engineRoot?: string;
-  /** The pack human steps in the node's plan. Hedge runs the ones that need only sudo on the node, and lists the others for the person. */
-  nodeHuman?(): Promise<Array<Owned<HumanStep>>>;
 };
 
 /** The profile's clone URL as stored, and the engine ref the profile pins. */
@@ -146,7 +144,6 @@ async function install(box: Machine, host: string, context: DevboxContext) {
   const { engineRef } = await context.profile();
   const getSh = `https://raw.githubusercontent.com/${engineRepo}/${engineRef}/get.sh`;
   await nameBox(box, host);
-  if (await engineCurrent(box, context)) return context.terminal.print(`  · ${host} already runs the engine at the commit this machine runs.`);
   const hedgeOnly = `{ grep -qF '/.local/share/hedge/engine' "$installer" || { rm -f "$installer"; exit ${refused}; }; }`;
   const download = `installer=$(mktemp) && { curl -fsSL ${quote(getSh)} -o "$installer" && ${hedgeOnly} && sh "$installer" --ref ${quote(engineRef)} --install-only; s=$?; rm -f "$installer"; exit $s; }`;
   const code = await box.run(["sh", "-c", download]);
@@ -209,15 +206,28 @@ async function coderSession(machine: Machine): Promise<CoderSession | undefined>
 
 const sameCoderUser = (here: CoderSession, box: CoderSession | undefined) => box !== undefined && (here.userId && box.userId ? here.userId === box.userId : here.address === box.address);
 
-/** The first Coder address the workspace answers at: this machine's, else the workspace's own agent address, which a workspace in another region or network may need. */
 async function coderAddressOn(host: string, box: Machine, address: string) {
-  const found = await box.exec(["sh", "-c", `for a in ${quote(address)} "\${CODER_AGENT_URL:-}"; do a=\${a%/}; [ -n "$a" ] && curl -fsS --max-time 10 -o /dev/null "$a/api/v2/buildinfo" && { echo "$a"; exit 0; }; done; exit 1`]);
-  const reached = found.code === 0 ? found.stdout.trim().split("\n").at(-1) : undefined;
-  if (!reached) throw new Error(`${host} reaches Coder neither at ${address} nor at its own agent address: ${found.output.trim().split("\n").at(-1) ?? ""} Check the workspace's network, then run hedge devbox add ${host} again.`);
-  return reached;
+  if (await answersAsCoder(box, address)) return address;
+  const agent = (await box.exec(["sh", "-c", 'printf %s "${CODER_AGENT_URL:-}"'])).stdout.trim().replace(/\/+$/, "");
+  const atAgent = agent !== "" && agent !== address && (await answersAsCoder(box, agent));
+  if (atAgent && agent.startsWith("https://")) return agent;
+  if (atAgent) throw new Error(`${host} reaches Coder only at its agent address, ${agent}, which is plain HTTP, so Hedge sends no token there. Sign ${host} in yourself: run ssh -t ${host} ${quote(`${remotePath} coder login ${agent}`)}, and paste a token from ${address}/cli-auth. Then run hedge devbox add ${host} again.`);
+  throw new Error(`${host} reaches Coder neither at ${address} nor at its own agent address${agent ? `, ${agent}` : ""}. Check the workspace's network, then run hedge devbox add ${host} again.`);
 }
 
-/** Signs the workspace in to Coder with a new token from this machine, sent on standard input, at the first address it answers at, then writes its SSH config, so it reaches every coder.<workspace> by name. A failed sign-in removes the token again. A workspace already signed in as the same Coder user keeps its session, whatever address it reaches Coder by. */
+async function answersAsCoder(box: Machine, address: string) {
+  const probe = await box.exec(["curl", "-sS", "--max-time", "10", "-w", "\\n%{http_code}", `${address}/api/v2/buildinfo`]);
+  const lines = probe.stdout.split("\n");
+  if (probe.code !== 0 || lines.pop() !== "200") return false;
+  try {
+    const info: unknown = JSON.parse(lines.join("\n"));
+    return typeof info === "object" && info !== null && "version" in info && typeof info.version === "string" && "external_url" in info && typeof info.external_url === "string";
+  } catch {
+    return false;
+  }
+}
+
+/** Signs the workspace in to Coder with a new token from this machine, sent on standard input, then writes its SSH config, so it reaches every coder.<workspace> by name. A workspace already signed in as the same Coder user keeps its session, whatever address it reaches Coder by. */
 async function coderOnBox(host: string, box: Machine, here: Machine) {
   const session = await coderSession(here);
   if (!session) throw new Error(`Coder is not signed in on this machine. Run coder login <your Coder address> here, then hedge devbox add ${host} again.`);
@@ -231,8 +241,9 @@ async function coderOnBox(host: string, box: Machine, here: Machine) {
     const login = `IFS= read -r token && CODER_SESSION_TOKEN="$token" coder login --use-token-as-session ${quote(address)}`;
     const signedIn = await box.exec(["sh", "-c", `${download} && ${login}`], { input: `${token.output.trim()}\n` });
     if (signedIn.code !== 0) {
-      await here.exec(["coder", "tokens", "remove", name]);
-      throw new Error(`Coder did not sign in on ${host}: ${signedIn.output.trim()}`);
+      const removed = (await here.exec(["coder", "tokens", "remove", name])).code === 0;
+      const cleanup = removed ? "" : ` Hedge could not remove the token it made, ${name}. Remove it with coder tokens remove ${name}.`;
+      throw new Error(`Coder did not sign in on ${host}: ${signedIn.output.trim()}${cleanup}`);
     }
   }
   const ssh = await box.exec(["coder", "config-ssh", "--yes"]);
@@ -243,45 +254,60 @@ async function engineCurrent(box: Machine, context: DevboxContext) {
   const here = context.engineRoot && (await context.machine.exec(["git", "-C", context.engineRoot, "rev-parse", "HEAD"]));
   const commit = here && here.code === 0 ? here.stdout.trim() : "";
   if (!/^[0-9a-f]{40,64}$/.test(commit)) return false;
-  return (await box.exec(["sh", "-c", `[ -f "${boxEngine}/hedge" ] && [ "$(git -C "${boxEngine}" rev-parse HEAD)" = ${commit} ]`])).code === 0;
+  return (await box.exec(["sh", "-c", `"$HOME/.local/bin/hedge" help >/dev/null 2>&1 && [ "$(git -C "${boxEngine}" rev-parse HEAD)" = ${commit} ]`])).code === 0;
 }
 
 const userBus = `export XDG_RUNTIME_DIR="\${XDG_RUNTIME_DIR:-/run/user/$(id -u)}";`;
+
+type LeftStep = { say: string; command?: string };
 
 async function applyProfile(box: Machine, host: string, context: DevboxContext) {
   const { url, engineRef } = await context.profile();
   const clone = `[ -d "${boxProfile}/.git" ] || gh repo clone ${quote(url)} "${boxProfile}" -- -q`;
   const withEngine = `sh "${boxEngine}/hedge" apply --profile "${boxProfile}"`;
   const apply = (await engineCurrent(box, context)) ? withEngine : `sh "${boxEngine}/get.sh" --ref ${quote(engineRef)} --profile "${boxProfile}"`;
-  if ((await box.run(["sh", "-c", `${userBus} ${clone} && ${apply}`])) === 0) return;
-  const { ran, left } = await rootSteps(box, context);
-  if (ran && (await box.run(["sh", "-c", `${userBus} ${withEngine}`])) === 0) return;
-  const yours = left.map((step) => `  · ${step.say}${step.command ? ` Run: ssh -t ${host} ${quote(step.command)}` : ""}`);
-  const intro = yours.length ? `The devbox could not apply your profile. Do what is left for you on ${host}, and fix what it says above, then run ${again(context)} again. Left for you:` : `The devbox could not apply your profile. Fix what it says above, then run ${again(context)} again.`;
-  throw new Error([intro, ...yours].join("\n"));
+  let applied = (await box.run(["sh", "-c", `${userBus} ${clone} && ${apply}`])) === 0;
+  let left = await stepsLeft(box);
+  if (left && (await runRootSteps(box, left, context))) {
+    applied = (await box.run(["sh", "-c", `${userBus} ${withEngine}`])) === 0;
+    left = await stepsLeft(box);
+  }
+  if (applied && left?.length === 0) return;
+  throw new Error(applyFailure(host, context, applied, left));
 }
+
+async function stepsLeft(box: Machine): Promise<LeftStep[] | undefined> {
+  const listed = await box.exec(["sh", "-c", `${userBus} sh "${boxEngine}/hedge" doctor --profile "${boxProfile}" --to-do`]);
+  if (listed.code !== 0) return undefined;
+  try {
+    const steps: unknown = JSON.parse(listed.stdout.trim().split("\n").at(-1) ?? "");
+    return Array.isArray(steps) && steps.every(isLeftStep) ? steps : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const isLeftStep = (step: unknown): step is LeftStep => typeof step === "object" && step !== null && "say" in step && typeof step.say === "string" && (!("command" in step) || typeof step.command === "string");
 
 const needsRoot = (command: string | undefined): command is string => command !== undefined && /(^|[\s;&|(])sudo\s/.test(command);
 const unattended = (command: string) => command.replace(/(^|[\s;&|(])sudo\s+/g, "$1sudo -n ");
 
-/** Runs on the node each of its pack human steps that needs only sudo, while sudo there asks no password, and returns the steps that are still left for the person. */
-async function rootSteps(box: Machine, context: DevboxContext) {
-  const passes = async (step: HumanStep) => (await box.exec(step.probe)).code === 0;
-  const failing: HumanStep[] = [];
-  for (const step of (await context.nodeHuman?.()) ?? []) if (!(await passes(step))) failing.push(step);
-  const sudo = failing.some((step) => needsRoot(step.command)) && (await box.exec(["sudo", "-n", "true"])).code === 0;
-  let ran = false;
-  const left: HumanStep[] = [];
-  for (const step of failing) {
-    if (sudo && needsRoot(step.command)) {
-      context.terminal.print(`  $ ${step.command}`);
-      await box.run(["sh", "-c", unattended(step.command)]);
-      ran = true;
-      if (await passes(step)) continue;
-    }
-    left.push(step);
+async function runRootSteps(box: Machine, left: LeftStep[], context: DevboxContext) {
+  const root = left.flatMap((step) => (needsRoot(step.command) ? [step.command] : []));
+  if (!root.length || (await box.exec(["sudo", "-n", "true"])).code !== 0) return false;
+  for (const command of root) {
+    context.terminal.print(`  $ ${command}`);
+    await box.run(["sh", "-c", unattended(command)]);
   }
-  return { ran, left };
+  return true;
+}
+
+function applyFailure(host: string, context: DevboxContext, applied: boolean, left: LeftStep[] | undefined) {
+  const rerun = `then run ${again(context)} again.`;
+  if (!left?.length) return applied ? `Hedge could not read the steps left on ${host}. Run hedge doctor there and fix what it says, ${rerun}` : `The devbox could not apply your profile. Fix what it says above, ${rerun}`;
+  const yours = left.map((step) => `  · ${step.say}${step.command ? ` Run: ssh -t ${host} ${quote(`${remotePath} ${step.command}`)}` : ""}`);
+  const intro = applied ? `Your profile applied on ${host}, but steps are left for you there. Do each one, ${rerun}` : `The devbox could not apply your profile. Do what is left for you on ${host}, and fix what it says above, ${rerun}`;
+  return [`${intro} Left for you:`, ...yours].join("\n");
 }
 
 /** Claude signs in on the box in an SSH terminal: its sign-in asks for a code that the person pastes. */
@@ -452,7 +478,6 @@ async function linkBothWays(host: string, box: Machine, context: DevboxContext) 
   else context.terminal.print(`  · ${host} does not link back to this machine, because T3 Connect is off here. Turn it on with t3 up --connect, and T3 Code on ${host} can pair with this machine.`);
 }
 
-/** self: this machine's name, so a command run on the hub reads T3 Code here instead of over SSH. */
 export type HubContext = { terminal: Terminal; machine: Machine; self?: string };
 
 const registerId = (host: string) => `devbox:${host}:register`;
@@ -515,24 +540,25 @@ export async function tellHub({ machine, terminal }: HubContext, hub: string, ho
   return updated.code === 0;
 }
 
-/** The hub links the node unless T3 Code on the hub lists it already, such as through T3 Connect, where hedge peers link fails. */
 export async function linkFromHub({ machine, terminal, self }: HubContext, hub: string, host: string, hubTook: boolean) {
   const onTheHub = self === hub;
   const id = await boxEnvironmentId(machine, host);
-  const listed = id !== undefined && (await t3Links(onTheHub ? machine : overSsh(machine, hub))).some((link) => link.environmentId === id);
-  if (listed) return terminal.print(`✓ The hub, ${hub}, reaches ${host} in T3 Code.`);
+  const link = id === undefined ? undefined : (await t3Links(onTheHub ? machine : overSsh(machine, hub))).find((entry) => entry.environmentId === id);
+  if (link?.status === "reachable") return terminal.print(`✓ The hub, ${hub}, reaches ${host} in T3 Code.`);
   const linked = hubTook && (await machine.exec(onHub(hub, ["peers", "link", host]), { timeoutMs: hubLinkLimitMs })).code === 0;
-  const fix = onTheHub ? `run hedge peers link ${host} here now` : `run ssh ${hub} hedge peers link ${host} now`;
-  terminal.print(linked ? `✓ The hub, ${hub}, linked ${host} in T3 Code.` : `· The hub, ${hub}, has not linked ${host} in T3 Code yet. Its daily hedge peers renew links it, or ${fix}.`);
+  const fix = onTheHub ? `run hedge peers link ${host} here now` : `run ssh ${hub} ${quote(`${remotePath} hedge peers link ${host}`)} now`;
+  const state = link ? `lists ${host} in T3 Code as ${link.status ?? "not reachable"}` : `has not linked ${host} in T3 Code yet`;
+  terminal.print(linked ? `✓ The hub, ${hub}, linked ${host} in T3 Code.` : `· The hub, ${hub}, ${state}. Its daily hedge peers renew links it, or ${fix}.`);
 }
 
-/** The environments T3 Code on that machine has linked. */
-export async function t3Links(machine: Machine): Promise<Array<{ environmentId: string; label?: string }>> {
+export type T3Link = { environmentId: string; label?: string; status?: string };
+
+export async function t3Links(machine: Machine): Promise<T3Link[]> {
   const links = parsedList(await machine.exec(["t3", "environment", "list", "--json"]));
-  return links.filter((link): link is { environmentId: string; label?: string } => typeof link?.environmentId === "string");
+  return links.filter((link): link is T3Link => typeof link?.environmentId === "string" && (link.status === undefined || typeof link.status === "string"));
 }
 
-function parsedList(result: ExecResult): Array<{ environmentId?: unknown; label?: string }> {
+function parsedList(result: ExecResult): Array<{ environmentId?: unknown; label?: string; status?: unknown }> {
   if (result.code !== 0) return [];
   try {
     const list: unknown = JSON.parse(result.stdout);
@@ -544,7 +570,11 @@ function parsedList(result: ExecResult): Array<{ environmentId?: unknown; label?
 
 /** The id T3 Code on that host goes by, the key of its load balancing weight and of its link here. */
 export async function boxEnvironmentId(machine: Machine, host: string) {
-  const id = (await overSsh(machine, host).exec(["sh", "-c", environmentIdScript])).stdout.trim();
+  return validEnvironmentId((await overSsh(machine, host).exec(["sh", "-c", environmentIdScript])).stdout);
+}
+
+export function validEnvironmentId(text: string) {
+  const id = text.trim();
   return /^[A-Za-z0-9._:-]{1,128}$/.test(id) ? id : undefined;
 }
 

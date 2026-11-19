@@ -194,7 +194,7 @@ describe("hedge devbox add", () => {
 
     const again = fakeMachine(home);
     expect(await main(["devbox", "add", "coder.hedge-node-2"], { ...options, setup: { machine: again.machine } })).toBe(0);
-    expect(again.calls.map((call) => call.command.join(" ")).filter((line) => line.startsWith("coder tokens create"))).toEqual([]);
+    expect(again.coderTokens()).toEqual([]);
     expect(again.coderSsh).toEqual(["https://coder.example.com"]);
   });
 

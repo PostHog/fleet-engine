@@ -1,4 +1,4 @@
-import type { HumanStep, MachineFile, Owned, Plan } from "../pack/types.ts";
+import type { MachineFile, Plan } from "../pack/types.ts";
 import { saveMachine, validHost } from "../profile/profile.ts";
 import type { Machine } from "../setup/commands.ts";
 import { balanceThreads } from "../setup/devbox-balance.ts";
@@ -8,7 +8,7 @@ import { FlagError, refuseUnusableDevbox } from "../setup/flags.ts";
 import { runSteps } from "../setup/runner.ts";
 import { Stopped, type Terminal } from "../setup/terminal.ts";
 
-export type DevboxCommandContext = { home: string; terminal: Terminal; machine: Machine; machineFile: MachineFile; plan: Plan; nodeHuman?(host: string): Promise<Array<Owned<HumanStep>>> };
+export type DevboxCommandContext = { home: string; terminal: Terminal; machine: Machine; machineFile: MachineFile; plan: Plan };
 
 const usage = "usage: hedge devbox, hedge devbox add <ssh host>, hedge devbox remove <ssh host>, or hedge devbox address";
 
@@ -34,8 +34,7 @@ export async function devboxCommand(args: string[], context: DevboxCommandContex
   const listedHub = await listInProfile(machineFile.profileDir, host);
   const hub = listedHub && listedHub !== host ? listedHub : undefined;
   const hubTook = hub !== undefined && (await tellHub(context, hub, host));
-  const nodeHuman = context.nodeHuman && (() => context.nodeHuman!(host));
-  const steps = () => devboxSteps(host, { terminal, machine: context.machine, nonInteractive: false, plan: context.plan.ai, models: context.plan.models, profile: () => profileForBox(context.machine, machineFile.profileDir), rerun: `hedge devbox add ${host}`, ...(context.plan.engineRoot ? { engineRoot: context.plan.engineRoot } : {}), ...(nodeHuman ? { nodeHuman } : {}) });
+  const steps = () => devboxSteps(host, { terminal, machine: context.machine, nonInteractive: false, plan: context.plan.ai, models: context.plan.models, profile: () => profileForBox(context.machine, machineFile.profileDir), rerun: `hedge devbox add ${host}`, ...(context.plan.engineRoot ? { engineRoot: context.plan.engineRoot } : {}) });
   try {
     await runSteps(steps, {
       terminal,

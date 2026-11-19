@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { MachineFile } from "../pack/types.ts";
 import { loadProfile, saveMachine } from "../profile/profile.ts";
 import type { Machine } from "./commands.ts";
-import { boxEnvironmentId } from "./devbox.ts";
+import { boxEnvironmentId, validEnvironmentId } from "./devbox.ts";
 import type { Terminal } from "./terminal.ts";
 
 export type BalanceContext = { home: string; terminal: Terminal; machine: Machine; machineFile: MachineFile };
@@ -13,7 +13,6 @@ type Weights = Record<string, number>;
 
 const normal = 50;
 const manualOnly = 0;
-const environmentId = /^[A-Za-z0-9._:-]{1,128}$/;
 const manualSteps = "In T3 Code, open Settings → Environments → Load balancing, turn it on, and set this Mac and the hub to Manual only.";
 
 /** T3 Code on the Mac starts new threads on the nodes: the hub, and the Mac itself until someone sets it, go to Manual only. A weight already set stays, so a node someone drains keeps draining. Hedge changes nothing unless it knows the ids of the Mac and the hub, so neither takes threads by T3's default. */
@@ -27,7 +26,7 @@ export async function balanceThreads(context: BalanceContext) {
   const path = settingsPath(context.home);
   if (!existsSync(userdata)) return terminal.print(`· T3 Code has not run on this Mac yet. Once it has, ${manualSteps}`);
   const ids = await environmentIds(context, [...new Set([...devboxes, ...(hub ? [hub] : [])])]);
-  const here = idOf(await readFile(join(userdata, "environment-id"), "utf8").catch(() => ""));
+  const here = validEnvironmentId(await readFile(join(userdata, "environment-id"), "utf8").catch(() => ""));
   if (!here) return terminal.print(`· Hedge cannot read T3 Code's id on this Mac, so it left load balancing alone. ${manualSteps}`);
   const hubId = hub && ids.get(hub);
   if (hub && !hubId) return terminal.print(`· Hedge cannot reach T3 Code on the hub, ${hub}, so it left load balancing alone. ${manualSteps}`);
@@ -73,11 +72,6 @@ export async function forgetWeight(home: string, id: string) {
 }
 
 const settingsPath = (home: string) => join(home, ".t3", "userdata", "client-settings.json");
-
-function idOf(text: string) {
-  const id = text.trim();
-  return environmentId.test(id) ? id : undefined;
-}
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 
