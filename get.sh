@@ -23,8 +23,8 @@ ref_flag=
 ref_given=
 while [ $# -gt 0 ]; do
   case "$1" in
-    --ref) [ $# -ge 2 ] || fail "--ref needs a value."; ref_flag=$2; ref_given=1; shift 2 ;;
-    --profile) [ $# -ge 2 ] || fail "--profile needs a directory."; profile=$2; shift 2 ;;
+    --ref) [ $# -ge 2 ] && [ -n "$2" ] && [ "${2#-}" = "$2" ] || fail "--ref needs a value. Put flags for hedge after --."; ref_flag=$2; ref_given=1; shift 2 ;;
+    --profile) [ $# -ge 2 ] && [ -n "$2" ] && [ "${2#-}" = "$2" ] || fail "--profile needs a directory. Put flags for hedge after --."; profile=$2; shift 2 ;;
     --install-only) install_only=1; shift ;;
     --) shift; break ;;
     *) fail "unknown option $1. Put flags for hedge after --." ;;

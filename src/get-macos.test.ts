@@ -87,6 +87,11 @@ esac`);
     ["an unknown flag", ["--dry-run"], undefined],
     ["an unknown flag after --", ["--", "--force"], undefined],
     ["an unknown flag after -- next to --dry-run", ["--", "--dry-run", "--force"], undefined],
+    ["--dry-run as the value of --ref", ["--ref", "--dry-run"], undefined],
+    ["--force as the value of --ref", ["--ref", "--force"], undefined],
+    ["--dry-run as the value of --profile", ["--profile", "--dry-run"], undefined],
+    ["--force as the value of --profile", ["--profile", "--force"], undefined],
+    ["an empty --ref", ["--ref", ""], undefined],
     ["sudo", [], "echo 0"],
   ] as const) {
     onLinuxHost(`with ${why}, stops before it touches a launchd job`, () => {
