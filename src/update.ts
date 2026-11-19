@@ -2,6 +2,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { repoUrl } from "./pack/sources.ts";
 import type { ProfileFile } from "./pack/types.ts";
+import { engineRepo } from "./setup/defaults.ts";
 
 export type UpdateOptions = {
   home: string;
@@ -46,16 +47,18 @@ async function pullProfile(options: UpdateOptions) {
 }
 
 /** The engine checkout must be clean, and its origin must be the profile's engine repository. */
-const fleetEngine = /\/fleet-engine(?:\.git)?$/;
+const formerEngines = new Set(["posthog/fleet-engine", "silthus/fleet-engine"]);
+const githubRepo = (url: string) => url.match(/^(?:https:\/\/|ssh:\/\/git@|git@)github\.com[:/]([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i)?.slice(1, 3).join("/").toLowerCase();
+const namesThisEngine = (wanted: string, origin: string) => formerEngines.has(githubRepo(wanted) ?? "") && githubRepo(origin) === engineRepo.toLowerCase();
 
 async function ready(options: UpdateOptions) {
   const status = await git(options.engineDir, "status", "--porcelain");
   if (!status.ok) return options.print(`hedge update: ${options.engineDir} is not an engine checkout: ${status.err}`), false;
   if (status.out) return options.print(`hedge update: ${options.engineDir} has local changes. Save them elsewhere and remove them, then run hedge update again.`), false;
   const wanted = repoUrl(options.engine.repo);
-  const origin = await git(options.engineDir, "remote", "get-url", "origin");
+  const origin = await git(options.engineDir, "config", "--get", "remote.origin.url");
   if (origin.ok && origin.out === wanted) return true;
-  if (origin.ok && fleetEngine.test(wanted) && !fleetEngine.test(origin.out)) return true;
+  if (origin.ok && namesThisEngine(wanted, origin.out)) return true;
   const changed = await git(options.engineDir, "remote", origin.ok ? "set-url" : "add", "origin", wanted);
   if (!changed.ok) return options.print(`hedge update: could not point the engine at ${wanted}: ${changed.err}`), false;
   options.print(`The engine now comes from ${options.engine.repo}.`);
