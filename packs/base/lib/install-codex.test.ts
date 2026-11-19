@@ -1,12 +1,16 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { main } from "../../../src/cli.ts";
 import { tempDirs } from "../../../src/testing/git.ts";
+import { updateAgents } from "../commands/agent-update.ts";
 
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
 const onLinux = test.skipIf(process.platform !== "linux");
 const script = join(import.meta.dir, "install-codex.sh");
+const engineRoot = join(import.meta.dir, "../../..");
+const launcher = join(engineRoot, "hedge");
 const tag = "rust-v9.9.9";
 const realMv = Bun.which("mv") ?? "/bin/mv";
 const realReadlink = Bun.which("readlink") ?? "/bin/readlink";
@@ -266,25 +270,70 @@ describe("install-codex.sh", () => {
     expect(existsSync(join(codexHome(box.home), "releases", tag))).toBe(false);
   });
 
-  onLinux("takes over the Codex that Fleet installed, keeps Fleet's copy, and apply's check fails until it does", async () => {
-    const box = await machine("x86_64", ["x86_64-unknown-linux-musl"]);
-    const fleets = join(box.home, ".local/share/fleet/codex");
+  function fleetCodex(home: string) {
+    const fleets = join(home, ".local/share/fleet/codex");
     mkdirSync(join(fleets, "releases/rust-v0.1.0/bin"), { recursive: true });
     writeFileSync(join(fleets, "releases/rust-v0.1.0/bin/codex"), "#!/bin/sh\necho codex-cli 0.1.0\n");
     chmodSync(join(fleets, "releases/rust-v0.1.0/bin/codex"), 0o755);
     symlinkSync("releases/rust-v0.1.0", join(fleets, "current"));
-    mkdirSync(join(box.home, ".local/bin"), { recursive: true });
-    symlinkSync(join(fleets, "current/bin/codex"), join(box.home, ".local/bin/codex"));
-    const step = (JSON.parse(readFileSync(join(import.meta.dir, "../pack.json"), "utf8")).steps as Array<{ id: string; check: string[] }>).find((item) => item.id === "codex-cli")!;
-    const check = () => Bun.spawnSync(step.check, { env: { HOME: box.home, PATH: `${box.home}/.local/bin:/usr/bin:/bin` } }).exitCode;
-    const before = check();
+    mkdirSync(join(home, ".local/bin"), { recursive: true });
+    symlinkSync(join(fleets, "current/bin/codex"), join(home, ".local/bin/codex"));
+    return fleets;
+  }
 
-    const result = await install(box);
+  async function codexOnPath(home: string, path: string) {
+    const child = Bun.spawn(["codex", "--version"], { env: { HOME: home, PATH: path }, stdout: "pipe", stderr: "pipe" });
+    return (await new Response(child.stdout).text()).trim();
+  }
 
-    expect([before, result.code, check()]).toEqual([1, 0, 0]);
+  onLinux("hedge apply moves the Codex that Fleet installed to Hedge's release package and keeps Fleet's copy", async () => {
+    const box = await machine("x86_64", ["x86_64-unknown-linux-musl"]);
+    rmSync(join(box.bin, "bun"));
+    symlinkSync(process.execPath, join(box.bin, "bun"));
+    const fleets = fleetCodex(box.home);
+    const path = `${box.bin}:${box.home}/.local/bin:/usr/bin:/bin`;
+    const profile = temp.make("profile-");
+    writeFileSync(join(profile, "hedge.json"), JSON.stringify({ schema: 1, engine: { repo: "PostHog/hedge", ref: "main", channel: "track" }, sources: [], packs: [], plan: "codex", settings: {}, workflows: {} }));
+    const ran: string[] = [];
+    const lines: string[] = [];
+    const hedge = (args: string[]) => main(args, { home: box.home, engineRoot, platform: "linux", env: {}, print: (line) => lines.push(line), run: codexStepOnly });
+    const codexStepOnly = async (command: string[]) => {
+      if (command[1] === launcher && command[2] === "install-codex") return ran.push("install-codex"), await hedge(command.slice(2));
+      if (command[0] !== "sh" || !command.at(-1)?.includes("codex --version")) return 0;
+      const code = await Bun.spawn(command, { env: { HOME: box.home, PATH: path }, stdout: "ignore", stderr: "ignore" }).exited;
+      return ran.push(`check ${code}`), code;
+    };
+    const before = await codexOnPath(box.home, path);
+    const saved = process.env.PATH;
+    process.env.PATH = path;
+    let applied: number;
+    try {
+      applied = await hedge(["apply", "--profile", profile]);
+    } finally {
+      process.env.PATH = saved;
+    }
+
+    expect(applied).toBe(0);
+    expect(ran).toEqual(["check 1", "install-codex", "check 0"]);
+    expect([before, await codexOnPath(box.home, path)]).toEqual(["codex-cli 0.1.0", "codex-cli 9.9.9 x86_64-unknown-linux-musl"]);
     expect(readlinkSync(join(box.home, ".local/bin/codex"))).toBe(join(codexHome(box.home), "current/bin/codex"));
-    expect(await version(box.home)).toBe("codex-cli 9.9.9 x86_64-unknown-linux-musl");
     expect(readFileSync(join(fleets, "releases/rust-v0.1.0/bin/codex"), "utf8")).toContain("0.1.0");
+  });
+
+  onLinux("the nightly update moves the Codex that Fleet installed to Hedge's release package", async () => {
+    const box = await machine("x86_64", ["x86_64-unknown-linux-musl"]);
+    fleetCodex(box.home);
+    const path = `${box.bin}:${box.home}/.local/bin:/usr/bin:/bin`;
+    const run = async (command: string[]) => {
+      const child = Bun.spawn(command, { env: { HOME: box.home, PATH: path }, stdout: "pipe", stderr: "pipe" });
+      return { code: await child.exited, out: await new Response(child.stdout).text() };
+    };
+
+    const result = await updateAgents(run);
+
+    expect(result).toEqual({ ok: true, lines: ["Claude Code: not installed by Hedge, skipped.", "Codex: up to date.", "Codex from Bun: not installed by Hedge, skipped."] });
+    expect(await codexOnPath(box.home, path)).toBe("codex-cli 9.9.9 x86_64-unknown-linux-musl");
+    expect(readlinkSync(join(box.home, ".local/bin/codex"))).toBe(join(codexHome(box.home), "current/bin/codex"));
   });
 
   onLinux("keeps a codex in ~/.local/bin that Hedge did not install", async () => {
