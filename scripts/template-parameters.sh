@@ -36,12 +36,13 @@ printf '%s' "$parameters" | json '
     my @facts = ($type);
     push @facts, "mutable" if $parameter->{mutable};
     push @facts, "ephemeral" if $parameter->{ephemeral};
-    push @facts, "secret" if $words =~ $secret;
+    my $hidden = $words =~ $secret || ($parameter->{styling} && $parameter->{styling}{mask_input}) || ($parameter->{form_type} // "") eq "password";
+    push @facts, "secret" if $hidden;
     my $default = $parameter->{default_value} // "";
     if ($parameter->{required} || $default eq "") { push @facts, "no default" }
-    elsif (@options || $type eq "number" || $type eq "bool") { $default =~ s/\n/\\n/g; push @facts, "default $default" }
+    elsif (!$hidden && (@options || $type eq "number" || $type eq "bool")) { $default =~ s/\n/\\n/g; push @facts, "default $default" }
     else { push @facts, "default hidden" }
-    push @facts, "options " . join(" | ", @options) if @options;
+    push @facts, "options " . join(" | ", @options) if @options && !$hidden;
     my $shown = $parameter->{display_name} && $parameter->{display_name} ne $parameter->{name} ? " ($parameter->{display_name})" : "";
     print "$parameter->{name}$shown: ", join(", ", @facts), "\n";
   }

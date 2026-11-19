@@ -235,11 +235,15 @@ describe("the agent setup guide", () => {
     expect([printed.code, printed.output]).toEqual([1, "x instance_type is not the value you passed. In the Coder web app, set it under Settings, Parameters, and submit.\nok hedge-hub runs and stays on\n"]);
   });
 
-  test("reads the parameters of the template's active version with the engine's script, prints no free-text default, also of a secret with no label, and keeps the session token off every command line", async () => {
+  test("reads the parameters of the template's active version with the engine's script, prints no free-text default, no default or option of a masked, password or secret-named field, and keeps the session token off every command line", async () => {
     const fixtures = temp.make("coder-");
     writeFileSync(join(fixtures, "templates.json"), JSON.stringify([{ Template: { name: "other", active_version_id: "v-other" } }, { Template: { name: "dev", active_version_id: "v-active" } }]));
     const credential = ["ghp", "fixture", "default", "credential"].join("-");
     const key = ["fixture", "ssh", "key", "default"].join("-");
+    const masked = ["masked", "fixture", "default"].join("-");
+    const maskedOption = ["masked", "fixture", "option"].join("-");
+    const password = String(Date.now() % 9000 + 1000);
+    const namedOption = ["named", "fixture", "option"].join("-");
     writeFileSync(join(fixtures, "parameters.json"), JSON.stringify([
       { name: "disk_size", display_name: "Disk size", type: "number", mutable: false, default_value: "100", options: [] },
       { name: "region", type: "string", default_value: "us-east-1", options: [{ value: "us-east-1" }, { value: "eu-central-1" }] },
@@ -247,6 +251,9 @@ describe("the agent setup guide", () => {
       { name: "jetbrains", type: "bool", default_value: "false" },
       { name: "github_pat", display_name: "GitHub", description: "A personal access token", type: "string", mutable: true, default_value: credential },
       { name: "ssh_key", type: "string", default_value: key },
+      { name: "agent_config", description: "Settings", type: "string", default_value: masked, styling: { mask_input: true }, options: [{ value: masked }, { value: maskedOption }] },
+      { name: "pin", type: "number", form_type: "password", default_value: password },
+      { name: "api_key", type: "string", default_value: namedOption, options: [{ value: namedOption }] },
       { name: "scratch", type: "string", ephemeral: true, default_value: "x" },
     ]));
     const bin = fakeTools({
@@ -262,7 +269,8 @@ describe("the agent setup guide", () => {
     const fromEnvironment = await runShell(command, { ...env, CODER_SESSION_TOKEN: "environment-session", CODER_ACCEPTS: "environment-session" });
 
     expect([stored.code, stored.stderr]).toEqual([0, ""]);
-    expect(stored.stdout).toBe(["disk_size (Disk size): number, default 100", "region: string, default us-east-1, options us-east-1 | eu-central-1", "dotfiles_uri: string, mutable, no default", "jetbrains: bool, default false", "github_pat (GitHub): string, mutable, secret, default hidden", "ssh_key: string, default hidden", "scratch: string, ephemeral, default hidden", ""].join("\n"));
+    expect(stored.stdout).toBe(["disk_size (Disk size): number, default 100", "region: string, default us-east-1, options us-east-1 | eu-central-1", "dotfiles_uri: string, mutable, no default", "jetbrains: bool, default false", "github_pat (GitHub): string, mutable, secret, default hidden", "ssh_key: string, default hidden", "agent_config: string, secret, default hidden", "pin: number, secret, default hidden", "api_key: string, secret, default hidden", "scratch: string, ephemeral, default hidden", ""].join("\n"));
+    for (const value of [credential, key, masked, maskedOption, password, namedOption]) expect(stored.stdout).not.toContain(value);
     expect([fromEnvironment.code, fromEnvironment.stdout]).toEqual([0, stored.stdout]);
     expect(readFileSync(join(fixtures, "curl-args"), "utf8")).not.toContain("session");
     expect(blocksIn(guide()).join("\n")).not.toContain("coder templates pull");
