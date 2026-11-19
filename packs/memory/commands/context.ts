@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
-import { cannotTell, runCommand } from "../../base/lib/command.ts";
+import { runCommand } from "../../base/lib/command.ts";
 import { modelFor } from "../../base/lib/models.ts";
 import { redactSecrets } from "../../base/hooks/secret-guard.ts";
 import { capture, captureAgent, type Agent } from "../lib/library/capture.ts";
@@ -11,7 +11,7 @@ import { runGit, type Git } from "../lib/library/git.ts";
 import { catalogName, parseDoc, readLibrary, related, renderCatalog, search, topicReport } from "../lib/library/library.ts";
 import { routerAgent, share, t3ShareDeps, type ShareDeps, type Shared, type SharedNote } from "../lib/library/share.ts";
 import { syncLibrary } from "../lib/library/sync.ts";
-import { upstreamCommand } from "../lib/library/upstream.ts";
+import { undoUpstream, upstreamCommand } from "../lib/library/upstream.ts";
 
 type Env = Record<string, string | undefined>;
 export type ContextDeps = { env: Env; home: string; print: (line: string) => void; git: Git; agent: () => Agent; sources: Sources; today: () => string; share: (owner: string) => ShareDeps };
@@ -30,6 +30,8 @@ export const usage = `usage:
 
 export async function contextCommand(args: string[], deps: ContextDeps): Promise<number> {
   const [mode, ...rest] = args;
+  const undone = mode === "upstream" && rest.length === 1 && (rest[0] === "remove" || deps.env.HEDGE_UNDO) ? undoUpstream(rest[0], deps.home, deps.print) : undefined;
+  if (undone !== undefined) return undone;
   const library = librarySettings(deps.env, deps.home);
   writePointer(deps.home, library);
   const root = library.path;
@@ -96,12 +98,9 @@ function printShared(shared: Shared, dryRun: boolean, print: (line: string) => v
   return shared.failed.length ? 1 : 0;
 }
 
-const probes = (args: string[]) => args.length === 2 && args[0] === "upstream" && args[1] === "doctor";
-
 if (import.meta.main) {
-  const args = process.argv.slice(2);
   await runCommand(
-    () => contextCommand(args, {
+    () => contextCommand(process.argv.slice(2), {
       env: Bun.env,
       home: Bun.env.HOME ?? homedir(),
       print: (line) => console.log(line),
@@ -112,6 +111,5 @@ if (import.meta.main) {
       share: (owner) => t3ShareDeps({ owner, host: hostname(), route: routerAgent(modelFor("survey")), skip: Bun.env.T3CODE_THREAD_ID ? [Bun.env.T3CODE_THREAD_ID] : [] }),
     }),
     "hedge context",
-    probes(args) ? cannotTell : 1,
   );
 }
