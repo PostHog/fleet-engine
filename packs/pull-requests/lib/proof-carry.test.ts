@@ -132,9 +132,9 @@ test("the gate fetches a PR base that the checkout lacks, and carries nothing wh
   const github = join(repo.directory, "github.git");
   repo.git("init", "-q", "--bare", github);
   repo.git("remote", "add", "github", github);
-  const moved = repo.git("commit-tree", repo.git("rev-parse", "main^{tree}").stdout, "-p", "main", "-m", "The base moves on GitHub").stdout;
-  repo.git("push", "-q", github, `${moved}:refs/heads/main`);
-  repo.git("gc", "-q", "--prune=now");
+  repo.git("push", "-q", github, "main:refs/heads/main");
+  const moved = repo.git("-C", github, "commit-tree", "main^{tree}", "-p", "main", "-m", "The base moves on GitHub").stdout;
+  repo.git("-C", github, "update-ref", "refs/heads/main", moved);
   expect(repo.run(["git", "cat-file", "-e", `${moved}^{commit}`]).code).not.toBe(0);
   const head = repo.commit("Note nothing", {});
   repo.github.base = moved;
