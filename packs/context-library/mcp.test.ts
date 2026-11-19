@@ -79,7 +79,7 @@ test("on the hub, fleet context declares the library's search to the MCP gateway
   mkdirSync(home);
   const printed: string[] = [];
   const settings = { "context-library.repo": `file://${remote}`, "context-library.path": "~/notes", "context-library.url": "https://notes.example.com/blob/main/", "context-library.owner": "" };
-  const fleet = (args: string[]) => contextCommand(args, { env: { FLEET_SETTINGS: JSON.stringify(settings) }, home, print: (line) => printed.push(line), git: runGit, agent: () => async () => ({ code: 1, stdout: "", stderr: "" }), today: () => "2026-11-12", share: () => { throw new Error("unused"); } });
+  const fleet = (args: string[]) => contextCommand(args, { env: { FLEET_SETTINGS: JSON.stringify(settings) }, home, print: (line) => printed.push(line), git: runGit, agent: () => async () => { throw new Error("unused"); }, sources: { page: async () => "", call: async () => "" }, today: () => "2026-11-12", share: () => { throw new Error("unused"); } });
   expect(await fleet(["sync"])).toBe(0);
   expect(await fleet(["upstream", "doctor"])).toBe(1);
   expect(await fleet(["upstream", "install"])).toBe(0);

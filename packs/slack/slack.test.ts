@@ -324,7 +324,8 @@ describe("saving to the context library", () => {
     await end();
     expect(captures(ran)).toEqual([{
       source: "https://example.slack.com/archives/C1/p200.1",
-      material: "Sam (200.1): Sprint planning notes in the canvas\nNora (200.2): load test first\n\nFiles in the thread (read each canvas with slack_read_canvas and its id):\n- F0CANVAS canvas Sprint plan",
+      material: "Sam (200.1): Sprint planning notes in the canvas\nNora (200.2): load test first\n\nFiles in the thread:\n- F0CANVAS canvas Sprint plan",
+      canvases: ["F0CANVAS"],
       startedAt: "1970-01-01T00:03:20.100Z",
     }]);
     expect(sends(ran)).toEqual([{ note: { title: captured.title, url: captured.url, text: captured.text }, sentBefore: [] }]);
