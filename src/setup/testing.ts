@@ -101,7 +101,7 @@ export const onBox = (command: string[]) => (command[0] === "ssh" ? command.at(-
  * Each box's T3 environment id is env-<host>, except on the hosts withoutT3, where T3 never ran.
  * T3 here lists hereLinks as its linked environments, and unlink forgets one, or fails with unlinkFails. ssh never reaches the hosts named unreachable.
  */
-export function fakeMachine(home: string, polls: Partial<Record<SignInName, number>> = {}, options: { org?: boolean; createFails?: string; createFailsAfterMaking?: string; lookupFails?: string; publicRepos?: string[]; scopes?: string; failRun?: boolean; exits?: Partial<Record<SignInName, number>>; connectHere?: boolean; boxFiles?: Record<string, string>; hubDown?: boolean; hubUpdateFails?: string; boxCoderAt?: string; boxCoderSameUser?: boolean; claude?: Partial<Record<"claude" | "box:claude", ClaudeSignedIn>>; startedAt?: number; cliPrintsTunnel?: boolean; serverWithoutLinkState?: Array<"box" | "here">; runtimeOrigin?: string; runtimePid?: unknown; serverGone?: boolean; boxConnect?: { authenticated: unknown; linked: unknown }; t3Home?: string; devServerUrl?: string; tunnelStartsAfter?: number; hereTunnelStartsAfter?: number; withoutT3?: string[]; hereLinks?: HereLink[]; unreachable?: string[]; unlinkFails?: string; hereStatusFailures?: number } = {}) {
+export function fakeMachine(home: string, polls: Partial<Record<SignInName, number>> = {}, options: { org?: boolean; createFails?: string; createFailsAfterMaking?: string; lookupFails?: string; publicRepos?: string[]; scopes?: string; failRun?: boolean; exits?: Partial<Record<SignInName, number>>; connectHere?: boolean; boxFiles?: Record<string, string>; hubDown?: boolean; hubUpdateFails?: string; boxCoderAt?: string; boxCoderSameUser?: boolean; claude?: Partial<Record<"claude" | "box:claude", ClaudeSignedIn>>; startedAt?: number; cliPrintsTunnel?: boolean; serverWithoutLinkState?: Array<"box" | "here">; runtimeOrigin?: string; runtimePid?: unknown; serverGone?: boolean; boxConnect?: { authenticated: unknown; linked: unknown }; hereConnect?: { authenticated?: unknown; linked?: unknown }; t3Home?: string; devServerUrl?: string; tunnelStartsAfter?: number; hereTunnelStartsAfter?: number; withoutT3?: string[]; hereLinks?: HereLink[]; unreachable?: string[]; unlinkFails?: string; hereStatusFailures?: number } = {}) {
   const left: Record<SignInName, number> = { github: 0, claude: 0, chatgpt: 0, coder: 0, "box:github": 0, "box:claude": 0, "box:chatgpt": 0, "box:t3": 0, "box:coder": 0, ...polls };
   const started = new Set<SignInName>();
   const calls: Array<{ command: string[]; cwd?: string; timeoutMs?: number; input?: string }> = [];
@@ -134,6 +134,9 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
   const lookups = { box: 0, here: 0 };
   const startsAfter = { box: options.tunnelStartsAfter ?? 0, here: options.hereTunnelStartsAfter ?? 0 };
   const peerLinks: Record<"box" | "here", string[]> = { box: [], here: [] };
+  const pending: Record<"box" | "here", number> = { box: 0, here: 0 };
+  const pairingCodes = { box: "BOXCODE", here: "HERECODE" };
+  const tunnels = { box: "box-1.relay.example", here: "here.relay.example" };
   const runtimeRecord = async (line: string, sideHome: string): Promise<ExecResult> => {
     const record = (at: string, origin: string) => {
       const file = `${at}/userdata/server-runtime.json`;
@@ -152,13 +155,19 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
   };
   const t3 = (line: string, token: string, input: string | undefined, side: { name: "box" | "here"; home: string; linked: boolean; tunnel: string; sessions: T3Session[] }) => {
     const { sessions } = side;
-    if (line.startsWith("t3 pair ")) return result(true, `Pairing with test.\n\nPairing URL: http://127.0.0.1:3773/pair#token=x\nToken: ${token}\n`);
-    if (line.startsWith("t3 environment link ")) return (peerLinks[side.name] = [...new Set([...peerLinks[side.name], line.split(" ")[3]!])]), result(true, "linked");
+    if (line.startsWith("t3 pair ")) return pending[side.name]++, result(true, `Pairing with test.\n\nPairing URL: http://127.0.0.1:3773/pair#token=x\nToken: ${token}\n`);
+    if (line.startsWith("t3 environment link ")) {
+      const other = side.name === "box" ? "here" : "box";
+      const [, , , address, , code] = line.split(" ");
+      if (pending[other] === 0 || code !== pairingCodes[other] || address !== `https://${tunnels[other]}`) return result(false, "t3: the pairing code or the address does not match a pairing\n");
+      pending[other]--;
+      return (peerLinks[side.name] = [...new Set([...peerLinks[side.name], address])]), result(true, "linked");
+    }
     if (side.name === "here" && line === "t3 environment list --json") return result(true, JSON.stringify(hereLinks.map((link) => ({ ...link, urls: [], access: "full-access", status: "reachable" }))));
     const forgotten = side.name === "here" ? hereLinks.findIndex((link) => line === `t3 environment unlink ${link.environmentId}`) : -1;
     if (forgotten >= 0 && options.unlinkFails) return result(false, `${options.unlinkFails}\n`);
     if (forgotten >= 0) return hereLinks.splice(forgotten, 1), result(true, "Unlinked.");
-    const status = side.name === "box" && options.boxConnect ? options.boxConnect : { authenticated: side.linked, linked: side.linked };
+    const status = side.name === "box" && options.boxConnect ? options.boxConnect : side.name === "here" && options.hereConnect ? options.hereConnect : { authenticated: side.linked, linked: side.linked };
     if (line === "t3 connect status --json" && side.name === "here" && (options.hereStatusFailures ?? 0) > 0) return options.hereStatusFailures!--, result(false, "t3: could not reach the T3 server\n");
     if (line === "t3 connect status --json") return result(true, JSON.stringify({ desired: side.linked, ...status, revoked: false, relayUrl: "https://relay.example", ...(options.cliPrintsTunnel && side.linked ? { tunnelHostname: side.tunnel } : {}) }));
     if (line.startsWith("sh -c ") && line.includes("server-runtime.json")) return runtimeRecord(line, side.home);
@@ -232,7 +241,7 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
     if (line.includes("/.config/hedge/machine.json")) return forReal(line, host, input);
     if (line.includes("/userdata/logs/boot-service.log")) return forReal(line, host, input);
     if (line.startsWith("sh -c ") && line.includes("/userdata/environment-id")) return options.withoutT3?.includes(host) ? result(false, "cat: environment-id: No such file or directory") : result(true, `env-${host}\n`);
-    return t3(line, "BOXCODE", input, { name: "box", home: boxHome(home, host), linked: passes("box:t3"), tunnel: "box-1.relay.example", sessions: boxSessions }) ?? result(false, `unexpected on the box: ${line}`);
+    return t3(line, pairingCodes.box, input, { name: "box", home: boxHome(home, host), linked: passes("box:t3"), tunnel: tunnels.box, sessions: boxSessions }) ?? result(false, `unexpected on the box: ${line}`);
   };
   const machine: Machine = {
     async exec(command, run = {}) {
@@ -270,7 +279,7 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
         return owner === options.createFailsAfterMaking ? result(false, "HTTP 502: Bad Gateway") : made;
       }
       if (command[0] === "git") return realGit(home, command.slice(1), run.cwd);
-      return t3(command.map(quote).join(" "), "HERECODE", run.input, { name: "here", home, linked: Boolean(options.connectHere), tunnel: "here.relay.example", sessions: hereSessions }) ?? result(false, `unexpected ${line}`);
+      return t3(command.map(quote).join(" "), pairingCodes.here, run.input, { name: "here", home, linked: Boolean(options.connectHere), tunnel: tunnels.here, sessions: hereSessions }) ?? result(false, `unexpected ${line}`);
     },
     start(command) {
       starts.push(command);

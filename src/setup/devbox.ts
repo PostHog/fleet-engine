@@ -293,7 +293,8 @@ const tunnelStartPolls = 15;
 export async function addressHere(machine: Machine, rerun: string): Promise<{ on: boolean; address?: string }> {
   const state = await connectStatus(machine);
   if (!state) throw new Error(`T3 Code here did not answer t3 connect status. Check that T3 Code runs here, then run ${rerun} again.`);
-  if (!isLinked(state)) return { on: false };
+  if (state.linked === false) return { on: false };
+  if (!isLinked(state)) throw new Error(`T3 Connect here is not fully set up: t3 connect status says authenticated ${String(state.authenticated)} and linked ${String(state.linked)}. Run t3 up --connect here, then run ${rerun} again.`);
   const address = await connectAddressWithin(machine);
   return address ? { on: true, address } : { on: true };
 }
