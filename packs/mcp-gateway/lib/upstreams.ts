@@ -100,7 +100,10 @@ export async function registerUpstream(hub: Hub, upstream: Upstream) {
     await call(`${path}/toggle`, "POST", { enabled: false });
     await dropOAuth();
     await call(path, "PUT", { config: { ...fresh, ...want, enabled: false } });
-    await dropOAuth();
+    await dropOAuth().catch(async (error) => {
+      await call(path, "PUT", { config: { ...fresh, ...want, url: stored?.url, enabled: false } });
+      throw error;
+    });
   } else if (offWithoutSignIn) await dropOAuth();
   const config = dropsSignIn || offWithoutSignIn ? await current(call, upstream.name) : fresh;
   const newClient = upstream.kind === "oauth" && upstream.loopback && !loopbackClientOf(config);
