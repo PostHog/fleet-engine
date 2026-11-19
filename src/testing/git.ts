@@ -1,6 +1,8 @@
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, relative } from "node:path";
+import { repoUrl } from "../pack/sources.ts";
+import type { SourceRef } from "../pack/types.ts";
 
 export const gitEnv = {
   ...process.env,
@@ -20,6 +22,13 @@ export function git(dir: string, ...args: string[]) {
   const result = Bun.spawnSync(["git", ...args], { cwd: dir, env: gitEnv });
   if (result.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${result.stderr.toString()}`);
   return result.stdout.toString().trim();
+}
+
+export async function cachedCheckout(dir: string, ref: SourceRef) {
+  mkdirSync(dir, { recursive: true });
+  await spawnGit(dir, "init", "-q");
+  await spawnGit(dir, "commit", "-q", "--allow-empty", "-m", "cached");
+  writeFileSync(join(dir, ".git", "hedge-source.json"), JSON.stringify({ repo: repoUrl(ref.repo), ref: ref.ref, commit: await spawnGit(dir, "rev-parse", "HEAD") }) + "\n");
 }
 
 export async function spawnGit(dir: string, ...args: string[]) {

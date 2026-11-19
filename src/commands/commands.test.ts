@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { main } from "../cli.ts";
 import type { AvailableSource, ProfileFile } from "../pack/types.ts";
 import { defaultSources } from "../setup/defaults.ts";
-import { isolateGit, spawnGit, template, tempDirs } from "../testing/git.ts";
+import { cachedCheckout, isolateGit, spawnGit, template, tempDirs } from "../testing/git.ts";
 import { engineSource, resolveEngine } from "../testing/packs.ts";
 import { settingsCommand } from "./settings.ts";
 
@@ -52,7 +52,7 @@ async function machineWithProfile(settings: Record<string, unknown> = {}) {
 /** Puts a fetched source with a pack whose first workflow yields to its second in this machine's cache, and turns that pack on in the profile. */
 async function withYieldingPack(home: string) {
   const source = join(home, ".local/share/hedge/sources/team");
-  mkdirSync(join(source, ".git"), { recursive: true });
+  await cachedCheckout(source, { name: "team", repo: "team/packs", ref: "main" });
   mkdirSync(join(source, "packs/team"), { recursive: true });
   const flow = (id: string, yields: string[] = []) => ({ id, name: id, sentence: `${id}.`, default: true, yields });
   writeFileSync(join(source, "packs/team/pack.json"), JSON.stringify({ schema: 1, name: "team", summary: "Team rules.", workflows: [flow("direct", ["routed"]), flow("routed")] }));

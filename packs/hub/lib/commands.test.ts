@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tempDirs } from "../../../src/testing/git.ts";
+import { cachedCheckout, tempDirs } from "../../../src/testing/git.ts";
 import { hedgeMachine, runHedge } from "../../orchestration/lib/testing.ts";
 
 const temp = tempDirs();
@@ -14,10 +14,11 @@ async function hubProfile(workflows: Record<string, boolean> = { boxes: true }, 
   const profile = await hedgeMachine(home, settings);
   const hedge = JSON.parse(readFileSync(join(profile, "hedge.json"), "utf8"));
   const team = join(home, ".local/share/hedge/sources/team");
-  mkdirSync(join(team, ".git"), { recursive: true });
+  const ref = { name: "team", repo: "example/team-packs", ref: "main" };
+  await cachedCheckout(team, ref);
   mkdirSync(join(team, "packs/posthog"), { recursive: true });
   writeFileSync(join(team, "packs/posthog/pack.json"), JSON.stringify({ schema: 1, name: "posthog", summary: "A team pack that brings Coder." }));
-  const sources = [...hedge.sources, { name: "team", repo: "example/team-packs", ref: "main" }];
+  const sources = [...hedge.sources, ref];
   writeFileSync(join(profile, "hedge.json"), JSON.stringify({ ...hedge, sources, packs, workflows, devboxes: ["devbox-2"] }));
   return home;
 }

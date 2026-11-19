@@ -217,6 +217,9 @@ async function advanceLocked(ref: SourceRef, dir: string, from: string, loadLimi
 export async function cachedSource(ref: SourceRef, cacheRoot: string): Promise<FetchedSource> {
   const dir = join(cacheRoot, ref.name);
   if (!existsSync(join(dir, ".git"))) return { ref, error: "never fetched; run hedge apply" };
+  const good = await lastGood(dir);
+  const head = (await git(dir, "rev-parse", "HEAD")).stdout;
+  if (good?.repo !== repoUrl(ref.repo) || good.ref !== ref.ref || good.commit !== head) return { ref, error: `the cached checkout is not ${ref.ref} of ${ref.repo}; run hedge apply` };
   return { ref, dir, packs: await loadPacks(dir) };
 }
 
