@@ -367,7 +367,7 @@ describe("hedge retire-fleet", () => {
     expect(linux.systemd.units.has("hedge-watch.service")).toBe(false);
   });
 
-  test("from a home path with a space, stops a live nightly job and the agent-update that its child shell runs, as the old launcher started them", async () => {
+  test.skipIf(process.platform !== "linux")("from a home path with a space, stops a live nightly job and the agent-update that its child shell runs, as the old launcher started them", async () => {
     const home = oldInstall(temp.make("home with space-"));
     const engine = join(home, ".local/share/fleet/engine");
     const bin = temp.make("bin-");
