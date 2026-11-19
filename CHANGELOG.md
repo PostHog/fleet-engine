@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### One rule carries a review
+
+- `hedge proof gate` carries a review to HEAD only when nothing changed past
+  a reviewed head and the base: it merges the reviewed head with the base that
+  HEAD contains and diffs that tree against HEAD. A clean merge of the base,
+  or a change and its revert, carries. Any other change, a test-only or
+  docs-only one too, takes a final read, and the gate prints the command. The
+  quiet-commit walk, its test-file and revert checks, and their carry lines
+  are gone.
+- A later round or final read reads only that net delta, so a merge of the
+  base adds nothing to read.
+- A review that finds no blocker or major spends no review budget. After the
+  arbiter stops the loop, one final read of the net delta may still run, such
+  as to confirm a revert. That read starts no other review: a blocker or major
+  it finds goes to the user.
+
 ### Fleet is now Hedge
 
 - The product and its command are now Hedge and `hedge`. `get.sh` points
