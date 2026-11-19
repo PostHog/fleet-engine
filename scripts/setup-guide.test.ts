@@ -10,6 +10,7 @@ import { devboxesOf } from "../packs/hub/lib/machine.ts";
 import { cliFixtures } from "../src/testing/cli.ts";
 import { fakeMachine, hedgeSetup, savedAnswers, scripted } from "../src/setup/testing.ts";
 import { isolateGit, tempDirs } from "../src/testing/git.ts";
+import { fakeCoder } from "../src/testing/coder.ts";
 import { needsHubPacks } from "../src/setup/defaults.ts";
 import { promptLabels, startPrompt } from "../page/model.ts";
 import { pageData } from "./build-page.ts";
@@ -186,7 +187,9 @@ describe("the agent setup guide", () => {
     expect(docs[0]).toContain("`coder restart <name> --parameter <parameter>=<value> --yes`");
     expect(docs[0]).toContain("Run it here on the Mac, never on the hub over SSH, because the restart stops the hub: `coder restart <name> --parameter <dotfiles parameter>=https://github.com/<repo> --yes`");
     expect(docs[1]).toContain("`coder restart <workspace> --parameter <dotfiles parameter>=https://github.com/<repo> --yes`");
-    expect(readFileSync(join(root, "scripts/check-workspace.sh"), "utf8")).toContain('restart="From this Mac, run: coder restart $name --parameter"');
+    const printed = fakeCoder(temp, { parameters: { instance_type: "m7g.xlarge" }, mutable: { instance_type: true } }).check(["instance_type=m7g.4xlarge"]);
+    expect(printed.code).toBe(1);
+    expect(printed.output).toContain("x instance_type is not the value you passed. From this Mac, run: coder restart hedge-hub --parameter instance_type=<value> --yes\n");
   });
 
   test("reads the template's parameters when coder templates pull fails", () => {
@@ -227,16 +230,20 @@ describe("the agent setup guide", () => {
 
   test("pairs a box that T3 Code does not list through its T3 Connect address and a token made there, never the loopback pairing URL", () => {
     const pairing = step(10);
-    expect(codeIn(pairing).slice(0, 2)).toEqual([`ssh coder.<name> 'export PATH="${guidePath}"; t3 connect status --json'\n`, `ssh coder.<name> 'export PATH="${guidePath}"; t3 pair --ttl 10m --label t3-app'\n`]);
+    const code = codeIn(pairing);
+    const status = code.indexOf(`ssh coder.<name> 'export PATH="${guidePath}"; t3 connect status --json'\n`);
+    const token = code.indexOf(`ssh coder.<name> 'export PATH="${guidePath}"; t3 pair --ttl 10m --label t3-app'\n`);
+    expect([status >= 0, status < token]).toEqual([true, true]);
     expect(words(pairing)).toContain("The address is `https://` and its `tunnelHostname`.");
     expect(words(pairing)).toContain("Never give the `Pairing URL` it prints");
   });
 
-  test("leaves a linked box without a tunnelHostname to hedge devbox add, and makes a pairing token only once there is an address", () => {
+  test("stops at a linked box without a tunnelHostname, updates T3 Code there, and makes a pairing token only once there is an address", () => {
     const pairing = words(step(10));
     expect(pairing).toContain("When `authenticated` or `linked` is not `true`, T3 Connect does not run there yet: start it on that box as in item 5 of step 7");
-    expect(pairing).toContain("When it is linked but has no `tunnelHostname`, its tunnel can still be starting, or its T3 CLI does not print the field yet. Do not start T3 Connect again, and make no token yet: for a node, run item 3 of step 9 again.");
-    expect(pairing.indexOf("no `tunnelHostname`")).toBeGreaterThan(-1);
+    expect(pairing).toContain("When it is linked but has no `tunnelHostname`, the T3 Code on that box is too old to report its address. Stop, and make no token. Update T3 Code there, then read the status again:");
+    expect(codeIn(step(10))).toContain(`ssh coder.<name> 'export PATH="${guidePath}"; hedge agent-update'\n`);
+    expect(pairing).not.toContain("item 3 of step 9");
     expect(pairing.indexOf("Make a pairing token only once you have the address")).toBeGreaterThan(pairing.indexOf("no `tunnelHostname`"));
   });
 

@@ -288,9 +288,11 @@ you never print it back.
 6. **Check them.** When a create ends, check that the workspace runs, that
    no stop time ends it, and that the parameters this guide sets have the
    values you passed: the disk size, the region, the instance type, and the
-   dotfiles repo. Never pass a private value to the check; Hedge does not
-   read private values back. Download the check once, and read it. It prints
-   only parameter names, never a value or the Coder session token:
+   dotfiles repo. Never pass a private value to the check. The check never
+   takes or prints a private value: it reads the build's parameter list from
+   Coder, compares only the parameters you pass, and prints only parameter
+   names, never a value or the Coder session token. Download the check once,
+   and read it:
 
    ```sh
    mkdir -p ~/.cache/hedge-setup && curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/scripts/check-workspace.sh -o ~/.cache/hedge-setup/check-workspace.sh && cat ~/.cache/hedge-setup/check-workspace.sh
@@ -639,13 +641,17 @@ ssh coder.<name> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin
 The address is `https://` and its `tunnelHostname`. When `authenticated` or
 `linked` is not `true`, T3 Connect does not run there yet: start it on that
 box as in item 5 of step 7, give the person its sign-in link, and read the
-status again. When it is linked but has no `tunnelHostname`, its tunnel can
-still be starting, or its T3 CLI does not print the field yet. Do not start
-T3 Connect again, and make no token yet: for a node, run item 3 of step 9
-again. `hedge devbox add` waits for the tunnel, asks the node's T3 server
-for the address, and says what to do when there is none. For the hub, read
-the status again after a minute. Make a pairing token only once you have the
-address:
+status again. When it is linked but has no `tunnelHostname`, the T3 Code on
+that box is too old to report its address. Stop, and make no token. Update
+T3 Code there, then read the status again:
+
+```sh
+ssh coder.<name> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge agent-update'
+```
+
+When it still has no `tunnelHostname`, tell the person that T3 Code on that
+box does not report its address yet, and pair it later. Make a pairing token
+only once you have the address:
 
 ```sh
 ssh coder.<name> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; t3 pair --ttl 10m --label t3-app'
