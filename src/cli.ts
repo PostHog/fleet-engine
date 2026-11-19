@@ -177,7 +177,10 @@ async function reconcile(command: "apply" | "doctor", args: string[], options: C
   const holds = () => fleetOf(options).holds(options.home, options.platform);
   const held = await holds();
   if (held.length && !preview) return printReport({ ok: false, actions: [], findings: held, humanLeft: [] }, command, options.print, false), 1;
-  const { plan, sources, remember } = await loadPlan(options, flags.profile, { fetch: !preview, inherit: preview });
+  const { plan, sources, remember } = await loadPlan(options, flags.profile, { fetch: !preview, inherit: preview }).catch((error: unknown) => {
+    printFindings(held, options.print);
+    throw error;
+  });
   const stillHeld = preview ? [] : await holds();
   if (stillHeld.length) return printReport({ ok: false, actions: [], findings: stillHeld, humanLeft: [] }, command, options.print, false), 1;
   if (!preview) await remember();
@@ -281,7 +284,8 @@ async function runPackCommand(name: string, args: string[], options: CliOptions)
   const command = plan.commands[name];
   if (!command) {
     const owner = sources.flatMap((source) => ("error" in source ? [] : source.packs)).find((pack) => existsSync(join(pack.dir, "commands", `${name}.ts`)) || Object.hasOwn(pack.code?.commands ?? {}, name));
-    options.print(owner ? `hedge ${name} comes from the ${owner.manifest.title ?? owner.manifest.name} pack, which is off. Turn it on with hedge packs.` : `hedge: unknown command ${name}\n\n${usage}`);
+    const unloaded = sources.flatMap((source) => ("error" in source ? [`The pack source ${source.ref.name} did not load: ${source.error}.`] : []));
+    options.print(owner ? `hedge ${name} comes from the ${owner.manifest.title ?? owner.manifest.name} pack, which is off. Turn it on with hedge packs.` : [`hedge: unknown command ${name}`, ...unloaded].join("\n") + `\n\n${usage}`);
     return 2;
   }
   if (name !== "usage") trackCommand(options.home, name, args, command.subcommands ?? [], options.env ?? {}, options.interactive);
@@ -488,9 +492,13 @@ function handlerSubcommands(plan: Plan) {
 function hedgeProfile(options: CliOptions, dir: string): string {
   const legacy = underLegacyPath(options.home, dir);
   const selected = legacy ? hedgeCopy(options.home, dir) : dir;
-  if (inAnyLegacyPath(profileFile(selected))) throw new Error(`${profileFile(selected)} is in a Fleet path from before the rename, so Hedge does not use it. Make it a file of its own in ${selected}, or run get.sh to copy the profile.`);
+  refuseLinkedProfile(selected);
   if (legacy) options.print(`Hedge: uses ${selected}, the copy of ${dir}, because ${dir} is in a Fleet path from before the rename.`);
   return selected;
+}
+
+function refuseLinkedProfile(dir: string) {
+  if (inAnyLegacyPath(profileFile(dir))) throw new Error(`${profileFile(dir)} is in a Fleet path from before the rename, so Hedge does not use it. Make it a file of its own in ${dir}, or run get.sh to copy the profile.`);
 }
 
 function hedgeCopy(home: string, dir: string): string {
@@ -507,7 +515,7 @@ async function loadPlan(options: CliOptions, profileFlag: string | undefined, mo
   if (!given) throw new Error("no profile on this machine. Run get.sh, or pass --profile <dir>.");
   const profileDir = hedgeProfile(options, given);
   const machine: MachineFile = { ...thisMachine(saved, options.platform, options.env ?? {}, (options.hostname ?? hostname)()), profileDir };
-  if (mode.pull) await pullProfile(profileDir);
+  if (mode.pull) await pullProfile(profileDir), refuseLinkedProfile(profileDir);
   const loaded = await loadProfile(profileDir);
   const profile = mode.withPack && !loaded.packs.includes(mode.withPack) ? { ...loaded, packs: [...loaded.packs, mode.withPack] } : loaded;
   const cache = sourceCache(options.home);
@@ -544,12 +552,15 @@ function parseFlags(args: string[]) {
 function printReport(report: Report, command: string, print: (line: string) => void, dryRun = false) {
   const changes = report.actions.filter((action) => action.operation !== "keep" && action.operation !== "conflict");
   if (command === "apply") for (const action of changes) print(`${action.operation} ${action.target}`);
-  for (const finding of report.findings) print(`${finding.repair === "human" ? "To do" : finding.repair ? "Fix" : "Note"}: ${finding.say}`);
+  printFindings(report.findings, print);
   if (command === "doctor") print(report.ok ? "Everything matches your profile." : "Run hedge apply to fix what Hedge can fix.");
   else if (dryRun) print(report.ok ? `Preview: ${changes.length} change${changes.length === 1 ? "" : "s"} to apply. Nothing was written.` : "Preview: Hedge could not apply your profile. Nothing was written.");
   else print(report.ok ? `Applied ${changes.length} change${changes.length === 1 ? "" : "s"}.` : "Hedge could not apply your profile.");
 }
 
+function printFindings(findings: Report["findings"], print: (line: string) => void) {
+  for (const finding of findings) print(`${finding.repair === "human" ? "To do" : finding.repair ? "Fix" : "Note"}: ${finding.say}`);
+}
 
 if (import.meta.main) {
   const engineRoot = resolvePath(import.meta.dir, "..");

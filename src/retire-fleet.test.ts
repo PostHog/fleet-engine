@@ -383,6 +383,54 @@ describe("hedge apply while Fleet still runs", () => {
     expect(JSON.parse(readFileSync(join(linux.home, ".config/hedge/machine.json"), "utf8")).profileDir).toBe(saved);
   });
 
+  test("an apply --profile that a Fleet unit stops while Hedge fetches the same source at another ref leaves the saved profile's pack commands off that checkout", async () => {
+    const linux = machine("linux");
+    const withCommand = (word: string) => {
+      const repo = temp.make("source-");
+      mkdirSync(join(repo, "packs/extra/commands"), { recursive: true });
+      writeFileSync(join(repo, "packs/extra/pack.json"), JSON.stringify({ schema: 1, name: "extra", summary: "Extra." }));
+      writeFileSync(join(repo, "packs/extra/commands/hello.ts"), `await Bun.write(Bun.env.HOME + "/hello.txt", ${JSON.stringify(word)});\n`);
+      git(repo, "init", "-q", "-b", "main");
+      git(repo, "add", ".");
+      git(repo, "commit", "-q", "-m", word);
+      const profile = profileDir(["extra"]);
+      const answers = JSON.parse(readFileSync(join(profile, "hedge.json"), "utf8"));
+      writeFileSync(join(profile, "hedge.json"), JSON.stringify({ ...answers, sources: [{ name: "extra", repo, ref: "main" }] }));
+      return profile;
+    };
+    const hello = join(linux.home, "hello.txt");
+    expect((await linux.hedge(["apply", "--profile", withCommand("saved")])).code).toBe(0);
+    const candidate = withCommand("candidate");
+    const cacheLock = holdLock(join(linux.home, ".local/share/hedge/sources/extra.lock"));
+    linux.clock.sleep = async () => {
+      linux.systemd.units.set("fleet-watch.service", { active: true, enabled: true });
+      cacheLock.release();
+    };
+    expect((await linux.hedge(["apply", "--profile", candidate])).code).toBe(1);
+
+    const refused = await linux.hedge(["hello"]);
+
+    expect(refused.code).not.toBe(0);
+    expect(existsSync(hello)).toBe(false);
+    expect(refused.output).toContain(`The pack source extra did not load: the cached checkout is not main of `);
+    expect((await linux.hedge(["retire-fleet"])).code).toBe(0);
+    expect((await linux.hedge(["apply"])).code).toBe(0);
+    expect((await linux.hedge(["hello"])).code).toBe(0);
+    expect(readFileSync(hello, "utf8")).toBe("saved");
+  });
+
+  test("hedge doctor with no profile yet, as get.sh leaves a machine where an old job still runs, names that job before it says the profile is missing", async () => {
+    const linux = machine("linux");
+    linux.processes.table.set(4242, { args: `/home/bin/bun ${join(linux.home, ".local/share/fleet/engine")}/src/cli.ts nightly` });
+
+    const checked = await linux.hedge(["doctor"]);
+
+    expect(checked.code).toBe(1);
+    const held = checked.output.indexOf("To do: The running command fleet nightly (process 4242) from before the rename still runs");
+    expect(held).toBeGreaterThanOrEqual(0);
+    expect(checked.output.indexOf("hedge: no profile on this machine.")).toBeGreaterThan(held);
+  });
+
   test("hedge doctor names each piece of Fleet that still runs and fails", async () => {
     const linux = machine("linux");
     expect((await linux.hedge(["apply", "--profile", profileDir([])])).code).toBe(0);

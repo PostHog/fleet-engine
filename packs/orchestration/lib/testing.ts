@@ -2,7 +2,7 @@ import type { LinkedEnvironment, LinkedThread, LinkedTimelineItem, ShellThread }
 import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ToolRefusal, type ToolHandler } from "../../base/lib/t3/testing.ts";
-import { spawnGit } from "../../../src/testing/git.ts";
+import { cachedCheckout, spawnGit } from "../../../src/testing/git.ts";
 import { engineSource, skillSources } from "../../../src/testing/packs.ts";
 import type { Discussion, FetchDiscussion, FetchIssue, IssueNode } from "./wayfinder.ts";
 
@@ -115,7 +115,7 @@ export async function runPackCommand(command: string, args: string[], env: Recor
 export async function hedgeMachine(home: string, settings: Record<string, unknown>, origin?: string): Promise<string> {
   const profile = join(home, "profile");
   const sources = skillSources(join(home, ".local/share/hedge/sources"), await engineSource());
-  for (const source of sources) await mkdir(join(source.dir, ".git"), { recursive: true });
+  for (const source of sources) await cachedCheckout(source.dir, source.ref);
   await mkdir(profile, { recursive: true });
   const engine = { repo: "acme/fleet-engine", ref: "main", channel: "track" };
   await writeFile(join(profile, "hedge.json"), JSON.stringify({ schema: 1, engine, sources: sources.map((source) => source.ref), packs: ["pull-requests", "orchestration"], plan: "both", settings, workflows: {} }));
