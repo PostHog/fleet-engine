@@ -19,29 +19,36 @@ afterEach(async () => {
 
 type Visit = { from?: Window; files?: SiteFiles; url?: string; motion?: "reduce" | "no-preference" };
 
-type Watched = { callback: (entries: Array<{ target: unknown; isIntersecting: boolean; intersectionRatio: number }>) => void; targets: unknown[] };
-const watchers = new WeakMap<Window, Watched[]>();
+type Entry = { target: unknown; isIntersecting: boolean; intersectionRatio: number };
+type Watched = { callback: (entries: Entry[]) => void; thresholds: number[]; states: Map<unknown, string> };
+type View = { shown: number; watched: Watched[] };
+const views = new WeakMap<Window, View>();
+const stateOf = (watch: Watched, shown: number) => `${shown > 0}:${watch.thresholds.filter((threshold) => shown > 0 && shown >= threshold).length}`;
+const deliver = (watch: Watched, targets: unknown[], shown: number) => {
+  if (targets.length) watch.callback(targets.map((target) => ({ target, isIntersecting: shown > 0, intersectionRatio: shown })));
+};
 
 function visit(path: string, { from, files = site, url = `https://hedge.test/hedge-engine/${path.replace(/index\.html$/, "")}`, motion = "no-preference" }: Visit = {}) {
   const window = new Window({ url, settings: { enableJavaScriptEvaluation: true, suppressInsecureJavaScriptEnvironmentWarning: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true, device: { prefersReducedMotion: motion } } });
   open.push(window);
-  const watched: Watched[] = [];
-  watchers.set(window, watched);
+  const view: View = { shown: 0, watched: [] };
+  views.set(window, view);
   Object.assign(window, {
     IntersectionObserver: class {
       watch: Watched;
-      constructor(callback: Watched["callback"]) {
-        this.watch = { callback, targets: [] };
-        watched.push(this.watch);
+      constructor(callback: Watched["callback"], options: { threshold?: number | number[] } = {}) {
+        this.watch = { callback, thresholds: [options.threshold ?? 0].flat(), states: new Map() };
+        view.watched.push(this.watch);
       }
       observe(target: unknown) {
-        this.watch.targets.push(target);
+        this.watch.states.set(target, stateOf(this.watch, view.shown));
+        deliver(this.watch, [target], view.shown);
       }
       unobserve(target: unknown) {
-        this.watch.targets = this.watch.targets.filter((item) => item !== target);
+        this.watch.states.delete(target);
       }
       disconnect() {
-        this.watch.targets = [];
+        this.watch.states.clear();
       }
     },
   });
@@ -186,31 +193,54 @@ describe("the Packs page in a browser", () => {
 
 const video = (window: Window, selector: string) => window.document.querySelector(selector) as unknown as HTMLVideoElement;
 const dialog = (window: Window) => window.document.querySelector("dialog") as unknown as HTMLDialogElement;
-const watchButton = (window: Window, title: string) =>
-  [...window.document.querySelectorAll("button.watch")].find((button) => button.textContent!.includes(`the ${title} video`)) as unknown as HTMLButtonElement;
+const accessibleName = (element: Element) => {
+  const copy = element.cloneNode(true) as Element;
+  for (const hidden of copy.querySelectorAll('[aria-hidden="true"]')) hidden.remove();
+  return copy.textContent!.replace(/\s+/g, " ").trim();
+};
+const watchButtons = (window: Window) => [...window.document.querySelectorAll("button.watch")] as unknown as HTMLButtonElement[];
+const watchButton = (window: Window, title: string) => watchButtons(window).find((button) => accessibleName(button).endsWith(`the ${title} video`))!;
 const pathOf = (window: Window, url: string) => new URL(url, window.location.href).pathname;
 const scrollTo = (window: Window, shown: number) => {
-  for (const watch of watchers.get(window)!) watch.callback(watch.targets.map((target) => ({ target, isIntersecting: shown > 0, intersectionRatio: shown })));
+  const view = views.get(window)!;
+  view.shown = shown;
+  for (const watch of view.watched) {
+    const changed = [...watch.states].filter(([, state]) => state !== stateOf(watch, shown)).map(([target]) => target);
+    for (const target of changed) watch.states.set(target, stateOf(watch, shown));
+    deliver(watch, changed, shown);
+  }
 };
 
 describe("the pack videos in a browser", () => {
-  test("Watch on a card opens one large player that names the pack and plays its video, and closing it stops the video", () => {
+  test("each Watch button is named for its length and pack, and opens one large player with that pack's name, line, video and poster", () => {
     const window = visit("packs/index.html");
-    expect(dialog(window).open).toBe(false);
-    watchButton(window, "Memory").click();
     const player = video(window, "dialog video");
     const textOf = (attribute: string) => window.document.getElementById(dialog(window).getAttribute(attribute)!)!.textContent;
-    const memoryLine = watchButton(window, "Memory").closest(".pack-card")!.querySelector(".pack-line")!.textContent;
-    expect([dialog(window).open, textOf("aria-labelledby"), textOf("aria-describedby")]).toEqual([true, "Memory", memoryLine]);
-    expect([pathOf(window, player.src), pathOf(window, player.poster), player.paused]).toEqual(["/hedge-engine/assets/video/memory.mp4", "/hedge-engine/assets/video/memory.jpg", false]);
-    expect(selected(window)).toEqual([]);
-    (window.document.querySelector("dialog button") as unknown as HTMLButtonElement).click();
-    expect([dialog(window).open, player.paused]).toEqual([false, true]);
-    watchButton(window, "Slack").click();
-    expect([pathOf(window, player.src), player.paused]).toEqual(["/hedge-engine/assets/video/slack.mp4", false]);
+    const opened = watchButtons(window).map((button) => {
+      const card = button.closest(".pack-card")!;
+      const title = card.querySelector(".pack-name")!.textContent;
+      button.click();
+      const shown = [accessibleName(button), dialog(window).open, textOf("aria-labelledby") === title, textOf("aria-describedby") === card.querySelector(".pack-line")!.textContent, pathOf(window, player.src), pathOf(window, player.poster), player.paused];
+      (window.document.querySelector("dialog button") as unknown as HTMLButtonElement).click();
+      return shown;
+    });
+    const row = (pack: string, name: string) => [name, true, true, true, `/hedge-engine/assets/video/${pack}.mp4`, `/hedge-engine/assets/video/${pack}.jpg`, false];
+    expect(opened).toEqual([
+      row("hub", "Watch · 29 s, the Hub video"),
+      row("pull-requests", "Watch · 29 s, the Quality gates video"),
+      row("orchestration", "Watch · 30 s, the Orchestration video"),
+      row("memory", "Watch · 29 s, the Memory video"),
+      row("slack", "Watch · 20 s, the Slack video"),
+    ]);
+    expect([dialog(window).open, player.paused, selected(window)]).toEqual([false, true, []]);
+  });
+
+  test("Escape, which the browser turns into closing the dialog, stops the video", () => {
+    const window = visit("packs/index.html");
+    watchButton(window, "Memory").click();
+    expect(video(window, "dialog video").paused).toBe(false);
     dialog(window).close();
-    expect(player.paused).toBe(true);
-    expect(textOf("aria-labelledby")).toBe("Slack");
+    expect(video(window, "dialog video").paused).toBe(true);
   });
 
   test("a visitor who asks for reduced motion gets the player and the pack page's video without autoplay", () => {
@@ -230,6 +260,21 @@ describe("the pack videos in a browser", () => {
     expect(clip.paused).toBe(true);
     scrollTo(window, 0.6);
     expect(clip.paused).toBe(false);
+    scrollTo(window, 0);
+    expect(clip.paused).toBe(true);
+    scrollTo(window, 1);
+    expect(clip.paused).toBe(false);
+  });
+
+  test("a pack page's video that the visitor paused stays paused when they scroll away and back, until they play it again", () => {
+    const window = visit("packs/hub/index.html");
+    const clip = video(window, "video.clip");
+    scrollTo(window, 1);
+    clip.pause();
+    scrollTo(window, 0);
+    scrollTo(window, 1);
+    expect(clip.paused).toBe(true);
+    clip.play();
     scrollTo(window, 0);
     expect(clip.paused).toBe(true);
     scrollTo(window, 1);

@@ -4,6 +4,7 @@ import { join, posix } from "node:path";
 import type { LoadedPack, PackManifest } from "../src/pack/types.ts";
 import { tempDirs } from "../src/testing/git.ts";
 import { spawnAsync } from "../src/testing/spawn.ts";
+import { packFlows } from "../page/flows.ts";
 import { logoMark } from "../page/logo.ts";
 import { firstStart, installPrompt, startPrompt, toggleSelected, type PageData, type PromptData } from "../page/model.ts";
 import { t3Link } from "../page/prompt.ts";
@@ -231,20 +232,10 @@ describe("the site build", () => {
   const attributesOf = (tag: string): Record<string, string | true | undefined> => Object.fromEntries([...tag.matchAll(/\s([a-z-]+)(?:="([^"]*)")?/g)].map((match) => [match[1]!, match[2] ?? true]));
   const describedBy = (html: string, tag: string) => String(attributesOf(tag)["aria-describedby"] ?? "").split(" ").map((id) => visibleText(html.match(new RegExp(`<(\\w+)[^>]* id="${id}"[^>]*>([\\s\\S]*?)</\\1>`))?.[2] ?? "").trim());
 
-  test("the packs page shows a Watch button with the video's length on the card of each pack with a video, and has one large player", () => {
+  test("the packs page shows a Watch button on the card of each pack with a video, and no other, and has one large player", () => {
     const html = page("packs/index.html");
     const cards = html.split('<li class="pack-card').slice(1);
-    const watched = cards.flatMap((card) => {
-      const watch = card.match(/<button type="button" class="watch"[^>]*>([\s\S]*?)<\/button>/);
-      return watch ? [[card.match(/<a class="more" href="([a-z-]+)\/"/)![1], visibleText(watch[1]!).trim().replaceAll(" ,", ",")]] : [];
-    });
-    expect(watched).toEqual([
-      ["hub", "Watch · 29 s, the Hub video"],
-      ["pull-requests", "Watch · 29 s, the Quality gates video"],
-      ["orchestration", "Watch · 30 s, the Orchestration video"],
-      ["memory", "Watch · 29 s, the Memory video"],
-      ["slack", "Watch · 20 s, the Slack video"],
-    ]);
+    expect(cards.filter((card) => card.includes('class="watch"')).map((card) => card.match(/<a class="more" href="([a-z-]+)\/"/)![1])).toEqual(videoPacks);
     expect(html.match(/<dialog\b/g)).toHaveLength(1);
     expect(html.match(/<video\b/g)).toHaveLength(1);
     expect(html.match(/<dialog\b[\s\S]*?<\/dialog>/)![0]).toContain("<video");
@@ -272,7 +263,7 @@ describe("the site build", () => {
         undefined,
       ]);
       const [summary, steps] = describedBy(html, tags![0]!);
-      expect([pack.name, summary, steps!.length > 20]).toEqual([pack.name, pack.summary, true]);
+      expect([pack.name, summary, steps]).toEqual([pack.name, pack.summary, packFlows[pack.name]!.join(" ")]);
       const after = html.slice(html.indexOf("<video"));
       expect([pack.name, after.includes('id="flow-h"')]).toEqual([pack.name, true]);
     }
