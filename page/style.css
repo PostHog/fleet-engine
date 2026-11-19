@@ -249,7 +249,7 @@ label.pack-main::after { content: ""; position: absolute; inset: 0; border-radiu
 .player-page { display: inline-block; margin-top: 6px; font-size: 0.93rem; }
 .player-close { flex: none; white-space: nowrap; box-shadow: 0 3px 0 var(--shadow); }
 .player video, .clip { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; background: #000; }
-.player video { flex: 1 1 auto; min-height: 0; object-fit: contain; border-radius: 12px; }
+.player video { flex: 1 1 auto; min-height: 160px; object-fit: contain; border-radius: 12px; }
 .clip { border: 2px solid var(--ink); border-radius: 22px; box-shadow: 0 7px 0 var(--shadow); }
 [hidden] { display: none !important; }
 
