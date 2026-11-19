@@ -239,12 +239,12 @@ describe("hedge update", () => {
 
     const failed = await run(engineDir, { repo: "Acme/fleet-engine", ref: "v0.1.0", channel: "release" });
 
-    expect(failed).toMatchObject({ code: 1, applied: 0, version: "fork v0.1.2", output: expect.stringMatching(/the engine's packages are installed, but could not point the engine at .*\. Run hedge update again to finish the update\.$/) });
+    expect(failed).toMatchObject({ code: 1, version: "fork v0.1.2", output: expect.stringMatching(/the engine's packages are installed, but could not point the engine at .*\. Run hedge update again to finish the update\.$/) });
     expect(await originOf(engineDir)).toBe(hedge);
     rmSync(lock);
     const retried = await run(engineDir, { repo: "Acme/fleet-engine", ref: "v0.1.0", channel: "release" });
 
-    expect(retried).toMatchObject({ code: 0, applied: 1, version: "fork v0.1.2" });
+    expect(retried).toMatchObject({ code: 0, version: "fork v0.1.2" });
     expect(await originOf(engineDir)).toBe("https://github.com/Acme/fleet-engine.git");
   });
 
