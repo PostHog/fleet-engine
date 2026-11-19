@@ -12,10 +12,12 @@ import { withLegacyNames } from "../legacy.ts";
 export type AdapterContext = { home: string; dryRun: boolean; adopt: string[]; adoptFrom?: string[] };
 export type AdapterResult = { actions: Action[]; findings: Finding[]; blocked?: boolean };
 export type Adapter = {
-  name: "files" | "config" | "jobs" | "identity" | "t3";
+  name: "files" | "config" | "jobs" | "identity" | "t3" | "fleet";
   /** The targets that --adopt may name for this adapter. */
   targets(plan: Plan): string[];
   apply(plan: Plan, context: AdapterContext): Promise<AdapterResult>;
+  /** Runs before apply changes anything. Any finding it returns stops the apply. */
+  guard?(plan: Plan, context: AdapterContext): Promise<Finding[]>;
 };
 export type Runner = (command: string[], env?: Record<string, string>) => Promise<number>;
 /** Fills this machine's credential for each served service: the hub issues its own, and a node pulls its own from the hub. Reports what failed. */
@@ -96,6 +98,13 @@ export async function apply(plan: Plan, options: { home: string; dryRun?: boolea
     report.ok = false;
     report.findings.push(...plan.unanswered.map((setting) => ({ id: `unanswered:${setting.key}`, pack: setting.key.split(".")[0] ?? "", say: `${setting.question} Answer it with hedge set ${setting.key}=<value>.`, repair: "human" as const })));
     return report;
+  }
+  for (const adapter of adapters) {
+    const held = (await adapter.guard?.(plan, context)) ?? [];
+    if (!held.length) continue;
+    report.findings.push(...held);
+    report.ok = false;
+    if (!context.dryRun) return report;
   }
   const run = viaEngine(plan, options.run ?? spawnRunner(options.home, plan.machine.profileDir));
   const node = plan.onHub || plan.pullsFromHub ? plan.machine.name : undefined;

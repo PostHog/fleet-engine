@@ -41,13 +41,20 @@ export async function readLedger(home: string): Promise<Ledger> {
   });
   if (!info) return { steps: [], human: [] };
   if (!info.isFile()) throw new Error(`${ledgerPath} must be a regular file`);
-  const value = JSON.parse(await readFile(path, "utf8")) as { version?: unknown; steps?: unknown; human?: unknown };
+  const ledger = asLedger(JSON.parse(await readFile(path, "utf8")));
+  if (!ledger) throw new Error(`${ledgerPath} is not a Hedge step ledger`);
+  return ledger;
+}
+
+/** The ledger value holds, or undefined when it is not a Hedge step ledger. */
+export function asLedger(parsed: unknown): Ledger | undefined {
+  const value = (parsed ?? {}) as { version?: unknown; steps?: unknown; human?: unknown };
   const valid = (step: Partial<LedgerStep>) =>
     typeof step.pack === "string" && typeof step.id === "string" && isStrings(step.check) && isStrings(step.undo) && (step.after === undefined || typeof step.after === "string") && (step.prerequisite === undefined || isStrings(step.prerequisite));
   const validHuman = (step: Partial<LedgerHuman>) => typeof step.pack === "string" && typeof step.id === "string" && isStrings(step.probe) && typeof step.undo === "string";
   const human = value.human ?? [];
   const records = (list: unknown, check: (item: never) => boolean) => Array.isArray(list) && list.every((item) => item && typeof item === "object" && check(item as never));
-  if (value.version !== 1 || !records(value.steps, valid) || !records(human, validHuman)) throw new Error(`${ledgerPath} is not a Hedge step ledger`);
+  if (value.version !== 1 || !records(value.steps, valid) || !records(human, validHuman)) return undefined;
   return { steps: value.steps as LedgerStep[], human: human as LedgerHuman[] };
 }
 

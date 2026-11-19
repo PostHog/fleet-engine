@@ -1,11 +1,11 @@
 import { describe, expect } from "bun:test";
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { git } from "./testing/git.ts";
 import { getShHarness, onLinuxHost, type Sandbox } from "./testing/get-sh.ts";
 import { legacyPaths } from "./legacy.ts";
 
-const { sandbox, profile, engine, getSh } = getShHarness();
+const { sandbox, profile, engine, getSh, temp } = getShHarness();
 
 function tree(root: string): Record<string, string> {
   const entries: Record<string, string> = {};
@@ -59,7 +59,110 @@ function profileRepo(box: Sandbox) {
   return repo;
 }
 
+/** The engine, with a launcher that writes each command to ~/hedge-commands, fails retire-fleet while ~/retire-fails is there, and fails apply while ~/apply-fails is there. */
+function engineThatFailsOnDemand() {
+  const repo = temp.make("engine-on-demand-");
+  git(repo, "clone", "-q", engine.repo, ".");
+  const launcher = readFileSync(join(repo, "hedge"), "utf8").split("\n");
+  const onDemand = [
+    'echo "$*" >> "$HOME/hedge-commands"',
+    '[ "${1:-}" != retire-fleet ] || [ ! -e "$HOME/retire-fails" ] || { echo "Hedge: systemd unit fleet-watch.service: it is active. Hedge could not verify that it stopped."; exit 1; }',
+    '[ "${1:-}" != apply ] || [ ! -e "$HOME/apply-fails" ] || { echo "apply failed on purpose"; exit 1; }',
+  ];
+  writeFileSync(join(repo, "hedge"), [launcher[0], ...onDemand, ...launcher.slice(1)].join("\n"));
+  git(repo, "commit", "-q", "-am", "fail on demand");
+  return repo;
+}
+const commands = (home: string) => readFileSync(join(home, "hedge-commands"), "utf8").trim().split("\n").filter((line) => /^(?:import-fleet|retire-fleet|apply|setup)\b/.test(line));
+
 describe("get.sh on a machine from before the rename", () => {
+  onLinuxHost("runs retire-fleet after the import and before apply, and stops before apply when Fleet may still run", () => {
+    const box = sandbox("Linux");
+    beforeTheRename(box);
+    const repo = engineThatFailsOnDemand();
+    writeFileSync(join(box.home, "retire-fails"), "");
+
+    const result = getSh(box, ["--ref", "main"], { env: { HEDGE_ENGINE_REPO: repo } });
+
+    expect(result.code).toBe(1);
+    expect(commands(box.home)).toEqual(["import-fleet", "retire-fleet"]);
+    expect(result.output).toContain("Hedge: systemd unit fleet-watch.service: it is active. Hedge could not verify that it stopped.");
+    expect(result.output).toContain("Hedge: Fleet may still run, so Hedge applied nothing. Stop each piece named above by hand, then run get.sh again.");
+  });
+
+  onLinuxHost("an identical retry after a failed apply runs apply again, not setup", () => {
+    const box = sandbox("Linux");
+    beforeTheRename(box);
+    const repo = engineThatFailsOnDemand();
+    writeFileSync(join(box.home, "apply-fails"), "");
+
+    const first = getSh(box, ["--ref", "main"], { env: { HEDGE_ENGINE_REPO: repo } });
+    rmSync(join(box.home, "apply-fails"));
+    rmSync(join(box.home, "hedge-commands"));
+    const second = getSh(box, ["--ref", "main"], { env: { HEDGE_ENGINE_REPO: repo } });
+    const third = getSh(box, ["--ref", "main", "--install-only"], { env: { HEDGE_ENGINE_REPO: repo } });
+
+    expect(first.code).toBe(1);
+    expect(first.output).toContain("apply failed on purpose");
+    expect(second.code).toBe(0);
+    expect(commands(box.home)).toEqual(["import-fleet", "retire-fleet", "apply", "import-fleet"]);
+    expect(second.output).toContain("Applied ");
+    expect(third.code).toBe(0);
+  });
+
+  onLinuxHost("puts the engine at the Hedge default when HEDGE_ENGINE_DIR leads into a Fleet path through a link, also when the folder does not exist yet", () => {
+    const box = sandbox("Linux");
+    beforeTheRename(box);
+    symlinkSync(join(box.home, ".local/share/fleet"), join(box.home, "elsewhere"));
+    const before = oldTree(box.home);
+
+    const result = getSh(box, ["--ref", "v0.1.0", "--install-only"], { env: { HEDGE_ENGINE_DIR: join(box.home, "elsewhere/new-engine") } });
+
+    expect(result.code).toBe(0);
+    expect(result.output).toContain(`HEDGE_ENGINE_DIR points into a Fleet path from before the rename, so the engine goes to ${join(box.home, ".local/share/hedge/engine")}.`);
+    expect(oldTree(box.home)).toEqual({ ...before, ".local/bin/fleet": tree(join(box.home, ".local/bin/fleet")) });
+    expect(git(join(box.home, ".local/share/hedge/engine"), "rev-parse", "HEAD")).toBe(git(engine.repo, "rev-parse", "v0.1.0"));
+  });
+
+  onLinuxHost("refuses when a Hedge folder leads into a Fleet path through a link, and writes nothing there", () => {
+    const results = [".local/share", ".local/state"].map((parent) => {
+      const box = sandbox("Linux");
+      const oldEngine = beforeTheRename(box);
+      symlinkSync(join(box.home, parent, "fleet"), join(box.home, parent, "hedge"));
+      const before = oldTree(box.home);
+      const result = getSh(box, ["--ref", "v0.1.0", "--install-only"]);
+      return { result, same: JSON.stringify(oldTree(box.home)) === JSON.stringify(before), head: git(oldEngine, "rev-parse", "HEAD"), link: join(box.home, parent, "hedge") };
+    });
+
+    for (const { result, same, head, link } of results) {
+      expect(result.code).toBe(1);
+      expect(result.output).toContain(`Hedge: ${link} leads into a Fleet path from before the rename. Move that link away, then run get.sh again.`);
+      expect(same).toBe(true);
+      expect(head).toBe(git(engine.repo, "rev-parse", "v0.0.9^{commit}"));
+    }
+  });
+
+  onLinuxHost("never reuses a custom engine folder that is a Fleet checkout, by its launcher, the old command, or its remote", () => {
+    const cases = ["launcher", "old command", "remote"].map((by) => {
+      const box = sandbox("Linux");
+      const custom = join(box.home, "src/engine");
+      git(box.home, "clone", "-q", engine.repo, custom);
+      git(custom, "checkout", "-q", by === "launcher" ? "v0.0.9" : "v0.1.0");
+      if (by === "old command") mkdirSync(join(box.home, ".local/bin"), { recursive: true }), writeFileSync(join(box.home, ".local/bin/fleet"), `#!/bin/sh\n# Fleet\nexec sh '${custom}/fleet' "$@"\n`, { mode: 0o755 });
+      if (by === "remote") git(custom, "remote", "set-url", "origin", "https://github.com/PostHog/fleet-engine.git");
+      const head = git(custom, "rev-parse", "HEAD");
+      const result = getSh(box, ["--ref", "v0.1.0", "--install-only"], { env: { FLEET_ENGINE_DIR: custom } });
+      return { by, result, kept: git(custom, "rev-parse", "HEAD") === head, fresh: git(join(box.home, ".local/share/hedge/engine"), "rev-parse", "HEAD"), custom, home: box.home };
+    });
+
+    for (const { result, kept, fresh, custom, home } of cases) {
+      expect(result.code).toBe(0);
+      expect(result.output).toContain(`Hedge: ${custom} is the engine from before the rename, so the engine goes to ${join(home, ".local/share/hedge/engine")}.`);
+      expect(kept).toBe(true);
+      expect(fresh).toBe(git(engine.repo, "rev-parse", "v0.1.0"));
+    }
+  });
+
   onLinuxHost("makes a fresh checkout, brings the setup over with its modes, applies, leaves every old path as it was, and does nothing the second time", () => {
     const box = sandbox("Linux");
     const oldEngine = beforeTheRename(box);
@@ -71,6 +174,7 @@ describe("get.sh on a machine from before the rename", () => {
     expect(first.code).toBe(0);
     expect(first.output).toContain(`FLEET_ENGINE_DIR points into a Fleet path from before the rename, so the engine goes to ${join(home, ".local/share/hedge/engine")}.`);
     expect(first.output).toContain("Hedge: copied ~/.config/fleet to ~/.config/hedge.");
+    expect(first.output.indexOf("Hedge: left the jobs from before the rename alone")).toBeLessThan(first.output.indexOf("Applied "));
     expect(first.output).toContain("Applied ");
     expect(git(join(home, ".local/share/hedge/engine"), "rev-parse", "HEAD")).toBe(git(engine.repo, "rev-parse", "v0.1.0"));
     expect(git(oldEngine, "rev-parse", "HEAD")).toBe(git(engine.repo, "rev-parse", "v0.0.9^{commit}"));

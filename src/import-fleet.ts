@@ -1,36 +1,75 @@
 import { randomUUID } from "node:crypto";
-import { chmodSync, constants, copyFileSync, linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, constants, copyFileSync, linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { inside } from "./files/install.ts";
 import { inLegacyPath, legacyPaths, renamed, underLegacyPath } from "./legacy.ts";
 import { linkOnPath, withLock } from "./adapters/provider-config/store.ts";
+import { writePrivateFile } from "./files/private.ts";
+import { loadProfile } from "./profile/profile.ts";
+import { asLedger } from "./reconciler/ledger.ts";
 
 type State = { version: number; groups: Record<string, Record<string, unknown>> };
 
 const machineFile = ".config/fleet/machine.json";
 const stateFile = ".local/state/fleet/state.json";
+const ledgerFile = ".local/state/fleet/steps.json";
+const doneFile = ".local/state/hedge/fleet-imported";
+const claimsFile = ".local/state/hedge/fleet-import.json";
 const notImported = new Set([".local/state/fleet", ".local/share/fleet"]);
 const runState = /^(?:logs?|locks?|cache|caches|\.cache|node_modules|.+\.(?:log|lock|pid|partial|tmp))$/;
 
 const present = (path: string) => lstatSync(path, { throwIfNoEntry: false });
 
-/** Copies the setup from before the rename to the new paths, once, and never changes an old path. Returns what it copied. */
+/** Copies the setup from before the rename to the new paths, once, and never changes an old path. An import that stopped part way copies what is still missing on the next run. Returns what it did. */
 export async function importFleet(home: string): Promise<string[]> {
-  if (!legacyPaths.some(([before]) => present(join(home, before)))) return [];
+  if (!legacyPaths.some(([before]) => present(join(home, before))) || present(join(home, doneFile))) return [];
   return withLock(home, async () => {
     const records = oldState(home);
     const writtenByApply = (target: string) => Object.values(records?.groups ?? {}).some((group) => Object.hasOwn(group, target));
-    const imported: string[] = [];
+    const done: string[] = [];
+    const claim = await claims(home);
     for (const [before, after] of legacyPaths.filter(([before]) => !notImported.has(before))) {
-      const from = join(home, before);
-      if (!present(from)?.isFile() && !present(from)?.isDirectory()) continue;
       const skip = (path: string) => path === join(home, machineFile) || writtenByApply(relative(home, path));
-      if (await publish(home, after, (partial) => copyTree(from, partial, skip))) imported.push(`~/${before} to ~/${after}`);
+      if (present(join(home, before)) && (await claim(after)) && (await importTree(home, join(home, before), after, skip))) done.push(`copied ~/${before} to ~/${after}`);
     }
-    if (records && (await publish(home, ".local/state/hedge/state.json", (partial) => writeFileSync(partial, JSON.stringify(takenOver(records), null, 2) + "\n", { mode: 0o600 })))) imported.push(`the files ~/${stateFile} owns`);
-    imported.push(...(await importMachine(home)));
-    return imported;
+    if (records && (await publishFile(home, ".local/state/hedge/state.json", (partial) => writeFileSync(partial, JSON.stringify(takenOver(records), null, 2) + "\n", { mode: 0o600 })))) done.push(`copied the files ~/${stateFile} owns`);
+    done.push(...(await importLedger(home)), ...(await importMachine(home, claim)));
+    await publishFile(home, doneFile, (partial) => writeFileSync(partial, "", { mode: 0o600 }));
+    return done;
   });
+}
+
+type Claim = (target: string) => Promise<boolean>;
+
+/** Whether the import may copy into target: it is not there yet, or an import that stopped part way made it. The import writes down each target before it makes it, so a path that was there before stays as it is. */
+async function claims(home: string): Promise<Claim> {
+  const path = inside(home, claimsFile);
+  const claimed = new Set<string>(present(path)?.isFile() ? (JSON.parse(readFileSync(path, "utf8")) as { claimed: string[] }).claimed : []);
+  return async (target) => {
+    await refuseLink(home, target);
+    if (claimed.has(target)) return true;
+    if (present(inside(home, target))) return false;
+    await refuseLink(home, claimsFile);
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    claimed.add(target);
+    await writePrivateFile(path, JSON.stringify({ claimed: [...claimed] }, null, 2) + "\n");
+    return true;
+  };
+}
+
+async function importLedger(home: string): Promise<string[]> {
+  const path = join(home, ledgerFile);
+  if (!present(path)?.isFile()) return [];
+  const ledger = (() => {
+    try {
+      return asLedger(JSON.parse(readFileSync(path, "utf8")));
+    } catch {
+      return undefined;
+    }
+  })();
+  if (!ledger) return [`left ~/${ledgerFile} behind, because it is not a Hedge step ledger`];
+  const text = JSON.stringify({ version: 1, ...ledger }, null, 2) + "\n";
+  return (await publishFile(home, ".local/state/hedge/steps.json", (partial) => writeFileSync(partial, text, { mode: 0o600 }))) ? [`copied the undo steps in ~/${ledgerFile}`] : [];
 }
 
 function oldState(home: string): State | undefined {
@@ -45,8 +84,8 @@ function takenOver(state: State): State {
   return { ...state, groups: Object.fromEntries(groups) };
 }
 
-/** The machine file, with profileDir on a copy of the profile when the profile was in an old path. The copy counts only when it is the same repository at the same commit; else profileDir goes and setup asks for the profile again. */
-async function importMachine(home: string): Promise<string[]> {
+/** The machine file, with profileDir on a copy of the profile when the profile was in an old path. The copy counts only when it is the same repository at the same commit and Hedge loads it as a profile; else profileDir goes and setup asks for the profile again. */
+async function importMachine(home: string, claim: Claim): Promise<string[]> {
   const path = join(home, machineFile);
   if (!present(path)?.isFile()) return [];
   const machine = JSON.parse(readFileSync(path, "utf8")) as { profileDir?: unknown };
@@ -54,11 +93,11 @@ async function importMachine(home: string): Promise<string[]> {
   const profile = typeof machine.profileDir === "string" ? machine.profileDir : undefined;
   if (profile && underLegacyPath(home, profile)) {
     const target = renamed(relative(home, profile));
-    if (target && (await publish(home, target, (partial) => copyTree(profile, partial, () => false)))) imported.push(`${profile} to ~/${target}`);
-    if (target && sameCheckout(profile, join(home, target))) machine.profileDir = join(home, target);
+    if (target && (await claim(target)) && (await importTree(home, profile, target, () => false))) imported.push(`copied ${profile} to ~/${target}`);
+    if (target && sameCheckout(profile, join(home, target)) && (await loads(join(home, target)))) machine.profileDir = join(home, target);
     else delete machine.profileDir;
   }
-  if (await publish(home, ".config/hedge/machine.json", (partial) => writeFileSync(partial, JSON.stringify(machine, null, 2) + "\n", { mode: 0o600 }))) imported.push(`~/${machineFile} to ~/.config/hedge/machine.json`);
+  if (await publishFile(home, ".config/hedge/machine.json", (partial) => writeFileSync(partial, JSON.stringify(machine, null, 2) + "\n", { mode: 0o600 }))) imported.push(`copied ~/${machineFile} to ~/.config/hedge/machine.json`);
   return imported;
 }
 
@@ -75,58 +114,45 @@ function sameCheckout(original: string, copy: string): boolean {
   });
 }
 
-/** Copies regular files and folders with their modes. Links, run state, and the paths skip names stay behind. */
-function copyTree(from: string, to: string, skip: (path: string) => boolean) {
-  const info = lstatSync(from);
-  if (info.isFile()) {
-    copyFileSync(from, to, constants.COPYFILE_EXCL);
-    chmodSync(to, info.mode & 0o7777);
-  } else if (info.isDirectory()) {
-    mkdirSync(to, { mode: 0o700 });
-    for (const name of readdirSync(from)) if (!runState.test(name) && !skip(join(from, name)) && (present(join(from, name))?.isFile() || present(join(from, name))?.isDirectory())) copyTree(join(from, name), join(to, name), skip);
-    chmodSync(to, info.mode & 0o7777);
-  }
+const loads = (dir: string) => loadProfile(dir).then(() => true, () => false);
+
+/** Copies each regular file below from that target does not have yet, one by one, with its mode, and replaces nothing. Links, run state, and the paths skip names stay behind. Returns whether it copied a file. */
+async function importTree(home: string, from: string, target: string, skip: (path: string) => boolean): Promise<boolean> {
+  const info = present(from);
+  if (info?.isFile()) return publishFile(home, target, (partial) => (copyFileSync(from, partial, constants.COPYFILE_EXCL), chmodSync(partial, info.mode & 0o7777)));
+  if (!info?.isDirectory()) return false;
+  await refuseLink(home, target);
+  const path = inside(home, target);
+  const made = !present(path);
+  if (made) mkdirSync(path, { recursive: true, mode: 0o700 });
+  await refuseLink(home, target);
+  let copied = false;
+  for (const name of readdirSync(from)) if (!runState.test(name) && !skip(join(from, name))) copied = (await importTree(home, join(from, name), join(target, name), skip)) || copied;
+  if (made) chmodSync(path, info.mode & 0o7777);
+  return copied;
 }
 
-/** Builds target beside it, then puts it in place only while nothing has its name. Refuses when target or a folder on its way is a link. */
-async function publish(home: string, target: string, build: (partial: string) => void): Promise<boolean> {
+async function refuseLink(home: string, target: string) {
+  const link = await linkOnPath(home, target);
+  if (link) throw new Error(`${link} is a link or a file, so Hedge did not bring the Fleet copy to ~/${target}. Move it away, then run get.sh again.`);
+}
+
+/** Builds target beside it, then links it in place only while nothing has its name. Refuses when target or a folder on its way is a link. */
+async function publishFile(home: string, target: string, build: (partial: string) => void): Promise<boolean> {
   const path = inside(home, target);
-  const linked = async () => {
-    const link = await linkOnPath(home, target);
-    if (link) throw new Error(`${link} is a link or a file, so Hedge did not bring the Fleet copy to ~/${target}. Move it away, then run get.sh again.`);
-  };
-  await linked();
+  await refuseLink(home, target);
   if (present(path)) return false;
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  await linked();
+  await refuseLink(home, target);
   const partial = `${path}.${randomUUID()}.partial`;
   try {
     build(partial);
-    return lstatSync(partial).isDirectory() ? claimFolder(partial, path) : claimFile(partial, path);
-  } finally {
-    rmSync(partial, { recursive: true, force: true });
-  }
-}
-
-const taken = (error: unknown) => (error as NodeJS.ErrnoException).code === "EEXIST";
-
-function claimFolder(partial: string, path: string): boolean {
-  try {
-    mkdirSync(path);
-  } catch (error) {
-    if (taken(error)) return false;
-    throw error;
-  }
-  renameSync(partial, path);
-  return true;
-}
-
-function claimFile(partial: string, path: string): boolean {
-  try {
     linkSync(partial, path);
     return true;
   } catch (error) {
-    if (taken(error)) return false;
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
     throw error;
+  } finally {
+    rmSync(partial, { force: true });
   }
 }

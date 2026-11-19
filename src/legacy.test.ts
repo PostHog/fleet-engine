@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fleetAdapter } from "./adapters/fleet/adapter.ts";
 import { jobsAdapter } from "./adapters/jobs/adapter.ts";
 import type { CommandRunner } from "./adapters/run.ts";
 import { main } from "./cli.ts";
-import { fleetIsHedge, legacyPaths } from "./legacy.ts";
+import { fleetIsHedge, legacyPaths, underLegacyPath } from "./legacy.ts";
+import { saveAnswers, saveMachine } from "./profile/profile.ts";
 import { filesAdapter, type Adapter } from "./reconciler/apply.ts";
+import { fakeLaunchd } from "./testing/old-fleet.ts";
 import { fakeSystemd } from "./testing/systemd.ts";
 import { cliFixtures, repoRoot } from "./testing/cli.ts";
 import { git, tempDirs } from "./testing/git.ts";
@@ -24,32 +27,20 @@ function linuxMachine(home = temp.make("home-")) {
     if (command.join(" ") === "crontab -") return (cron.text = options?.input ?? ""), { code: 0, stdout: "" };
     return systemd.run(command, options);
   };
-  return { home, systemd, hedge: machineCommand(home, "linux", jobsAdapter({ run, engineRoot: repoRoot })) };
+  return { home, systemd, hedge: machineCommand(home, "linux", run) };
 }
 
 function macMachine() {
   const home = temp.make("home-");
-  const launchd = { loaded: new Set<string>(), disabled: new Set<string>(), calls: [] as string[][], bootstrapFails: false };
-  const run: CommandRunner = async (command) => {
-    launchd.calls.push(command);
-    const [tool, verb, target, file] = command;
-    if (tool !== "launchctl") return { code: 0, stdout: "" };
-    if (verb === "print") return { code: launchd.loaded.has(target!) ? 0 : 113, stdout: "" };
-    if (verb === "bootstrap") {
-      if (launchd.bootstrapFails) return { code: 5, stdout: "" };
-      launchd.loaded.add(`gui/501/${basename(file!, ".plist")}`);
-    }
-    if (verb === "bootout") launchd.loaded.delete(target!);
-    if (verb === "disable") launchd.disabled.add(target!);
-    return { code: 0, stdout: "" };
-  };
-  return { home, launchd, hedge: machineCommand(home, "darwin", jobsAdapter({ run, engineRoot: repoRoot, uid: 501 })) };
+  const launchd = fakeLaunchd();
+  return { home, launchd, hedge: machineCommand(home, "darwin", launchd.run) };
 }
 
-function machineCommand(home: string, platform: NodeJS.Platform, jobs: Adapter) {
+function machineCommand(home: string, platform: NodeJS.Platform, run: CommandRunner) {
+  const adapters = (): Adapter[] => [fleetAdapter({ run, uid: 501, accountHome: async () => home, tasks: async () => undefined }), filesAdapter, jobsAdapter({ run, engineRoot: repoRoot, uid: 501, accountHome: async () => home })];
   return async (args: string[]) => {
     const lines: string[] = [];
-    const code = await main(args, { home, engineRoot: repoRoot, platform, env: {}, print: (line) => lines.push(line), run: async () => 0, adapters: () => [filesAdapter, jobs] });
+    const code = await main(args, { home, engineRoot: repoRoot, platform, env: {}, print: (line) => lines.push(line), run: async () => 0, adapters });
     return { code, output: lines.join("\n") };
   };
 }
@@ -96,8 +87,8 @@ async function beforeTheRename(machine: Machine, launchd?: ReturnType<typeof mac
     writeFileSync(join(home, `.local/state/hedge/jobs/${id}.plist`), old);
     renameSync(join(home, `.local/state/hedge/jobs/${id}.plist`), join(home, `.local/state/hedge/jobs/${oldId(id)}.plist`));
     renameSync(join(home, `.local/state/hedge/jobs/${id}.sh`), join(home, `.local/state/hedge/jobs/${oldId(id)}.sh`));
-    launchd?.loaded.delete(`gui/501/dev.hedge.${id}`);
-    launchd?.loaded.add(`gui/501/dev.fleet.${oldId(id)}`);
+    launchd?.loaded.delete(`dev.hedge.${id}`);
+    launchd?.loaded.add(`dev.fleet.${oldId(id)}`);
   }
   for (const [before, after] of legacyPaths) if (existsSync(join(home, after))) renameSync(join(home, after), join(home, before));
   const statePath = join(home, ".local/state/fleet/state.json");
@@ -112,8 +103,7 @@ const bothTrees = (home: string) => Object.fromEntries(legacyPaths.flatMap((pair
 const oldRoot = (home: string) => join(home, ".local/share/fleet/engine");
 
 /** A checkout of this engine at the path the engine had before the rename, as the old updater leaves it once it pulled Hedge. */
-function oldCheckout(home: string) {
-  const root = oldRoot(home);
+function oldCheckout(home: string, root = oldRoot(home)) {
   for (const path of ["hedge", "fleet", "src", "packs", "package.json"]) cpSync(join(repoRoot, path), join(root, path), { recursive: true });
   symlinkSync(join(repoRoot, "node_modules"), join(root, "node_modules"));
   return root;
@@ -122,21 +112,39 @@ function oldCheckout(home: string) {
 const quiet = (home: string) => ({ HOME: home, PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" });
 
 describe("an engine in a Fleet path from before the rename", () => {
-  test("apply, update, setup and prune change nothing in either tree, print the notice, and exit 0", async () => {
+  test("an old job's command exits 0 and every other command exits 1, each with the notice, and neither changes either tree", async () => {
     const machine = linuxMachine();
     await beforeTheRename(machine);
     mkdirSync(join(machine.home, ".config/hedge"), { recursive: true });
     writeFileSync(join(machine.home, ".config/hedge/new.txt"), "new\n");
     const before = bothTrees(machine.home);
+    const jobs = [["nightly", "fleet-update", "--", "fleet", "update"], ["prune", "--auto"], ["refresh"], ["run", "slack/slack-trigger"]];
+    const others = [["apply"], ["update"], ["setup"], ["prune"], ["import-fleet"], ["retire-fleet"], ["help"], []];
 
-    for (const args of [["apply"], ["update"], ["setup"], ["prune", "--auto"], ["import-fleet"]]) {
+    for (const args of [...jobs, ...others]) {
       const lines: string[] = [];
       const code = await main(args, { home: machine.home, engineRoot: oldRoot(machine.home), platform: "linux", env: {}, print: (line) => lines.push(line), run: async () => 0 });
-      expect({ args, code, lines }).toEqual({ args, code: 0, lines: [fleetIsHedge] });
+      expect({ args, code, lines }).toEqual({ args, code: jobs.includes(args) ? 0 : 1, lines: [fleetIsHedge] });
     }
 
     expect(bothTrees(machine.home)).toEqual(before);
     expect(machine.systemd.calls).toEqual([]);
+  });
+
+  test("the launcher is inert when the path it was run by, or the path it resolves to, is a Fleet path", () => {
+    const byName = temp.make("home-");
+    mkdirSync(join(byName, ".local/share/fleet"), { recursive: true });
+    symlinkSync(oldCheckout(byName, join(byName, "checkout")), oldRoot(byName));
+    const byTarget = temp.make("home-");
+    symlinkSync(oldCheckout(byTarget), join(byTarget, "engine"));
+    const run = (home: string, launcher: string, ...args: string[]) => {
+      const done = Bun.spawnSync(["sh", launcher, ...args], { env: quiet(home) });
+      return [done.exitCode, done.stderr.toString()];
+    };
+
+    expect(run(byName, join(oldRoot(byName), "hedge"), "apply")).toEqual([1, `${fleetIsHedge}\n`]);
+    expect(run(byName, join(oldRoot(byName), "fleet"), "prune", "--auto")).toEqual([0, `${fleetIsHedge}\n`]);
+    expect(run(byTarget, join(byTarget, "engine/hedge"), "apply")).toEqual([1, `${fleetIsHedge}\n`]);
   });
 
   test("an old scheduled job that runs the old checkout's fleet changes nothing and exits 0", () => {
@@ -167,10 +175,29 @@ describe("an engine in a Fleet path from before the rename", () => {
     expect([hook.exitCode, hook.stdout.toString(), hook.stderr.toString()]).toEqual([0, "", `${fleetIsHedge}\n`]);
     expect(bothTrees(home)).toEqual(before);
   });
+
+  test("a hook runner whose folder or file resolves into a Fleet path exits 0 with the notice", () => {
+    const home = temp.make("home-");
+    const root = oldCheckout(home);
+    mkdirSync(join(home, ".config/fleet/hooks"), { recursive: true });
+    cpSync(join(root, "packs/base/hooks/run.sh"), join(home, ".config/fleet/hooks/run.sh"));
+    symlinkSync(join(home, ".config/fleet"), join(home, ".config/hedge"));
+    const other = temp.make("home-");
+    const otherRoot = oldCheckout(other);
+    mkdirSync(join(other, ".config/hedge/hooks"), { recursive: true });
+    symlinkSync(join(otherRoot, "packs/base/hooks/run.sh"), join(other, ".config/hedge/hooks/run.sh"));
+    const hook = (at: string, runner: string) => {
+      const done = Bun.spawnSync(["sh", runner, "claude", "UserPromptSubmit"], { env: quiet(at), stdin: new TextEncoder().encode("{}") });
+      return [done.exitCode, done.stdout.toString(), done.stderr.toString()];
+    };
+
+    expect(hook(home, join(home, ".config/hedge/hooks/run.sh"))).toEqual([0, "", `${fleetIsHedge}\n`]);
+    expect(hook(other, join(other, ".config/hedge/hooks/run.sh"))).toEqual([0, "", `${fleetIsHedge}\n`]);
+  });
 });
 
 describe("hedge import-fleet, which get.sh runs once the new engine is in place", () => {
-  test("copies the machine file, the profile, the config folder and the SSH keys with their modes, leaves the old tree as it was, and then apply turns the old jobs off", async () => {
+  test("copies the machine file, the profile, the config folder and the SSH keys with their modes, leaves the old tree as it was, and after retire-fleet, apply runs", async () => {
     const machine = linuxMachine();
     const { home, systemd } = machine;
     await beforeTheRename(machine);
@@ -194,9 +221,11 @@ describe("hedge import-fleet, which get.sh runs once the new engine is in place"
     const before = oldTree(home);
 
     const imported = await machine.hedge(["import-fleet"]);
+    const retired = await machine.hedge(["retire-fleet"]);
     const applied = await machine.hedge(["apply"]);
 
     expect(imported.output).toContain("Hedge: copied ~/.config/fleet to ~/.config/hedge.");
+    expect(retired.output).toContain("Hedge: stopped and turned off the systemd unit fleet-watch.service from before the rename, and kept its files.");
     expect(applied.code).toBe(0);
     expect(oldTree(home)).toEqual(before);
     expect(tree(join(home, ".config/hedge/secrets"))).toEqual(tree(join(home, ".config/fleet/secrets")));
@@ -215,25 +244,26 @@ describe("hedge import-fleet, which get.sh runs once the new engine is in place"
     expect(Object.keys(state.groups.hedge!).filter(underOldPaths)).toEqual([]);
     expect(Object.keys(state.groups.hedge!)).toContain(".config/hedge/hooks/run.sh");
 
-    systemd.calls.length = 0;
     const again = await machine.hedge(["import-fleet"]);
     const second = await machine.hedge(["apply"]);
 
     expect(again.output).toBe("");
     expect(second.output).toContain("Applied 0 changes.");
-    expect(systemd.calls.filter((call) => call.at(-1) === "fleet-watch.service" && call[2] !== "show")).toEqual([]);
+    expect(systemd.units.get("fleet-watch.service")).toEqual({ active: false, enabled: false });
     expect(oldTree(home)).toEqual(before);
     expect(stateOf(home)).toEqual(state);
   });
 
-  test("on a Mac, apply after the import turns the old launchd jobs off and loads the new ones, and keeps the old plists", async () => {
+  test("on a Mac, retire-fleet after the import turns the old launchd jobs off, apply loads the new ones, and the old plists stay", async () => {
     const machine = macMachine();
     const { home, launchd } = machine;
     await beforeTheRename(machine, launchd);
-    const old = [...launchd.loaded].filter((label) => label.startsWith("gui/501/dev.fleet."));
+    const old = [...launchd.loaded].filter((label) => label.startsWith("dev.fleet."));
     const plists = tree(join(home, "Library/LaunchAgents"));
 
     await machine.hedge(["import-fleet"]);
+    expect((await machine.hedge(["apply"])).code).toBe(1);
+    expect((await machine.hedge(["retire-fleet"])).code).toBe(0);
     expect((await machine.hedge(["apply"])).code).toBe(0);
 
     expect(old.length).toBeGreaterThan(0);
@@ -280,6 +310,69 @@ describe("hedge import-fleet, which get.sh runs once the new engine is in place"
     expect(stateOf(home)).toEqual({ version: 1, groups: { hedge: { ".agents/AGENTS.md": record("new") } } } as never);
   });
 
+  test("after an import that stopped part way, the next import copies each file that is still missing, replaces none, and leaves a new path it did not make alone", async () => {
+    const home = temp.make("home-");
+    mkdirSync(join(home, ".config/fleet/hooks"), { recursive: true });
+    writeFileSync(join(home, ".config/fleet/kept.txt"), "mine\n");
+    writeFileSync(join(home, ".config/fleet/hooks/notes.md"), "notes\n", { mode: 0 });
+    mkdirSync(join(home, ".local/share/fleet-mcphub"), { recursive: true });
+    writeFileSync(join(home, ".local/share/fleet-mcphub/auth.json"), "{}\n");
+
+    const stopped = await hedge(["import-fleet"], home);
+    chmodSync(join(home, ".config/fleet/hooks/notes.md"), 0o600);
+    writeFileSync(join(home, ".config/hedge/kept.txt"), "changed since\n");
+    mkdirSync(join(home, ".local/share/hedge-mcphub"), { recursive: true });
+    const resumed = await hedge(["import-fleet"], home);
+    rmSync(join(home, ".config/hedge/hooks/notes.md"));
+    const again = await hedge(["import-fleet"], home);
+
+    expect(stopped.code).toBe(1);
+    expect(resumed.code).toBe(0);
+    expect(resumed.output).toContain("Hedge: copied ~/.config/fleet to ~/.config/hedge.");
+    expect(readFileSync(join(home, ".config/hedge/kept.txt"), "utf8")).toBe("changed since\n");
+    expect(readdirSync(join(home, ".local/share/hedge-mcphub"))).toEqual([]);
+    expect(again.output).toBe("");
+    expect([...readdirSync(join(home, ".config/hedge")), ...readdirSync(join(home, ".config/hedge/hooks"))].filter((name) => name.includes(".partial"))).toEqual([]);
+    expect(existsSync(join(home, ".config/hedge/hooks/notes.md"))).toBe(false);
+  });
+
+  test("does not point the machine file at a profile copy whose profile file was a link", async () => {
+    const home = temp.make("home-");
+    const repo = join(home, ".local/share/fleet/profile");
+    cpSync(profileDir(), repo, { recursive: true });
+    const outside = join(temp.make("outside-"), "hedge.json");
+    renameSync(join(repo, "hedge.json"), outside);
+    symlinkSync(outside, join(repo, "hedge.json"));
+    git(repo, "init", "-q");
+    git(repo, "add", ".");
+    git(repo, "commit", "-q", "-m", "profile");
+    mkdirSync(join(home, ".config/fleet"), { recursive: true });
+    writeFileSync(join(home, ".config/fleet/machine.json"), JSON.stringify({ role: "devbox", profileDir: repo }));
+
+    await hedge(["import-fleet"], home);
+
+    expect(existsSync(join(home, ".local/share/hedge/profile/hedge.json"))).toBe(false);
+    expect(JSON.parse(readFileSync(join(home, ".config/hedge/machine.json"), "utf8"))).toEqual({ role: "devbox" });
+  });
+
+  test("copies the undo ledger with the ownership records when it is a Hedge step ledger, and leaves one that is not behind", async () => {
+    const ledger = { version: 1, steps: [{ pack: "base", id: "tool", check: ["fleet", "check"], undo: ["fleet", "undo"] }], human: [] };
+    const homes = [ledger, { version: 1, steps: [{ pack: "base" }] }].map((value) => {
+      const home = temp.make("home-");
+      mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
+      writeFileSync(join(home, ".local/state/fleet/state.json"), JSON.stringify({ version: 1, groups: {} }));
+      writeFileSync(join(home, ".local/state/fleet/steps.json"), JSON.stringify(value));
+      return home;
+    });
+
+    const results = await Promise.all(homes.map((home) => hedge(["import-fleet"], home)));
+
+    expect(results.map((result) => result.code)).toEqual([0, 0]);
+    expect(JSON.parse(readFileSync(join(homes[0]!, ".local/state/hedge/steps.json"), "utf8"))).toEqual(ledger);
+    expect(existsSync(join(homes[1]!, ".local/state/hedge/steps.json"))).toBe(false);
+    expect(results[1]!.output).toContain("Hedge: left ~/.local/state/fleet/steps.json behind, because it is not a Hedge step ledger.");
+  });
+
   test("refuses to copy through a link on the way to a new path, and writes nothing there", async () => {
     const home = temp.make("home-");
     mkdirSync(join(home, ".config/fleet"), { recursive: true });
@@ -312,6 +405,82 @@ describe("a profile from before the rename", () => {
   });
 });
 
+describe("a profile in a Fleet path from before the rename", () => {
+  const oldProfile = (home: string) => {
+    const old = join(home, ".local/share/fleet/profile");
+    cpSync(profileDir(), old, { recursive: true });
+    return old;
+  };
+  const machineFile = (home: string) => join(home, ".config/hedge/machine.json");
+
+  test("apply --profile uses the Hedge copy of the profile and remembers the copy", async () => {
+    const home = temp.make("home-");
+    const old = oldProfile(home);
+    cpSync(old, join(home, ".local/share/hedge/profile"), { recursive: true });
+    const before = tree(old);
+
+    const result = await hedge(["apply", "--profile", old], home);
+
+    expect(result.code).toBe(0);
+    expect(result.output).toContain(`Hedge: uses ${join(home, ".local/share/hedge/profile")}, the copy of ${old}, because ${old} is in a Fleet path from before the rename.`);
+    expect(JSON.parse(readFileSync(machineFile(home), "utf8")).profileDir).toBe(join(home, ".local/share/hedge/profile"));
+    expect(tree(old)).toEqual(before);
+  });
+
+  test("apply --profile refuses a profile in a Fleet path that has no copy, also through a link, and writes no machine file", async () => {
+    const home = temp.make("home-");
+    const old = oldProfile(home);
+    symlinkSync(old, join(home, "my-profile"));
+
+    const results = [await hedge(["apply", "--profile", old], home), await hedge(["apply", "--profile", join(home, "my-profile")], home)];
+
+    expect(results.map((result) => result.code)).toEqual([1, 1]);
+    for (const [result, given] of results.map((result, index) => [result, [old, join(home, "my-profile")][index]!] as const)) expect(result.output).toContain(`${given} is in a Fleet path from before the rename, so Hedge does not use it. Run get.sh to copy it, or pass --profile with a profile outside the Fleet paths.`);
+    expect(existsSync(machineFile(home))).toBe(false);
+  });
+
+  test("apply --profile refuses a Hedge copy that is a link back into the Fleet path", async () => {
+    const home = temp.make("home-");
+    const old = oldProfile(home);
+    mkdirSync(join(home, ".local/share/hedge"), { recursive: true });
+    symlinkSync(old, join(home, ".local/share/hedge/profile"));
+
+    const result = await hedge(["apply", "--profile", old], home);
+
+    expect(result.code).toBe(1);
+    expect(result.output).toContain(`${old} is in a Fleet path from before the rename, so Hedge does not use it.`);
+  });
+
+  test("hedge set on a machine whose machine file points into a Fleet path changes the Hedge copy, not the old profile", async () => {
+    const home = temp.make("home-");
+    const old = oldProfile(home);
+    const remote = temp.make("remote-");
+    git(remote, "init", "-q", "--bare");
+    for (const args of [["init", "-q", "-b", "main"], ["config", "user.name", "Test"], ["config", "user.email", "test@example.com"], ["add", "."], ["commit", "-q", "-m", "profile"], ["remote", "add", "origin", remote], ["push", "-q", "-u", "origin", "main"]]) git(old, ...args);
+    cpSync(old, join(home, ".local/share/hedge/profile"), { recursive: true });
+    mkdirSync(dirname(machineFile(home)), { recursive: true });
+    writeFileSync(machineFile(home), JSON.stringify({ schema: 1, role: "linux", profileDir: old }));
+    const before = tree(old);
+
+    const result = await hedge(["set", "base.heavySlots=3"], home);
+
+    expect(result.output).toContain("Saved");
+    expect(JSON.parse(readFileSync(join(home, ".local/share/hedge/profile/hedge.json"), "utf8")).settings).toEqual({ "base.heavySlots": 3 });
+    expect(tree(old)).toEqual(before);
+  });
+
+  test("the profile writers refuse a folder in a Fleet path", async () => {
+    const home = temp.make("home-");
+    const old = oldProfile(home);
+    const before = tree(old);
+
+    await expect(saveAnswers(old, { plan: "claude" })).rejects.toThrow(`${old} is in a Fleet path from before the rename, so Hedge does not write there.`);
+    await expect(saveMachine(home, { role: "linux", profileDir: old } as never)).rejects.toThrow(`${old} is in a Fleet path from before the rename, so Hedge does not write there.`);
+    expect(tree(old)).toEqual(before);
+    expect(existsSync(machineFile(home))).toBe(false);
+  });
+});
+
 describe("FLEET_ variables from before the rename", () => {
   test("hedge reads a FLEET_ variable when its HEDGE_ variable is unset, and the HEDGE_ one when both are set", async () => {
     const home = temp.make("home-");
@@ -324,4 +493,12 @@ describe("FLEET_ variables from before the rename", () => {
     expect(fromOld.output).toContain(".agents/AGENTS.md needs to be updated.");
     expect(fromNew.output).not.toContain(".agents/AGENTS.md needs to be updated.");
   });
+});
+
+test("a path below a link into a Fleet path counts as a Fleet path, also when the path does not exist yet", () => {
+  const home = temp.make("home-");
+  mkdirSync(join(home, ".config/fleet"), { recursive: true });
+  symlinkSync(join(home, ".config/fleet"), join(home, "elsewhere"));
+  mkdirSync(join(home, "plain"));
+  expect([join(home, "elsewhere/new/hedge.json"), join(home, "elsewhere"), join(home, "plain/new/hedge.json")].map((path) => underLegacyPath(home, path))).toEqual([true, true, false]);
 });

@@ -1,5 +1,5 @@
 import { existsSync, realpathSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 export const profileFileName = "hedge.json";
 export const legacyProfileFileName = "fleet.json";
@@ -41,6 +41,14 @@ export const legacyPaths: ReadonlyArray<readonly [string, string]> = [
   [".ssh/fleet-peers.conf", ".ssh/hedge-peers.conf"],
 ];
 
+/** The commands that the jobs and services of the engine from before the rename run. Each is the start of an argument list. */
+export const oldJobCommands: ReadonlyArray<readonly string[]> = [
+  ["nightly"], ["refresh"], ["prune", "--auto"], ["usage", "flush"], ["context", "sync"], ["box", "sweep"], ["box", "nightly"], ["box", "grants"], ["box", "restore"],
+  ["secret", "sweep"], ["dream", "run"], ["peers", "renew"], ["peers", "restore"], ["disk-watch"], ["cli-proxy-balance"], ["memory-sync"], ["recover"], ["run"],
+];
+
+export const isOldJob = (argv: string[]) => oldJobCommands.some((command) => command.every((word, index) => argv[index] === word));
+
 export const fleetIsHedge = "Fleet is now Hedge. Run: curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh | sh";
 
 /** Whether target, relative to the home folder, is a path from before the rename or inside one. */
@@ -52,11 +60,14 @@ export function renamed(target: string): string | undefined {
   return match && `${match[1]}${target.slice(match[0].length)}`;
 }
 
-const real = (path: string) => {
+/** path with every link resolved, including the links above a part of it that does not exist yet. */
+const real = (path: string): string => {
+  const full = resolve(path);
   try {
-    return realpathSync(path);
+    return realpathSync(full);
   } catch {
-    return resolve(path);
+    const parent = dirname(full);
+    return parent === full ? full : join(real(parent), basename(full));
   }
 };
 
@@ -64,4 +75,21 @@ const real = (path: string) => {
 export function underLegacyPath(home: string, path: string): boolean {
   const homes = new Set([resolve(home), real(home)]);
   return [resolve(path), real(path)].some((full) => [...homes].some((root) => full.startsWith(`${root}/`) && inLegacyPath(full.slice(root.length + 1))));
+}
+
+/** The Hedge path of a path in a Fleet path from before the rename, as written or with its links resolved. */
+export function renamedPath(home: string, path: string): string | undefined {
+  for (const full of [resolve(path), real(path)])
+    for (const root of new Set([resolve(home), real(home)])) {
+      const after = full.startsWith(`${root}/`) ? renamed(full.slice(root.length + 1)) : undefined;
+      if (after) return join(root, after);
+    }
+  return undefined;
+}
+
+/** Whether path, as written or with its links resolved, is in a Fleet path from before the rename below any home folder. */
+export const inAnyLegacyPath = (path: string): boolean => [resolve(path), real(path)].some((full) => legacyPaths.some(([before]) => full.includes(`/${before}/`) || full.endsWith(`/${before}`)));
+
+export function refuseLegacyPath(path: string) {
+  if (inAnyLegacyPath(path)) throw new Error(`${path} is in a Fleet path from before the rename, so Hedge does not write there.`);
 }

@@ -30,11 +30,13 @@ import { spawnRunner, type CommandRunner } from "./adapters/run.ts";
 import { become, canBecome, type Become } from "./runner/become.ts";
 import { trackCommand } from "./usage/usage.ts";
 import { asHedge } from "./reconciler/engine-command.ts";
-import { adoptLegacyEnv, fleetIsHedge, underLegacyPath, withLegacyNames } from "./legacy.ts";
+import { adoptLegacyEnv, fleetIsHedge, isOldJob, profileFile, renamedPath, underLegacyPath, withLegacyNames } from "./legacy.ts";
 import { importFleet } from "./import-fleet.ts";
+import { fleetAdapter, type FleetAdapter } from "./adapters/fleet/adapter.ts";
 
 /** env: the environment that tells a Coder workspace apart; tests pass their own. */
-export type CliOptions = { home: string; engineRoot: string; platform: NodeJS.Platform; env?: Record<string, string | undefined>; print: (line: string) => void; fail?: (line: string) => void; run?: Runner; terminal?: Terminal; apply?: (profileDir: string, skip?: string[]) => Promise<number>; setup?: Pick<SetupOptions, "machine" | "fetchSource" | "doctor" | "env" | "timeZone" | "clock">; clock?: Clock; adapters?: () => Adapter[]; hostname?: () => string; stdin?: () => ReadableStream<Uint8Array>; capture?: CommandRunner; become?: Become; interactive?: boolean };
+/** launchedFrom: the engine folder as the command named it, before links resolve. */
+export type CliOptions = { home: string; engineRoot: string; launchedFrom?: string; platform: NodeJS.Platform; env?: Record<string, string | undefined>; print: (line: string) => void; fail?: (line: string) => void; run?: Runner; terminal?: Terminal; apply?: (profileDir: string, skip?: string[]) => Promise<number>; setup?: Pick<SetupOptions, "machine" | "fetchSource" | "doctor" | "env" | "timeZone" | "clock">; clock?: Clock; adapters?: () => Adapter[]; hostname?: () => string; stdin?: () => ReadableStream<Uint8Array>; capture?: CommandRunner; become?: Become; interactive?: boolean };
 
 const usage = `Hedge: one setup for T3 Code, agents, and your workflows
 
@@ -74,12 +76,13 @@ const builtins: Record<string, string[]> = { apply: [], doctor: [], update: [], 
 export async function main(argv: string[], options: CliOptions): Promise<number> {
   const [command, ...rest] = argv;
   const help = !command || command === "help" || command === "--help";
-  if (underLegacyPath(options.home, options.engineRoot)) return inert(help, options);
+  if (options.env?.HEDGE_INERT === "1" || [options.engineRoot, options.launchedFrom].some((path) => path !== undefined && underLegacyPath(options.home, path))) return inert(argv, options);
   if (options.env) adoptLegacyEnv(options.env);
   if (help) return options.print(usage), 0;
   if (Object.hasOwn(builtins, command)) trackCommand(options.home, command, rest, builtins[command]!, options.env ?? {}, options.interactive);
   try {
     if (command === "import-fleet") return await bringOverFleet(options);
+    if (command === "retire-fleet") return await retireFleet(options);
     if (command === "apply" || command === "doctor") return await reconcile(command, rest, options);
     if (command === "update") return await runUpdate(options);
     if (command === "refresh") return await runRefresh(rest, options);
@@ -97,17 +100,31 @@ export async function main(argv: string[], options: CliOptions): Promise<number>
   }
 }
 
-/** An engine in a Fleet path from before the rename changes nothing, and exits 0 so that old jobs and hooks raise no alert. */
-function inert(help: boolean, options: CliOptions) {
-  if (help) options.print(usage);
+/** An engine in a Fleet path from before the rename changes nothing. An old job exits 0 so that it raises no alert; every other command exits 1. */
+function inert(argv: string[], options: CliOptions) {
   (options.fail ?? options.print)(fleetIsHedge);
-  return 0;
+  return isOldJob(argv) ? 0 : 1;
 }
 
 /** get.sh runs this once the new engine is in place. */
 async function bringOverFleet(options: CliOptions) {
-  for (const line of await importFleet(options.home)) options.print(`Hedge: copied ${line}.`);
+  for (const line of await importFleet(options.home)) options.print(`Hedge: ${line}.`);
   return 0;
+}
+
+/** get.sh runs this after import-fleet and before apply: it stops and turns off every piece of Fleet, keeps their files, and fails while one is not verified stopped. */
+async function retireFleet(options: CliOptions) {
+  const fleet = (options.adapters ?? engineAdapters)().find((adapter): adapter is FleetAdapter => adapter.name === "fleet") ?? fleetAdapter();
+  const fail = options.fail ?? options.print;
+  const result = await fleet.retire(options.home, options.platform);
+  if (!result) return options.print(`Hedge: left the jobs from before the rename alone, because ${options.home} is not your account's home folder.`), 0;
+  for (const item of result.retired) options.print(`Hedge: stopped and turned off the ${item} from before the rename, and kept its files.`);
+  for (const note of result.notes) options.print(`Hedge: ${note}`);
+  if (!result.retired.length && !result.left.length) options.print("Hedge: nothing from before the rename runs.");
+  if (!result.left.length) return 0;
+  for (const item of result.left) fail(`Hedge: ${item}. Hedge could not verify that it stopped.`);
+  fail("Hedge: stop each one by hand, then run hedge retire-fleet again. Hedge starts nothing while Fleet still runs.");
+  return 1;
 }
 
 /** Runs hedge setup and records its transcript. A failed step's message names hedge triage. */
@@ -452,12 +469,22 @@ function handlerSubcommands(plan: Plan) {
   return Object.fromEntries(Object.entries(plan.handlers).flatMap(([seam, handler]) => (handler.subcommands ? [[seam, handler.subcommands]] : [])));
 }
 
+/** A profile in a Fleet path from before the rename is never used: Hedge uses its Hedge copy, which get.sh makes, or refuses. */
+function hedgeProfile(options: CliOptions, dir: string): string {
+  if (!underLegacyPath(options.home, dir)) return dir;
+  const copy = renamedPath(options.home, dir);
+  if (!copy || underLegacyPath(options.home, copy) || !existsSync(profileFile(copy))) throw new Error(`${dir} is in a Fleet path from before the rename, so Hedge does not use it. Run get.sh to copy it, or pass --profile with a profile outside the Fleet paths.`);
+  options.print(`Hedge: uses ${copy}, the copy of ${dir}, because ${dir} is in a Fleet path from before the rename.`);
+  return copy;
+}
+
 /** withPack resolves the plan as if the profile also had that pack on, for the undo of one of its steps. */
 async function loadPlan(options: CliOptions, profileFlag: string | undefined, mode: { fetch: boolean; remember: boolean; inherit?: boolean; pull?: boolean; withPack?: string; fetched?: FetchedSource[] }): Promise<{ plan: Plan; sources: FetchedSource[] }> {
   const saved = await loadMachine(options.home);
   const inherited = mode.inherit && !profileFlag ? options.env?.HEDGE_PROFILE_DIR : undefined;
-  const profileDir = profileFlag ? resolvePath(profileFlag) : inherited ? resolvePath(inherited) : saved?.profileDir;
-  if (!profileDir) throw new Error("no profile on this machine. Run get.sh, or pass --profile <dir>.");
+  const given = profileFlag ? resolvePath(profileFlag) : inherited ? resolvePath(inherited) : saved?.profileDir;
+  if (!given) throw new Error("no profile on this machine. Run get.sh, or pass --profile <dir>.");
+  const profileDir = hedgeProfile(options, given);
   const machine: MachineFile = { ...thisMachine(saved, options.platform, options.env ?? {}, (options.hostname ?? hostname)()), profileDir };
   if (mode.pull) await pullProfile(profileDir);
   const loaded = await loadProfile(profileDir);
@@ -509,6 +536,6 @@ if (import.meta.main) {
       process.exit(130);
     });
   }
-  const code = await main(Bun.argv.slice(2), { home: Bun.env.HOME ?? homedir(), engineRoot, platform: process.platform, env: Bun.env, print: (line) => console.log(line), fail: (line) => console.error(line), ...(canBecome() ? { become } : {}) });
+  const code = await main(Bun.argv.slice(2), { home: Bun.env.HOME ?? homedir(), engineRoot, launchedFrom: resolvePath(Bun.argv[1]!, "../.."), platform: process.platform, env: Bun.env, print: (line) => console.log(line), fail: (line) => console.error(line), ...(canBecome() ? { become } : {}) });
   process.exit(code);
 }

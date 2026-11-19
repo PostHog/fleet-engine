@@ -738,3 +738,20 @@ onLinux("prune keeps a landed worktree whose repository is a Fleet checkout from
   expect(await readdir(join(root, "engine"))).toEqual(["backed"]);
   expect(await readdir(join(elsewhere.root, "repo"))).toEqual([]);
 });
+
+onLinux("prune keeps every worktree in a Fleet path from before the rename, also through a linked root, and inspects none of them", async () => {
+  const { base, repo } = await repository();
+  const inFleet = join(base, ".local/share/fleet/worktrees");
+  const inside = join(inFleet, "repo", "inside");
+  const linkedReal = join(base, ".local/share/fleet/linked");
+  const linked = join(base, "linked", "repo", "through");
+  await sh(repo, "git", "worktree", "add", "-q", "-b", "inside", inside);
+  await sh(repo, "git", "worktree", "add", "-q", "-b", "through", join(linkedReal, "repo", "through"));
+  await symlink(linkedReal, join(base, "linked"));
+  const statePath = t3State(join(base, "statev2.sqlite"), [inside, linked].map((worktreePath) => ({ worktreePath, settledAt })));
+
+  const verdicts = [...pass(base, inFleet, statePath, { home: base }), ...pass(base, join(base, "linked"), statePath, { home: base })];
+
+  expect(verdicts.sort((a, b) => a.path.localeCompare(b.path))).toEqual([join(linkedReal, "repo", "through"), inside].map((path) => ({ path, remove: false, reason: "it is in a Fleet path from before the rename" })));
+  expect([await readdir(join(inFleet, "repo")), await readdir(join(linkedReal, "repo"))]).toEqual([["inside"], ["through"]]);
+});

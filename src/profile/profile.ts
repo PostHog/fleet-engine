@@ -8,7 +8,7 @@ import { sourceName } from "../pack/sources.ts";
 import { withoutCredentials } from "../credentials.ts";
 import { writePrivateFile } from "../files/private.ts";
 import { isKeptForBoxes } from "../hub/names.ts";
-import { profileFile } from "../legacy.ts";
+import { profileFile, refuseLegacyPath } from "../legacy.ts";
 
 export class ProfileError extends Error {}
 
@@ -47,6 +47,7 @@ async function rebasing(dir: string) {
  * caller removes a workflow override by saving the full override set.
  */
 export async function saveAnswers(dir: string, answers: Partial<ProfileFile>, options: { push?: boolean } = {}) {
+  refuseLegacyPath(dir);
   const path = profileFile(dir);
   const name = basename(path);
   if (options.push) await pullUnder(dir, path, answers);
@@ -145,6 +146,7 @@ export function placedMachine(machine: MachineFile, hub: string | undefined): Ma
 }
 
 export async function saveMachine(home: string, machine: MachineFile) {
+  if (machine.profileDir) refuseLegacyPath(machine.profileDir);
   const path = machinePath(home);
   await mkdir(dirname(path), { recursive: true });
   await writePrivateFile(path, JSON.stringify(machine, null, 2) + "\n");

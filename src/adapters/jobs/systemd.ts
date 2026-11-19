@@ -1,6 +1,5 @@
 export const unitsFolder = ".config/systemd/user";
 export const unitName = (id: string) => `hedge-${id}.service`;
-export const legacyUnitPrefix = "fleet-";
 export const unitTarget = (id: string) => `${unitsFolder}/${unitName(id)}`;
 
 export const systemdSafe = (path: string) => !/[\n\r]/.test(path);
