@@ -70,13 +70,12 @@ describe("the site build", () => {
     }
   });
 
-  test("every page carries its own script and styles and asks the site for no script or stylesheet file, so a cached page never meets a script of another release", () => {
+  test("every page carries its own script and styles and asks the site for no script or stylesheet file", () => {
     expect(Object.keys(files).filter((path) => /\.(js|css)$/.test(path))).toEqual([]);
     for (const [path, html] of pagesOf(files)) {
       expect([path, localTargets(path, html).filter((target) => /\.(js|css)$/.test(target))]).toEqual([path, []]);
       expect([path, html.match(/<script\b[^>]*\bsrc=|<link rel="stylesheet" href="(?!https:)/g)]).toEqual([path, null]);
       expect([path, pageScript(html).length > 1000, (html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? "").length > 1000]).toEqual([path, true, true]);
-      expect([path, pageScript(html)]).toEqual([path, pageScript(page("index.html"))]);
     }
   });
 

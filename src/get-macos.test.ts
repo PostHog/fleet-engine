@@ -68,6 +68,36 @@ esac`);
     expect(jobs.login()).toEqual(["com.apple.other"]);
   });
 
+  onLinuxHost("with --dry-run, names each launchd job of an earlier Fleet or Hedge it would stop and turn off, and leaves every job as it was", () => {
+    const box = sandbox("Darwin");
+    const jobs = earlierJobs(box);
+    const result = getSh(box, ["--", "--dry-run"]);
+    expect(result.code).toBe(0);
+    expect(result.output).toBe(
+      [
+        ...["com.fleet.mcphub", "dev.fleet.nightly", "dev.hedge.update"].map((label) => `Hedge: This is a preview, so Hedge did not stop or turn off the launchd job ${label} of an earlier Fleet or Hedge. Without --dry-run, get.sh stops it and turns it off.`),
+        "Hedge: Hedge runs on cloud boxes, not on a Mac. Your Mac only runs the T3 Code app. To set up your hub, follow https://posthog.github.io/hedge/#start",
+        "",
+      ].join("\n"),
+    );
+    expect(jobs.login()).toEqual(["com.apple.other", "com.fleet.mcphub", "dev.fleet.nightly", "dev.hedge.update"]);
+  });
+
+  for (const [why, args, stub] of [
+    ["an unknown flag", ["--dry-run"], undefined],
+    ["sudo", [], "echo 0"],
+  ] as const) {
+    onLinuxHost(`with ${why}, stops before it touches a launchd job`, () => {
+      const box = sandbox("Darwin");
+      const jobs = earlierJobs(box);
+      if (stub) box.stub("id", stub);
+      const result = getSh(box, [...args]);
+      expect(result.code).toBe(1);
+      expect(result.output).not.toContain("launchd job");
+      expect(jobs.login()).toEqual(["com.apple.other", "com.fleet.mcphub", "dev.fleet.nightly", "dev.hedge.update"]);
+    });
+  }
+
   onLinuxHost("still turns off each later job when launchd does not stop or turn off two jobs, prints each command a job needs, then exits 1 and names each job once", () => {
     const box = sandbox("Darwin");
     const jobs = earlierJobs(box, { keepRunning: ["com.fleet.mcphub"], failDisable: ["com.fleet.mcphub", "dev.fleet.nightly"] });

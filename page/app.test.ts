@@ -54,7 +54,9 @@ describe("the landing page in a browser", () => {
     switchOf(window, "communication").click();
     expect([line(window, "Packs on the first setup"), line(window, "Packs once the hub runs")]).toEqual(["pull-requests, orchestration", "hub"]);
     expect(t3Prompt(window, "start")).toBe(text(window, "start-text"));
-    expect(text(window, "start-status")).toBe("The prompt now sets up pull-requests and orchestration first.");
+    const shownName = (pack: string) => switchOf(window, pack).getAttribute("aria-label")!.replace(/ on the first setup$/, "");
+    expect(text(window, "start-status")).toBe(`The prompt now sets up ${shownName("pull-requests")} and ${shownName("orchestration")} first.`);
+    expect(shownName("pull-requests")).toBe("Pull requests");
     switchOf(window, "communication").click();
     expect(line(window, "Packs on the first setup")).toBe("pull-requests, orchestration, communication");
   });

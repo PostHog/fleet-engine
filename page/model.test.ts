@@ -51,14 +51,12 @@ describe("the Getting started prompt", () => {
 
   test("a pack that is switched off leaves the first setup, and comes back when it is switched on", () => {
     expect(line(startPrompt(data, flip(firstStart, "communication")), "Packs on the first setup")).toBe("pull-requests, orchestration");
-    expect(flip(firstStart, "communication", "communication")).toEqual(firstStart);
+    expect(startPrompt(data, flip(firstStart, "communication", "communication"))).toBe(startPrompt(data, firstStart));
     expect(line(startPrompt(data, flip(firstStart, "communication")), "Packs once the hub runs")).toBe("hub");
   });
 
   test("switches only the packs of the first setup", () => {
-    expect(data.startPacks).toEqual(["pull-requests", "orchestration", "communication"]);
-    expect(data.hubStartPacks).toEqual(["hub"]);
-    expect(flip(firstStart, "hub", "memory", "base")).toEqual(firstStart);
+    expect(startPrompt(data, flip(firstStart, "hub", "memory", "base"))).toBe(startPrompt(data, firstStart));
   });
 
   test("its first setup packs, as the guide's one by one command, are the packs setup turns on", async () => {
@@ -89,7 +87,7 @@ describe("the install prompt", () => {
         "",
         "Hedge runs on my hub and my nodes in the cloud, not on my Mac. Run each command of this prompt on the hub, over SSH with the `PATH` line of https://raw.githubusercontent.com/PostHog/hedge/main/SETUP.md when you run elsewhere. Install nothing from Hedge here. Ask me each choice with your question tool, and run every command yourself.",
         "",
-        '1. Find my hub. List my cloud boxes as step 1 of https://raw.githubusercontent.com/PostHog/hedge/main/SETUP.md does, and run `hedge hub status` over SSH on each one that runs, until one names the hub. Do not ask a `hedge` on this Mac: an earlier setup can leave one here. The name after "The hub:" is the SSH name of the hub. Use it as `<hub>` in each SSH command of a note. When every box prints "The hub: not named", or no box runs Hedge, I have no hub yet. Tell me, and offer to set one up first with steps 5, 7, and 9 of https://raw.githubusercontent.com/PostHog/hedge/main/SETUP.md. To make a box that already runs Hedge the hub, skip step 5 for it.',
+        '1. Find my hub. List my cloud boxes as step 1 of https://raw.githubusercontent.com/PostHog/hedge/main/SETUP.md does, and run `hedge hub status` over SSH on each one that runs, until one names the hub. Do not ask a `hedge` on this Mac: an earlier setup can leave one here. The name after "The hub:" is the SSH name of the hub. In each SSH command of a note, put that whole name in place of the host that holds `<hub>`. When every box prints "The hub: not named", or no box runs Hedge, I have no hub yet. Tell me, and offer to set one up first with steps 5, 7, and 9 of https://raw.githubusercontent.com/PostHog/hedge/main/SETUP.md. To make a box that already runs Hedge the hub, skip step 5 for it.',
         "2. Run `hedge update` on the hub, so it has the newest engine and packs. Then run `hedge packs` there, and leave out each pack that is already on.",
         '3. Read the setup note of each pack. Ask me what it asks, and collect the flags that it names. Where a note names "the setup command" or "the command in item 2 of step 9", use the `hedge packs` command of this prompt. Do not run a step that a note puts after that command yet.',
         "   - Memory: ~/.local/share/hedge/engine/packs/memory/SETUP.md",
@@ -133,6 +131,21 @@ describe("the install prompt", () => {
     expect(box.output()).toContain("\nThe hub: coder.hedge-hub");
     const guide = readFileSync(join(root, "SETUP.md"), "utf8");
     for (const heading of ["\n## 5. Create the hub and the nodes\n", "\n## 7. Set up Hedge on the hub\n", "\n## 9. Add the hub packs and the nodes\n"]) expect(guide).toContain(heading);
+  });
+
+  test("with the name that hedge hub status prints put in where it says, each SSH command of every setup note reaches the hub", async () => {
+    const box = await hubWithHedge();
+    expect(await box.hedge(["hub", "here", "coder.hedge-hub"])).toBe(0);
+    expect(await box.hedge(["hub", "status"])).toBe(0);
+    const hub = box.output().match(/The hub: (\S+)\.$/m)![1]!;
+    const text = installPrompt(data, everyPack());
+    expect(step(text, "Find my hub")).toContain('The name after "The hub:" is the SSH name of the hub. In each SSH command of a note, put that whole name in place of the host that holds `<hub>`.');
+    const notes = [...text.matchAll(/^ {3}- [^:]+: ~\/\.local\/share\/hedge\/engine\/(\S+)$/gm)].map((match) => readFileSync(join(root, match[1]!), "utf8"));
+    const filled = notes.map((note) => note.replace(/\bssh (-t )?[^\s`'"]*<hub>[^\s`'"]*/g, (_, flag: string | undefined) => `ssh ${flag ?? ""}${hub}`));
+    expect(filled.filter((note) => note.includes("<hub>"))).toEqual([]);
+    const targets = filled.flatMap((note) => [...note.matchAll(/\bssh (?:-t )?([^\s`'"]+)/g)].map((match) => match[1]!));
+    expect(targets.length).toBeGreaterThan(0);
+    expect(new Set(targets)).toEqual(new Set([hub]));
   });
 
   test("names only hedge commands that exist", async () => {

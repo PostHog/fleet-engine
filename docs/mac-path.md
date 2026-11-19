@@ -17,12 +17,30 @@ A test name is written as `file › describe › test`.
 
 ## `get.sh` on macOS
 
-`get.sh` stops at once on `Darwin`, before it installs or writes anything. It
-says that Hedge runs on cloud boxes and points at the setup page.
+`get.sh` installs nothing on `Darwin` and writes no file. First it reads its
+flags and checks that it does not run as root. Then it says that Hedge runs
+on cloud boxes and points at the setup page.
 
-**Code.** `get.sh`: the `uname -s` check after `set -eu`.
+On a Mac with an earlier Fleet or Hedge, it changes launchd settings. It
+stops each of their launchd jobs (`dev.fleet.*`, `com.fleet.*`,
+`dev.hedge.*`) with `launchctl bootout`, and turns it off with
+`launchctl disable`, so that it stays off at the next login. It keeps their
+files. To turn a job on again, run
+`launchctl enable gui/<uid>/<label>`, then
+`launchctl bootstrap gui/<uid> ~/Library/LaunchAgents/<label>.plist`.
 
-**Test.** `src/get-macos.test.ts › get.sh on macOS › stops before it installs or writes anything, says that Hedge runs on cloud boxes, and points at the setup page`
+With `-- --dry-run`, it changes nothing. It only names each job that it
+would stop and turn off.
+
+**Code.** `get.sh`: `retire_mac_jobs` and the `uname -s` check after it.
+
+**Tests.** In `src/get-macos.test.ts › get.sh on macOS`:
+
+- `stops before it installs or writes anything, says that Hedge runs on cloud boxes, and points at the setup page`
+- `with an earlier Fleet or Hedge on the Mac, stops and turns off each of their launchd jobs, keeps their files, installs nothing, and points at the setup page`
+- `with --dry-run, names each launchd job of an earlier Fleet or Hedge it would stop and turn off, and leaves every job as it was`
+- `with an unknown flag, stops before it touches a launchd job`
+- `with sudo, stops before it touches a launchd job`
 
 ## Mac code kept for outside engineers
 

@@ -234,9 +234,12 @@ T3 Chat** (up to 10 machines with Pro).
 ## 5. Create the hub and the nodes
 
 Create every workspace now, at once, and go on to step 6 while they start.
-Show each command as you start it. A value that is private, such as an email
-address, a token, or a key, shows as `<private>` in a command you show, and
-you never print it back.
+Show each command as you start it. Put only values that are not secret on a
+command line: every program on the Mac can read the arguments of a running
+command. A private value that is not a secret, such as an email address,
+shows as `<private>` in a command you show, and you never print it back. A
+secret, such as a token or a key, never goes on a command line. Item 4 says
+how a secret reaches a workspace.
 
 1. **Names.** Use `hedge-hub` and `hedge-node-1`, `hedge-node-2`, and so on.
    When `coder list` already has a workspace by that name that they do not
@@ -269,18 +272,42 @@ you never print it back.
    log. That is expected. A team pack can keep the profile in its GitHub org
    instead; step 7 checks the repo again. Below, `<profile repo>` is the
    `owner/name` you found.
-4. **Create.** Pass every parameter of the template with its own
-   `--parameter`, also those where the default is right, so you see each
-   value Coder uses. Give the hub a 200 GB disk and each node a 500 GB disk.
+4. **Create.** Pass every parameter of the template that is not a secret
+   with its own `--parameter`, also those where the default is right, so you
+   see each value Coder uses. Give the hub a 200 GB disk and each node a 500 GB disk.
    `--preset none` stops the preset question that `--yes` does not skip:
 
    ```sh
    coder create <name> --template <template> --preset none --parameter <disk parameter>=<200 or 500> --parameter <region parameter>=<region> --parameter <dotfiles parameter>=https://github.com/<profile repo> --parameter <other parameter>=<value> --yes
    ```
 
-   Write one `--parameter` for each parameter the template has. Never use
-   `--copy-parameters-from`: Coder then takes the copied workspace's values
-   over every `--parameter` you pass. Start the hub and the nodes at once,
+   Write one `--parameter` for each parameter the template has, except a
+   secret one. Never use `--copy-parameters-from`: Coder then takes the
+   copied workspace's values over every `--parameter` you pass.
+
+   Never give a secret, such as a token or a key, with `--parameter`. Coder
+   also keeps each parameter value with the workspace's build, where anyone
+   who can see the workspace reads it. When a template parameter asks for a
+   secret, ask for the secret with the secret prompt, delivered as a file.
+   Then:
+
+   - When the parameter has a default, keep the default. Give the secret to
+     the workspaces as a Coder secret instead. Coder reads it from standard
+     input and sets it in each workspace that starts:
+     `coder secret create <secret name> --env <variable> < <secret file>`.
+     When the template's files do not say which variable its tools read,
+     ask.
+   - When the parameter has no default, Coder needs it at create. Write it
+     to a parameter file that only the person can read:
+
+     ```sh
+     mkdir -p ~/.cache/hedge-setup && (umask 077 && perl -0777 -ne 's/\n\z//; s/(["\\])/\\$1/g; print "<secret parameter>: \"$_\"\n"' < <secret file> > ~/.cache/hedge-setup/secret-parameters.yaml)
+     ```
+
+     Add `--rich-parameter-file ~/.cache/hedge-setup/secret-parameters.yaml`
+     to each `coder create`, and run
+     `rm -f ~/.cache/hedge-setup/secret-parameters.yaml` when the creates
+     end. Tell the person that Coder still keeps this value with the build. Start the hub and the nodes at once,
    each in the background. They take minutes; use the wait (see "While
    something runs").
 5. **Keep them running.** Agents work there while the Mac sleeps:

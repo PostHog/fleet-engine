@@ -9,12 +9,44 @@
 # Running it again picks up where it stopped: every step skips what is done.
 set -eu
 
-if [ "$(uname -s)" = Darwin ]; then
+say() { printf 'Hedge: %s\n' "$*" >&2; }
+fail() {
+  say "$*"
+  [ "$(sed -n 2p "$HOME/.local/bin/hedge" 2>/dev/null)" != "# Hedge" ] || say "Stuck? Run hedge triage. It shows a report of this setup that you can send to the Hedge maintainer."
+  exit 1
+}
+has() { command -v "$1" >/dev/null 2>&1; }
+
+profile=
+install_only=
+ref_flag=
+ref_given=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --ref) [ $# -ge 2 ] || fail "--ref needs a value."; ref_flag=$2; ref_given=1; shift 2 ;;
+    --profile) [ $# -ge 2 ] || fail "--profile needs a directory."; profile=$2; shift 2 ;;
+    --install-only) install_only=1; shift ;;
+    --) shift; break ;;
+    *) fail "unknown option $1. Put flags for hedge after --." ;;
+  esac
+done
+
+# A preview passes --dry-run to hedge. It never copies, stops, or turns off the setup from before the rename.
+preview=
+for arg in "$@"; do [ "$arg" != --dry-run ] || preview=1; done
+
+[ "$(id -u)" -ne 0 ] || fail "run this as your login user, without sudo."
+
+retire_mac_jobs() {
   uid=$(id -u)
   old_jobs=$({
     for plist in "$HOME"/Library/LaunchAgents/*.plist; do [ -e "$plist" ] && basename "$plist" .plist; done
     launchctl list 2>/dev/null | sed 's/.*[[:space:]]//'
   } | grep -E '^(dev[.]fleet|com[.]fleet|dev[.]hedge)[.]' | sort -u)
+  if [ -n "$preview" ]; then
+    for label in $old_jobs; do say "This is a preview, so Hedge did not stop or turn off the launchd job $label of an earlier Fleet or Hedge. Without --dry-run, get.sh stops it and turns it off."; done
+    return
+  fi
   not_off=
   for label in $old_jobs; do
     target="gui/$uid/$label"
@@ -24,42 +56,36 @@ if [ "$(uname -s)" = Darwin ]; then
     loaded=0
     launchctl print "$target" >/dev/null 2>&1 || loaded=$?
     if [ "$loaded" -ne 113 ]; then
-      printf 'Hedge: %s\n' "the launchd job $label of an earlier Fleet or Hedge still runs. Stop it with: launchctl bootout $target" >&2
+      say "the launchd job $label of an earlier Fleet or Hedge still runs. Stop it with: launchctl bootout $target"
       off=
     fi
     listed=$(launchctl print-disabled "gui/$uid" 2>/dev/null) && listed_ok=yes || listed_ok=
     if [ -z "$listed_ok" ] || ! printf '%s\n' "$listed" | grep -F "\"$label\" =>" | grep -Eq '=> (disabled|true)$'; then
-      printf 'Hedge: %s\n' "launchd still has the job $label of an earlier Fleet or Hedge turned on, so it starts again at the next login. Turn it off with: launchctl disable $target" >&2
+      say "launchd still has the job $label of an earlier Fleet or Hedge turned on, so it starts again at the next login. Turn it off with: launchctl disable $target"
       off=
     fi
     if [ -n "$off" ]; then
-      printf 'Hedge: %s\n' "stopped and turned off the launchd job $label of an earlier Fleet or Hedge, and kept its files." >&2
+      say "stopped and turned off the launchd job $label of an earlier Fleet or Hedge, and kept its files."
     else
       not_off="$not_off${not_off:+, }$label"
     fi
   done
   if [ -n "$not_off" ]; then
-    printf 'Hedge: %s\n' "these launchd jobs of an earlier Fleet or Hedge are not off yet: $not_off. Run the commands above, then run get.sh again." >&2
+    say "these launchd jobs of an earlier Fleet or Hedge are not off yet: $not_off. Run the commands above, then run get.sh again."
     exit 1
   fi
-  printf 'Hedge: %s\n' "Hedge runs on cloud boxes, not on a Mac. Your Mac only runs the T3 Code app. To set up your hub, follow https://posthog.github.io/hedge/#start" >&2
+}
+
+if [ "$(uname -s)" = Darwin ]; then
+  retire_mac_jobs
+  say "Hedge runs on cloud boxes, not on a Mac. Your Mac only runs the T3 Code app. To set up your hub, follow https://posthog.github.io/hedge/#start"
   [ -n "$old_jobs" ] || exit 1
   exit 0
 fi
 
 engine_slug=PostHog/hedge
 default_engine_dir=$HOME/.local/share/hedge/engine
-profile=
-install_only=
 bun_version=1.4.4
-
-say() { printf 'Hedge: %s\n' "$*" >&2; }
-fail() {
-  say "$*"
-  [ "$(sed -n 2p "$HOME/.local/bin/hedge" 2>/dev/null)" != "# Hedge" ] || say "Stuck? Run hedge triage. It shows a report of this setup that you can send to the Hedge maintainer."
-  exit 1
-}
-has() { command -v "$1" >/dev/null 2>&1; }
 
 # A HEDGE_ variable that is set, even to an empty string, wins over its FLEET_ variable from before the rename.
 setting() {
@@ -123,6 +149,7 @@ setting ENGINE_REPO "https://github.com/$engine_slug.git"
 engine_repo=$value
 setting ENGINE_REF main
 ref=$value
+[ -z "$ref_given" ] || ref=$ref_flag
 setting ENGINE_DIR "$default_engine_dir"
 engine_dir=$value
 case "$engine_dir" in /*) ;; *) engine_dir="$PWD/$engine_dir" ;; esac
@@ -135,21 +162,6 @@ elif [ -n "$from" ] && fleet_checkout "$engine_dir"; then
 fi
 for destination in "$engine_dir" "$HOME/.local/state/hedge"; do refuse_fleet "$destination"; done
 
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --ref) [ $# -ge 2 ] || fail "--ref needs a value."; ref=$2; shift 2 ;;
-    --profile) [ $# -ge 2 ] || fail "--profile needs a directory."; profile=$2; shift 2 ;;
-    --install-only) install_only=1; shift ;;
-    --) shift; break ;;
-    *) fail "unknown option $1. Put flags for hedge after --." ;;
-  esac
-done
-
-# A preview passes --dry-run to hedge. It never copies or stops the setup from before the rename.
-preview=
-for arg in "$@"; do [ "$arg" != --dry-run ] || preview=1; done
-
-[ "$(id -u)" -ne 0 ] || fail "run this as your login user, without sudo."
 export PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH"
 
 # hedge setup reads this log to time the whole install, from this line on.

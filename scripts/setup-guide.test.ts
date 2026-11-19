@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { main } from "../src/cli.ts";
 import { loadPacks } from "../src/pack/manifest.ts";
@@ -40,6 +40,7 @@ const step = (number: number) => {
   return guide().slice(from, to < 0 ? undefined : to);
 };
 const hubStep = () => step(9);
+const beforeStepFiveCreate = () => step(5).slice(0, step(5).indexOf("4. **Create.**"));
 const beforeSteps = (heading: string) => guide().slice(guide().indexOf(heading), guide().indexOf("\n## 1. "));
 const onHubLine = (command: string) => `ssh coder.<hub> 'export PATH="${guidePath}"; ${command}'`;
 const setupArgs = () => guide().match(/; hedge setup (--chat [^']+)'/)![1]!;
@@ -167,7 +168,32 @@ describe("the agent setup guide", () => {
     expect(words(step(4))).toContain("one **hub** with a 200 GB disk and one **node** with a 500 GB disk");
     const creates = codeIn(step(5)).filter((code) => code.startsWith("coder create "));
     expect(creates).toEqual(["coder create <name> --template <template> --preset none --parameter <disk parameter>=<200 or 500> --parameter <region parameter>=<region> --parameter <dotfiles parameter>=https://github.com/<profile repo> --parameter <other parameter>=<value> --yes\n"]);
-    expect(words(step(5))).toContain("Pass every parameter of the template with its own `--parameter`");
+    expect(words(step(5))).toContain("Pass every parameter of the template that is not a secret with its own `--parameter`");
+  });
+
+  test("gives a secret template parameter to coder create in a file only the person can read, never in a process argument", () => {
+    const secret = 's3cr3t"value\\with-quotes';
+    const dir = temp.make("secret-");
+    const home = join(dir, "home");
+    const bin = join(dir, "bin");
+    mkdirSync(home);
+    mkdirSync(bin);
+    const secretFile = join(dir, "secret");
+    writeFileSync(secretFile, `${secret}\n`);
+    for (const tool of ["perl", "mkdir"]) {
+      writeFileSync(join(bin, tool), `#!/bin/sh\necho "${tool} $*" >> "${dir}/argv.log"\nexec "${Bun.which(tool)}" "$@"\n`);
+      chmodSync(join(bin, tool), 0o755);
+    }
+    const write = codeIn(step(5)).find((code) => code.includes("secret-parameters.yaml") && code.includes("<secret file>"))!;
+    const run = Bun.spawnSync(["sh", "-c", write.replaceAll("<secret parameter>", "api_token").replaceAll("<secret file>", secretFile)], { env: { HOME: home, PATH: `${bin}:/usr/bin:/bin` } });
+    expect(run.exitCode).toBe(0);
+    const file = join(home, ".cache/hedge-setup/secret-parameters.yaml");
+    expect(Bun.YAML.parse(readFileSync(file, "utf8"))).toEqual({ api_token: secret });
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    expect(readFileSync(join(dir, "argv.log"), "utf8")).not.toContain("s3cr3t");
+    expect(codeIn(step(5))).toContain("--rich-parameter-file ~/.cache/hedge-setup/secret-parameters.yaml");
+    expect(codeIn(step(5)).filter((code) => /coder secret create/.test(code))).toEqual(["coder secret create <secret name> --env <variable> < <secret file>"]);
+    expect(words(beforeStepFiveCreate())).not.toMatch(/a token, or a key, shows as `<private>`/);
   });
 
   test("checks each new workspace with the engine's own check, given only the parameters the guide sets and no private value, and replaces a workspace whose fixed parameter is wrong before setup", () => {

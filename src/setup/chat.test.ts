@@ -32,7 +32,7 @@ describe("hedge setup --chat", () => {
     expect(result.output).not.toContain("Needs you");
     expect(result.output).toContain("  ✓ Sign in to GitHub: done");
     expect(result.output).toContain("  ✓ Sign in to ChatGPT: done");
-    expect(machineFile(home).setup.done).toContain("check");
+    expect(result.output.indexOf("  ✓ Standalone: no proxy, hub, or tunnel")).toBeGreaterThan(result.output.indexOf("  ✓ Sign in to ChatGPT: done"));
   });
 
   test("leaves a sign-in that needs the keyboard open, and says to run it in a terminal, once the machine is usable", async () => {
