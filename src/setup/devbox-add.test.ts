@@ -85,17 +85,24 @@ describe("hedge devbox add", () => {
     expect(box.peerLinks.box).toEqual(["https://here.relay.example"]);
   });
 
-  test("a hub that is linked with a live tunnel while t3 connect status says desired false still counts as on: hedge devbox add links the node back, and hedge devbox address prints the address", async () => {
+  const linkedButNotDesired = { desired: false, authenticated: true, linked: true };
+
+  test("a hub that is linked with a live tunnel while t3 connect status says desired false still counts as on: hedge devbox add links the node back", async () => {
     const home = temp.make("home-");
     expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""])).code).toBe(0);
     const io = scripted([]);
-    const options = { home, engineRoot, platform: "linux" as const, print: io.terminal.print, terminal: io.terminal };
-    const box = fakeMachine(home, {}, { connectHere: true, hereConnect: { desired: false, authenticated: true, linked: true } });
-    expect(await main(["devbox", "add", "node-2"], { ...options, setup: { machine: box.machine } })).toBe(0);
+    const box = fakeMachine(home, {}, { connectHere: true, hereConnect: linkedButNotDesired });
+    expect(await main(["devbox", "add", "node-2"], { home, engineRoot, platform: "linux", print: io.terminal.print, terminal: io.terminal, setup: { machine: box.machine } })).toBe(0);
     expect(io.output()).not.toContain("T3 Connect is off here");
     expect(box.peerLinks.box).toEqual(["https://here.relay.example"]);
-    expect(await main(["devbox", "address"], { ...options, setup: { machine: box.machine } })).toBe(0);
-    expect(io.output()).toEndWith("https://here.relay.example");
+  });
+
+  test("a machine that is linked with a live tunnel while t3 connect status says desired false prints its address with hedge devbox address", async () => {
+    const home = temp.make("home-");
+    const io = scripted([]);
+    const box = fakeMachine(home, {}, { connectHere: true, hereConnect: linkedButNotDesired });
+    const code = await main(["devbox", "address"], { home, engineRoot, platform: "linux", print: io.terminal.print, terminal: io.terminal, setup: { machine: box.machine } });
+    expect([code, io.output()]).toEqual([0, "https://here.relay.example"]);
   });
 
   test("hedge devbox address prints this machine's T3 Connect address from its live T3 server when the T3 CLI does not print it, and says when there is none", async () => {
