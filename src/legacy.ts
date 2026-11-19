@@ -72,7 +72,7 @@ function underHome(home: string, path: string, inside: (relative: string) => boo
 
 export const underLegacyPath = (home: string, path: string): boolean => underHome(home, path, inLegacyPath);
 
-const legacyEngine = ".local/share/fleet/engine";
+export const legacyEngine = ".local/share/fleet/engine";
 
 export const inLegacyEngine = (home: string, path: string): boolean => underHome(home, path, (relative) => relative === legacyEngine || relative.startsWith(`${legacyEngine}/`));
 

@@ -92,6 +92,7 @@ async function beforeTheRename(machine: Machine, launchd?: ReturnType<typeof mac
     launchd?.loaded.add(`dev.fleet.${oldId(id)}`);
   }
   for (const [before, after] of legacyPaths) if (existsSync(join(home, after))) renameSync(join(home, after), join(home, before));
+  mkdirSync(join(home, ".local/share/fleet/engine"), { recursive: true });
   const statePath = join(home, ".local/state/fleet/state.json");
   const state = JSON.parse(readFileSync(statePath, "utf8")) as { version: number; groups: Record<string, Record<string, unknown>> };
   writeFileSync(statePath, JSON.stringify({ version: state.version, groups: { fleet: Object.fromEntries(Object.entries(state.groups.hedge!).map(([target, entry]) => [toOld(target), entry])) } }));

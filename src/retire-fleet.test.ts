@@ -16,12 +16,14 @@ import { holdLock } from "./lock.ts";
 import { fakeSystemd } from "./testing/systemd.ts";
 
 const temp = tempDirs();
+const noEngine = "Hedge: this machine has no Fleet engine install in ~/.local/share/fleet/engine, so Hedge stops nothing.";
 afterEach(() => temp.cleanup());
 const { profileDir } = cliFixtures(temp);
 
 function oldInstall(home = temp.make("home-")) {
   mkdirSync(join(home, ".config/fleet"), { recursive: true });
   writeFileSync(join(home, ".config/fleet/machine.json"), JSON.stringify({ role: "devbox" }));
+  mkdirSync(join(home, ".local/share/fleet/engine"), { recursive: true });
   return home;
 }
 
@@ -586,7 +588,7 @@ describe("hedge retire-fleet", () => {
       return { code, output: lines.join("\n") };
     };
 
-    expect(await hedge(["retire-fleet"])).toEqual({ code: 0, output: "Hedge: nothing from before the rename runs." });
+    expect(await hedge(["retire-fleet"])).toEqual({ code: 0, output: noEngine });
     const applied = await hedge(["apply", "--profile", profileDir([])]);
     expect(applied.output).not.toContain("fleet:home");
     expect(applied.output).not.toContain("could not look up your account's home folder");
@@ -602,12 +604,23 @@ describe("hedge retire-fleet", () => {
     expect(await linux.hedge(["retire-fleet", "--now"])).toEqual({ code: 2, output: "Usage: hedge retire-fleet [--dry-run]" });
   });
 
-  test("on a machine without Fleet, or with a HOME that is not the account's, stops nothing", async () => {
-    const fresh = machine("linux", temp.make("home-"));
-    fresh.systemd.units.set("fleet-own.service", { active: true, enabled: true });
-    expect(await fresh.hedge(["retire-fleet"])).toEqual({ code: 0, output: "Hedge: nothing from before the rename runs." });
-    expect(fresh.systemd.units.get("fleet-own.service")).toEqual({ active: true, enabled: true });
+  test("on a machine that runs a private Fleet copy and has no Fleet engine install, retire leaves its units running and apply runs", async () => {
+    const home = temp.make("home-");
+    mkdirSync(join(home, ".config/fleet"), { recursive: true });
+    const privateCopy = machine("linux", home);
+    privateCopy.systemd.units.set("fleet-peer-box-t3.service", { active: true, enabled: false });
 
+    expect(await privateCopy.hedge(["retire-fleet"])).toEqual({ code: 0, output: noEngine });
+    expect(await privateCopy.hedge(["retire-fleet", "--dry-run"])).toEqual({ code: 0, output: noEngine });
+    const applied = await privateCopy.hedge(["apply", "--profile", profileDir(["watcher"])]);
+
+    expect(privateCopy.systemd.units.get("fleet-peer-box-t3.service")).toEqual({ active: true, enabled: false });
+    expect(applied.output).not.toContain("from before the rename");
+    expect(applied.code).toBe(0);
+    expect(privateCopy.systemd.units.get("hedge-watch.service")?.active).toBe(true);
+  });
+
+  test("with a HOME that is not the account's, stops nothing", async () => {
     const other = machine("linux");
     other.systemd.units.set("fleet-own.service", { active: true, enabled: true });
     const lines: string[] = [];

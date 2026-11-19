@@ -39,6 +39,7 @@ function fleetMachine({ failing = [], stuck, lastWords, engine: change }: Upgrad
   git(home, "clone", "-q", repo, oldProfile);
   mkdirSync(join(home, ".config/fleet"), { recursive: true });
   writeFileSync(join(home, ".config/fleet/machine.json"), JSON.stringify({ schema: 1, role: "devbox", profileDir: oldProfile }));
+  mkdirSync(join(home, ".local/share/fleet/engine"), { recursive: true });
   mkdirSync(join(home, ".config/systemd/user"), { recursive: true });
   writeFileSync(join(home, ".config/systemd/user/fleet-watch.service"), "[Unit]\nDescription=Fleet: watch\n");
   const stateFile = join(box.root, "schedulers.json");
