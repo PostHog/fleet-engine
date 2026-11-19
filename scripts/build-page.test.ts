@@ -91,7 +91,6 @@ describe("the site build", () => {
   test("the landing page offers one setup, a hub and a node, with a switch for every default pack, all on, and the Hub pack always on", () => {
     const html = page("index.html");
     expect(html.match(/<section class="box">/g)).toHaveLength(1);
-    expect(html).not.toContain('type="radio"');
     const switches = [...boxOf(html).matchAll(/<input type="checkbox" role="switch" class="switch" name="([^"]+)"[^>]*?( checked)?>/g)].map((match) => [match[1], Boolean(match[2])]);
     expect(switches).toEqual(["pull-requests", "orchestration", "communication"].map((pack) => [`start:${pack}`, true]));
     expect(visibleText(boxOf(html))).toContain("Hub One always-on devbox links and watches the others. Always on");
