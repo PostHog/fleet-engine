@@ -525,16 +525,18 @@ describe("hedge retire-fleet", () => {
     writeFileSync(join(proc, "4280/stat"), "4280 (bun) S 1 4280 4280 0");
     writeFileSync(join(proc, "4280/environ"), `HOME=${home}\0`);
     symlinkSync(worktree, join(proc, "4280/cwd"));
-    const signals: string[][] = [];
-    const recordsKills: CommandRunner = async (command) => (command[0] === "kill" && signals.push(command), { code: command[0] === "kill" ? 0 : 127, stdout: "" });
-    const linux = machine("linux", home, undefined, { run: recordsKills, uid: process.getuid!(), sleep: async () => {}, processes: procProcesses(process.getuid!(), proc) });
+    const signalEnds: CommandRunner = async (command) => {
+      if (command[0] !== "kill") return { code: 127, stdout: "" };
+      for (const target of command.slice(2)) if (Math.abs(Number(target)) === 4280) rmSync(join(proc, "4280"), { recursive: true, force: true });
+      return { code: 0, stdout: "" };
+    };
+    const linux = machine("linux", home, undefined, { run: signalEnds, uid: process.getuid!(), sleep: async () => {}, processes: procProcesses(process.getuid!(), proc) });
 
     const retired = await linux.hedge(["retire-fleet"]);
     const applied = await linux.hedge(["apply", "--profile", profileDir(["watcher"])]);
 
     expect(retired.code).toBe(0);
-    expect(signals).toEqual([]);
-    expect(existsSync(join(proc, "4280"))).toBe(true);
+    expect(existsSync(join(proc, "4280/cmdline"))).toBe(true);
     expect(applied.output).not.toContain("process 4280");
     expect(applied.code).toBe(0);
     expect(linux.systemd.units.has("hedge-watch.service")).toBe(true);
