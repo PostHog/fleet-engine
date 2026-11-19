@@ -325,9 +325,9 @@ async function startRound(home: string, identity: ProofIdentity, reviews: string
   let round = 1;
   while (started.includes(String(round))) round++;
   if (round === 1 && scope !== "full") throw new Error("Round 1 is --scope full: it reviews the whole PR diff. Drop --base");
-  const finished = await finishedReviews(home, identity);
   const running = await runningPanel(reviews, started);
   if (running) throw new Error(`The panel of ${reviewLabel(running)} is unfinished, and its lenses may still finish. Wait for it with hedge proof review --wait --round ${running}, then start this round again.`);
+  const finished = await finishedReviews(home, identity);
   const stopped = await stopState(reviews, started);
   if (decision?.mark !== "👤") await refuseAfterConfirmingRead(identity, reviews, stopped);
   const spent = await reviewsSpent(reviews, started, "review");

@@ -594,7 +594,7 @@ test("review-finish refuses an unfinished round that an older Hedge reserved, as
   olderHedge(pr, "final-1", "merged");
 
   await expect(finishRound(pr, "final-1")).rejects.toThrow(`Review final-1 was reserved by an older Hedge, which recorded no merged start or base on GitHub, so it cannot resume. Delete it with rm -rf '${join(pr.pullRequest, "reviews", "final-1")}'`);
-  expect(await reviewLine(pr)).not.toStartWith("review: HEAD reviewed");
+  expect((await pr.hedge("show")).output).toMatch(/^final read on \w+: reserved, no findings yet$/m);
 });
 
 test("a fixes round refuses to start while a final panel is unfinished, so no panel finishes while its arbiter weighs the budget", async () => {
