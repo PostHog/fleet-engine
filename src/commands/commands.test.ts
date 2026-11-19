@@ -204,10 +204,10 @@ describe("hedge packs with a profile that still names an old pack", () => {
     expect((await hedge(home, ["packs"])).output).toContain("disk-watch on, linked-hub on");
   });
 
-  test("keeps a workflow value the profile states when a change leaves it alone, even one that equals the default", async () => {
+  test("keeps a workflow value the profile states when a change leaves it alone, even one that equals the default, and adds only choices that differ from it", async () => {
     const { home, elsewhere, pushed } = await machineWithProfile();
     await elsewhere((file) => ({ ...file, packs: ["pull-requests", "guards"], workflows: { "shell-guards": true, "package-age": true } }));
-    expect((await hedge(home, ["packs", "--add", "communication"])).code).toBe(0);
+    expect((await hedge(home, ["packs", "--add", "communication", "--workflows", "merge-gate=off"])).code).toBe(0);
     expect((await pushed()).workflows).toEqual({ "shell-guards": true, "package-age": true });
   });
 

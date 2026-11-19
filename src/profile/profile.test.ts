@@ -1,25 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { PackManifest, ProfileFile } from "../pack/types.ts";
+import type { ProfileFile } from "../pack/types.ts";
 import { isolateGit, spawnGit, template, tempDirs } from "../testing/git.ts";
-import { keptWorkflows, loadMachine, loadProfile, picksTurnOn, ProfileError, saveAnswers, saveMachine, thisMachine } from "./profile.ts";
+import { loadMachine, loadProfile, picksTurnOn, ProfileError, saveAnswers, saveMachine, thisMachine } from "./profile.ts";
 
 isolateGit();
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
-
-const packs: PackManifest[] = [
-  {
-    schema: 1,
-    name: "orchestration",
-    summary: "Planning maps.",
-    workflows: [
-      { id: "maps", name: "Maps", sentence: "Plan work as maps.", default: true },
-      { id: "quality-loop", name: "Quality loop", sentence: "Small PRs that improve code.", default: false },
-    ],
-  },
-];
 
 const profile: ProfileFile = {
   schema: 1,
@@ -55,16 +43,6 @@ describe("profile", () => {
     const dir = await profileRepo();
     writeFileSync(join(dir, "about-me.md"), "I like small PRs.\n");
     expect((await loadProfile(dir)).aboutMe).toBe("I like small PRs.\n");
-  });
-
-  test("keeps every workflow value the profile states, even one that equals the default, and adds only choices that differ from it", async () => {
-    const dir = await profileRepo({ ...profile, workflows: { maps: true } });
-    await saveAnswers(dir, { workflows: keptWorkflows((await loadProfile(dir)).workflows, { "quality-loop": true }, packs) });
-    expect((await loadProfile(dir)).workflows).toEqual({ maps: true, "quality-loop": true });
-    await saveAnswers(dir, { workflows: keptWorkflows((await loadProfile(dir)).workflows, { maps: true, "quality-loop": false }, packs) });
-    expect((await loadProfile(dir)).workflows).toEqual({ maps: true, "quality-loop": false });
-    expect(keptWorkflows({}, { maps: true, "quality-loop": false, unknown: true }, packs)).toEqual({});
-    expect(await spawnGit(dir, "log", "--format=%s")).toBe("Save Hedge answers\nSave Hedge answers\nStart");
   });
 
   test("keeps answers it was not given", async () => {

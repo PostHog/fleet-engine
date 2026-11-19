@@ -84,6 +84,8 @@ export function settingSteps(context: QuestionContext, asked: PackSetting[]): St
     .map((setting) => ({ id: `setting:${setting.key}`, title: setting.question, minutes: 0.5, kind: "question" as const, run: () => askSetting(context, setting) }));
 }
 
+const presetWorkflows = (preset: Preset | undefined, saved: Draft) => ({ ...preset?.workflows, ...saved.workflows });
+
 function presetPacks(preset: Preset, catalog: Catalog) {
   return [...new Set([...preset.packs, ...catalog.teamPacks])];
 }
@@ -121,7 +123,7 @@ export function picksFrom(flags: SetupFlags, catalog: Catalog, saved: Draft = {}
   const manifests = catalog.packs.map((pack) => pack.manifest);
   const known = workflowDefaults(manifests);
   for (const id of Object.keys(flags.workflows)) if (!Object.hasOwn(known, id) && !laterWorkflow(catalog)) throw new FlagError(`--workflows: no workflow named ${id}`);
-  return { packs, workflows: keptWorkflows(saved.workflows ?? {}, kept ? flags.workflows : { ...preset.workflows, ...flags.workflows }, manifests) };
+  return { packs, workflows: keptWorkflows(saved.workflows ?? {}, { ...presetWorkflows(kept ? undefined : preset, saved), ...flags.workflows }, manifests) };
 }
 
 /** Picked packs whose required packs are not picked. */
@@ -168,7 +170,7 @@ async function askPacks(context: QuestionContext): Promise<StepOutcome> {
   const lines = [...presets.map((preset) => `${preset.name}  ${packList(presetPacks(preset, catalog), catalog)}`), "One by one"];
   const fallback = presets.findIndex((preset) => preset.id === defaultPreset);
   const index = await chooseFrom(terminal, lines, fallback, presets[fallback]!.name);
-  const chosen = index < presets.length ? { packs: presetPacks(presets[index]!, catalog), workflows: keptWorkflows(draft.workflows ?? {}, presets[index]!.workflows, catalog.packs.map((pack) => pack.manifest)) } : { packs: await oneByOne(terminal, catalog, picked.packs), workflows: picked.workflows };
+  const chosen = index < presets.length ? { packs: presetPacks(presets[index]!, catalog), workflows: keptWorkflows(draft.workflows ?? {}, presetWorkflows(presets[index], draft), catalog.packs.map((pack) => pack.manifest)) } : { packs: await oneByOne(terminal, catalog, picked.packs), workflows: picked.workflows };
   await context.answer(chosen);
   show(chosen);
 }
