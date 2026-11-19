@@ -153,7 +153,7 @@ export async function reconcileService(run: CommandRunner, wait: Wait, user: str
   }
   const manager = await userManager(run, wait, user, dryRun, result);
   if (manager !== "answers") {
-    const lingerOn = manager === "sudo refused" ? ` Hedge could not turn on lingering for ${user}, because sudo needs a password here. Run: sudo loginctl enable-linger ${user}, then run hedge apply. Without sudo,` : "";
+    const lingerOn = typeof manager === "object" ? ` Hedge could not turn on lingering for ${user}: sudo -n loginctl enable-linger ${user} failed: ${manager.refused}. Run: sudo loginctl enable-linger ${user}, then run hedge apply. Without sudo,` : "";
     return void result.findings.push(finding("service", `T3 Code cannot run as a service: systemd's user manager does not answer (systemctl --user).${lingerOn}${lingerOn ? " log" : " Log"} in to this machine in a normal session, or install your system's systemd user-session support, then run hedge apply.`, "human"));
   }
   const linger = (await run(["loginctl", "show-user", user, "--property=Linger", "--value"])).stdout.trim();
@@ -171,6 +171,14 @@ export async function reconcileService(run: CommandRunner, wait: Wait, user: str
   result.actions.push({ target: "t3 service", operation: "create" });
 }
 
+const needsUserBus = (command: string[]) => (command[0] === "systemctl" && command[1] === "--user") || (command[0] === "t3" && command[1] === "service");
+
+export function onUserBus(run: CommandRunner, env: Environment, uid: number): CommandRunner {
+  const runtime = env.XDG_RUNTIME_DIR || `/run/user/${uid}`;
+  const bus = env.DBUS_SESSION_BUS_ADDRESS || `unix:path=${runtime}/bus`;
+  return (command, options) => run(needsUserBus(command) ? ["env", `XDG_RUNTIME_DIR=${runtime}`, `DBUS_SESSION_BUS_ADDRESS=${bus}`, ...command] : command, options);
+}
+
 const managerStartMs = 1000;
 const managerStartTries = 10;
 
@@ -178,7 +186,8 @@ async function userManager(run: CommandRunner, wait: Wait, user: string, dryRun:
   const answers = async () => (await run(["systemctl", "--user", "show-environment"])).code === 0;
   if (await answers()) return "answers";
   if (dryRun) return "silent";
-  if ((await run(["sudo", "-n", "loginctl", "enable-linger", user])).code !== 0) return "sudo refused";
+  const linger = await run(["sudo", "-n", "loginctl", "enable-linger", user]);
+  if (linger.code !== 0) return { refused: lastLine(`${linger.stderr ?? ""}\n${linger.stdout}`) || `exit ${linger.code}` };
   result.actions.push({ target: "t3 linger", operation: "create", reason: "systemd's user manager starts only for a lingering user over SSH" });
   for (let tries = 0; tries < managerStartTries; tries++) {
     await wait(managerStartMs);
@@ -186,6 +195,8 @@ async function userManager(run: CommandRunner, wait: Wait, user: string, dryRun:
   }
   return "silent";
 }
+
+const lastLine = (text: string) => text.trim().split("\n").at(-1)?.trim() ?? "";
 
 export const timeZoneSetting = "base.t3TimeZone";
 const timeZoneDropIn = ".config/systemd/user/t3code.service.d/hedge-timezone.conf";
