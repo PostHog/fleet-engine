@@ -304,8 +304,10 @@ and Hedge does not wrap it in a unit.
     leave the plan, and the adapter removes its own values. Claude Code
     uses its own sign-in. The adapter removes only the keys that its
     record names, also while a pack source cannot be fetched.
-    `hedge cli-proxy connect` writes neither key: it saves the proxy key and
-    runs `hedge apply`, so every route Hedge writes has a record.
+    `hedge cli-proxy connect` writes neither key and runs nothing: it saves
+    the proxy key, and the next `hedge apply` writes the route, so every
+    route Hedge writes has a record. When the hub hands a box over, it runs
+    `hedge apply` on the box as its own SSH step after connect.
   - *One route:* the adapter writes the route keys of a provider together
     or not at all, and removes them together. When removing them would
     leave a key of yours that Claude Code sends to Anthropic, or a Codex

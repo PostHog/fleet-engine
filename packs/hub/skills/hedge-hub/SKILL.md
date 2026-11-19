@@ -151,10 +151,10 @@ the person's own subscriptions, never for someone else's.
   `model_provider` to `hedge-proxy`, a provider that reads the same key file.
 - **Devboxes.** The hub's SSH tunnel to each devbox carries port 8317. On the
   hub, `hedge cli-proxy doctor` prints one connect command per devbox; it
-  sends the key on standard input. Connect saves the key and runs
-  `hedge apply`, which writes the Claude and Codex settings. Connect never
-  writes them itself. Boxes get the key and connect when the hub hands them
-  over.
+  sends the key on standard input. Connect only saves the key. Run
+  `hedge apply` next: it writes the Claude and Codex settings. When the hub
+  hands a box over, it sends the key, runs connect, then runs `hedge apply`
+  on the box, and says when an agent there keeps its own sign-in.
 - **When the proxy is down.** Hedge's Claude settings wait for
   `hedge cli-proxy check`, and its Codex settings wait for
   `hedge cli-proxy check codex`. Both checks only read. On the hub, both
@@ -171,9 +171,9 @@ the person's own subscriptions, never for someone else's.
   the proxy holds none of that agent's subscriptions that work. Run
   `hedge cli-proxy doctor` on the hub to tell the two cases apart: it counts
   the subscriptions that work, and fails when one works but the proxy lists
-  no model for it. `hedge cli-proxy connect` then saves the key, and the
-  `hedge apply` that it runs keeps the agent on its own sign-in until the
-  proxy serves it. A later apply then sends the agent there. Connect still changes nothing when the proxy
+  no model for it. `hedge cli-proxy connect` then saves the key, and
+  `hedge apply` keeps the agent on its own sign-in until the proxy serves
+  it. A later apply then sends the agent there. Connect still changes nothing when the proxy
   does not answer or refuses the key. The first apply after the proxy
   answers again sends the agent back to the proxy.
 - **The panel.** The Proxy panel workflow is off by default and needs

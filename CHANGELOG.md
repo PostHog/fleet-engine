@@ -17,8 +17,8 @@
   `hedge cli-proxy connect` saves the key on a node in that case, so the
   first `hedge apply` after the proxy serves an agent sends it there.
   When the hub hands a box over while the proxy serves none of its agents,
-  the hub says that the box keeps its own sign-in until the proxy serves
-  it. On the both plan, `hedge doctor` fails while a
+  the hub says, after it runs `hedge apply` on the box, that the box keeps
+  its own sign-in until the proxy serves it. On the both plan, `hedge doctor` fails while a
   Codex subscription works but the proxy serves no Codex model. A proxy
   that is down, refuses the key, answers without a model list, or runs a
   plugin Hedge did not install still fails `hedge doctor`.
@@ -48,9 +48,15 @@
   leaves at the next apply. A route to a safe proxy stays in place, and a
   `hedge-proxy` Codex table of your own stays.
 - `hedge cli-proxy connect` no longer writes Claude Code or Codex
-  settings itself. It saves the proxy key and runs `hedge apply`, which
-  writes the route and records it. So every route that Hedge writes has
-  a record, and turning balancing off takes it off at the next apply.
+  settings, and runs nothing. It saves the proxy key and says to run
+  `hedge apply`, which writes the route and records it. So every route
+  that Hedge writes has a record, and turning balancing off takes it off
+  at the next apply. When the hub hands a box over, it runs `hedge apply`
+  on the box after connect, as one more SSH step with the same time limit
+  as the others. When that apply fails, the hub names the exit code and
+  `hedge box run <box> -- hedge apply`. When the apply shows that the proxy
+  lists no model for an agent, or that the agent cannot reach the proxy,
+  the hub says the agent there keeps its own sign-in.
 - Hedge removes a Claude Code or Codex setting only when its own record
   says Hedge wrote it. It no longer removes a setting because it points
   at the proxy port 8317. So a Codex provider table of your own, of any
@@ -62,7 +68,13 @@
   yours that Claude Code then sends to Anthropic, such as your own
   `ANTHROPIC_AUTH_TOKEN`, or a Codex `model_provider` that names a table
   that is gone, the route stays and apply shows a `To do:` line that
-  names the setting to remove.
+  names the setting to remove. Only Hedge's own proxy values form the
+  route. A gateway and key helper from your profile are set one by one,
+  as before.
+- When the route's check fails, such as for a proxy with a plugin Hedge
+  did not install, apply takes the route out even if that leaves a key of
+  yours such as `ANTHROPIC_AUTH_TOKEN`. A `To do:` line names the key,
+  never its value, and says to remove it.
   `hedge doctor` reads one result of each check for both the config and
   its line.
 - When `hedge cli-proxy connect` fails on a box, the hub names the box and
