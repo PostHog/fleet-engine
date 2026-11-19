@@ -1,10 +1,11 @@
 import { afterEach, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawnAsync } from "../../../src/testing/spawn.ts";
 import { answeredFindings, reviewedFindings } from "./proof.ts";
+import { stuckLock } from "./proof-panel.ts";
 import { checkout, cleanFixtures, exitedPid, fakeModel, lockHolder, finishRound, fixture, graded, markPanel, models, recordingModel, settings, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
@@ -717,6 +718,18 @@ test("a budget lock whose holder is gone and whose takeovers all stopped midway 
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", panel)).output).toContain(`"round":2`);
 });
 
+test("the command that clears a stuck lock removes its files when the path holds an apostrophe", async () => {
+  const reviews = join(fixture("hedge-stuck-lock-"), "O'Brien", "reviews");
+  mkdirSync(reviews, { recursive: true });
+  const lock = join(reviews, "round.lock");
+  const files = [lock, `${lock}.reclaim-0123456789abcdef`, `${lock}.reclaim-0123456789abcdef.2`];
+  for (const file of files) writeFileSync(file, "{}");
+  const clear = stuckLock(lock).match(/then run (rm -f .*) and run this command again$/)![1]!;
+
+  expect((await spawnAsync(["sh", "-c", clear])).exitCode).toBe(0);
+  expect(files.filter((file) => existsSync(file))).toEqual([]);
+});
+
 test("a review that leaves the arbiter while another command holds the budget lock stops before it reserves, and reserves once that command is done", async () => {
   const pr = await checkout();
   pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 1, "pull-requests.reviewCeiling": 3 });
@@ -949,9 +962,9 @@ test("a review that lists only minor or nit items that lead with the severity an
 
   expect((await pr.hedge("gate")).output).not.toContain("has unanswered findings");
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", fix)).output).toContain(`"round":3`);
-  await finishWith(pr, "3", "- feature.txt:1 | minor (major if two members share a name) | the greeting drops the name\n");
+  await finishWith(pr, "3", "- feature.txt:1 | minor (major if two members share a name) | the greeting drops the name\n- minor:42 | blocker | the build breaks on an empty name\n");
   await pr.commit("feature.txt", "greet each member\n");
-  expect((await pr.hedge("gate")).output).toContain("review: round 3 has unanswered findings 1;");
+  expect((await pr.hedge("gate")).output).toContain("review: round 3 has unanswered findings 1, 2;");
   await expect(pr.hedge("review-start", "--scope", "fixes", "--base", later)).rejects.toThrow("The review budget of 1 reviews is spent");
 });
 

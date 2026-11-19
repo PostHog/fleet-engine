@@ -7,6 +7,7 @@ import { readJson, roundId, storeCapturedFindings, writeJson, type ProofIdentity
 import { askModel, familyOf, isQuotaExhausted, quotaExitCode, reviewerRow, sameFamilyRow, securityRow, type Family, type Usage } from "./proof-models.ts";
 import type { ModelRow } from "../../base/lib/models.ts";
 import { capped, diffCap, reviewedDiff } from "./proof-review.ts";
+import { quote } from "../../hub/lib/machine.ts";
 import type { ReviewTier } from "./proof-checkout.ts";
 
 export type PanelGuide = { brief: string; lenses: Map<string, { title: string; text: string }>; freshEyes: Set<string>; security: Set<string>; contextFree: Set<string> };
@@ -393,7 +394,7 @@ async function olderThanGrace(path: string, now: Date) {
 
 const guardGenerations = 10;
 
-const stuckLock = (path: string) => `The lock ${path} is stuck: its holder is gone, and ${guardGenerations} takeovers of it stopped before they ended. Check that no hedge proof command runs on this PR, then run rm -f '${path}' '${path}'.reclaim-* and run this command again`;
+export const stuckLock = (path: string) => `The lock ${path} is stuck: its holder is gone, and ${guardGenerations} takeovers of it stopped before they ended. Check that no hedge proof command runs on this PR, then run rm -f ${quote(path)} ${quote(path)}.reclaim-* and run this command again`;
 
 type Guarded = { lock?: string; stuck: boolean };
 

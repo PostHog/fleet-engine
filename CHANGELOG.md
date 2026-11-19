@@ -137,9 +137,10 @@
   error, so the budget is never counted short. A review that
   finds the lock held stops and names the holder. This lock, a round lock,
   and a panel slot follow one rule: hedge takes over the lock when the
-  process that holds it is gone. When ten takeovers of a lock in a row
-  stopped before they ended, the command stops, names the lock files, and
-  gives the `rm` command that clears them. A
+  process that holds it is gone. When ten takeovers of the budget lock or
+  a round lock in a row stopped before they ended, the command stops, names
+  the lock files, and gives the `rm` command that clears them. A stuck
+  panel slot counts as taken. A
   final read takes the next free name in the reviews directory, so a
   leftover directory without `round.json` never blocks it.
 
