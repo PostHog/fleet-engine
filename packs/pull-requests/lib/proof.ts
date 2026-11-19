@@ -6,6 +6,7 @@ import { agentRefusal, agentsAcceptance, covers, fold, keptOwed, panelRefusal, t
 import type { Family, Usage } from "./proof-models.ts";
 import { quietReason, type DeltaKind, type QuietStep } from "./proof-delta.ts";
 import { panelOutcome } from "./proof-panel.ts";
+import { anchorHeading } from "./finding-anchors.ts";
 
 export type ProofIdentity = { repository: string; pr: number; commit: string };
 const sha = /^[0-9a-f]{40}$/;
@@ -519,6 +520,7 @@ function reviewedLines(findings: string) {
   const kept: string[] = [];
   const tested: string[] = [];
   for (const line of lines) {
+    if (line.trim() === anchorHeading) break;
     if (testsBlock.test(line)) { tests = true; inside = false; continue; }
     if (findingsBlock.test(line)) { tests = false; inside = true; kept.push(line.replace(findingsBlock, "")); continue; }
     if (/^COVERED\b/.test(line)) { tests = false; inside = false; }

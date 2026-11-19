@@ -71,6 +71,27 @@ test("minor and nit findings need no answer, while a blocker, a major, a finding
   expect(prompt).not.toContain("asserts the call count");
 });
 
+test("the Anchor check hedge appends repeats findings, so its lines need no answer and spend no review", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: graded("non-critical", "medium") });
+  await pr.commit("feature.txt", "new\n");
+  await pr.hedge("require", "--none", "--reason", "fixture");
+  await savedPanel(pr, [
+    "- minor | feature.txt:1 | the word reads oddly | anchor: new",
+    "",
+    "## Anchor check",
+    "",
+    "fleet compared each finding's anchor with the diff and with earlier reviews of this PR.",
+    "",
+    "- Not in the diff, so check it before triage: - minor | feature.txt:1 | the word reads oddly | anchor: new",
+    "",
+  ].join("\n"));
+
+  const gate = await pr.hedge("gate");
+  expect(gate.output).not.toContain("unanswered findings");
+  expect(gate.code).toBe(0);
+});
+
 test("TESTS items number after every finding, so a TESTS block between lenses moves no finding's number", async () => {
   const pr = await checkout();
   pr.pullRequestState({ body: graded("non-critical", "medium") });
