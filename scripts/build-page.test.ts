@@ -42,6 +42,7 @@ const visibleText = (html: string) => unescaped(html.replace(/<script[\s\S]*?<\/
 const promptOn = (html: string, id: string) => unescaped(html.match(new RegExp(`<pre id="${id}-text"[^>]*>([\\s\\S]*?)</pre>`))![1]!.replace(/<[^>]+>/g, ""));
 const t3LinkOn = (html: string, id: string) => unescaped(html.match(new RegExp(`<a class="btn btn-ghost" id="${id}-t3" href="([^"]*)"`))![1]!);
 const carried = (html: string) => JSON.parse(html.match(/<script id="hedge-data" type="application\/json">([\s\S]*?)<\/script>/)![1]!) as PromptData;
+const pageScript = (html: string) => html.match(/<script>([\s\S]*?)<\/script>/)?.[1] ?? "";
 const boxOf = (html: string) => html.match(/<section class="box">[\s\S]*?<\/section>/)![0];
 
 function localTargets(path: string, html: string) {
@@ -69,11 +70,14 @@ describe("the site build", () => {
     }
   });
 
-  test("every page loads the script and the styles of its own build, under names that change with their content, so a cached page never runs another build's script", () => {
-    const assets = Object.keys(files).filter((path) => /^assets\/[^/]+\.(js|css)$/.test(path));
-    expect(assets.map((path) => path.replace(/-[0-9a-f]{16}\./, "-<hash>."))).toEqual(["assets/site-<hash>.css", "assets/app-<hash>.js"]);
-    for (const path of assets) expect(path).toContain(`-${Bun.hash(files[path]!).toString(16).padStart(16, "0")}.`);
-    for (const [path, html] of pagesOf(files)) expect([path, assets.filter((asset) => !html.includes(`${asset}"`))]).toEqual([path, []]);
+  test("every page carries its own script and styles and asks the site for no script or stylesheet file, so a cached page never meets a script of another release", () => {
+    expect(Object.keys(files).filter((path) => /\.(js|css)$/.test(path))).toEqual([]);
+    for (const [path, html] of pagesOf(files)) {
+      expect([path, localTargets(path, html).filter((target) => /\.(js|css)$/.test(target))]).toEqual([path, []]);
+      expect([path, html.match(/<script\b[^>]*\bsrc=|<link rel="stylesheet" href="(?!https:)/g)]).toEqual([path, null]);
+      expect([path, pageScript(html).length > 1000, (html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? "").length > 1000]).toEqual([path, true, true]);
+      expect([path, pageScript(html)]).toEqual([path, pageScript(page("index.html"))]);
+    }
   });
 
   test("the landing page's first screen says that Hedge runs agents in the cloud, not on the Mac, and why", () => {
@@ -156,7 +160,6 @@ describe("the site build", () => {
 
   test("the public build names no item of a private team pack, and credits PostHog for the hedgehogs and the logo", async () => {
     for (const [path, html] of pagesOf(files)) expect([path, html.match(/hogli|coder|stamphog|reviewhog/gi)]).toEqual([path, null]);
-    expect(Buffer.from(files[Object.keys(files).find((path) => /^assets\/app-[0-9a-f]+\.js$/.test(path))!] as string).toString().match(/hogli|coder|stamphog|reviewhog/gi)).toBeNull();
     expect(data.packs.flatMap((pack) => pack.workflows).map((workflow) => workflow.id)).not.toContain("previews");
     expect(data.teamPacks).toEqual([]);
     for (const [path, html] of pagesOf(files)) {

@@ -23,16 +23,15 @@ function visit(path: string, { from, files = site, url = `https://hedge.test/hed
   const window = new Window({ url });
   open.push(window);
   if (from) carryStorage(from, window);
-  const html = (files[path] as string).replace(/<script src=[^>]*><\/script>/, "").replace(/<link rel="stylesheet"[^>]*>/g, "");
+  const page = files[path] as string;
+  const html = page.replace(/<script>[\s\S]*?<\/script>/, "").replace(/<link rel="stylesheet"[^>]*>/g, "");
   window.document.write(html);
   window.document.addEventListener("click", (event) => {
     if ((event.target as unknown as Element).closest("a")) event.preventDefault();
   });
-  window.eval(files[scriptOf(files[path] as string)] as string);
+  window.eval(page.match(/<script>([\s\S]*?)<\/script>/)![1]!);
   return window;
 }
-
-const scriptOf = (html: string) => html.match(/<script src="(?:\.\.?\/)*(assets\/[^"]+\.js)"/)![1]!;
 
 function carryStorage(from: Window, to: Window) {
   for (let index = 0; index < from.sessionStorage.length; index++) {

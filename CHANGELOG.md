@@ -20,8 +20,8 @@
 - On a box without a browser, ChatGPT signs in with a device code, and
   Claude in a terminal. When device code sign-in is off, setup says how to
   turn it on, or how to sign in over an SSH port forward.
-- The site loads a script and styles whose names carry a hash of their
-  content, so a cached page always runs its own script.
+- Each page of the site carries its own script and styles, so a cached page
+  always runs its own script.
 
 ### Fleet is now Hedge
 
