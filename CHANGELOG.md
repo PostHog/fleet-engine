@@ -46,7 +46,7 @@
   when the Coder CLI could not be fetched from the hub's Coder address. It
   runs `coder login` and `coder config-ssh` on the node under `timeout`,
   which ends them there after 2 minutes. It removes the token when they
-  fail or time out, and gives that removal 1 minute. When the removal
+  fail or time out, under `timeout` too, with 1 minute. When the removal
   fails or times out, it names the token and the command that removes it.
   After the node applies the profile, it asks the node's
   `hedge doctor --to-do` which steps are left. When the apply passed and

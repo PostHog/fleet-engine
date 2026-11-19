@@ -225,7 +225,7 @@ async function configSsh(host: string, box: Machine) {
 
 const signInLimitSeconds = 120;
 const timedOut = 124;
-const tokenRemoveLimitMs = 60_000;
+const tokenRemoveLimitSeconds = 60;
 const otherSignIn = 87;
 const savedElsewhere = 88;
 
@@ -242,7 +242,7 @@ async function signInBox(host: string, box: Machine, context: DevboxContext, add
   const login = `${signInState(address)} { [ ! -f "$d/session" ] || chmod 600 "$d/session"; } && IFS= read -r t && CODER_SESSION_TOKEN="$t" coder login --use-token-as-session "$a" && coder config-ssh --yes`;
   const signedIn = await box.exec(["timeout", "-k", "10", String(signInLimitSeconds), "sh", "-c", login], { input: `${token.stdout.trim()}\n` });
   if (signedIn.code === 0) return;
-  const removed = (await here.exec(["coder", "tokens", "remove", name], { timeoutMs: tokenRemoveLimitMs })).code === 0;
+  const removed = (await here.exec(["timeout", "-k", "10", String(tokenRemoveLimitSeconds), "coder", "tokens", "remove", name])).code === 0;
   const cleanup = removed ? "" : ` Hedge could not remove the token it made, ${name}. Remove it with coder tokens remove ${name}.`;
   const why = [otherSignIn, savedElsewhere].includes(signedIn.code) ? ", because it is signed in another way now" : signedIn.code === timedOut ? `: coder login and coder config-ssh did not finish within ${signInLimitSeconds / 60} minutes` : `: ${signedIn.output.trim()}`;
   throw new Error(`Hedge could not sign ${host} in to Coder${why}.${cleanup}`);
