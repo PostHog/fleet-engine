@@ -201,7 +201,13 @@ describe("the agent setup guide", () => {
 
   test("a change to an earlier setup ends at step 8, so step 9's first-install defaults never turn off a workflow the person did not name", () => {
     expect(words(step(1))).toContain("Then check the hub as in step 8, and end there. Skip step 9: its command sets first-install defaults, such as `mcp-gateway=off`, that would change what they did not name.");
-    expect(words(hubStep())).toContain("This step runs only on a first setup; a change to an earlier setup ends at step 8 (see step 1).");
+    expect(words(hubStep())).toContain("Item 2 runs only on a first setup, because its command sets first-install defaults.");
+  });
+
+  test("a rerun of setup still adds each node that step 5 created, and skips only the first-install pack defaults", () => {
+    expect(words(step(1))).toContain("Skip step 5 for the hub.");
+    expect(words(hubStep())).toContain("On a rerun of setup (step 1), skip item 2, and run items 1, 3, and 4 for each node that step 5 created.");
+    expect(words(hubStep())).not.toContain("This step runs only on a first setup");
   });
 
   test("pairs a box that T3 Code does not list through its T3 Connect address and a token made there, never the loopback pairing URL", () => {
@@ -209,6 +215,14 @@ describe("the agent setup guide", () => {
     expect(codeIn(pairing).slice(0, 2)).toEqual([`ssh coder.<name> 'export PATH="${guidePath}"; t3 connect status --json'\n`, `ssh coder.<name> 'export PATH="${guidePath}"; t3 pair --ttl 10m --label t3-app'\n`]);
     expect(words(pairing)).toContain("The address is `https://` and its `tunnelHostname`.");
     expect(words(pairing)).toContain("Never give the `Pairing URL` it prints");
+  });
+
+  test("leaves a linked box without a tunnelHostname to hedge devbox add, and makes a pairing token only once there is an address", () => {
+    const pairing = words(step(10));
+    expect(pairing).toContain("When `authenticated` or `linked` is not `true`, T3 Connect does not run there yet: start it on that box as in item 5 of step 7");
+    expect(pairing).toContain("When it is linked but has no `tunnelHostname`, its tunnel can still be starting, or its T3 CLI does not print the field yet. Do not start T3 Connect again, and make no token yet: for a node, run item 3 of step 9 again.");
+    expect(pairing.indexOf("no `tunnelHostname`")).toBeGreaterThan(-1);
+    expect(pairing.indexOf("Make a pairing token only once you have the address")).toBeGreaterThan(pairing.indexOf("no `tunnelHostname`"));
   });
 
   test("checks each workspace with a hedge doctor that sets the guide's PATH over SSH", () => {

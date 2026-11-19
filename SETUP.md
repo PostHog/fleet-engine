@@ -543,8 +543,10 @@ pack makes itself. Where it differs from the items below, follow the note.
 When it names another template than step 5 used, replace the nodes: see
 "Clean up what you replace".
 
-This step runs only on a first setup; a change to an earlier setup ends at
-step 8 (see step 1).
+Item 2 runs only on a first setup, because its command sets first-install
+defaults. On a rerun of setup (step 1), skip item 2, and run items 1, 3, and
+4 for each node that step 5 created. A change to an earlier setup that
+creates no node ends at step 8 (see step 1).
 
 1. **The hub.** Item 4 of step 7 named it. Check that this prints
    `The hub: coder.<hub>`:
@@ -634,9 +636,15 @@ ssh coder.<name> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin
 ```
 
 The address is `https://` and its `tunnelHostname`. When `authenticated` or
-`linked` is not `true`, or there is no `tunnelHostname`, T3 Connect does not
-run there yet: start it on that box as in item 5 of step 7, and give the
-person its sign-in link. Then make a pairing token there:
+`linked` is not `true`, T3 Connect does not run there yet: start it on that
+box as in item 5 of step 7, give the person its sign-in link, and read the
+status again. When it is linked but has no `tunnelHostname`, its tunnel can
+still be starting, or its T3 CLI does not print the field yet. Do not start
+T3 Connect again, and make no token yet: for a node, run item 3 of step 9
+again. `hedge devbox add` waits for the tunnel, asks the node's T3 server
+for the address, and says what to do when there is none. For the hub, read
+the status again after a minute. Make a pairing token only once you have the
+address:
 
 ```sh
 ssh coder.<name> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; t3 pair --ttl 10m --label t3-app'
