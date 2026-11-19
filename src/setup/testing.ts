@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { parse as parseToml } from "smol-toml";
 import { main } from "../cli.ts";
 import type { FetchedSource, SourceRef } from "../pack/types.ts";
 import type { ExecResult, Machine } from "./commands.ts";
@@ -124,7 +125,10 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
   const passes = (name: SignInName) => left[name] === 0;
   const codexSaved: Partial<Record<SignInName, string>> = {};
   const storeIn = (text: string) => /cli_auth_credentials_store\s*=\s*"([^"]*)"/.exec(text)?.[1];
-  const configuredStore = (name: SignInName) => (name === "chatgpt" && options.codexConfig !== undefined ? storeIn(options.codexConfig.split(/^\[/m)[0]!) : undefined);
+  const configuredStore = (name: SignInName) => {
+    const store = name === "chatgpt" && options.codexConfig !== undefined ? parseToml(options.codexConfig).cli_auth_credentials_store : undefined;
+    return typeof store === "string" ? store : undefined;
+  };
   const codexReads = (name: SignInName, line: string) => {
     const store = storeIn(line) ?? (line.includes("--ignore-user-config") ? "auto" : (configuredStore(name) ?? "auto"));
     const saved = codexSaved[name];

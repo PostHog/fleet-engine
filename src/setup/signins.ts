@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { parse } from "smol-toml";
 import { environmentToken, tokenScopes } from "../adapters/identity/github.ts";
 import type { ModelRow, SourceRef } from "../pack/types.ts";
 import type { Machine } from "./commands.ts";
@@ -102,13 +103,17 @@ export const codexProbeTimeoutMs = 20_000;
 
 const fileStore = 'cli_auth_credentials_store="file"';
 const signInGone = /\b401\b|unauthorized|not logged in|expired|log in again|sign in again/i;
-const configuredStore = /^\s*cli_auth_credentials_store\s*=\s*"([^"]*)"/m;
 const codexConfig = ["sh", "-c", 'cat "${CODEX_HOME:-$HOME/.codex}/config.toml"'];
 
 async function codexStore(machine: Machine) {
   const config = await machine.exec(codexConfig);
   if (config.code !== 0) return undefined;
-  return configuredStore.exec(config.stdout.split(/^\s*\[/m)[0]!)?.[1];
+  try {
+    const store = parse(config.stdout).cli_auth_credentials_store;
+    return typeof store === "string" ? store : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function chatgptSignIn(machine: Machine, models: ModelRow[]): SignIn {

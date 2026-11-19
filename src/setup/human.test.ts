@@ -311,6 +311,14 @@ describe("ChatGPT's credentials store", () => {
     expect((await box.machine.exec(["codex", "exec", "ok"])).code).toBe(0);
   });
 
+  test("a store written as a TOML literal string counts too, so the person's own Codex sessions have the sign-in", async () => {
+    const home = temp.make("home-");
+    const box = fakeMachine(home, { chatgpt: 2 }, { exits: { chatgpt: 0 }, codexConfig: "cli_auth_credentials_store = 'keyring'\n" });
+    const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "codex"], ["", ""], box);
+    expect(result.code).toBe(0);
+    expect((await box.machine.exec(["codex", "exec", "ok"])).code).toBe(0);
+  });
+
   test("a store named only inside a table of the Codex config does not count, so the sign-in still goes to a file", async () => {
     const home = temp.make("home-");
     const box = fakeMachine(home, { chatgpt: 2 }, { exits: { chatgpt: 0 }, codexConfig: '[profiles.other]\ncli_auth_credentials_store = "keyring"\n' });
