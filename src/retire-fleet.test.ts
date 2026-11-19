@@ -630,13 +630,16 @@ describe("hedge apply while Fleet still runs", () => {
   test("a source URL with a token in it stays out of apply, refresh, and the unknown-command message", async () => {
     const linux = machine("linux");
     const source = sourceWithCommand();
-    expect((await linux.hedge(["apply", "--profile", source.profile("main")])).code).toBe(0);
+    const saved = source.profile("main");
+    expect((await linux.hedge(["apply", "--profile", saved])).code).toBe(0);
     const token = ["ghp", "q".repeat(30)].join("_");
-    const secretProfile = source.profile("main", `https://hedge:${token}@127.0.0.1:9/extra.git`);
+    const secretUrl = `https://hedge:${token}@127.0.0.1:9/extra.git`;
+    const profile = JSON.parse(readFileSync(join(saved, "hedge.json"), "utf8"));
+    writeFileSync(join(saved, "hedge.json"), JSON.stringify({ ...profile, sources: [{ name: "extra", repo: secretUrl, ref: "main" }] }));
 
-    const applied = await linux.hedge(["apply", "--profile", secretProfile]);
-    const unknown = await linux.hedge(["no-such-command"]);
     const refreshed = await linux.hedge(["refresh"]);
+    const applied = await linux.hedge(["apply", "--profile", source.profile("main", secretUrl)]);
+    const unknown = await linux.hedge(["no-such-command"]);
 
     for (const output of [applied.output, unknown.output, refreshed.output]) expect(output).not.toContain(token);
     expect(unknown.output).toContain("The pack source extra at main did not load: the cached checkout is not main; run hedge apply.");
