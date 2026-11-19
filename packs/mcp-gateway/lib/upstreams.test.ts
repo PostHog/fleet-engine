@@ -126,6 +126,14 @@ test("a local upstream whose folder is missing on the hub waits with a warning w
   expect(await upstreamsRegistered(hub)).toBe(true);
 });
 
+test("an upstream that Fleet added before the rename moves to its declared address and keeps its sign-in", async () => {
+  const fleets = { type: "streamable-http", url: "https://old.example.com/mcp", description: "Added by Fleet", oauth: { redirectUri: "http://127.0.0.1:3317/mcphub/oauth/callback", refreshToken: "kept" } };
+  const { api, hub } = hubWith({ "notes.json": notes }, { servers: ["tickets", "calendar", "notes"], configs: { notes: fleets } });
+  await registerUpstreams(hub);
+  expect(api.configs.notes).toMatchObject({ url: "https://notes.example.com/mcp", description: "Added by Hedge", oauth: { refreshToken: "kept" } });
+  expect(await upstreamsRegistered(hub)).toBe(true);
+});
+
 test("keeps a server of the same name that Hedge did not add", async () => {
   const theirs = { type: "streamable-http", url: "https://other.example.com/mcp" };
   const { api, hub } = hubWith({ "notes.json": notes }, { servers: ["tickets", "calendar", "notes"], configs: { notes: theirs } });

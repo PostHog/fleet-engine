@@ -36,7 +36,7 @@ function wanted(upstream: Upstream, hub: Hub): Config {
 }
 
 const marker = "Added by Hedge";
-const ours = (config: Config) => config.description === marker || (config.command === "node" && Array.isArray(config.args) && [bridgeFile, legacyBridgeFile].includes(config.args[0]));
+const ours = (config: Config) => config.description === marker || config.description === "Added by Fleet" || (config.command === "node" && Array.isArray(config.args) && [bridgeFile, legacyBridgeFile].includes(config.args[0]));
 
 async function current(call: Api, name: string): Promise<Config | undefined> {
   const names = (await call<Array<{ name: string }>>("servers")).map((server) => server.name);
