@@ -276,7 +276,7 @@ describe("the site build", () => {
       const lists = [...html.matchAll(/<ol class="flow"[^>]*>([\s\S]*?)<\/ol>/g)].map((list) => visibleText(list[1]!).trim());
       expect([pack.name, lists.length, summary, steps]).toEqual([pack.name, 1, pack.summary, lists[0]]);
       const after = html.slice(html.indexOf("<video"));
-      expect([pack.name, after.includes('id="flow-h"')]).toEqual([pack.name, true]);
+      expect([pack.name, /^How it works\b/.test(visibleText(after).trim())]).toEqual([pack.name, true]);
     }
     expect(page("index.html")).not.toMatch(/<video|assets\/video\//);
   });

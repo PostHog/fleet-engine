@@ -20,7 +20,7 @@ afterEach(async () => {
 type Visit = { from?: Window; files?: SiteFiles; url?: string; motion?: "reduce" | "no-preference" };
 
 type Entry = { target: unknown; isIntersecting: boolean; intersectionRatio: number };
-type Watched = { callback: (entries: Entry[]) => void; thresholds: number[]; states: Map<unknown, string> };
+type Watched = { callback: (entries: Entry[]) => void; thresholds: number[]; states: Map<unknown, string>; observed: unknown[] };
 type View = { shown: number; watched: Watched[] };
 const views = new WeakMap<Window, View>();
 const stateOf = (watch: Watched, shown: number) => `${shown > 0}:${watch.thresholds.filter((threshold) => shown > 0 && shown >= threshold).length}`;
@@ -37,10 +37,11 @@ function visit(path: string, { from, files = site, url = `https://hedge.test/hed
     IntersectionObserver: class {
       watch: Watched;
       constructor(callback: Watched["callback"], options: { threshold?: number | number[] } = {}) {
-        this.watch = { callback, thresholds: [options.threshold ?? 0].flat(), states: new Map() };
+        this.watch = { callback, thresholds: [options.threshold ?? 0].flat(), states: new Map(), observed: [] };
         view.watched.push(this.watch);
       }
       observe(target: unknown) {
+        this.watch.observed.push(target);
         this.watch.states.set(target, stateOf(this.watch, view.shown));
         deliver(this.watch, [target], view.shown);
       }
@@ -194,6 +195,8 @@ describe("the Packs page in a browser", () => {
 const video = (window: Window, selector: string) => window.document.querySelector(selector) as unknown as HTMLVideoElement;
 const dialog = (window: Window) => window.document.querySelector("dialog") as unknown as HTMLDialogElement;
 const accessibleName = (element: Element) => {
+  const labelledBy = element.getAttribute("aria-labelledby");
+  if (labelledBy) return labelledBy.split(" ").map((id) => element.ownerDocument.getElementById(id)!.textContent).join(" ");
   const label = element.getAttribute("aria-label");
   if (label) return label;
   const copy = element.cloneNode(true) as Element;
@@ -207,6 +210,9 @@ const plays = (clip: HTMLVideoElement, seconds: number) => {
   clip.currentTime += seconds;
 };
 const pathOf = (window: Window, url: string) => new URL(url, window.location.href).pathname;
+const queuedEarlier = (window: Window, shown: number) => {
+  for (const watch of views.get(window)!.watched) deliver(watch, watch.observed, shown);
+};
 const scrollTo = (window: Window, shown: number) => {
   const view = views.get(window)!;
   view.shown = shown;
@@ -301,5 +307,15 @@ describe("the pack videos in a browser", () => {
     clip.pause();
     scrollTo(window, 0.6);
     expect([clip.paused, clip.currentTime]).toEqual([true, 0]);
+  });
+
+  test("a pack page's video that the visitor played and paused stays paused when a visibility entry that the browser queued earlier arrives", () => {
+    const window = visit("packs/hub/index.html");
+    const clip = video(window, "video.clip");
+    scrollTo(window, 0.4);
+    clip.play();
+    clip.pause();
+    queuedEarlier(window, 0.6);
+    expect(clip.paused).toBe(true);
   });
 });

@@ -131,11 +131,15 @@ function player(dialog: HTMLDialogElement) {
 function clips() {
   const videos = document.querySelectorAll<HTMLVideoElement>("video.clip");
   if (!videos.length || calm() || !("IntersectionObserver" in window)) return;
+  const played = new WeakSet<HTMLVideoElement>();
   const observer = new IntersectionObserver((entries) => {
-    for (const entry of entries) if (entry.intersectionRatio >= 0.5) start(entry.target as HTMLVideoElement);
+    for (const entry of entries) {
+      const video = entry.target as HTMLVideoElement;
+      if (entry.intersectionRatio >= 0.5 && !played.has(video)) start(video);
+    }
   }, { threshold: 0.5 });
   for (const video of videos) {
-    video.addEventListener("play", () => observer.unobserve(video));
+    video.addEventListener("play", () => played.add(video));
     observer.observe(video);
   }
 }
