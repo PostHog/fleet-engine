@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { join } from "node:path";
 import { parse } from "smol-toml";
 import { providerConfigAdapter, type CommandRunner } from "../../src/adapters/provider-config/adapter.ts";
-import type { AiPlan, AvailableSource } from "../../src/pack/types.ts";
+import type { AiPlan, AvailableSource, Plan } from "../../src/pack/types.ts";
 import { apply, check, type Runner } from "../../src/reconciler/apply.ts";
 import { tempDirs } from "../../src/testing/git.ts";
 import { devbox, engineSource, resolveEngine, skillSources } from "../../src/testing/packs.ts";
@@ -40,8 +40,9 @@ const signedOut = { claude: (server: string) => `${server}:\n  Scope: Dynamic co
 
 type Machine = { claude?: (server: string) => string; codexAuth?: string; convex?: boolean; env?: Record<string, string> };
 
-/** Runs each check with fake claude and codex CLIs that print what the real ones print. */
-function checkRunner(home: string, machine: Machine): Runner {
+/** Runs the Integrations pack's own checks with fake claude and codex CLIs that print what the real ones print, and fails every other command without a process. */
+function checkRunner(home: string, machine: Machine, plan: Plan): Runner {
+  const signIns = new Set(plan.checks.filter((item) => item.pack === "integrations").map((item) => JSON.stringify(item.run)));
   const bin = temp.make("bin-");
   for (const server of ["plugin:github:github", "plugin:context7:context7"]) writeFileSync(join(bin, server.replaceAll(":", "_")), (machine.claude ?? signedOut.claude)(server));
   writeFileSync(join(bin, "codex-mcp-list"), signedIn.codex(machine.codexAuth ?? "Not logged in"));
@@ -54,7 +55,7 @@ function checkRunner(home: string, machine: Machine): Runner {
     writeFileSync(join(home, ".convex/config.json"), "{}");
   }
   const inherited = Object.fromEntries(Object.entries(Bun.env).filter(([name]) => name !== "CONTEXT7_API_KEY"));
-  return async (command, env = {}) => Bun.spawn(command, { stdout: "ignore", stderr: "ignore", env: { ...inherited, PATH: `${bin}:${Bun.env.PATH}`, HOME: home, ...machine.env, ...env } }).exited;
+  return async (command, env = {}) => (signIns.has(JSON.stringify(command)) ? Bun.spawn(command, { stdout: "ignore", stderr: "ignore", env: { ...inherited, PATH: `${bin}:${Bun.env.PATH}`, HOME: home, ...machine.env, ...env } }).exited : 1);
 }
 
 const resolve = (plan: AiPlan, workflows: Record<string, boolean>) => resolveEngine([engine, ...skillSources(temp.make("skills-"), engine)], { packs: ["integrations"], plan, workflows }, devbox);
@@ -72,7 +73,8 @@ async function applyPack(plan: AiPlan, workflows: Record<string, boolean> = {}) 
 
 async function doctor(plan: AiPlan, workflows: Record<string, boolean>, machine: Machine) {
   const home = temp.make("home-");
-  return signInsOf((await check(resolve(plan, workflows), { home, adapters: [], run: checkRunner(home, machine) })).findings);
+  const resolved = resolve(plan, workflows);
+  return signInsOf((await check(resolved, { home, adapters: [], run: checkRunner(home, machine, resolved) })).findings);
 }
 
 describe("the Integrations pack", () => {
