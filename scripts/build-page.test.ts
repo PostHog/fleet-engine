@@ -248,7 +248,8 @@ describe("the site build", () => {
     ]);
     expect(html.match(/<dialog\b/g)).toHaveLength(1);
     expect(html.match(/<video\b/g)).toHaveLength(1);
-    expect(html.match(/<dialog\b[\s\S]*?<\/dialog>/)![0]).toContain("<video");
+    const player = attributesOf(html.match(/<dialog\b[\s\S]*?<\/dialog>/)![0].match(/<video\b[^>]*>/)![0]);
+    expect([player.muted, player.loop, player.playsinline, player.controls, player.preload, player.autoplay]).toEqual([true, true, true, true, "none", undefined]);
   });
 
   test("a pack's page with a video shows it above How it works, with its poster, described by the page's own text, and no other page has a video", () => {
