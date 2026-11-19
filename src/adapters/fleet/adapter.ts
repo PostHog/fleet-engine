@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { lstatSync, readdirSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { Finding } from "../../pack/types.ts";
 import type { Adapter } from "../../reconciler/apply.ts";
@@ -10,7 +10,8 @@ import type { T3Server } from "../t3/port.ts";
 
 export type FleetPiece = { kind: "launchd" | "systemd" | "container" | "t3" | "cron" | "process"; name: string; pid?: number };
 export type OldTasks = { list(): Promise<Array<{ id: string; enabled: boolean }>>; setEnabled(id: string, enabled: boolean): Promise<void>; saved?: true };
-export type FleetOptions = { run?: CommandRunner; accountHome?: () => Promise<string | undefined>; uid?: number; tasks?: (home: string) => Promise<OldTasks | undefined>; sleep?: (ms: number) => Promise<void> };
+export type Running = { pid: number; ppid: number; argv: string[] };
+export type FleetOptions = { run?: CommandRunner; accountHome?: () => Promise<string | undefined>; uid?: number; tasks?: (home: string) => Promise<OldTasks | undefined>; sleep?: (ms: number) => Promise<void>; processes?: () => Promise<Running[]> };
 export type Retirement = { retired: string[]; left: string[]; notes: string[] };
 export type FleetAdapter = Adapter & { retire(home: string, platform: NodeJS.Platform): Promise<Retirement | undefined>; holds(home: string, platform: NodeJS.Platform): Promise<Finding[]> };
 
@@ -27,11 +28,13 @@ const exitPollMs = 500;
 const shellPrograms = new Set(["sh", "bash", "dash", "zsh"]);
 const jobLauncher = /\/\.local\/state\/fleet\/jobs\/([A-Za-z0-9._-]+)\.sh$/;
 const packCommand = /\/packs\/[^/]+\/commands\/([a-z0-9-]+)\.ts$/;
+const jobChildren: ReadonlyArray<readonly string[]> = [["update"], ["agent-update"]];
+const jobOrChild = (argv: string[]) => oldJob(argv) ?? jobChildren.find((command) => command.every((word, index) => argv[index] === word));
 
 function fleetJob(home: string, words: string[]): string | undefined {
   const [program = "", script = "", ...rest] = words;
   const ours = (path: string) => path.startsWith("/") && underLegacyPath(home, path);
-  const job = (argv: string[]) => oldJob(argv)?.join(" ");
+  const job = (argv: string[]) => jobOrChild(argv)?.join(" ");
   if (basename(program) === "fleet" && ours(program)) return job([script, ...rest]);
   if (!ours(script)) return undefined;
   if (shellPrograms.has(basename(program))) {
@@ -42,6 +45,33 @@ function fleetJob(home: string, words: string[]): string | undefined {
   if (script.endsWith("/src/cli.ts")) return job(rest);
   const command = packCommand.exec(script)?.[1];
   return command ? job([command, ...rest]) : undefined;
+}
+
+function procProcesses(uid: number): () => Promise<Running[]> {
+  return async () => {
+    let entries: string[];
+    try {
+      entries = readdirSync("/proc").filter((name) => /^[0-9]+$/.test(name));
+    } catch (error) {
+      throw new Error(`/proc could not be read (${(error as Error).message})`);
+    }
+    return entries.flatMap((name): Running[] => {
+      try {
+        if (statSync(`/proc/${name}`).uid !== uid) return [];
+        const argv = readFileSync(`/proc/${name}/cmdline`, "utf8").split("\0");
+        if (argv.at(-1) === "") argv.pop();
+        const stat = readFileSync(`/proc/${name}/stat`, "utf8");
+        const ppid = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
+        return argv.length ? [{ pid: Number(name), ppid, argv }] : [];
+      } catch {
+        return [];
+      }
+    });
+  };
+}
+
+function descendants(running: Running[], pid: number): number[] {
+  return running.filter((item) => item.ppid === pid && item.pid !== pid).flatMap((item) => [item.pid, ...descendants(running, item.pid)]);
 }
 
 const present = (path: string) => lstatSync(path, { throwIfNoEntry: false }) !== undefined;
@@ -100,18 +130,30 @@ export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
   };
   const cronId = (line: string) => cronMarker.exec(line)?.[1];
   const sleep = options.sleep ?? Bun.sleep;
-  const oldCommands = async (home: string): Promise<{ pieces: FleetPiece[]; unclear?: string }> => {
-    const listed = await run(["ps", "-ww", "-U", String(uid), "-o", "pid=,args="]);
-    if (listed.code !== 0) return { pieces: [], unclear: `ps did not answer (${why(listed)})` };
-    const pieces = lines(listed.stdout).flatMap((line): FleetPiece[] => {
-      const [pid, ...words] = line.split(/\s+/);
-      const job = fleetJob(home, words);
-      return job ? [{ kind: "process", name: `fleet ${job} (process ${pid})`, pid: Number(pid) }] : [];
+  const psProcesses = async (): Promise<Running[]> => {
+    const listed = await run(["ps", "-ww", "-U", String(uid), "-o", "pid=,ppid=,args="]);
+    if (listed.code !== 0) throw new Error(`ps did not answer (${why(listed)})`);
+    return lines(listed.stdout).map((line) => {
+      const [pid, ppid, ...argv] = line.split(/\s+/);
+      return { pid: Number(pid), ppid: Number(ppid), argv };
     });
-    return { pieces };
   };
-  const stillRunning = async (home: string, piece: FleetPiece) => {
-    const now = await oldCommands(home);
+  const processesOf = (platform: NodeJS.Platform) => options.processes ?? (platform === "linux" ? procProcesses(uid) : psProcesses);
+  const oldCommands = async (home: string, platform: NodeJS.Platform): Promise<{ pieces: FleetPiece[]; running: Running[]; unclear?: string }> => {
+    let running: Running[];
+    try {
+      running = await processesOf(platform)();
+    } catch (error) {
+      return { pieces: [], running: [], unclear: (error as Error).message };
+    }
+    const pieces = running.flatMap(({ pid, argv }): FleetPiece[] => {
+      const job = fleetJob(home, argv);
+      return job ? [{ kind: "process", name: `fleet ${job} (process ${pid})`, pid }] : [];
+    });
+    return { pieces, running };
+  };
+  const stillRunning = async (home: string, platform: NodeJS.Platform, piece: FleetPiece) => {
+    const now = await oldCommands(home, platform);
     return now.unclear ?? (now.pieces.some((item) => item.pid === piece.pid) ? "it has not ended" : undefined);
   };
 
@@ -150,14 +192,14 @@ export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
         found.unclear.push(`T3 Code did not list its scheduled tasks (${(error as Error).message})`);
       }
     }
-    const commands = await oldCommands(home);
+    const commands = await oldCommands(home, platform);
     if (commands.unclear) found.unclear.push(commands.unclear);
     for (const piece of commands.pieces) found.pieces.push(piece);
     return found;
   }
 
-  async function stillOn(home: string, piece: FleetPiece, tasks: OldTasks | undefined): Promise<string | undefined> {
-    if (piece.kind === "process") return stillRunning(home, piece);
+  async function stillOn(home: string, platform: NodeJS.Platform, piece: FleetPiece, tasks: OldTasks | undefined): Promise<string | undefined> {
+    if (piece.kind === "process") return stillRunning(home, platform, piece);
     if (piece.kind === "launchd") {
       const printed = await run(["launchctl", "print", launchdTarget(piece.name)]);
       if (printed.code !== notLoaded) return printed.code === 0 ? "it is still loaded" : `launchctl print exit ${printed.code}`;
@@ -198,11 +240,15 @@ export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
     }
   }
 
-  async function stop(home: string, piece: FleetPiece, tasks: OldTasks | undefined) {
+  async function stop(home: string, platform: NodeJS.Platform, piece: FleetPiece, tasks: OldTasks | undefined): Promise<string | undefined> {
     if (piece.kind === "process") {
-      if ((await stillRunning(home, piece)) !== "it has not ended") return;
-      await run(["kill", "-TERM", String(piece.pid)]);
-      for (let poll = 0; poll < exitPolls && (await stillRunning(home, piece)) === "it has not ended"; poll++) await sleep(exitPollMs);
+      const now = await oldCommands(home, platform);
+      if (!now.pieces.some((item) => item.pid === piece.pid)) return;
+      const tree = [piece.pid!, ...descendants(now.running, piece.pid!)];
+      await run(["kill", "-TERM", ...tree.map(String)]);
+      const alive = async () => (await processesOf(platform)().catch(() => undefined))?.some((item) => tree.includes(item.pid)) ?? true;
+      for (let poll = 0; poll < exitPolls && (await alive()); poll++) await sleep(exitPollMs);
+      return (await alive()) ? `${describe(piece)}: it or a command it started has not ended` : undefined;
     } else if (piece.kind === "launchd") {
       await run(["launchctl", "bootout", launchdTarget(piece.name)]);
       await run(["launchctl", "disable", launchdTarget(piece.name)]);
@@ -225,7 +271,7 @@ export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
     const on: Array<{ piece: FleetPiece; reason: string }> = [];
     const pieces = [...found.pieces, ...earlier.filter((piece) => !found.pieces.some((item) => item.kind === piece.kind && item.name === piece.name))];
     for (const piece of pieces) {
-      const reason = await stillOn(home, piece, tasks);
+      const reason = await stillOn(home, platform, piece, tasks);
       if (reason) on.push({ piece, reason });
     }
     return { found, on, tasks };
@@ -255,10 +301,15 @@ export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
       if (skipped?.findings.length) throw new Error(skipped.findings[0]!.say);
       if (skipped) return undefined;
       const before = await still(home, platform);
-      for (const piece of before.found.pieces) await stop(home, piece, before.tasks);
+      const stuck = new Map<FleetPiece, string>();
+      for (const piece of before.found.pieces) {
+        const reason = await stop(home, platform, piece, before.tasks);
+        if (reason) stuck.set(piece, reason);
+      }
       const after = await still(home, platform, before.found.pieces);
-      const left = [...after.on.map(({ piece, reason }) => `${describe(piece)}: ${reason}`), ...after.found.unclear];
-      const retired = before.on.filter(({ piece }) => !after.on.some((item) => item.piece.kind === piece.kind && item.piece.name === piece.name)).map(({ piece }) => describe(piece));
+      const same = (piece: FleetPiece) => (item: { piece: FleetPiece }) => item.piece.kind === piece.kind && item.piece.name === piece.name;
+      const left = [...after.on.map(({ piece, reason }) => `${describe(piece)}: ${reason}`), ...[...stuck].filter(([piece]) => !after.on.some(same(piece))).map(([, reason]) => reason), ...after.found.unclear];
+      const retired = before.on.filter(({ piece }) => !stuck.has(piece) && !after.on.some(same(piece))).map(({ piece }) => describe(piece));
       return { retired, left, notes: after.found.notes };
     },
   };

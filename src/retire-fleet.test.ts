@@ -45,7 +45,7 @@ function savedT3Tasks(home: string, tasks: Array<{ id: string; enabled: boolean 
 
 const stoppedT3: T3Server = { answering: async () => false, session: async () => Promise.reject(new Error("T3 Code is not running")) };
 
-type LiveProcesses = { run: CommandRunner; uid: number; sleep: () => Promise<void> };
+type LiveProcesses = { run: CommandRunner; uid: number; sleep: () => Promise<void>; processes?: FleetOptions["processes"] };
 
 function machine(platform: NodeJS.Platform, home = oldInstall(), tasks?: FleetOptions["tasks"], live?: LiveProcesses) {
   const systemd = fakeSystemd();
@@ -55,7 +55,7 @@ function machine(platform: NodeJS.Platform, home = oldInstall(), tasks?: FleetOp
   const cron = fakeCrontab();
   const processes = fakeProcesses();
   const run = runners(cron.run, systemd.run, launchd.run, docker.run, live?.run ?? processes.run);
-  const fleet = fleetAdapter({ run, uid: live?.uid ?? 501, accountHome: async () => home, tasks: tasks ?? (async () => t3.client), sleep: live?.sleep ?? (async () => {}) });
+  const fleet = fleetAdapter({ run, uid: live?.uid ?? 501, accountHome: async () => home, tasks: tasks ?? (async () => t3.client), sleep: live?.sleep ?? (async () => {}), processes: live ? live.processes : processes.list });
   const adapters = (): Adapter[] => [fleet, filesAdapter, jobsAdapter({ run, engineRoot: repoRoot, uid: 501, accountHome: async () => home })];
   const engine = engineWithService();
   const clock = { now: Date.now, sleep: async (_ms: number) => {} };
@@ -101,16 +101,54 @@ const [name = "", ...args] = Bun.argv.slice(2);
 process.execve(Bun.which("bun"), ["bun", join(import.meta.dir, "../packs/base/commands", name + ".ts"), ...args], process.env);
 `;
 
-async function firstLine(stream: ReadableStream<Uint8Array>) {
+const oldNightlyRunsChildShell = `import { join } from "node:path";
+const command = Bun.argv.slice(2).slice(3);
+const once = ["/bin/sh", "-c", '"$@"\\ncode=$?\\nexit "$code"', "fleet-nightly", "/bin/sh", join(import.meta.dir, "../../../fleet"), ...command];
+process.exit(await Bun.spawn(once, { stdio: ["inherit", "inherit", "inherit"] }).exited);
+`;
+
+const oldAgentUpdateRunsInstaller = `const installer = Bun.spawn(["/bin/sh", "-c", 'sh -c "echo installer \\\\$\\\\$; exec sleep 60"; exit'], { stdin: "ignore", stdout: "inherit", stderr: "inherit" });
+console.log(\`working \${process.pid}\`);
+await installer.exited;
+`;
+
+const parentOf = (pid: number) => {
+  const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+  return Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
+};
+
+function inTree(root: number, pid: number) {
+  try {
+    for (let at = pid; at > 1; at = parentOf(at)) if (at === root) return true;
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+function running(pid: number) {
+  try {
+    return readFileSync(`/proc/${pid}/cmdline`).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function untilClosed(stream: ReadableStream<Uint8Array>) {
+  const reader = stream.getReader();
+  while (!(await reader.read()).done);
+}
+
+async function firstLines(stream: ReadableStream<Uint8Array>, count: number) {
   const reader = stream.getReader();
   let text = "";
-  while (!text.includes("\n")) {
+  while (text.split("\n").length <= count) {
     const { value, done } = await reader.read();
     if (done) break;
     text += new TextDecoder().decode(value);
   }
   reader.releaseLock();
-  return text.split("\n")[0];
+  return text.split("\n").slice(0, count);
 }
 
 describe("hedge retire-fleet", () => {
@@ -306,8 +344,8 @@ describe("hedge retire-fleet", () => {
     expect(linux.systemd.units.has("hedge-watch.service")).toBe(false);
   });
 
-  test("stops a live nightly job that the old launcher started, after Fleet replaced its process with bun running packs/base/commands/nightly.ts", async () => {
-    const home = oldInstall();
+  test("from a home path with a space, stops a live nightly job and the agent-update that its child shell runs, as the old launcher started them", async () => {
+    const home = oldInstall(temp.make("home with space-"));
     const engine = join(home, ".local/share/fleet/engine");
     const bin = temp.make("bin-");
     symlinkSync(process.execPath, join(bin, "bun"));
@@ -315,26 +353,34 @@ describe("hedge retire-fleet", () => {
     mkdirSync(join(engine, "packs/base/commands"), { recursive: true });
     writeFileSync(join(engine, "fleet"), oldLauncher);
     writeFileSync(join(engine, "src/cli.ts"), oldCliBecomesPackCommand);
-    writeFileSync(join(engine, "packs/base/commands/nightly.ts"), 'console.log("ready");\nsetInterval(() => {}, 1 << 30);\n');
+    writeFileSync(join(engine, "packs/base/commands/nightly.ts"), oldNightlyRunsChildShell);
+    writeFileSync(join(engine, "packs/base/commands/agent-update.ts"), oldAgentUpdateRunsInstaller);
     const secret = ["token", "z".repeat(24)].join("-");
     const child = Bun.spawn(["/bin/sh", join(engine, "fleet"), "nightly", "agent-update", "--", "fleet", "agent-update", `--auth=${secret}`], {
       env: { HOME: home, PATH: `${bin}:/usr/bin:/bin`, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" },
       stdin: "ignore", stdout: "pipe", stderr: "inherit",
     });
     try {
-      expect(await firstLine(child.stdout)).toBe("ready");
-      const onlyThisChild: CommandRunner = async (command, options) => {
-        if (command[0] === "ps") return spawnRunner(command, options);
-        if (command[0] === "kill") return command.at(-1) === String(child.pid) ? spawnRunner(command, options) : { code: 1, stdout: "", stderr: "the test signals only its own child\n" };
-        return { code: 127, stdout: "" };
+      const started = new Map((await firstLines(child.stdout, 2)).map((line) => line.split(" ") as [string, string]));
+      const [worker, installer] = [Number(started.get("working")), Number(started.get("installer"))];
+      const ended = untilClosed(child.stdout);
+      const onlyThisTree: CommandRunner = async (command) => {
+        if (command[0] !== "kill") return { code: 127, stdout: "" };
+        const pids = command.slice(2).map(Number);
+        if (!pids.every((pid) => inTree(child.pid, pid))) return { code: 1, stdout: "", stderr: "the test signals only its own processes\n" };
+        for (const pid of pids) process.kill(pid, "SIGTERM");
+        return { code: 0, stdout: "" };
       };
-      const linux = machine("linux", home, undefined, { run: onlyThisChild, uid: process.getuid!(), sleep: () => child.exited.then(() => undefined) });
+      const linux = machine("linux", home, undefined, { run: onlyThisTree, uid: process.getuid!(), sleep: () => ended });
 
       const retired = await linux.hedge(["retire-fleet"]);
 
       expect(retired.output).toContain(`Hedge: stopped and turned off the running command fleet nightly (process ${child.pid}) from before the rename, and kept its files.`);
+      expect(retired.output).toContain(`Hedge: stopped and turned off the running command fleet agent-update (process ${worker}) from before the rename, and kept its files.`);
       expect(retired.output).not.toContain(secret);
       expect(retired.code).toBe(0);
+      await ended;
+      expect([worker, installer].filter(running)).toEqual([]);
       await child.exited;
       expect(child.signalCode).toBe("SIGTERM");
     } finally {
@@ -360,7 +406,7 @@ describe("hedge retire-fleet", () => {
     ]);
   });
 
-  test("when ps cannot run, retire exits 1 and apply starts nothing, since Hedge cannot tell whether an old job's command still runs", async () => {
+  test("when Hedge cannot read the running commands, retire exits 1 and apply starts nothing, since Hedge cannot tell whether an old job's command still runs", async () => {
     const linux = machine("linux");
     linux.processes.state.missing = true;
 
@@ -368,9 +414,9 @@ describe("hedge retire-fleet", () => {
     const applied = await linux.hedge(["apply", "--profile", profileDir(["watcher"])]);
 
     expect(retired.code).toBe(1);
-    expect(retired.output).toContain("Hedge: ps did not answer (exit 127). Hedge could not verify that it stopped.");
+    expect(retired.output).toContain("Hedge: /proc could not be read (ENOENT: no such file or directory). Hedge could not verify that it stopped.");
     expect(applied.code).toBe(1);
-    expect(applied.output).toContain("ps did not answer (exit 127), so Hedge cannot tell whether Fleet still runs, and started nothing.");
+    expect(applied.output).toContain("/proc could not be read (ENOENT: no such file or directory), so Hedge cannot tell whether Fleet still runs, and started nothing.");
     expect(linux.systemd.units.has("hedge-watch.service")).toBe(false);
   });
 
