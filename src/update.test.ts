@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import type { ProfileFile } from "./pack/types.ts";
 import { isolateGit, spawnGit, template, tempDirs } from "./testing/git.ts";
 import { spawnAsync } from "./testing/spawn.ts";
-import { noticePath, readNotice, update, type Child } from "./update.ts";
+import { noticePath, readNotice, startStep, update, type Child } from "./update.ts";
 import { main } from "./cli.ts";
 import { spawnRunner, type CommandRunner } from "./adapters/run.ts";
 import { engineRoot, fakeMachine, pushedAnswers, scripted } from "./setup/testing.ts";
@@ -78,6 +78,7 @@ function pausePoint() {
   const held = [openSync(reached, constants.O_RDWR), openSync(resume, constants.O_RDWR)];
   const safetyMs = 3_000;
   return {
+    paths: { reached, resume },
     shell: `echo > '${reached}'; read _ < '${resume}'`,
     untilStopped: `sleep 60 & s=$!; trap "kill $s; echo > '${reached}'; read _ < '${resume}'; exit 143" TERM; echo > '${reached}'; wait $s`,
     reached: async () => {
@@ -94,9 +95,9 @@ function pausePoint() {
 
 const originOf = async (engineDir: string) => (await spawnGit(engineDir, "config", "--get", "remote.origin.url")).trim();
 
-type RunWith = { profileDir?: string; home?: string; apply?: () => Child; beforeProfile?: () => Promise<void> };
+type RunWith = { profileDir?: string; home?: string; apply?: () => Child };
 
-async function run(engineDir: string, engine: ProfileFile["engine"], { profileDir = temp.make("profile-"), home = temp.make("home-"), apply, beforeProfile }: RunWith = {}) {
+async function run(engineDir: string, engine: ProfileFile["engine"], { profileDir = temp.make("profile-"), home = temp.make("home-"), apply }: RunWith = {}) {
   const lines: string[] = [];
   let applied = 0;
   let appliedProfile: string | undefined;
@@ -106,7 +107,7 @@ async function run(engineDir: string, engine: ProfileFile["engine"], { profileDi
     appliedProfile = existsSync(answers) ? readFileSync(answers, "utf8") : undefined;
     return { exited: Promise.resolve(0), kill: () => undefined };
   };
-  const readProfile = async () => (await beforeProfile?.(), { profileDir, engine });
+  const readProfile = async () => ({ profileDir, engine });
   const code = await update({ home, engineDir, readProfile, print: (line) => lines.push(line), runApply: apply ?? runApply });
   return { code, home, applied, appliedProfile, output: lines.join("\n"), version: await Bun.file(join(engineDir, "VERSION")).text() };
 }
@@ -119,6 +120,38 @@ async function tagRelease(remote: string, version: string, scripts?: Record<stri
 }
 
 const anotherUpdateRuns = "hedge update: another hedge update is running. Run it again when that one ends.";
+
+async function releaseWithDep(remote: string, version: string, dep: string, scripts?: Record<string, string>) {
+  mkdirSync(join(remote, "dep"), { recursive: true });
+  writeFileSync(join(remote, "dep", "package.json"), JSON.stringify({ name: "dep", version: dep }));
+  writeFileSync(join(remote, "package.json"), JSON.stringify({ name: "engine", dependencies: { dep: "file:./dep" }, ...(scripts ? { scripts } : {}) }));
+  expect((await spawnAsync([process.execPath, "install", "--ignore-scripts"], { cwd: remote })).exitCode).toBe(0);
+  writeFileSync(join(remote, "VERSION"), version);
+  await spawnGit(remote, "add", ".");
+  await spawnGit(remote, "commit", "-q", "-m", version);
+  await spawnGit(remote, "tag", version);
+}
+
+const installedDep = (engineDir: string) => JSON.parse(readFileSync(join(engineDir, "node_modules", "dep", "package.json"), "utf8")).version;
+
+function updateInSubprocess(engineDir: string, home: string, remote: string, ref: string, apply: string) {
+  const script = join(temp.make("script-"), "update.ts");
+  writeFileSync(script, [
+    `import { startStep, update } from ${JSON.stringify(join(import.meta.dir, "update.ts"))};`,
+    `const [engineDir, home, repo, ref, apply] = process.argv.slice(2);`,
+    `const readProfile = async () => ({ profileDir: home, engine: { repo, ref, channel: "release" as const } });`,
+    `process.exitCode = await update({ home, engineDir, readProfile, print: console.log, runApply: () => startStep(["sh", "-c", apply], { stdio: ["ignore", "inherit", "inherit"] }) });`,
+  ].join("\n"));
+  return Bun.spawn([process.execPath, script, engineDir, home, remote, ref, apply], { env: process.env, stdin: "ignore", stdout: "ignore", stderr: "inherit" });
+}
+
+const alive = (pid: number) => {
+  try {
+    return process.kill(pid, 0);
+  } catch {
+    return false;
+  }
+};
 
 describe("hedge update", () => {
   test.each(["PostHog/fleet-engine", "Silthus/fleet-engine", "https://github.com/PostHog/fleet-engine"])("keeps the Hedge origin when the profile still names %s, this engine's repository from before the rename", async (repo) => {
@@ -321,49 +354,98 @@ describe("hedge update", () => {
     expect(result).toMatchObject({ code: 0, version: "main" });
   });
 
-  test("a second hedge update from another home on the same engine checkout exits 1 while the first fetches, and the first then installs its release", async () => {
-    const remote = await engineRemote(["v0.1.0", "v0.1.1"]);
-    const engineDir = await engineCheckout(remote, "v0.1.0");
+  async function whileFirstFetches<T>(first: () => Promise<T>, meanwhile: () => Promise<void>) {
     const realGit = Bun.which("git")!;
     const bin = temp.make("bin-");
     const pause = pausePoint();
     writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = -C ] && [ "$3" = fetch ] && mkdir "${bin}/paused" 2>/dev/null; then "${realGit}" "$@"; status=$?; ${pause.shell}; exit $status; fi\nexec "${realGit}" "$@"\n`, { mode: 0o755 });
     const path = process.env.PATH;
     process.env.PATH = `${bin}:${path}`;
-    const first = run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" }, { home: temp.make("home-") });
+    const running = first();
     try {
       await pause.reached();
-
-      const second = await run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" }, { home: temp.make("home-") });
-      expect(second).toMatchObject({ code: 1, applied: 0, version: "v0.1.0", output: anotherUpdateRuns });
-
+      await meanwhile();
       pause.resume();
-      expect(await first).toMatchObject({ code: 0, applied: 1, version: "v0.1.1" });
+      return await running;
     } finally {
       process.env.PATH = path;
-      await pause.end(first);
+      await pause.end(running);
     }
-  });
+  }
 
-  test("a hedge update that starts while another reads its profile exits 1, so the engine never moves between a run's profile read and its update", async () => {
+  test("a second hedge update from another home on the same engine checkout exits 1 while the first fetches, and the first then installs its release", async () => {
     const remote = await engineRemote(["v0.1.0", "v0.1.1"]);
     const engineDir = await engineCheckout(remote, "v0.1.0");
-    let reading!: () => void;
-    let read!: () => void;
-    const started = new Promise<void>((resolve) => (reading = resolve));
-    const gate = new Promise<void>((resolve) => (read = resolve));
-    const first = run(engineDir, { repo: remote, ref: "main", channel: "track" }, { beforeProfile: async () => (reading(), await gate) });
+
+    const first = await whileFirstFetches(() => run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" }, { home: temp.make("home-") }), async () => {
+      const second = await run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" }, { home: temp.make("home-") });
+      expect(second).toMatchObject({ code: 1, applied: 0, version: "v0.1.0", output: anotherUpdateRuns });
+    });
+
+    expect(first).toMatchObject({ code: 0, applied: 1, version: "v0.1.1" });
+  });
+
+  test("a second hedge update from another engine checkout with the same home exits 1 while the first fetches, and leaves its checkout alone", async () => {
+    const remote = await engineRemote(["v0.1.0", "v0.1.1"]);
+    const [engineDir, otherDir] = [await engineCheckout(remote, "v0.1.0"), await engineCheckout(remote, "v0.1.0")];
+    const home = temp.make("home-");
+    const before = await spawnGit(otherDir, "rev-parse", "HEAD");
+
+    const first = await whileFirstFetches(() => run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" }, { home }), async () => {
+      const second = await run(otherDir, { repo: remote, ref: "v0.1.0", channel: "release" }, { home });
+      expect(second).toMatchObject({ code: 1, applied: 0, version: "v0.1.0", output: anotherUpdateRuns });
+      expect(await spawnGit(otherDir, "rev-parse", "HEAD")).toBe(before);
+    });
+
+    expect(first).toMatchObject({ code: 0, applied: 1, version: "v0.1.1" });
+  });
+
+  test("a second hedge update from a linked worktree of the same engine repository exits 1 while the first fetches, and leaves the worktree alone", async () => {
+    const remote = await engineRemote(["v0.1.0", "v0.1.1"]);
+    const engineDir = await engineCheckout(remote, "v0.1.0");
+    const worktree = join(temp.make("worktrees-"), "engine");
+    await spawnGit(engineDir, "worktree", "add", "-q", "--detach", worktree, "HEAD");
+    const before = await spawnGit(worktree, "rev-parse", "HEAD");
+
+    const first = await whileFirstFetches(() => run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" }, { home: temp.make("home-") }), async () => {
+      const second = await run(worktree, { repo: remote, ref: "v0.1.0", channel: "release" }, { home: temp.make("home-") });
+      expect(second).toMatchObject({ code: 1, applied: 0, version: "v0.1.0", output: anotherUpdateRuns });
+      expect(await spawnGit(worktree, "rev-parse", "HEAD")).toBe(before);
+    });
+
+    expect(first).toMatchObject({ code: 0, applied: 1, version: "v0.1.1" });
+  });
+
+  test("a hedge update that starts while the hedge CLI reads the machine file of another run exits 1, so the engine never moves between a run's profile read and its update", async () => {
+    const remote = await engineRemote(["v0.1.0", "v0.1.1"]);
+    const engineDir = await engineCheckout(remote, "v0.1.0");
+    const home = temp.make("home-");
+    const profileDir = temp.make("profile-");
+    writeFileSync(join(profileDir, "hedge.json"), JSON.stringify({ schema: 1, engine: { repo: remote, ref: "v0.1.0", channel: "release" }, sources: [], packs: [], plan: "both", settings: {}, workflows: {} }));
+    const machineFile = join(home, ".config/hedge/machine.json");
+    mkdirSync(dirname(machineFile), { recursive: true });
+    Bun.spawnSync(["mkfifo", machineFile]);
+    const machine = join(temp.make("machine-"), "machine.json");
+    writeFileSync(machine, JSON.stringify({ schema: 1, role: "devbox", profileDir }));
+    const pause = pausePoint();
+    const writer = Bun.spawn(["sh", "-c", `exec 3> '${machineFile}'; echo > '${pause.paths.reached}'; read _ < '${pause.paths.resume}'; cat '${machine}' >&3`]);
+    const script = join(temp.make("script-"), "cli.ts");
+    writeFileSync(script, `import { main } from ${JSON.stringify(join(import.meta.dir, "cli.ts"))};\nconst [home, engineRoot] = process.argv.slice(2);\nprocess.exitCode = await main(["update"], { home, engineRoot, platform: "linux", env: {}, print: console.log });\n`);
+    const first = Bun.spawn([process.execPath, script, home, engineDir], { env: process.env, stdin: "ignore", stdout: "pipe", stderr: "ignore" });
     try {
-      await started;
+      await pause.reached();
 
       const second = await run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" });
       expect(second).toMatchObject({ code: 1, applied: 0, version: "v0.1.0", output: anotherUpdateRuns });
 
-      read();
-      expect(await first).toMatchObject({ code: 0, applied: 1, version: "main" });
+      pause.resume();
+      await within(first.exited, 3_000, "the first hedge update did not end");
+      expect(await new Response(first.stdout).text()).toContain("Engine is at v0.1.1.");
+      expect(await Bun.file(join(engineDir, "VERSION")).text()).toBe("v0.1.1");
     } finally {
-      read();
-      await first;
+      writer.kill();
+      first.kill();
+      await pause.end(first.exited);
     }
   });
 
@@ -415,15 +497,8 @@ describe("hedge update", () => {
   test("hedge update stopped with SIGTERM while apply runs passes the signal to apply, holds the lock until apply ends, then exits 143", async () => {
     const remote = await engineRemote(["v0.1.0", "v0.1.1"]);
     const engineDir = await engineCheckout(remote, "v0.1.0");
-    const script = join(temp.make("script-"), "update.ts");
-    writeFileSync(script, [
-      `import { update } from ${JSON.stringify(join(import.meta.dir, "update.ts"))};`,
-      `const [engineDir, home, repo, apply] = process.argv.slice(2);`,
-      `const readProfile = async () => ({ profileDir: home, engine: { repo, ref: "v0.1.0", channel: "release" as const } });`,
-      `process.exitCode = await update({ home, engineDir, readProfile, print: console.log, runApply: () => Bun.spawn(["sh", "-c", apply]) });`,
-    ].join("\n"));
     const pause = pausePoint();
-    const updating = Bun.spawn([process.execPath, script, engineDir, temp.make("home-"), remote, pause.untilStopped], { env: process.env, stdin: "ignore", stdout: "ignore", stderr: "inherit" });
+    const updating = updateInSubprocess(engineDir, temp.make("home-"), remote, "v0.1.0", pause.untilStopped);
     try {
       await pause.reached();
 
@@ -439,16 +514,65 @@ describe("hedge update", () => {
     }
   });
 
-  test("hedge update refuses a link in place of its lock file, and leaves the link's target and the engine alone", async () => {
+  test("hedge update stopped with SIGTERM while it installs packages signals the install's whole process group, does not wait for a child that keeps its output open, puts back the previous engine and its packages, then exits 143", async () => {
+    const remote = await engineRemote(["v0.1.0"]);
+    await releaseWithDep(remote, "v0.1.1", "1.0.0");
+    const pause = pausePoint();
+    const marks = temp.make("marks-");
+    writeFileSync(join(remote, "install.sh"), `sh -c 'trap "echo > ${marks}/got; exec sleep 60" TERM; echo $$ > ${marks}/pid; echo > ${pause.paths.reached}; sleep 60 & wait' &\nread _ < '${pause.paths.resume}'\n`);
+    await releaseWithDep(remote, "v0.2.0", "2.0.0", { postinstall: "sh ./install.sh" });
+    const engineDir = await engineCheckout(remote, "v0.1.1");
+    expect((await spawnAsync([process.execPath, "install", "--frozen-lockfile", "--production"], { cwd: engineDir })).exitCode).toBe(0);
+    const before = await spawnGit(engineDir, "rev-parse", "HEAD");
+    const updating = updateInSubprocess(engineDir, temp.make("home-"), remote, "v0.1.1", "true");
+    try {
+      await pause.reached();
+      expect(installedDep(engineDir)).toBe("2.0.0");
+
+      updating.kill("SIGTERM");
+
+      expect(await within(updating.exited, 3_000, "hedge update did not end")).toBe(143);
+      expect(existsSync(join(marks, "got"))).toBe(true);
+      expect(await spawnGit(engineDir, "rev-parse", "HEAD")).toBe(before);
+      expect(installedDep(engineDir)).toBe("1.0.0");
+      expect(await spawnGit(engineDir, "status", "--porcelain")).toBe("");
+      await releaseWithDep(remote, "v0.2.1", "2.1.0");
+      expect(await run(engineDir, { repo: remote, ref: "v0.1.1", channel: "release" })).toMatchObject({ code: 0, applied: 1, version: "v0.2.1" });
+    } finally {
+      const pid = Number(readFileSync(join(marks, "pid"), { encoding: "utf8", flag: "a+" }));
+      if (pid && alive(pid)) process.kill(pid, "SIGKILL");
+      await pause.end(updating.exited);
+    }
+  });
+
+  test("hedge update refuses a link in place of its lock file in the engine checkout, and leaves the link's target and the engine alone", async () => {
     const remote = await engineRemote(["v0.1.0", "v0.1.1"]);
     const engineDir = await engineCheckout(remote, "v0.1.0");
+    const before = await spawnGit(engineDir, "rev-parse", "HEAD");
     const elsewhere = join(temp.make("elsewhere-"), "update.lock");
     symlinkSync(elsewhere, join(engineDir, ".git", "hedge-update.lock"));
 
     const result = await run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" });
 
     expect(result).toMatchObject({ code: 1, applied: 0, version: "v0.1.0", output: expect.stringMatching(/hedge-update\.lock is a link, so hedge update does not lock through it\. Remove it, then run hedge update again\.$/) });
+    expect(await spawnGit(engineDir, "rev-parse", "HEAD")).toBe(before);
     expect(existsSync(elsewhere)).toBe(false);
+  });
+
+  test("hedge update refuses a link on the way to its lock file in the home folder, and leaves the link's target and the engine alone", async () => {
+    const remote = await engineRemote(["v0.1.0", "v0.1.1"]);
+    const engineDir = await engineCheckout(remote, "v0.1.0");
+    const before = await spawnGit(engineDir, "rev-parse", "HEAD");
+    const home = temp.make("home-");
+    const elsewhere = temp.make("fleet-state-");
+    mkdirSync(join(home, ".local/state"), { recursive: true });
+    symlinkSync(elsewhere, join(home, ".local/state/hedge"));
+
+    const result = await run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" }, { home });
+
+    expect(result).toMatchObject({ code: 1, applied: 0, version: "v0.1.0", output: `hedge update: ${join(home, ".local/state/hedge")} is a link, so hedge update does not lock through it. Remove it, then run hedge update again.` });
+    expect(await spawnGit(engineDir, "rev-parse", "HEAD")).toBe(before);
+    expect(existsSync(join(elsewhere, "update.lock"))).toBe(false);
   });
 
   async function triageEngineLine(engineDir: string) {
@@ -635,25 +759,14 @@ describe("hedge update", () => {
 
   test("puts back the old engine's packages when the new engine's install fails halfway", async () => {
     const remote = await engineRemote(["v0.1.0"]);
-    const release = async (version: string, dep: string, scripts?: Record<string, string>) => {
-      mkdirSync(join(remote, "dep"), { recursive: true });
-      writeFileSync(join(remote, "dep", "package.json"), JSON.stringify({ name: "dep", version: dep }));
-      writeFileSync(join(remote, "package.json"), JSON.stringify({ name: "engine", dependencies: { dep: "file:./dep" }, ...(scripts ? { scripts } : {}) }));
-      expect((await spawnAsync([process.execPath, "install", "--ignore-scripts"], { cwd: remote })).exitCode).toBe(0);
-      writeFileSync(join(remote, "VERSION"), version);
-      await spawnGit(remote, "add", ".");
-      await spawnGit(remote, "commit", "-q", "-m", version);
-      await spawnGit(remote, "tag", version);
-    };
-    await release("v0.1.1", "1.0.0");
-    await release("v0.2.0", "2.0.0", { postinstall: "exit 1" });
+    await releaseWithDep(remote, "v0.1.1", "1.0.0");
+    await releaseWithDep(remote, "v0.2.0", "2.0.0", { postinstall: "exit 1" });
     const engineDir = await engineCheckout(remote, "v0.1.1");
     expect((await spawnAsync([process.execPath, "install", "--frozen-lockfile", "--production"], { cwd: engineDir })).exitCode).toBe(0);
-    const installed = () => JSON.parse(readFileSync(join(engineDir, "node_modules", "dep", "package.json"), "utf8")).version;
-    expect(installed()).toBe("1.0.0");
+    expect(installedDep(engineDir)).toBe("1.0.0");
     const result = await run(engineDir, { repo: remote, ref: "v0.1.1", channel: "release" });
     expect(result).toMatchObject({ code: 1, applied: 0, version: "v0.1.1" });
-    expect(installed()).toBe("1.0.0");
+    expect(installedDep(engineDir)).toBe("1.0.0");
   });
 
   test("stops before apply when the track checkout fails", async () => {

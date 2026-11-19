@@ -76,15 +76,21 @@
   `PostHog/fleet-engine`, so a Hedge checkout never looks like Fleet's.
 - `hedge update` and `hedge refresh` use the Hedge copy of a profile that the
   machine file still names in a Fleet path, or refuse, before they pull.
-- `hedge update` runs one at a time for each engine checkout. It holds an
-  `flock` lock on `hedge-update.lock` in the checkout's git directory from
-  before it reads the profile to the end of apply. A second `hedge update`,
-  such as the nightly one while you run it by hand, or one from another home
-  on the same checkout, changes nothing, says "another hedge update is
-  running", and exits 1. It refuses a link in place of the lock file. When
-  `hedge update` gets SIGTERM or SIGINT, it passes the signal to the step
-  that runs, such as the package install or apply, waits for it to end, and
-  then lets go of the lock.
+- `hedge update` runs one at a time for each home and for each engine
+  repository. It holds two `flock` locks from before it reads the profile to
+  the end of apply: `~/.local/state/hedge/update.lock` for the home, then
+  `hedge-update.lock` in the repository's common git directory, which linked
+  worktrees share. A second `hedge update`, such as the nightly one while you
+  run it by hand, one from another home on the same repository, or one from
+  another checkout with the same home, changes nothing, says "another hedge
+  update is running", and exits 1. It refuses a link in place of either lock
+  file or on the way to the home lock. Each step, such as git, the package
+  install or apply, runs in its own process group. When `hedge update` gets
+  SIGTERM or SIGINT, it passes the signal to the whole group of the step that
+  runs and waits for that step to exit, not for its output to close. A stop
+  during the package install still rolls back to the previous engine and
+  installs its packages. Then `hedge update` lets go of the locks and exits
+  143 or 130.
 - Hedge operations that change the machine take an `flock` lock on
   `~/.local/state/hedge/hedge.lock`. The system lets go of it when the
   process ends, so an import or apply stopped with Ctrl-C does not block the

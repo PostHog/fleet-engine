@@ -11,7 +11,7 @@ import { apply, check, filesAdapter, type Adapter, type Issuer, type Runner } fr
 import { refresh } from "./refresh.ts";
 import { resolve } from "./reconciler/resolve.ts";
 import { undoingPack } from "./reconciler/ledger.ts";
-import { readNotice, update } from "./update.ts";
+import { readNotice, startStep, update } from "./update.ts";
 import { setup, type SetupOptions } from "./setup/setup.ts";
 import { ttyTerminal, type Terminal } from "./setup/terminal.ts";
 import { FlagError } from "./setup/flags.ts";
@@ -254,7 +254,7 @@ async function runUpdate(options: CliOptions) {
     engineDir: options.engineRoot,
     readProfile,
     print: options.print,
-    runApply: () => Bun.spawn(["sh", join(options.engineRoot, "hedge"), "apply"], { stdio: ["inherit", "inherit", "inherit"], env: { ...Bun.env, HOME: options.home } }),
+    runApply: () => startStep(["sh", join(options.engineRoot, "hedge"), "apply"], { stdio: ["inherit", "inherit", "inherit"], env: { ...Bun.env, HOME: options.home } }),
   });
 }
 

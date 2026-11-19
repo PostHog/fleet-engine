@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { closeSync, openSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { constants } from "node:os";
-import { dirname, join } from "node:path";
-import { tryLock } from "./lock.ts";
+import { constants, tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { linkOnPath } from "./adapters/provider-config/store.ts";
+import { inside } from "./files/install.ts";
+import { tryLock, type Held } from "./lock.ts";
 import { repoUrl, withoutUserinfo } from "./pack/sources.ts";
 import type { ProfileFile } from "./pack/types.ts";
 import { engineRepo } from "./setup/defaults.ts";
@@ -40,12 +42,15 @@ export async function readNotice(home: string): Promise<string | undefined> {
 
 class Stopped extends Error {}
 
+type OnStop = "kill" | "finish";
+
 const running = new Set<Child>();
 let stopping: NodeJS.Signals | undefined;
 
-function track<T extends Child>(start: () => T): T {
-  if (stopping) throw new Stopped();
+function track<T extends Child>(start: () => T, onStop: OnStop = "kill"): T {
+  if (stopping && onStop === "kill") throw new Stopped();
   const child = start();
+  if (onStop === "finish") return child;
   running.add(child);
   void child.exited.finally(() => running.delete(child));
   return child;
@@ -56,11 +61,25 @@ const stop = (signal: NodeJS.Signals) => {
   for (const child of running) child.kill(signal);
 };
 
-async function updateLock(engineDir: string): Promise<{ path: string } | { error: string }> {
-  const gitDir = await git(engineDir, "rev-parse", "--absolute-git-dir");
-  if (!gitDir.ok) return { error: `hedge update: ${engineDir} is not an engine checkout: ${gitDir.err}` };
-  return { path: join(realpathSync(gitDir.out), "hedge-update.lock") };
+type StepIo = { cwd?: string; env?: Record<string, string | undefined>; stdio: ["ignore" | "inherit", number | "inherit", number | "inherit"] };
+
+export function startStep(command: string[], io: StepIo): Child {
+  const child = Bun.spawn(command, { ...io, detached: true });
+  return {
+    exited: child.exited,
+    kill(signal = "SIGTERM") {
+      try {
+        process.kill(-child.pid, signal);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+      }
+    },
+  };
 }
+
+const homeLock = ".local/state/hedge/update.lock";
+const anotherUpdateRuns = "hedge update: another hedge update is running. Run it again when that one ends.";
+const throughLink = (path: string) => `hedge update: ${path} is a link, so hedge update does not lock through it. Remove it, then run hedge update again.`;
 
 function lockOnce(path: string) {
   try {
@@ -71,13 +90,30 @@ function lockOnce(path: string) {
   }
 }
 
+async function takeLocks(home: string, engineDir: string): Promise<Held[] | string> {
+  const link = await linkOnPath(home, homeLock);
+  if (link) return throughLink(link);
+  const common = await git(engineDir, "rev-parse", "--git-common-dir");
+  if (!common.ok) return `hedge update: ${engineDir} is not an engine checkout: ${common.err}`;
+  const held: Held[] = [];
+  for (const path of [inside(home, homeLock), join(realpathSync(resolve(engineDir, common.out)), "hedge-update.lock")]) {
+    const lock = lockOnce(path);
+    if (lock && lock !== "link") {
+      held.push(lock);
+      continue;
+    }
+    releaseAll(held);
+    return lock === "link" ? throughLink(path) : anotherUpdateRuns;
+  }
+  return held;
+}
+
+const releaseAll = (held: Held[]) => held.reverse().forEach((lock) => lock.release());
+
 export async function update(given: UpdateOptions): Promise<number> {
   const print = (line: string) => given.print(withoutUserinfo(line));
-  const lock = await updateLock(given.engineDir);
-  if ("error" in lock) return print(lock.error), 1;
-  const held = lockOnce(lock.path);
-  if (held === "link") return print(`hedge update: ${lock.path} is a link, so hedge update does not lock through it. Remove it, then run hedge update again.`), 1;
-  if (!held) return print("hedge update: another hedge update is running. Run it again when that one ends."), 1;
+  const held = await takeLocks(given.home, given.engineDir);
+  if (typeof held === "string") return print(held), 1;
   process.on("SIGTERM", stop).on("SIGINT", stop);
   try {
     const code = await updateAlone({ ...given, print, ...(await given.readProfile()) });
@@ -88,7 +124,7 @@ export async function update(given: UpdateOptions): Promise<number> {
   } finally {
     process.off("SIGTERM", stop).off("SIGINT", stop);
     stopping = undefined;
-    held.release();
+    releaseAll(held);
   }
 }
 
@@ -98,7 +134,7 @@ async function updateAlone(options: Run): Promise<number> {
   const before = (await git(options.engineDir, "rev-parse", "HEAD")).out;
   const moved = options.engine.channel === "track" ? await trackMain(options, origin.url) : await followRelease(options, origin.url, origin.switched);
   if (!moved) return 1;
-  const failed = await installPackages(options.engineDir);
+  const failed = await installPackages(options.engineDir, "kill");
   if (failed !== undefined) return await rollBack(options, before, failed), 1;
   if (!(await recordRelease(options, moved))) return 1;
   if (!(await saveOrigin(options, origin))) return 1;
@@ -158,7 +194,7 @@ async function withFetched(options: Run, url: string, ref: string, use: (commit:
     if (!commit.ok) return options.print(`hedge update: could not read the fetched engine: ${commit.err}`), false;
     return await use(commit.out);
   } finally {
-    await git(options.engineDir, "update-ref", "-d", fetching);
+    await gitAs("finish", options.engineDir, "update-ref", "-d", fetching);
   }
 }
 
@@ -215,23 +251,37 @@ async function checkOutRelease(options: Run, url: string, target: Version): Prom
   });
 }
 
-async function installPackages(engineDir: string) {
-  const { code, out, err } = await piped([process.execPath, "install", "--frozen-lockfile", "--production"], { cwd: engineDir, timeout: 300_000 });
-  return code === 0 ? undefined : (err || out).trim();
+async function installPackages(engineDir: string, onStop: OnStop) {
+  try {
+    const { code, out, err } = await piped([process.execPath, "install", "--frozen-lockfile", "--production"], { cwd: engineDir, timeout: 300_000, onStop });
+    return code === 0 ? undefined : (err || out).trim();
+  } catch (error) {
+    if (error instanceof Stopped) return "";
+    throw error;
+  }
 }
 
-async function piped(command: string[], options: { cwd?: string; env?: Record<string, string | undefined>; timeout: number }) {
-  const child = track(() => Bun.spawn(command, { ...options, stdin: "ignore", stdout: "pipe", stderr: "pipe" }));
-  const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
-  return { code, out, err };
+async function piped(command: string[], { cwd, env, timeout, onStop = "kill" }: { cwd?: string; env?: Record<string, string | undefined>; timeout: number; onStop?: OnStop }) {
+  const files = ["out", "err"].map((stream) => join(tmpdir(), `hedge-update-${randomUUID()}.${stream}`));
+  const fds = files.map((file) => openSync(file, "wx", 0o600));
+  try {
+    const child = track(() => startStep(command, { cwd, env, stdio: ["ignore", fds[0]!, fds[1]!] }), onStop);
+    const timer = setTimeout(() => child.kill("SIGTERM"), timeout);
+    const code = await child.exited.finally(() => clearTimeout(timer));
+    const [out, err] = files.map((file) => readFileSync(file, "utf8"));
+    return { code, out: out!, err: err! };
+  } finally {
+    fds.forEach((fd) => closeSync(fd));
+    files.forEach((file) => rmSync(file, { force: true }));
+  }
 }
 
 async function rollBack(options: Run, before: string, installError: string) {
-  const failed = `hedge update: could not install the engine's packages in ${options.engineDir}`;
-  const restored = await git(options.engineDir, "checkout", "-q", "--force", "--detach", before);
+  const failed = stopping ? `hedge update: stopped by ${stopping} while it installed the engine's packages in ${options.engineDir}` : `hedge update: could not install the engine's packages in ${options.engineDir}`;
+  const restored = await gitAs("finish", options.engineDir, "checkout", "-q", "--force", "--detach", before);
   if (!restored.ok) return options.print(`${failed}, and could not roll the engine back to ${before.slice(0, 7)}: ${restored.err}. Run get.sh again to repair it.\n${installError}`);
-  const repair = (await installPackages(options.engineDir)) === undefined ? "" : " Its packages did not install either, so run get.sh again to repair it.";
-  options.print(`${failed}, so the update was rolled back. The engine stays at ${before.slice(0, 7)}.${repair}\n${installError}`);
+  const repair = (await installPackages(options.engineDir, "finish")) === undefined ? "" : " Its packages did not install either, so run get.sh again to repair it.";
+  options.print(`${failed}, so the update was rolled back. The engine stays at ${before.slice(0, 7)}.${repair}\n${installError}`.trimEnd());
 }
 
 async function saveNotice(home: string, newMajor: string | undefined) {
@@ -250,8 +300,10 @@ function compare(a: Version, b: Version) {
   return a.parts[0] - b.parts[0] || a.parts[1] - b.parts[1] || a.parts[2] - b.parts[2];
 }
 
-async function git(dir: string, ...args: string[]) {
+const git = (dir: string, ...args: string[]) => gitAs("kill", dir, ...args);
+
+async function gitAs(onStop: OnStop, dir: string, ...args: string[]) {
   const env = { ...Bun.env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "true", SSH_ASKPASS: "true", GIT_SSH_COMMAND: "ssh -o BatchMode=yes" };
-  const { code, out, err } = await piped(["git", "-C", dir, ...args], { env, timeout: 120_000 });
+  const { code, out, err } = await piped(["git", "-C", dir, ...args], { env, timeout: 120_000, onStop });
   return { ok: code === 0, out: out.trim(), err: err.trim().split("\n").at(-1) ?? "" };
 }
