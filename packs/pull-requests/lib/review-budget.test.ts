@@ -413,6 +413,21 @@ test("a known answer waits for the budget of its own phase", async () => {
   await expect(pr.hedge("respond", "--round", "final-2", "responses.md")).rejects.toThrow("only once the review budget of 2 reviews is spent; 1 ran");
 });
 
+test("respond refuses a known answer when as many reviews ran as the ceiling allows but a clean panel left the budget unspent", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: graded("non-critical", "medium") });
+  pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 10, "pull-requests.reviewCeiling": 2 });
+  await pr.commit("feature.txt", "greet\n");
+  await pr.hedge("require", "--none", "--reason", "fixture");
+  const panel = await cannedPanel(pr, { design: minor, others: lensAnswer("(none)") });
+  await pr.commit("feature.txt", "greet the member\n");
+  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", panel)).output).toContain(`"round":2`);
+  await finishWith(pr, "2", major("the member goes unnamed"));
+
+  writeFileSync(join(pr.repository, "responses.md"), "1. known: listed under Known issues.\n");
+  await expect(pr.hedge("respond", "--round", "2", "responses.md")).rejects.toThrow("Answer a finding \"known\" only once the review budget of 2 reviews is spent; 1 ran");
+});
+
 test("a revert carries only from a reviewed commit before the reverted one", async () => {
   const pr = await checkout();
   pr.pullRequestState({ body: graded("non-critical", "medium") });
@@ -553,16 +568,20 @@ test("for a panel that mixes a prose-only lens with a lens that lists a minor, t
   await expect(pr.hedge("review-start", "--scope", "fixes", "--base", fix)).rejects.toThrow("The review budget of 1 reviews is spent");
 });
 
-test("the ceiling never refuses a final read of a HEAD the gate does not carry, while its major still spends budget and stops the fixes round after it", async () => {
+test("the ceiling never refuses a final read of a HEAD the gate does not carry, while a final read's major spends the last review and stops the fixes round after it", async () => {
   const pr = await checkout();
-  const { fix } = await atCeiling(pr);
-  const read = await pr.commit("feature.txt", "greet the new member\n");
+  pr.pullRequestState({ body: graded("non-critical", "medium") });
+  pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 10, "pull-requests.reviewCeiling": 2 });
+  await pr.commit("feature.txt", "greet\n");
+  await pr.hedge("require", "--none", "--reason", "fixture");
+  const panel = await cannedPanel(pr, { design: minor, others: major("the greeting drops the name") });
+  const fix = await pr.commit("feature.txt", "greet the member\n");
 
-  expect((await pr.hedge("review-start", "--scope", "final", "--base", fix)).output).toContain(`"round":"final"`);
-  await finishWith(pr, "final-1", major("the new member goes unnamed"));
+  expect((await pr.hedge("review-start", "--scope", "final", "--base", panel)).output).toContain(`"round":"final"`);
+  await finishWith(pr, "final-1", major("the member goes unnamed"));
   await pr.commit("feature.txt", "greet every member\n");
-  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", fix)).rejects.toThrow("The review budget of 2 reviews is spent");
-  expect((await pr.hedge("review-start", "--scope", "final", "--base", read)).output).toContain(`"round":"final"`);
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", panel)).rejects.toThrow("The review budget of 2 reviews is spent");
+  expect((await pr.hedge("review-start", "--scope", "final", "--base", fix)).output).toContain(`"round":"final"`);
   await finishWith(pr, "final-2", "No findings.\n");
 
   await pr.commit("feature.test.ts", "test(\"greets every member\", () => {});\n");
