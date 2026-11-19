@@ -162,7 +162,7 @@ function envOf(command: string[]) {
 
 function runner(server: ReturnType<typeof fakeServer>, machine: Machine = {}) {
   const calls: string[] = [];
-  const state = { t3: machine.t3 ?? true, service: machine.service ?? "installed", installFailures: machine.installFailures ?? 0, installerVersions: [] as string[] };
+  const state = { t3: machine.t3 ?? true, service: machine.service ?? "installed", installFailures: machine.installFailures ?? 0, installerVersions: [] as string[], lingering: false };
   const systemd = { reloadFailures: machine.reloadFailures ?? 0, restartFailures: machine.restartFailures ?? 0, loaded: false, tokenInT3: false, starts: 1 };
   const run: CommandRunner = async (command) => {
     const line = command.join(" ");
@@ -181,8 +181,8 @@ function runner(server: ReturnType<typeof fakeServer>, machine: Machine = {}) {
       return { code: 0, stdout: "T3 Code service\n  Status: installed · t3@0.9.0\n" };
     }
     if (line === "t3 service install") return (state.service = "installed"), { code: 0, stdout: "" };
-    if (line === "systemctl --user show-environment") return machine.manager === false ? { code: 1, stdout: "", stderr: "Failed to connect to bus" } : { code: 0, stdout: "HOME=/home/octo\n" };
-    if (line === "sudo -n loginctl enable-linger octo") return machine.sudo ? { code: 0, stdout: "" } : { code: 1, stdout: "", stderr: "sudo: a password is required" };
+    if (line === "systemctl --user show-environment") return machine.manager === false && !state.lingering ? { code: 1, stdout: "", stderr: "Failed to connect to bus" } : { code: 0, stdout: "HOME=/home/octo\n" };
+    if (line === "sudo -n loginctl enable-linger octo") return machine.sudo ? ((state.lingering = true), { code: 0, stdout: "" }) : { code: 1, stdout: "", stderr: "sudo: a password is required" };
     if (line === "systemctl --user daemon-reload") {
       if (systemd.reloadFailures > 0) return systemd.reloadFailures--, { code: 1, stdout: "", stderr: "Failed to reload daemon" };
       return (systemd.loaded = true), { code: 0, stdout: "" };
@@ -1202,9 +1202,19 @@ describe("T3 on Linux", () => {
     expect(report.findings).toContainEqual({
       id: "t3:service",
       pack: "engine",
-      say: "T3 Code cannot run as a service: systemd's user manager does not answer (systemctl --user). Log in to this machine in a normal session, or install your system's systemd user-session support, then run hedge apply.",
+      say: "T3 Code cannot run as a service: systemd's user manager does not answer (systemctl --user). Hedge could not turn on lingering for octo, because sudo needs a password here. Run: sudo loginctl enable-linger octo, then run hedge apply. Without sudo, log in to this machine in a normal session, or install your system's systemd user-session support, then run hedge apply.",
       repair: "human",
     });
+  });
+
+  test("turns lingering on when the user manager does not answer, as over SSH on a cloud box, and installs the service", async () => {
+    const home = temp.make("home-");
+    const { commands, adapter } = setup({}, { service: "not installed", manager: false, sudo: true });
+    const report = await apply(plan("linux", []), { home, adapters: [adapter] });
+    expect(commands.calls).toContain("sudo -n loginctl enable-linger octo");
+    expect(commands.calls).toContain("t3 service install");
+    expect(report.findings.map((item) => item.id)).not.toContain("t3:service");
+    expect(report.actions.map((action) => action.target)).toContain("t3 linger");
   });
 
   test("does not touch the service on the Mac", async () => {
