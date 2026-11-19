@@ -6,7 +6,7 @@ import { providerConfigAdapter } from "../../src/adapters/provider-config/adapte
 import { apply, check } from "../../src/reconciler/apply.ts";
 import { boxCommand } from "./lib/box-command.ts";
 import { cliProxy, codexProviderTable, type ProxyMachine } from "./lib/cli-proxy.ts";
-import { proxyMachine } from "./lib/cli-proxy-testing.ts";
+import { proxyMachine, type Proxy } from "./lib/cli-proxy-testing.ts";
 import { Coder } from "./lib/coder.ts";
 import { fakeMachine } from "./lib/testing.ts";
 import type { AvailableSource, MachineFile, MachineRole, Plan, Profile } from "../../src/pack/types.ts";
@@ -465,6 +465,22 @@ describe("the Own-account balancing workflow", () => {
       const applied = await apply(result, options);
       expect(applied).toMatchObject({ ok: true, findings: [{ id: "check:cli-proxy-accounts", todo: true }] });
       expect(JSON.parse(readFileSync(join(home, ".claude/settings.json"), "utf8")).env.ANTHROPIC_BASE_URL).toBe("http://127.0.0.1:8317");
+    });
+
+    test("takes Claude Code off the proxy once its pool empties, and lists the To do", async () => {
+      const proxy: Proxy = { credentials: [{ provider: "claude" }] };
+      const { machine, home } = proxyMachine((prefix) => temp.make(prefix), { plan: "claude", devboxes: [] }, proxy);
+      const options = { home, adapters: [providerConfigAdapter()], run: hedgeProxy(machine) };
+      const result = proxyOnly(plan({ ...balancing, plan: "claude" }, hub));
+      await apply(result, options);
+      await apply(result, options);
+      expect(JSON.parse(readFileSync(join(home, ".claude/settings.json"), "utf8")).apiKeyHelper).toBeDefined();
+      Object.assign(proxy, { credentials: [], models: [] });
+      const emptied = await apply(result, options);
+      expect(emptied.ok).toBe(true);
+      expect(emptied.findings.map((finding) => [finding.id, finding.todo])).toEqual([["check:cli-proxy-client", true], ["check:cli-proxy-accounts", true]]);
+      const settings = existsSync(join(home, ".claude/settings.json")) ? JSON.parse(readFileSync(join(home, ".claude/settings.json"), "utf8")) : {};
+      expect([settings.env?.ANTHROPIC_BASE_URL, settings.apiKeyHelper]).toEqual([undefined, undefined]);
     });
   });
 });

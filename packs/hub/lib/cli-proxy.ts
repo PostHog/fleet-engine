@@ -399,12 +399,14 @@ async function sendCodexHome(home: string): Promise<boolean> {
 
 export type Agent = "claude" | "codex";
 
+const applyWaits = (name: string) => `hedge apply keeps ${name} on its own sign-in until the proxy serves it.`;
+
 async function check(machine: ProxyMachine, agent: Agent): Promise<number> {
   const key = await savedKey(machine.home);
   const models = key ? await listModels(machine.fetch, key) : `This machine has no proxy key at ${keyPath(machine.home)}. On the hub, hedge cli-proxy doctor prints the connect command.`;
   const reason = agent === "claude" ? unserved(models, "claude") : await codexUnserved(machine.home, models);
   const name = agent === "claude" ? "Claude Code" : "Codex";
-  machine.print(reason ? `${reason} hedge apply keeps ${name} on its own sign-in until the proxy serves it.` : `${name} reaches your own-account proxy at ${proxyUrl}.`);
+  machine.print(reason ? `${reason} ${applyWaits(name)}` : `${name} reaches your own-account proxy at ${proxyUrl}.`);
   if (!reason) return 0;
   return reason === missingModel[agent] ? waitsForPerson : 1;
 }
@@ -419,12 +421,9 @@ async function codexUnserved(home: string, models: string[] | string): Promise<s
 const reachesProxy = (table: unknown) => isObject(table) && (["base_url", "wire_api", "auth"] as const).every((field) => Bun.deepEquals(table[field], codexProviderTable[field]));
 const ownTable = (path: string) => `${path} has its own ${codexProvider} provider table, which does not reach the proxy with this machine's key.`;
 
-const unreadableCodex = "Hedge cannot read ~/.codex/config.toml, or it is a link, so Hedge leaves it alone.";
-const codexMayStay = "Codex may still use the proxy. Fix that, then run hedge apply.";
-
 async function codexRoute(home: string): Promise<string | (() => Promise<void>)> {
   const read = await readableCodex(home);
-  if (!read) return unreadableCodex;
+  if (!read) return "Hedge cannot read ~/.codex/config.toml, or it is a link, so Hedge leaves it alone.";
   const { path, text, config, providers } = read;
   const table = providers?.[codexProvider];
   if (config.model_provider !== undefined && config.model_provider !== codexProvider) return `Keep your Codex setting model_provider in ${path}: Hedge did not set it. Remove it to use the proxy.`;
@@ -459,31 +458,17 @@ async function connect(machine: ProxyMachine): Promise<void> {
   await mkdir(dirname(keyPath(machine.home)), { recursive: true, mode: 0o700 });
   await writePrivateFile(keyPath(machine.home), `${key}\n`);
   const waiting = unserved(models, "claude");
-  if (agent === "claude" && waiting) {
-    if (await hedgeKeyHelper(machine.home)) await sendClaude(machine.home, false);
-    machine.print(`${waiting} Claude Code keeps its own sign-in. The first hedge apply after the proxy serves it sends Claude Code there.`);
-  } else if (agent === "claude") {
+  if (agent === "claude" && waiting) machine.print(`${waiting} ${applyWaits("Claude Code")}`);
+  else if (agent === "claude") {
     await sendClaude(machine.home, true);
     machine.print(`Claude Code uses your own-account proxy at ${proxyUrl} now. Restart open Claude Code sessions.`);
   }
   if (codex === undefined) return;
-  const unroutable = typeof codex === "string" ? codex : unserved(models, "codex");
-  const left = !unroutable ? undefined : typeof codex !== "string" ? await leaveCodex(machine.home) : codex === unreadableCodex ? codexMayStay : undefined;
-  const failed = unroutable ?? (await sendCodex(machine.home, agent === "claude"));
-  if (failed) return machine.print(`${failed} ${left ?? "Codex keeps its own sign-in."}`);
+  const missing = typeof codex === "string" ? undefined : unserved(models, "codex");
+  if (missing) return machine.print(`${missing} ${applyWaits("Codex")}`);
+  const failed = typeof codex === "string" ? codex : await sendCodex(machine.home, agent === "claude");
+  if (failed) return machine.print(`${failed} Codex keeps its own sign-in.`);
   machine.print(`Codex uses your own-account proxy at ${proxyUrl} now. Restart open Codex sessions.`);
-}
-
-async function hedgeKeyHelper(home: string): Promise<boolean> {
-  const text = await readIfThere(join(home, ".claude/settings.json"));
-  return text !== undefined && ownHelper((JSON.parse(text) as Settings).apiKeyHelper);
-}
-
-async function leaveCodex(home: string): Promise<string | undefined> {
-  const failed = await sendCodexHome(home).then(() => undefined, (error: Error) => error.message);
-  const read = await readableCodex(home);
-  if (!failed && read && !read.routed) return undefined;
-  return `${failed ?? unreadableCodex} ${codexMayStay}`;
 }
 
 async function disconnect(machine: ProxyMachine): Promise<void> {
