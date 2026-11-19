@@ -28,7 +28,8 @@ Claude agent on the survey row turns the text into a note. It runs without
 tools, MCP servers, or settings files, in an empty folder, and sees only the
 source's text, the topics the library uses, and the note it updates. A page
 that tells it to read or send notes finds no note to read and no way out.
-Fleet writes the one note under `notes/` and refuses any other path.
+Fleet writes the one note under `notes/` and refuses any other path. It turns
+images into plain links and escapes HTML, so opening the note loads nothing.
 
 With the Slack pack's trigger on, their own `:brain:` reaction on a Slack
 message saves its thread as a note. The reaction shows `:eyes:` while it runs

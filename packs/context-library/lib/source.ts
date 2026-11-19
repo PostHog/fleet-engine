@@ -45,7 +45,8 @@ export async function readMaterial(input: SourceInput, sources: Sources): Promis
   const parts = [{ label: input.source, text: capped(text) }];
   for (const id of input.canvases ?? []) {
     if (!canvasId.test(id)) throw new Error(`${JSON.stringify(id)} is not a Slack canvas id`);
-    parts.push({ label: `Slack canvas ${id}`, text: capped(await sources.call("slack", "slack_read_canvas", { canvas_id: id })) });
+    const read = await sources.call("slack", "slack_read_canvas", { canvas_id: id }).catch(() => "This canvas could not be read.");
+    parts.push({ label: `Slack canvas ${id}`, text: capped(read) });
   }
   return input.startedAt ? { parts, meetings: await meetingsAround(input.startedAt, sources) } : { parts };
 }
@@ -81,10 +82,25 @@ function entity(whole: string, name: string) {
 }
 
 const decoded = (text: string) => text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, entity);
-const attributes = `(?:[^>"']|"[^"]*"|'[^']*')*`;
+const attributes = `(?:[^<>"']|"[^"<]*"|'[^'<]*')*`;
 const blockTags = new RegExp(`<\\/?(?:p|div|br|li|tr|h[1-6]|title|section|article|header|footer|pre|blockquote)\\b${attributes}>`, "gi");
 const anyTag = new RegExp(`<${attributes}>`, "g");
-const links = new RegExp(`<a\\b(${attributes})>([\\s\\S]*?)<\\/a\\s*>`, "gi");
+const links = new RegExp(`<a\\b(${attributes})>((?:(?!<a\\b|<\\/a\\s*>)[\\s\\S])*)<\\/a\\s*>`, "gi");
+const hidden = /<!--|<(script|style|noscript|template|svg)\b/gi;
+
+function withoutHidden(html: string): string {
+  let kept = "";
+  let at = 0;
+  hidden.lastIndex = 0;
+  for (let open = hidden.exec(html); open; open = hidden.exec(html)) {
+    kept += `${html.slice(at, open.index)} `;
+    const closing = open[1] ? new RegExp(`<\\/${open[1]}\\s*>`, "gi") : /-->/g;
+    closing.lastIndex = hidden.lastIndex;
+    if (!closing.exec(html)) return kept;
+    at = hidden.lastIndex = closing.lastIndex;
+  }
+  return kept + html.slice(at);
+}
 
 const attribute = /([^\s"'=<>/]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g;
 
@@ -99,9 +115,7 @@ function linkTarget(tag: string, base: string): string | undefined {
 }
 
 export function pageText(html: string, base: string): string {
-  return decoded(html
-    .replace(/<(script|style|noscript|template|svg)\b[\s\S]*?<\/\1\s*>/gi, " ")
-    .replace(/<!--[\s\S]*?-->/g, " ")
+  return decoded(withoutHidden(html)
     .replace(links, (_whole, tag: string, text: string) => {
       const target = linkTarget(tag, base);
       return target ? `${text} (${target})` : text;

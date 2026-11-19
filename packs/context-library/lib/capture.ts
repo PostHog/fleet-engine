@@ -115,6 +115,8 @@ function newPath(worktree: string, wanted: string): string {
   throw new Error(`${wanted} and its numbered copies exist already; nothing was saved`);
 }
 
+const inert = (text: string) => text.replaceAll("![", "[").replace(/<(?=[a-z/!?])/gi, "&lt;");
+
 function wisprOf(draft: Draft, input: CaptureInput, material: Material): string | undefined {
   if (!input.startedAt) return undefined;
   const known = new Set(["pending", "none", ...(material.meetings ?? []).flatMap((meeting) => [meeting.id, ...(meeting.link ? [meeting.link] : [])])]);
@@ -137,11 +139,11 @@ export async function capture(input: CaptureInput, deps: CaptureDeps): Promise<C
     const topics = [...new Set(docs.flatMap((doc) => doc.topics))].sort();
     const draft = await deps.agent(capturePrompt(input, library, existing, deps.today(), material, topics));
     const wispr = wisprOf(draft, input, material);
-    if (found && existing && draft.text === existing.text) {
+    const text = inert(draft.text);
+    if (found && existing && text === existing.text) {
       return { path: found.path, title: found.title, url: docUrl(library, found.path), updated: true, text: existing.text, wispr };
     }
     const path = existing?.path ?? newPath(worktree, draft.path);
-    const text = draft.text;
     const doc = parseDoc(path, text);
     if (doc.source !== input.source) throw new Error(`${path} names source ${doc.source ?? "none"}, not ${input.source}; nothing was saved`);
     const secrets = secretKinds(text);
