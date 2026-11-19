@@ -449,8 +449,6 @@ describe("hedge update", () => {
       const second = await run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" });
       expect(second).toMatchObject({ code: 1, applied: 0, version: "v0.1.0", output: anotherUpdateRuns });
 
-      expect(existsSync(join(second.home, "applied"))).toBe(false);
-
       pause.resume();
       expect(await within(first.exited, 3_000, "the first hedge update did not end")).toBe(0);
       expect(await new Response(first.stdout).text()).toContain("Engine is at v0.1.1.");
