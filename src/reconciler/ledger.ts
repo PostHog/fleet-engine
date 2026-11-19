@@ -20,10 +20,10 @@ export const ledgerKey = (step: { pack: string; id: string }) => `${step.pack}/$
 export const undoVariable = "HEDGE_UNDO";
 
 /** The pack whose command line this is, when it is the undo, check or prerequisite of the ledger step that HEDGE_UNDO names, or the probe of its human step. */
-export async function undoingPack(home: string, env: Record<string, string | undefined>, command: string[]): Promise<string | undefined> {
+export async function undoingPack(home: string, env: Record<string, string | undefined>, command: string[], packOf: (name: string) => string): Promise<string | undefined> {
   const key = env[undoVariable];
   if (!key) return undefined;
-  const ledger = await readLedger(home);
+  const ledger = currentNames(await readLedger(home), packOf);
   const typed = asHedge(command);
   const same = (line: string[] | undefined) => line?.length === typed.length && asHedge(line).every((part, index) => part === typed[index]);
   const step = ledger.steps.find((item) => ledgerKey(item) === key);
@@ -76,17 +76,18 @@ export function changeLedger<List extends keyof Ledger>(home: string, list: List
   });
 }
 
-/** Moves every entry to its pack's current name in one write under the lock. An entry already under the current name is newer, so it wins. */
 export async function renameLedger(home: string, packOf: (name: string) => string): Promise<Ledger> {
   const current = await readLedger(home);
   if ([...current.steps, ...current.human].every((item) => packOf(item.pack) === item.pack)) return current;
   return serially(home, async () => {
     const ledger = await readLedger(home);
-    const renamed = { steps: renamedItems(ledger.steps, packOf), human: renamedItems(ledger.human, packOf) };
+    const renamed = currentNames(ledger, packOf);
     await write(home, ledger, renamed);
     return renamed;
   });
 }
+
+export const currentNames = (ledger: Ledger, packOf: (name: string) => string): Ledger => ({ steps: renamedItems(ledger.steps, packOf), human: renamedItems(ledger.human, packOf) });
 
 function renamedItems<T extends { pack: string; id: string }>(items: T[], packOf: (name: string) => string): T[] {
   const byKey = new Map<string, T>();

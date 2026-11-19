@@ -262,14 +262,6 @@ describe("a step whose pack now has a new name", () => {
     expect(ledgerText(home)).toBe(before);
   });
 
-  test("a dry run after its pack left the profile reports the undo, and probes it under the name the ledger holds", async () => {
-    const home = await installed();
-    const keys: Array<string | undefined> = [];
-    const report = await apply(withoutMemory, { home, dryRun: true, run: async (command, env) => (keys.push(env?.HEDGE_UNDO), command.join(" ").includes(marker) ? 0 : 1) });
-    expect(report.actions.map((action) => action.target)).toContain("step memory/context-upstream");
-    expect(keys).toContain("context-library/context-upstream");
-  });
-
   test("keeps the newer entry when the ledger already holds the new name too", async () => {
     const home = await installed();
     await changeLedger(home, "steps", "memory/context-upstream", { ...upstream, pack: "memory", undo: ["sh", "-c", 'rm "$HOME/upstream"; touch "$HOME/newer-undo"'] });

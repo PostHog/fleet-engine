@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
-import { runCommand } from "../../base/lib/command.ts";
+import { cannotTell, runCommand } from "../../base/lib/command.ts";
 import { modelFor } from "../../base/lib/models.ts";
 import { redactSecrets } from "../../base/hooks/secret-guard.ts";
 import { capture, captureAgent, type Agent } from "../lib/library/capture.ts";
@@ -96,9 +96,12 @@ function printShared(shared: Shared, dryRun: boolean, print: (line: string) => v
   return shared.failed.length ? 1 : 0;
 }
 
+const probes = (args: string[]) => args.length === 2 && args[0] === "upstream" && args[1] === "doctor";
+
 if (import.meta.main) {
+  const args = process.argv.slice(2);
   await runCommand(
-    () => contextCommand(process.argv.slice(2), {
+    () => contextCommand(args, {
       env: Bun.env,
       home: Bun.env.HOME ?? homedir(),
       print: (line) => console.log(line),
@@ -109,5 +112,6 @@ if (import.meta.main) {
       share: (owner) => t3ShareDeps({ owner, host: hostname(), route: routerAgent(modelFor("survey")), skip: Bun.env.T3CODE_THREAD_ID ? [Bun.env.T3CODE_THREAD_ID] : [] }),
     }),
     "hedge context",
+    probes(args) ? cannotTell : 1,
   );
 }

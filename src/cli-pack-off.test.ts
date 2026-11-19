@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { cpSync, existsSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, readdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { main } from "./cli.ts";
 import { cliFixtures, repoRoot } from "./testing/cli.ts";
 import { tempDirs } from "./testing/git.ts";
+import { changeLedger, ledgerKey, readLedger } from "./reconciler/ledger.ts";
 
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
@@ -109,5 +110,74 @@ else process.exit((await Bun.file(file).exists()) ? 0 : 1);
       expect(await run(["apply"], home, engine)).toBe(0);
       expect(existsSync(join(home, "box.txt"))).toBe(false);
     });
+  });
+});
+
+describe("the library's upstream from before the Context library pack joined Memory", () => {
+  const memory = JSON.parse(readFileSync(join(repoRoot, "packs/memory/pack.json"), "utf8"));
+  const library = memory.workflows.find((workflow: { id: string }) => workflow.id === "context-library");
+  const { roles: _, ...upstream } = memory.steps.find((step: { id: string }) => step.id === "context-upstream");
+  const declaration = (home: string) => join(home, ".config/hedge/mcp-gateway/upstreams/context.json");
+  const ledgerFile = (home: string) => join(home, ".local/state/hedge/steps.json");
+
+  function engineWithLibrary() {
+    const engine = engineWithCommands();
+    cpSync(join(repoRoot, "src"), join(engine, "src"), { recursive: true });
+    cpSync(join(repoRoot, "hedge"), join(engine, "hedge"));
+    symlinkSync(join(repoRoot, "node_modules"), join(engine, "node_modules"));
+    cpSync(join(repoRoot, "packs/memory"), join(engine, "packs/memory"), { recursive: true });
+    for (const pack of readdirSync(join(repoRoot, "packs")).filter((name) => existsSync(join(repoRoot, "packs", name, "lib")) && !existsSync(join(engine, "packs", name, "lib")))) cpSync(join(repoRoot, "packs", pack, "lib"), join(engine, "packs", pack, "lib"), { recursive: true });
+    const base = JSON.parse(readFileSync(join(engine, "packs/base/pack.json"), "utf8"));
+    writeFileSync(join(engine, "packs/base/pack.json"), JSON.stringify({ ...base, steps: [] }));
+    const settings = memory.settings.filter((setting: { key: string }) => library.settings.includes(setting.key));
+    writeFileSync(join(engine, "packs/memory/pack.json"), JSON.stringify({ schema: 1, name: "memory", summary: memory.summary, aliases: memory.aliases, settings, workflows: [library], steps: [upstream] }));
+    return engine;
+  }
+
+  async function upgraded(packs: string[], workflows: Record<string, boolean> = {}) {
+    const home = temp.make("home-");
+    const engine = engineWithLibrary();
+    const profile = profileDir(packs);
+    const settings = { "context-library.repo": "me/notes", "context-library.path": join(home, "notes") };
+    writeFileSync(join(profile, "hedge.json"), JSON.stringify({ ...JSON.parse(readFileSync(join(profile, "hedge.json"), "utf8")), settings, workflows }));
+    const installed = Bun.spawn(["bun", join(engine, "packs/memory/commands/context.ts"), "upstream", "install"], { stdout: "ignore", env: { ...Bun.env, HOME: home, HEDGE_SETTINGS: JSON.stringify({ ...settings, "context-library.url": "", "context-library.owner": "" }) } });
+    expect(await installed.exited).toBe(0);
+    await changeLedger(home, "steps", "context-library/context-upstream", { pack: "context-library", id: upstream.id, check: upstream.check, undo: upstream.undo });
+    const hedge = async (args: string[], env: Record<string, string> = {}, lines: string[] = []): Promise<{ code: number; output: string }> => {
+      const run = async (command: string[], stepEnv: Record<string, string> = {}) =>
+        command[1] === join(engine, "hedge") ? (await hedge(command.slice(2), { ...stepEnv, HEDGE_PROFILE_DIR: profile }, lines)).code : Bun.spawn(command, { stdout: "ignore", stderr: "ignore", env: { ...Bun.env, HOME: home, ...stepEnv } }).exited;
+      const code = await main(args, { home, engineRoot: engine, platform: "linux", env, print: (line) => lines.push(line), run });
+      return { code, output: lines.join("\n") };
+    };
+    return { home, profile, hedge };
+  }
+
+  test("a dry run and doctor after the library left the profile name its removal once, through the nested probe, also beside an entry under the new name, and the next apply removes it", async () => {
+    const { home, profile, hedge } = await upgraded([]);
+    const previews = async () => {
+      const before = readFileSync(ledgerFile(home), "utf8");
+      const preview = await hedge(["apply", "--dry-run", "--profile", profile]);
+      expect(preview.output.split("\n").filter((line) => line.includes("step memory/context-upstream"))).toEqual(["remove step memory/context-upstream"]);
+      const doctor = await hedge(["doctor", "--profile", profile]);
+      expect(doctor.output.split("\n").filter((line) => line.includes("context-upstream"))).toEqual(["Fix: The memory pack is off, but step context-upstream of the memory pack still holds what it set. Run hedge apply to undo it."]);
+      expect(existsSync(declaration(home))).toBe(true);
+      expect(readFileSync(ledgerFile(home), "utf8")).toBe(before);
+    };
+    await previews();
+    await changeLedger(home, "steps", "memory/context-upstream", { pack: "memory", id: upstream.id, check: upstream.check, undo: upstream.undo });
+    await previews();
+    expect((await hedge(["apply", "--profile", profile])).code).toBe(0);
+    expect(existsSync(declaration(home))).toBe(false);
+    expect((await readLedger(home)).steps).toEqual([]);
+  });
+
+  test("turned off before the first apply, it stays in the ledger and is reported while its declaration remains", async () => {
+    const { home, profile, hedge } = await upgraded(["context-library"], { "context-library": false });
+    for (const _ of [1, 2]) {
+      const applied = await hedge(["apply", "--profile", profile]);
+      expect(applied.output).toContain("Hedge cannot tell whether step context-upstream of the memory pack still holds what it set, though its workflow context-library is off.");
+      expect(existsSync(declaration(home))).toBe(true);
+      expect((await readLedger(home)).steps.map(ledgerKey)).toEqual(["memory/context-upstream"]);
+    }
   });
 });

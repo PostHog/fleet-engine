@@ -5,7 +5,7 @@ import { packName } from "../pack/manifest.ts";
 import { cannotTell } from "../pack/types.ts";
 import type { Action, CatalogEntry, Finding, HumanStep, Owned, PackCheck, Plan, Report } from "../pack/types.ts";
 import { engineCommand } from "./engine-command.ts";
-import { changeLedger, ledgerKey, readLedger, renameLedger, undoVariable, type Ledger, type LedgerStep } from "./ledger.ts";
+import { changeLedger, currentNames, ledgerKey, readLedger, renameLedger, undoVariable, type Ledger, type LedgerStep } from "./ledger.ts";
 import { hublessReason, listedPack } from "./resolve.ts";
 import { withLegacyNames } from "../legacy.ts";
 
@@ -112,7 +112,7 @@ export async function apply(plan: Plan, options: { home: string; dryRun?: boolea
     report.ok = false;
     if (!context.dryRun) return report;
   }
-  const before = await movedLedger(options.home, plan, context.dryRun);
+  const before = context.dryRun ? currentNames(await readLedger(options.home), packOf(plan)) : await renameLedger(options.home, packOf(plan));
   const record = async (key: string, step?: LedgerStep) => {
     if (!context.dryRun) await changeLedger(options.home, "steps", key, step);
   };
@@ -172,7 +172,7 @@ export async function apply(plan: Plan, options: { home: string; dryRun?: boolea
     if (step.undo && (gated.passed.includes(step) || (await run(step.probe)) === 0)) await changeLedger(options.home, "human", ledgerKey(step), { pack: step.pack, id: step.id, probe: step.left ?? step.probe, undo: step.undo });
   }
   for (const step of context.dryRun ? [] : leftHuman(plan, before)) {
-    if (!heldCodes.includes(await run(step.probe, { [undoVariable]: undoKey(step) }))) await changeLedger(options.home, "human", ledgerKey(step));
+    if (!heldCodes.includes(await run(step.probe, { [undoVariable]: ledgerKey(step) }))) await changeLedger(options.home, "human", ledgerKey(step));
   }
   await undo(items.filter((item) => item.cause !== "pack"));
   return report;
@@ -190,7 +190,7 @@ export async function check(plan: Plan, options: { home: string; adapters?: Adap
     if (await waits(step)) continue;
     if (step.check && (await run(step.check)) !== 0) report.findings.push({ id: `step:${step.id}`, pack: step.pack, say: `Step ${step.id} of the ${step.pack} pack does not pass its check.`, repair: "apply" });
   }
-  const ledger = moved(await readLedger(options.home), plan);
+  const ledger = currentNames(await readLedger(options.home), packOf(plan));
   for (const { step, cause } of undoItems(plan, ledger.steps)) {
     if (report.actions.some((action) => action.target === `step ${step.pack}/${step.id}`)) report.findings.push({ id: `undo:${step.id}`, pack: step.pack, say: `${stillHolds(step, cause)} Run hedge apply to undo it.`, repair: "apply" });
   }
@@ -302,7 +302,7 @@ async function leftByHand(plan: Plan, ledger: Ledger, run: Runner): Promise<Find
   const listed = new Set(plan.packs.map((pack) => pack.name));
   const findings: Finding[] = [];
   for (const step of leftHuman(plan, ledger)) {
-    if ((await run(step.probe, { [undoVariable]: undoKey(step) })) !== 0) continue;
+    if ((await run(step.probe, { [undoVariable]: ledgerKey(step) })) !== 0) continue;
     const cause = listed.has(step.pack) ? `This machine no longer plans the ${step.id} step of the ${step.pack} pack.` : `The ${step.pack} pack is off.`;
     findings.push({ id: `left:${step.id}`, pack: step.pack, say: `${cause} ${step.undo}` });
   }
@@ -353,19 +353,7 @@ function unreachable(plan: Plan) {
   return [...packs, ...skills];
 }
 
-function moved(ledger: Ledger, plan: Plan): Ledger {
-  const rename = <T extends { pack: string }>(item: T): T => {
-    const pack = listedPack(plan, item.pack);
-    return pack === item.pack ? item : { ...item, pack, listedAs: item.pack };
-  };
-  return { steps: ledger.steps.map(rename), human: ledger.human.map(rename) };
-}
-
-async function movedLedger(home: string, plan: Plan, dryRun: boolean): Promise<Ledger> {
-  return dryRun ? moved(await readLedger(home), plan) : renameLedger(home, (name) => listedPack(plan, name));
-}
-
-const undoKey = (step: { pack: string; id: string; listedAs?: string }) => ledgerKey({ pack: step.listedAs ?? step.pack, id: step.id });
+const packOf = (plan: Plan) => (name: string) => listedPack(plan, name);
 
 function waitingFindings(plan: Plan): Finding[] {
   return plan.workflows.filter((workflow) => workflow.unset).map((workflow) => ({ id: `waits:${workflow.id}`, pack: workflow.pack, say: `Workflow ${workflow.id} stays off until you set ${workflow.unset}. Set it with hedge set ${workflow.unset}=<value>.` }));
@@ -389,7 +377,7 @@ function viaEngine(plan: Plan, run: Runner): Runner {
 }
 
 /** Names the step in HEDGE_UNDO, so a nested hedge runs the command of a pack that is off, but only for this step's undo, check and prerequisite. */
-const undoRunner = (run: Runner, step: LedgerStep): Runner => (command) => run(command, { [undoVariable]: undoKey(step) });
+const undoRunner = (run: Runner, step: LedgerStep): Runner => (command) => run(command, { [undoVariable]: ledgerKey(step) });
 
 /** Runs commands with the plan's home directory as HOME, so a step installs into the home it applies to, and with the plan's profile, so a nested hedge reads the profile this run applies or checks. */
 function spawnRunner(home: string, profileDir: string | undefined): Runner {
