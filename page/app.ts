@@ -149,7 +149,8 @@ function clips() {
   }, { threshold: 0.5 });
   for (const video of videos) {
     video.addEventListener("play", () => {
-      if (!video.paused) pausedByScroll.delete(video);
+      started.add(video);
+      pausedByScroll.delete(video);
     });
     observer.observe(video);
   }
