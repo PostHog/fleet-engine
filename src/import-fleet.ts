@@ -13,17 +13,18 @@ type State = { version: number; groups: Record<string, Record<string, unknown>> 
 const machineFile = ".config/fleet/machine.json";
 const stateFile = ".local/state/fleet/state.json";
 const ledgerFile = ".local/state/fleet/steps.json";
-const secretLog = [".local/state/fleet/secrets.jsonl", ".local/state/hedge/secrets.jsonl"] as const;
+const stateFiles = [
+  { before: ".local/state/fleet/secrets.jsonl", after: ".local/state/hedge/secrets.jsonl", what: "the secret store's log" },
+  { before: ".local/state/fleet/slack/slack-trigger.json", after: ".local/state/hedge/slack/slack-trigger.json", what: "Slack's pending launches and handled events" },
+];
 const doneFile = ".local/state/hedge/fleet-imported";
 const claimsFile = ".local/state/hedge/fleet-import.json";
 const notImported = new Set([".local/state/fleet", ".local/share/fleet"]);
-/** Hedge folders that take each missing file even when they were there before: hedge devbox add makes ~/.config/hedge before get.sh runs. */
 const filledIn = new Set([".config/hedge"]);
 const runState = /^(?:logs?|locks?|cache|caches|\.cache|node_modules|.+\.(?:log|lock|pid|partial|tmp))$/;
 
 const present = (path: string) => lstatSync(path, { throwIfNoEntry: false });
 
-/** Copies the setup from before the rename to the new paths, once, and never changes an old path. An import that stopped part way copies what is still missing on the next run. Returns what it did. */
 export async function importFleet(home: string): Promise<string[]> {
   if (!legacyPaths.some(([before]) => present(join(home, before))) || present(join(home, doneFile))) return [];
   return withLock(home, async () => {
@@ -36,7 +37,7 @@ export async function importFleet(home: string): Promise<string[]> {
       if (present(join(home, before)) && (filledIn.has(after) || (await claim(after))) && (await importTree(home, join(home, before), after, skip))) done.push(`copied ~/${before} to ~/${after}`);
     }
     if (records && (await publishFile(home, ".local/state/hedge/state.json", (partial) => writeFileSync(partial, JSON.stringify(takenOver(records), null, 2) + "\n", { mode: 0o600 })))) done.push(`copied the files ~/${stateFile} owns`);
-    done.push(...(await importLedger(home)), ...(await importSecretLog(home)), ...(await importMachine(home, claim)));
+    done.push(...(await importLedger(home)), ...(await importStateFiles(home)), ...(await importMachine(home, claim)));
     await publishFile(home, doneFile, (partial) => writeFileSync(partial, "", { mode: 0o600 }));
     return done;
   });
@@ -44,7 +45,6 @@ export async function importFleet(home: string): Promise<string[]> {
 
 type Claim = (target: string) => Promise<boolean>;
 
-/** Whether the import may copy into target: it is not there yet, or an import that stopped part way made it. The import writes down each target before it makes it, so a path that was there before stays as it is. */
 async function claims(home: string): Promise<Claim> {
   const path = inside(home, claimsFile);
   const claimed = new Set<string>(present(path)?.isFile() ? (JSON.parse(readFileSync(path, "utf8")) as { claimed: string[] }).claimed : []);
@@ -75,14 +75,16 @@ async function importLedger(home: string): Promise<string[]> {
   return (await publishFile(home, ".local/state/hedge/steps.json", (partial) => writeFileSync(partial, text, { mode: 0o600 }))) ? [`copied the undo steps in ~/${ledgerFile}`] : [];
 }
 
-/** The secret store's event log, which says what each stored value is and whether the store is off, comes over with the values in ~/.config/fleet/secrets. */
-async function importSecretLog(home: string): Promise<string[]> {
-  const [before, after] = secretLog;
-  const path = join(home, before);
-  if (!present(path)?.isFile()) return [];
-  const mode = present(path)!.mode & 0o7777;
-  if (await publishFile(home, after, (partial) => (copyFileSync(path, partial, constants.COPYFILE_EXCL), chmodSync(partial, mode)))) return [`copied the secret store's log ~/${before}`];
-  return [`left ~/${before} behind, because ~/${after} is there`];
+async function importStateFiles(home: string): Promise<string[]> {
+  const done: string[] = [];
+  for (const { before, after, what } of stateFiles) {
+    const path = join(home, before);
+    if (!present(path)?.isFile()) continue;
+    const mode = present(path)!.mode & 0o7777;
+    if (await publishFile(home, after, (partial) => (copyFileSync(path, partial, constants.COPYFILE_EXCL), chmodSync(partial, mode)))) done.push(`copied ${what} ~/${before}`);
+    else done.push(`left ~/${before} behind, because ~/${after} is there`);
+  }
+  return done;
 }
 
 function oldState(home: string): State | undefined {
@@ -90,17 +92,14 @@ function oldState(home: string): State | undefined {
   return present(path)?.isFile() ? (JSON.parse(readFileSync(path, "utf8")) as State) : undefined;
 }
 
-/** A Fleet unit file, such as the heavy slice, that apply must not remove, because retire keeps the files of Fleet. */
 const fleetUnit = (target: string) => target.startsWith(".config/systemd/user/fleet-");
 
-/** The fleet group becomes the hedge group. A target that both name keeps its hedge owner, and no group keeps a target in an old path or a Fleet unit file. */
 function takenOver(state: State): State {
   const { fleet = {}, hedge = {}, ...others } = state.groups;
   const groups = Object.entries({ ...others, hedge: { ...fleet, ...hedge } }).map(([name, entries]) => [name, Object.fromEntries(Object.entries(entries).filter(([target]) => !inLegacyPath(target) && !fleetUnit(target)))]);
   return { ...state, groups: Object.fromEntries(groups) };
 }
 
-/** The machine file, with profileDir on a copy of the profile when the profile was in an old path, also through a link. The copy counts only when it is the same repository at the same commit and Hedge loads it as a profile; else profileDir and the setup progress go, and setup starts again. */
 async function importMachine(home: string, claim: Claim): Promise<string[]> {
   const path = join(home, machineFile);
   if (!present(path)?.isFile()) return [];
@@ -124,7 +123,6 @@ const gitIn = (dir: string, ...args: string[]) => {
   return result.exitCode === 0 ? result.stdout.toString().trim() : undefined;
 };
 
-/** Whether copy is a checkout of its own of the same repository as original: the same origin, and the commit original is at. */
 export function isCopyOf(original: string, copy: string): boolean {
   const common = gitIn(copy, "rev-parse", "--path-format=absolute", "--git-common-dir");
   if (!common || !`${realpathSync(common)}/`.startsWith(`${realpathSync(copy)}/`)) return false;
@@ -145,7 +143,6 @@ const resolvedPath = (path: string) => {
 
 const loads = (dir: string) => loadProfile(dir).then(() => true, () => false);
 
-/** Copies each regular file below from that target does not have yet, one by one, with its mode, and replaces nothing. Links, run state, and the paths skip names stay behind. Returns whether it copied a file. */
 async function importTree(home: string, from: string, target: string, skip: (path: string) => boolean): Promise<boolean> {
   const info = present(from);
   if (info?.isFile()) return publishFile(home, target, (partial) => (copyFileSync(from, partial, constants.COPYFILE_EXCL), chmodSync(partial, info.mode & 0o7777)));
@@ -166,7 +163,6 @@ async function refuseLink(home: string, target: string) {
   if (link) throw new Error(`${link} is a link or a file, so Hedge did not bring the Fleet copy to ~/${target}. Move it away, then run get.sh again.`);
 }
 
-/** Builds target beside it, then links it in place only while nothing has its name. Refuses when target or a folder on its way is a link. */
 async function publishFile(home: string, target: string, build: (partial: string) => void): Promise<boolean> {
   const path = inside(home, target);
   await refuseLink(home, target);
