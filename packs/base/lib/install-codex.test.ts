@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { main } from "../../../src/cli.ts";
 import { tempDirs } from "../../../src/testing/git.ts";
 import { devbox, engineSource, resolveEngine } from "../../../src/testing/packs.ts";
+import { launcherScript } from "../../../src/adapters/jobs/launcher.ts";
+import { engineCommand } from "../../../src/reconciler/engine-command.ts";
 
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
@@ -317,7 +319,7 @@ describe("install-codex.sh", () => {
     expect(readFileSync(join(fleets, "releases/rust-v0.1.0/bin/codex"), "utf8")).toContain("0.1.0");
   });
 
-  onLinux("the scheduled nightly agent-update job, run at night, moves the Codex that Fleet installed to Hedge's release package", async () => {
+  onLinux("the scheduled nightly agent-update job, run at night through its installed launcher and the hedge launcher, moves the Codex that Fleet installed to Hedge's release package", async () => {
     const box = await machine("x86_64", ["x86_64-unknown-linux-musl"]);
     rmSync(join(box.bin, "bun"));
     symlinkSync(process.execPath, join(box.bin, "bun"));
@@ -329,13 +331,15 @@ describe("install-codex.sh", () => {
     writeFileSync(join(box.home, ".config/hedge/machine.json"), JSON.stringify({ schema: 1, role: "devbox", profileDir: profile }));
     const job = resolveEngine([await engineSource()], { plan: "codex" }, devbox).jobs.find((item) => item.id === "agent-update")!;
     expect(job.command.slice(0, 2)).toEqual(["hedge", "nightly"]);
-    const driver = join(temp.make("driver-"), "driver.ts");
-    writeFileSync(driver, `import { nightlyCommand } from ${JSON.stringify(join(import.meta.dir, "nightly.ts"))};\nprocess.exit(await nightlyCommand(JSON.parse(Bun.argv[2]), { home: Bun.argv[3], engineRoot: Bun.argv[4], now: () => new Date("2026-11-10T02:17:00Z") }));\n`);
+    const clock = join(temp.make("clock-"), "clock.ts");
+    writeFileSync(clock, `const at = Date.parse("2026-11-10T02:17:00Z");\nconst RealDate = Date;\nglobalThis.Date = class extends RealDate { constructor(...args) { args.length ? super(...args) : super(at); } static now() { return at; } };\n`);
+    const log = join(box.home, "agent-update.log");
+    const installed = join(box.home, "agent-update.sh");
+    writeFileSync(installed, launcherScript(engineCommand(job.command, engineRoot), path, log), { mode: 0o755 });
 
-    const nightly = Bun.spawn([process.execPath, driver, JSON.stringify(job.command.slice(2)), box.home, engineRoot], { env: { HOME: box.home, PATH: path }, stdout: "pipe", stderr: "pipe" });
-    const [out, code] = await Promise.all([new Response(nightly.stdout).text(), nightly.exited]);
+    const code = await Bun.spawn(["/bin/sh", installed], { env: { HOME: box.home, BUN_OPTIONS: `--preload ${clock}`, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" }, stdout: "ignore", stderr: "ignore" }).exited;
 
-    expect({ code, codex: out.split("\n").find((line) => line.startsWith("Codex:")) }).toEqual({ code: 0, codex: "Codex: up to date." });
+    expect({ code, codex: readFileSync(log, "utf8").split("\n").find((line) => line.startsWith("Codex:")) }).toEqual({ code: 0, codex: "Codex: up to date." });
     expect(await codexOnPath(box.home, path)).toBe("codex-cli 9.9.9 x86_64-unknown-linux-musl");
     expect(readlinkSync(join(box.home, ".local/bin/codex"))).toBe(join(codexHome(box.home), "current/bin/codex"));
   });
