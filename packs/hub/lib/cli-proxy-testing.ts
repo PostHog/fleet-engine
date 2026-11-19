@@ -1,6 +1,10 @@
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { proxyUrl, type ProxyMachine } from "./cli-proxy.ts";
+import { providerConfigAdapter } from "../../../src/adapters/provider-config/adapter.ts";
+import type { AiPlan, MachineFile, Plan } from "../../../src/pack/types.ts";
+import { apply } from "../../../src/reconciler/apply.ts";
+import { devbox, engineSource, resolveEngine, skillSources } from "../../../src/testing/packs.ts";
+import { applyCommand, cliProxy, proxyUrl, type ProxyMachine } from "./cli-proxy.ts";
 import { fakeRun, roleHome } from "./run-testing.ts";
 
 export const clientKey = "c1".repeat(32);
@@ -52,4 +56,35 @@ export function proxyMachine(make: (prefix: string) => string, fields: Partial<P
     readStdin: async () => `${clientKey}\n`, randomKey: () => keys.shift()!, print: (line) => printed.push(line), ...fields,
   };
   return { machine, home, calls: fake.calls, inputs: fake.inputs, requests, printed };
+}
+
+export const proxyOnly = (result: Plan): Plan => ({ ...result, files: [], jobs: [], human: [], steps: result.steps.filter((step) => step.id === "cli-proxy"), checks: result.checks.filter((check) => check.workflow === "own-account-balancing"), config: result.config.filter((entry) => entry.workflow === "own-account-balancing") });
+
+export const hedgeProxy = (machine: ProxyMachine, engineRoot: string | undefined) => async (command: string[]) => {
+  const [shell, launcher, group, mode, ...rest] = command;
+  const agent = mode === "check" && rest.join(" ") === "codex" ? "codex" : "claude";
+  const known = (["install", "doctor", "accounts", "check"] as const).find((name) => name === mode);
+  if (shell !== "/bin/sh" || !engineRoot || launcher !== join(engineRoot, "hedge") || group !== "cli-proxy" || !known || (rest.length && agent !== "codex")) throw new Error(`The hub pack runs no ${command.join(" ")}`);
+  return cliProxy(known, machine, agent).catch(() => 1);
+};
+
+const answers = { "hub.alias": "my-hub", "hub.coderUrl": "https://coder.example.com", "hub.boxTemplate": "linux" };
+
+export async function balancingPlan(make: (prefix: string) => string, plan: AiPlan, on = true, machine: MachineFile = devbox): Promise<Plan> {
+  const engine = await engineSource();
+  return proxyOnly(resolveEngine([engine, ...skillSources(make("skills-"), engine)], { settings: answers, packs: ["hub"], workflows: { "own-account-balancing": on }, plan }, machine));
+}
+
+const label = (finding: { todo?: true; repair?: string }) => (finding.todo || finding.repair === "human" ? "To do" : finding.repair ? "Fix" : "Note");
+
+export function hedgeApply(machine: ProxyMachine, plan: () => Plan) {
+  const quiet: ProxyMachine = { ...machine, print: () => {} };
+  const run = async () => {
+    const report = await apply(plan(), { home: machine.home, adapters: [providerConfigAdapter()], run: hedgeProxy(quiet, plan().engineRoot) }).catch((error: Error) => error);
+    if (report instanceof Error) return { code: 1, stdout: "", stderr: `hedge: ${report.message}\n` };
+    return { report, code: report.ok ? 0 : 1, stdout: report.findings.map((finding) => `${label(finding)}: ${finding.say}\n`).join(""), stderr: "" };
+  };
+  const outer = machine.run;
+  machine.run = async (command, options) => (command.join(" ") === applyCommand.join(" ") ? run() : outer(command, options));
+  return run;
 }

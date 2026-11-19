@@ -15,7 +15,7 @@ export type { CommandRunner } from "../run.ts";
 /** owns says which of the provider's keys live in this file. */
 type Target = { provider: Provider; path: string; format: Format; owns(path: string[]): boolean };
 export type FieldRecord = { [target: string]: Field[] };
-type Merged = { record: Field[]; kept: string[]; reason: string; after?: string; document: Document };
+type Merged = { record: Field[]; kept: string[]; reason: string; after?: string; document: Document; todo?: string };
 type FilesResult = AdapterResult & { plugins?: string[]; claudeEnabled?: Record<string, boolean>; marketplaces?: Record<string, string | null>; codexPlugins?: string[] };
 
 export const recordTarget = ".config/hedge/provider-fields.json";
@@ -83,6 +83,7 @@ async function reconcileFiles(plan: Plan, home: string, dryRun: boolean, adopt: 
       result.marketplaces = declaredMarketplaces(merged.document);
     }
     if (target.provider === "codex" && !link) result.codexPlugins = acceptedCodexPlugins(merged.document);
+    if (merged.todo) result.findings.push({ id: `route:${target.path}`, pack: "engine", say: merged.todo, todo: true });
     if (merged.kept.length) result.findings.push({ id: `kept:${target.path}`, pack: "engine", say: `Kept your ${merged.kept.join(", ")} in ${target.path}. Run hedge apply --adopt ${target.path} to take Hedge's value.` });
     if (merged.after !== undefined) writes.push({ target: target.path, before, after: merged.after, action: { target: target.path, operation: before === undefined ? "create" : "replace", reason: merged.reason } });
   }
@@ -113,16 +114,25 @@ function merge(target: Target, text: string | undefined, previous: Field[], want
   const kept: string[] = [];
   const changed: string[] = [];
   const removed: string[] = [];
+  const route = proxyRoute[target.provider];
+  const onRoute = (path: string[]) => route?.paths.some((item) => samePath(item, path)) ?? false;
+  const oldOf = (field: Field) => previous.find((item) => samePath(item.path, field.path));
+  const keeps = (field: Field) => {
+    const value = get(current, field.path);
+    const old = oldOf(field);
+    return !same(value, field.value) && value !== undefined && !(old && same(value, old.value)) && !adopt;
+  };
+  const routeHeld = wanted.some((field) => onRoute(field.path) && keeps(field));
   const reconcile = (fields: Field[]) => {
     const applied: Field[] = [];
     for (const field of fields) {
-      const value = get(current, field.path);
-      const old = previous.find((item) => samePath(item.path, field.path));
-      if (!same(value, field.value) && value !== undefined && !(old && same(value, old.value)) && !adopt) {
-        kept.push(field.path.join("."));
+      const old = oldOf(field);
+      if (keeps(field) || (routeHeld && onRoute(field.path))) {
+        if (keeps(field)) kept.push(field.path.join("."));
         if (old) record.push(old);
         continue;
       }
+      const value = get(current, field.path);
       if (!same(value, field.value)) {
         set(current, field.path, field.value);
         changed.push(field.path.join("."));
@@ -145,25 +155,27 @@ function merge(target: Target, text: string | undefined, previous: Field[], want
     trust.push(...retained);
   }
   const all = [...wanted, ...trust];
+  const leaving: Field[] = [];
   for (const field of previous) {
     if (all.some((item) => overlaps(item.path, field.path))) continue;
     if ((options.outage && !options.gated(field.path)) || keepsEdit(field)) record.push(field);
-    else if (get(current, field.path) !== undefined) {
-      remove(current, field.path);
-      removed.push(field.path.join("."));
-    }
+    else if (get(current, field.path) !== undefined) leaving.push(field);
   }
-  const route = proxyRoute[target.provider] ?? [];
-  const hedges = route.every((field) => same(get(current, field.path), field.value));
-  const wantedRoute = route.some((field) => all.some((item) => overlaps(item.path, field.path)));
-  const outageKeeps = options.outage && !route.some((field) => options.gated(field.path));
-  for (const field of hedges && !wantedRoute && !outageKeeps ? route : []) {
+  const trial = structuredClone(current);
+  for (const field of leaving.filter((item) => onRoute(item.path))) remove(trial, field.path);
+  const stranded = leaving.some((field) => onRoute(field.path)) && !route?.strands(current) ? route?.strands(trial) : undefined;
+  for (const field of leaving) {
+    if (stranded && onRoute(field.path)) {
+      record.push(field);
+      continue;
+    }
     remove(current, field.path);
     removed.push(field.path.join("."));
   }
   const reason = [changed.length ? `set ${changed.join(", ")}` : "", removed.length ? `remove ${removed.join(", ")}` : ""].filter(Boolean).join("; ");
   const after = target.format.encode(current);
-  return { record, kept, reason, after: after === original ? undefined : after, document: current };
+  const todo = stranded && `Kept Hedge's proxy route in ${target.path}: without it, ${stranded.harm}. Remove ${stranded.path} from ${target.path}, then run hedge apply to take the route out.`;
+  return { record, kept, reason, after: after === original ? undefined : after, document: current, ...(todo ? { todo } : {}) };
 }
 
 function acceptedPlugins(document: Document) {

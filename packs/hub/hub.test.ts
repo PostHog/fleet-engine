@@ -7,7 +7,7 @@ import { providerConfigAdapter } from "../../src/adapters/provider-config/adapte
 import { apply, check } from "../../src/reconciler/apply.ts";
 import { boxCommand } from "./lib/box-command.ts";
 import { cliProxy, codexProviderTable, proxyUrl, type ProxyMachine } from "./lib/cli-proxy.ts";
-import { clientKey, dataDir, proxyMachine, type Proxy } from "./lib/cli-proxy-testing.ts";
+import { clientKey, dataDir, hedgeApply, hedgeProxy, proxyMachine, proxyOnly, type Proxy } from "./lib/cli-proxy-testing.ts";
 import { Coder } from "./lib/coder.ts";
 import { fakeMachine } from "./lib/testing.ts";
 import type { AvailableSource, MachineFile, MachineRole, Plan, Profile } from "../../src/pack/types.ts";
@@ -312,25 +312,55 @@ describe("the Own-account balancing workflow", () => {
   });
 
   const connectedDevbox = (files: Record<string, string> = {}) => {
-    const { machine, home } = proxyMachine((prefix) => temp.make(prefix), { plan: "both" }, { models: ["claude-sonnet-5-5", "gpt-6.1-sol"] }, { role: "devbox" });
+    const { machine, home, printed } = proxyMachine((prefix) => temp.make(prefix), { plan: "both" }, { models: ["claude-sonnet-5-5", "gpt-6.1-sol"] }, { role: "devbox" });
     for (const [path, text] of Object.entries(files)) {
       mkdirSync(join(home, path, ".."), { recursive: true });
       writeFileSync(join(home, path), text);
     }
-    const off = plan({ packs: ["hub"], plan: "both" }, devbox);
-    const applyOff = () => apply({ ...off, config: off.config.filter((entry) => entry.pack === "hub"), checks: [], steps: [], jobs: [], human: [] }, { home, adapters: [providerConfigAdapter()], run: async () => 0 });
+    const on = proxyOnly(plan({ ...balancing, plan: "both" }, devbox));
+    let profile = on;
+    const applyNow = hedgeApply(machine, () => profile);
+    const applyWith = (next: Plan) => {
+      profile = next;
+      const applied = applyNow();
+      profile = on;
+      return applied;
+    };
+    const applyOff = () => applyWith(proxyOnly(plan({ packs: ["hub"], plan: "both" }, devbox)));
     const codex = () => parse(readFileSync(join(home, ".codex/config.toml"), "utf8"));
-    return { machine, home, applyOff, codex };
+    const claude = () => JSON.parse(readFileSync(join(home, ".claude/settings.json"), "utf8"));
+    return { machine, on, printed, applyWith, applyOff, codex, claude };
   };
+  const helper = 'cat "$HOME/.config/hedge/cli-proxy.key"';
 
-  test("on a devbox that connect sent to the proxy, with no record of it, turning balancing off takes Hedge's exact Claude and Codex routes off at the next apply", async () => {
-    const { machine, home, applyOff, codex } = connectedDevbox();
+  test("on a devbox, connect routes Claude Code and Codex through hedge apply, and turning balancing off takes both routes off at the next apply", async () => {
+    const { machine, applyOff, codex, claude } = connectedDevbox();
     expect(await cliProxy("connect", machine)).toBe(0);
     expect(codex()).toEqual({ model_provider: "hedge-proxy", model_providers: { "hedge-proxy": codexProviderTable } });
-    expect(existsSync(join(home, ".config/hedge/provider-fields.json"))).toBe(false);
-    expect((await applyOff()).ok).toBe(true);
+    expect(claude()).toEqual({ env: { ANTHROPIC_BASE_URL: proxyUrl }, apiKeyHelper: helper });
+    expect((await applyOff()).code).toBe(0);
     expect(codex()).toEqual({});
-    expect(JSON.parse(readFileSync(join(home, ".claude/settings.json"), "utf8"))).toEqual({});
+    expect(claude()).toEqual({});
+  });
+
+  test("after an earlier apply wrote only the hedge-proxy Codex table, connect selects it, and turning balancing off takes the table and the selector off together", async () => {
+    const { machine, on, applyWith, applyOff, codex } = connectedDevbox({ ".config/hedge/cli-proxy.key": `${clientKey}\n` });
+    expect((await applyWith({ ...on, config: on.config.filter((entry) => entry.key !== "model_provider") })).code).toBe(0);
+    expect(codex()).toEqual({ model_providers: { "hedge-proxy": codexProviderTable } });
+    expect(await cliProxy("connect", machine)).toBe(0);
+    expect(codex()).toEqual({ model_provider: "hedge-proxy", model_providers: { "hedge-proxy": codexProviderTable } });
+    expect((await applyOff()).code).toBe(0);
+    expect(codex()).toEqual({});
+  });
+
+  test("connect beside a hedge-proxy Codex table of your own with another name selects nothing, and turning balancing off leaves your table", async () => {
+    const mine = { model_providers: { "hedge-proxy": { ...codexProviderTable, name: "Mine" } } };
+    const { machine, printed, applyOff, codex } = connectedDevbox({ ".codex/config.toml": stringify(mine) });
+    expect(await cliProxy("connect", machine)).toBe(0);
+    expect(codex()).toEqual(mine);
+    expect(printed.at(-1)).toBe("Codex keeps its own sign-in. The hedge apply report above says why.");
+    expect((await applyOff()).code).toBe(0);
+    expect(codex()).toEqual(mine);
   });
 
   test("your own hedge-proxy selector with a Codex table of your own stays, selector and table, after connect and after turning balancing off", async () => {
@@ -338,8 +368,21 @@ describe("the Own-account balancing workflow", () => {
     const { machine, applyOff, codex } = connectedDevbox({ ".codex/config.toml": stringify(mine) });
     expect(await cliProxy("connect", machine)).toBe(0);
     expect(codex()).toEqual(mine);
-    expect((await applyOff()).ok).toBe(true);
+    expect((await applyOff()).code).toBe(0);
     expect(codex()).toEqual(mine);
+  });
+
+  test("Hedge's Claude route beside your own ANTHROPIC_AUTH_TOKEN stays when balancing turns off, with a To do, so the token never goes to Anthropic, and leaves once you remove the token", async () => {
+    const { machine, applyOff, claude } = connectedDevbox({ ".claude/settings.json": JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: "my-token" } }) });
+    expect(await cliProxy("connect", machine)).toBe(0);
+    const routed = { env: { ANTHROPIC_AUTH_TOKEN: "my-token", ANTHROPIC_BASE_URL: proxyUrl }, apiKeyHelper: helper };
+    expect(claude()).toEqual(routed);
+    const kept = await applyOff();
+    expect(claude()).toEqual(routed);
+    expect(kept.stdout).toContain("To do: Kept Hedge's proxy route in .claude/settings.json: without it, Claude Code would send your env.ANTHROPIC_AUTH_TOKEN to Anthropic. Remove env.ANTHROPIC_AUTH_TOKEN from .claude/settings.json, then run hedge apply to take the route out.");
+    writeFileSync(join(machine.home, ".claude/settings.json"), JSON.stringify({ env: { ANTHROPIC_BASE_URL: proxyUrl }, apiKeyHelper: helper }));
+    expect((await applyOff()).code).toBe(0);
+    expect(claude()).toEqual({});
   });
 
   test("sends Claude Code to the loopback proxy, and keeps the client key out of the settings: Claude reads it from a private file", () => {
@@ -395,23 +438,18 @@ describe("the Own-account balancing workflow", () => {
       expect(reports[1]!.actions).toEqual([]);
     });
 
-    test("also removes the Claude settings that connect wrote before any apply", async () => {
-      const home = homeWith({ ".claude/settings.json": JSON.stringify({ model: "opus", env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: 'cat "$HOME/.config/hedge/cli-proxy.key"' }) });
-      const { claude, reports } = await applied(home, "down");
+    test("takes off the Claude route that an earlier apply wrote even while a pack source cannot be fetched", async () => {
+      const home = homeWith({ ".claude/settings.json": JSON.stringify({ model: "opus" }) });
+      expect((await applied(home, both, 1)).claude.apiKeyHelper).toBe('cat "$HOME/.config/hedge/cli-proxy.key"');
+      const { claude, reports } = await applied(home, "down", 2, offline);
       expect(claude).toEqual({ model: "opus" });
       expect(reports[1]!.actions).toEqual([]);
     });
 
-    test("removes the settings that connect wrote even while a pack source cannot be fetched", async () => {
-      const connected = { model: "opus", env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: 'cat "$HOME/.config/hedge/cli-proxy.key"' };
-      const { claude, reports } = await applied(homeWith({ ".claude/settings.json": JSON.stringify(connected) }), "down", 2, offline);
-      expect(claude).toEqual({ model: "opus" });
-      expect(reports[1]!.actions).toEqual([]);
-    });
-
-    test("removes the Codex settings that connect wrote even while a pack source cannot be fetched", async () => {
-      const connected = { model: "gpt-6.1-sol", model_provider: "hedge-proxy", model_providers: { "hedge-proxy": codexProviderTable } };
-      const { codex, reports } = await applied(homeWith({ ".codex/config.toml": stringify(connected) }), "down", 2, offline);
+    test("takes off the Codex route that an earlier apply wrote even while a pack source cannot be fetched", async () => {
+      const home = homeWith({ ".codex/config.toml": stringify({ model: "gpt-6.1-sol" }) });
+      expect((await applied(home, both, 1)).codex.model_provider).toBe("hedge-proxy");
+      const { codex, reports } = await applied(home, "down", 2, offline);
       expect(codex).toEqual({ model: "gpt-6.1-sol" });
       expect(reports[1]!.actions).toEqual([]);
     });
@@ -445,14 +483,6 @@ describe("the Own-account balancing workflow", () => {
   });
 
   describe("apply on a hub whose proxy holds none of your subscriptions", () => {
-    const proxyOnly = (result: Plan): Plan => ({ ...result, files: [], jobs: [], human: [], steps: result.steps.filter((step) => step.id === "cli-proxy"), checks: result.checks.filter((check) => check.workflow === "own-account-balancing"), config: result.config.filter((entry) => entry.workflow === "own-account-balancing") });
-    const hedgeProxy = (machine: ProxyMachine, engineRoot: string | undefined) => async (command: string[]) => {
-      const [shell, launcher, group, mode, ...rest] = command;
-      const agent = mode === "check" && rest.join(" ") === "codex" ? "codex" : "claude";
-      const known = (["install", "doctor", "accounts", "check"] as const).find((name) => name === mode);
-      if (shell !== "/bin/sh" || !engineRoot || launcher !== join(engineRoot, "hedge") || group !== "cli-proxy" || !known || (rest.length && agent !== "codex")) throw new Error(`The hub pack runs no ${command.join(" ")}`);
-      return cliProxy(known, machine, agent).catch(() => 1);
-    };
     const emptyHub = (ai: "claude" | "codex", credentials: Array<{ provider: string }> = []) => {
       const { machine, home } = proxyMachine((prefix) => temp.make(prefix), { plan: ai, devboxes: [] }, { credentials, models: [] });
       const result = proxyOnly(plan({ ...balancing, plan: ai }, hub));

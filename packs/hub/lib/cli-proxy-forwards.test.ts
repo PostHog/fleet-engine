@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { parse } from "smol-toml";
 import { tempDirs } from "../../../src/testing/git.ts";
 import { cliProxy, waitingLines, type ProxyMachine } from "./cli-proxy.ts";
+import { balancingPlan, hedgeApply } from "./cli-proxy-testing.ts";
 import { handOver, hubForward } from "./links.ts";
 import { roleHome } from "./run-testing.ts";
 import { proxyOn, readBoxSettings } from "./machine.ts";
@@ -97,7 +98,7 @@ test("a box handed over to a proxy that serves no model yet keeps its own sign-i
   const box = (stdin: string): ProxyMachine => ({ home: boxHome, uid: 1000, user: "me", plan: "claude", devboxes: [], release: { version: "", url: "", sha256: "" }, run: async () => ok, fetch: async () => Response.json({ data: [], object: "list" }), now: () => 0, sleep: async () => {}, readStdin: async () => stdin, randomKey: () => clientKey, print: (line) => printed.push(line) });
   const { coder } = fakeCoder({ ssh: async (_name, command, stdin) => (command.includes("cli-proxy connect") ? { ...ok, code: await cliProxy("connect", box(stdin ?? "")), stdout: printed.join("\n") } : ok) });
   await handOver(coder, hub.machine, "box-lane");
-  expect(hub.lines).toContain("box-lane: the proxy lists no Claude model yet. Run hedge apply on box-lane, so that Claude Code there uses its own sign-in until the proxy serves it.");
+  expect(hub.lines).toContain("box-lane: the proxy lists no Claude model yet, so Claude Code there keeps its own sign-in until the proxy serves it.");
   expect(existsSync(join(boxHome, ".claude/settings.json"))).toBe(false);
 });
 
@@ -112,15 +113,20 @@ test("a handover prints only the hub's own words for a box line that is exactly 
   expect(hub.lines.join("\n")).not.toContain("\u001b");
   const exact = fakeCoder({ ssh: async (_name, command) => (command.includes("cli-proxy connect") ? { ...ok, stdout: `${waitingLines.codex}\n` } : ok) });
   await handOver(exact.coder, hub.machine, "box-lane");
-  expect(hub.lines.filter((line) => line.startsWith("box-lane:"))).toEqual(["box-lane: the proxy lists no Codex model yet. Run hedge apply on box-lane, so that Codex there uses its own sign-in until the proxy serves it."]);
+  expect(hub.lines.filter((line) => line.startsWith("box-lane:"))).toEqual(["box-lane: the proxy lists no Codex model yet, so Codex there keeps its own sign-in until the proxy serves it."]);
 });
 
-test("a box handed over on the Codex plan sends Codex through the proxy without another apply", async () => {
+test("a box handed over on the Codex plan sends Codex through the proxy with the hedge apply that connect runs", async () => {
   const hub = fakeMachine(temp.make("hedge-hub-"), { settings: balancing, run: async () => ({ ...ok, code: 1 }) });
   writeHome(hub.machine.home, { ".config/hedge/cli-proxy.key": `${clientKey}\n` });
   const boxHome = roleHome(temp.make("hedge-box-"), "devbox");
   const fetch = async () => Response.json({ data: [{ id: "gpt-6.1-sol" }] });
-  const box = (stdin: string): ProxyMachine => ({ home: boxHome, uid: 1000, user: "me", plan: "codex", devboxes: [], release: { version: "", url: "", sha256: "" }, run: async () => ok, fetch, now: () => 0, sleep: async () => {}, readStdin: async () => stdin, randomKey: () => clientKey, print: () => {} });
+  const codexPlan = await balancingPlan((prefix) => temp.make(prefix), "codex");
+  const box = (stdin: string): ProxyMachine => {
+    const machine: ProxyMachine = { home: boxHome, uid: 1000, user: "me", plan: "codex", devboxes: [], release: { version: "", url: "", sha256: "" }, run: async () => ok, fetch, now: () => 0, sleep: async () => {}, readStdin: async () => stdin, randomKey: () => clientKey, print: () => {} };
+    hedgeApply(machine, () => codexPlan);
+    return machine;
+  };
   const { coder } = fakeCoder({ ssh: async (_name, command, stdin) => (command.includes("cli-proxy connect") ? { ...ok, code: await cliProxy("connect", box(stdin ?? "")) } : ok) });
   await handOver(coder, hub.machine, "box-lane");
   expect(parse(readFileSync(join(boxHome, ".codex/config.toml"), "utf8")).model_provider).toBe("hedge-proxy");

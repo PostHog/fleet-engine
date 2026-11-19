@@ -11,6 +11,7 @@ import { changedFiles, ownedFiles, readIfThere, removeUnits, requireInstalled, w
 import { refuseLinks, writePrivateFile, type Fetch } from "../../mcp-gateway/lib/client.ts";
 import type { Run } from "../../mcp-gateway/lib/hub.ts";
 import { isKeptForBoxes } from "../../../src/hub/names.ts";
+import { remoteLauncher } from "../../../src/hub/ssh.ts";
 import { waitsForPerson } from "../../../src/pack/types.ts";
 import { codexProvider, codexProviderTable, keyHelper } from "../../../src/adapters/provider-config/proxy-route.ts";
 import { refreshCodexCatalog } from "./codex-catalog.ts";
@@ -309,8 +310,8 @@ const missingModel = {
 };
 
 export const waitingLines = {
-  claude: `${missingModel.claude} Run hedge apply: it keeps Claude Code on its own sign-in until the proxy serves it.`,
-  codex: `${missingModel.codex} Run hedge apply: it keeps Codex on its own sign-in until the proxy serves it.`,
+  claude: `${missingModel.claude} hedge apply keeps Claude Code on its own sign-in until the proxy serves it.`,
+  codex: `${missingModel.codex} hedge apply keeps Codex on its own sign-in until the proxy serves it.`,
 };
 
 function unserved(models: string[] | string, provider: "claude" | "codex"): string | undefined {
@@ -330,29 +331,30 @@ async function answering(machine: ProxyMachine, key: string): Promise<string[] |
 type Settings = Record<string, unknown> & { env?: Record<string, unknown> };
 const isObject = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
 
-export async function claudeRoute(home: string, on: boolean): Promise<(() => Promise<void>) | undefined> {
+async function readClaude(home: string) {
   const path = join(home, ".claude/settings.json");
   await refuseLinks(home, path, "Claude settings path");
   const text = await readIfThere(path);
-  if (text === undefined && !on) return undefined;
   const settings = text === undefined ? {} : (JSON.parse(text) as Settings);
   if (!isObject(settings) || (settings.env !== undefined && !isObject(settings.env))) throw new Error(`${path} is not a Claude settings object. Fix it, then run this again.`);
+  return { path, text, settings };
+}
+
+async function leaveClaude(home: string): Promise<void> {
+  const { path, text, settings } = await readClaude(home);
+  if (text === undefined) return;
   const before = JSON.stringify(settings);
   const env = settings.env ?? {};
-  if (on) {
-    for (const [name, current, value] of [["env.ANTHROPIC_BASE_URL", env.ANTHROPIC_BASE_URL, proxyUrl], ["apiKeyHelper", ownHelper(settings.apiKeyHelper) ? keyHelper : settings.apiKeyHelper, keyHelper]]) {
-      if (current !== undefined && current !== value) throw new Error(`Keep your Claude setting ${name} in ${path}: Hedge did not set it. Remove it to use the proxy.`);
-    }
-    settings.env = { ...env, ANTHROPIC_BASE_URL: proxyUrl };
-    settings.apiKeyHelper = keyHelper;
-  } else {
-    if (env.ANTHROPIC_BASE_URL === proxyUrl) delete env.ANTHROPIC_BASE_URL;
-    if (settings.env && !Object.keys(env).length) delete settings.env;
-    if (ownHelper(settings.apiKeyHelper)) delete settings.apiKeyHelper;
-  }
-  if (JSON.stringify(settings) === before) return async () => {};
-  return () => replaceUnchanged(path, text, `${JSON.stringify(settings, null, 2)}\n`);
+  if (env.ANTHROPIC_BASE_URL === proxyUrl) delete env.ANTHROPIC_BASE_URL;
+  if (settings.env && !Object.keys(env).length) delete settings.env;
+  if (ownHelper(settings.apiKeyHelper)) delete settings.apiKeyHelper;
+  if (JSON.stringify(settings) !== before) await replaceUnchanged(path, text, `${JSON.stringify(settings, null, 2)}\n`);
 }
+
+const claudeRouted = async (home: string) => {
+  const { settings } = await readClaude(home).catch(() => ({ settings: {} as Settings }));
+  return settings.env?.ANTHROPIC_BASE_URL === proxyUrl && settings.apiKeyHelper === keyHelper;
+};
 
 async function replaceUnchanged(path: string, before: string | undefined, after: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
@@ -365,8 +367,6 @@ async function replaceUnchanged(path: string, before: string | undefined, after:
     rmSync(partial, { force: true });
   }
 }
-
-const sendClaude = async (home: string, on: boolean) => (await claudeRoute(home, on))?.();
 
 const codexUrl = codexProviderTable.base_url;
 const fleetProvider = "fleet-proxy";
@@ -436,57 +436,38 @@ async function codexUnserved(home: string, models: string[] | string): Promise<s
 const reachesProxy = (table: unknown) => isObject(table) && (["base_url", "wire_api", "auth"] as const).every((field) => Bun.deepEquals(table[field], codexProviderTable[field]));
 const ownTable = (path: string) => `${path} has its own ${codexProvider} provider table, which does not reach the proxy with this machine's key.`;
 
-async function codexRoute(home: string): Promise<string | (() => Promise<void>)> {
+const codexRouted = async (home: string) => {
   const read = await readableCodex(home);
-  if (!read) return "Hedge cannot read ~/.codex/config.toml, or it is a link, so Hedge leaves it alone.";
-  const { path, text, config, providers } = read;
-  const table = providers?.[codexProvider];
-  if (config.model_provider !== undefined && config.model_provider !== codexProvider) return `Keep your Codex setting model_provider in ${path}: Hedge did not set it. Remove it to use the proxy.`;
-  if (table !== undefined && !reachesProxy(table)) return ownTable(path);
-  config.model_provider = codexProvider;
-  config.model_providers = { ...providers, [codexProvider]: table ?? codexProviderTable };
-  return () => replaceUnchanged(path, text, `${stringify(config)}\n`);
-}
+  return read?.config.model_provider === codexProvider && reachesProxy(read.providers?.[codexProvider]);
+};
 
-async function sendCodex(home: string, besideClaude: boolean): Promise<string | undefined> {
-  const route = await codexRoute(home);
-  if (typeof route === "string") return route;
-  try {
-    await route();
-  } catch (error) {
-    if (!besideClaude) throw error;
-    return (error as Error).message;
-  }
-}
+export const applyCommand = ["sh", "-c", `sh ${remoteLauncher} apply`];
+const applyLimitMs = 30 * 60_000;
 
 async function connect(machine: ProxyMachine): Promise<void> {
   if (readRole(machine.home) === "hub") throw new Error("The hub has its own key. Run hedge cli-proxy install there.");
   const key = (await machine.readStdin()).trim();
   if (!keyPattern.test(key)) throw new Error("Pass the proxy key from the hub on standard input: 64 hexadecimal characters.");
-  const agent = pooled(machine.plan);
-  if (agent === "claude") await claudeRoute(machine.home, true);
-  const codex = machine.plan === "codex" || machine.plan === "both" ? await codexRoute(machine.home) : undefined;
-  if (agent === "codex" && typeof codex === "string") throw new Error(`${codex} Nothing changed.`);
   const models = await answering(machine, key);
   if (typeof models === "string") throw new Error(`${models} Nothing changed.`);
   await refuseLinks(machine.home, keyPath(machine.home), `${what} path`);
   await mkdir(dirname(keyPath(machine.home)), { recursive: true, mode: 0o700 });
   await writePrivateFile(keyPath(machine.home), `${key}\n`);
-  if (agent === "claude" && unserved(models, "claude")) machine.print(waitingLines.claude);
-  else if (agent === "claude") {
-    await sendClaude(machine.home, true);
-    machine.print(`Claude Code uses your own-account proxy at ${proxyUrl} now. Restart open Claude Code sessions.`);
+  const applied = await machine.run(applyCommand, { timeoutMs: applyLimitMs });
+  for (const line of `${applied.stdout}${applied.stderr}`.split("\n").filter(Boolean)) machine.print(line);
+  if (applied.code !== 0) throw new Error(`Saved the key, but hedge apply exited ${applied.code}, so this machine may keep its own sign-in. Its report above says why. Run hedge apply again once you fixed it.`);
+  const agents: Agent[] = machine.plan === "both" ? ["claude", "codex"] : [pooled(machine.plan)];
+  for (const agent of agents) {
+    const name = agent === "claude" ? "Claude Code" : "Codex";
+    if (unserved(models, agent)) machine.print(waitingLines[agent]);
+    else if (await (agent === "claude" ? claudeRouted : codexRouted)(machine.home)) machine.print(`${name} uses your own-account proxy at ${proxyUrl} now. Restart open ${name} sessions.`);
+    else machine.print(`${name} keeps its own sign-in. The hedge apply report above says why.`);
   }
-  if (codex === undefined) return;
-  if (typeof codex !== "string" && unserved(models, "codex")) return machine.print(waitingLines.codex);
-  const failed = typeof codex === "string" ? codex : await sendCodex(machine.home, agent === "claude");
-  if (failed) return machine.print(`${failed} Codex keeps its own sign-in.`);
-  machine.print(`Codex uses your own-account proxy at ${proxyUrl} now. Restart open Codex sessions.`);
 }
 
 async function disconnect(machine: ProxyMachine): Promise<void> {
   if (readRole(machine.home) === "hub") throw new Error("On the hub, turn the workflow off instead: hedge packs --workflows own-account-balancing=off");
-  await sendClaude(machine.home, false);
+  await leaveClaude(machine.home);
   const codex = await sendCodexHome(machine.home);
   await refuseLinks(machine.home, keyPath(machine.home), `${what} path`);
   await rm(keyPath(machine.home), { force: true });

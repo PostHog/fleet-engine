@@ -70,18 +70,35 @@ function claudeCli(installed: string[] = []) {
 const adapters = (run = claudeCli().run) => [filesAdapter, providerConfigAdapter({ run })];
 
 describe("provider config", () => {
-  test("removes a proxy base URL it recorded with a backup, and keeps every key Hedge has no record of, even one beside the proxy URL", async () => {
+  test("removes a proxy base URL it recorded with a backup, and keeps every key Hedge has no record of", async () => {
     const home = temp.make("home-");
     await apply(plan([{ provider: "claude", key: "env.ANTHROPIC_BASE_URL", value: "http://127.0.0.1:8317", pack: "hub" }]), { home, adapters: adapters() });
-    const before = { model: "opus", env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317", ANTHROPIC_AUTH_TOKEN: "proxy-key", MY_FLAG: "1" }, permissions: { allow: ["Bash(ls)"] } };
+    const before = { model: "opus", env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317", MY_FLAG: "1" }, permissions: { allow: ["Bash(ls)"] } };
     write(home, claude, before);
 
     const report = await apply(plan(), { home, adapters: adapters() });
 
-    expect(read(home, claude)).toEqual({ model: "opus", env: { ANTHROPIC_AUTH_TOKEN: "proxy-key", MY_FLAG: "1" }, permissions: { allow: ["Bash(ls)"] } });
+    expect(read(home, claude)).toEqual({ model: "opus", env: { MY_FLAG: "1" }, permissions: { allow: ["Bash(ls)"] } });
     expect(report.actions).toContainEqual({ target: claude, operation: "replace", reason: "remove env.ANTHROPIC_BASE_URL" });
     const run = backups(home).at(-1);
     expect(JSON.parse(readFileSync(join(run!, claude), "utf8"))).toEqual(before);
+  });
+
+  test("keeps the proxy route it recorded while a token of yours would go to Anthropic without it, says so as a To do, and takes the route out once the token is gone", async () => {
+    const home = temp.make("home-");
+    const route = [{ provider: "claude" as const, key: "env.ANTHROPIC_BASE_URL", value: "http://127.0.0.1:8317", pack: "hub" }, { provider: "claude" as const, key: "apiKeyHelper", value: 'cat "$HOME/.config/hedge/cli-proxy.key"', pack: "hub" }];
+    await apply(plan(route), { home, adapters: adapters() });
+    const routed = { ...read(home, claude), env: { ...read(home, claude).env, ANTHROPIC_AUTH_TOKEN: "my-token" } };
+    write(home, claude, routed);
+
+    const kept = await apply(plan(), { home, adapters: adapters() });
+
+    expect(read(home, claude)).toEqual(routed);
+    expect(kept.findings).toContainEqual({ id: `route:${claude}`, pack: "engine", say: `Kept Hedge's proxy route in ${claude}: without it, Claude Code would send your env.ANTHROPIC_AUTH_TOKEN to Anthropic. Remove env.ANTHROPIC_AUTH_TOKEN from ${claude}, then run hedge apply to take the route out.`, todo: true });
+    write(home, claude, { ...routed, env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" } });
+    const taken = await apply(plan(), { home, adapters: adapters() });
+    expect(read(home, claude)).toEqual({});
+    expect(taken.findings.map((finding) => finding.id)).not.toContain(`route:${claude}`);
   });
 
   test("keeps a proxy base URL that Hedge has no record of", async () => {
@@ -95,18 +112,15 @@ describe("provider config", () => {
     expect(report.actions).toEqual([]);
   });
 
-  test("removes Hedge's exact proxy route that it has no record of, and keeps the proxy address beside a key helper of your own", async () => {
-    const hedges = temp.make("home-");
-    write(hedges, claude, { model: "opus", env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: 'cat "$HOME/.config/hedge/cli-proxy.key"' });
-    const yours = temp.make("home-");
-    const mine = { env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: "my-helper" };
-    write(yours, claude, mine);
+  test("keeps a route with Hedge's own proxy values that Hedge has no record of", async () => {
+    const home = temp.make("home-");
+    const unrecorded = { model: "opus", env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: 'cat "$HOME/.config/hedge/cli-proxy.key"' };
+    write(home, claude, unrecorded);
 
-    await apply(plan(), { home: hedges, adapters: adapters() });
-    await apply(plan(), { home: yours, adapters: adapters() });
+    const report = await apply(plan(), { home, adapters: adapters() });
 
-    expect(read(hedges, claude)).toEqual({ model: "opus" });
-    expect(read(yours, claude)).toEqual(mine);
+    expect(read(home, claude)).toEqual(unrecorded);
+    expect(report.actions).toEqual([]);
   });
 
   test("keeps a base URL that points at a gateway the user chose", async () => {

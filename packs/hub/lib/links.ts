@@ -72,8 +72,8 @@ async function handOverProxy(coder: Pick<Coder, "ssh">, here: Machine, box: stri
   const connected = await coder.ssh(box, `umask 077 && ${remoteHedge("cli-proxy connect")}`, readFileSync(key, "utf8"));
   if (connected.code !== 0) return here.say(`${box} keeps its own sign-in: hedge cli-proxy connect exited ${connected.code} there. To see why and hand over the same key again, run on the hub: hedge box run ${box} -- hedge cli-proxy connect < ~/${proxyKeyPath}`);
   const lines = connected.stdout.split("\n");
-  if (lines.includes(waitingLines.claude)) here.say(`${box}: the proxy lists no Claude model yet. Run hedge apply on ${box}, so that Claude Code there uses its own sign-in until the proxy serves it.`);
-  if (lines.includes(waitingLines.codex)) here.say(`${box}: the proxy lists no Codex model yet. Run hedge apply on ${box}, so that Codex there uses its own sign-in until the proxy serves it.`);
+  if (lines.includes(waitingLines.claude)) here.say(`${box}: the proxy lists no Claude model yet, so Claude Code there keeps its own sign-in until the proxy serves it.`);
+  if (lines.includes(waitingLines.codex)) here.say(`${box}: the proxy lists no Codex model yet, so Codex there keeps its own sign-in until the proxy serves it.`);
 }
 
 export async function handOver(coder: Pick<Coder, "ssh">, here: Machine, box: string): Promise<boolean> {
