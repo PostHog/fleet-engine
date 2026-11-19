@@ -517,21 +517,22 @@ const anchorNote = /^- (?:Not in the diff, so check it before triage: \S|Seen be
 
 type ReviewedLine = { text: string; note: boolean };
 
-function anchorNotes(lines: string[]) {
+function anchorCheckLines(lines: string[]) {
   const notes = new Set<number>();
   lines.forEach((line, index) => {
     if (line.trim() !== anchorHeading) return;
     let next = index + 1;
     while (next < lines.length && !lines[next]!.trim()) next++;
     if (!anchorIntro.test(lines[next]?.trim() ?? "")) return;
+    notes.add(index).add(next);
     for (next++; next < lines.length && (!lines[next]!.trim() || anchorNote.test(lines[next]!)); next++) notes.add(next);
   });
   return notes;
 }
 
 function reviewedLines(findings: string) {
-  const lines = findings.split("\n");
-  const notes = anchorNotes(lines);
+  const lines = findings.replace(/\r\n?/g, "\n").split("\n");
+  const notes = anchorCheckLines(lines);
   const lensAnswer = lines.some((line) => findingsBlock.test(line));
   let inside = !lensAnswer;
   let tests = false;
@@ -580,9 +581,9 @@ function listedItems(reviewed: ReviewedLine[]) {
     else if (joins) items[items.length - 1]!.text += `\n${line.trim()}`;
     open = Boolean(line.trim()) && (findingItem.test(line) || joins);
   }
-  const text = reviewed.map(({ text: line }) => line.trim()).filter(Boolean);
-  if (items.length || text.every((line) => noFinding.test(line))) return items;
-  return [{ text: text.join("\n"), note: false }];
+  const text = reviewed.flatMap(({ text: line, note }) => note || !line.trim() ? [] : [line.trim()]);
+  if (items.some(({ note }) => !note) || text.every((line) => noFinding.test(line))) return items;
+  return [{ text: text.join("\n"), note: false }, ...items];
 }
 
 export type Answer = { verdict: "fixed" | "rejected" | "known"; text: string };

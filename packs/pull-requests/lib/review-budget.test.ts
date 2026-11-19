@@ -4,7 +4,6 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawnAsync } from "../../../src/testing/spawn.ts";
 import { reviewedFindings } from "./proof.ts";
-import { anchorCheck } from "./finding-anchors.ts";
 import { checkout, cleanFixtures, fakeModel, lockHolder, finishRound, fixture, graded, markPanel, models, recordingModel, settings, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
@@ -82,9 +81,16 @@ test("the Anchor check an author saves with the findings repeats them, so its no
   const fix = await pr.commit("feature.txt", "greet the member\n");
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", panel)).output).toContain(`"round":2`);
   const answer = "- minor | feature.txt:1 | the word reads oddly | anchor: greet the guest";
-  const anchors = anchorCheck(answer, await pr.git("diff", panel, fix), []);
-  expect(anchors).toContain(`- Not in the diff, so check it before triage: ${answer}`);
-  await finishWith(pr, "2", `${answer}\n\n${anchors}\n`);
+  await finishWith(pr, "2", [
+    answer,
+    "",
+    "## Anchor check",
+    "",
+    "hedge compared each finding's anchor with the diff and with earlier reviews of this PR.",
+    "",
+    `- Not in the diff, so check it before triage: ${answer}`,
+    "",
+  ].join("\n"));
   await pr.commit("feature.txt", "greet every member\n");
 
   expect((await pr.hedge("gate")).output).not.toContain("unanswered findings");
@@ -133,9 +139,83 @@ test("a TESTS item keeps its number when a stored review ends with an Anchor che
     "- 1 finding quotes no anchor.",
     "",
   ].join("\n"));
+  writeFileSync(join(pr.repository, "responses.md"), "1. rejected: the word is the fixture's.\n");
+  await expect(pr.hedge("respond", "--round", "1", "responses.md")).rejects.toThrow("Answer findings 4 too");
   writeFileSync(join(pr.repository, "responses.md"), "4. fixed in 1a2b3c4: the test asserts the greeting.\n");
 
   expect((await pr.hedge("respond", "--round", "1", "responses.md")).code).toBe(0);
+});
+
+test("a prose finding stays a finding when the review lists only TESTS items and an Anchor check, so the gate asks for it", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: graded("non-critical", "medium") });
+  await pr.commit("feature.txt", "new\n");
+  await pr.hedge("require", "--none", "--reason", "fixture");
+  await pr.hedge("review-start", "--scope", "full");
+  await finishWith(pr, "1", [
+    "The greeting drops the name.",
+    "TESTS:",
+    "- feature.test.ts:3 asserts the call count of greet",
+    "",
+    "## Anchor check",
+    "",
+    "hedge compared each finding's anchor with the diff and with earlier reviews of this PR.",
+    "",
+    "- 1 finding quotes no anchor.",
+    "",
+  ].join("\n"));
+
+  expect((await pr.hedge("gate")).output).toContain("review: round 1 has unanswered findings 1, 3;");
+  writeFileSync(join(pr.repository, "responses.md"), "3. fixed in 1a2b3c4: the test asserts the greeting.\n");
+  await expect(pr.hedge("respond", "--round", "1", "responses.md")).rejects.toThrow("Answer findings 1 too");
+});
+
+test("a review with only TESTS items and an Anchor check has no prose finding, so the gate asks only for the TESTS item", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: graded("non-critical", "medium") });
+  await pr.commit("feature.txt", "new\n");
+  await pr.hedge("require", "--none", "--reason", "fixture");
+  await pr.hedge("review-start", "--scope", "full");
+  await finishWith(pr, "1", [
+    "TESTS:",
+    "",
+    "- feature.test.ts:3 asserts the call count of greet | anchor: greet(",
+    "",
+    "## Anchor check",
+    "",
+    "fleet compared each finding's anchor with the diff and with earlier reviews of this PR.",
+    "",
+    "- Seen before in final read 2: feature.test.ts: `greet(`",
+    "",
+  ].join("\n"));
+
+  expect((await pr.hedge("gate")).output).toContain("review: round 1 has unanswered findings 2;");
+});
+
+test("a saved review with CRLF line endings reads its Anchor check notes as notes, so only the TESTS item needs an answer", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: graded("non-critical", "medium") });
+  await pr.commit("feature.txt", "new\n");
+  await pr.hedge("require", "--none", "--reason", "fixture");
+  await pr.hedge("review-start", "--scope", "full");
+  await finishWith(pr, "1", [
+    "- minor | feature.txt:1 | the word reads oddly | anchor: old",
+    "TESTS:",
+    "- feature.test.ts:3 asserts the call count of greet",
+    "",
+    "## Anchor check",
+    "",
+    "hedge compared each finding's anchor with the diff and with earlier reviews of this PR.",
+    "",
+    "- 1 finding quotes no anchor.",
+    "- Not in the diff, so check it before triage: - minor | feature.txt:1 | the word reads oddly | anchor: old",
+    "",
+  ].join("\r\n"));
+
+  expect((await pr.hedge("gate")).output).toContain("review: round 1 has unanswered findings 4;");
+  writeFileSync(join(pr.repository, "responses.md"), "4. fixed in 1a2b3c4: the test asserts the greeting.\n");
+  expect((await pr.hedge("respond", "--round", "1", "responses.md")).code).toBe(0);
+  expect((await pr.hedge("gate")).output).not.toContain("unanswered findings");
 });
 
 test("TESTS items number after every finding, so a TESTS block between lenses moves no finding's number", async () => {
