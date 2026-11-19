@@ -17,17 +17,34 @@ afterEach(async () => {
   for (const window of open.splice(0)) await window.happyDOM.close();
 });
 
-type Visit = { from?: Window; files?: SiteFiles; url?: string; motion?: "reduce" | "no-preference" };
+type Visit = { from?: Window; files?: SiteFiles; url?: string; motion?: "reduce" | "no-preference"; inView?: boolean };
 
-function visit(path: string, { from, files = site, url = `https://hedge.test/hedge-engine/${path.replace(/index\.html$/, "")}`, motion = "no-preference" }: Visit = {}) {
+function visit(path: string, { from, files = site, url = `https://hedge.test/hedge-engine/${path.replace(/index\.html$/, "")}`, motion = "no-preference", inView = false }: Visit = {}) {
   const window = new Window({ url, settings: { enableJavaScriptEvaluation: true, suppressInsecureJavaScriptEnvironmentWarning: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true, device: { prefersReducedMotion: motion } } });
   open.push(window);
+  if (inView) showEverything(window);
   if (from) carryStorage(from, window);
   window.document.addEventListener("click", (event) => {
     if ((event.target as unknown as Element).closest("a")) event.preventDefault();
   });
   window.document.write(files[path] as string);
   return window;
+}
+
+function showEverything(window: Window) {
+  Object.assign(window, {
+    IntersectionObserver: class {
+      constructor(private readonly report: (entries: object[], observer: object) => void) {}
+      observe(target: Element) {
+        this.report([{ target, isIntersecting: true, intersectionRatio: 1 }], this);
+      }
+      unobserve() {}
+      disconnect() {}
+      takeRecords() {
+        return [];
+      }
+    },
+  });
 }
 
 function carryStorage(from: Window, to: Window) {
@@ -199,7 +216,7 @@ describe("the pack videos in a browser", () => {
     expect([dialog(window).open, player.paused, selected(window)]).toEqual([false, true, []]);
   });
 
-  test("closing the player in any way, such as with Escape, stops the video", () => {
+  test("closing the player, as Escape and Close both do, stops the video", () => {
     const window = visit("packs/index.html");
     watchButton(window, "Memory").click();
     expect(video(window, "dialog video").paused).toBe(false);
@@ -211,5 +228,12 @@ describe("the pack videos in a browser", () => {
     const window = visit("packs/index.html", { motion: "reduce" });
     watchButton(window, "Orchestration").click();
     expect([dialog(window).open, video(window, "dialog video").paused]).toEqual([true, true]);
+  });
+
+  test("a pack page's video waits for the visitor to press play, even when it shows in full", () => {
+    const window = visit("packs/hub/index.html", { inView: true });
+    window.dispatchEvent(new window.Event("scroll"));
+    window.dispatchEvent(new window.Event("load"));
+    expect(video(window, "video.clip").paused).toBe(true);
   });
 });
