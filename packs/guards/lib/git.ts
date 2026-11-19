@@ -35,6 +35,11 @@ const aliasReason = (person: string) => "Fleet blocked this command: it makes an
   + "`gh alias set sp 'stack push'`, a shell alias, or `gh alias import`, that can hide gh stack pushes from this guard. "
   + `Run \`gh stack\` itself. If you need the alias, stop and ask ${person}.`;
 
+const configReason = (person: string) => "Fleet blocked this command: it runs gh while it sets or names GH_CONFIG_DIR, XDG_CONFIG_HOME or HOME, "
+  + "or runs gh through sudo, doas, or env or exec with an option, so this guard cannot tell which gh aliases run. "
+  + "Run gh without them, and pass text that names these variables in a file, such as with --body-file. Reading `$HOME` is fine. "
+  + `If you need it, stop and ask ${person}.`;
+
 export const githubSlug = (url: string) => url.match(/github\.com[:/]+([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i)?.slice(1, 3).join("/");
 
 /** An AGENTS.md line such as "Commit and push directly to `main`", without a "never" or "not". */
@@ -245,16 +250,17 @@ function unsafeAliasWords(aliases: Record<string, unknown>): Set<string> | undef
   return new Set([...unsafe].map((name) => name.split(" ").at(-1)!));
 }
 
+const managesAliases = (args: string[]) => args[0] === "alias" && aliasActions.has(args[1] ?? "");
+
 /**
  * The call's arguments when none of the agent's own gh aliases can hide a stack push in it, else undefined. gh picks an
  * alias through its leading words, synonyms such as `ext`, flags between words, and chains of aliases, so the guard
  * does not expand: it refuses any call that names the last word of an alias that may reach `gh stack`, `gh alias` or
- * an extension, and any call whose command may move gh's config. Only gh's own alias subcommands, which run before any
- * alias, skip the check.
+ * an extension. Only gh's own alias subcommands, which run before any alias, skip the check.
  */
-function expandedGh(args: string[], command: string): string[] | undefined {
-  if (args[0] === "alias" && aliasActions.has(args[1] ?? "")) return args;
-  const aliases = movesGhConfig(command) ? undefined : ghAliases();
+function expandedGh(args: string[]): string[] | undefined {
+  if (managesAliases(args)) return args;
+  const aliases = ghAliases();
   const unsafe = aliases && unsafeAliasWords(aliases);
   return unsafe && !args.some((arg) => unsafe.has(arg)) ? args : undefined;
 }
@@ -442,7 +448,8 @@ export function gitRisk(command: string, cwd: string, person: string, mainPushRe
   };
   let forced = 0;
   for (const [call, directory] of withDirectories(commandsIn(command), cwd)) {
-    const called = call.name === "gh" ? expandedGh(call.args, command) : call.args;
+    if (call.name === "gh" && !managesAliases(call.args) && movesGhConfig(command)) return configReason(person);
+    const called = call.name === "gh" ? expandedGh(call.args) : call.args;
     if (called === undefined) return aliasReason(person);
     const stack = stackArgs(call.name, called);
     if ((stack && makesAlias(stack)) || ghAliasHidesStack(call.name, called)) return aliasReason(person);

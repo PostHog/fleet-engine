@@ -1097,22 +1097,22 @@ describe("the Git guard", () => {
     ["an alias with arguments", "gh s push", "gh alias set"],
     ["an alias with a positional argument", "gh sn push", "gh alias set"],
     ["a shell alias", "gh shp", "gh alias set"],
-    ["an alias from a GH_CONFIG_DIR the command names", "GH_CONFIG_DIR=OTHER gh other", "gh alias set"],
-    ["an alias from a relative GH_CONFIG_DIR, read from the command's directory", "GH_CONFIG_DIR=rel-gh gh other", "gh alias set"],
+    ["an alias from a GH_CONFIG_DIR the command names", "GH_CONFIG_DIR=OTHER gh other", "sets or names GH_CONFIG_DIR"],
+    ["an alias from a relative GH_CONFIG_DIR, read from the command's directory", "GH_CONFIG_DIR=rel-gh gh other", "sets or names GH_CONFIG_DIR"],
     ["a nested alias under a gh command", "gh pr sp", "gh alias set"],
     ["an alias whose expansion quotes its words, which the guard does not split", "gh qp", "gh alias set"],
-    ["a config with a quoted alias name, which the guard does not match", "GH_CONFIG_DIR=QUOTED gh pr mine", "gh alias set"],
+    ["a config with a quoted alias name, which the guard does not match", "GH_CONFIG_DIR=QUOTED gh pr mine", "sets or names GH_CONFIG_DIR"],
     ["an alias whose expansion holds a comment", "gh commented", "gh alias set"],
     ["a placeholder that an earlier argument fills with another placeholder", "gh chain '$2' import", "gh alias set"],
     ["a shell alias nested under gh alias", "gh alias inspect", "gh alias set"],
-    ["an alias from the config home of the command's own HOME", "HOME=HOMEDIR GH_CONFIG_DIR= gh other", "gh alias set"],
+    ["an alias from the config home of the command's own HOME", "HOME=HOMEDIR GH_CONFIG_DIR= gh other", "sets or names GH_CONFIG_DIR"],
     ["an alias that runs another alias", "gh hop", "gh alias set"],
     ["an alias gh picks through a synonym of its group", "gh ext demo", "gh alias set"],
     ["an alias gh picks past a flag", "gh alias --help=false local-demo", "gh alias set"],
     ["an alias named like a gh alias subcommand that gh does not have", "gh alias rm", "gh alias set"],
     ["an alias with a space gh does not split", "gh nb", "gh alias set"],
     ["an argument that a JavaScript replacement pattern would change", "gh sub \"$'\"", "gh alias set"],
-    ["an alias from the XDG config home when the command empties an inherited GH_CONFIG_DIR", "GH_CONFIG_DIR= XDG_CONFIG_HOME=XDGDIR gh other", "gh alias set"],
+    ["an alias from the XDG config home when the command empties an inherited GH_CONFIG_DIR", "GH_CONFIG_DIR= XDG_CONFIG_HOME=XDGDIR gh other", "sets or names GH_CONFIG_DIR"],
       ["an alias that runs an alias gh picks through a synonym", "gh hop2 missing.yml", "gh alias set"],
     ["an alias whose expansion starts with a flag", "gh ext demo2 missing.yml", "gh alias set"],
     ["an alias whose placeholder takes an argument before its name", "gh ext --help=false demo3 import quiet", "gh alias set"],
@@ -1145,6 +1145,13 @@ describe("the Git guard", () => {
     expect(await preToolUse(homeWith(withGuards()), "claude", bash(command, await repo("feature")), { guardAsProcess: true })).toEqual({ code: 0, refusal: undefined });
   });
 
+  test("allows deleting an alias that may hide a stack push, since gh alias delete runs before any alias", async () => {
+    const home = homeWith(withGuards());
+    mkdirSync(join(home, ".config/gh"), { recursive: true });
+    writeFileSync(join(home, ".config/gh/config.yml"), "aliases:\n    sp: stack push\n");
+    expect(await preToolUse(home, "claude", bash("gh alias delete sp", await repo("feature")), { guardAsProcess: true })).toEqual({ code: 0, refusal: undefined });
+  });
+
   test.each(["gh co 12", "gh mine", "gh pr list", "gh pr checkout 12"])("allows %s with aliases that cannot reach a guarded gh group", async (command) => {
     const dir = await repo("feature");
     const home = homeWith(withGuards());
@@ -1162,6 +1169,7 @@ describe("the Git guard", () => {
     ["a second YAML document after a flow mapping", "{aliases: {sp: stack push}}\n---\naliases: {}\n"],
     ["a flow mapping before a second aliases block", "aliases: {sp: stack push}\naliases:\n    sp: pr list\n"],
     ["a config that does not parse", "aliases:\n    sp: [stack push\n"],
+    ["a quoted alias name, which gh unquotes", "aliases:\n    \"s'p'\": stack push\n"],
     ["a config that cannot be read", undefined],
   ])("refuses gh sp with %s", async (_, config) => {
     const dir = await repo("feature");
@@ -1184,7 +1192,7 @@ describe("the Git guard", () => {
     "doas gh pr list",
   ])("refuses %s, which may move the config gh reads its aliases from", async (command) => {
     const home = homeWith(withGuards());
-    expect((await preToolUse(home, "claude", bash(command, await repo("feature")), { guardAsProcess: true })).refusal).toContain("gh alias set");
+    expect((await preToolUse(home, "claude", bash(command, await repo("feature")), { guardAsProcess: true })).refusal).toContain("sets or names GH_CONFIG_DIR");
   });
 
   test.each([
