@@ -1,4 +1,5 @@
 export const jobsFolder = ".local/state/hedge/jobs";
+export const legacyJobsFolder = ".local/state/fleet/jobs";
 
 export const launcherTarget = (id: string) => `${jobsFolder}/${id}.sh`;
 export const logTarget = (id: string) => `${jobsFolder}/${id}.log`;

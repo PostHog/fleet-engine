@@ -10,7 +10,7 @@ import { skipOtherHome, spawnRunner, type CommandRunner } from "../run.ts";
 import { cronLine, cronSafe, reconcileCrontab } from "./cron.ts";
 import { labelPrefix, legacyLabelPrefix, plist } from "./launchd.ts";
 import { engineCommand } from "../../reconciler/engine-command.ts";
-import { agentCopyTarget, jobsFolder, launcherScript, launcherTarget, logTarget } from "./launcher.ts";
+import { agentCopyTarget, jobsFolder, launcherScript, launcherTarget, legacyJobsFolder, logTarget } from "./launcher.ts";
 import { cronExpression, isService, isTimed, launchdTimer, t3Schedule, type T3Schedule, type TimedJob } from "./schedule.ts";
 import { legacyUnitPrefix, systemdSafe, unit, unitName, unitsFolder, unitTarget } from "./systemd.ts";
 
@@ -104,22 +104,16 @@ async function removeLauncher(home: string, id: string) {
   if (!(await linkOnPath(home, launcherTarget(id)))) await rm(inside(home, launcherTarget(id)), { force: true });
 }
 
-const legacyCopy = (copy: string) => `${copy}.fleet`;
+const renamedJob = (id: string) => id.replace(/^fleet-/, "hedge-");
 
-/** The jobs Hedge wrote before the rename, found by a match with the copy it kept. Keeps that copy under its own name, so a later apply still knows the job when this one cannot stop it. */
-async function legacyJobs(home: string, folder: string, prefix: string, suffix: string, copyOf: (id: string) => string): Promise<Array<{ name: string; id: string }>> {
+/** The jobs the engine wrote before the rename: each file in folder that still matches the copy that engine kept of it. Hedge only reads them. */
+async function legacyJobs(home: string, folder: string, prefix: string, suffix: string): Promise<Array<{ name: string; id: string }>> {
+  const text = (target: string) => readFile(join(home, target), "utf8").catch(() => undefined);
   const found: Array<{ name: string; id: string }> = [];
-  const text = (target: string) => readFile(inside(home, target), "utf8").catch(() => undefined);
-  for (const name of (await readdir(inside(home, folder)).catch(() => [] as string[])).filter((item) => item.startsWith(prefix) && item.endsWith(suffix))) {
+  for (const name of (await readdir(join(home, folder)).catch(() => [] as string[])).filter((item) => item.startsWith(prefix) && item.endsWith(suffix))) {
     const id = name.slice(prefix.length, -suffix.length);
-    if (!jobId.test(id)) continue;
-    const current = await text(`${folder}/${name}`);
-    if (current === undefined) continue;
-    if (current !== (await text(legacyCopy(copyOf(id))))) {
-      if (current !== (await text(copyOf(id)))) continue;
-      await writeFile(inside(home, legacyCopy(copyOf(id))), current);
-    }
-    found.push({ name, id });
+    const current = jobId.test(id) ? await text(`${folder}/${name}`) : undefined;
+    if (current !== undefined && current === (await text(`${legacyJobsFolder}/${id}${suffix}`))) found.push({ name, id });
   }
   return found;
 }
@@ -185,21 +179,23 @@ async function reconcileLaunchd(jobs: Array<Owned<PackJob>>, scripts: Scripts, {
     result.findings.push({ id: `job:${id}`, pack: typeof job === "string" ? "engine" : job.pack, say, repair: "apply" });
     return false;
   };
+  const retire = async (id: string, label: string) => {
+    const loaded = (await state(label)) !== "absent";
+    if (loaded && !(await stop(id, label))) return false;
+    const disabled = await run(["launchctl", "disable", `${domain}/${label}`]);
+    if (disabled.code !== 0) {
+      result.findings.push({ id: `job:${id}`, pack: "engine", say: `launchd did not turn off the old ${label} job (exit ${disabled.code}), so Hedge did not load the new one.`, repair: "apply" });
+      return false;
+    }
+    if (loaded) result.actions.push({ target: `launchd job ${label}`, operation: "remove", reason: "turned off" });
+    return true;
+  };
   const held = new Set<string>();
-  if (!dryRun && !outage && !(await linkOnPath(home, jobsFolder))) {
-    for (const { name, id } of await legacyJobs(home, "Library/LaunchAgents", legacyLabelPrefix, ".plist", agentCopyTarget)) {
+  if (!dryRun && !outage) {
+    for (const { name, id } of await legacyJobs(home, "Library/LaunchAgents", legacyLabelPrefix, ".plist")) {
       const label = name.slice(0, -".plist".length);
-      if (label === launchdLabel) {
-        result.findings.push({ id: `job:${id}`, pack: "engine", say: `The old ${label} job runs this apply, so Hedge leaves it for the next apply to stop.`, repair: "apply" });
-        continue;
-      }
-      if (!(await stop(id, label))) {
-        held.add(id);
-        continue;
-      }
-      await rm(join(agents, name), { force: true });
-      await rm(inside(home, legacyCopy(agentCopyTarget(id))), { force: true });
-      result.actions.push({ target: `Library/LaunchAgents/${name}`, operation: "remove" });
+      if (label === launchdLabel) result.findings.push({ id: `job:${id}`, pack: "engine", say: `The old ${label} job runs this apply, so Hedge leaves it for the next apply to stop.`, repair: "apply" });
+      else if (!(await retire(id, label))) held.add(renamedJob(id));
     }
   }
   for (const job of jobs) {
@@ -269,17 +265,18 @@ async function reconcileSystemd(jobs: Array<Owned<PackJob>>, scripts: Scripts, {
   const gone = copies.filter((id) => jobId.test(id) && !jobs.some((job) => job.id === id) && (!outage || gated.has(id)));
   if (jobs.length && !systemdSafe(home)) return result.findings.push({ id: "jobs:systemd", pack: "engine", say: `Left services alone: systemd cannot run scripts from ${JSON.stringify(home)}, which holds a line break.`, repair: "human" }), done;
   const held = new Set<string>();
-  if (!dryRun && !linked && !outage) {
-    for (const { name, id } of await legacyJobs(home, unitsFolder, legacyUnitPrefix, ".service", copyTarget)) {
+  if (!dryRun && !outage) {
+    for (const { name, id } of await legacyJobs(home, unitsFolder, legacyUnitPrefix, ".service")) {
+      const shown = await systemctl("show", "--property=ActiveState,UnitFileState", name);
+      const state = Object.fromEntries(shown.stdout.split("\n").map((line) => line.split("=", 2) as [string, string]));
+      if (shown.code === 0 && !running.includes(state.ActiveState ?? "") && state.UnitFileState !== "enabled") continue;
       const stopped = await systemctl("disable", "--now", name);
       if (stopped.code !== 0) {
         say(id, `systemd did not stop the old ${name} job (${reason(stopped)}), so Hedge left it as it is and did not start the new one.`, "apply");
-        held.add(id);
+        held.add(renamedJob(id));
         continue;
       }
-      await rm(inside(home, `${unitsFolder}/${name}`), { force: true });
-      await rm(inside(home, legacyCopy(copyTarget(id))), { force: true });
-      result.actions.push({ target: `${unitsFolder}/${name}`, operation: "remove" });
+      result.actions.push({ target: `systemd unit ${name}`, operation: "remove", reason: "turned off" });
     }
   }
   const plans: Array<{ job: Owned<PackJob>; script: Write; content: string; current?: string; copy?: string; reload: boolean; restart: boolean; enable: boolean; pending: boolean; marked?: string }> = [];

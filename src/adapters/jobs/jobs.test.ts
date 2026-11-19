@@ -213,10 +213,12 @@ describe("launchd jobs on a Mac", () => {
   function launchctl(stuck = false, launchdLabel?: string) {
     const calls: string[][] = [];
     const loaded = new Set<string>();
+    const disabled = new Set<string>();
     const mode = { stuck, printFails: false };
     const run: CommandRunner = async (command) => {
       calls.push(command);
       const [, verb, target] = command;
+      if (verb === "disable") disabled.add(target!);
       if (verb === "print") return mode.printFails ? { code: 127, stdout: "" } : { code: loaded.has(target!) ? 0 : 113, stdout: "" };
       if (verb === "bootstrap") loaded.add(`gui/501/${command[3]!.split("/").at(-1)!.replace(/\.plist$/, "")}`);
       if (verb === "bootout") {
@@ -225,7 +227,7 @@ describe("launchd jobs on a Mac", () => {
       }
       return { code: 0, stdout: "" };
     };
-    return { calls, loaded, mode, run, adapter: jobsAdapter({ run, engineRoot: engine, uid: 501, launchdLabel }) };
+    return { calls, loaded, disabled, mode, run, adapter: jobsAdapter({ run, engineRoot: engine, uid: 501, launchdLabel }) };
   }
 
   test("writes a dev.hedge plist that runs the launcher script, and loads it", async () => {
@@ -264,33 +266,33 @@ describe("launchd jobs on a Mac", () => {
     expect(readFileSync(join(home, ".local/state/hedge/jobs/prune.sh"), "utf8")).toContain(`PATH='${home}/.local/bin:${home}/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin'`);
   });
 
-  test("unloads and removes the dev.fleet plist that Hedge wrote before the rename, and loads the dev.hedge one in its place", async () => {
-    const home = temp.make("home-");
-    const mac = launchctl();
-    await apply(plan("darwin", [prune]), { home, adapters: [mac.adapter] });
-    const agents = join(home, "Library/LaunchAgents");
-    renameSync(join(agents, "dev.hedge.prune.plist"), join(agents, "dev.fleet.prune.plist"));
-    mac.loaded.delete("gui/501/dev.hedge.prune");
-    mac.loaded.add("gui/501/dev.fleet.prune");
-
-    await apply(plan("darwin", [prune]), { home, adapters: [mac.adapter] });
-
-    expect(existsSync(join(agents, "dev.fleet.prune.plist"))).toBe(false);
-    expect(mac.loaded.has("gui/501/dev.fleet.prune")).toBe(false);
-    expect(mac.loaded.has("gui/501/dev.hedge.prune")).toBe(true);
-  });
-
   const beforeTheRename = async (mac: ReturnType<typeof launchctl>, home: string) => {
     await apply(plan("darwin", [prune]), { home, adapters: [mac.adapter] });
     const agents = join(home, "Library/LaunchAgents");
     const old = readFileSync(join(agents, "dev.hedge.prune.plist"), "utf8").replaceAll("hedge", "fleet");
     rmSync(join(agents, "dev.hedge.prune.plist"));
     writeFileSync(join(agents, "dev.fleet.prune.plist"), old);
-    writeFileSync(join(home, ".local/state/hedge/jobs/prune.plist"), old);
+    mkdirSync(join(home, ".local/state/fleet/jobs"), { recursive: true });
+    writeFileSync(join(home, ".local/state/fleet/jobs/prune.plist"), old);
     mac.loaded.delete("gui/501/dev.hedge.prune");
     mac.loaded.add("gui/501/dev.fleet.prune");
-    return join(agents, "dev.fleet.prune.plist");
+    return { path: join(agents, "dev.fleet.prune.plist"), old };
   };
+
+  test("stops and turns off the dev.fleet job that Hedge wrote before the rename, keeps its file, and loads the dev.hedge one in its place", async () => {
+    const home = temp.make("home-");
+    const mac = launchctl();
+    const legacy = await beforeTheRename(mac, home);
+
+    const report = await apply(plan("darwin", [prune]), { home, adapters: [mac.adapter] });
+
+    expect(readFileSync(legacy.path, "utf8")).toBe(legacy.old);
+    expect(mac.loaded.has("gui/501/dev.fleet.prune")).toBe(false);
+    expect(mac.disabled.has("gui/501/dev.fleet.prune")).toBe(true);
+    expect(mac.loaded.has("gui/501/dev.hedge.prune")).toBe(true);
+    expect(report.actions).toContainEqual({ target: "launchd job dev.fleet.prune", operation: "remove", reason: "turned off" });
+    expect((await apply(plan("darwin", [prune]), { home, adapters: [mac.adapter] })).actions).toEqual([]);
+  });
 
   test("leaves the dev.fleet job that runs this apply loaded, so the update does not stop itself, and loads the dev.hedge one", async () => {
     const home = temp.make("home-");
@@ -300,15 +302,15 @@ describe("launchd jobs on a Mac", () => {
     const report = await apply(plan("darwin", [prune]), { home, adapters: [mac.adapter] });
 
     expect(mac.calls.some((call) => call[1] === "bootout" && call[2] === "gui/501/dev.fleet.prune")).toBe(false);
-    expect(existsSync(legacy)).toBe(true);
     expect(mac.loaded.has("gui/501/dev.hedge.prune")).toBe(true);
     expect(report.findings.map((finding) => finding.say)).toContain("The old dev.fleet.prune job runs this apply, so Hedge leaves it for the next apply to stop.");
     await apply(plan("darwin", [prune]), { home, adapters: [jobsAdapter({ run: mac.run, engineRoot: engine, uid: 501 })] });
-    expect(existsSync(legacy)).toBe(false);
+    expect(readFileSync(legacy.path, "utf8")).toBe(legacy.old);
     expect(mac.loaded.has("gui/501/dev.fleet.prune")).toBe(false);
+    expect(mac.disabled.has("gui/501/dev.fleet.prune")).toBe(true);
   });
 
-  test("when the dev.fleet job does not stop, holds the dev.hedge one back and retires the old one on a later apply", async () => {
+  test("when the dev.fleet job does not stop, holds the dev.hedge one back and turns the old one off on a later apply", async () => {
     const home = temp.make("home-");
     const mac = launchctl();
     const legacy = await beforeTheRename(mac, home);
@@ -317,10 +319,10 @@ describe("launchd jobs on a Mac", () => {
     await apply(plan("darwin", [prune]), { home, adapters: [mac.adapter] });
 
     expect(mac.loaded.has("gui/501/dev.hedge.prune")).toBe(false);
-    expect(existsSync(legacy)).toBe(true);
+    expect(mac.loaded.has("gui/501/dev.fleet.prune")).toBe(true);
     mac.mode.stuck = false;
     await apply(plan("darwin", [prune]), { home, adapters: [mac.adapter] });
-    expect(existsSync(legacy)).toBe(false);
+    expect(readFileSync(legacy.path, "utf8")).toBe(legacy.old);
     expect(mac.loaded.has("gui/501/dev.fleet.prune")).toBe(false);
     expect(mac.loaded.has("gui/501/dev.hedge.prune")).toBe(true);
   });
@@ -662,32 +664,35 @@ describe("service jobs", () => {
   }
   const changes = (calls: string[][]) => calls.filter((call) => call[0] === "systemctl" && call[2] !== "show");
 
-  test("stops and removes the fleet- unit that Hedge wrote before the rename, and starts the hedge- unit in its place", async () => {
-    const home = temp.make("home-");
-    const linux = systemd();
+  const beforeTheRename = async (linux: ReturnType<typeof systemd>, home: string) => {
     await apply(plan("linux", [trigger]), { home, adapters: [linux.adapter] });
     const legacy = join(home, ".config/systemd/user/fleet-slack-trigger.service");
     renameSync(unitPath(home), legacy);
+    mkdirSync(join(home, ".local/state/fleet/jobs"), { recursive: true });
+    writeFileSync(join(home, ".local/state/fleet/jobs/slack-trigger.service"), readFileSync(legacy, "utf8"));
     linux.units.delete("hedge-slack-trigger.service");
     linux.units.set("fleet-slack-trigger.service", { active: true, enabled: true });
+    return { path: legacy, old: readFileSync(legacy, "utf8") };
+  };
+
+  test("stops and disables the fleet- unit that Hedge wrote before the rename, keeps its file, and starts the hedge- unit in its place", async () => {
+    const home = temp.make("home-");
+    const linux = systemd();
+    const legacy = await beforeTheRename(linux, home);
 
     const report = await apply(plan("linux", [trigger]), { home, adapters: [linux.adapter] });
 
     expect(report.ok).toBe(true);
-    expect(existsSync(legacy)).toBe(false);
+    expect(readFileSync(legacy.path, "utf8")).toBe(legacy.old);
     expect(linux.units.get("fleet-slack-trigger.service")).toEqual({ active: false, enabled: false });
     expect(linux.units.get("hedge-slack-trigger.service")).toEqual({ active: true, enabled: true });
     expect(existsSync(unitPath(home))).toBe(true);
   });
 
-  test("when the fleet- unit does not stop, does not start the hedge- unit beside it, and retires the old one on a later apply", async () => {
+  test("when the fleet- unit does not stop, does not start the hedge- unit beside it, and turns the old one off on a later apply", async () => {
     const home = temp.make("home-");
     const refusing = systemd({ refuse: "disable" });
-    await apply(plan("linux", [trigger]), { home, adapters: [refusing.adapter] });
-    const legacy = join(home, ".config/systemd/user/fleet-slack-trigger.service");
-    renameSync(unitPath(home), legacy);
-    refusing.units.delete("hedge-slack-trigger.service");
-    refusing.units.set("fleet-slack-trigger.service", { active: true, enabled: true });
+    const legacy = await beforeTheRename(refusing, home);
 
     const report = await apply(plan("linux", [trigger]), { home, adapters: [refusing.adapter] });
 
@@ -696,7 +701,7 @@ describe("service jobs", () => {
     const linux = systemd();
     linux.units.set("fleet-slack-trigger.service", { active: true, enabled: true });
     await apply(plan("linux", [trigger]), { home, adapters: [linux.adapter] });
-    expect(existsSync(legacy)).toBe(false);
+    expect(readFileSync(legacy.path, "utf8")).toBe(legacy.old);
     expect(linux.units.get("fleet-slack-trigger.service")).toEqual({ active: false, enabled: false });
     expect(linux.units.get("hedge-slack-trigger.service")).toEqual({ active: true, enabled: true });
   });
