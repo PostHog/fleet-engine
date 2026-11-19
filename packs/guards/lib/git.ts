@@ -31,9 +31,9 @@ const burstReason = (count: number, person: string) => `Fleet blocked this comma
   + "and bursts like that make GitHub fail many CI runs at startup. "
   + `Push in batches of at most ${largestForcePush} branches, about a minute apart. If that does not fit, stop and ask ${person}.`;
 
-const aliasReason = (person: string) => "Fleet blocked this command: it makes an alias or a wrapper command, such as `gh stack alias`, "
-  + "`gh alias set sp 'stack push'`, a shell alias, or `gh alias import`, that can hide gh stack pushes from this guard. "
-  + `Run \`gh stack\` itself. If you need the alias, stop and ask ${person}.`;
+const aliasReason = (person: string) => "Fleet blocked this command: it makes or runs an alias or a wrapper command, such as `gh stack alias`, "
+  + "`gh alias set sp 'stack push'`, a shell alias, or `gh alias import`, or runs gh through `xargs`, which can hide gh stack "
+  + `pushes from this guard. Run \`gh stack\` itself. If you need the alias, stop and ask ${person}.`;
 
 const configReason = (person: string) => "Fleet blocked this command: it runs gh while it sets or names GH_CONFIG_DIR, XDG_CONFIG_HOME or HOME, "
   + "or uses sudo, doas, env or exec, so this guard cannot tell which gh aliases run. "
@@ -152,12 +152,23 @@ function asksHelp(args: string[]): boolean {
   return help;
 }
 
-function ghAliasHidesStack(name: string, args: string[]): boolean {
-  const [group, action, , expansion] = operandsOf(args);
-  if (name !== "gh" || group !== "alias" || asksHelp(args)) return false;
+/** `--shell`, or `-s` alone or in a cluster of short flags. */
+const shellFlag = /^(?:--shell(?:=|$)|-[^-=]*s)/;
+
+/**
+ * Whether `gh alias set` or `gh alias import` makes an alias that can hide a stack push: any import, a shell alias, an
+ * expansion from standard input, and an expansion the alias screen would refuse, so a later call in the same command
+ * cannot run it.
+ */
+function ghAliasHidesStack(args: string[]): boolean {
+  const [group, action, name, expansion] = operandsOf(args);
+  if (group !== "alias" || asksHelp(args)) return false;
   if (action === "import") return true;
   if (action !== "set") return false;
-  return expansion === undefined || args.some((arg) => /^(?:-s|--shell)(?:=|$)/.test(arg)) || /^!|\bstack\b/.test(expansion);
+  if (name === undefined || expansion === undefined || args.some((arg) => shellFlag.test(arg))) return true;
+  const aliases = ghAliases();
+  const unsafe = aliases && unsafeAliasWords({ ...aliases, [name]: expansion });
+  return !unsafe || unsafe.has(name.split(" ").at(-1)!);
 }
 
 /** The variables that move gh's config directory, and a read of one as `$NAME` or `${NAME}`. */
@@ -489,8 +500,8 @@ export function gitRisk(command: string, cwd: string, person: string, mainPushRe
   }).length;
   for (const [call, directory] of withDirectories(calls, cwd)) {
     const stack = stackArgs(call.name, call.args);
-    if ((stack && makesAlias(stack)) || ghAliasHidesStack(call.name, call.args)) return aliasReason(person);
     const ghArgs = ghArguments(call);
+    if ((stack && makesAlias(stack)) || (ghArgs && (call.name !== "gh" || ghAliasHidesStack(ghArgs)))) return aliasReason(person);
     if (ghArgs && movesGhConfig(command, extensionExecs)) return configReason(person);
     if (ghArgs && !expandedGh(ghArgs)) return aliasReason(person);
     if (stack) forced += stackPushes(stack, () => repoAt(directory, []));

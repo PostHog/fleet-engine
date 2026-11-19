@@ -1086,6 +1086,13 @@ describe("the Git guard", () => {
     "command gh alias set sp 'stack push'",
     "gh alias import -- --help",
     "gh alias import --help --help=false aliases.yml",
+    "gh alias set probe 'extension list' && gh probe",
+    "gh alias set probe 'demo run' && gh probe",
+    "gh alias set hop probe",
+    "gh alias set -ss sp 'pr list'",
+    "gh alias set \"p'q\" 'pr list'",
+    "echo aliases.yml | xargs gh alias import",
+    "echo alias import aliases.yml | xargs gh",
   ])("refuses a gh alias that can hide a stack push: %s", async (command) => {
     const denied = await preToolUse(homeWith(withGuards(), { "guards.person": "Robin" }), "claude", bash(command, await repo("feature")), { guardAsProcess: true });
     expect(denied.refusal).toContain("gh alias set");
@@ -1143,7 +1150,7 @@ describe("the Git guard", () => {
     expect(denied.refusal).toContain(refusal);
   });
 
-  test.each(["gh alias set co 'pr checkout'", "gh alias list", "gh alias delete sp", "gh alias set --help", "cd $HOME/dev && gh pr list", "echo ${HOME} ${XDG_CONFIG_HOME} && gh pr list", "gh alias import --help=true", "gh alias import --help=false --help", "gh alias import -h --help=false"])("allows a gh alias that cannot push a stack: %s", async (command) => {
+  test.each(["gh alias set co 'pr checkout'", "gh alias set co 'pr checkout' && gh co 12", "gh alias list", "gh alias delete sp", "gh alias set --help", "cd $HOME/dev && gh pr list", "echo ${HOME} ${XDG_CONFIG_HOME} && gh pr list", "gh alias import --help=true", "gh alias import --help=false --help", "gh alias import -h --help=false"])("allows a gh alias that cannot push a stack: %s", async (command) => {
     expect(await preToolUse(homeWith(withGuards()), "claude", bash(command, await repo("feature")), { guardAsProcess: true })).toEqual({ code: 0, refusal: undefined });
   });
 
