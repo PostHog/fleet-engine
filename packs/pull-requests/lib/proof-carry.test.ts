@@ -6,7 +6,7 @@ import { localLedger } from "./decision-ledger.ts";
 import { remotesOf } from "./proof-checkout.ts";
 import { proofCommand } from "./proof-cli.ts";
 import { netDeltaIn } from "./proof-delta.ts";
-import { finishReview, proofGate, startReview, type Arbiter, type ProofIdentity, type ReviewLimits } from "./proof.ts";
+import { arbiterStopFile, finishReview, startReview, type Arbiter, type ProofIdentity, type ReviewLimits } from "./proof.ts";
 import { checkout, cleanFixtures, fakeModel, finishRound, fixture, hubAt, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
@@ -113,20 +113,6 @@ test("the final read the carry asks for runs once the budget is spent, and the f
   await expect(fixesRound(repo, third, again, unasked, limits)).rejects.toThrow("The review budget of 2 reviews is spent");
 });
 
-test("a fixes round after a final read starts at the final read's head, and the net delta past it holds a revert to the panel's content", async () => {
-  const { repo, reviewed } = reviewedApp();
-  await firstRound(repo, reviewed, major);
-  const read = repo.commit("Fix the count and add a helper", { "src/app.ts": "export const app = 3;\n", "src/helper.ts": "export const help = 1;\n" });
-  await finalRead(repo, read, reviewed, unasked);
-  await finish(repo, read, "final-1", major);
-  const head = repo.commit("Take the count back and tidy the helper", { "src/app.ts": "export const app = 2;\n", "src/helper.ts": "export const help = 2;\n" });
-
-  await expect(fixesRound(repo, head, reviewed, unasked)).rejects.toThrow(`Round 2 needs --base ${read}, the commit of final read 1, the latest finished review`);
-  const round = await fixesRound(repo, head, read, unasked);
-  expect(round.merged).toMatchObject({ reviewed: read, conflicts: [] });
-  expect(repo.git("diff", "--name-only", round.from!, head).stdout.split("\n")).toEqual(["src/app.ts", "src/helper.ts"]);
-});
-
 test("a fixes round or final read refuses a net delta it cannot read and names the command that recovers", async () => {
   const { repo, reviewed } = reviewedApp();
   await firstRound(repo, reviewed, major);
@@ -224,15 +210,22 @@ test("review-start prints one JSON document, which names a confirming read", asy
   expect(started.confirms).toStartWith("This final read confirms the arbiter's stop (Round 2 undoes the rename round 1 asked for)");
 });
 
-test("an override clears the arbiter's stop only once its own decision is in the ledger", async () => {
+test("an override clears the arbiter's stop only once its own decision is in the ledger, and its retry clears it", async () => {
   const { pr, reviewed } = await stoppedCheckout();
   const hub = hubAt(pr, "drops appends");
   pr.choose("Run one more round", question);
-  await expect(pr.hedge("review-start", "--scope", "final", "--base", reviewed, ...override)).rejects.toThrow("Not recorded");
-  rmSync(join(pr.pullRequest, "reviews", "final-1"), { recursive: true });
+  const start = ["review-start", "--scope", "final", "--base", reviewed, ...override];
+  await expect(pr.hedge(...start)).rejects.toThrow("Not recorded");
+  expect(existsSync(join(pr.pullRequest, arbiterStopFile))).toBe(true);
   hub.state.hub = "up";
 
-  expect(JSON.parse((await pr.hedge("review-start", "--scope", "final", "--base", reviewed)).output).confirms).toStartWith("This final read confirms the arbiter's stop");
+  const resumed = JSON.parse((await pr.hedge(...start)).output);
+  expect(resumed).toMatchObject({ round: "final", id: "final-1" });
+  expect(resumed.confirms).toBeUndefined();
+  await finishRound(pr, "final-1");
+  const read = await pr.git("rev-parse", "HEAD");
+  await pr.commit("feature.txt", "fixed again\n");
+  await expect(pr.hedge("review-start", "--scope", "final", "--base", read)).rejects.toThrow("The arbiter escalates");
 });
 
 test("a recorded override clears the arbiter's stop, so the next read asks the arbiter again", async () => {
@@ -250,10 +243,11 @@ const patchFiles = (patch: string) => [...patch.matchAll(/^diff --git a\/(\S+) b
 const readPatch = (pr: Checkout, round: string) => readFileSync(join(pr.pullRequest, "reviews", round, "diff.patch"), "utf8");
 const covering = (...files: string[]) => `FINDINGS:\n(none)\nCOVERED: ${files.join(", ")}\n`;
 
-async function panelReviewed(pr: Checkout, file = "feature.txt", content = "greet\n") {
+async function panelReviewed(pr: Checkout, files: Record<string, string> = { "feature.txt": "greet\n" }) {
   await pr.hedge("require", "--none", "--reason", "docs only");
-  const reviewed = await pr.commit(file, content);
-  const reviewer = fakeModel(pr, "REVIEWER", covering(file));
+  for (const [file, content] of Object.entries(files)) await pr.commit(file, content);
+  const reviewed = await pr.git("rev-parse", "HEAD");
+  const reviewer = fakeModel(pr, "REVIEWER", covering(...Object.keys(files)));
   await pr.hedge("review", "--lens", "correctness");
   expect((await pr.hedge("review", "--wait")).code).toBe(0);
   return { reviewed, reviewer };
@@ -339,7 +333,7 @@ test("the gate refuses its result when the PR's base on GitHub moves between its
 
 test("a base merge's ledger conflict resolution is part of the net delta", async () => {
   const pr = await checkout();
-  const { reviewed } = await panelReviewed(pr, "shared.txt", "one\n| 2 | pr |\n");
+  const { reviewed } = await panelReviewed(pr, { "shared.txt": "one\n| 2 | pr |\n" });
   await pr.advanceBase("shared.txt", "one\n| 3 | base |\n");
   await pr.git("merge", "-q", "main");
   writeFileSync(join(pr.repository, "shared.txt"), "one\n| 2 | pr |\n| 3 | base |\n");
@@ -349,24 +343,38 @@ test("a base merge's ledger conflict resolution is part of the net delta", async
   expect(await reviewLine(pr)).toBe(finalReadLine(reviewed, 1));
 });
 
-test("a conflict that leaves no markers, such as in a binary file, never carries, and its final read shows both sides and needs the file covered", async () => {
-  const pr = await checkout();
+const list = "the $HOME list.txt";
+
+async function conflicted(pr: Checkout) {
   await pr.advanceBase("logo.bin", "logo\0one\n");
   await pr.git("merge", "-q", "--no-edit", "main");
-  const { reviewed, reviewer } = await panelReviewed(pr, "logo.bin", "logo\0two\n");
-  await pr.advanceBase("logo.bin", "logo\0three\n");
+  const panel = await panelReviewed(pr, { "logo.bin": "logo\0two\n", [list]: "the reviewed side\n" });
+  await pr.git("checkout", "-q", "main");
+  await pr.commit("logo.bin", "logo\0three\n");
+  await pr.commit(list, "the base side\n");
+  await pr.git("update-ref", "refs/remotes/origin/main", "HEAD");
+  await pr.git("checkout", "-q", "feature");
   await pr.git("merge", "-q", "main");
   await pr.git("checkout", "-q", "--ours", "logo.bin");
-  await pr.git("add", "logo.bin");
+  writeFileSync(join(pr.repository, list), "the reviewed side and the base side\n");
+  await pr.git("add", "logo.bin", list);
   await pr.git("commit", "-q", "--no-edit");
-  const base = await pr.git("rev-parse", "main");
+  return { ...panel, base: await pr.git("rev-parse", "main") };
+}
 
-  expect(await reviewLine(pr)).toBe(finalReadLine(reviewed, 1));
-  reviewer.answer(covering("feature.txt"));
+test("a conflict never carries, a binary one that leaves no markers too, and its final read shows HEAD against each side and needs the file covered", async () => {
+  const pr = await checkout();
+  const { reviewed, reviewer, base } = await conflicted(pr);
+
+  expect(await reviewLine(pr)).toBe(finalReadLine(reviewed, 2));
+  reviewer.answer(covering(list));
   await pr.hedge("review", "--lens", "correctness", "--scope", "final", "--base", reviewed);
   expect((await pr.hedge("review", "--wait")).output).toContain("COVERED misses logo.bin");
-  expect(readPatch(pr, "final-1")).toContain(`# Conflict in logo.bin: the merge of the reviewed head ${reviewed} with the base ${base} leaves it in conflict, and HEAD resolves it`);
-  expect(reviewer.prompts().at(-1)).toContain("# HEAD against the base:");
+  const brief = reviewer.prompts().at(-1)!;
+  const conflict = brief.slice(brief.indexOf(`# Conflict in ${list}: `));
+  expect(conflict).toContain(`the merge of the reviewed head ${reviewed} with the base ${base} leaves it in conflict, and HEAD resolves it.`);
+  expect(conflict).toMatch(/# HEAD against the reviewed head:\n[^#]*-the reviewed side\n\+the reviewed side and the base side\n[^#]*# HEAD against the base:\n[^#]*-the base side\n\+the reviewed side and the base side\n/);
+  expect(brief).toContain("# Conflict in logo.bin: ");
 });
 
 test("a review that recorded no base, as the base version wrote it, carries nothing and asks for a final read, which runs", async () => {
@@ -395,6 +403,45 @@ test("a final read after a base merge sends the reviewer only the test file that
   expect(await reviewLine(pr)).toBe(finalReadLine(reviewed, 1));
   expect((await pr.hedge("review", "--scope", "final", "--base", reviewed)).code).toBe(0);
   expect(patchFiles(readPatch(pr, "final-1"))).toEqual(["feature.test.ts"]);
+});
+
+const majorFinding = "FINDINGS:\n- feature.txt:1 | major | Correctness | the greeting drops the name | greet by name | anchor: greet\nCOVERED: feature.txt\n";
+
+test("a fixes round after a final read starts at the final read's head, so its reviewer gets a revert to the panel's content and the helper change", async () => {
+  const pr = await checkout();
+  const { reviewed, reviewer } = await panelReviewed(pr);
+  await pr.commit("helper.txt", "help\n");
+  const read = await pr.commit("feature.txt", "greet the member\n");
+  reviewer.answer(majorFinding);
+  await pr.hedge("review", "--scope", "final", "--base", reviewed);
+  await pr.commit("helper.txt", "help more\n");
+  await pr.commit("feature.txt", "greet\n");
+  reviewer.answer("No findings.\n");
+
+  await expect(pr.hedge("review", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(`Round 2 needs --base ${read}, the commit of final read 1, the latest finished review`);
+  await pr.hedge("review", "--scope", "fixes", "--base", read);
+  const brief = reviewer.prompts().at(-1)!;
+  expect(brief).toContain("-greet the member\n+greet\n");
+  expect(brief).toContain("-help\n+help more\n");
+});
+
+test("the gate fetches a PR base that the checkout lacks from a remote of the PR's repository, and carries nothing when it cannot fetch it", async () => {
+  const pr = await checkout();
+  const { reviewed } = await panelReviewed(pr);
+  const github = join(pr.home, "github.com", "example", "product.git");
+  await pr.git("init", "-q", "--bare", github);
+  await pr.git("push", "-q", github, "main:refs/heads/main");
+  const onGithub = (...args: string[]) => Bun.spawnSync(["git", "-C", github, ...args], { env: pr.env }).stdout.toString().trim();
+  const moved = onGithub("commit-tree", "main^{tree}", "-p", "main", "-m", "The base moves on GitHub");
+  onGithub("update-ref", "refs/heads/main", moved);
+  await pr.git("remote", "set-url", "origin", github);
+  await noteNothing(pr);
+  pr.githubBase(moved);
+
+  expect(Bun.spawnSync(["git", "cat-file", "-e", `${moved}^{commit}`], { cwd: pr.repository, env: pr.env }).exitCode).not.toBe(0);
+  expect(await reviewLine(pr)).toStartWith(carried(reviewed));
+  pr.githubBase("f".repeat(40));
+  expect(await reviewLine(pr)).toBe(`review: HEAD not reviewed, last review covered ${short(reviewed)}; the checkout lacks the PR's base fffffff and cannot fetch it, so nothing carries. Fetch it with git fetch origin ${"f".repeat(40)}`);
 });
 
 for (const path of [["review", "--scope", "final"], ["review", "--lens", "correctness", "--scope", "final"]]) {
