@@ -5,7 +5,7 @@ import { fleetAdapter } from "./adapters/fleet/adapter.ts";
 import { jobsAdapter } from "./adapters/jobs/adapter.ts";
 import type { CommandRunner } from "./adapters/run.ts";
 import { main } from "./cli.ts";
-import { fleetIsHedge, hedgeOnMac, legacyPaths, underLegacyPath } from "./legacy.ts";
+import { fleetIsHedge, legacyPaths, underLegacyPath } from "./legacy.ts";
 import { saveAnswers, saveMachine } from "./profile/profile.ts";
 import { filesAdapter, type Adapter } from "./reconciler/apply.ts";
 import { fakeLaunchd } from "./testing/old-fleet.ts";
@@ -136,8 +136,11 @@ describe("an engine in a Fleet path from before the rename", () => {
     await beforeTheRename(machine);
     const lines: string[] = [];
     const code = await main(["prune", "--auto"], { home: machine.home, engineRoot: oldRoot(machine.home), platform: "darwin", env: {}, print: (line) => lines.push(line), run: async () => 0 });
-    expect({ code, lines }).toEqual({ code: 0, lines: [`Fleet is now Hedge. ${hedgeOnMac}`] });
-    expect(hedgeOnMac).toContain("https://posthog.github.io/hedge/#start");
+    expect(code).toBe(0);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toStartWith("Fleet is now Hedge. Hedge now runs on cloud boxes, not on a Mac.");
+    expect(lines[0]).toContain("Set up your hub at https://posthog.github.io/hedge/#start.");
+    expect(lines[0]).toEndWith("To stop the jobs of an earlier Fleet or Hedge on this Mac, run: curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh | sh");
   });
 
   test("the launcher is inert when the path it was run by, or the path it resolves to, is a Fleet path", () => {

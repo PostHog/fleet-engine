@@ -100,20 +100,35 @@ describe("the agent setup guide", () => {
     expect(inStep7.slice(inStep7.indexOf("setup"), inStep7.indexOf("setup") + 2)).toEqual(["setup", "hub here"]);
     expect(codeIn(readFileSync(join(root, "packs/incident-io/SETUP.md"), "utf8")).join("\n")).toContain(`; hedge page --key setup-check --title "Setup check" --dry-run'`);
 
+    let alerts = 0;
+    const incident = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => (alerts++, new Response("{}", { status: 202 })) });
+    const sourceUrl = `http://127.0.0.1:${incident.port}/v2/alert_events/http/hedgesetupcheck`;
     const runOnHub = async (order: "guide" | "without hub here") => {
       const home = temp.make("hub-home-");
       const box = fakeMachine(home);
       const io = scripted([]);
       const env = { CODER: "true", CODER_AGENT_URL: "https://coder.example.com", CODER_WORKSPACE_NAME: "hedge-hub" };
-      const onHub = (args: string[]) => main(args, { home, engineRoot: root, platform: "linux", env, hostname: () => "hedge-hub", print: io.terminal.print, fail: io.terminal.print, terminal: io.terminal, apply: async () => 0, setup: { machine: box.machine, clock: box.clock, doctor: async () => 0, env, timeZone: "UTC" } });
+      const onHub = (args: string[], stdin?: string) => main(args, { home, engineRoot: root, platform: "linux", env, hostname: () => "hedge-hub", print: io.terminal.print, fail: io.terminal.print, terminal: io.terminal, apply: async () => 0, stdin: () => new Response(stdin ?? "").body!, setup: { machine: box.machine, clock: box.clock, doctor: async () => 0, env, timeZone: "UTC" } });
       const args = setupArgs().replace("<id>", "starter").replace("<claude|codex|both>", "codex").split(" ");
       expect(await onHub(["setup", ...args, "--add", "incident-io", "--workflows", "page-owner=on"])).toBe(0);
       if (order === "guide") expect(await onHub(["hub", "here"])).toBe(0);
-      await onHub(["page", "--key", "setup-check", "--title", "Setup check", "--dry-run"]);
-      return io.output();
+      const saved = await onHub(["page", "setup", sourceUrl], "token-from-the-secret-prompt\n");
+      const dryRun = await onHub(["page", "--key", "setup-check", "--title", "Setup check", "--dry-run"]);
+      return { saved, dryRun, output: io.output() };
     };
-    expect(await runOnHub("without hub here")).toContain("hedge page runs on the hub. Run it there.");
-    expect(await runOnHub("guide")).not.toContain("runs on the hub");
+    try {
+      const refused = await runOnHub("without hub here");
+      expect([refused.saved === 0, refused.dryRun === 0]).toEqual([false, false]);
+      expect(refused.output).toContain("hedge page runs on the hub. Run it there.");
+      const inOrder = await runOnHub("guide");
+      expect([inOrder.saved, inOrder.dryRun]).toEqual([0, 0]);
+      expect(inOrder.output).toContain("hedge page: saved the alert source.");
+      expect(inOrder.output).toContain("hedge page: dry run, nothing sent.");
+      expect(inOrder.output).not.toContain("runs on the hub");
+      expect(alerts).toBe(0);
+    } finally {
+      incident.stop(true);
+    }
   });
 
   test("on the hub, its hedge setup command waits for GitHub and ChatGPT in the browser, stops for Claude, and finishes after the guide's Claude sign-in in a terminal", async () => {

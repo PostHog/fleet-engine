@@ -4,7 +4,6 @@ import { join } from "node:path";
 import type { ProfileFile } from "./pack/types.ts";
 import { isolateGit, spawnGit, template, tempDirs } from "./testing/git.ts";
 import { spawnAsync } from "./testing/spawn.ts";
-import { hedgeOnMac } from "./legacy.ts";
 import { noticePath, readNotice, update } from "./update.ts";
 import { main } from "./cli.ts";
 
@@ -193,7 +192,9 @@ describe("hedge update", () => {
     const onMac = await run(engineDir, { repo: remote, ref: "v0.1.1", channel: "release" }, undefined, "darwin");
     expect(onMac.code).toBe(1);
     expect(onMac.output).not.toContain("run get.sh again to repair it");
-    expect(onMac.output).toContain(`so the update was rolled back. The engine stays at ${(await spawnGit(engineDir, "rev-parse", "HEAD")).slice(0, 7)}. ${hedgeOnMac}`);
+    expect(onMac.output).toContain(`so the update was rolled back. The engine stays at ${(await spawnGit(engineDir, "rev-parse", "HEAD")).slice(0, 7)}. Hedge now runs on cloud boxes, not on a Mac.`);
+    expect(onMac.output).toContain("Set up your hub at https://posthog.github.io/hedge/#start.");
+    expect(onMac.output).toContain("To stop the jobs of an earlier Fleet or Hedge on this Mac, run: curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh | sh");
   });
 
   test("puts back the old engine's packages when the new engine's install fails halfway", async () => {
