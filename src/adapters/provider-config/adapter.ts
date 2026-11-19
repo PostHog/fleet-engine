@@ -83,7 +83,7 @@ async function reconcileFiles(plan: Plan, home: string, dryRun: boolean, adopt: 
       result.marketplaces = declaredMarketplaces(merged.document);
     }
     if (target.provider === "codex" && !link) result.codexPlugins = acceptedCodexPlugins(merged.document);
-    if (merged.todo) result.findings.push({ id: `route:${target.path}`, pack: "engine", say: merged.todo, todo: true });
+    if (merged.todo && !dryRun) result.findings.push({ id: `route:${target.path}`, pack: "engine", say: merged.todo, todo: true });
     if (merged.kept.length) result.findings.push({ id: `kept:${target.path}`, pack: "engine", say: `Kept your ${merged.kept.join(", ")} in ${target.path}. Run hedge apply --adopt ${target.path} to take Hedge's value.` });
     if (merged.after !== undefined) writes.push({ target: target.path, before, after: merged.after, action: { target: target.path, operation: before === undefined ? "create" : "replace", reason: merged.reason } });
   }
@@ -155,31 +155,25 @@ function merge(target: Target, text: string | undefined, previous: Field[], want
     trust.push(...retained);
   }
   const all = [...wanted, ...trust];
-  const leaving: Field[] = [];
+  const routeLeft: string[][] = [];
   for (const field of previous) {
     if (all.some((item) => overlaps(item.path, field.path))) continue;
     if ((options.outage && !options.gated(field.path)) || keepsEdit(field)) record.push(field);
-    else if (get(current, field.path) !== undefined) leaving.push(field);
-  }
-  const trial = structuredClone(current);
-  const routeLeaving = leaving.filter(onRoute);
-  for (const field of leaving) remove(trial, field.path);
-  const stranded = routeLeaving.length > 0 && !route?.strands(current) ? route?.strands(trial) : undefined;
-  const checkFails = routeLeaving.some((field) => options.gated(field.path));
-  for (const field of leaving) {
-    if (stranded && !checkFails && onRoute(field)) {
-      record.push(field);
-      continue;
+    else if (get(current, field.path) !== undefined) {
+      remove(current, field.path);
+      removed.push(field.path.join("."));
+      if (onRoute(field)) routeLeft.push(field.path);
     }
-    remove(current, field.path);
-    removed.push(field.path.join("."));
+  }
+  const beside = route?.beside(current, routeLeft) ?? [];
+  for (const path of beside) {
+    remove(current, path);
+    removed.push(path.join("."));
   }
   const reason = [changed.length ? `set ${changed.join(", ")}` : "", removed.length ? `remove ${removed.join(", ")}` : ""].filter(Boolean).join("; ");
   const after = target.format.encode(current);
-  const todo = stranded && (checkFails
-    ? `Took Hedge's proxy route out of ${target.path}, because the proxy fails its check. Without the route, ${stranded.harm}. Remove ${stranded.path} from ${target.path}.`
-    : `Kept Hedge's proxy route in ${target.path}: without it, ${stranded.harm}. Remove ${stranded.path} from ${target.path}, then run hedge apply to take the route out.`);
-  return { record, kept, reason, after: after === original ? undefined : after, document: current, ...(todo ? { todo } : {}) };
+  const todo = beside.length ? `Took Hedge's proxy route out of ${target.path}, and with it your ${beside.map((path) => path.join(".")).join(", ")}, which only worked through that route. ${route!.agent} now uses its own sign-in: sign in there if it asks.` : undefined;
+  return { record: record.filter((field) => !beside.some((path) => overlaps(path, field.path))), kept, reason, after: after === original ? undefined : after, document: current, ...(todo ? { todo } : {}) };
 }
 
 function acceptedPlugins(document: Document) {

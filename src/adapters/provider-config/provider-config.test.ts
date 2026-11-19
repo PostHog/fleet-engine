@@ -84,21 +84,36 @@ describe("provider config", () => {
     expect(JSON.parse(readFileSync(join(run!, claude), "utf8"))).toEqual(before);
   });
 
-  test("keeps the proxy route it recorded while a token of yours would go to Anthropic without it, says so as a To do, and takes the route out once the token is gone", async () => {
+  test("takes the proxy route it recorded out together with a token of yours beside it, so the token never goes to Anthropic, and names the token without its value", async () => {
     const home = temp.make("home-");
     const route = [{ provider: "claude" as const, key: "env.ANTHROPIC_BASE_URL", value: "http://127.0.0.1:8317", pack: "hub" }, { provider: "claude" as const, key: "apiKeyHelper", value: 'cat "$HOME/.config/hedge/cli-proxy.key"', pack: "hub" }];
     await apply(plan(route), { home, adapters: adapters() });
-    const routed = { ...read(home, claude), env: { ...read(home, claude).env, ANTHROPIC_AUTH_TOKEN: "my-token" } };
-    write(home, claude, routed);
+    write(home, claude, { ...read(home, claude), model: "opus", env: { ...read(home, claude).env, ANTHROPIC_AUTH_TOKEN: "my-token", MY_FLAG: "1" } });
 
-    const kept = await apply(plan(), { home, adapters: adapters() });
-
-    expect(read(home, claude)).toEqual(routed);
-    expect(kept.findings).toContainEqual({ id: `route:${claude}`, pack: "engine", say: `Kept Hedge's proxy route in ${claude}: without it, Claude Code would send your env.ANTHROPIC_AUTH_TOKEN to Anthropic. Remove env.ANTHROPIC_AUTH_TOKEN from ${claude}, then run hedge apply to take the route out.`, todo: true });
-    write(home, claude, { ...routed, env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" } });
     const taken = await apply(plan(), { home, adapters: adapters() });
-    expect(read(home, claude)).toEqual({});
-    expect(taken.findings.map((finding) => finding.id)).not.toContain(`route:${claude}`);
+
+    expect(read(home, claude)).toEqual({ model: "opus", env: { MY_FLAG: "1" } });
+    expect(taken.actions).toContainEqual({ target: claude, operation: "replace", reason: "remove env.ANTHROPIC_BASE_URL, apiKeyHelper, env.ANTHROPIC_AUTH_TOKEN" });
+    expect(taken.findings).toContainEqual({ id: `route:${claude}`, pack: "engine", say: `Took Hedge's proxy route out of ${claude}, and with it your env.ANTHROPIC_AUTH_TOKEN, which only worked through that route. Claude Code now uses its own sign-in: sign in there if it asks.`, todo: true });
+    expect(JSON.stringify(taken.findings)).not.toContain("my-token");
+    expect((await apply(plan(), { home, adapters: adapters() })).actions).toEqual([]);
+  });
+
+  test("a profile that drops its own Claude gateway takes only that gateway out, field by field as on the base: your token stays, and a gateway URL you edited stays", async () => {
+    const home = temp.make("home-");
+    const gateway = [{ provider: "claude" as const, key: "env.ANTHROPIC_BASE_URL", value: "https://gateway.example.com", pack: "team" }];
+    await apply(plan(gateway), { home, adapters: adapters() });
+    write(home, claude, { env: { ANTHROPIC_BASE_URL: "https://gateway.example.com", ANTHROPIC_AUTH_TOKEN: "my-token" } });
+
+    const dropped = await apply(plan(), { home, adapters: adapters() });
+
+    expect(read(home, claude)).toEqual({ env: { ANTHROPIC_AUTH_TOKEN: "my-token" } });
+    expect(dropped.actions).toContainEqual({ target: claude, operation: "replace", reason: "remove env.ANTHROPIC_BASE_URL" });
+    expect(dropped.findings.map((finding) => finding.id)).not.toContain(`route:${claude}`);
+    await apply(plan(gateway), { home, adapters: adapters() });
+    write(home, claude, { env: { ANTHROPIC_BASE_URL: "https://my-gateway.example.com", ANTHROPIC_AUTH_TOKEN: "my-token" } });
+    await apply(plan(), { home, adapters: adapters() });
+    expect(read(home, claude)).toEqual({ env: { ANTHROPIC_BASE_URL: "https://my-gateway.example.com", ANTHROPIC_AUTH_TOKEN: "my-token" } });
   });
 
   test("a profile's own Claude gateway and key helper are set field by field: a key helper you edited stays, and the gateway is still set", async () => {

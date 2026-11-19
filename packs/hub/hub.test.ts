@@ -357,13 +357,13 @@ describe("the Own-account balancing workflow", () => {
     expect(codex()).toEqual({});
   });
 
-  test("while Hedge owns only the hedge-proxy Codex table and you own the selector, turning balancing off keeps the table and says what to remove", async () => {
+  test("while Hedge owns only the hedge-proxy Codex table and you own the selector, turning balancing off takes both, and a To do names the selector", async () => {
     const { machine, on, applyWith, applyOff, codex } = connectedDevbox({ ".config/hedge/cli-proxy.key": `${clientKey}\n` });
     expect((await applyWith({ ...on, config: on.config.filter((entry) => entry.key !== "model_provider") })).code).toBe(0);
-    writeFileSync(join(machine.home, ".codex/config.toml"), stringify({ model_provider: "hedge-proxy", model_providers: { "hedge-proxy": codexProviderTable } }));
-    const kept = await applyOff();
-    expect(codex()).toEqual({ model_provider: "hedge-proxy", model_providers: { "hedge-proxy": codexProviderTable } });
-    expect(kept.stdout).toContain("To do: Kept Hedge's proxy route in .codex/config.toml: without it, Codex would select a hedge-proxy provider table that is gone. Remove model_provider from .codex/config.toml, then run hedge apply to take the route out.");
+    writeFileSync(join(machine.home, ".codex/config.toml"), stringify({ model: "gpt-6.1-sol", model_provider: "hedge-proxy", model_providers: { "hedge-proxy": codexProviderTable } }));
+    const off = await applyOff();
+    expect(codex()).toEqual({ model: "gpt-6.1-sol" });
+    expect(off.stdout).toContain("To do: Took Hedge's proxy route out of .codex/config.toml, and with it your model_provider, which only worked through that route. Codex now uses its own sign-in: sign in there if it asks.");
   });
 
   test("hedge apply after connect beside a hedge-proxy Codex table of your own with another name selects nothing, and turning balancing off leaves your table", async () => {
@@ -384,17 +384,14 @@ describe("the Own-account balancing workflow", () => {
     expect(codex()).toEqual(mine);
   });
 
-  test("Hedge's Claude route beside your own ANTHROPIC_AUTH_TOKEN stays when balancing turns off, with a To do, so the token never goes to Anthropic, and leaves once you remove the token", async () => {
-    const { machine, applyOff, claude, connectAndApply } = connectedDevbox({ ".claude/settings.json": JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: "my-token" } }) });
+  test("Hedge's Claude route leaves with your own ANTHROPIC_AUTH_TOKEN beside it when balancing turns off, so the token never goes to Anthropic, and a To do names the token without its value", async () => {
+    const { applyOff, claude, connectAndApply } = connectedDevbox({ ".claude/settings.json": JSON.stringify({ model: "opus", env: { ANTHROPIC_AUTH_TOKEN: "my-token" } }) });
     expect((await connectAndApply()).code).toBe(0);
-    const routed = { env: { ANTHROPIC_AUTH_TOKEN: "my-token", ANTHROPIC_BASE_URL: proxyUrl }, apiKeyHelper: helper };
-    expect(claude()).toEqual(routed);
-    const kept = await applyOff();
-    expect(claude()).toEqual(routed);
-    expect(kept.stdout).toContain("To do: Kept Hedge's proxy route in .claude/settings.json: without it, Claude Code would send your env.ANTHROPIC_AUTH_TOKEN to Anthropic. Remove env.ANTHROPIC_AUTH_TOKEN from .claude/settings.json, then run hedge apply to take the route out.");
-    writeFileSync(join(machine.home, ".claude/settings.json"), JSON.stringify({ env: { ANTHROPIC_BASE_URL: proxyUrl }, apiKeyHelper: helper }));
-    expect((await applyOff()).code).toBe(0);
-    expect(claude()).toEqual({});
+    expect(claude()).toEqual({ model: "opus", env: { ANTHROPIC_AUTH_TOKEN: "my-token", ANTHROPIC_BASE_URL: proxyUrl }, apiKeyHelper: helper });
+    const off = await applyOff();
+    expect(claude()).toEqual({ model: "opus" });
+    expect(off.stdout).toContain("To do: Took Hedge's proxy route out of .claude/settings.json, and with it your env.ANTHROPIC_AUTH_TOKEN, which only worked through that route. Claude Code now uses its own sign-in: sign in there if it asks.");
+    expect(off.stdout).not.toContain("my-token");
   });
 
   test("sends Claude Code to the loopback proxy, and keeps the client key out of the settings: Claude reads it from a private file", () => {
@@ -616,7 +613,7 @@ describe("the Own-account balancing workflow", () => {
       expect(route()).toBeUndefined();
     });
 
-    test("on a routed hub with its own ANTHROPIC_AUTH_TOKEN, a plugin Hedge did not install takes the route out anyway, and a To do names the token without its value", async () => {
+    test("on a routed hub with its own ANTHROPIC_AUTH_TOKEN, a plugin Hedge did not install fails the check, and the route leaves with the token, which a To do names without its value", async () => {
       const { home, result, route, options } = runningHub("claude", { credentials: [{ provider: "claude" }] });
       expect((await apply(result, options)).ok).toBe(true);
       const settings = join(home, ".claude/settings.json");
@@ -625,10 +622,10 @@ describe("the Own-account balancing workflow", () => {
       writeFileSync(join(dataDir(home), "plugins/other.so"), "plugin");
       const failed = await apply(result, options);
       expect(route()).toBeUndefined();
-      expect(JSON.parse(readFileSync(settings, "utf8"))).toEqual({ env: { ANTHROPIC_AUTH_TOKEN: "my-token" } });
+      expect(JSON.parse(readFileSync(settings, "utf8"))).toEqual({});
       expect(failed.ok).toBe(false);
       const todo = failed.findings.find((finding) => finding.id === "route:.claude/settings.json");
-      expect(todo).toEqual({ id: "route:.claude/settings.json", pack: "engine", say: "Took Hedge's proxy route out of .claude/settings.json, because the proxy fails its check. Without the route, Claude Code would send your env.ANTHROPIC_AUTH_TOKEN to Anthropic. Remove env.ANTHROPIC_AUTH_TOKEN from .claude/settings.json.", todo: true });
+      expect(todo).toEqual({ id: "route:.claude/settings.json", pack: "engine", say: "Took Hedge's proxy route out of .claude/settings.json, and with it your env.ANTHROPIC_AUTH_TOKEN, which only worked through that route. Claude Code now uses its own sign-in: sign in there if it asks.", todo: true });
       expect(JSON.stringify(failed.findings)).not.toContain("my-token");
     });
 
@@ -641,6 +638,22 @@ describe("the Own-account balancing workflow", () => {
       const badJob: Plan = { ...result, jobs: [{ id: "bad id", command: ["hedge", "box", "sweep"], schedule: { every: "always" }, pack: "hub" }] };
       await expect(apply(badJob, { ...options, adapters: [jobsAdapter(), providerConfigAdapter()] })).rejects.toThrow("job id bad id of the hub pack may hold only");
       expect(route()).toBeUndefined();
+    });
+
+    test("a job the Jobs adapter refuses still lets apply take the route and the token beside it out, and the error that apply throws holds the To do that names the token", async () => {
+      const { home, result, route, options } = runningHub("claude", { credentials: [{ provider: "claude" }] });
+      expect((await apply(result, options)).ok).toBe(true);
+      const settings = join(home, ".claude/settings.json");
+      writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, "utf8")), env: { ANTHROPIC_BASE_URL: proxyUrl, ANTHROPIC_AUTH_TOKEN: "my-token" } }));
+      mkdirSync(join(dataDir(home), "plugins"), { recursive: true });
+      writeFileSync(join(dataDir(home), "plugins/other.so"), "plugin");
+      const badJob: Plan = { ...result, jobs: [{ id: "bad id", command: ["hedge", "box", "sweep"], schedule: { every: "always" }, pack: "hub" }] };
+      const failure = await apply(badJob, { ...options, adapters: [jobsAdapter(), providerConfigAdapter()] }).then(() => "", (error: Error) => error.message);
+      expect(route()).toBeUndefined();
+      expect(JSON.parse(readFileSync(settings, "utf8"))).toEqual({});
+      expect(failure).toStartWith("job id bad id of the hub pack may hold only");
+      expect(failure.split("\n")).toContain("To do: Took Hedge's proxy route out of .claude/settings.json, and with it your env.ANTHROPIC_AUTH_TOKEN, which only worked through that route. Claude Code now uses its own sign-in: sign in there if it asks.");
+      expect(failure).not.toContain("my-token");
     });
 
     test("a job the Jobs adapter refuses and a provider record Hedge cannot read both reach the person, the job's reason first", async () => {
@@ -687,6 +700,25 @@ describe("the Own-account balancing workflow", () => {
       expect(next.actions).toEqual([]);
       expect(routes).toEqual(new Set(["http://127.0.0.1:8317"]));
       expect(route()).toBe("http://127.0.0.1:8317");
+    });
+
+    test("once the Codex pool empties, Hedge's hedge-proxy table leaves with your own selector beside it, so Codex starts on its own sign-in, and a To do names the selector", async () => {
+      const proxy: Proxy = { credentials: [{ provider: "codex" }], models: ["gpt-6.1-sol"] };
+      const { machine, home } = proxyMachine((prefix) => temp.make(prefix), { plan: "codex", devboxes: [] }, proxy);
+      const result = proxyOnly(plan({ ...balancing, plan: "codex" }, hub));
+      const options = { home, adapters: [providerConfigAdapter()], run: hedgeProxy(machine, result.engineRoot) };
+      const tableOnly = { ...result, config: result.config.filter((entry) => entry.key !== "model_provider") };
+      await apply(tableOnly, options);
+      await apply(tableOnly, options);
+      const config = join(home, ".codex/config.toml");
+      expect(parse(readFileSync(config, "utf8"))).toEqual({ model_providers: { "hedge-proxy": codexProviderTable } });
+      writeFileSync(config, stringify({ model: "gpt-6.1-sol", model_provider: "hedge-proxy", model_providers: { "hedge-proxy": codexProviderTable } }));
+      Object.assign(proxy, { credentials: [], models: [] });
+      const emptied = await apply(result, options);
+      expect(emptied.ok).toBe(true);
+      expect(parse(readFileSync(config, "utf8"))).toEqual({ model: "gpt-6.1-sol" });
+      expect(emptied.findings.map((finding) => [finding.id, finding.todo])).toEqual([["check:cli-proxy-codex-accounts", true], ["check:cli-proxy-codex", true], ["route:.codex/config.toml", true]]);
+      expect(emptied.findings.at(-1)!.say).toBe("Took Hedge's proxy route out of .codex/config.toml, and with it your model_provider, which only worked through that route. Codex now uses its own sign-in: sign in there if it asks.");
     });
 
     test("takes Claude Code off the proxy once its pool empties, and lists the To do", async () => {

@@ -128,9 +128,11 @@ async function reconcile(plan: Plan, options: ApplyOptions): Promise<{ report: R
   };
   for (const adapter of adapters.filter((each) => !afterSteps.includes(each))) {
     const result = await adapter.apply(gated.plan, context).catch(async (error: unknown) => {
+      const from = report.findings.length;
       const also = await configure().then(() => undefined, (second: unknown) => second);
-      if (also === undefined) throw error;
-      throw new Error(`${String((error as Error)?.message ?? error)} Hedge also could not set your provider settings: ${String((also as Error)?.message ?? also)}`);
+      const todos = report.findings.slice(from).filter((finding) => finding.todo).map((finding) => `\nTo do: ${finding.say}`).join("");
+      if (also === undefined && !todos) throw error;
+      throw new Error(`${String((error as Error)?.message ?? error)}${also === undefined ? "" : ` Hedge also could not set your provider settings: ${String((also as Error)?.message ?? also)}`}${todos}`);
     });
     report.actions.push(...result.actions);
     report.findings.push(...result.findings);
