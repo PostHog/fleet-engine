@@ -284,7 +284,7 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
     async run(command, run = {}) {
       runs.push({ command, input: run.input ?? false });
       const remote = onBox(command);
-      if (remote === "claude auth login") left["box:claude"] = 0;
+      if ((remote ?? command.join(" ")) === "claude auth login") left[remote === undefined ? "claude" : "box:claude"] = 0;
       const node = command.at(-2)!;
       const { hub } = remote?.includes(" --profile ") ? await pushedProfile() : {};
       if (hub && hub !== node && !options.hubDown) credentials.push({ node, issued: hubTook.has(node) });

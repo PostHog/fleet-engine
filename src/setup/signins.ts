@@ -61,6 +61,7 @@ export function claudeSignIn(machine: Machine, host?: string): SignIn {
     minutes: 1,
     why: "Each machine signs in to Claude itself. There is no shared proxy. Setup checks with a real request, because a stale sign-in still looks signed in.",
     command: ["claude", "auth", "login"],
+    interactive: true,
     probe: () => claudeSignedIn(machine, host),
   };
 }
@@ -106,7 +107,7 @@ export function chatgptSignIn(machine: Machine, models: ModelRow[]): SignIn {
     title: "Sign in to ChatGPT",
     minutes: 1,
     why: "Codex signs in with your ChatGPT plan. Setup checks with a real request, because a stale sign-in still looks signed in.",
-    command: ["codex", "login"],
+    command: ["codex", "login", "--device-auth"],
     async probe() {
       const dir = mkdtempSync(join(tmpdir(), "hedge-codex-probe-"));
       try {

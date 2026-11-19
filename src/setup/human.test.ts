@@ -120,20 +120,20 @@ describe("hedge setup sign-ins", () => {
   });
 
   test("a sign-in command that fails, or is missing, stops setup with what to do instead of waiting", async () => {
-    const starter = ["--preset", "starter", "--plan", "claude"];
+    const starter = ["--preset", "starter", "--plan", "codex"];
     const failedHome = temp.make("home-");
-    const failed = await hedgeSetup(failedHome, starter, ["", ""], fakeMachine(failedHome, { claude: 50 }, { exits: { claude: 1 } }));
+    const failed = await hedgeSetup(failedHome, starter, ["", ""], fakeMachine(failedHome, { chatgpt: 50 }, { exits: { chatgpt: 1 } }));
     expect(failed.code).toBe(1);
-    expect(failed.output).toContain("hedge: claude auth login ended with code 1, but Sign in to Claude still does not pass its check. Fix what it says above, then run hedge setup again.");
+    expect(failed.output).toContain("hedge: codex login --device-auth ended with code 1, but Sign in to ChatGPT still does not pass its check. Fix what it says above, then run hedge setup again.");
 
     const missingHome = temp.make("home-");
-    const missing = await hedgeSetup(missingHome, starter, ["", ""], fakeMachine(missingHome, { claude: 50 }, { exits: { claude: 127 } }));
-    expect(missing.output).toContain("hedge: claude is not installed here. Install it, then run hedge setup again.");
+    const missing = await hedgeSetup(missingHome, starter, ["", ""], fakeMachine(missingHome, { chatgpt: 50 }, { exits: { chatgpt: 127 } }));
+    expect(missing.output).toContain("hedge: codex is not installed here. Install it, then run hedge setup again.");
 
     const quietHome = temp.make("home-");
-    const box = fakeMachine(quietHome, { claude: 50 }, { exits: { claude: 0 } });
+    const box = fakeMachine(quietHome, { chatgpt: 50 }, { exits: { chatgpt: 0 } });
     const quiet = await hedgeSetup(quietHome, starter, ["", ""], box);
-    expect(quiet.output).toContain("hedge: claude auth login ended, but Sign in to Claude still does not pass its check.");
+    expect(quiet.output).toContain("hedge: codex login --device-auth ended, but Sign in to ChatGPT still does not pass its check.");
     expect(box.sleeps).toHaveLength(16);
   });
 
@@ -256,7 +256,8 @@ describe("hedge setup sign-ins", () => {
     const box = fakeMachine(home, { claude: 1, chatgpt: 2 });
     const result = await hedgeSetup(home, ["--preset", "starter"], ["", "", ""], box);
     expect(result.code).toBe(0);
-    expect(box.starts.slice(-2)).toEqual([["claude", "auth", "login"], ["codex", "login"]]);
+    expect(box.runs).toEqual([{ command: ["claude", "auth", "login"], input: true }]);
+    expect(box.starts.at(-1)).toEqual(["codex", "login", "--device-auth"]);
     const probes = box.calls.filter((call) => call.command[0] === "codex");
     expect(probes.length).toBeGreaterThan(1);
     for (const probe of probes) {
@@ -272,6 +273,19 @@ describe("hedge setup sign-ins", () => {
     const claudeOnly = fakeMachine(other, { claude: 1, chatgpt: 1 });
     await hedgeSetup(other, ["--preset", "starter", "--plan", "claude"], ["", ""], claudeOnly);
     expect(claudeOnly.calls.some((call) => call.command[0] === "codex")).toBe(false);
+  });
+
+  test("on a cloud box with no browser, ChatGPT signs in with a device code, and Claude in a terminal, where the person pastes its code", async () => {
+    const home = temp.make("home-");
+    const box = fakeMachine(home, { claude: 1, chatgpt: 2 });
+    const chat = await hedgeSetup(home, ["--chat", "--preset", "starter", "--plan", "both"], [], box);
+    expect(chat.code).toBe(2);
+    expect(chat.output).toContain("  Needs you: Sign in to Claude\n  In a terminal, run: claude auth login\n");
+    expect(box.runs).toEqual([]);
+    expect(await box.machine.run(["claude", "auth", "login"], { input: true })).toBe(0);
+    const again = await hedgeSetup(home, ["--chat", "--preset", "starter", "--plan", "both"], [], box);
+    expect(again.code).toBe(0);
+    expect(box.starts).toContainEqual(["codex", "login", "--device-auth"]);
   });
 });
 
