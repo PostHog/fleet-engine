@@ -64,23 +64,32 @@
 - The route to the proxy is one unit: the Claude proxy address and key
   helper, or the Codex `hedge-proxy` selector and table. Apply writes all
   of it or none of it, so it selects no `hedge-proxy` table of your own.
-  It removes it together too. When removing it would leave a key of
-  yours that Claude Code then sends to Anthropic, such as your own
-  `ANTHROPIC_AUTH_TOKEN`, or a Codex `model_provider` that names a table
-  that is gone, the route stays and apply shows a `To do:` line that
-  names the setting to remove. Only Hedge's own proxy values form the
-  route. A gateway and key helper from your profile are set one by one,
-  as before.
-- When the route's check fails, such as for a proxy with a plugin Hedge
-  did not install, apply takes the route out even if that leaves a key of
-  yours such as `ANTHROPIC_AUTH_TOKEN`. A `To do:` line names the key,
-  never its value, and says to remove it.
+  It removes it together too.
+- Hedge's route leaves with the settings that only work through it. Each
+  time apply removes it, because balancing is off, its check fails, or
+  the pool is empty, it also removes a Claude credential beside Hedge's
+  proxy address, such as your own `ANTHROPIC_AUTH_TOKEN`, and a Codex
+  `model_provider = "hedge-proxy"` beside Hedge's table. So no key goes
+  to Anthropic, and Codex selects no table that is gone. A `To do:` line
+  names each removed setting, never its value, and says the agent now
+  uses its own sign-in. The backup in `~/.local/state/hedge/backups`
+  holds the file as it was. Only Hedge's own proxy values form the
+  route. A gateway and key helper from your profile are set and removed
+  one by one, as before.
+- When an adapter that runs before the steps fails, the error that apply
+  throws holds the `To do:` lines from the provider settings it wrote.
   `hedge doctor` reads one result of each check for both the config and
   its line.
 - When `hedge cli-proxy connect` fails on a box, the hub names the box and
-  the exit code, and the command that hands over the same key again:
-  `hedge box run <box> -- hedge cli-proxy connect < ~/.config/hedge/cli-proxy.key`.
-  It never prints the box's output.
+  the exit code, and the commands that hand over the same key again and
+  apply it:
+  `hedge box run <box> -- hedge cli-proxy connect < ~/.config/hedge/cli-proxy.key, then hedge box run <box> -- hedge apply`.
+  It never prints the box's output. When `hedge apply` on the box exits
+  nonzero, the hub still reads its proxy `To do:` and `Fix:` lines, then
+  names the exit code.
+- The `Connect <node>:` command that `hedge cli-proxy doctor` prints now
+  runs `hedge apply` on the node after connect, and the Recovery runbook
+  says so.
 - The notice that a Codex plugin is yours now no longer fails
   `hedge doctor`, as for a Claude plugin.
 

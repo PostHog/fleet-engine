@@ -151,8 +151,9 @@ the person's own subscriptions, never for someone else's.
   `model_provider` to `hedge-proxy`, a provider that reads the same key file.
 - **Devboxes.** The hub's SSH tunnel to each devbox carries port 8317. On the
   hub, `hedge cli-proxy doctor` prints one connect command per devbox; it
-  sends the key on standard input. Connect only saves the key. Run
-  `hedge apply` next: it writes the Claude and Codex settings. When the hub
+  sends the key on standard input, then runs `hedge apply` on the devbox.
+  Connect only saves the key, and `hedge apply` writes the Claude and Codex
+  settings. When the hub
   hands a box over, it sends the key, runs connect, then runs `hedge apply`
   on the box, and says when an agent there keeps its own sign-in.
 - **When the proxy is down.** Hedge's Claude settings wait for

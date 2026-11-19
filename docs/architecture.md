@@ -309,10 +309,13 @@ and Hedge does not wrap it in a unit.
     route Hedge writes has a record. When the hub hands a box over, it runs
     `hedge apply` on the box as its own SSH step after connect.
   - *One route:* the adapter writes the route keys of a provider together
-    or not at all, and removes them together. When removing them would
-    leave a key of yours that Claude Code sends to Anthropic, or a Codex
-    `model_provider` that names a table that is gone, the route stays and
-    apply shows a `To do:`.
+    or not at all, and removes them together. Each time the route leaves,
+    for any reason, the settings beside it that only work through it leave
+    too: a Claude credential such as `ANTHROPIC_AUTH_TOKEN` beside Hedge's
+    proxy address, or a Codex `model_provider = "hedge-proxy"` beside
+    Hedge's table. Apply shows a `To do:` that names each one, never its
+    value, and says the agent now uses its own sign-in. A gateway from your
+    profile is not Hedge's route: its keys leave one by one, as on the base.
   - *Until recovery:* each `hedge apply` and `hedge doctor` reports the
     failed check. The first apply whose probe passes writes both keys
     again. Between applies nothing changes the route.
