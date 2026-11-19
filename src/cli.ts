@@ -32,6 +32,7 @@ import { trackCommand } from "./usage/usage.ts";
 import { asHedge } from "./reconciler/engine-command.ts";
 import { adoptLegacyEnv, fleetIsHedge, underLegacyPath, withLegacyNames } from "./legacy.ts";
 import { importFleet } from "./import-fleet.ts";
+import { fleetAdapter, type FleetAdapter } from "./adapters/fleet/adapter.ts";
 
 /** env: the environment that tells a Coder workspace apart; tests pass their own. */
 export type CliOptions = { home: string; engineRoot: string; platform: NodeJS.Platform; env?: Record<string, string | undefined>; print: (line: string) => void; fail?: (line: string) => void; run?: Runner; terminal?: Terminal; apply?: (profileDir: string, skip?: string[]) => Promise<number>; setup?: Pick<SetupOptions, "machine" | "fetchSource" | "doctor" | "env" | "timeZone" | "clock">; clock?: Clock; adapters?: () => Adapter[]; hostname?: () => string; stdin?: () => ReadableStream<Uint8Array>; capture?: CommandRunner; become?: Become; interactive?: boolean };
@@ -80,6 +81,7 @@ export async function main(argv: string[], options: CliOptions): Promise<number>
   if (Object.hasOwn(builtins, command)) trackCommand(options.home, command, rest, builtins[command]!, options.env ?? {}, options.interactive);
   try {
     if (command === "import-fleet") return await bringOverFleet(options);
+    if (command === "retire-fleet") return await retireFleet(options);
     if (command === "apply" || command === "doctor") return await reconcile(command, rest, options);
     if (command === "update") return await runUpdate(options);
     if (command === "refresh") return await runRefresh(rest, options);
@@ -108,6 +110,21 @@ function inert(help: boolean, options: CliOptions) {
 async function bringOverFleet(options: CliOptions) {
   for (const line of await importFleet(options.home)) options.print(`Hedge: copied ${line}.`);
   return 0;
+}
+
+/** get.sh runs this after import-fleet and before apply: it stops and turns off every piece of Fleet, keeps their files, and fails while one is not verified stopped. */
+async function retireFleet(options: CliOptions) {
+  const fleet = (options.adapters ?? engineAdapters)().find((adapter): adapter is FleetAdapter => adapter.name === "fleet") ?? fleetAdapter();
+  const fail = options.fail ?? options.print;
+  const result = await fleet.retire(options.home, options.platform);
+  if (!result) return options.print(`Hedge: left the jobs from before the rename alone, because ${options.home} is not your account's home folder.`), 0;
+  for (const item of result.retired) options.print(`Hedge: stopped and turned off the ${item} from before the rename, and kept its files.`);
+  for (const note of result.notes) options.print(`Hedge: ${note}`);
+  if (!result.retired.length && !result.left.length) options.print("Hedge: nothing from before the rename runs.");
+  if (!result.left.length) return 0;
+  for (const item of result.left) fail(`Hedge: ${item}. Hedge could not verify that it stopped.`);
+  fail("Hedge: stop each one by hand, then run hedge retire-fleet again. Hedge starts nothing while Fleet still runs.");
+  return 1;
 }
 
 /** Runs hedge setup and records its transcript. A failed step's message names hedge triage. */

@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
+import { fleetAdapter } from "./adapters/fleet/adapter.ts";
 import { jobsAdapter } from "./adapters/jobs/adapter.ts";
 import type { CommandRunner } from "./adapters/run.ts";
 import { main } from "./cli.ts";
 import { fleetIsHedge, legacyPaths } from "./legacy.ts";
 import { filesAdapter, type Adapter } from "./reconciler/apply.ts";
+import { fakeLaunchd } from "./testing/old-fleet.ts";
 import { fakeSystemd } from "./testing/systemd.ts";
 import { cliFixtures, repoRoot } from "./testing/cli.ts";
 import { git, tempDirs } from "./testing/git.ts";
@@ -24,32 +26,20 @@ function linuxMachine(home = temp.make("home-")) {
     if (command.join(" ") === "crontab -") return (cron.text = options?.input ?? ""), { code: 0, stdout: "" };
     return systemd.run(command, options);
   };
-  return { home, systemd, hedge: machineCommand(home, "linux", jobsAdapter({ run, engineRoot: repoRoot })) };
+  return { home, systemd, hedge: machineCommand(home, "linux", run) };
 }
 
 function macMachine() {
   const home = temp.make("home-");
-  const launchd = { loaded: new Set<string>(), disabled: new Set<string>(), calls: [] as string[][], bootstrapFails: false };
-  const run: CommandRunner = async (command) => {
-    launchd.calls.push(command);
-    const [tool, verb, target, file] = command;
-    if (tool !== "launchctl") return { code: 0, stdout: "" };
-    if (verb === "print") return { code: launchd.loaded.has(target!) ? 0 : 113, stdout: "" };
-    if (verb === "bootstrap") {
-      if (launchd.bootstrapFails) return { code: 5, stdout: "" };
-      launchd.loaded.add(`gui/501/${basename(file!, ".plist")}`);
-    }
-    if (verb === "bootout") launchd.loaded.delete(target!);
-    if (verb === "disable") launchd.disabled.add(target!);
-    return { code: 0, stdout: "" };
-  };
-  return { home, launchd, hedge: machineCommand(home, "darwin", jobsAdapter({ run, engineRoot: repoRoot, uid: 501 })) };
+  const launchd = fakeLaunchd();
+  return { home, launchd, hedge: machineCommand(home, "darwin", launchd.run) };
 }
 
-function machineCommand(home: string, platform: NodeJS.Platform, jobs: Adapter) {
+function machineCommand(home: string, platform: NodeJS.Platform, run: CommandRunner) {
+  const adapters = (): Adapter[] => [fleetAdapter({ run, uid: 501, accountHome: async () => home, tasks: async () => undefined }), filesAdapter, jobsAdapter({ run, engineRoot: repoRoot, uid: 501, accountHome: async () => home })];
   return async (args: string[]) => {
     const lines: string[] = [];
-    const code = await main(args, { home, engineRoot: repoRoot, platform, env: {}, print: (line) => lines.push(line), run: async () => 0, adapters: () => [filesAdapter, jobs] });
+    const code = await main(args, { home, engineRoot: repoRoot, platform, env: {}, print: (line) => lines.push(line), run: async () => 0, adapters });
     return { code, output: lines.join("\n") };
   };
 }
@@ -96,8 +86,8 @@ async function beforeTheRename(machine: Machine, launchd?: ReturnType<typeof mac
     writeFileSync(join(home, `.local/state/hedge/jobs/${id}.plist`), old);
     renameSync(join(home, `.local/state/hedge/jobs/${id}.plist`), join(home, `.local/state/hedge/jobs/${oldId(id)}.plist`));
     renameSync(join(home, `.local/state/hedge/jobs/${id}.sh`), join(home, `.local/state/hedge/jobs/${oldId(id)}.sh`));
-    launchd?.loaded.delete(`gui/501/dev.hedge.${id}`);
-    launchd?.loaded.add(`gui/501/dev.fleet.${oldId(id)}`);
+    launchd?.loaded.delete(`dev.hedge.${id}`);
+    launchd?.loaded.add(`dev.fleet.${oldId(id)}`);
   }
   for (const [before, after] of legacyPaths) if (existsSync(join(home, after))) renameSync(join(home, after), join(home, before));
   const statePath = join(home, ".local/state/fleet/state.json");
@@ -170,7 +160,7 @@ describe("an engine in a Fleet path from before the rename", () => {
 });
 
 describe("hedge import-fleet, which get.sh runs once the new engine is in place", () => {
-  test("copies the machine file, the profile, the config folder and the SSH keys with their modes, leaves the old tree as it was, and then apply turns the old jobs off", async () => {
+  test("copies the machine file, the profile, the config folder and the SSH keys with their modes, leaves the old tree as it was, and after retire-fleet, apply runs", async () => {
     const machine = linuxMachine();
     const { home, systemd } = machine;
     await beforeTheRename(machine);
@@ -194,9 +184,11 @@ describe("hedge import-fleet, which get.sh runs once the new engine is in place"
     const before = oldTree(home);
 
     const imported = await machine.hedge(["import-fleet"]);
+    const retired = await machine.hedge(["retire-fleet"]);
     const applied = await machine.hedge(["apply"]);
 
     expect(imported.output).toContain("Hedge: copied ~/.config/fleet to ~/.config/hedge.");
+    expect(retired.output).toContain("Hedge: stopped and turned off the systemd unit fleet-watch.service from before the rename, and kept its files.");
     expect(applied.code).toBe(0);
     expect(oldTree(home)).toEqual(before);
     expect(tree(join(home, ".config/hedge/secrets"))).toEqual(tree(join(home, ".config/fleet/secrets")));
@@ -215,25 +207,26 @@ describe("hedge import-fleet, which get.sh runs once the new engine is in place"
     expect(Object.keys(state.groups.hedge!).filter(underOldPaths)).toEqual([]);
     expect(Object.keys(state.groups.hedge!)).toContain(".config/hedge/hooks/run.sh");
 
-    systemd.calls.length = 0;
     const again = await machine.hedge(["import-fleet"]);
     const second = await machine.hedge(["apply"]);
 
     expect(again.output).toBe("");
     expect(second.output).toContain("Applied 0 changes.");
-    expect(systemd.calls.filter((call) => call.at(-1) === "fleet-watch.service" && call[2] !== "show")).toEqual([]);
+    expect(systemd.units.get("fleet-watch.service")).toEqual({ active: false, enabled: false });
     expect(oldTree(home)).toEqual(before);
     expect(stateOf(home)).toEqual(state);
   });
 
-  test("on a Mac, apply after the import turns the old launchd jobs off and loads the new ones, and keeps the old plists", async () => {
+  test("on a Mac, retire-fleet after the import turns the old launchd jobs off, apply loads the new ones, and the old plists stay", async () => {
     const machine = macMachine();
     const { home, launchd } = machine;
     await beforeTheRename(machine, launchd);
-    const old = [...launchd.loaded].filter((label) => label.startsWith("gui/501/dev.fleet."));
+    const old = [...launchd.loaded].filter((label) => label.startsWith("dev.fleet."));
     const plists = tree(join(home, "Library/LaunchAgents"));
 
     await machine.hedge(["import-fleet"]);
+    expect((await machine.hedge(["apply"])).code).toBe(1);
+    expect((await machine.hedge(["retire-fleet"])).code).toBe(0);
     expect((await machine.hedge(["apply"])).code).toBe(0);
 
     expect(old.length).toBeGreaterThan(0);

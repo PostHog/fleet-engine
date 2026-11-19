@@ -1235,6 +1235,6 @@ describe("T3 adapter guards", () => {
   });
 
   test("runs before the Jobs adapter in the engine", () => {
-    expect(engineAdapters().map((adapter) => adapter.name)).toEqual(["files", "config", "t3", "jobs", "identity"]);
+    expect(engineAdapters().map((adapter) => adapter.name)).toEqual(["fleet", "files", "config", "t3", "jobs", "identity"]);
   });
 });
