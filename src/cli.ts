@@ -30,7 +30,7 @@ import { spawnRunner, type CommandRunner } from "./adapters/run.ts";
 import { become, canBecome, type Become } from "./runner/become.ts";
 import { trackCommand } from "./usage/usage.ts";
 import { asHedge } from "./reconciler/engine-command.ts";
-import { adoptLegacyEnv, fleetIsHedge, isOldJob, profileFile, renamedPath, underLegacyPath, withLegacyNames } from "./legacy.ts";
+import { adoptLegacyEnv, fleetIsHedge, inAnyLegacyPath, isOldJob, profileFile, renamedPath, underLegacyPath, withLegacyNames } from "./legacy.ts";
 import { importFleet, isCopyOf } from "./import-fleet.ts";
 import { fleetAdapter, type FleetAdapter } from "./adapters/fleet/adapter.ts";
 
@@ -131,7 +131,6 @@ async function retireFleet(args: string[], options: CliOptions) {
   return 1;
 }
 
-/** What retire-fleet would stop, without changing anything. */
 async function listFleet(fleet: FleetAdapter, options: CliOptions) {
   const held = await fleet.holds(options.home, options.platform);
   for (const finding of held) options.print(`Hedge: ${finding.say}`);
@@ -179,12 +178,13 @@ async function reconcile(command: "apply" | "doctor", args: string[], options: C
   const flags = parseFlags(args);
   const doctor = command === "doctor";
   const preview = doctor || flags.dryRun;
-  const held = doctor ? [] : await fleetOf(options).holds(options.home, options.platform);
+  const holds = () => fleetOf(options).holds(options.home, options.platform);
+  const held = doctor ? [] : await holds();
   if (held.length && !flags.dryRun) return printReport({ ok: false, actions: [], findings: held, humanLeft: [] }, command, options.print, false), 1;
   const { plan, sources } = await loadPlan(options, flags.profile, { fetch: !preview, remember: !preview, inherit: preview });
   const adapters = (options.adapters ?? engineAdapters)();
   const issue: Issuer = (entries, node) => issueCredentials(entries, node, plan, sources, options);
-  const report = doctor ? await check(plan, { home: options.home, adapters, run: options.run }) : await apply(plan, { home: options.home, adopt: flags.adopt, adoptFrom: flags.adoptFrom, skip: flags.skip, dryRun: flags.dryRun, adapters, run: options.run, issue, progress: options.print });
+  const report = doctor ? await check(plan, { home: options.home, adapters, run: options.run }) : await apply(plan, { home: options.home, adopt: flags.adopt, adoptFrom: flags.adoptFrom, skip: flags.skip, dryRun: flags.dryRun, adapters, run: options.run, issue, progress: options.print, holds });
   if (doctor) {
     const drifted = await drift(plan, report.humanLeft);
     report.findings.push(...drifted);
@@ -490,7 +490,7 @@ function handlerSubcommands(plan: Plan) {
 function hedgeProfile(options: CliOptions, dir: string): string {
   if (!underLegacyPath(options.home, dir)) return dir;
   const copy = renamedPath(options.home, dir);
-  if (!copy || underLegacyPath(options.home, copy) || !existsSync(profileFile(copy)) || !isCopyOf(dir, copy)) throw new Error(`${dir} is in a Fleet path from before the rename, so Hedge does not use it. Run get.sh to copy it, or pass --profile with a profile outside the Fleet paths.`);
+  if (!copy || underLegacyPath(options.home, copy) || !existsSync(profileFile(copy)) || inAnyLegacyPath(profileFile(copy)) || !isCopyOf(dir, copy)) throw new Error(`${dir} is in a Fleet path from before the rename, so Hedge does not use it. Run get.sh to copy it, or pass --profile with a profile outside the Fleet paths.`);
   options.print(`Hedge: uses ${copy}, the copy of ${dir}, because ${dir} is in a Fleet path from before the rename.`);
   return copy;
 }

@@ -7,7 +7,7 @@ import type { CommandRunner } from "./adapters/run.ts";
 import { main } from "./cli.ts";
 import { fleetIsHedge, legacyPaths, underLegacyPath } from "./legacy.ts";
 import { saveAnswers, saveMachine } from "./profile/profile.ts";
-import { readEvents } from "../packs/hub/lib/secret-store.ts";
+import { secretCommand } from "../packs/hub/lib/secret-cli.ts";
 import { filesAdapter, type Adapter } from "./reconciler/apply.ts";
 import { fakeLaunchd } from "./testing/old-fleet.ts";
 import { fakeSystemd } from "./testing/systemd.ts";
@@ -402,22 +402,35 @@ describe("hedge import-fleet, which get.sh runs once the new engine is in place"
     expect(results[1]!.output).toContain("Hedge: left ~/.local/state/fleet/steps.json behind, because it is not a Hedge step ledger.");
   });
 
-  test("copies the secret store's event log with its values, so a stored value stays readable and a store that was off stays off", async () => {
-    const home = temp.make("home-");
+  test("copies the secret store's event log with its values, so hedge secret run serves a stored value and a store that was off stays off", async () => {
     const put = { type: "put", id: "p1", name: "slack", at: "2026-11-01T00:00:00.000Z", why: "intake", machine: "hub" };
     const off = { type: "off", id: "o1", reason: "leaked", at: "2026-11-02T00:00:00.000Z", machine: "hub" };
-    mkdirSync(join(home, ".config/fleet/secrets"), { recursive: true });
-    writeFileSync(join(home, ".config/fleet/secrets/slack.p1"), "SLACK_TOKEN=xoxb-test\n", { mode: 0o600 });
-    mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
-    writeFileSync(join(home, ".local/state/fleet/secrets.jsonl"), [put, off].map((event) => `${JSON.stringify(event)}\n`).join(""), { mode: 0o600 });
+    const [on, offHome] = [[put], [put, off]].map((events) => {
+      const home = temp.make("home-");
+      mkdirSync(join(home, ".config/fleet/secrets"), { recursive: true });
+      writeFileSync(join(home, ".config/fleet/secrets/slack.p1"), "SLACK_TOKEN=xoxb-test\n", { mode: 0o600 });
+      mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
+      writeFileSync(join(home, ".local/state/fleet/secrets.jsonl"), events.map((event) => `${JSON.stringify(event)}\n`).join(""), { mode: 0o600 });
+      return home;
+    }) as [string, string];
+    const served = async (home: string) => {
+      const shown: string[] = [];
+      const show = (text: string | Uint8Array) => void shown.push(typeof text === "string" ? text : Buffer.from(text).toString("utf8"));
+      const rows = [{ name: "slack", provider: { name: "slack" }, scope: "the test workspace", settings: "https://example.com/apps", env: ["SLACK_TOKEN"] }];
+      const code = await secretCommand(["run", "slack", "--", "sh", "-c", 'test "$SLACK_TOKEN" = xoxb-test && echo served'], { home, env: { HEDGE_SETTINGS: "{}" }, out: show, err: show, rows, now: () => new Date("2026-11-03T00:00:00Z") });
+      return { code, output: shown.join("") };
+    };
 
-    const imported = await hedge(["import-fleet"], home);
+    const imported = await Promise.all([on, offHome].map((home) => hedge(["import-fleet"], home)));
 
-    expect(imported.code).toBe(0);
-    expect(imported.output).toContain("Hedge: copied the secret store's log ~/.local/state/fleet/secrets.jsonl.");
-    expect(readEvents(home)).toEqual([put, off] as never);
-    expect(lstatSync(join(home, ".local/state/hedge/secrets.jsonl")).mode & 0o777).toBe(0o600);
-    expect(readFileSync(join(home, ".config/hedge/secrets/slack.p1"), "utf8")).toBe("SLACK_TOKEN=xoxb-test\n");
+    expect(imported.map((result) => result.code)).toEqual([0, 0]);
+    expect(imported[0]!.output).toContain("Hedge: copied the secret store's log ~/.local/state/fleet/secrets.jsonl.");
+    expect(lstatSync(join(on, ".local/state/hedge/secrets.jsonl")).mode & 0o777).toBe(0o600);
+    expect(await served(on)).toEqual({ code: 0, output: "served\n" });
+    const refused = await served(offHome);
+    expect(refused.code).toBe(1);
+    expect(refused.output).toContain("The store is off since 2026-11-02T00:00Z (leaked).");
+    expect(refused.output).not.toContain("served");
   });
 
   test("copies each old config file into a ~/.config/hedge that hedge devbox add made first, and keeps the files there", async () => {
@@ -537,6 +550,21 @@ describe("a profile in a Fleet path from before the rename", () => {
 
     expect(result.code).toBe(1);
     expect(result.output).toContain(`${old} is in a Fleet path from before the rename, so Hedge does not use it.`);
+  });
+
+  test("apply --profile refuses a Hedge copy whose profile file is a link back into the Fleet path, and writes no machine file", async () => {
+    const home = temp.make("home-");
+    const old = oldProfile(home);
+    const copy = join(home, ".local/share/hedge/profile");
+    cpSync(old, copy, { recursive: true });
+    rmSync(join(copy, "hedge.json"));
+    symlinkSync(join(old, "hedge.json"), join(copy, "hedge.json"));
+
+    const result = await hedge(["apply", "--profile", old], home);
+
+    expect(result.code).toBe(1);
+    expect(result.output).toContain(`${old} is in a Fleet path from before the rename, so Hedge does not use it.`);
+    expect(existsSync(machineFile(home))).toBe(false);
   });
 
   test("hedge set on a machine whose machine file points into a Fleet path changes the Hedge copy, not the old profile", async () => {

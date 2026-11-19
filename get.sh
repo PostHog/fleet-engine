@@ -378,8 +378,8 @@ fi
 
 if [ -n "$preview" ]; then
   say "This is a preview, so Hedge did not copy or stop the setup from before the rename. Without --dry-run, get.sh stops each piece of Fleet named below before it applies."
+  [ "${launcher##*/}" != hedge ] || sh "$launcher" retire-fleet --dry-run || exit $?
   if [ -z "$profile" ]; then
-    [ "${launcher##*/}" != hedge ] || sh "$launcher" retire-fleet --dry-run || exit $?
     say "A preview without --profile runs no setup. Run get.sh without --dry-run to set up, or add --profile <dir> to preview the apply."
     exit 0
   fi

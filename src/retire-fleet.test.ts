@@ -57,7 +57,7 @@ function machine(platform: NodeJS.Platform, home = oldInstall(), tasks?: FleetOp
     const code = await main(args, { home, engineRoot: engine, platform, env: {}, print: (line) => lines.push(line), run: async () => 0, adapters });
     return { code, output: lines.join("\n") };
   };
-  return { home, systemd, launchd, docker, t3, cron, hedge };
+  return { home, systemd, launchd, docker, t3, cron, hedge, fleet };
 }
 
 describe("hedge retire-fleet", () => {
@@ -196,12 +196,14 @@ describe("hedge retire-fleet", () => {
     linux.systemd.units.set("fleet-watch.service", { active: true, enabled: true });
 
     const retired = await linux.hedge(["retire-fleet"]);
+    const applied = await linux.hedge(["apply", "--profile", profileDir(["watcher"])]);
 
     expect(retired.code).toBe(0);
     expect(retired.output).toBe("Hedge: stopped and turned off the systemd unit fleet-watch.service from before the rename, and kept its files.");
-    expect(linux.systemd.calls.filter((call) => call.includes("fleet-heavy.slice") && !call.includes("list-units") && !call.includes("list-unit-files"))).toEqual([]);
+    expect(applied.code).toBe(0);
+    expect(linux.systemd.units.get("fleet-heavy.slice")).toEqual({ active: false, enabled: false });
+    expect(linux.systemd.calls.filter((call) => call.includes("fleet-heavy.slice") && ["stop", "disable", "mask", "kill"].includes(call[2]!))).toEqual([]);
     expect(readFileSync(join(linux.home, ".config/systemd/user/fleet-heavy.slice"), "utf8")).toBe("[Slice]\nMemoryMax=50%\n");
-    expect((await linux.hedge(["apply", "--profile", profileDir(["watcher"])])).code).toBe(0);
   });
 
   test("on a machine without Fleet, neither retire nor apply needs the account's home folder", async () => {
@@ -263,6 +265,24 @@ describe("hedge apply while Fleet still runs", () => {
     expect((await linux.hedge(["retire-fleet"])).code).toBe(0);
     expect((await linux.hedge(["apply", "--profile", profile])).code).toBe(0);
     expect(linux.systemd.units.get("hedge-watch.service")).toEqual({ active: true, enabled: true });
+  });
+
+  test("on Linux, checks again before it starts anything, so a Fleet unit that starts while Hedge loads the plan stops the apply", async () => {
+    const linux = machine("linux");
+    const firstCheck = linux.fleet.holds;
+    let checks = 0;
+    linux.fleet.holds = async (home, platform) => {
+      const held = await firstCheck(home, platform);
+      if (++checks === 1) linux.systemd.units.set("fleet-watch.service", { active: true, enabled: true });
+      return held;
+    };
+
+    const applied = await linux.hedge(["apply", "--profile", profileDir(["watcher"])]);
+
+    expect(applied.code).toBe(1);
+    expect(applied.output).toContain("The systemd unit fleet-watch.service from before the rename still runs (it is active), so Hedge started nothing. Run hedge retire-fleet, then hedge apply.");
+    expect(linux.systemd.started("watch")).toBe(0);
+    expect(linux.systemd.units.has("hedge-watch.service")).toBe(false);
   });
 
   test("on Linux, exits 1 when the new unit does not start after retire, and the old unit stays off", async () => {

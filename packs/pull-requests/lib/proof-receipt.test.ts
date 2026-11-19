@@ -2,7 +2,6 @@ import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { acceptGap, checkout, cleanFixtures, fakeModel, graded, hubAt, reviewHead, verdict, type Checkout } from "./proof-testing.ts";
-import { checkPlacement, keepBody, placeReceipt, withoutReceipt } from "./proof-receipt.ts";
 
 afterEach(cleanFixtures);
 
@@ -805,11 +804,17 @@ test("code is left out of the page where the parser puts it, indented or fenced,
   for (const output of ["TOP=", "NUMBERED=", "QUOTED=", "ITEM=", "TABBED=", "TABLED=", "FIRST=", "CR_FIRST=", "CR_SECOND=", "TABLE_CODE=", "HEADED=", "MARKED=", "TASKED=", "DELIMITED=", "FENCED_LIST=", "FENCED_QUOTE=", "QUOTED_FENCE=", "QUOTED_BLANK=", "FORGED=", "BULK_", "$ stays as written", "HTML_ENTITY_OUT", "\uE003", "hedge proof run"]) expect(Bun.markdown.html(page)).not.toContain(output);
 });
 
-test("a receipt that Hedge wrote before the rename leaves the body with the next one, so the PR never shows two", () => {
-  const old = `## Testing\n\n<!-- fleet-proof-receipt head=${"a".repeat(40)} hash=1 -->\nold receipt\n<!-- /fleet-proof-receipt -->\n\nMore text.\n`;
-  expect(withoutReceipt(old)).toBe("## Testing\n\nMore text.\n");
-  expect(() => checkPlacement(old, "Testing")).not.toThrow();
-  const placed = placeReceipt(old, { head: "b".repeat(40), hash: "2", section: "new receipt" }, "Testing");
-  expect(placed).toBe(`## Testing\n\n<!-- hedge-proof-receipt head=${"b".repeat(40)} hash=2 -->\nnew receipt\n<!-- /hedge-proof-receipt -->\n\nMore text.\n`);
-  expect(keepBody(old, placed)).toBe(placed);
+test("a receipt that Hedge wrote before the rename is replaced by the next one, so the PR never shows two", async () => {
+  const { pr, head } = await provedPr();
+  const legacy = `<!-- fleet-proof-receipt head=${"a".repeat(40)} hash=1 -->\nold receipt\n<!-- /fleet-proof-receipt -->\n\n`;
+  pr.pullRequestState({ body: template.replace("- [x] I ticked this box\n\n", `- [x] I ticked this box\n\n${legacy}`) });
+
+  expect((await pr.hedge("receipt")).code).toBe(0);
+
+  const body = pr.githubBody();
+  expect(body).not.toContain("fleet-proof-receipt");
+  expect(body).not.toContain("old receipt");
+  expect(body.match(/<!-- hedge-proof-receipt /g)).toHaveLength(1);
+  expect(block(body)).toContain(`head=${head}`);
+  expect(body.replace(block(body), "")).toBe(template.replace("- [x] I ticked this box\n\n", "- [x] I ticked this box\n\n\n\n"));
 });
