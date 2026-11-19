@@ -1,13 +1,52 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { main } from "../cli.ts";
-import { isolateGit, tempDirs } from "../testing/git.ts";
-import { coderToken, engineRoot, fakeMachine, hedgeSetup, machineFile, onBox, scripted } from "./testing.ts";
+import { git, isolateGit, tempDirs } from "../testing/git.ts";
+import { boxHome, coderToken, engineRoot, fakeMachine, hedgeSetup, machineFile, onBox, scripted } from "./testing.ts";
 
 isolateGit();
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
 
 describe("hedge devbox add", () => {
+  const addNode2 = async (home: string, box: ReturnType<typeof fakeMachine>) => {
+    const io = scripted([]);
+    const code = await main(["devbox", "add", "node-2"], { home, engineRoot, platform: "linux", print: io.terminal.print, terminal: io.terminal, setup: { machine: box.machine } });
+    return { code, output: io.output() };
+  };
+
+  test("hedge devbox add refuses a profile that pins an engine from before the rename, and installs nothing on the box", async () => {
+    const home = temp.make("home-");
+    expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""])).code).toBe(0);
+    const answers = join(machineFile(home).profileDir, "hedge.json");
+    const profile = JSON.parse(readFileSync(answers, "utf8"));
+    writeFileSync(answers, JSON.stringify({ ...profile, engine: { ...profile.engine, ref: "v0.0.9", channel: "release" } }));
+    git(machineFile(home).profileDir, "commit", "-q", "-am", "pin the engine from before the rename");
+    const box = fakeMachine(home, {}, { installers: { "v0.0.9": 'mkdir -p "$HOME/.local/share/fleet/engine" && echo installed > "$HOME/.local/share/fleet/engine/get.sh"\n' } });
+
+    const result = await addNode2(home, box);
+
+    expect(result.code).toBe(1);
+    expect(result.output).toContain("Your profile pins the engine at v0.0.9, from before Fleet became Hedge, so Hedge does not install it on node-2.");
+    expect(existsSync(join(boxHome(home, "node-2"), ".local/share/fleet"))).toBe(false);
+  });
+
+  test("hedge devbox add refuses a box whose ~/.config/hedge leads into Fleet's folder, and leaves Fleet's machine file as it was", async () => {
+    const home = temp.make("home-");
+    expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""])).code).toBe(0);
+    const config = join(boxHome(home, "node-2"), ".config");
+    mkdirSync(join(config, "fleet"), { recursive: true });
+    writeFileSync(join(config, "fleet/machine.json"), '{"schema":1,"role":"devbox"}\n');
+    symlinkSync(join(config, "fleet"), join(config, "hedge"));
+
+    const result = await addNode2(home, fakeMachine(home));
+
+    expect(result.code).toBe(1);
+    expect(result.output).toContain("~/.config/hedge or its machine.json on node-2 is a link, so Hedge does not write through it.");
+    expect(readFileSync(join(config, "fleet/machine.json"), "utf8")).toBe('{"schema":1,"role":"devbox"}\n');
+  });
+
   test("hedge devbox add makes a host a devbox later, and a failed install stops with what to do", async () => {
     const home = temp.make("home-");
     expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""])).code).toBe(0);
