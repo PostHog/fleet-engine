@@ -1227,6 +1227,13 @@ describe("the Git guard", () => {
     "bash -c 'gh pr list; env -i gh pr list'",
     "\"e\"nv -i gh pr list",
     "./bin/env -i gh pr list",
+    "git submodule foreach 'env -i gh pr list' && gh pr list",
+    "git submodule foreach bin/env -i gh pr list && gh pr list",
+    "git -c alias.l='!env -i gh pr list' l && gh pr list",
+    "git -C . -c core.pager=env log && gh pr list",
+    "git fetch --upload-pack 'env -i gh pr list' . && gh pr list",
+    "git rebase -x 'env -i gh pr list' main && gh pr list",
+    "GIT_SSH_COMMAND=env git fetch origin && gh pr list",
   ])("refuses %s, which may move the config gh reads its aliases from", async (command) => {
     const home = homeWith(withGuards());
     expect((await preToolUse(home, "claude", bash(command, await repo("feature")), { guardAsProcess: true })).refusal).toContain("sets or names GH_CONFIG_DIR");
@@ -1239,6 +1246,7 @@ describe("the Git guard", () => {
     "gh pr list --head fix/doas --json number",
     "git checkout -b fix/env && gh pr list --head fix/env",
     "GH_PAGER=cat gh pr view fix/sudo-env",
+    "git -C . push origin HEAD:fix/env && gh pr create --head fix/env --base main --title Env --body Env",
   ])("allows %s, whose branch name holds a wrapper's name but runs no wrapper", async (command) => {
     const home = homeWith(withGuards());
     expect(await preToolUse(home, "claude", bash(command, await repo("feature")), { guardAsProcess: true })).toEqual({ code: 0, refusal: undefined });

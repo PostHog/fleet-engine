@@ -178,11 +178,23 @@ const configRead = /\$(?:\{(?:GH_CONFIG_DIR|XDG_CONFIG_HOME|HOME)\}|(?:GH_CONFIG
 const environmentWrapper = /(?:^|[^\w.-])(?:sudo|doas|env)(?![\w.-])/;
 const commandBreak = /[;&|()`{}\n]/;
 const beforeCommand = /^(?:[A-Za-z_]\w*=\S*|\d*[<>]\S*|if|then|else|elif|do|while|until|!)$/;
-const takesNoCommand = new Set(["gh", "git"]);
+/** A ref or branch name, such as fix/env or origin/env:env, which git and gh read as data. */
+const refLike = /^\+?[\w-][\w.-]*(?:[/:][\w.-]+)+$/;
+/** git commands that read their operands as refs and paths, and the options and settings that make git run a program. */
+const gitDataCommands = new Set(["add", "branch", "checkout", "cherry-pick", "commit", "diff", "fetch", "log", "merge", "pull", "push", "reset", "restore", "revert", "show", "status", "switch", "tag", "worktree"]);
+const runsProgram = /^--(?:upload-pack|receive-pack|exec)(?:=|$)/;
+const wrapperWordsAreData = ([command = "", ...args]: string[]) => {
+  if (basename(command) === "gh") return true;
+  if (basename(command) !== "git") return false;
+  let at = 0;
+  while (args[at] === "-C") at += 2;
+  return gitDataCommands.has(args[at] ?? "") && args.every((arg) => !runsProgram.test(arg) && (!environmentWrapper.test(arg) || refLike.test(arg)));
+};
 const runsWrapper = (words: string) => words.split(commandBreak).some((part) => {
+  if (!environmentWrapper.test(part)) return false;
   const tokens = part.trim().split(/\s+/);
-  const command = tokens.find((token) => !beforeCommand.test(token));
-  return !(command && takesNoCommand.has(basename(command))) && environmentWrapper.test(part);
+  const at = tokens.findIndex((token) => !beforeCommand.test(token));
+  return at < 0 || tokens.slice(0, at).some((token) => environmentWrapper.test(token)) || !wrapperWordsAreData(tokens.slice(at));
 });
 /** The shell's `exec` can clear the environment too; `gh extension exec` also spells the word. */
 const execWord = /(?:^|[^\w.-])exec(?![\w.-])/g;
