@@ -522,7 +522,8 @@ const severityShorthand = /^\**(?:minor|nit)(?:[,:]\**|\**[,:])\s/i;
 function flooredItem(text: string) {
   const item = listItem.exec(text.split("\n")[0]!)?.[1];
   if (item === undefined) return false;
-  const stated = item.split("|").slice(0, 2).map((field) => severityField.exec(field.trim())?.[1]?.toLowerCase()).find(Boolean);
+  const fields = item.split("|");
+  const stated = fields.slice(0, Math.min(2, fields.length - 1)).map((field) => severityField.exec(field.trim())?.[1]?.toLowerCase()).find(Boolean);
   return stated ? stated === "minor" || stated === "nit" : severityShorthand.test(item);
 }
 

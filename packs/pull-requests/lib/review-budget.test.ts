@@ -715,7 +715,7 @@ test.each(["hedge-proof-checkout-", "hedge-proof-o'brien-"])("a budget lock whos
 
   expect(stuck).toContain(`The lock ${lock} is stuck: its holder is gone, and 10 takeovers of it stopped before they ended. Check that no hedge proof command runs on this PR, then run rm -f `);
   expect((await spawnAsync(["sh", "-c", clear])).exitCode).toBe(0);
-  expect(readdirSync(dirname(lock)).filter((name) => name.startsWith("round.lock"))).toEqual([]);
+  expect(readdirSync(dirname(lock)).filter((name) => name === "round.lock" || name.startsWith("round.lock.reclaim-"))).toEqual([]);
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", panel)).output).toContain(`"round":2`);
 });
 
@@ -951,9 +951,9 @@ test("a review that lists only minor or nit items that lead with the severity an
 
   expect((await pr.hedge("gate")).output).not.toContain("has unanswered findings");
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", fix)).output).toContain(`"round":3`);
-  await finishWith(pr, "3", "- feature.txt:1 | minor (major if two members share a name) | the greeting drops the name\n- minor:42 | blocker | the build breaks on an empty name\n- minor: helpers.ts:42 | blocker | the helper throws on an empty name\n");
+  await finishWith(pr, "3", "- feature.txt:1 | minor (major if two members share a name) | the greeting drops the name\n- minor:42 | blocker | the build breaks on an empty name\n- minor: helpers.ts:42 | blocker | the helper throws on an empty name\n\nTESTS:\n\n- feature.test.ts:4 asserts the hardcoded output Severity | minor\n");
   await pr.commit("feature.txt", "greet each member\n");
-  expect((await pr.hedge("gate")).output).toContain("review: round 3 has unanswered findings 1, 2, 3;");
+  expect((await pr.hedge("gate")).output).toContain("review: round 3 has unanswered findings 1, 2, 3, 4;");
   await expect(pr.hedge("review-start", "--scope", "fixes", "--base", later)).rejects.toThrow("The review budget of 1 reviews is spent");
 });
 
