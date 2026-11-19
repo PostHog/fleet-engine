@@ -539,6 +539,10 @@ the person:
   and give the file to the command over SSH, as its pack's setup note shows.
 - `Note:` information only.
 - `Everything matches your profile.` The box is set up.
+- `Everything Hedge sets matches your profile. The To do lines above wait for
+  you.` The box is set up. Each `To do:` line above it waits for the person,
+  such as adding a subscription to the hub's own-account proxy, and does not
+  stop setup. Tell the person what each one asks, and go on.
 
 ### When Hedge kept something of theirs
 

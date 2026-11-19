@@ -160,10 +160,13 @@ the person's own subscriptions, never for someone else's.
   agent's settings out and removes Hedge's own values, so the agent uses its
   own sign-in, and the next apply changes nothing. `hedge apply` and
   `hedge doctor` name the failed check. When the proxy answers the key but
-  serves no model for the agent, because it holds none of that agent's
-  subscriptions that work, the check exits 4: the agent stays on its own
-  sign-in, and the line is a `To do:` with the login command, not a
-  failure. `hedge cli-proxy connect` then saves the key and changes no
+  lists no model for the agent, the check exits 4: the agent stays on its
+  own sign-in, and the line is a `To do:` with the login command, not a
+  failure. The `To do:` names the agent whose model is missing. Most often
+  the proxy holds none of that agent's subscriptions that work. Run
+  `hedge cli-proxy doctor` on the hub to tell the two cases apart: it counts
+  the subscriptions that work, and fails when one works but the proxy lists
+  no model for it. `hedge cli-proxy connect` then saves the key and changes no
   agent settings; `hedge apply` keeps the agent on its own sign-in until
   the proxy serves it, and then sends it there. Connect still changes nothing when the proxy
   does not answer or refuses the key. The first apply after the proxy

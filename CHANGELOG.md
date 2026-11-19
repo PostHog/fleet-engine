@@ -17,13 +17,20 @@
   `hedge cli-proxy connect` saves the key on a node in that case, so the
   first `hedge apply` after the proxy serves an agent sends it there.
   Connect changes no agent settings in that case: `hedge apply` takes
-  Hedge's route off an agent that the proxy no longer serves. On the both plan, `hedge doctor` fails while a Codex
+  Hedge's route off an agent that the proxy no longer serves. When the hub
+  hands a box over while the proxy serves none of its agents, the hub shows
+  the box's line that it keeps its own sign-in. On the both plan, `hedge doctor` fails while a Codex
   subscription works but the proxy serves no Codex model. A
   proxy that is down, refuses the key, answers without a model list, or
   runs a plugin Hedge did not install still fails `hedge doctor`.
 - A pack check can name a `todo`: when its command exits 4, Hedge prints
   it as a `To do:` line, keeps the config that waits for the check out, and
-  fails neither apply nor doctor. Apply runs such a check after the steps.
+  fails neither apply nor doctor. Apply runs such a check again after the
+  steps, unless it passed or waited before them, and reports what it finds
+  then. When it passes then, apply drops its old `Fix:` and writes the
+  config that waits for it, so a hub whose proxy was stopped routes Claude
+  Code in one apply. `hedge doctor` reads one result of each check for both
+  the config and its line.
 
 ### Hedge is cloud only
 
