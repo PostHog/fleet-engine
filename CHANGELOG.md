@@ -119,6 +119,11 @@
   count reach the ceiling. A review counts when the gate asks for an answer
   to one of its items: a blocker, a major, a finding without a severity, or a
   TESTS item.
+- A review that starts while another weighs the budget backs out when the
+  other one started first. This holds also when the other one reuses the
+  name of a final read that was dropped meanwhile. A reservation that hedge
+  cannot read for any reason other than a missing file stops the command
+  with the read error, so the budget is never counted short.
 
 ## v0.1.0
 

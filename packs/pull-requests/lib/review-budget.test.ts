@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawnAsync } from "../../../src/testing/spawn.ts";
@@ -485,6 +485,60 @@ test("a review that another one overtakes while it weighs the budget backs out",
   await expect(pr.hedge("show", "--round", "3")).rejects.toThrow("has no reservation");
 });
 
+test("a fixes round backs out when a dropped final read's name is reused while it weighs the budget, so it never opens past the ceiling", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: graded("non-critical", "medium") });
+  pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 2, "pull-requests.reviewCeiling": 3 });
+  await pr.commit("feature.txt", "greet\n");
+  await pr.hedge("require", "--none", "--reason", "fixture");
+  const panel = await panelReview(pr, "- feature.txt:1 | major | Correctness | the greeting drops the name | greet by name | anchor: greet");
+  const fix = await pr.commit("feature.txt", "greet the member\n");
+  await pr.hedge("review-start", "--scope", "fixes", "--base", panel);
+  writeFileSync(join(pr.repository, "findings.md"), "- major | feature.txt:1 | the member goes unnamed | anchor: greet the member\n");
+  await pr.hedge("review-finish", "--round", "2", "--reviewer", "gpt-6.1-sol", "findings.md");
+  await pr.commit("feature.txt", "greet the new member\n");
+  const babysit = JSON.parse((await pr.hedge("review-start", "--scope", "final", "--phase", "babysit", "--base", fix)).output.split("\n")[0]!);
+  expect(babysit).toMatchObject({ round: "final", id: "final-1" });
+  const [started, go] = ["started", "go"].map((name) => join(pr.home, name));
+  await spawnAsync(["mkfifo", started, go]);
+  pr.env.HEDGE_REVIEW_ARBITER = `cat >/dev/null; if mkdir "${pr.home}/first" 2>/dev/null; then echo > "${started}"; read line < "${go}"; fi; echo CONTINUE`;
+
+  const slow = pr.hedge("review-start", "--scope", "fixes", "--base", fix);
+  await readFile(started, "utf8");
+  rmSync(babysit.directory, { recursive: true, force: true });
+  expect((await pr.hedge("review-start", "--scope", "final", "--base", fix)).output).toContain(`"id":"final-1"`);
+  writeFileSync(join(pr.repository, "findings.md"), "- major | feature.txt:1 | the new member goes unnamed | anchor: greet the new member\n");
+  await pr.hedge("review-finish", "--round", "final-1", "--reviewer", "gpt-6.1-sol", "findings.md");
+  await writeFile(go, "go\n");
+
+  await expect(slow).rejects.toThrow("Review final-1 started while this one weighed the budget");
+  await expect(pr.hedge("show", "--round", "3")).rejects.toThrow("has no reservation");
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", fix)).rejects.toThrow("The review budget of 3 reviews is spent");
+});
+
+test("respond surfaces a reservation it cannot read instead of counting that review as unspent, and takes the known answer once the reservation reads again", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: graded("non-critical", "medium") });
+  pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 10, "pull-requests.reviewCeiling": 2 });
+  await pr.commit("feature.txt", "greet\n");
+  await pr.hedge("require", "--none", "--reason", "fixture");
+  const panel = await panelReview(pr, "- feature.txt:1 | major | Correctness | the greeting drops the name | greet by name | anchor: greet");
+  await pr.commit("feature.txt", "greet the member\n");
+  await pr.hedge("review-start", "--scope", "final", "--base", panel);
+  writeFileSync(join(pr.repository, "findings.md"), "- major | feature.txt:1 | the member goes unnamed | anchor: greet the member\n");
+  await pr.hedge("review-finish", "--round", "final-1", "--reviewer", "gpt-6.1-sol", "findings.md");
+  const reservation = join(pr.pullRequest, "reviews", "final-1", "round.json");
+  const saved = readFileSync(reservation, "utf8");
+  rmSync(reservation);
+  mkdirSync(reservation);
+  writeFileSync(join(pr.repository, "responses.md"), [1, 2, 3].map((finding) => `${finding}. known: listed under Known issues.\n`).join(""));
+
+  await expect(pr.hedge("respond", "--round", "1", "responses.md")).rejects.toThrow("EISDIR");
+  rmSync(reservation, { recursive: true });
+  writeFileSync(reservation, saved);
+  expect((await pr.hedge("respond", "--round", "1", "responses.md")).code).toBe(0);
+});
+
 const lensAnswer = (findings: string) => `FINDINGS:\n${findings}\nCOVERED: feature.txt\n`;
 const major = (finding: string) => lensAnswer(`- feature.txt:1 | major | Correctness | ${finding} | fix it | anchor: greet`);
 const minor = lensAnswer("- feature.txt:1 | minor | Design | a name reads plain | rename it | anchor: greet");
@@ -619,21 +673,24 @@ test("with as many finished rounds as the ceiling but budget left by a clean pan
   expect(refused).toContain(`HEAD needs no final read: final read carried from ${fix.slice(0, 7)}: revert of a PR commit. hedge proof gate counts the carry. To read it anyway, pass --agent '<your reason>', or the user's --override`);
 });
 
-test("a final read that another command drops while this one counts the budget leaves the needs-no-final-read answer for a carried HEAD", async () => {
+test("a final read reserved through the CLI and then dropped leaves the needs-no-final-read answer for a carried HEAD, with the --agent and --override retry advice", async () => {
   const pr = await checkout();
   pr.pullRequestState({ body: graded("non-critical", "medium") });
   pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 10, "pull-requests.reviewCeiling": 10 });
   await pr.commit("feature.txt", "greet\n");
   await pr.hedge("require", "--none", "--reason", "fixture");
-  await cannedPanel(pr, { design: minor, others: major("the greeting drops the name") });
+  const panel = await cannedPanel(pr, { design: minor, others: major("the greeting drops the name") });
   const fix = await pr.commit("feature.txt", "greet the member\n");
-  await pr.hedge("review-start", "--scope", "fixes", "--base", await pr.git("rev-parse", "HEAD~1"));
+  await pr.hedge("review-start", "--scope", "fixes", "--base", panel);
   await finishWith(pr, "2", major("the member goes unnamed"));
   const change = await pr.commit("feature.txt", "greet the new member\n");
+  const reserved = JSON.parse((await pr.hedge("review-start", "--scope", "final", "--base", fix)).output.split("\n")[0]!);
+  expect(reserved).toMatchObject({ round: "final", id: "final-1" });
+  rmSync(reserved.directory, { recursive: true, force: true });
   await pr.git("revert", "--no-edit", change);
-  mkdirSync(join(pr.pullRequest, "reviews", "final-1"));
 
-  await expect(pr.hedge("review-start", "--scope", "final", "--base", fix)).rejects.toThrow(`HEAD needs no final read: final read carried from ${fix.slice(0, 7)}: revert of a PR commit. hedge proof gate counts the carry.`);
+  const refused = await pr.hedge("review-start", "--scope", "final", "--base", fix).then(() => "", (error: Error) => error.message);
+  expect(refused).toBe(`HEAD needs no final read: final read carried from ${fix.slice(0, 7)}: revert of a PR commit. hedge proof gate counts the carry. To read it anyway, pass --agent '<your reason>', or the user's --override`);
 });
 
 test("a fixes round left unfinished and then reverted still gets the needs-no-final-read answer, without retry advice that the unfinished review would refuse", async () => {

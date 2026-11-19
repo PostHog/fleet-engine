@@ -142,24 +142,27 @@ const finalReadPrefix = "final-";
 const finalReadPhases = ["review", "babysit"] as const;
 type FinalReadPhase = (typeof finalReadPhases)[number];
 
+const unstarted = "￿";
 const isReviewName = (name: string) => /^(\d+|final-\d+)$/.test(name);
 const reviewNames = async (reviews: string) => (await entries(reviews)).filter(isReviewName);
 /** When a round was reserved; a round that vanished meanwhile sorts last, so it never makes another back out. */
 const reservedAt = async (reviews: string, name: string) =>
-  (await readJson<{ startedAt?: string } | undefined>(join(reviews, name, "round.json"), undefined))?.startedAt ?? "￿";
+  (await readJson<{ startedAt?: string } | undefined>(join(reviews, name, "round.json"), undefined))?.startedAt ?? unstarted;
 
 function finalReadPhase(value: string): FinalReadPhase {
   if (!(finalReadPhases as readonly string[]).includes(value)) throw new Error("Final read phase must be review or babysit");
   return value as FinalReadPhase;
 }
 
-async function reviewsSpent(reviews: string, started: string[], phase: FinalReadPhase) {
-  const spent = await Promise.all(started.map(async (name) => {
-    const round = name.startsWith(finalReadPrefix) ? await readFile(join(reviews, name, "round.json"), "utf8").catch(() => undefined) : "{}";
-    if (round === undefined) return false;
-    return ((JSON.parse(round) as { phase?: FinalReadPhase }).phase ?? "review") === phase && await leadsToFixes(join(reviews, name));
+type Counted = Map<string, string>;
+
+async function reviewsSpent(reviews: string, phase: FinalReadPhase) {
+  const rounds = await Promise.all((await reviewNames(reviews)).map(async (name) => {
+    const round = await readJson<{ phase?: FinalReadPhase; startedAt?: string } | undefined>(join(reviews, name, "round.json"), undefined);
+    return round && { name, startedAt: round.startedAt ?? unstarted, spends: (round.phase ?? "review") === phase && await leadsToFixes(join(reviews, name)) };
   }));
-  return spent.filter(Boolean).length;
+  const present = rounds.filter((round) => round !== undefined);
+  return { spent: present.filter(({ spends }) => spends).length, counted: new Map(present.map(({ name, startedAt }) => [name, startedAt] as const)) };
 }
 
 async function leadsToFixes(directory: string) {
@@ -241,14 +244,13 @@ async function startFinalRead(home: string, identity: ProofIdentity, base: strin
   if (base === identity.commit) throw new Error("HEAD is already reviewed. Skip the final read.");
   const reviews = join(pullRequestDirectory(home, identity), "reviews");
   for (let attempt = 1; attempt <= 100; attempt++) {
-    const started = await reviewNames(reviews);
+    const { spent, counted } = await reviewsSpent(reviews, phase);
     const finished = await finishedReviews(home, identity);
     const carried = gateCarry(identity, finished, cleanBaseMerge, quietCommit).found;
     const latest = finished.at(-1);
     if (!latest) throw new Error("A final read needs a finished earlier review");
     if (!coversReview(base, latest.commit, cleanBaseMerge)) throw new Error(`Final read base must be the latest reviewed commit ${latest.commit}, or a clean base merge the gate carried it to`);
-    const unfinished = finished.length < started.length;
-    const spent = await reviewsSpent(reviews, started, phase);
+    const unfinished = [...counted.keys()].some((name) => !finished.some((review) => review.name === name));
     const { free, ceiling } = permit.limits;
     const retry = unfinished ? "" : ` To read it anyway, pass ${spent < ceiling ? "--agent '<your reason>', or " : ""}the user's --override`;
     if (!decision && carried?.quiet.length) throw new Error(`HEAD needs no final read: final read carried from ${short(carried.from)}: ${quietReason(carried.kinds)}. hedge proof gate counts the carry.${retry}`);
@@ -256,18 +258,19 @@ async function startFinalRead(home: string, identity: ProofIdentity, base: strin
     const stop = carried && spent >= ceiling ? budgetSpent(permit.limits) : undefined;
     const verdict = await permitReview(home, identity, spent >= free, stop, decision, permit);
     let read = 1;
-    while (started.includes(finalReadPrefix + read)) read++;
+    while (counted.has(finalReadPrefix + read)) read++;
     const name = finalReadPrefix + read;
-    if (await reserveDecided(reviews, name, { ...identity, round: "final", read, scope: "final", base, from, phase, arbiter: verdict, capturedBy }, decision, lock)) return await reservedAlone(reviews, started, name, { round: "final", id: name, directory: join(reviews, name) });
+    if (await reserveDecided(reviews, name, { ...identity, round: "final", read, scope: "final", base, from, phase, arbiter: verdict, capturedBy }, decision, lock)) return await reservedAlone(reviews, counted, name, { round: "final", id: name, directory: join(reviews, name) });
   }
   throw new Error("Final read limit exceeded");
 }
 
-async function reservedAlone(reviews: string, counted: string[], name: string, reserved: Reserved) {
-  const others = (await reviewNames(reviews)).filter((started) => started !== name && !counted.includes(started));
+async function reservedAlone(reviews: string, counted: Counted, name: string, reserved: Reserved) {
+  const others = (await reviewNames(reviews)).filter((started) => started !== name);
   const mine = await reservedAt(reviews, name);
   // Both racers see each other, so only the later reservation backs out; the earlier one keeps its round.
   const other = (await Promise.all(others.map(async (started) => ({ started, at: await reservedAt(reviews, started) }))))
+    .filter(({ started, at }) => counted.get(started) !== at)
     .find(({ started, at }) => at < mine || (at === mine && started < name))?.started;
   if (!other) return reserved;
   await rm(join(reviews, name), { recursive: true, force: true });
@@ -299,12 +302,11 @@ async function startRound(home: string, identity: ProofIdentity, reviews: string
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     if (round === 1 && scope !== "full") throw new Error("Round 1 is --scope full: it reviews the whole PR diff. Drop --base");
     if (round > 1) await checkLaterRound(reviews, round, scope, base, decision, cleanBaseMerge);
-    const started = await reviewNames(reviews);
-    const spent = await reviewsSpent(reviews, started, "review");
+    const { spent, counted } = await reviewsSpent(reviews, "review");
     const { free, ceiling } = permit.limits;
     const stop = spent >= ceiling ? budgetSpent(permit.limits) : undefined;
     const verdict = await permitReview(home, identity, spent >= free, stop, decision, permit);
-    if (await reserveDecided(reviews, String(round), { ...identity, round, scope, base, from, arbiter: verdict, capturedBy }, decision, lock)) return await reservedAlone(reviews, started, String(round), { round, id: String(round), directory });
+    if (await reserveDecided(reviews, String(round), { ...identity, round, scope, base, from, arbiter: verdict, capturedBy }, decision, lock)) return await reservedAlone(reviews, counted, String(round), { round, id: String(round), directory });
   }
   throw new Error("Review limit exceeded");
 }
@@ -472,9 +474,8 @@ export async function respondToReview(home: string, identity: ProofIdentity, rou
   if (missing.length) throw new Error(`Answer findings ${missing.join(", ")} too: one line each, numbered in the order of findings.md, such as "${missing[0]}. fixed in 1a2b3c4: <how>", "${missing[0]}. rejected: <why>", or, at the review budget, "${missing[0]}. known: <why>" for a finding listed under Known issues. Minor and nit findings need no answer; a TESTS item gets a test-only rewrite or delete`);
   if (answeredFindings(findings, bytes.toString()).findings.some(({ answer }) => answer?.verdict === "known")) {
     const reviews = join(pullRequestDirectory(home, identity), "reviews");
-    const started = await reviewNames(reviews);
     const phase = (await readJson<{ phase?: FinalReadPhase }>(join(directory, "round.json"), {})).phase ?? "review";
-    const spent = await reviewsSpent(reviews, started, phase);
+    const { spent } = await reviewsSpent(reviews, phase);
     if (spent < ceiling) throw new Error(`Answer a finding "known" only once the review budget of ${ceiling} reviews is spent; ${spent} ran. Fix or reject it now`);
   }
   const destination = join(directory, "responses.md");
