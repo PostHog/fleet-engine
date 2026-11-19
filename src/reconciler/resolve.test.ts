@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadPacks } from "../pack/manifest.ts";
+import { loadPacks, parseManifest } from "../pack/manifest.ts";
 import type { AvailableSource, FetchedSource, MachineFile, MachineRole, PackManifest, Plan, Profile } from "../pack/types.ts";
 import { tempDirs } from "../testing/git.ts";
 import { apply, check } from "./apply.ts";
@@ -55,6 +55,8 @@ function withPack(manifest: PackManifest, files: Record<string, string> = {}): A
   }
   return { ref: { name: manifest.name, repo: dir, ref: "v1" }, dir, packs: [{ manifest, dir: packDir }] };
 }
+
+const validPack = (manifest: PackManifest) => withPack(parseManifest(manifest, manifest.name));
 
 const temp = tempDirs();
 
@@ -269,8 +271,21 @@ describe("resolve", () => {
     const resolved = plan({ packs: ["shelf", "cloud", "local"] }, mac, [engine, cloud, local, shelf]);
     expect(resolved.workflows.filter((state) => state.pack !== "base").map(({ id, active, reason }) => [id, active, reason])).toEqual([["shelf", true, undefined], ["cloud", false, "waits for setting cloud.token"], ["local", true, undefined]]);
     expect(resolved.settings["context.repo"]).toBe("me/context");
-    const own = withPack({ schema: 1, name: "own", summary: "Own.", settings: [{ key: "own.key", question: "Key?", type: "string", ask: "never", default: "from-fallback" }], workflows: [{ id: "preferred", name: "Preferred", sentence: "Preferred.", default: true, offUntilSet: ["own.key"] }, { id: "fallback", name: "Fallback", sentence: "Fallback.", default: true, settings: ["own.key"], yields: ["preferred"] }] });
-    expect(plan({ packs: ["own"] }, mac, [engine, own]).workflows.filter((state) => state.pack === "own").map(({ id, active, reason }) => [id, active, reason])).toEqual([["preferred", false, "waits for setting own.key"], ["fallback", true, undefined]]);
+  });
+
+  test("keeps holding a workflow whose own fallback supplies its setting", () => {
+    const own = validPack({ schema: 1, name: "own", summary: "Own.", settings: [{ key: "context.repo", question: "Repo?", type: "string", ask: "never", optional: true }], workflows: [{ id: "preferred", name: "Preferred", sentence: "Preferred.", default: true, settings: ["context.repo"], offUntilSet: ["context.repo"] }, { id: "fallback", name: "Fallback", sentence: "Fallback.", default: true, yields: ["preferred"] }] });
+    const spare = validPack({ schema: 1, name: "spare", summary: "Spare.", settings: [{ key: "context.repo", question: "Repo?", type: "string", ask: "never", default: "me/context" }], workflows: [{ id: "feeder", name: "Feeder", sentence: "Feeder.", default: true, settings: ["context.repo"], requires: ["fallback"] }] });
+    const resolved = plan({ packs: ["own", "spare"] }, mac, [engine, own, spare]);
+    expect(resolved.workflows.filter((state) => state.pack !== "base").map(({ id, active, reason }) => [id, active, reason])).toEqual([["preferred", false, "waits for setting context.repo"], ["fallback", true, undefined], ["feeder", true, undefined]]);
+  });
+
+  test("names the setting a held workflow still misses after a fallback supplies its first one", () => {
+    const remote = validPack({ schema: 1, name: "remote", summary: "Remote.", settings: [{ key: "remote.token", question: "Token?", type: "string", ask: "never", optional: true }, { key: "context.repo", question: "Repo?", type: "string", ask: "never", default: "me/context" }], workflows: [{ id: "cloud", name: "Cloud", sentence: "Cloud.", default: true, settings: ["remote.token"], offUntilSet: ["remote.token"] }, { id: "local", name: "Local", sentence: "Local.", default: true, settings: ["context.repo"], yields: ["cloud"] }] });
+    const shelf = validPack({ schema: 1, name: "shelf", summary: "Shelf.", settings: [{ key: "context.repo", question: "Repo?", type: "string", ask: "never", optional: true }, { key: "context.path", question: "Path?", type: "string", ask: "never", optional: true }], workflows: [{ id: "shelf", name: "Shelf", sentence: "Shelf.", default: true, settings: ["context.repo", "context.path"], offUntilSet: ["context.repo", "context.path"] }] });
+    const resolved = plan({ packs: ["shelf", "remote"] }, mac, [engine, remote, shelf]);
+    expect(resolved.workflows.filter((state) => state.pack !== "base").map(({ id, active, reason }) => [id, active, reason])).toEqual([["shelf", false, "waits for setting context.path"], ["cloud", false, "waits for setting remote.token"], ["local", true, undefined]]);
+    expect(resolved.settings["context.repo"]).toBe("me/context");
   });
 
   test("settles a chain of yields: the first stays on when the one it yields to yields in turn", () => {
