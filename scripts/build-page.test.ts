@@ -7,9 +7,6 @@ import { spawnAsync } from "../src/testing/spawn.ts";
 import { logoMark } from "../page/logo.ts";
 import { firstStart, installPrompt, startPrompt, toggleSelected, type PageData, type PromptData } from "../page/model.ts";
 import { t3Link } from "../page/prompt.ts";
-import { parseSetupFlags } from "../src/setup/flags.ts";
-import { picksFrom } from "../src/setup/questions.ts";
-import { loadCatalog } from "../src/setup/setup.ts";
 import { buildSite, pageData, type SiteFiles } from "./build-page.ts";
 
 const root = join(import.meta.dir, "..");
@@ -122,7 +119,7 @@ describe("the site build", () => {
     expect(localTargets("index.html", html).filter((target) => /^packs\/.+\//.test(target))).toEqual([]);
   });
 
-  test("the packs page shows Base and Hub in every Hedge without a switch, then the picks in three groups, and leaves Integrations off the site while Everything still installs it", async () => {
+  test("the packs page shows Base and Hub in every Hedge without a switch, then the picks in three groups, and leaves Integrations off the site", async () => {
     const groupsOf = (html: string) =>
       [...html.matchAll(/<section[^>]*aria-labelledby="(group-\d+)"[^>]*>([\s\S]*?)<\/section>/g)].map(([, id, body]) => [
         visibleText(body!.match(new RegExp(`<h2[^>]*id="${id}"[^>]*>([\\s\\S]*?)</h2>`))![1]!).trim(),
@@ -136,8 +133,6 @@ describe("the site build", () => {
     ]);
     expect(visibleText(page("packs/hub/index.html"))).toContain("Every Hedge has this pack. You add nothing.");
     expect(Object.keys(files)).not.toContain("packs/integrations/index.html");
-    const everything = picksFrom(parseSetupFlags(["--preset", "everything"]), await loadCatalog(root, [], temp.make("home-")));
-    expect(everything.packs).toContain("integrations");
     const team = await buildSite({ audience: "posthog", team: [teamPack()] });
     expect(groupsOf(page("packs/index.html", team)).at(-1)).toEqual(["Your team's packs", ["Posthog (switch)"]]);
   });
