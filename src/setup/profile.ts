@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { copyFile, mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { PackManifest, Profile, ProfileFile, SettingValue } from "../pack/types.ts";
-import { bothChanged, loadProfile, saveAnswers } from "../profile/profile.ts";
+import { bothChanged, loadProfile, pushedBehind, saveAnswers } from "../profile/profile.ts";
 import type { Machine } from "./commands.ts";
 import { defaultSources, engineRepo } from "./defaults.ts";
 import { profileFile } from "../legacy.ts";
@@ -119,6 +119,7 @@ export async function existingProfile(machine: Machine, home: string, packs: Pac
 async function makeProfile(context: ProfileContext) {
   const { terminal, machine, home, draft } = context;
   const { gh, login, exists, personal, org, team, dir, found } = await lookUp(machine, home, context.packs(), draft.packs ?? [], context.current);
+  if (found && (await machine.exec(["git", "-C", dir, "status", "--porcelain", "--", basename(profileFile(dir))])).output.trim()) throw new Error(`${dir}: ${basename(profileFile(dir))} has changes that are not committed. Commit or discard them, then try again.`);
   if (found && existsSync(profileFile(dir)) && context.loaded?.() !== undefined && readFileSync(profileFile(dir), "utf8") !== context.loaded()) throw new Error(changedMeanwhile(dir));
   const create = (repo: string, description: string) => machine.exec(["gh", "repo", "create", repo, "--private", "--description", description]);
   let profileRepo = found ?? team ?? personal;
@@ -146,6 +147,7 @@ async function makeProfile(context: ProfileContext) {
 
   if (!found) await checkout(machine, home, dir, profileRepo);
   const target = await saveTarget(machine, dir);
+  const head = await machine.exec(["git", "-C", dir, "rev-parse", "--verify", "-q", "HEAD"]);
   await git(machine, dir, "config", "user.name", login);
   await git(machine, dir, "config", "user.email", `${login}@users.noreply.github.com`);
   await startFiles(dir, context, same(profileRepo, team) ? org : undefined);
@@ -163,7 +165,12 @@ async function makeProfile(context: ProfileContext) {
     await git(machine, dir, "commit", "-q", "-m", "Start my Hedge profile", "--", ...started);
   }
   await saveAnswers(dir, answers);
-  await git(machine, dir, "push", "-q", ...target);
+  const pushed = await machine.exec(["git", "-C", dir, "push", "-q", ...target]);
+  if (pushed.code !== 0 && head.code === 0 && pushedBehind(pushed.output)) {
+    await git(machine, dir, "reset", "-q", "--keep", head.output.trim());
+    throw new Error(changedMeanwhile(dir));
+  }
+  if (pushed.code !== 0) throw new Error(`git push in ${dir} failed: ${lastLine(pushed.output)}`);
   terminal.print(`  ✓ Saved your answers in ${profileRepo}. Every machine of yours reads it.`);
   await context.saved(dir);
 }
@@ -207,13 +214,13 @@ async function trackedOnOrigin(machine: Machine, dir: string) {
 
 export async function takeOrigin(machine: Machine, home: string, dir: string) {
   await knowGitHub(machine, home, dir);
-  await git(machine, dir, "fetch", "-q", "origin");
+  await git(machine, dir, "fetch", "-q", "--prune", "origin");
   const merge = await trackedOnOrigin(machine, dir);
   if (!merge) return undefined;
   const fetched = await machine.exec(["git", "-C", dir, "rev-parse", "@{upstream}"]);
   if (fetched.code !== 0) {
     if ((await machine.exec(["git", "-C", dir, "rev-parse", "--verify", "-q", "HEAD"])).code !== 0) return undefined;
-    throw new Error(`could not find ${merge} of origin in ${dir} after fetching origin: ${lastLine(fetched.output)}. Run git -C ${dir} pull, then run hedge setup again.`);
+    throw new Error(`could not find ${merge} of origin in ${dir} after fetching origin: ${(fetched.output.split("\n").find((line) => line.startsWith("fatal:")) ?? lastLine(fetched.output)).replace(/\.$/, "")}. Run git -C ${dir} pull, then run hedge setup again.`);
   }
   const merged = await machine.exec(["git", "-C", dir, "merge", "-q", "--ff-only", fetched.output.trim()]);
   return merged.code === 0 ? undefined : merged;

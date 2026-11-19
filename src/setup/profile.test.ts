@@ -244,17 +244,17 @@ describe("hedge setup profile", () => {
     expect(await spawnGit(dotfiles, "show", "hub:about-me.md")).toBe("# Changed on another machine");
   });
 
-  test("stops before it applies when origin fetches no branch the checkout's branch tracks, and names why", async () => {
+  test("stops before it applies when another machine deleted the branch the checkout tracks on origin, and names why", async () => {
     const home = temp.make("home-");
-    const { checkout } = await branchCheckout(home);
-    await spawnGit(checkout, "config", "remote.origin.fetch", "+refs/heads/main:refs/remotes/origin/main");
-    await spawnGit(checkout, "update-ref", "-d", "refs/remotes/origin/hub");
+    const { dotfiles, checkout } = await branchCheckout(home);
+    await spawnGit(dotfiles, "branch", "-D", "hub");
+    const applied = join(home, "applied");
 
-    const rerun = await hedgeSetup(home, ["--non-interactive"], []);
+    const rerun = await hedgeSetup(home, ["--non-interactive"], [], undefined, undefined, 0, "linux", () => writeFileSync(applied, ""));
 
     expect(rerun.code).toBe(1);
-    expect(rerun.output).toContain(`hedge: could not find refs/heads/hub of origin in ${checkout} after fetching origin: fatal: upstream branch 'refs/heads/hub' not stored as a remote-tracking branch. Run git -C ${checkout} pull, then run hedge setup again.`);
-    expect(rerun.applied).toEqual([]);
+    expect(rerun.output).toContain(`hedge: could not find refs/heads/hub of origin in ${checkout} after fetching origin: fatal: ambiguous argument '@{upstream}': unknown revision or path not in the working tree. Run git -C ${checkout} pull, then run hedge setup again.`);
+    expect(existsSync(applied)).toBe(false);
   });
 
   test("adds the host keys of github.com, not of the host gh uses by default, before it reaches a profile over SSH, and keeps the lines already there", async () => {

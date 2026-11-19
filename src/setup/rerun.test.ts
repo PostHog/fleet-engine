@@ -6,7 +6,7 @@ import { loadPacks } from "../pack/manifest.ts";
 import type { FetchedSource, SourceRef } from "../pack/types.ts";
 import { isolateGit, spawnGit, tempDirs } from "../testing/git.ts";
 import { profilePath } from "./profile.ts";
-import { engineRoot, fakeMachine, hedgeSetup, githubRepo, machineFile, pushedAnswers, savedAnswers, scripted } from "./testing.ts";
+import { changeOnFirstCommit, engineRoot, fakeMachine, hedgeSetup, githubRepo, machineFile, pushedAnswers, savedAnswers, scripted } from "./testing.ts";
 
 isolateGit();
 const temp = tempDirs();
@@ -113,30 +113,49 @@ describe("hedge setup while another machine changes the profile", () => {
   test("a rerun stops before it saves when another machine saves the profile while it runs, and the same command run again keeps both changes", async () => {
     const home = temp.make("home-");
     expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""])).code).toBe(0);
-    const box = fakeMachine(home);
-    let changed = false;
-    const changing = {
-      ...box,
-      machine: {
-        ...box.machine,
-        async exec(command: string[], options?: Parameters<typeof box.machine.exec>[1]) {
-          if (!changed && command.join(" ") === "gh api user --jq .login") {
-            changed = true;
-            await changeElsewhere(home, (profile) => void (profile.packs = [...(profile.packs as string[]), "guards"]));
-          }
-          return box.machine.exec(command, options);
-        },
-      },
-    };
+    const args = ["--remove", "pull-requests"];
+    const keepPicks = async () => (await changeElsewhere(home, (profile) => void (profile.packs = [...(profile.packs as string[]), "guards"])), "");
+
+    const stopped = await hedgeSetup(home, args, [keepPicks]);
+
+    expect(stopped.code).toBe(1);
+    expect(stopped.output).toContain(`hedge: another machine saved your profile in ${profilePath(home)} while setup ran. Run the same hedge setup command again: it starts from the profile as it is now.`);
+    expect((await pushedAnswers(home)).packs).toEqual(["pull-requests", "guards"]);
+    expect((await hedgeSetup(home, args, [""])).code).toBe(0);
+    expect((await pushedAnswers(home)).packs).toEqual(["guards"]);
+  });
+
+  test("a rerun whose profile push comes after another machine's takes back its own commit, and the same command run again saves on top", async () => {
+    const home = temp.make("home-");
+    expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""])).code).toBe(0);
+    await changeOnFirstCommit(home, join(temp.make("elsewhere-"), "profile"), 'profile.packs = [...profile.packs, "guards"];');
     const args = ["--non-interactive", "--remove", "pull-requests"];
 
-    const stopped = await hedgeSetup(home, args, [], changing);
+    const stopped = await hedgeSetup(home, args, []);
 
     expect(stopped.code).toBe(1);
     expect(stopped.output).toContain(`hedge: another machine saved your profile in ${profilePath(home)} while setup ran. Run the same hedge setup command again: it starts from the profile as it is now.`);
     expect((await pushedAnswers(home)).packs).toEqual(["pull-requests", "guards"]);
     expect((await hedgeSetup(home, args, [])).code).toBe(0);
     expect((await pushedAnswers(home)).packs).toEqual(["guards"]);
+  });
+
+  test("a rerun stops before it saves the profile when hedge.json has a staged change, and keeps that change", async () => {
+    const home = temp.make("home-");
+    expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""])).code).toBe(0);
+    const file = join(profilePath(home), "hedge.json");
+    const committed = readFileSync(file, "utf8");
+    writeFileSync(file, `${JSON.stringify({ ...JSON.parse(committed), plan: "both" }, null, 2)}\n`);
+    await spawnGit(profilePath(home), "add", "hedge.json");
+    writeFileSync(file, committed);
+    const staged = await spawnGit(profilePath(home), "show", ":hedge.json");
+
+    const rerun = await hedgeSetup(home, ["--non-interactive", "--plan", "codex"], []);
+
+    expect(rerun.code).toBe(1);
+    expect(rerun.output).toContain(`hedge: ${profilePath(home)}: hedge.json has changes that are not committed. Commit or discard them, then try again.`);
+    expect(await spawnGit(profilePath(home), "show", ":hedge.json")).toBe(staged);
+    expect((await pushedAnswers(home)).plan).toBe("claude");
   });
 
   test("an apply-only resume runs the steps of the plan that another machine saved after the stop", async () => {
