@@ -213,6 +213,41 @@ describe("hedge update", () => {
     expect(await pinSavedBySetup(engineDir)).toEqual({ repo: "PostHog/hedge", ref: "v0.1.1", channel: "release" });
   });
 
+  test("after a ref lock stops hedge update from recording the release, the next update records it, and hedge setup saves that release as the engine pin", async () => {
+    const remote = await engineRemote(["v0.1.0", "v0.1.1"]);
+    const engineDir = await engineCheckout(remote, "v0.1.0");
+    const lock = join(engineDir, ".git/refs/hedge/releases/v0.1.1.lock");
+    mkdirSync(dirname(lock), { recursive: true });
+    writeFileSync(lock, "");
+
+    const failed = await run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" });
+
+    expect(failed).toMatchObject({ code: 1, applied: 0, version: "v0.1.1", output: expect.stringMatching(/could not record that release: .*\. Run hedge update again to finish the update\.$/) });
+    rmSync(lock);
+    const retried = await run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" });
+
+    expect(retried).toMatchObject({ code: 0, applied: 1, version: "v0.1.1" });
+    expect(await pinSavedBySetup(engineDir)).toEqual({ repo: "PostHog/hedge", ref: "v0.1.1", channel: "release" });
+  });
+
+  test("after hedge update cannot save the fork as the engine's origin, the next update saves it before it reports success", async () => {
+    const { engineDir, fork } = await hedgeReleaseWithOlderFork();
+    const hedge = await originOf(engineDir);
+    await spawnGit(engineDir, "config", `url.${fork}.insteadOf`, "https://github.com/Acme/fleet-engine.git");
+    const lock = join(engineDir, ".git/config.lock");
+    writeFileSync(lock, "");
+
+    const failed = await run(engineDir, { repo: "Acme/fleet-engine", ref: "v0.1.0", channel: "release" });
+
+    expect(failed).toMatchObject({ code: 1, applied: 0, version: "fork v0.1.2", output: expect.stringMatching(/the engine's packages are installed, but could not point the engine at .*\. Run hedge update again to finish the update\.$/) });
+    expect(await originOf(engineDir)).toBe(hedge);
+    rmSync(lock);
+    const retried = await run(engineDir, { repo: "Acme/fleet-engine", ref: "v0.1.0", channel: "release" });
+
+    expect(retried).toMatchObject({ code: 0, applied: 1, version: "fork v0.1.2" });
+    expect(await originOf(engineDir)).toBe("https://github.com/Acme/fleet-engine.git");
+  });
+
   async function withFetchBeforeFirstCheckout<T>(work: () => Promise<T>) {
     const realGit = Bun.which("git")!;
     const bin = temp.make("bin-");

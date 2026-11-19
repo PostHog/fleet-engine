@@ -73,7 +73,7 @@ async function ready(options: UpdateOptions): Promise<false | Origin> {
 async function saveOrigin(options: UpdateOptions, origin: Origin) {
   if (!origin.switched) return true;
   const changed = await git(options.engineDir, "remote", origin.exists ? "set-url" : "add", "origin", origin.url);
-  if (!changed.ok) return options.print(`hedge update: could not point the engine at ${origin.url}: ${changed.err}`), false;
+  if (!changed.ok) return options.print(`hedge update: the engine's packages are installed, but could not point the engine at ${origin.url}: ${changed.err}. Run hedge update again to finish the update.`), false;
   options.print(`The engine now comes from ${options.engine.repo}.`);
   return true;
 }
@@ -84,7 +84,7 @@ async function recordRelease(options: UpdateOptions, moved: Exclude<Moved, false
   if (!moved.release) return true;
   const { tag, commit } = moved.release;
   const recorded = await git(options.engineDir, "update-ref", `${releaseRefs}/${tag}`, commit);
-  if (!recorded.ok) options.print(`hedge update: the engine is at ${tag}, but could not record that release: ${recorded.err}`);
+  if (!recorded.ok) options.print(`hedge update: the engine is at ${tag}, but could not record that release: ${recorded.err}. Run hedge update again to finish the update.`);
   return recorded.ok;
 }
 
@@ -136,7 +136,7 @@ async function followRelease(options: UpdateOptions, url: string, switched: bool
     options.print(`Engine stays at ${head.slice(0, 7)}, which is not a release, so hedge update does not move it back. Set engine.channel to track to follow main, or run get.sh --ref ${target.tag}.`);
     return {};
   }
-  if (compare(installed, target) >= 0) return options.print(`Engine is at ${installed.tag}.`), {};
+  if (compare(installed, target) >= 0) return options.print(`Engine is at ${installed.tag}.`), { release: { tag: installed.tag, commit: head } };
   return checkOutRelease(options, url, target);
 }
 
