@@ -19,7 +19,7 @@ afterEach(async () => {
 
 type Visit = { from?: Window; files?: SiteFiles; url?: string; motion?: "reduce" | "no-preference" };
 
-type Watched = { callback: (entries: Array<{ target: unknown; isIntersecting: boolean }>) => void; targets: unknown[] };
+type Watched = { callback: (entries: Array<{ target: unknown; isIntersecting: boolean; intersectionRatio: number }>) => void; targets: unknown[] };
 const watchers = new WeakMap<Window, Watched[]>();
 
 function visit(path: string, { from, files = site, url = `https://hedge.test/hedge-engine/${path.replace(/index\.html$/, "")}`, motion = "no-preference" }: Visit = {}) {
@@ -189,8 +189,8 @@ const dialog = (window: Window) => window.document.querySelector("dialog") as un
 const watchButton = (window: Window, title: string) =>
   [...window.document.querySelectorAll("button.watch")].find((button) => button.textContent!.includes(`the ${title} video`)) as unknown as HTMLButtonElement;
 const pathOf = (window: Window, url: string) => new URL(url, window.location.href).pathname;
-const scrollIntoView = (window: Window) => {
-  for (const watch of watchers.get(window)!) watch.callback(watch.targets.map((target) => ({ target, isIntersecting: true })));
+const scrollTo = (window: Window, shown: number) => {
+  for (const watch of watchers.get(window)!) watch.callback(watch.targets.map((target) => ({ target, isIntersecting: shown > 0, intersectionRatio: shown })));
 };
 
 describe("the pack videos in a browser", () => {
@@ -199,7 +199,9 @@ describe("the pack videos in a browser", () => {
     expect(dialog(window).open).toBe(false);
     watchButton(window, "Memory").click();
     const player = video(window, "dialog video");
-    expect([dialog(window).open, window.document.getElementById(dialog(window).getAttribute("aria-labelledby")!)!.textContent]).toEqual([true, "Memory"]);
+    const textOf = (attribute: string) => window.document.getElementById(dialog(window).getAttribute(attribute)!)!.textContent;
+    const memoryLine = watchButton(window, "Memory").closest(".pack-card")!.querySelector(".pack-line")!.textContent;
+    expect([dialog(window).open, textOf("aria-labelledby"), textOf("aria-describedby")]).toEqual([true, "Memory", memoryLine]);
     expect([pathOf(window, player.src), pathOf(window, player.poster), player.paused]).toEqual(["/hedge-engine/assets/video/memory.mp4", "/hedge-engine/assets/video/memory.jpg", false]);
     expect(selected(window)).toEqual([]);
     (window.document.querySelector("dialog button") as unknown as HTMLButtonElement).click();
@@ -208,6 +210,7 @@ describe("the pack videos in a browser", () => {
     expect([pathOf(window, player.src), player.paused]).toEqual(["/hedge-engine/assets/video/slack.mp4", false]);
     dialog(window).close();
     expect(player.paused).toBe(true);
+    expect(textOf("aria-labelledby")).toBe("Slack");
   });
 
   test("a visitor who asks for reduced motion gets the player and the pack page's video without autoplay", () => {
@@ -215,14 +218,21 @@ describe("the pack videos in a browser", () => {
     watchButton(packs, "Orchestration").click();
     expect([dialog(packs).open, video(packs, "dialog video").paused]).toEqual([true, true]);
     const page = visit("packs/orchestration/index.html", { motion: "reduce" });
-    scrollIntoView(page);
+    scrollTo(page, 1);
     expect(video(page, "video.clip").paused).toBe(true);
   });
 
-  test("a pack page's video starts once it scrolls into view", () => {
+  test("a pack page's video plays while at least half of it is in view, and pauses when it leaves", () => {
     const window = visit("packs/hub/index.html");
-    expect(video(window, "video.clip").paused).toBe(true);
-    scrollIntoView(window);
-    expect(video(window, "video.clip").paused).toBe(false);
+    const clip = video(window, "video.clip");
+    expect(clip.paused).toBe(true);
+    scrollTo(window, 0.1);
+    expect(clip.paused).toBe(true);
+    scrollTo(window, 0.6);
+    expect(clip.paused).toBe(false);
+    scrollTo(window, 0);
+    expect(clip.paused).toBe(true);
+    scrollTo(window, 1);
+    expect(clip.paused).toBe(false);
   });
 });

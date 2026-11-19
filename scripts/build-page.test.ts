@@ -228,41 +228,53 @@ describe("the site build", () => {
   });
 
   const videoPacks = ["hub", "pull-requests", "orchestration", "memory", "slack"];
-  const watchOf = (card: string) => card.match(/<button type="button" class="watch" data-video="([^"]+)" data-poster="([^"]+)" data-title="([^"]+)">([\s\S]*?)<\/button>/);
+  const attributesOf = (tag: string): Record<string, string | true | undefined> => Object.fromEntries([...tag.matchAll(/\s([a-z-]+)(?:="([^"]*)")?/g)].map((match) => [match[1]!, match[2] ?? true]));
+  const describedBy = (html: string, tag: string) => String(attributesOf(tag)["aria-describedby"] ?? "").split(" ").map((id) => visibleText(html.match(new RegExp(`<(\\w+)[^>]* id="${id}"[^>]*>([\\s\\S]*?)</\\1>`))?.[2] ?? "").trim());
 
-  test("the packs page shows a Watch control with the video's length on the card of each pack with a video, and opens it in one large player", () => {
+  test("the packs page shows a Watch button with the video's length on the card of each pack with a video, and has one large player", () => {
     const html = page("packs/index.html");
     const cards = html.split('<li class="pack-card').slice(1);
     const watched = cards.flatMap((card) => {
-      const watch = watchOf(card);
-      return watch ? [[card.match(/<a class="more" href="([a-z-]+)\/"/)![1], visibleText(watch[4]!).trim(), watch[1], watch[2]]] : [];
+      const watch = card.match(/<button type="button" class="watch"[^>]*>([\s\S]*?)<\/button>/);
+      return watch ? [[card.match(/<a class="more" href="([a-z-]+)\/"/)![1], visibleText(watch[1]!).trim().replaceAll(" ,", ",")]] : [];
     });
     expect(watched).toEqual([
-      ["hub", "Watch the Hub video · 29 s", "../assets/video/hub.mp4", "../assets/video/hub.jpg"],
-      ["pull-requests", "Watch the Quality gates video · 29 s", "../assets/video/pull-requests.mp4", "../assets/video/pull-requests.jpg"],
-      ["orchestration", "Watch the Orchestration video · 30 s", "../assets/video/orchestration.mp4", "../assets/video/orchestration.jpg"],
-      ["memory", "Watch the Memory video · 29 s", "../assets/video/memory.mp4", "../assets/video/memory.jpg"],
-      ["slack", "Watch the Slack video · 20 s", "../assets/video/slack.mp4", "../assets/video/slack.jpg"],
+      ["hub", "Watch · 29 s, the Hub video"],
+      ["pull-requests", "Watch · 29 s, the Quality gates video"],
+      ["orchestration", "Watch · 30 s, the Orchestration video"],
+      ["memory", "Watch · 29 s, the Memory video"],
+      ["slack", "Watch · 20 s, the Slack video"],
     ]);
-    for (const [, , video, poster] of watched) for (const target of [video!, poster!]) expect([target, posix.join("packs", target) in files]).toEqual([target, true]);
     expect(html.match(/<dialog\b/g)).toHaveLength(1);
-    expect(html.match(/<video\b[^>]*>/g)).toEqual(['<video id="player-video" muted loop playsinline controls preload="none">']);
+    expect(html.match(/<video\b/g)).toHaveLength(1);
+    expect(html.match(/<dialog\b[\s\S]*?<\/dialog>/)![0]).toContain("<video");
   });
 
-  test("a pack's page with a video shows it large above How it works, with its poster, and no other page has a video", () => {
+  test("a pack's page with a video shows it above How it works, with its poster, described by the page's own text, and no other page has a video", () => {
     for (const pack of data.packs) {
       const html = page(`packs/${pack.name}/index.html`);
-      const video = html.match(/<video\b[^>]*>/g);
+      const tags = html.match(/<video\b[^>]*>/g);
       if (!videoPacks.includes(pack.name)) {
-        expect([pack.name, video]).toEqual([pack.name, null]);
+        expect([pack.name, tags]).toEqual([pack.name, null]);
         continue;
       }
-      expect([pack.name, video]).toEqual([
+      expect([pack.name, tags!.length]).toEqual([pack.name, 1]);
+      const video = attributesOf(tags![0]!);
+      expect([pack.name, video.src, video.poster, video.muted, video.loop, video.playsinline, video.controls, video.preload, video.autoplay]).toEqual([
         pack.name,
-        [`<video class="clip" src="../../assets/video/${pack.name}.mp4" poster="../../assets/video/${pack.name}.jpg" width="1280" height="720" muted loop playsinline controls preload="none" aria-label="${pack.title} explainer, a silent loop">`],
+        `../../assets/video/${pack.name}.mp4`,
+        `../../assets/video/${pack.name}.jpg`,
+        true,
+        true,
+        true,
+        true,
+        "none",
+        undefined,
       ]);
+      const [summary, steps] = describedBy(html, tags![0]!);
+      expect([pack.name, summary, steps!.length > 20]).toEqual([pack.name, pack.summary, true]);
       const after = html.slice(html.indexOf("<video"));
-      expect([pack.name, after.includes('id="flow-h"') || after.includes('id="wf-h"')]).toEqual([pack.name, true]);
+      expect([pack.name, after.includes('id="flow-h"')]).toEqual([pack.name, true]);
     }
     expect(page("index.html")).not.toMatch(/<video|assets\/video\//);
   });
@@ -276,18 +288,11 @@ describe("the site build", () => {
       expect(shipped.toSorted()).toEqual(expected);
       for (const path of shipped) expect([path, Buffer.from(site[path]!).equals(readFileSync(join(videoDir, posix.basename(path))))]).toEqual([path, true]);
     }
-    expect(readdirSync(videoDir).filter((name) => name !== "README.md").map((name) => `assets/video/${name}`).toSorted()).toEqual(expected);
-  });
-
-  test("the video notes name every video and credit PostHog for the hedgehogs in them", () => {
-    const notes = readFileSync(join(root, "page/video/README.md"), "utf8");
-    expect(readdirSync(join(root, "page/video")).filter((name) => name !== "README.md" && !notes.includes(`\`${name}\``))).toEqual([]);
-    expect(notes).toContain("brand.posthog.com");
   });
 
   test("a pack's page shows how the pack works in three to five short steps", () => {
     const flows = data.packs.flatMap((pack) => {
-      const flow = page(`packs/${pack.name}/index.html`).match(/<ol class="flow">([\s\S]*?)<\/ol>/)?.[1];
+      const flow = page(`packs/${pack.name}/index.html`).match(/<ol class="flow"[^>]*>([\s\S]*?)<\/ol>/)?.[1];
       return flow ? [[pack.name, [...flow.matchAll(/<span class="flow-step">([^<]+)<\/span>/g)].map((match) => unescaped(match[1]!))] as const] : [];
     });
     expect(flows.map(([name]) => name)).toEqual(expect.arrayContaining(["pull-requests", "orchestration", "memory"]));

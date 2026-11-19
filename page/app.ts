@@ -117,6 +117,7 @@ function player(dialog: HTMLDialogElement) {
     video.poster = button.dataset.poster!;
     video.src = button.dataset.video!;
     document.getElementById(dialog.getAttribute("aria-labelledby")!)!.textContent = button.dataset.title!;
+    document.getElementById(dialog.getAttribute("aria-describedby")!)!.textContent = button.dataset.line!;
     dialog.showModal();
     start(video);
   });
@@ -131,9 +132,10 @@ function clips() {
   const videos = document.querySelectorAll<HTMLVideoElement>("video.clip");
   if (!videos.length || calm() || !("IntersectionObserver" in window)) return;
   const observer = new IntersectionObserver((entries) => {
-    for (const entry of entries.filter((item) => item.isIntersecting)) {
-      observer.unobserve(entry.target);
-      start(entry.target as HTMLVideoElement);
+    for (const entry of entries) {
+      const video = entry.target as HTMLVideoElement;
+      if (entry.intersectionRatio >= 0.5) start(video);
+      else video.pause();
     }
   }, { threshold: 0.5 });
   for (const video of videos) observer.observe(video);

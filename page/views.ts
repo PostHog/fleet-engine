@@ -154,12 +154,12 @@ ${pageJson ? `<script id="hedge-data" type="application/json">${JSON.stringify(p
   const watchButton = (root: string, pack: PagePack) => {
     const video = packVideos[pack.name];
     if (!video) return "";
-    return `<button type="button" class="watch" data-video="${videoPath(root, video.file)}" data-poster="${videoPath(root, video.poster)}" data-title="${esc(pack.title)}">${uiIcons.play}Watch<span class="sr"> the ${esc(pack.title)} video</span> · ${Math.round(video.seconds)} s</button>`;
+    return `<button type="button" class="watch" data-video="${videoPath(root, video.file)}" data-poster="${videoPath(root, video.poster)}" data-title="${esc(pack.title)}" data-line="${esc(roleOf(pack).line)}">${uiIcons.play}Watch · ${Math.round(video.seconds)} s<span class="sr">, the ${esc(pack.title)} video</span></button>`;
   };
 
-  const player = `<dialog class="player" aria-labelledby="player-title">
+  const player = `<dialog class="player" aria-labelledby="player-title" aria-describedby="player-line">
   <div class="player-in">
-    <div class="player-head"><h2 id="player-title"></h2><button type="button" class="btn small player-close">Close</button></div>
+    <div class="player-head"><div><h2 id="player-title"></h2><p id="player-line" class="player-line"></p></div><button type="button" class="btn small player-close">Close</button></div>
     <video id="player-video" muted loop playsinline controls preload="none"></video>
   </div>
 </dialog>`;
@@ -167,7 +167,7 @@ ${pageJson ? `<script id="hedge-data" type="application/json">${JSON.stringify(p
   const videoSection = (root: string, pack: PagePack) => {
     const video = packVideos[pack.name];
     if (!video) return "";
-    return `<section class="band band-tight" aria-labelledby="video-h"><div class="wrap"><h2 id="video-h">Watch it work</h2><video class="clip" src="${videoPath(root, video.file)}" poster="${videoPath(root, video.poster)}" width="1280" height="720" muted loop playsinline controls preload="none" aria-label="${esc(pack.title)} explainer, a silent loop"></video></div></section>`;
+    return `<section class="band band-tight" aria-labelledby="video-h"><div class="wrap"><h2 id="video-h">Watch it work</h2><video class="clip" src="${videoPath(root, video.file)}" poster="${videoPath(root, video.poster)}" width="1280" height="720" muted loop playsinline controls preload="none" aria-label="${esc(pack.title)} explainer, a silent loop" aria-describedby="pack-summary${packFlows[pack.name] ? " flow-steps" : ""}"></video></div></section>`;
   };
 
   const packCard = (root: string, pack: PagePack) => {
@@ -252,14 +252,14 @@ ${player}`;
   <div class="hero-text">
     <a class="back" href="../">${uiIcons.arrow}All packs</a>
     <h1 class="pack-title">${icon(pack.name, "big")}<span>${esc(pack.title)}</span></h1>
-    <p class="lead">${esc(pack.summary)}</p>
+    <p class="lead" id="pack-summary">${esc(pack.summary)}</p>
     <p class="tags">${packTags(pack)}</p>
     ${pack.always ? "" : `<p class="cta"><a class="btn btn-yellow big" href="#add">Add to your Hedge</a></p>`}
   </div>
   ${stage(root, role.art, role.tone, true)}
 </div></section>
 ${videoSection(root, pack)}
-${flow ? `<section class="band band-tight" aria-labelledby="flow-h"><div class="wrap"><h2 id="flow-h">How it works</h2><ol class="flow">${flow.map((step) => `<li><span class="flow-step">${esc(step)}</span></li>`).join("")}</ol></div></section>` : ""}
+${flow ? `<section class="band band-tight" aria-labelledby="flow-h"><div class="wrap"><h2 id="flow-h">How it works</h2><ol class="flow" id="flow-steps">${flow.map((step) => `<li><span class="flow-step">${esc(step)}</span></li>`).join("")}</ol></div></section>` : ""}
 ${pack.workflows.length ? `<section class="band band-tight" aria-labelledby="wf-h"><div class="wrap"><h2 id="wf-h">Workflows</h2><ul class="wfs">${pack.workflows.map(workflowItem).join("")}</ul></div></section>` : ""}
 <section class="band band-tight" aria-label="Cost and risk"><div class="wrap facts">
   ${pack.cost ? `<div class="fact"><p class="eyebrow">What it costs</p><p>${fmt(pack.cost)}</p></div>` : ""}

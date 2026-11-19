@@ -4,13 +4,15 @@ Each video is a short, silent loop that shows what one pack does. Each
 poster is the still image that the page shows before the video plays. The
 site build copies a video and its poster only when a page shows them.
 
-| Pack | Video | Poster | Length |
-| --- | --- | --- | --- |
-| Quality gates | `pull-requests.mp4` | `pull-requests.jpg` | 28.5 s |
-| Orchestration | `orchestration.mp4` | `orchestration.jpg` | 30 s |
-| Memory | `memory.mp4` | `memory.jpg` | 29 s |
-| Hub | `hub.mp4` | `hub.jpg` | 28.5 s |
-| Slack | `slack.mp4` | `slack.jpg` | 20 s |
+| Pack | Video | Poster |
+| --- | --- | --- |
+| Quality gates | `pull-requests.mp4` | `pull-requests.jpg` |
+| Orchestration | `orchestration.mp4` | `orchestration.jpg` |
+| Memory | `memory.mp4` | `memory.jpg` |
+| Hub | `hub.mp4` | `hub.jpg` |
+| Slack | `slack.mp4` | `slack.jpg` |
+
+`page/cast.ts` holds the length of each video, which the Watch button shows.
 
 All videos are 1280 x 720, H.264, with no audio.
 
