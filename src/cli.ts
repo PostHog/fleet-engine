@@ -254,7 +254,7 @@ async function runUpdate(options: CliOptions) {
     profileDir,
     engine: profile.engine,
     print: options.print,
-    runApply: () => Bun.spawn(["sh", join(options.engineRoot, "hedge"), "apply"], { stdio: ["inherit", "inherit", "inherit"], env: { ...Bun.env, HOME: options.home } }).exited,
+    runApply: () => Bun.spawn(["sh", join(options.engineRoot, "hedge"), "apply", "--profile", profileDir], { stdio: ["inherit", "inherit", "inherit"], env: { ...Bun.env, HOME: options.home } }).exited,
   });
 }
 

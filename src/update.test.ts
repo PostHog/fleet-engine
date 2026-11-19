@@ -26,7 +26,7 @@ function engineRemote(tags: string[]) {
     copyFileSync(join(engineRoot, "templates/profile/install.sh"), join(dir, "templates/profile/install.sh"));
     mkdirSync(join(dir, "packs/base"), { recursive: true });
     writeFileSync(join(dir, "packs/base/pack.json"), JSON.stringify({ schema: 1, name: "base", summary: "Base." }));
-    writeFileSync(join(dir, "hedge"), `[ "$1" = apply ] || exit 64\ncat "$(dirname "$0")/VERSION" > "$HOME/applied"\n[ ! -f "$HOME/apply.sh" ] || exec sh "$HOME/apply.sh"\n`);
+    writeFileSync(join(dir, "hedge"), `[ "$1" = apply ] || exit 64\ncat "$(dirname "$0")/VERSION" > "$HOME/applied"\n[ ! -f "$HOME/apply.sh" ] || exec sh "$HOME/apply.sh" "$@"\n`);
     for (const tag of tags) {
       writeFileSync(join(dir, "VERSION"), tag);
       await spawnGit(dir, "add", ".");
@@ -612,17 +612,17 @@ describe("hedge update with a profile in a Fleet path", () => {
     await spawnGit(profileRemote, "commit", "-q", "--allow-empty", "-m", "newer answers");
     mkdirSync(join(home, ".config/hedge"), { recursive: true });
     writeFileSync(join(home, ".config/hedge/machine.json"), JSON.stringify({ schema: 1, role: "devbox", profileDir: old }));
-    writeFileSync(join(home, "apply.sh"), `git -C '${copy}' rev-parse HEAD > "$HOME/applied-profile"\n`);
+    writeFileSync(join(home, "apply.sh"), `[ "$2" = --profile ] || exit 64\nprintf '%s %s' "$3" "$(git -C "$3" rev-parse HEAD)" > "$HOME/applied-profile"\n`);
     const read = (name: string) => (existsSync(join(home, name)) ? readFileSync(join(home, name), "utf8").trim() : undefined);
     const head = async (dir: string) => (await spawnAsync(["git", "-C", dir, "rev-parse", "HEAD"])).stdout.trim();
     const lines: string[] = [];
     const code = await main(["update"], { home, engineRoot: await engineCheckout(remote, "v0.1.0"), platform: "linux", env: {}, print: (line) => lines.push(line) });
-    return { code, output: lines.join("\n"), old: await head(old), copy: withCopy ? await head(copy) : undefined, newest: await head(profileRemote), applied: read("applied"), appliedProfile: read("applied-profile") };
+    return { code, output: lines.join("\n"), old: await head(old), copy: withCopy ? await head(copy) : undefined, copyDir: copy, newest: await head(profileRemote), applied: read("applied"), appliedProfile: read("applied-profile") };
   }
 
-  test("pulls the Hedge copy, exits 0 after the CLI applies that copy, and leaves the old profile as it was", async () => {
+  test("pulls the Hedge copy, exits 0 after the CLI hands apply that copy, and leaves the old profile as it was", async () => {
     const result = await machine(true);
-    expect(result).toMatchObject({ code: 0, applied: "v0.1.0", appliedProfile: result.newest });
+    expect(result).toMatchObject({ code: 0, applied: "v0.1.0", appliedProfile: `${result.copyDir} ${result.newest}` });
     expect(result.copy).toBe(result.newest);
     expect(result.old).not.toBe(result.newest);
   });
