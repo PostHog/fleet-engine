@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { copyFile, lstat, mkdir, readFile, readlink, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { inLegacyPath } from "../legacy.ts";
 
 // A conflict note explains what an unmanaged existing file loses when Hedge adopts it.
 export type DesiredFile = { target: string; conflict?: string } & ({ source: string } | { content: string });
@@ -64,6 +65,7 @@ async function readState(home: string): Promise<State> {
     if (!entries || typeof entries !== "object") throw new Error("Invalid Hedge group");
     for (const [target, entry] of Object.entries(entries)) {
       inside(home, target);
+      if (inLegacyPath(target)) delete entries[target];
       if (!entry || (entry.kind !== "link" && entry.kind !== "file")) throw new Error("Invalid Hedge ownership entry");
       if (entry.kind === "link" ? typeof entry.source !== "string" : typeof entry.hash !== "string") throw new Error("Invalid Hedge ownership value");
     }
@@ -99,6 +101,7 @@ export async function plan(home: string, files: DesiredFile[], group = "core", {
   const actions: Action[] = [];
   for (const file of files) {
     inside(home, file.target);
+    if (inLegacyPath(file.target)) throw new Error(`Hedge never writes in ${file.target}, a path from before the rename`);
     if (file.target === ".local/state/hedge" || file.target.startsWith(".local/state/hedge/") || statePath.startsWith(`${file.target}/`)) throw new Error("A managed target cannot replace Hedge state");
     if (files.some((other) => other !== file && other.target.startsWith(`${file.target}/`))) throw new Error(`Overlapping targets: ${file.target}`);
   }

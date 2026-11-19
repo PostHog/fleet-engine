@@ -181,3 +181,25 @@ test("managed targets cannot replace Hedge state through ancestors or aliases", 
     expect(await readFile(join(home, "settings"), "utf8")).toBe("original");
   }
 });
+
+test("a hedge record of a file in a path from before the rename is dropped, and the file stays", async () => {
+  const { home } = await fixture();
+  await mkdir(join(home, ".config/fleet/hooks"), { recursive: true });
+  await writeFile(join(home, ".config/fleet/hooks/run.sh"), "old hook\n");
+  await install(home, [{ target: "kept", content: "kept\n" }], "hedge");
+  const state = join(home, ".local/state/hedge/state.json");
+  const owned = JSON.parse(await readFile(state, "utf8"));
+  owned.groups.hedge[".config/fleet/hooks/run.sh"] = { kind: "file", hash: new Bun.CryptoHasher("sha256").update("old hook\n").digest("hex") };
+  await writeFile(state, JSON.stringify(owned));
+
+  await install(home, [{ target: "kept", content: "kept\n" }], "hedge");
+
+  expect(await readFile(join(home, ".config/fleet/hooks/run.sh"), "utf8")).toBe("old hook\n");
+  expect(Object.keys(JSON.parse(await readFile(state, "utf8")).groups.hedge)).toEqual(["kept"]);
+});
+
+test("refuses a target in a path from before the rename", async () => {
+  const { home } = await fixture();
+  await expect(plan(home, [{ target: ".local/share/fleet/engine/packs/base/pack.json", content: "{}" }])).rejects.toThrow("Hedge never writes in .local/share/fleet/engine/packs/base/pack.json, a path from before the rename");
+  await expect(lstat(join(home, ".local/share/fleet"))).rejects.toThrow();
+});
