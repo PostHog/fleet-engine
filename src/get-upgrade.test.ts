@@ -1,9 +1,10 @@
 import { describe, expect } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { git } from "./testing/git.ts";
 import { getShHarness, onLinuxHost } from "./testing/get-sh.ts";
 import { emptySchedulers, type SchedulerState } from "./testing/scheduler-cli.ts";
+import { deliver, eventLogPath, putValue, valuesDir } from "../packs/hub/lib/secret-store.ts";
 
 const { sandbox, profile, engine, getSh, temp } = getShHarness();
 
@@ -137,15 +138,26 @@ describe("get.sh upgrades a machine that Fleet runs", () => {
     expect(machine.state().both).toEqual([]);
   });
 
-  onLinuxHost("a secret that Fleet saves while it stops reaches Hedge's secret store, also when --install-only hands over to setup", () => {
-    const machine = fleetMachine({ lastWords: (home) => [{ unit: "fleet-watch.service", file: join(home, ".local/state/fleet/secrets.jsonl"), line: '{"name":"late"}\n' }] });
+  onLinuxHost("a secret that Fleet saves while it stops reaches Hedge's secret store, also when --install-only hands over to setup", async () => {
+    const now = new Date("2026-11-19T12:00:00Z");
+    const rows = [{ name: "early-key", env: ["EARLY_KEY"] }, { name: "late-key", env: ["LATE_KEY"] }].map((row) => ({ ...row, provider: { name: "test" }, scope: "test", settings: "" }));
+    const fleets = { home: temp.make("fleet-store-"), rows, now };
+    await putValue(fleets, { name: "early-key", text: "early-value-1", why: "intake", machine: "test" });
+    const late = await putValue(fleets, { name: "late-key", text: "late-value-22", why: "intake", machine: "test" });
+    const logged = readFileSync(eventLogPath(fleets.home), "utf8").split("\n").filter(Boolean);
+    const lateLine = logged.find((line) => JSON.parse(line).id === late.id)!;
+    const machine = fleetMachine({ lastWords: (home) => [{ unit: "fleet-watch.service", file: join(home, ".local/state/fleet/secrets.jsonl"), line: `${lateLine}\n` }] });
+    cpSync(valuesDir(fleets.home), join(machine.home, ".config/fleet/secrets"), { recursive: true });
     mkdirSync(join(machine.home, ".local/state/fleet"), { recursive: true });
-    writeFileSync(join(machine.home, ".local/state/fleet/secrets.jsonl"), '{"name":"early"}\n', { mode: 0o600 });
+    writeFileSync(join(machine.home, ".local/state/fleet/secrets.jsonl"), logged.filter((line) => line !== lateLine).map((line) => `${line}\n`).join(""), { mode: 0o600 });
 
     const result = machine.getSh(["--install-only"]);
 
     expect(result.code).toBe(0);
-    expect(readFileSync(join(machine.home, ".local/state/hedge/secrets.jsonl"), "utf8")).toBe('{"name":"early"}\n{"name":"late"}\n');
+    expect(deliver({ home: machine.home, rows, now }, { names: ["early-key", "late-key"], machine: "test" })).toEqual([
+      { name: "early-key", values: { EARLY_KEY: "early-value-1" } },
+      { name: "late-key", values: { LATE_KEY: "late-value-22" } },
+    ]);
   });
 
   onLinuxHost("a dry run on an engine whose retire-fleet ignores --dry-run stops nothing and says it cannot name what still runs", () => {
