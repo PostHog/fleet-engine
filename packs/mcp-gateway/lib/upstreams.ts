@@ -93,15 +93,19 @@ export async function registerUpstream(hub: Hub, upstream: Upstream) {
   const want = wanted(upstream, hub);
   const fresh = forThisOrigin(stored, want);
   const path = `servers/${encodeURIComponent(upstream.name)}`;
+  const dropOAuth = () => call(`${path}/oauth/disconnect`, "POST", { scope: "all" });
   const dropsSignIn = upstream.kind === "oauth" && fresh !== stored;
+  const offWithoutSignIn = upstream.kind === "oauth" && stored?.enabled === false && !signedIn(stored);
   if (dropsSignIn) {
-    const dropOAuth = () => call(`${path}/oauth/disconnect`, "POST", { scope: "all" });
     await call(`${path}/toggle`, "POST", { enabled: false });
     await dropOAuth();
     await call(path, "PUT", { config: { ...fresh, ...want, enabled: false } });
-    await dropOAuth();
-  }
-  const config = dropsSignIn ? await current(call, upstream.name) : fresh;
+    await dropOAuth().catch(async (error) => {
+      await call(path, "PUT", { config: { ...fresh, ...want, url: stored?.url, enabled: false } });
+      throw error;
+    });
+  } else if (offWithoutSignIn) await dropOAuth();
+  const config = dropsSignIn || offWithoutSignIn ? await current(call, upstream.name) : fresh;
   const newClient = upstream.kind === "oauth" && upstream.loopback && !loopbackClientOf(config);
   if (newClient) want.oauth = { ...(want.oauth as Config), clientId: await registerLoopbackClient(hub.fetch, upstream) };
   if (!config) await call("servers", "POST", { name: upstream.name, config: want });

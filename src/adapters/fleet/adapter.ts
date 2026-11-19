@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { Finding } from "../../pack/types.ts";
 import type { Adapter } from "../../reconciler/apply.ts";
@@ -10,7 +10,7 @@ import type { T3Server } from "../t3/port.ts";
 
 export type FleetPiece = { kind: "launchd" | "systemd" | "container" | "t3" | "cron" | "process"; name: string; pid?: number };
 export type OldTasks = { list(): Promise<Array<{ id: string; enabled: boolean }>>; setEnabled(id: string, enabled: boolean): Promise<void>; saved?: true };
-export type Running = { pid: number; ppid: number; argv: string[]; fleetEngine?: string };
+export type Running = { pid: number; ppid: number; argv: string[]; fleetEngine?: string; cwd?: string };
 export type FleetOptions = { run?: CommandRunner; accountHome?: () => Promise<string | undefined>; uid?: number; tasks?: (home: string) => Promise<OldTasks | undefined>; sleep?: (ms: number) => Promise<void>; processes?: () => Promise<Running[]> };
 export type Retirement = { retired: string[]; left: string[]; notes: string[] };
 export type FleetAdapter = Adapter & { retire(home: string, platform: NodeJS.Platform): Promise<Retirement | undefined>; holds(home: string, platform: NodeJS.Platform): Promise<Finding[]> };
@@ -48,8 +48,9 @@ function installerIn(argv: string[]) {
   return undefined;
 }
 
-function fleetInstaller(home: string, { argv, fleetEngine }: Running): string | undefined {
-  const installer = fleetEngine?.startsWith("/") && underLegacyPath(home, fleetEngine) ? installerIn(argv) : undefined;
+function fleetInstaller(home: string, { argv, fleetEngine, cwd }: Running): string | undefined {
+  const fromFleet = [fleetEngine, cwd].some((path) => path?.startsWith("/") && underLegacyPath(home, path));
+  const installer = fromFleet ? installerIn(argv) : undefined;
   return installer && `${installer.job}: ${installer.command.slice(0, 2).join(" ")}`;
 }
 
@@ -89,8 +90,10 @@ export function procProcesses(uid: number, root = "/proc"): () => Promise<Runnin
         if (argv.at(-1) === "") argv.pop();
         const stat = readFileSync(join(dir, "stat"), "utf8");
         const ppid = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
-        const fleetEngine = installerIn(argv) ? engineIn(readFileSync(join(dir, "environ"), "utf8")) : undefined;
-        return argv.length ? [{ pid: Number(name), ppid, argv, fleetEngine }] : [];
+        const installer = Boolean(installerIn(argv));
+        const fleetEngine = installer ? engineIn(readFileSync(join(dir, "environ"), "utf8")) : undefined;
+        const cwd = installer ? readlinkSync(join(dir, "cwd")) : undefined;
+        return argv.length ? [{ pid: Number(name), ppid, argv, fleetEngine, cwd }] : [];
       } catch (error) {
         if (vanished(error)) return [];
         throw new Error(`process ${name} could not be read (${(error as Error).message})`);
