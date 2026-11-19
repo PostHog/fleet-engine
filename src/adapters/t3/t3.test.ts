@@ -9,7 +9,6 @@ import type { HedgeTask } from "../jobs/adapter.ts";
 import { jobsAdapter } from "../jobs/adapter.ts";
 import type { CommandRunner } from "../run.ts";
 import { t3Adapter } from "./adapter.ts";
-import { onUserBus } from "./service.ts";
 import type { T3Rpc, T3Server } from "./port.ts";
 import { t3Tasks } from "./tasks.ts";
 
@@ -1118,9 +1117,9 @@ describe("T3 on Linux", () => {
       const home = temp.make("home-");
       const { token, env, commands, adapter } = withToken({ home }, { T3CODE_THREAD_ID: "thread-1" });
       await apply(plan("linux", []), { home, adapters: [adapter] });
-      const systemctl = onUserBus(commands.run, {}, 1000);
-      const invocation = async () => (await systemctl(["systemctl", "--user", "show", "t3code.service", "--property=InvocationID", "--value"])).stdout;
-      await systemctl(["systemctl", "--user", "restart", "t3code.service"]);
+      const systemctl = (args: string[]) => commands.run(["env", "XDG_RUNTIME_DIR=/run/user/1000", "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus", "systemctl", "--user", ...args]);
+      const invocation = async () => (await systemctl(["show", "t3code.service", "--property=InvocationID", "--value"])).stdout;
+      expect((await systemctl(["restart", "t3code.service"])).code).toBe(0);
       const restarted = await invocation();
       delete env.T3CODE_THREAD_ID;
       const report = await apply(plan("linux", []), { home, adapters: [adapter] });
