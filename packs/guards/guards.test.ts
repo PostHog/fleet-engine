@@ -1141,7 +1141,7 @@ describe("the Git guard", () => {
     expect(denied.refusal).toContain(refusal);
   });
 
-  test.each(["gh alias set co 'pr checkout'", "gh alias list", "gh alias delete sp", "gh alias set --help", "cd - && GH_CONFIG_DIR=relative gh alias set --help", "gh alias import --help=true", "gh alias import --help=false --help", "gh alias import -h --help=false"])("allows a gh alias that cannot push a stack: %s", async (command) => {
+  test.each(["gh alias set co 'pr checkout'", "gh alias list", "gh alias delete sp", "gh alias set --help", "cd $HOME/dev && gh pr list", "echo ${HOME} ${XDG_CONFIG_HOME} && gh pr list", "cd - && GH_CONFIG_DIR=relative gh alias set --help", "gh alias import --help=true", "gh alias import --help=false --help", "gh alias import -h --help=false"])("allows a gh alias that cannot push a stack: %s", async (command) => {
     expect(await preToolUse(homeWith(withGuards()), "claude", bash(command, await repo("feature")), { guardAsProcess: true })).toEqual({ code: 0, refusal: undefined });
   });
 
@@ -1149,8 +1149,51 @@ describe("the Git guard", () => {
     const dir = await repo("feature");
     const home = homeWith(withGuards());
     mkdirSync(join(home, ".config/gh"), { recursive: true });
-    writeFileSync(join(home, ".config/gh/config.yml"), "aliases:\n    co: pr checkout\n    mine: co 12\n    loop: loop\n");
+    writeFileSync(join(home, ".config/gh/config.yml"), "aliases:\n    co: pr checkout\n    mine: >-\n        pr view\n        12\n    loop: loop\n");
     expect(await preToolUse(home, "claude", bash(command, dir), { guardAsProcess: true })).toEqual({ code: 0, refusal: undefined });
+  });
+
+  test.each([
+    ["an alias that runs a gh extension directly", "aliases:\n    sp: demo push\n"],
+    ["a duplicate alias, of which gh reads the first and Bun the last", "aliases:\n    sp: stack push\n    sp: pr list\n"],
+    ["a duplicate alias with a quoted name", "aliases:\n    sp: stack push\n    \"sp\": pr list\n"],
+    ["a duplicate alias written as a complex key", "aliases:\n    sp: stack push\n    ? sp\n    : pr list\n"],
+    ["a second aliases block", "aliases:\n    sp: stack push\naliases:\n    sp: pr list\n"],
+    ["a second YAML document after a flow mapping", "{aliases: {sp: stack push}}\n---\naliases: {}\n"],
+    ["a flow mapping before a second aliases block", "aliases: {sp: stack push}\naliases:\n    sp: pr list\n"],
+    ["a config that does not parse", "aliases:\n    sp: [stack push\n"],
+    ["a config that cannot be read", undefined],
+  ])("refuses gh sp with %s", async (_, config) => {
+    const dir = await repo("feature");
+    const home = homeWith(withGuards());
+    mkdirSync(join(home, ".config/gh"), { recursive: true });
+    if (config === undefined) mkdirSync(join(home, ".config/gh/config.yml"));
+    else writeFileSync(join(home, ".config/gh/config.yml"), config);
+    expect((await preToolUse(home, "claude", bash("gh sp", dir), { guardAsProcess: true })).refusal).toContain("gh alias set");
+  });
+
+  test.each([
+    "export GH_CONFIG_DIR=/elsewhere; gh pr list",
+    "GH_CONFIG_DIR=~/elsewhere gh pr list",
+    ": ${HOME:=/elsewhere}; gh pr list",
+    "bash -c 'XDG_CONFIG_HOME=/elsewhere gh pr list'",
+    "env -i gh pr list",
+    "/usr/bin/env -u PATH gh pr list",
+    "exec -c gh pr list",
+    "sudo gh pr list",
+    "doas gh pr list",
+  ])("refuses %s, which may move the config gh reads its aliases from", async (command) => {
+    const home = homeWith(withGuards());
+    expect((await preToolUse(home, "claude", bash(command, await repo("feature")), { guardAsProcess: true })).refusal).toContain("gh alias set");
+  });
+
+  test.each([
+    ["a relative GH_CONFIG_DIR", { GH_CONFIG_DIR: "relative-gh" }],
+    ["a relative XDG_CONFIG_HOME", { XDG_CONFIG_HOME: "relative-config" }],
+    ["an empty HOME", { HOME: "" }],
+  ])("refuses gh calls when the agent inherits %s", async (_, env) => {
+    const home = homeWith(withGuards());
+    expect((await preToolUse(home, "claude", bash("gh pr list", await repo("feature")), { guardAsProcess: true, env })).refusal).toContain("gh alias set");
   });
 
   test("refuses an alias whose expansion quotes a value, which the guard does not split", async () => {
