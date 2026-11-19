@@ -1,6 +1,6 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { repoUrl } from "./pack/sources.ts";
+import { repoUrl, withoutUserinfo } from "./pack/sources.ts";
 import type { ProfileFile } from "./pack/types.ts";
 import { engineRepo } from "./setup/defaults.ts";
 
@@ -26,7 +26,8 @@ export async function readNotice(home: string): Promise<string | undefined> {
   return notice.newMajor ? `Hedge ${notice.newMajor} is out. It is a new major version, so hedge update does not apply it. Read its changelog, then change the engine ref in your profile.` : undefined;
 }
 
-export async function update(options: UpdateOptions): Promise<number> {
+export async function update(given: UpdateOptions): Promise<number> {
+  const options = { ...given, print: (line: string) => given.print(withoutUserinfo(line)) };
   const origin = await ready(options);
   if (!origin) return 1;
   const before = (await git(options.engineDir, "rev-parse", "HEAD")).out;

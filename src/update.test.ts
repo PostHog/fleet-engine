@@ -234,6 +234,22 @@ describe("hedge update", () => {
     expect(result.version).toBe("v0.2.0");
   });
 
+  test("keeps a token in the profile's engine URL out of its messages when it follows that repository", async () => {
+    const original = await engineRemote(["v0.1.0"]);
+    const engineDir = await engineCheckout(original, "v0.1.0");
+    const moved = temp.make("engine-moved-");
+    await spawnGit(moved, "clone", "-q", original, ".");
+    writeFileSync(join(moved, "VERSION"), "v0.2.0");
+    await spawnGit(moved, "commit", "-q", "-am", "v0.2.0");
+    await spawnGit(moved, "tag", "v0.2.0");
+    const withToken = "https://hedge:s3cret-token@git.example.invalid/engine.git";
+    await spawnGit(engineDir, "config", `url.${moved}.insteadOf`, withToken);
+    const result = await run(engineDir, { repo: withToken, ref: "v0.1.0", channel: "release" });
+    expect(result.version).toBe("v0.2.0");
+    expect(result.output).toContain("The engine now comes from https://git.example.invalid/engine.git.");
+    expect(result.output).not.toContain("s3cret-token");
+  });
+
   test("never moves an engine that is not on a release back to one", async () => {
     const remote = await engineRemote(["v0.1.0"]);
     const result = await run(await engineCheckout(remote, "main"), { repo: remote, ref: "v0.1.0", channel: "release" });
