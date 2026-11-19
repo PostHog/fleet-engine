@@ -581,6 +581,23 @@ test("a HEAD that the gate carries across a revert of the latest reviewed fix ne
   await expect(pr.hedge("review-start", "--scope", "final", "--base", fix, "--agent", "The revert needs a read.")).rejects.toThrow("The review budget of 2 reviews is spent");
 });
 
+test("a fixes round left unfinished and then reverted still gets the needs-no-final-read answer, not a request to finish the reverted review", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: graded("non-critical", "medium") });
+  pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 10, "pull-requests.reviewCeiling": 10 });
+  await pr.commit("feature.txt", "greet\n");
+  await pr.hedge("require", "--none", "--reason", "fixture");
+  const panel = await cannedPanel(pr, { design: minor, others: major("the greeting drops the name") });
+  const fix = await pr.commit("feature.txt", "greet the member\n");
+  await pr.hedge("review-start", "--scope", "fixes", "--base", panel);
+  await finishWith(pr, "2", major("the member goes unnamed"));
+  const change = await pr.commit("feature.txt", "greet the new member\n");
+  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", fix)).output).toContain(`"round":3`);
+  await pr.git("revert", "--no-edit", change);
+
+  await expect(pr.hedge("review-start", "--scope", "final", "--base", fix)).rejects.toThrow(`HEAD needs no final read: final read carried from ${fix.slice(0, 7)}: revert of a PR commit`);
+});
+
 async function merge21BaseCommits(pr: Checkout, fix: string) {
   const merges = await spawnAsync(["sh", "-ec", `git checkout -q main
 for i in $(seq 21); do echo "$i" > base.txt; git add base.txt; git commit -qm "Base $i"; done
