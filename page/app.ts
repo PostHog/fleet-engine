@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-import { installPrompt, startPrompt, toggleSelected, toggleStart, whereLabels, type PromptData, type Start, type Where } from "./model.ts";
+import { installPrompt, startPrompt, startStatus, toggleSelected, toggleStart, type PromptData, type Start } from "./model.ts";
 import { promptHtml, t3Link } from "./prompt.ts";
 
 const selectionKey = "hedge-packs";
@@ -29,26 +29,16 @@ function showPrompt(id: string, text: string, status: string) {
 }
 
 function chooser(form: HTMLFormElement, data: PromptData) {
-  const switchOf = (where: Where, pack: string) => form.elements.namedItem(`${where}:${pack}`) as HTMLInputElement;
-  const radioOf = (where: Where) => form.querySelector<HTMLInputElement>(`#where-${where}`)!;
-  const starts: Record<Where, Start> = { mac: { where: "mac", off: [] }, hub: { where: "hub", off: [] } };
-  for (const where of ["mac", "hub"] as const) starts[where].off = data.startPacks.filter((pack) => !switchOf(where, pack).checked);
-  let where: Where = radioOf("hub").checked ? "hub" : "mac";
+  const switchOf = (pack: string) => form.elements.namedItem(`start:${pack}`) as HTMLInputElement;
+  let start: Start = { off: data.startPacks.filter((pack) => !switchOf(pack).checked) };
 
   const show = () => {
-    radioOf(where).checked = true;
-    for (const start of Object.values(starts)) for (const pack of data.startPacks) switchOf(start.where, pack).checked = !start.off.includes(pack);
-    showPrompt("start", startPrompt(data, starts[where]), `The prompt is for ${whereLabels[where]}.`);
+    for (const pack of data.startPacks) switchOf(pack).checked = !start.off.includes(pack);
+    showPrompt("start", startPrompt(data, start), startStatus(data, start));
   };
 
   form.addEventListener("change", (event) => {
-    const input = event.target as HTMLInputElement;
-    if (input.name === "where") where = input.value as Where;
-    else {
-      const [box, pack] = input.name.split(":") as [Where, string];
-      starts[box] = toggleStart(data, starts[box], pack);
-      where = box;
-    }
+    start = toggleStart(data, start, (event.target as HTMLInputElement).name.slice("start:".length));
     show();
   });
   show();

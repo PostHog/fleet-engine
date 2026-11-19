@@ -42,7 +42,7 @@ const visibleText = (html: string) => unescaped(html.replace(/<script[\s\S]*?<\/
 const promptOn = (html: string, id: string) => unescaped(html.match(new RegExp(`<pre id="${id}-text"[^>]*>([\\s\\S]*?)</pre>`))![1]!.replace(/<[^>]+>/g, ""));
 const t3LinkOn = (html: string, id: string) => unescaped(html.match(new RegExp(`<a class="btn btn-ghost" id="${id}-t3" href="([^"]*)"`))![1]!);
 const carried = (html: string) => JSON.parse(html.match(/<script id="hedge-data" type="application\/json">([\s\S]*?)<\/script>/)![1]!) as PromptData;
-const boxOf = (html: string, where: string) => html.match(new RegExp(`<section class="box" data-where="${where}">[\\s\\S]*?</section>`))![0];
+const boxOf = (html: string) => html.match(/<section class="box">[\s\S]*?<\/section>/)![0];
 
 function localTargets(path: string, html: string) {
   const links = [...html.matchAll(/\s(?:href|src|srcset)="([^"]*)"/g)].map((match) => unescaped(match[1]!));
@@ -69,19 +69,23 @@ describe("the site build", () => {
     }
   });
 
-  test("the landing page offers two boxes, each with a switch for every default pack, all on", () => {
-    const html = page("index.html");
-    expect([...html.matchAll(/<input class="sr" type="radio" name="where" id="where-(\w+)" value="\w+"( checked)?>/g)].map((match) => [match[1], Boolean(match[2])])).toEqual([["mac", true], ["hub", false]]);
-    for (const where of ["mac", "hub"]) {
-      const switches = [...boxOf(html, where).matchAll(/<input type="checkbox" role="switch" class="switch" name="([^"]+)"[^>]*?( checked)?>/g)].map((match) => [match[1], Boolean(match[2])]);
-      expect(switches).toEqual(["pull-requests", "orchestration", "communication"].map((pack) => [`${where}:${pack}`, true]));
-    }
-    expect(visibleText(boxOf(html, "hub"))).toContain("Hub One always-on devbox links and watches the others. Always on");
-    expect(visibleText(boxOf(html, "mac"))).toContain("Hub Add a hub later, when you want one.");
-    expect(boxOf(html, "mac")).not.toMatch(/name="mac:hub"|Always on/);
+  test("the landing page's first screen says that Hedge runs agents in the cloud, not on the Mac, and why", () => {
+    const hero = visibleText(page("index.html").match(/<section class="hero">[\s\S]*?<\/section>/)![0]).replaceAll(" ,", ",");
+    expect(hero).toContain(
+      "Hedge runs your agents in the cloud, not on your Mac. Always on. Agents keep working when you close your Mac or go to sleep. Secure. Agents run on isolated cloud boxes. Secrets stay on your hub. Your Mac stays clean. With you everywhere. Read and steer every thread from your Mac or your phone. Grows with your work. Add a node when you need more agents at once.",
+    );
   });
 
-  test("the landing page shows the Getting Started prompt for the first box under the boxes, with a link that opens it in T3 Code", () => {
+  test("the landing page offers one setup, a hub and a node, with a switch for every default pack, all on, and the Hub pack always on", () => {
+    const html = page("index.html");
+    expect(html.match(/<section class="box">/g)).toHaveLength(1);
+    expect(html).not.toContain('type="radio"');
+    const switches = [...boxOf(html).matchAll(/<input type="checkbox" role="switch" class="switch" name="([^"]+)"[^>]*?( checked)?>/g)].map((match) => [match[1], Boolean(match[2])]);
+    expect(switches).toEqual(["pull-requests", "orchestration", "communication"].map((pack) => [`start:${pack}`, true]));
+    expect(visibleText(boxOf(html))).toContain("Hub One always-on devbox links and watches the others. Always on");
+  });
+
+  test("the landing page shows the Getting Started prompt after the box, with a link that opens it in T3 Code", () => {
     const html = page("index.html");
     const prompt = startPrompt(data, firstStart);
     expect(promptOn(html, "start")).toBe(prompt);
@@ -89,10 +93,10 @@ describe("the site build", () => {
     expect(html.indexOf('id="start-text"')).toBeGreaterThan(html.lastIndexOf('class="box"'));
     expect(html).toContain('<button type="button" class="btn btn-yellow" data-copy="start-text">Copy prompt</button>');
     for (const text of ["Download T3 Code", "Sign in with T3 Connect", "Paste this prompt", "https://t3.codes"]) expect(html).toContain(text);
-    expect(startPrompt(carried(html), { where: "hub", off: ["communication"] })).toBe(startPrompt(data, { where: "hub", off: ["communication"] }));
+    expect(startPrompt(carried(html), { off: ["communication"] })).toBe(startPrompt(data, { off: ["communication"] }));
   });
 
-  test("the landing page lists no pack beyond the packs of the two boxes, and links the packs page", () => {
+  test("the landing page lists no pack beyond the packs of the box, and links the packs page", () => {
     const html = page("index.html");
     const boxed = [...data.startPacks, ...data.hubStartPacks];
     const others = data.packs.filter((pack) => !boxed.includes(pack.name));
@@ -182,14 +186,15 @@ describe("the site build", () => {
     expect(Object.keys(team)).toContain("assets/art/heart-hog.png");
   });
 
-  test("the credits name the source of every picture in the art folder, and the folder holds no picture that no build shows", async () => {
+  test("the credits name the source of every picture in the art folder, and the folder holds no picture that no build shows but the Mac scene, kept for a later page", async () => {
     const artDir = join(root, "page/art");
+    const keptUnshown = ["laptop-hog-02.png"];
     const held = readdirSync(artDir).filter((name) => !name.endsWith(".md") && name !== "LICENSE");
     const credits = readFileSync(join(artDir, "README.md"), "utf8");
     expect(held.filter((name) => !new RegExp(`^\\| \`${name}\` \\| \`[^\`]+/${name}\` \\| \`[0-9a-f]{40}\` \\|$`, "m").test(credits))).toEqual([]);
     expect(readFileSync(join(artDir, "LICENSE"), "utf8")).toStartWith("Copyright (c) 2020-2026 PostHog Inc.");
     const team = await buildSite({ audience: "posthog", team: [teamPack()] });
-    expect(held.filter((name) => !(`assets/art/${name}` in team))).toEqual([]);
+    expect(held.filter((name) => !(`assets/art/${name}` in team))).toEqual(keptUnshown);
     expect(held.length).toBeGreaterThan(15);
   });
 
@@ -219,19 +224,17 @@ describe("the site build", () => {
     expect(buildSite({ audience: "public", team: [teamPack()] })).rejects.toThrow("no pack from a private source");
   });
 
-  test("a team build puts the team pack in both boxes and in the first setup, and gives it a page", async () => {
+  test("a team build puts the team pack in the box and in the first setup, and gives it a page", async () => {
     const team = [teamPack({ title: "PostHog" })];
     const teamData = await pageData({ audience: "posthog", team });
     const site = await buildSite({ audience: "posthog", team });
     expect(teamData.teamPacks).toEqual(["posthog"]);
-    expect(startPrompt(teamData, firstStart)).toEndWith("- Packs on the first setup: pull-requests, orchestration, communication, posthog");
-    expect(startPrompt(teamData, { where: "mac", off: teamData.startPacks })).toEndWith("- Packs on the first setup: posthog");
+    expect(startPrompt(teamData, firstStart)).toContain("- Packs on the first setup: pull-requests, orchestration, communication, posthog\n");
+    expect(startPrompt(teamData, { off: teamData.startPacks })).toContain("- Packs on the first setup: posthog\n");
     const landing = page("index.html", site);
     expect(promptOn(landing, "start")).toBe(startPrompt(teamData, firstStart));
-    for (const where of ["mac", "hub"]) {
-      expect(visibleText(boxOf(landing, where))).toContain("PostHog A team pack. Your team's pack");
-      expect(boxOf(landing, where)).not.toContain(`name="${where}:posthog"`);
-    }
+    expect(visibleText(boxOf(landing))).toContain("PostHog A team pack. Your team's pack");
+    expect(boxOf(landing)).not.toContain('name="start:posthog"');
     expect(visibleText(page("packs/posthog/index.html", site))).toContain("Team devbox");
     expect(promptOn(page("packs/posthog/index.html", site), "install")).toContain("hedge packs --add posthog");
     expect(teamData.packs.flatMap((pack) => pack.workflows).map((workflow) => workflow.id)).toContain("previews");

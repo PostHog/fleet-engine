@@ -20,24 +20,23 @@ beforeAll(async () => {
 });
 
 const root = join(import.meta.dir, "..");
-const withHub: Start = { where: "hub", off: [] };
 const flip = (start: Start, ...names: string[]) => names.reduce((picked, name) => toggleStart(data, picked, name), start);
 const select = (...names: string[]) => names.reduce((selected, name) => toggleSelected(data, selected, name), [] as string[]);
 const everyPack = () => select(...data.packs.map((pack) => pack.name));
 const line = (text: string, label: string) => text.match(new RegExp(`^- ${label}: (.*)$`, "m"))?.[1];
 const step = (text: string, start: string) => text.split("\n").find((item) => /^\d+\. /.test(item) && item.includes(start));
 
-async function macWithHedge() {
+async function hubWithHedge() {
   const home = temp.make("home-");
-  expect((await hedgeSetup(home, ["--non-interactive", "--preset", "starter", "--plan", "claude", "--devbox", "skip"], [], fakeMachine(home), undefined, 0, "darwin")).code).toBe(0);
+  expect((await hedgeSetup(home, ["--non-interactive", "--preset", "starter", "--plan", "claude"], [], fakeMachine(home))).code).toBe(0);
   const io = scripted([]);
-  const hedge = (args: string[]) => main(args, { home, engineRoot, platform: "darwin", print: io.terminal.print, terminal: io.terminal, apply: async () => 0, setup: { machine: fakeMachine(home).machine } });
+  const hedge = (args: string[]) => main(args, { home, engineRoot, platform: "linux", print: io.terminal.print, terminal: io.terminal, apply: async () => 0, setup: { machine: fakeMachine(home).machine } });
   return { home, hedge, output: io.output };
 }
 
 async function hedgeCommands() {
   let usage = "";
-  await main(["help"], { home: "/nonexistent", engineRoot: root, platform: "darwin", print: (text) => (usage += `${text}\n`) });
+  await main(["help"], { home: "/nonexistent", engineRoot: root, platform: "linux", print: (text) => (usage += `${text}\n`) });
   const commandFiles = (dir: string) => (existsSync(join(dir, "commands")) ? readdirSync(join(dir, "commands")).filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts")).map((name) => name.slice(0, -3)) : []);
   const shipped = (await loadPacks(root)).flatMap(({ dir, code }) => [...Object.keys(code?.commands ?? {}), ...commandFiles(dir)]);
   return new Set([...[...usage.matchAll(/^ {2}hedge ([a-z][a-z-]*)/gm)].map((match) => match[1]!), ...shipped]);
@@ -46,32 +45,25 @@ async function hedgeCommands() {
 describe("the Getting started prompt", () => {
   const readmePrompt = () => readFileSync(join(root, "README.md"), "utf8").match(/```text\n\s*(Set up Hedge[^\n]+)\n/)![1]!;
 
-  test("with Mac only, is the README's prompt plus where Hedge runs and the three packs that are on by default", () => {
-    expect(startPrompt(data, firstStart)).toBe(`${readmePrompt()}\n\nMy picks from the Hedge page:\n- Where Hedge runs: Mac only\n- Packs on the first setup: pull-requests, orchestration, communication`);
-  });
-
-  test("with a hub and a node, changes only the place and adds the Hub pack for once the hub runs", () => {
-    const mac = startPrompt(data, firstStart).split("\n");
-    const hub = startPrompt(data, withHub).split("\n");
-    expect(hub.filter((text) => !mac.includes(text))).toEqual(["- Where Hedge runs: Mac plus a hub and a node", "- Packs once the hub runs: hub"]);
-    expect(mac.filter((text) => !hub.includes(text))).toEqual(["- Where Hedge runs: Mac only"]);
+  test("is the README's prompt plus the three packs the hub's first setup turns on by default, and the Hub pack for once the hub runs", () => {
+    expect(startPrompt(data, firstStart)).toBe(`${readmePrompt()}\n\nMy picks from the Hedge page:\n- Packs on the first setup: pull-requests, orchestration, communication\n- Packs once the hub runs: hub`);
   });
 
   test("a pack that is switched off leaves the first setup, and comes back when it is switched on", () => {
     expect(line(startPrompt(data, flip(firstStart, "communication")), "Packs on the first setup")).toBe("pull-requests, orchestration");
     expect(flip(firstStart, "communication", "communication")).toEqual(firstStart);
-    expect(line(startPrompt(data, flip(withHub, "communication")), "Packs once the hub runs")).toBe("hub");
+    expect(line(startPrompt(data, flip(firstStart, "communication")), "Packs once the hub runs")).toBe("hub");
   });
 
-  test("switches only the packs of the two boxes", () => {
+  test("switches only the packs of the first setup", () => {
     expect(data.startPacks).toEqual(["pull-requests", "orchestration", "communication"]);
     expect(data.hubStartPacks).toEqual(["hub"]);
-    expect(flip(withHub, "hub", "memory", "base")).toEqual(withHub);
+    expect(flip(firstStart, "hub", "memory", "base")).toEqual(firstStart);
   });
 
   test("its first setup packs, as the guide's one by one command, are the packs setup turns on", async () => {
     const catalog = await loadCatalog(root, [], temp.make("home-"));
-    for (const start of [firstStart, flip(firstStart, "orchestration"), flip(withHub, "pull-requests"), flip(firstStart, "pull-requests", "communication")]) {
+    for (const start of [firstStart, flip(firstStart, "orchestration"), flip(firstStart, "pull-requests"), flip(firstStart, "pull-requests", "communication")]) {
       const packs = setupSplit(data, start).first;
       const flags = ["--preset", "starter", ...(packs.includes("pull-requests") ? [] : ["--remove", "pull-requests"]), ...packs.filter((name) => name !== "pull-requests").flatMap((name) => ["--add", name])];
       expect(picksFrom(parseSetupFlags(flags), catalog).packs.toSorted()).toEqual(packs.toSorted());
@@ -80,7 +72,7 @@ describe("the Getting started prompt", () => {
 
   test("the data a page carries builds the same prompts as the full pack data", () => {
     const carried = JSON.parse(JSON.stringify(promptData(data)));
-    expect(startPrompt(carried, flip(withHub, "communication"))).toBe(startPrompt(data, flip(withHub, "communication")));
+    expect(startPrompt(carried, flip(firstStart, "communication"))).toBe(startPrompt(data, flip(firstStart, "communication")));
     expect(installPrompt(carried, everyPack())).toBe(installPrompt(data, everyPack()));
   });
 });
@@ -132,9 +124,9 @@ describe("the install prompt", () => {
     expect(installPrompt(data, select("recovery"))).toContain("2. This pack needs a hub: Recovery.");
     expect(installPrompt(data, select("recovery"))).toContain("leave that pack out");
     expect(installPrompt(data, select("memory", "slack"))).not.toContain("hub");
-    const mac = await macWithHedge();
-    expect(await mac.hedge(["hub", "status"])).toBe(0);
-    expect(mac.output()).toContain("\nThe hub: not named.");
+    const hub = await hubWithHedge();
+    expect(await hub.hedge(["hub", "status"])).toBe(0);
+    expect(hub.output()).toContain("\nThe hub: not named.");
     expect(readFileSync(join(root, "SETUP.md"), "utf8")).toContain("\n## 9. Add the hub and the nodes\n");
   });
 
@@ -168,18 +160,18 @@ describe("the install prompt", () => {
   test("Memory's note leaves the memory repo to the command, and the command of the prompt makes it on a Hedge that already runs", async () => {
     const note = readFileSync(join(root, "packs/memory/SETUP.md"), "utf8").replace(/\s+/g, " ");
     expect(note).toContain("`hedge setup` and `hedge packs --add memory` create it when it is missing. Add nothing to the command.");
-    const mac = await macWithHedge();
+    const hub = await hubWithHedge();
     const command = installPrompt(data, select("memory")).match(/^ {3}hedge (packs .*)$/m)![1]!;
-    expect(await mac.hedge(command.split(" "))).toBe(0);
-    expect(existsSync(githubRepo(mac.home, "nora/hedge-memory"))).toBe(true);
-    expect(await pushedAnswers(mac.home)).toMatchObject({ packs: expect.arrayContaining(["memory"]), settings: { "memory.repo": "nora/hedge-memory" } });
+    expect(await hub.hedge(command.split(" "))).toBe(0);
+    expect(existsSync(githubRepo(hub.home, "nora/hedge-memory"))).toBe(true);
+    expect(await pushedAnswers(hub.home)).toMatchObject({ packs: expect.arrayContaining(["memory"]), settings: { "memory.repo": "nora/hedge-memory" } });
   });
 
   test("its command turns the selected packs on in the profile of a machine that runs Hedge", async () => {
-    const mac = await macWithHedge();
+    const hub = await hubWithHedge();
     const selected = select("communication", "guards");
     const command = installPrompt(data, selected).match(/^ {3}hedge (packs .*)$/m)![1]!;
-    expect(await mac.hedge(command.split(" "))).toBe(0);
-    expect((await pushedAnswers(mac.home)).packs).toEqual(expect.arrayContaining(selected));
+    expect(await hub.hedge(command.split(" "))).toBe(0);
+    expect((await pushedAnswers(hub.home)).packs).toEqual(expect.arrayContaining(selected));
   });
 });

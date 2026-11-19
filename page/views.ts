@@ -2,7 +2,7 @@ import { crew, logos, packCast, scenes, teamRole, type Art, type Role, type Tone
 import { packFlows } from "./flows.ts";
 import { brandIcons, packIcon, uiIcons } from "./icons.ts";
 import { logoMark } from "./logo.ts";
-import { firstStart, installPrompt, promptData, startPacksOn, startPrompt, toggleSelected, wheres, type PageData, type PagePack, type Where } from "./model.ts";
+import { firstStart, installPrompt, promptData, startPacksOn, startPrompt, toggleSelected, type PageData, type PagePack } from "./model.ts";
 import { esc, fmt, promptHtml, t3Link } from "./prompt.ts";
 
 export type ArtSizes = Record<string, { width: number; height: number }>;
@@ -11,10 +11,12 @@ export type Route = { path: string; html: string };
 
 type Frame = { root: string; title: string; description: string; current?: "packs"; body: string; data?: unknown };
 
-const boxes: Record<Where, { name: string; sticker: string; fact: string; art: Art; tone: Tone }> = {
-  mac: { name: "Mac only", sticker: "Simplest start", fact: "Agents run on your Mac. They stop when it sleeps.", art: scenes.mac, tone: "sky" },
-  hub: { name: "Mac + hub + node", sticker: "Agents work overnight", fact: "Two cloud devboxes stay on while your Mac sleeps.", art: scenes.hub, tone: "lilac" },
-};
+const pitch = [
+  { head: "Always on.", line: "Agents keep working when you close your Mac or go to sleep." },
+  { head: "Secure.", line: "Agents run on isolated cloud boxes. Secrets stay on your hub. Your Mac stays clean." },
+  { head: "With you everywhere.", line: "Read and steer every thread from your Mac or your phone." },
+  { head: "Grows with your work.", line: "Add a node when you need more agents at once." },
+];
 
 export function site(data: PageData, sizes: ArtSizes): Route[] {
   const repoUrl = `https://github.com/${data.engineRepo}`;
@@ -58,7 +60,7 @@ export function site(data: PageData, sizes: ArtSizes): Route[] {
 ${body}
 </main>
 <footer class="foot"><div class="wrap foot-in">
-  <div class="foot-brand"><a class="brand" href="${root}"><span class="mark" aria-hidden="true">${logoMark}</span><span>Hedge</span></a><p>The same agent setup on every machine.</p></div>
+  <div class="foot-brand"><a class="brand" href="${root}"><span class="mark" aria-hidden="true">${logoMark}</span><span>Hedge</span></a><p>Your coding agents, in the cloud.</p></div>
   <nav aria-label="More"><a href="${root}#start">Get started</a><a href="${root}packs/">Packs</a><a href="${repoUrl}">GitHub</a><a href="${repoUrl}#set-it-up-by-hand">Set it up by hand</a></nav>
   <p class="foot-note"><span>A side project at</span>${posthogLogo(root)}<span>The hedgehogs and the PostHog logo belong to PostHog.</span><a href="${repoUrl}/tree/main/page/art">Credits</a></p>
 </div></footer>
@@ -75,25 +77,21 @@ ${pageJson ? `<script id="hedge-data" type="application/json">${JSON.stringify(p
 
   const startSteps = `<ol class="mini-steps"><li><a href="https://t3.codes" target="_blank" rel="noopener">Download T3 Code</a></li><li>Sign in with T3 Connect</li><li>Paste this prompt</li></ol>`;
 
-  const packRow = (where: Where, pack: PagePack, control: string) =>
-    `<li class="row">${icon(pack.name, "mini")}<span class="row-text"><b>${esc(pack.title)}</b><span>${esc(roleOf(pack).line)}</span></span>${control.replace("{}", `${where}:${pack.name}`)}</li>`;
+  const packRow = (pack: PagePack, control: string) =>
+    `<li class="row">${icon(pack.name, "mini")}<span class="row-text"><b>${esc(pack.title)}</b><span>${esc(roleOf(pack).line)}</span></span>${control}</li>`;
 
-  const box = (root: string, where: Where) => {
-    const { name, sticker, fact, art, tone } = boxes[where];
+  const box = (root: string) => {
     const on = startPacksOn(data, firstStart);
     const switches = data.startPacks.map((pack) =>
-      packRow(where, packOf(pack), `<input type="checkbox" role="switch" class="switch" name="{}" aria-label="${esc(packOf(pack).title)} in the ${name} setup"${on.includes(pack) ? " checked" : ""}>`),
+      packRow(packOf(pack), `<input type="checkbox" role="switch" class="switch" name="start:${pack}" aria-label="${esc(packOf(pack).title)} on the first setup"${on.includes(pack) ? " checked" : ""}>`),
     );
-    const fixed = data.teamPacks.map((pack) => packRow(where, packOf(pack), `<span class="tag">Your team's pack</span>`));
-    const hub = data.hubStartPacks.map((pack) =>
-      where === "hub" ? packRow(where, packOf(pack), `<span class="tag on">Always on</span>`) : `<li class="row ghost">${icon(pack, "mini")}<span class="row-text"><b>${esc(packOf(pack).title)}</b><span>Add a hub later, when you want one.</span></span></li>`,
-    );
-    return `<section class="box" data-where="${where}">
-      <input class="sr" type="radio" name="where" id="where-${where}" value="${where}"${firstStart.where === where ? " checked" : ""}>
-      <label class="box-head" for="where-${where}"><span class="pick" aria-hidden="true"></span><span class="box-name">${name}</span><span class="sticker">${sticker}</span></label>
-      ${stage(root, art, tone)}
-      <p class="box-fact">${fact}</p>
-      <ul class="rows" aria-label="Packs in the ${name} setup">${[...switches, ...fixed, ...hub].join("")}</ul>
+    const fixed = data.teamPacks.map((pack) => packRow(packOf(pack), `<span class="tag">Your team's pack</span>`));
+    const hub = data.hubStartPacks.map((pack) => packRow(packOf(pack), `<span class="tag on">Always on</span>`));
+    return `<section class="box">
+      <div class="box-head"><span class="box-name">A hub and a node</span><span class="sticker">Agents work overnight</span></div>
+      ${stage(root, scenes.hub, "lilac")}
+      <p class="box-fact">Two Linux boxes in the cloud run your agents. Your Mac and your phone run only the T3 Code app.</p>
+      <ul class="rows" aria-label="Packs on your hub and node">${[...switches, ...fixed, ...hub].join("")}</ul>
     </section>`;
   };
 
@@ -103,8 +101,8 @@ ${pageJson ? `<script id="hedge-data" type="application/json">${JSON.stringify(p
     const problems = scenes.problems.map(({ art, tone, title, line }) => `<li class="problem">${stage(root, art, tone)}<h3>${title}</h3><p>${line}</p></li>`).join("");
     const body = `<section class="hero"><div class="wrap hero-in">
   <div class="hero-text">
-    <h1>Set up your <br>coding agents <br><mark>once</mark>.</h1>
-    <p class="lead">Hedge gives every machine the same rules, skills, and workflows. One prompt sets it up.</p>
+    <h1 class="pitch">Hedge runs your agents <mark>in the cloud</mark>, not on your Mac.</h1>
+    <ul class="ticks pitch-points">${pitch.map(({ head, line }) => `<li><span><b>${head}</b> ${line}</span></li>`).join("")}</ul>
     <p class="cta"><a class="btn btn-yellow big" href="#start">Get started</a><a class="btn btn-line big" href="packs/">Browse the packs</a></p>
   </div>
   <div class="stage tone-blue crew" role="img" aria-label="${scenes.crew}">${crewHtml}</div>
@@ -119,23 +117,23 @@ ${pageJson ? `<script id="hedge-data" type="application/json">${JSON.stringify(p
     <p class="eyebrow">What Hedge does</p>
     <h2 id="hedge-h">One prompt sets up all of it.</h2>
     <ul class="ticks">
-      <li><span>It installs T3 Code, Claude Code, and Codex, with rules and skills.</span></li>
+      <li><span>It sets up a hub and nodes in the cloud with T3 Code, Claude Code, Codex, rules, and skills.</span></li>
       <li><span>You pick the workflows as <b>packs</b>.</span></li>
-      <li><span>It saves your answers in your private <b>profile</b> repo, so every machine matches.</span></li>
+      <li><span>It saves your answers in your private <b>profile</b> repo, so every node matches.</span></li>
     </ul>
   </div>
 </div></section>
 <section class="band band-pick" id="start" aria-labelledby="start-h"><div class="wrap">
-  <header class="band-head"><p class="eyebrow">Get started</p><h2 id="start-h">Where should your agents run?</h2><p class="lead">Choose a setup, and switch packs on or off. The prompt below changes as you choose.</p></header>
+  <header class="band-head"><p class="eyebrow">Get started</p><h2 id="start-h">Start your hub and a node.</h2><p class="lead">Switch packs on or off. The prompt changes as you choose. Paste it into T3 Code on your Mac or your phone: the agent sets up the cloud boxes, and installs nothing from Hedge on your Mac.</p></header>
   <form id="chooser" class="chooser" autocomplete="off">
-    <div class="boxes" role="radiogroup" aria-labelledby="start-h">${wheres.map((where) => box(root, where)).join("")}</div>
+    ${box(root)}
     ${promptCard("start", "Your Getting started prompt", startPrompt(data, firstStart), startSteps)}
   </form>
 </div></section>`;
     return frame({
       root,
-      title: "PostHog Hedge: set up your coding agents once",
-      description: "Hedge gives every machine the same agent rules, skills, and workflows. Choose Mac only or a Mac with a hub and a node, and copy one prompt that sets it up.",
+      title: "PostHog Hedge: your coding agents in the cloud",
+      description: "Hedge runs your coding agents on a hub and nodes in the cloud, not on your Mac. They keep working while your Mac sleeps, and you steer them from your Mac or your phone. Copy one prompt that sets it up.",
       body,
       data: promptData(data),
     });

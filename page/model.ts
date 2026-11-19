@@ -17,19 +17,12 @@ export type PromptData<Pack extends PromptPack = PromptPack> = {
 
 export type PageData = PromptData<PagePack> & { needLabels: Partial<Record<Need, string>> };
 
-export type Where = "mac" | "hub";
+export type Start = { off: string[] };
 
-export type Start = { where: Where; off: string[] };
-
-export const wheres: Where[] = ["mac", "hub"];
-
-export const firstStart: Start = { where: "mac", off: [] };
-
-export const whereLabels: Record<Where, string> = { mac: "Mac only", hub: "Mac plus a hub and a node" };
+export const firstStart: Start = { off: [] };
 
 export const promptLabels = {
   intro: "My picks from the Hedge page:",
-  where: "Where Hedge runs",
   firstPacks: "Packs on the first setup",
   laterPacks: "Packs once the hub runs",
 };
@@ -75,20 +68,24 @@ export function toggleStart(data: PromptData, start: Start, name: string): Start
 }
 
 export function setupSplit(data: PromptData, start: Start) {
-  return { first: inPageOrder(data, [...startPacksOn(data, start), ...data.teamPacks]), later: start.where === "hub" ? inPageOrder(data, data.hubStartPacks) : [] };
+  return { first: inPageOrder(data, [...startPacksOn(data, start), ...data.teamPacks]), later: inPageOrder(data, data.hubStartPacks) };
 }
 
 export function startPrompt(data: PromptData, start: Start) {
   const { first, later } = setupSplit(data, start);
   return [
-    `Set up Hedge on this Mac with me. Read https://raw.githubusercontent.com/${data.engineRepo}/main/SETUP.md and follow it step by step.`,
+    `Set up Hedge with me. Read https://raw.githubusercontent.com/${data.engineRepo}/main/SETUP.md and follow it step by step.`,
     "",
     promptLabels.intro,
-    `- ${promptLabels.where}: ${whereLabels[start.where]}`,
     `- ${promptLabels.firstPacks}: ${first.join(", ") || noPack}`,
-    ...(start.where === "hub" ? [`- ${promptLabels.laterPacks}: ${later.join(", ") || noPack}`] : []),
+    `- ${promptLabels.laterPacks}: ${later.join(", ") || noPack}`,
   ].join("\n");
 }
+
+export const startStatus = (data: PromptData, start: Start) => {
+  const { first } = setupSplit(data, start);
+  return `The prompt now sets up ${first.length ? listed(first) : "no pack"} first.`;
+};
 
 export const installCommand = (selected: string[]) => `hedge packs ${selected.map((name) => `--add ${name}`).join(" ")}`;
 

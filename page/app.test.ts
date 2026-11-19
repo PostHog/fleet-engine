@@ -42,53 +42,41 @@ function carryStorage(from: Window, to: Window) {
 const input = (window: Window, selector: string) => window.document.querySelector(selector) as unknown as HTMLInputElement;
 const text = (window: Window, id: string) => window.document.getElementById(id)!.textContent;
 const line = (window: Window, label: string) => text(window, "start-text").match(new RegExp(`^- ${label}: (.*)$`, "m"))?.[1];
-const switchOf = (window: Window, where: string, pack: string) => input(window, `input[name="${where}:${pack}"]`);
-const switches = (window: Window, where: string) => ["pull-requests", "orchestration", "communication"].filter((pack) => switchOf(window, where, pack).checked);
+const switchOf = (window: Window, pack: string) => input(window, `input[name="start:${pack}"]`);
+const switches = (window: Window) => ["pull-requests", "orchestration", "communication"].filter((pack) => switchOf(window, pack).checked);
 const selected = (window: Window) => [...window.document.querySelectorAll('input[name="pack"]')].flatMap((box) => ((box as unknown as HTMLInputElement).checked ? [(box as unknown as HTMLInputElement).value] : []));
 const command = (window: Window) => text(window, "install-text").match(/^ {3}(hedge packs .*)$/m)?.[1];
 const shown = (window: Window, id: string) => !(window.document.getElementById(id) as unknown as HTMLElement).hidden;
 const t3Prompt = (window: Window, id: string) => new URL((window.document.getElementById(`${id}-t3`) as unknown as HTMLAnchorElement).href).searchParams.get("prompt");
 
 describe("the landing page in a browser", () => {
-  test("choosing the other box rewrites the prompt under the boxes, its T3 Code link, and the status for a screen reader", () => {
+  test("a switch rewrites the prompt under the box, its T3 Code link, and the status for a screen reader", () => {
     const window = visit("index.html");
-    expect([line(window, "Where Hedge runs"), line(window, "Packs once the hub runs")]).toEqual(["Mac only", undefined]);
-    input(window, "#where-hub").click();
-    expect([line(window, "Where Hedge runs"), line(window, "Packs once the hub runs")]).toEqual(["Mac plus a hub and a node", "hub"]);
+    expect([line(window, "Packs on the first setup"), line(window, "Packs once the hub runs")]).toEqual(["pull-requests, orchestration, communication", "hub"]);
+    switchOf(window, "communication").click();
+    expect([line(window, "Packs on the first setup"), line(window, "Packs once the hub runs")]).toEqual(["pull-requests, orchestration", "hub"]);
     expect(t3Prompt(window, "start")).toBe(text(window, "start-text"));
-    expect(text(window, "start-status")).toBe("The prompt is for Mac plus a hub and a node.");
-    input(window, "#where-mac").click();
-    expect([line(window, "Where Hedge runs"), line(window, "Packs once the hub runs")]).toEqual(["Mac only", undefined]);
-  });
-
-  test("a switch in a box chooses that box and takes the pack out of its prompt, and the other box keeps its own switches", () => {
-    const window = visit("index.html");
-    switchOf(window, "hub", "communication").click();
-    expect(input(window, "#where-hub").checked).toBe(true);
-    expect([line(window, "Where Hedge runs"), line(window, "Packs on the first setup")]).toEqual(["Mac plus a hub and a node", "pull-requests, orchestration"]);
-    expect(switches(window, "mac")).toEqual(["pull-requests", "orchestration", "communication"]);
-    input(window, "#where-mac").click();
+    expect(text(window, "start-status")).toBe("The prompt now sets up pull-requests and orchestration first.");
+    switchOf(window, "communication").click();
     expect(line(window, "Packs on the first setup")).toBe("pull-requests, orchestration, communication");
-    expect(switches(window, "hub")).toEqual(["pull-requests", "orchestration"]);
-    input(window, "#where-hub").click();
-    expect(line(window, "Packs on the first setup")).toBe("pull-requests, orchestration");
   });
 
-  test("switching Pull requests off switches Orchestration off in that box, and switching Orchestration on brings Pull requests back", () => {
+  test("switching Pull requests off switches Orchestration off, and switching Orchestration on brings Pull requests back", () => {
     const window = visit("index.html");
-    switchOf(window, "mac", "pull-requests").click();
-    expect(switches(window, "mac")).toEqual(["communication"]);
+    switchOf(window, "pull-requests").click();
+    expect(switches(window)).toEqual(["communication"]);
     expect(line(window, "Packs on the first setup")).toBe("communication");
-    switchOf(window, "mac", "communication").click();
+    switchOf(window, "communication").click();
     expect(line(window, "Packs on the first setup")).toBe("none");
-    switchOf(window, "mac", "orchestration").click();
-    expect(switches(window, "mac")).toEqual(["pull-requests", "orchestration"]);
+    expect(text(window, "start-status")).toBe("The prompt now sets up no pack first.");
+    switchOf(window, "orchestration").click();
+    expect(switches(window)).toEqual(["pull-requests", "orchestration"]);
     expect(line(window, "Packs on the first setup")).toBe("pull-requests, orchestration");
   });
 
   test("Copy prompt puts the prompt that shows on the clipboard and says so on the button", async () => {
     const window = visit("index.html");
-    input(window, "#where-hub").click();
+    switchOf(window, "communication").click();
     const button = window.document.querySelector('[data-copy="start-text"]') as unknown as HTMLButtonElement;
     button.click();
     expect(await window.navigator.clipboard.readText()).toBe(text(window, "start-text"));

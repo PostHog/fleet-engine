@@ -162,7 +162,7 @@ describe("the agent setup guide", () => {
 
   test("says how to use each line the page's prompt can carry", async () => {
     const data = await pageData({ audience: "public" });
-    const prompt = startPrompt(data, { where: "hub", off: [] });
+    const prompt = startPrompt(data, { off: [] });
     const labels = [...prompt.matchAll(/^- ([^:]+): /gm)].map((match) => match[1]!);
     expect(new Set(labels)).toEqual(new Set(Object.values(promptLabels).filter((label) => label !== promptLabels.intro)));
     const [, intro] = prompt.split("\n\n");
@@ -184,7 +184,7 @@ describe("the agent setup guide", () => {
   test("takes a first setup with every pack switched off, and leaves workflows and settings to each pack's setup note", async () => {
     const data = await pageData({ audience: "public" });
     const text = words(guide());
-    expect(startPrompt(data, { where: "mac", off: data.startPacks })).toContain("- Packs on the first setup: none");
+    expect(startPrompt(data, { off: data.startPacks })).toContain("- Packs on the first setup: none");
     expect(text).toContain("`none` means no pack.");
     expect(text).toContain("The page names packs only. Each pack's setup note still asks which of its workflows to turn on and which settings it needs.");
   });
