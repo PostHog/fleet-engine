@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { isolateGit, spawnGit, tempDirs } from "../testing/git.ts";
+import { gitEnv, isolateGit, spawnGit, tempDirs } from "../testing/git.ts";
+import { profilePath } from "./profile.ts";
 import { fakeMachine, hedgeSetup, githubRepo, pushedAnswers } from "./testing.ts";
 
 isolateGit();
@@ -52,6 +53,27 @@ describe("hedge setup with a devbox", () => {
     rmSync(rejecting);
     expect((await hedgeSetup(home, ["--non-interactive", ...args], [], fakeMachine(home))).code).toBe(0);
     expect((await pushedAnswers(home)).settings["orchestration.loopProject"]).toBe("~/code/app");
+  });
+
+  test("a devbox setting saved while another machine changes a setting keeps that machine's value", async () => {
+    const args = ["--preset", "everyday", "--plan", "claude", "--workflows", "pr-digest=on", "--devbox", "node-1"];
+    const home = temp.make("home-");
+    expect((await hedgeSetup(home, args, ["", ""], fakeMachine(home))).code).toBe(130);
+    const elsewhere = join(temp.make("elsewhere-"), "profile");
+    await spawnGit(home, "clone", "-q", githubRepo(home, "nora/hedge-profile"), elsewhere);
+    const publish = join(elsewhere, "..", "publish.ts");
+    writeFileSync(publish, `const [file, value] = process.argv.slice(2);\nconst profile = await Bun.file(file).json();\nprofile.settings = { ...profile.settings, "elsewhere.setting": value };\nawait Bun.write(file, JSON.stringify(profile, null, 2) + "\\n");\n`);
+    const setElsewhere = `'${process.execPath}' '${publish}' hedge.json`;
+    expect(Bun.spawnSync(["sh", "-c", `cd '${elsewhere}' && ${setElsewhere} before && git commit -q -am 'Set a setting on another machine' && git push -q`], { env: gitEnv }).exitCode).toBe(0);
+    const marker = join(elsewhere, "..", "published");
+    const hook = `#!/bin/sh\n[ -e '${marker}' ] && exit 0\ntouch '${marker}'\nunset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX\ncd '${elsewhere}' && git pull -q && ${setElsewhere} after && git commit -q -am 'Change that setting on another machine' && git push -q\n`;
+    writeFileSync(join(profilePath(home), ".git/hooks/post-commit"), hook, { mode: 0o755 });
+
+    const resumed = await hedgeSetup(home, args, ["~/code/app"], fakeMachine(home));
+
+    expect(resumed.code).toBe(0);
+    expect(existsSync(marker)).toBe(true);
+    expect((await pushedAnswers(home)).settings).toEqual({ "elsewhere.setting": "after", "orchestration.loopProject": "~/code/app" });
   });
 
   test("hedge setup --devbox lists the node in the profile, and the hub takes it before the node asks it for a credential and links it in T3 Code once the node runs T3", async () => {

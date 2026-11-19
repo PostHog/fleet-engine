@@ -87,6 +87,17 @@ describe("hedge setup while another machine changes the profile", () => {
     expect(rerun.output).toContain("Sign in to ChatGPT");
   });
 
+  test("a rerun that removes a pack keeps the pack another machine added meanwhile", async () => {
+    const home = temp.make("home-");
+    expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""])).code).toBe(0);
+    await changeElsewhere(home, (profile) => void (profile.packs = [...(profile.packs as string[]), "guards"]));
+
+    const rerun = await hedgeSetup(home, ["--non-interactive", "--remove", "pull-requests"], []);
+
+    expect(rerun.code).toBe(0);
+    expect((await pushedAnswers(home)).packs).toEqual(["guards"]);
+  });
+
   test("an apply-only resume runs the steps of the plan that another machine saved after the stop", async () => {
     const home = temp.make("home-");
     const stopped = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""], undefined, undefined, 0, "linux", () => {

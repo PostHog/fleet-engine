@@ -49,9 +49,38 @@ async function rebasing(dir: string) {
 export async function saveAnswers(dir: string, answers: Partial<ProfileFile>, options: { push?: boolean } = {}) {
   refuseLegacyPath(dir);
   const path = profileFile(dir);
-  const name = basename(path);
   refuseLegacyPath(path);
   if (options.push) await pullUnder(dir, path, answers);
+  await commitAnswers(dir, answers);
+  if (options.push) await push(dir);
+}
+
+/**
+ * Saves answers on top of the profile as this machine last took it, and
+ * pushes them without taking new commits first. When another machine pushed
+ * meanwhile, it drops that commit, takes their commits, saves the same
+ * answers on top, and pushes once more. Settings merge key by key, so pass
+ * only the settings this command changed.
+ */
+export async function pushAnswers(dir: string, answers: Partial<ProfileFile>) {
+  refuseLegacyPath(dir);
+  refuseLegacyPath(profileFile(dir));
+  const head = await run(dir, "git", "rev-parse", "--verify", "HEAD");
+  if (!head.ok) throw new ProfileError(`${dir}: has no commit to save answers on top of.`);
+  await commitAnswers(dir, answers);
+  const pushed = await run(dir, "git", "push", "-q");
+  if (pushed.ok) return;
+  if (!pushedBehind(pushed.stderr)) throw pushFailed(dir, pushed.stderr);
+  const dropped = await run(dir, "git", "reset", "-q", "--keep", head.stdout);
+  if (!dropped.ok) throw new ProfileError(`${dir}: could not take the changes another machine pushed: ${gitReason(dropped.stderr) ?? "git reset failed"}. Run git -C ${dir} pull --rebase, then try again.`);
+  await pullProfile(dir);
+  await commitAnswers(dir, answers);
+  await push(dir);
+}
+
+async function commitAnswers(dir: string, answers: Partial<ProfileFile>) {
+  const path = profileFile(dir);
+  const name = basename(path);
   refuseLegacyPath(path);
   const current = (await readJson(path)) ?? { schema: 1 };
   if (current.schema !== 1) throw new ProfileError(`${path}: unknown schema ${String(current.schema)}`);
@@ -65,7 +94,6 @@ export async function saveAnswers(dir: string, answers: Partial<ProfileFile>, op
     const committed = await run(dir, "git", "commit", "-q", "-m", "Save Hedge answers", "--", name);
     if (!committed.ok) throw new ProfileError(`${dir}: could not commit answers: ${committed.stderr}`);
   }
-  if (options.push) await push(dir);
 }
 
 async function pullUnder(dir: string, path: string, answers: Partial<ProfileFile>) {
@@ -82,11 +110,15 @@ export function bothChanged(dir: string, other: string) {
 
 async function push(dir: string) {
   const pushed = await run(dir, "git", "push", "-q");
-  if (pushed.ok) return;
-  const reason = gitReason(pushed.stderr);
-  const behind = /\((fetch first|non-fast-forward)\)/.test(pushed.stderr);
-  const recovery = behind ? ` ${bothChanged(dir, "its remote")} Run git -C ${dir} pull --rebase, then try again.` : reason ? " Fix that, then try again." : "";
-  throw new ProfileError(`${dir}: could not push answers${reason ? `: ${reason}.` : "."}${recovery}`);
+  if (!pushed.ok) throw pushFailed(dir, pushed.stderr);
+}
+
+const pushedBehind = (stderr: string) => /\((fetch first|non-fast-forward)\)/.test(stderr);
+
+function pushFailed(dir: string, stderr: string) {
+  const reason = gitReason(stderr);
+  const recovery = pushedBehind(stderr) ? ` ${bothChanged(dir, "its remote")} Run git -C ${dir} pull --rebase, then try again.` : reason ? " Fix that, then try again." : "";
+  return new ProfileError(`${dir}: could not push answers${reason ? `: ${reason}.` : "."}${recovery}`);
 }
 
 function gitReason(stderr: string) {

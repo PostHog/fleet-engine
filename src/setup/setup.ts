@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { loadPacks } from "../pack/manifest.ts";
 import { cachedSource, fetchSource } from "../pack/sources.ts";
 import type { AvailableSource, FetchedSource, MachineFile, Plan, Preset, Profile, SetupProgress, SourceRef } from "../pack/types.ts";
-import { loadMachine, loadProfile, saveAnswers, saveMachine, thisMachine } from "../profile/profile.ts";
+import { loadMachine, loadProfile, pushAnswers, saveMachine, thisMachine } from "../profile/profile.ts";
 import { resolve } from "../reconciler/resolve.ts";
 import { defaultSources, engineRepo, makesOwnDevbox } from "./defaults.ts";
 import { FlagError, hasPicks, parseSetupFlags, type SetupFlags } from "./flags.ts";
@@ -207,7 +207,7 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
         if (outcome !== "unanswered" && machine.profileDir) {
           await fastForward(box, options.home, machine.profileDir);
           await reread(machine.profileDir);
-          await saveAnswers(machine.profileDir, { settings: progress.draft.settings ?? {} }, { push: true });
+          await pushAnswers(machine.profileDir, { settings: changedSettings(base?.settings, progress.draft.settings) });
           base = structuredClone(progress.draft);
         }
         return outcome;
@@ -344,9 +344,24 @@ function overlay<T>(fresh: Record<string, T> | undefined, base: Record<string, T
   return merged;
 }
 
+function changedSettings(base: Draft["settings"], draft: Draft["settings"]) {
+  return Object.fromEntries(Object.entries(draft ?? {}).filter(([key, value]) => JSON.stringify(base?.[key]) !== JSON.stringify(value)));
+}
+
+function listChange<T>(fresh: T[] | undefined, base: T[] | undefined, draft: T[] | undefined, key: (item: T) => string): T[] | undefined {
+  if (JSON.stringify(base) === JSON.stringify(draft)) return fresh;
+  if (!fresh || !base || !draft) return draft;
+  const before = new Set(base.map(key));
+  const after = new Set(draft.map(key));
+  const kept = fresh.filter((item) => !before.has(key(item)) || after.has(key(item)));
+  const added = draft.filter((item) => !before.has(key(item)) && !kept.some((other) => key(other) === key(item)));
+  return [...kept, ...added];
+}
+
 function onTop(fresh: Draft, base: Draft, draft: Draft): Draft {
-  const ours = (key: "packs" | "plan" | "sources") => JSON.stringify(base[key]) === JSON.stringify(draft[key]) ? {} : { [key]: draft[key] };
-  return { ...fresh, ...ours("packs"), ...ours("plan"), ...ours("sources"), settings: overlay(fresh.settings, base.settings, draft.settings), workflows: overlay(fresh.workflows, base.workflows, draft.workflows), ...(draft.inferred ? { inferred: draft.inferred } : {}) };
+  const packs = listChange(fresh.packs, base.packs, draft.packs, (name) => name);
+  const sources = listChange(fresh.sources, base.sources, draft.sources, (ref) => ref.name);
+  return { ...fresh, ...(packs ? { packs } : {}), ...(base.plan === draft.plan ? {} : { plan: draft.plan }), ...(sources ? { sources } : {}), settings: overlay(fresh.settings, base.settings, draft.settings), workflows: overlay(fresh.workflows, base.workflows, draft.workflows), ...(draft.inferred ? { inferred: draft.inferred } : {}) };
 }
 
 function profileDraft(profile: Profile): Draft {
