@@ -7,6 +7,7 @@ import type { CommandRunner } from "./adapters/run.ts";
 import { main } from "./cli.ts";
 import { fleetIsHedge, legacyPaths, underLegacyPath } from "./legacy.ts";
 import { saveAnswers, saveMachine } from "./profile/profile.ts";
+import { readEvents } from "../packs/hub/lib/secret-store.ts";
 import { filesAdapter, type Adapter } from "./reconciler/apply.ts";
 import { fakeLaunchd } from "./testing/old-fleet.ts";
 import { fakeSystemd } from "./testing/systemd.ts";
@@ -163,20 +164,26 @@ describe("an engine in a Fleet path from before the rename", () => {
     expect(bothTrees(home)).toEqual(before);
   });
 
-  test("an old hook that runs the old checkout's hook runner exits 0 with the notice and answers nothing", () => {
+  test("an old hook that runs the old checkout's hook runner blocks each guard event with the notice, lets other events pass, and answers nothing", () => {
     const home = temp.make("home-");
     const root = oldCheckout(home);
     mkdirSync(join(home, ".config/fleet/hooks"), { recursive: true });
     symlinkSync(join(root, "packs/base/hooks/run.sh"), join(home, ".config/fleet/hooks/run.sh"));
     const before = bothTrees(home);
+    const hook = (agent: string, event: string) => {
+      const done = Bun.spawnSync(["sh", join(home, ".config/fleet/hooks/run.sh"), agent, event], { env: quiet(home), stdin: new TextEncoder().encode("{}") });
+      return [done.exitCode, done.stdout.toString(), done.stderr.toString()];
+    };
 
-    const hook = Bun.spawnSync(["sh", join(home, ".config/fleet/hooks/run.sh"), "claude", "UserPromptSubmit"], { env: quiet(home), stdin: new TextEncoder().encode("{}") });
-
-    expect([hook.exitCode, hook.stdout.toString(), hook.stderr.toString()]).toEqual([0, "", `${fleetIsHedge}\n`]);
+    for (const event of ["PreToolUse", "PostToolUse", "UserPromptSubmit"]) {
+      expect(hook("claude", event)).toEqual([2, "", `${fleetIsHedge}\n`]);
+      expect(hook("codex", event)).toEqual([2, "", `${fleetIsHedge}\n`]);
+    }
+    for (const event of ["SessionStart", "Stop"]) expect(hook("claude", event)).toEqual([0, "", `${fleetIsHedge}\n`]);
     expect(bothTrees(home)).toEqual(before);
   });
 
-  test("a hook runner whose folder or file resolves into a Fleet path exits 0 with the notice", () => {
+  test("a hook runner whose folder or file resolves into a Fleet path blocks a guard event with the notice", () => {
     const home = temp.make("home-");
     const root = oldCheckout(home);
     mkdirSync(join(home, ".config/fleet/hooks"), { recursive: true });
@@ -191,8 +198,8 @@ describe("an engine in a Fleet path from before the rename", () => {
       return [done.exitCode, done.stdout.toString(), done.stderr.toString()];
     };
 
-    expect(hook(home, join(home, ".config/hedge/hooks/run.sh"))).toEqual([0, "", `${fleetIsHedge}\n`]);
-    expect(hook(other, join(other, ".config/hedge/hooks/run.sh"))).toEqual([0, "", `${fleetIsHedge}\n`]);
+    expect(hook(home, join(home, ".config/hedge/hooks/run.sh"))).toEqual([2, "", `${fleetIsHedge}\n`]);
+    expect(hook(other, join(other, ".config/hedge/hooks/run.sh"))).toEqual([2, "", `${fleetIsHedge}\n`]);
   });
 });
 
@@ -303,14 +310,14 @@ describe("hedge import-fleet, which get.sh runs once the new engine is in place"
     const home = temp.make("home-");
     mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
     const record = (hash: string) => ({ kind: "file", hash });
-    writeFileSync(join(home, ".local/state/fleet/state.json"), JSON.stringify({ version: 1, groups: { fleet: { ".agents/AGENTS.md": record("old"), ".config/fleet/hooks/run.sh": record("hook") }, hedge: { ".agents/AGENTS.md": record("new"), ".local/share/fleet/x": record("x") } } }));
+    writeFileSync(join(home, ".local/state/fleet/state.json"), JSON.stringify({ version: 1, groups: { fleet: { ".agents/AGENTS.md": record("old"), ".config/fleet/hooks/run.sh": record("hook"), ".config/systemd/user/fleet-heavy.slice": record("slice") }, hedge: { ".agents/AGENTS.md": record("new"), ".local/share/fleet/x": record("x") } } }));
 
     await hedge(["import-fleet"], home);
 
     expect(stateOf(home)).toEqual({ version: 1, groups: { hedge: { ".agents/AGENTS.md": record("new") } } } as never);
   });
 
-  test("after an import that stopped part way, the next import copies each file that is still missing, replaces none, and leaves a new path it did not make alone", async () => {
+  test("after an import that stopped part way, the next import copies each file that is still missing, replaces none, and leaves a new data folder it did not make alone", async () => {
     const home = temp.make("home-");
     mkdirSync(join(home, ".config/fleet/hooks"), { recursive: true });
     writeFileSync(join(home, ".config/fleet/kept.txt"), "mine\n");
@@ -395,6 +402,62 @@ describe("hedge import-fleet, which get.sh runs once the new engine is in place"
     expect(results[1]!.output).toContain("Hedge: left ~/.local/state/fleet/steps.json behind, because it is not a Hedge step ledger.");
   });
 
+  test("copies the secret store's event log with its values, so a stored value stays readable and a store that was off stays off", async () => {
+    const home = temp.make("home-");
+    const put = { type: "put", id: "p1", name: "slack", at: "2026-11-01T00:00:00.000Z", why: "intake", machine: "hub" };
+    const off = { type: "off", id: "o1", reason: "leaked", at: "2026-11-02T00:00:00.000Z", machine: "hub" };
+    mkdirSync(join(home, ".config/fleet/secrets"), { recursive: true });
+    writeFileSync(join(home, ".config/fleet/secrets/slack.p1"), "SLACK_TOKEN=xoxb-test\n", { mode: 0o600 });
+    mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
+    writeFileSync(join(home, ".local/state/fleet/secrets.jsonl"), [put, off].map((event) => `${JSON.stringify(event)}\n`).join(""), { mode: 0o600 });
+
+    const imported = await hedge(["import-fleet"], home);
+
+    expect(imported.code).toBe(0);
+    expect(imported.output).toContain("Hedge: copied the secret store's log ~/.local/state/fleet/secrets.jsonl.");
+    expect(readEvents(home)).toEqual([put, off] as never);
+    expect(lstatSync(join(home, ".local/state/hedge/secrets.jsonl")).mode & 0o777).toBe(0o600);
+    expect(readFileSync(join(home, ".config/hedge/secrets/slack.p1"), "utf8")).toBe("SLACK_TOKEN=xoxb-test\n");
+  });
+
+  test("copies each old config file into a ~/.config/hedge that hedge devbox add made first, and keeps the files there", async () => {
+    const home = temp.make("home-");
+    mkdirSync(join(home, ".config/fleet/secrets"), { recursive: true });
+    writeFileSync(join(home, ".config/fleet/machine.json"), JSON.stringify({ role: "devbox", name: "box-old" }));
+    writeFileSync(join(home, ".config/fleet/provider-fields.json"), "{}\n");
+    writeFileSync(join(home, ".config/fleet/secrets/slack.p1"), "SLACK_TOKEN=xoxb-test\n");
+    mkdirSync(join(home, ".config/hedge"), { recursive: true });
+    writeFileSync(join(home, ".config/hedge/machine.json"), JSON.stringify({ schema: 1, role: "devbox", name: "box-2" }));
+
+    expect((await hedge(["import-fleet"], home)).code).toBe(0);
+
+    expect(readFileSync(join(home, ".config/hedge/provider-fields.json"), "utf8")).toBe("{}\n");
+    expect(readFileSync(join(home, ".config/hedge/secrets/slack.p1"), "utf8")).toBe("SLACK_TOKEN=xoxb-test\n");
+    expect(JSON.parse(readFileSync(join(home, ".config/hedge/machine.json"), "utf8"))).toEqual({ schema: 1, role: "devbox", name: "box-2" });
+  });
+
+  test("follows a saved profileDir that is a link into a Fleet path to its copy, and starts setup again when the profile cannot be copied", async () => {
+    const home = temp.make("home-");
+    const repo = join(home, ".local/share/fleet/profile");
+    cpSync(profileDir(), repo, { recursive: true });
+    for (const args of [["init", "-q", "-b", "main"], ["config", "user.name", "Test"], ["config", "user.email", "test@example.com"], ["add", "."], ["commit", "-q", "-m", "profile"]]) git(repo, ...args);
+    symlinkSync(repo, join(home, "my-profile"));
+    mkdirSync(join(home, ".config/fleet"), { recursive: true });
+    writeFileSync(join(home, ".config/fleet/machine.json"), JSON.stringify({ role: "devbox", profileDir: join(home, "my-profile"), setup: { done: ["github", "profile", "apply"] } }));
+    const broken = temp.make("home-");
+    mkdirSync(join(broken, ".local/share/fleet/profile"), { recursive: true });
+    writeFileSync(join(broken, ".local/share/fleet/profile/hedge.json"), "{}\n");
+    mkdirSync(join(broken, ".config/fleet"), { recursive: true });
+    writeFileSync(join(broken, ".config/fleet/machine.json"), JSON.stringify({ role: "devbox", profileDir: join(broken, ".local/share/fleet/profile"), setup: { done: ["github", "profile", "apply"] } }));
+
+    await hedge(["import-fleet"], home);
+    await hedge(["import-fleet"], broken);
+
+    expect(JSON.parse(readFileSync(join(home, ".config/hedge/machine.json"), "utf8"))).toEqual({ role: "devbox", profileDir: join(home, ".local/share/hedge/profile"), setup: { done: ["github", "profile", "apply"] } });
+    expect(git(join(home, ".local/share/hedge/profile"), "rev-parse", "HEAD")).toBe(git(repo, "rev-parse", "HEAD"));
+    expect(JSON.parse(readFileSync(join(broken, ".config/hedge/machine.json"), "utf8"))).toEqual({ role: "devbox" });
+  });
+
   test("refuses to copy through a link on the way to a new path, and writes nothing there", async () => {
     const home = temp.make("home-");
     mkdirSync(join(home, ".config/fleet"), { recursive: true });
@@ -431,6 +494,9 @@ describe("a profile in a Fleet path from before the rename", () => {
   const oldProfile = (home: string) => {
     const old = join(home, ".local/share/fleet/profile");
     cpSync(profileDir(), old, { recursive: true });
+    const remote = temp.make("remote-");
+    git(remote, "init", "-q", "--bare");
+    for (const args of [["init", "-q", "-b", "main"], ["config", "user.name", "Test"], ["config", "user.email", "test@example.com"], ["add", "."], ["commit", "-q", "-m", "profile"], ["remote", "add", "origin", remote], ["push", "-q", "-u", "origin", "main"]]) git(old, ...args);
     return old;
   };
   const machineFile = (home: string) => join(home, ".config/hedge/machine.json");
@@ -476,9 +542,6 @@ describe("a profile in a Fleet path from before the rename", () => {
   test("hedge set on a machine whose machine file points into a Fleet path changes the Hedge copy, not the old profile", async () => {
     const home = temp.make("home-");
     const old = oldProfile(home);
-    const remote = temp.make("remote-");
-    git(remote, "init", "-q", "--bare");
-    for (const args of [["init", "-q", "-b", "main"], ["config", "user.name", "Test"], ["config", "user.email", "test@example.com"], ["add", "."], ["commit", "-q", "-m", "profile"], ["remote", "add", "origin", remote], ["push", "-q", "-u", "origin", "main"]]) git(old, ...args);
     cpSync(old, join(home, ".local/share/hedge/profile"), { recursive: true });
     mkdirSync(dirname(machineFile(home)), { recursive: true });
     writeFileSync(machineFile(home), JSON.stringify({ schema: 1, role: "linux", profileDir: old }));
@@ -491,6 +554,29 @@ describe("a profile in a Fleet path from before the rename", () => {
     expect(tree(old)).toEqual(before);
   });
 
+  test("hedge set and apply refuse a checkout of another repository at the Hedge path, and push nothing there", async () => {
+    const home = temp.make("home-");
+    const old = oldProfile(home);
+    const stranger = join(home, ".local/share/hedge/profile");
+    cpSync(profileDir(), stranger, { recursive: true });
+    const elsewhere = temp.make("remote-");
+    git(elsewhere, "init", "-q", "--bare");
+    for (const args of [["init", "-q", "-b", "main"], ["config", "user.name", "Test"], ["config", "user.email", "test@example.com"], ["add", "."], ["commit", "-q", "-m", "other"], ["remote", "add", "origin", elsewhere], ["push", "-q", "-u", "origin", "main"]]) git(stranger, ...args);
+    mkdirSync(dirname(machineFile(home)), { recursive: true });
+    writeFileSync(machineFile(home), JSON.stringify({ schema: 1, role: "linux", profileDir: old }));
+    const before = git(elsewhere, "rev-parse", "main");
+    const profileText = readFileSync(join(stranger, "hedge.json"), "utf8");
+
+    const set = await hedge(["set", "base.heavySlots=3"], home);
+    const applied = await hedge(["apply", "--profile", old], home);
+
+    expect(set.code).toBe(1);
+    expect(set.output).toContain(`${old} is in a Fleet path from before the rename, so Hedge does not use it.`);
+    expect(applied.code).toBe(1);
+    expect(readFileSync(join(stranger, "hedge.json"), "utf8")).toBe(profileText);
+    expect(git(elsewhere, "rev-parse", "main")).toBe(before);
+  });
+
   test("the profile writers refuse a folder in a Fleet path", async () => {
     const home = temp.make("home-");
     const old = oldProfile(home);
@@ -500,6 +586,23 @@ describe("a profile in a Fleet path from before the rename", () => {
     await expect(saveMachine(home, { role: "linux", profileDir: old } as never)).rejects.toThrow(`${old} is in a Fleet path from before the rename, so Hedge does not write there.`);
     expect(tree(old)).toEqual(before);
     expect(existsSync(machineFile(home))).toBe(false);
+  });
+
+  test("the profile writers refuse a file that links into a Fleet path, though its folder is outside", async () => {
+    const home = temp.make("home-");
+    const old = oldProfile(home);
+    const linked = profileDir();
+    rmSync(join(linked, "hedge.json"));
+    symlinkSync(join(old, "hedge.json"), join(linked, "hedge.json"));
+    mkdirSync(join(home, ".config/fleet"), { recursive: true });
+    writeFileSync(join(home, ".config/fleet/machine.json"), "{}\n");
+    symlinkSync(join(home, ".config/fleet"), join(home, ".config/hedge"));
+    const before = tree(old);
+
+    await expect(saveAnswers(linked, { plan: "claude" })).rejects.toThrow("is in a Fleet path from before the rename, so Hedge does not write there.");
+    await expect(saveMachine(home, { role: "linux", profileDir: linked } as never)).rejects.toThrow("is in a Fleet path from before the rename, so Hedge does not write there.");
+    expect(tree(old)).toEqual(before);
+    expect(readFileSync(join(home, ".config/fleet/machine.json"), "utf8")).toBe("{}\n");
   });
 });
 

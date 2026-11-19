@@ -26,6 +26,8 @@ export type ProxyMachine = {
 
 export const keyPath = (home: string) => join(home, ".config/hedge/cli-proxy.key");
 export const keyHelper = 'cat "$HOME/.config/hedge/cli-proxy.key"';
+const fleetKeyHelper = 'cat "$HOME/.config/fleet/cli-proxy.key"';
+const ownHelper = (helper: unknown) => helper === keyHelper || helper === fleetKeyHelper;
 export const panelUrl = `${proxyUrl}/management.html`;
 const marker = "# Managed by Hedge CLI proxy.";
 const what = "CLI proxy";
@@ -303,7 +305,7 @@ export async function claudeRoute(home: string, on: boolean): Promise<(() => Pro
   const before = JSON.stringify(settings);
   const env = settings.env ?? {};
   if (on) {
-    for (const [name, current, value] of [["env.ANTHROPIC_BASE_URL", env.ANTHROPIC_BASE_URL, proxyUrl], ["apiKeyHelper", settings.apiKeyHelper, keyHelper]]) {
+    for (const [name, current, value] of [["env.ANTHROPIC_BASE_URL", env.ANTHROPIC_BASE_URL, proxyUrl], ["apiKeyHelper", ownHelper(settings.apiKeyHelper) ? keyHelper : settings.apiKeyHelper, keyHelper]]) {
       if (current !== undefined && current !== value) throw new Error(`Keep your Claude setting ${name} in ${path}: Hedge did not set it. Remove it to use the proxy.`);
     }
     settings.env = { ...env, ANTHROPIC_BASE_URL: proxyUrl };
@@ -311,7 +313,7 @@ export async function claudeRoute(home: string, on: boolean): Promise<(() => Pro
   } else {
     if (env.ANTHROPIC_BASE_URL === proxyUrl) delete env.ANTHROPIC_BASE_URL;
     if (settings.env && !Object.keys(env).length) delete settings.env;
-    if (settings.apiKeyHelper === keyHelper) delete settings.apiKeyHelper;
+    if (ownHelper(settings.apiKeyHelper)) delete settings.apiKeyHelper;
   }
   if (JSON.stringify(settings) === before) return async () => {};
   return () => replaceUnchanged(path, text, `${JSON.stringify(settings, null, 2)}\n`);
@@ -334,6 +336,19 @@ const sendClaude = async (home: string, on: boolean) => (await claudeRoute(home,
 export const codexProvider = "hedge-proxy";
 const codexUrl = `${proxyUrl}/v1`;
 export const codexProviderTable = { name: "Hedge CLI proxy", base_url: codexUrl, wire_api: "responses", auth: { command: "/bin/sh", args: ["-c", keyHelper] } };
+const fleetProvider = "fleet-proxy";
+const fleetProviderTable = { name: "Fleet CLI proxy", base_url: codexUrl, wire_api: "responses", auth: { command: "/bin/sh", args: ["-c", fleetKeyHelper] } };
+
+/** Removes the provider table that fleet cli-proxy connect wrote, while it is unchanged, and the model_provider that names it. Returns whether Codex used it. */
+function withoutFleetProvider(config: Record<string, unknown>): boolean {
+  const providers = config.model_providers as Record<string, unknown> | undefined;
+  if (!Bun.deepEquals(providers?.[fleetProvider], fleetProviderTable)) return false;
+  delete providers![fleetProvider];
+  if (!Object.keys(providers!).length) delete config.model_providers;
+  if (config.model_provider !== fleetProvider) return false;
+  delete config.model_provider;
+  return true;
+}
 
 async function readCodex(home: string) {
   const path = join(home, ".codex/config.toml");
@@ -343,11 +358,12 @@ async function readCodex(home: string) {
   try { if (text !== undefined) config = parse(text); }
   catch { config = undefined; }
   if (!isObject(config) || (config.model_providers !== undefined && !isObject(config.model_providers))) throw new Error(`${path} is not a Codex config. Fix it, then run this again.`);
+  const fleetRouted = withoutFleetProvider(config);
   const providers = config.model_providers as Record<string, unknown> | undefined;
   const table = providers?.[codexProvider];
   const url = isObject(table) ? table.base_url : undefined;
   const routed = config.model_provider === codexProvider && (url === undefined || url === codexUrl);
-  return { path, text, config, providers, routed, untouched: Bun.deepEquals(table, codexProviderTable) };
+  return { path, text, config, providers, routed: routed || fleetRouted, untouched: Bun.deepEquals(table, codexProviderTable) };
 }
 
 const readableCodex = (home: string) => readCodex(home).catch(() => undefined);
@@ -356,7 +372,7 @@ async function sendCodexHome(home: string): Promise<boolean> {
   const read = await readableCodex(home);
   if (!read) return false;
   const { path, text, config, providers, routed, untouched } = read;
-  if (routed) delete config.model_provider;
+  if (routed && config.model_provider === codexProvider) delete config.model_provider;
   if (untouched) delete providers![codexProvider];
   if (providers && !Object.keys(providers).length) delete config.model_providers;
   if (routed || untouched) await replaceUnchanged(path, text, Object.keys(config).length ? `${stringify(config)}\n` : "");
