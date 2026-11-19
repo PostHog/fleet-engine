@@ -29,14 +29,18 @@ case $state in pending | starting | stopping | canceling | deleting)
   echo "x $name is not ready: its latest build is a $transition that is $state. Wait until it ends, then run this check again."
   exit 1 ;;
 esac
-if [ "$transition" = delete ]; then
-  echo "x $name is deleted or failed to delete: its latest build is a delete that is $state. Never retry it. Ask the person whether to create the workspace again."
-  exit 1
-fi
-if [ "$transition $state" != "start running" ]; then
-  echo "x $name does not run: its latest build is a $transition that is $state. Ask the person to start it in the Coder web app, then run this check again."
-  exit 1
-fi
+case "$transition $state" in
+  "start running") ;;
+  "delete "*)
+    echo "x $name has a delete build that is $state, so its name stays taken. Ask the person whether it should go. If so, they press Retry in the Coder web app until it is gone, and you create it again. If not, they ask the Coder admin to restore it."
+    exit 1 ;;
+  *" failed")
+    echo "x $name does not run: its latest build is a $transition that failed. Ask the person to press Retry in the Coder web app, and Start when it has stopped, then run this check again."
+    exit 1 ;;
+  *)
+    echo "x $name does not run: its latest build is a $transition that is $state. Ask the person to press Start in the Coder web app, then run this check again."
+    exit 1 ;;
+esac
 url=$(coder whoami -o json | json 'my $me = decode_json(join "", <STDIN>); $me = $me->[0] if ref $me eq "ARRAY"; print $me->{url}')
 
 token() { if [ -n "${CODER_SESSION_TOKEN:-}" ]; then printf '%s\n' "$CODER_SESSION_TOKEN"; else coder login token; fi; }

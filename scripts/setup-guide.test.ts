@@ -191,10 +191,13 @@ describe("the agent setup guide", () => {
   });
 
   test("changes a parameter in the workspace's Settings in the Coder web app, as the check says, and never with the Coder CLI", () => {
-    const docs = [guide(), readFileSync(join(root, "docs/getting-started.md"), "utf8")].map((text) => text.replace(/\s+/g, " "));
-    for (const text of docs) expect(text.match(/\bcoder (?:update|restart|start) [^`\s]+/g)).toBeNull();
-    expect(docs[0]).toContain("**Settings → Parameters**");
-    expect(docs[1]).toContain("**Settings → Parameters**");
+    const texts = [guide(), readFileSync(join(root, "docs/getting-started.md"), "utf8")];
+    const wrappedSpans = (text: string) => [...text.replace(/^ *```[\s\S]*?^ *```$/gm, "").replace(/\s+/g, " ").matchAll(/`([^`]+)`/g)].map((match) => match[1]!);
+    const commands = texts.flatMap((text) => [...codeIn(text), ...wrappedSpans(text)]);
+    expect(commands.filter((code) => /(?:^|[;&|(]\s*)coder\s+["']?(?:update|restart|start)["']?\s+\S/m.test(code))).toEqual([]);
+    for (const text of texts) expect(text.replace(/\s+/g, " ")).toContain("**Settings → Parameters**");
+    const printed = fakeCoder(temp, { parameters: { instance_type: "m7g.xlarge" }, mutable: { instance_type: true } }).check(["instance_type=m7g.4xlarge"]);
+    expect([printed.code, printed.output]).toEqual([1, "x instance_type is not the value you passed. In the Coder web app, set it under Settings, Parameters, and submit.\nok hedge-hub runs and stays on\n"]);
   });
 
   test("reads the template's parameters when coder templates pull fails", () => {

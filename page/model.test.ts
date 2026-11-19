@@ -27,9 +27,10 @@ const line = (text: string, label: string) => text.match(new RegExp(`^- ${label}
 const step = (text: string, start: string) => text.split("\n").find((item) => /^\d+\. /.test(item) && item.includes(start));
 const filledIn = (code: string): string => (/<[^<>\n]+>/.test(code) ? filledIn(code.replace(/<[^<>\n]+>/g, "value")) : code);
 const parses = (code: string) => Bun.spawnSync(["sh", "-n"], { stdin: new TextEncoder().encode(filledIn(code)) }).exitCode === 0;
+const remoteHereDocuments = (code: string) => [...code.matchAll(/\bssh(?:\s+-\S+)*\s+[^\s'"]+\s+sh -s <<'([A-Za-z_][A-Za-z0-9_]*)'\n([\s\S]*?)^\1$/gm)].map((match) => match[2]!);
 const remoteCommands = (code: string) => [
   ...[...code.matchAll(/\bssh(?:\s+-\S+)*\s+[^\s'"]+\s+'([^']*)'/g)].map((match) => match[1]!),
-  ...[...code.matchAll(/\bssh(?:\s+-\S+)*\s+[^\s'"]+\s+sh -s <<'([A-Z]+)'\n([\s\S]*?)^\1$/gm)].map((match) => match[2]!),
+  ...remoteHereDocuments(code),
 ];
 const unparsedSnippets = (codes: string[]) => codes.filter((code) => !parses(code) || !remoteCommands(code).every(parses));
 const sshSnippets = (note: string) =>
@@ -166,7 +167,7 @@ describe("the install prompt", () => {
     expect(filled).toContain(recovery);
     const brokenRecovery = recovery.replace(/(sh -s <<[^\n]*\n)/, "$1fi\n");
     expect([unparsedSnippets([recovery]), unparsedSnippets([brokenRecovery])]).toEqual([[], [brokenRecovery]]);
-    expect(filled.filter((code) => (code.match(/<</g) ?? []).length !== (code.match(/\bsh -s <<'[A-Z]+'\n/g) ?? []).length)).toEqual([]);
+    expect(filled.filter((code) => (code.match(/<</g) ?? []).length !== remoteHereDocuments(code).length)).toEqual([]);
     const run = filled.map((code) => code.split("\n").filter((line) => !/^\s*#/.test(line)).join("\n"));
     const hosts = run.flatMap((code) => [...code.matchAll(/\bssh((?:\s+-\S+)*)\s+([^\s'"]+)/g)].map((match) => match[2]!));
     expect(hosts.length).toBe(run.join("\n").match(/\bssh\s/g)!.length);
