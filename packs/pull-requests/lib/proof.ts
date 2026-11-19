@@ -512,22 +512,40 @@ const findingsBlock = /^\s*FINDINGS\b:?/;
 const testsBlock = /^\s*(?:#+\s*)?\**TESTS\b/;
 const flooredItem = /^\s*(?:[-*]|\d+[.)])\s+(?:[^|\n]*\|)?\s*\**(?:minor|nit)\**\s*\|/i;
 
+const anchorIntro = /^(?:fleet|hedge) compared each finding's anchor with the diff and with earlier reviews of this PR\.$/;
+const anchorNote = /^- (?:Not in the diff, so check it before triage: \S|Seen before in [^:\n]+: \S|\d+ findings? quotes? no anchor\.$)/;
+
+type ReviewedLine = { text: string; note: boolean };
+
+function anchorNotes(lines: string[]) {
+  const notes = new Set<number>();
+  lines.forEach((line, index) => {
+    if (line.trim() !== anchorHeading) return;
+    let next = index + 1;
+    while (next < lines.length && !lines[next]!.trim()) next++;
+    if (!anchorIntro.test(lines[next]?.trim() ?? "")) return;
+    for (next++; next < lines.length && (!lines[next]!.trim() || anchorNote.test(lines[next]!)); next++) notes.add(next);
+  });
+  return notes;
+}
+
 function reviewedLines(findings: string) {
   const lines = findings.split("\n");
+  const notes = anchorNotes(lines);
   const lensAnswer = lines.some((line) => findingsBlock.test(line));
   let inside = !lensAnswer;
   let tests = false;
-  const kept: string[] = [];
-  const tested: string[] = [];
-  for (const line of lines) {
-    if (line.trim() === anchorHeading) break;
-    if (testsBlock.test(line)) { tests = true; inside = false; continue; }
-    if (findingsBlock.test(line)) { tests = false; inside = true; kept.push(line.replace(findingsBlock, "")); continue; }
+  const kept: ReviewedLine[] = [];
+  const tested: ReviewedLine[] = [];
+  lines.forEach((line, index) => {
+    const note = notes.has(index);
+    if (testsBlock.test(line)) { tests = true; inside = false; return; }
+    if (findingsBlock.test(line)) { tests = false; inside = true; kept.push({ text: line.replace(findingsBlock, ""), note }); return; }
     if (/^COVERED\b/.test(line)) { tests = false; inside = false; }
     else if (/^#/.test(line)) { tests = false; if (!lensAnswer) inside = true; }
-    if (tests) tested.push(line);
-    else if (inside) kept.push(line);
-  }
+    if (tests) tested.push({ text: line, note });
+    else if (inside) kept.push({ text: line, note });
+  });
   return { kept, tested };
 }
 
@@ -545,28 +563,32 @@ const lazyContinued = /^[^\s#]/;
 
 /** The findings, then the TESTS items. Each part on its own: prose without list items is one finding of its part. */
 export function reviewedFindings(findings: string) {
+  return reviewedItems(findings).map(({ text }) => text);
+}
+
+function reviewedItems(findings: string) {
   const { kept, tested } = reviewedLines(findings);
   return [...listedItems(kept), ...listedItems(tested)];
 }
 
-function listedItems(reviewed: string[]) {
-  const items: string[] = [];
+function listedItems(reviewed: ReviewedLine[]) {
+  const items: ReviewedLine[] = [];
   let open = false;
-  for (const line of reviewed) {
+  for (const { text: line, note } of reviewed) {
     const joins: boolean = items.length > 0 && (continued.test(line) || (open && lazyContinued.test(line)));
-    if (findingItem.test(line)) items.push(line.trim());
-    else if (joins) items[items.length - 1] += `\n${line.trim()}`;
+    if (findingItem.test(line)) items.push({ text: line.trim(), note });
+    else if (joins) items[items.length - 1]!.text += `\n${line.trim()}`;
     open = Boolean(line.trim()) && (findingItem.test(line) || joins);
   }
-  const text = reviewed.map((line) => line.trim()).filter(Boolean);
+  const text = reviewed.map(({ text: line }) => line.trim()).filter(Boolean);
   if (items.length || text.every((line) => noFinding.test(line))) return items;
-  return [text.join("\n")];
+  return [{ text: text.join("\n"), note: false }];
 }
 
 export type Answer = { verdict: "fixed" | "rejected" | "known"; text: string };
 
 export function answeredFindings(findings: string, responses: string) {
-  const items = reviewedFindings(findings);
+  const items = reviewedItems(findings);
   const answers = new Map<number, Answer>();
   const other: string[] = [];
   let last: Answer | undefined;
@@ -577,13 +599,13 @@ export function answeredFindings(findings: string, responses: string) {
     else if (!match && last && continued.test(line)) last.text += `\n${line.trim()}`;
     else if (line.trim()) { last = undefined; other.push(line.trim()); }
   }
-  return { findings: items.map((text, index) => ({ text, ...answers.has(index + 1) ? { answer: answers.get(index + 1)! } : {} })), other: other.join("\n") };
+  return { findings: items.map(({ text, note }, index) => ({ text, ...note ? { note } : {}, ...answers.has(index + 1) ? { answer: answers.get(index + 1)! } : {} })), other: other.join("\n") };
 }
 
 const majorItem = /^\s*(?:[-*]|\d+[.)])\s+(?:[^|\n]*\|)?\s*\**major\**\s*\|/i;
 
 const knownBlockers = (findings: string, responses: string) =>
-  answeredFindings(findings, responses).findings.flatMap(({ text, answer }, index) => answer?.verdict === "known" && !majorItem.test(text) && !flooredItem.test(text) ? [index + 1] : []);
+  answeredFindings(findings, responses).findings.flatMap(({ text, note, answer }, index) => answer?.verdict === "known" && !majorItem.test(text) && !needsNoAnswer({ text, note }) ? [index + 1] : []);
 
 const locations = (text: string) => [...text.matchAll(/(?<![\w./-])([\w./-]+:\d+)(?![\w:])/g)].map((match) => match[1]!);
 
@@ -593,8 +615,10 @@ const unlistedKnown = (findings: string, responses: string, listed: string[]) =>
     return answer?.verdict === "known" && !(location && listed.some((item) => locations(item).includes(location))) ? [index + 1] : [];
   });
 
+const needsNoAnswer = ({ text, note }: { text: string; note?: boolean }) => note || flooredItem.test(text);
+
 const unanswered = (findings: string, responses: string) =>
-  answeredFindings(findings, responses).findings.flatMap(({ text, answer }, index) => answer || flooredItem.test(text) ? [] : [index + 1]);
+  answeredFindings(findings, responses).findings.flatMap((finding, index) => finding.answer || needsNoAnswer(finding) ? [] : [index + 1]);
 
 export const proofKinds = ["live-run", "ui-walk", "prod-shape", "cross-version", "shadow-diff", "post-deploy-watch", "dev-observed"] as const;
 export type ProofKind = (typeof proofKinds)[number];
