@@ -90,7 +90,7 @@ export const startStatus = (data: PromptData, start: Start) => {
 export const installCommand = (selected: string[]) => `hedge packs ${selected.map((name) => `--add ${name}`).join(" ")}`;
 
 function findHub(guide: string, notes: boolean) {
-  return `Find my hub. Run \`hedge hub status\` where Hedge runs: here when \`command -v hedge\` finds it, or else over SSH on one of my cloud boxes whose name starts with \`hedge-\`. The name after "The hub:" is the SSH name of the hub. ${notes ? "Use it as `<hub>` in each SSH command of a note. " : ""}When it prints "The hub: not named", or no box runs Hedge, I have no hub yet. Tell me, and offer to set one up first with steps 5, 7, and 9 of ${guide}. To make a box that already runs Hedge the hub, skip step 5 for it.`;
+  return `Find my hub. List my cloud boxes as step 1 of ${guide} does, and run \`hedge hub status\` over SSH on each one that runs, until one names the hub. Do not ask a \`hedge\` on this Mac: an earlier setup can leave one here. The name after "The hub:" is the SSH name of the hub. ${notes ? "Use it as `<hub>` in each SSH command of a note. " : ""}When every box prints "The hub: not named", or no box runs Hedge, I have no hub yet. Tell me, and offer to set one up first with steps 5, 7, and 9 of ${guide}. To make a box that already runs Hedge the hub, skip step 5 for it.`;
 }
 
 function noteStep(notes: PromptPack[]) {

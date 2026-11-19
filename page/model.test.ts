@@ -89,7 +89,7 @@ describe("the install prompt", () => {
         "",
         "Hedge runs on my hub and my nodes in the cloud, not on my Mac. Run each command of this prompt on the hub, over SSH with the `PATH` line of https://raw.githubusercontent.com/PostHog/hedge/main/SETUP.md when you run elsewhere. Install nothing from Hedge here. Ask me each choice with your question tool, and run every command yourself.",
         "",
-        '1. Find my hub. Run `hedge hub status` where Hedge runs: here when `command -v hedge` finds it, or else over SSH on one of my cloud boxes whose name starts with `hedge-`. The name after "The hub:" is the SSH name of the hub. Use it as `<hub>` in each SSH command of a note. When it prints "The hub: not named", or no box runs Hedge, I have no hub yet. Tell me, and offer to set one up first with steps 5, 7, and 9 of https://raw.githubusercontent.com/PostHog/hedge/main/SETUP.md. To make a box that already runs Hedge the hub, skip step 5 for it.',
+        '1. Find my hub. List my cloud boxes as step 1 of https://raw.githubusercontent.com/PostHog/hedge/main/SETUP.md does, and run `hedge hub status` over SSH on each one that runs, until one names the hub. Do not ask a `hedge` on this Mac: an earlier setup can leave one here. The name after "The hub:" is the SSH name of the hub. Use it as `<hub>` in each SSH command of a note. When every box prints "The hub: not named", or no box runs Hedge, I have no hub yet. Tell me, and offer to set one up first with steps 5, 7, and 9 of https://raw.githubusercontent.com/PostHog/hedge/main/SETUP.md. To make a box that already runs Hedge the hub, skip step 5 for it.',
         "2. Run `hedge update` on the hub, so it has the newest engine and packs. Then run `hedge packs` there, and leave out each pack that is already on.",
         '3. Read the setup note of each pack. Ask me what it asks, and collect the flags that it names. Where a note names "the setup command" or "the command in item 2 of step 9", use the `hedge packs` command of this prompt. Do not run a step that a note puts after that command yet.',
         "   - Memory: ~/.local/share/hedge/engine/packs/memory/SETUP.md",
@@ -120,7 +120,8 @@ describe("the install prompt", () => {
   test("for any selection, finds the hub with hedge hub status in the words it prints, sends a box without a hub to the setup guide's steps 5, 7, and 9, and never says Hedge runs on the machine it is pasted on", async () => {
     for (const selected of [select("communication"), select("recovery"), select("memory", "slack"), everyPack()]) {
       const text = installPrompt(data, selected);
-      expect(step(text, "Find my hub")).toStartWith("1. Find my hub. Run `hedge hub status`");
+      expect(step(text, "Find my hub")).toStartWith("1. Find my hub. List my cloud boxes as step 1 of https://raw.githubusercontent.com/PostHog/hedge/main/SETUP.md does, and run `hedge hub status` over SSH on each one that runs");
+      expect(step(text, "Find my hub")).not.toMatch(/hedge-`|command -v hedge/);
       expect(text).toContain("offer to set one up first with steps 5, 7, and 9 of https://raw.githubusercontent.com/PostHog/hedge/main/SETUP.md");
       expect(text).not.toContain("Hedge already runs on this machine");
     }

@@ -132,8 +132,9 @@ passes. When they have no Coder deployment, stop: this setup needs Coder
 today. Plain Linux boxes over SSH are not supported yet. "Set it up by hand"
 in the README installs Hedge on one Linux box.
 
-**An earlier setup.** Run `coder list`. For each workspace whose name starts
-with `hedge-`, check whether Hedge runs there and whether it is the hub:
+**An earlier setup.** Run `coder list`. For each workspace that runs, check
+whether Hedge runs there and whether it is the hub. Their boxes can have any
+name, so do not skip one whose name does not start with `hedge-`:
 
 ```sh
 ssh coder.<name> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge hub status'
