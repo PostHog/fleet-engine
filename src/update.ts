@@ -39,6 +39,7 @@ export async function update(given: UpdateOptions): Promise<number> {
   if (!moved) return 1;
   const failed = await installPackages(options.engineDir);
   if (failed !== undefined) return await rollBack(options, before, failed), 1;
+  if (!(await recordRelease(options, moved.release))) return 1;
   if (!(await saveOrigin(options, origin))) return 1;
   const profileMoved = await pullProfile(options);
   const applied = await options.runApply();
@@ -77,13 +78,22 @@ async function saveOrigin(options: UpdateOptions, origin: Origin) {
   return true;
 }
 
-async function trackMain(options: UpdateOptions, url: string) {
+type Moved = false | { release?: string };
+
+async function recordRelease(options: UpdateOptions, release: string | undefined) {
+  if (!release) return true;
+  const recorded = await git(options.engineDir, "update-ref", `${releaseRefs}/${release}`, "HEAD");
+  if (!recorded.ok) options.print(`hedge update: the engine is at ${release}, but could not record that release: ${recorded.err}`);
+  return recorded.ok;
+}
+
+async function trackMain(options: UpdateOptions, url: string): Promise<Moved> {
   const fetched = await git(options.engineDir, "fetch", "-q", "--depth", "1", "--no-tags", url, "main");
   if (!fetched.ok) return options.print(`hedge update: could not fetch the engine: ${fetched.err}`), false;
   const checkedOut = await git(options.engineDir, "checkout", "-q", "--detach", "FETCH_HEAD");
   if (!checkedOut.ok) return options.print(`hedge update: could not check out main: ${checkedOut.err}`), false;
   options.print(`Engine follows main at ${(await git(options.engineDir, "rev-parse", "--short", "HEAD")).out}.`);
-  return true;
+  return {};
 }
 
 async function releases(options: UpdateOptions, url: string) {
@@ -100,7 +110,7 @@ async function releases(options: UpdateOptions, url: string) {
   });
 }
 
-async function followRelease(options: UpdateOptions, url: string, switched: boolean) {
+async function followRelease(options: UpdateOptions, url: string, switched: boolean): Promise<Moved> {
   const versions = await releases(options, url);
   if (!versions) return false;
   const pin = parse(options.engine.ref);
@@ -115,20 +125,19 @@ async function followRelease(options: UpdateOptions, url: string, switched: bool
   if (switched) return checkOutRelease(options, url, target);
   if (!installed) {
     options.print(`Engine stays at ${head.slice(0, 7)}, which is not a release, so hedge update does not move it back. Set engine.channel to track to follow main, or run get.sh --ref ${target.tag}.`);
-    return true;
+    return {};
   }
-  if (compare(installed, target) >= 0) return options.print(`Engine is at ${installed.tag}.`), true;
+  if (compare(installed, target) >= 0) return options.print(`Engine is at ${installed.tag}.`), {};
   return checkOutRelease(options, url, target);
 }
 
-async function checkOutRelease(options: UpdateOptions, url: string, target: Version) {
-  const release = `${releaseRefs}/${target.tag}`;
-  const fetched = await git(options.engineDir, "fetch", "-q", "--depth", "1", "--no-tags", "--force", url, `+refs/tags/${target.tag}:${release}`);
+async function checkOutRelease(options: UpdateOptions, url: string, target: Version): Promise<Moved> {
+  const fetched = await git(options.engineDir, "fetch", "-q", "--depth", "1", "--no-tags", url, `refs/tags/${target.tag}`);
   if (!fetched.ok) return options.print(`hedge update: could not fetch the engine: ${fetched.err}`), false;
-  const checkedOut = await git(options.engineDir, "checkout", "-q", "--detach", release);
+  const checkedOut = await git(options.engineDir, "checkout", "-q", "--detach", "FETCH_HEAD");
   if (!checkedOut.ok) return options.print(`hedge update: could not check out ${target.tag}: ${checkedOut.err}`), false;
   options.print(`Engine is at ${target.tag}.`);
-  return true;
+  return { release: target.tag };
 }
 
 async function installPackages(engineDir: string) {
