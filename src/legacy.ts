@@ -42,7 +42,9 @@ export const oldJobCommands: ReadonlyArray<readonly string[]> = [
   ["secret", "sweep"], ["dream", "run"], ["peers", "renew"], ["peers", "restore"], ["disk-watch"], ["cli-proxy-balance"], ["memory-sync"], ["recover"], ["run"],
 ];
 
-export const isOldJob = (argv: string[]) => oldJobCommands.some((command) => command.every((word, index) => argv[index] === word));
+export const oldJob = (argv: string[]) => oldJobCommands.find((command) => command.every((word, index) => argv[index] === word));
+
+export const isOldJob = (argv: string[]) => oldJob(argv) !== undefined;
 
 export const fleetIsHedge = "Fleet is now Hedge. Run: curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh | sh";
 

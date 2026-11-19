@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { fleetAdapter, scheduledTasks, type FleetOptions } from "./adapters/fleet/adapter.ts";
+import { spawnRunner, type CommandRunner } from "./adapters/run.ts";
 import type { T3Server } from "./adapters/t3/port.ts";
 import { jobsAdapter } from "./adapters/jobs/adapter.ts";
 import { main } from "./cli.ts";
@@ -44,15 +45,17 @@ function savedT3Tasks(home: string, tasks: Array<{ id: string; enabled: boolean 
 
 const stoppedT3: T3Server = { answering: async () => false, session: async () => Promise.reject(new Error("T3 Code is not running")) };
 
-function machine(platform: NodeJS.Platform, home = oldInstall(), tasks?: FleetOptions["tasks"]) {
+type LiveProcesses = { run: CommandRunner; uid: number; sleep: () => Promise<void> };
+
+function machine(platform: NodeJS.Platform, home = oldInstall(), tasks?: FleetOptions["tasks"], live?: LiveProcesses) {
   const systemd = fakeSystemd();
   const launchd = fakeLaunchd();
   const docker = fakeDocker();
   const t3 = fakeTasks();
   const cron = fakeCrontab();
   const processes = fakeProcesses();
-  const run = runners(cron.run, systemd.run, launchd.run, docker.run, processes.run);
-  const fleet = fleetAdapter({ run, uid: 501, accountHome: async () => home, tasks: tasks ?? (async () => t3.client), sleep: async () => {} });
+  const run = runners(cron.run, systemd.run, launchd.run, docker.run, live?.run ?? processes.run);
+  const fleet = fleetAdapter({ run, uid: live?.uid ?? 501, accountHome: async () => home, tasks: tasks ?? (async () => t3.client), sleep: live?.sleep ?? (async () => {}) });
   const adapters = (): Adapter[] => [fleet, filesAdapter, jobsAdapter({ run, engineRoot: repoRoot, uid: 501, accountHome: async () => home })];
   const engine = engineWithService();
   const clock = { now: Date.now, sleep: async (_ms: number) => {} };
@@ -85,6 +88,29 @@ function startsFleetDuringFetch(linux: ReturnType<typeof machine>) {
     release();
   };
   return profile;
+}
+
+const oldLauncher = `#!/bin/sh
+set -eu
+fleet_root=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
+exec bun "$fleet_root/src/cli.ts" "$@"
+`;
+
+const oldCliBecomesPackCommand = `import { join } from "node:path";
+const [name = "", ...args] = Bun.argv.slice(2);
+process.execve(Bun.which("bun"), ["bun", join(import.meta.dir, "../packs/base/commands", name + ".ts"), ...args], process.env);
+`;
+
+async function firstLine(stream: ReadableStream<Uint8Array>) {
+  const reader = stream.getReader();
+  let text = "";
+  while (!text.includes("\n")) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    text += new TextDecoder().decode(value);
+  }
+  reader.releaseLock();
+  return text.split("\n")[0];
 }
 
 describe("hedge retire-fleet", () => {
@@ -252,12 +278,16 @@ describe("hedge retire-fleet", () => {
     linux.processes.table.set(4300, { args: `/home/bin/bun ${engine}/packs/context-library/mcp/main.ts` });
     linux.processes.table.set(4301, { args: `/home/bin/bun ${engine}/src/cli.ts heavy -- make test` });
     linux.processes.table.set(4302, { args: "/usr/bin/vim notes.md" });
+    linux.processes.table.set(4244, { args: `/bin/sh ${linux.home}/.local/state/fleet/jobs/agent-update.sh` });
+    linux.processes.table.set(4245, { args: `bun ${engine}/packs/base/commands/nightly.ts fleet-update -- fleet update` });
 
     const retired = await linux.hedge(["retire-fleet"]);
 
     expect(retired.code).toBe(0);
     expect(retired.output).toContain("Hedge: stopped and turned off the running command fleet nightly (process 4242) from before the rename, and kept its files.");
     expect(retired.output).toContain("Hedge: stopped and turned off the running command fleet prune --auto (process 4243) from before the rename, and kept its files.");
+    expect(retired.output).toContain("Hedge: stopped and turned off the running command fleet job agent-update (process 4244) from before the rename, and kept its files.");
+    expect(retired.output).toContain("Hedge: stopped and turned off the running command fleet nightly (process 4245) from before the rename, and kept its files.");
     expect([...linux.processes.table.keys()]).toEqual([4300, 4301, 4302]);
     expect(linux.cron.table.text).toBe("");
   });
@@ -274,6 +304,89 @@ describe("hedge retire-fleet", () => {
     expect(applied.code).toBe(1);
     expect(applied.output).toContain("The running command fleet nightly (process 4242) from before the rename still runs (it has not ended), so Hedge started nothing.");
     expect(linux.systemd.units.has("hedge-watch.service")).toBe(false);
+  });
+
+  test("stops a live nightly job that the old launcher started, after Fleet replaced its process with bun running packs/base/commands/nightly.ts", async () => {
+    const home = oldInstall();
+    const engine = join(home, ".local/share/fleet/engine");
+    const bin = temp.make("bin-");
+    symlinkSync(process.execPath, join(bin, "bun"));
+    mkdirSync(join(engine, "src"), { recursive: true });
+    mkdirSync(join(engine, "packs/base/commands"), { recursive: true });
+    writeFileSync(join(engine, "fleet"), oldLauncher);
+    writeFileSync(join(engine, "src/cli.ts"), oldCliBecomesPackCommand);
+    writeFileSync(join(engine, "packs/base/commands/nightly.ts"), 'console.log("ready");\nsetInterval(() => {}, 1 << 30);\n');
+    const secret = ["token", "z".repeat(24)].join("-");
+    const child = Bun.spawn(["/bin/sh", join(engine, "fleet"), "nightly", "agent-update", "--", "fleet", "agent-update", `--auth=${secret}`], {
+      env: { HOME: home, PATH: `${bin}:/usr/bin:/bin`, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" },
+      stdin: "ignore", stdout: "pipe", stderr: "inherit",
+    });
+    try {
+      expect(await firstLine(child.stdout)).toBe("ready");
+      const onlyThisChild: CommandRunner = async (command, options) => {
+        if (command[0] === "ps") return spawnRunner(command, options);
+        if (command[0] === "kill") return command.at(-1) === String(child.pid) ? spawnRunner(command, options) : { code: 1, stdout: "", stderr: "the test signals only its own child\n" };
+        return { code: 127, stdout: "" };
+      };
+      const linux = machine("linux", home, undefined, { run: onlyThisChild, uid: process.getuid!(), sleep: () => child.exited.then(() => undefined) });
+
+      const retired = await linux.hedge(["retire-fleet"]);
+
+      expect(retired.output).toContain(`Hedge: stopped and turned off the running command fleet nightly (process ${child.pid}) from before the rename, and kept its files.`);
+      expect(retired.output).not.toContain(secret);
+      expect(retired.code).toBe(0);
+      await child.exited;
+      expect(child.signalCode).toBe("SIGTERM");
+    } finally {
+      child.kill("SIGKILL");
+    }
+  });
+
+  test("leaves alone a program whose arguments only name the old launcher, and a process ID that another program took after the scan", async () => {
+    const linux = machine("linux");
+    const engine = join(linux.home, ".local/share/fleet/engine");
+    linux.processes.table.set(4242, { args: `/usr/bin/vim ${engine}/src/cli.ts nightly` });
+    linux.processes.table.set(4243, { args: `/home/bin/bun /work/tool.ts ${engine}/src/cli.ts nightly` });
+    linux.processes.table.set(4244, { args: `/home/bin/bun ${engine}/src/cli.ts nightly`, reusedBy: "/usr/bin/vim notes.md" });
+
+    const retired = await linux.hedge(["retire-fleet"]);
+
+    expect(retired.code).toBe(0);
+    expect(linux.processes.killed).toEqual([]);
+    expect([...linux.processes.table].map(([pid, item]) => `${pid} ${item.args}`)).toEqual([
+      `4242 /usr/bin/vim ${engine}/src/cli.ts nightly`,
+      `4243 /home/bin/bun /work/tool.ts ${engine}/src/cli.ts nightly`,
+      "4244 /usr/bin/vim notes.md",
+    ]);
+  });
+
+  test("when ps cannot run, retire exits 1 and apply starts nothing, since Hedge cannot tell whether an old job's command still runs", async () => {
+    const linux = machine("linux");
+    linux.processes.state.missing = true;
+
+    const retired = await linux.hedge(["retire-fleet"]);
+    const applied = await linux.hedge(["apply", "--profile", profileDir(["watcher"])]);
+
+    expect(retired.code).toBe(1);
+    expect(retired.output).toContain("Hedge: ps did not answer (exit 127). Hedge could not verify that it stopped.");
+    expect(applied.code).toBe(1);
+    expect(applied.output).toContain("ps did not answer (exit 127), so Hedge cannot tell whether Fleet still runs, and started nothing.");
+    expect(linux.systemd.units.has("hedge-watch.service")).toBe(false);
+  });
+
+  test("names an old job's command by its job and process only, so arguments that can hold a secret stay out of retire, apply and doctor", async () => {
+    const linux = machine("linux");
+    expect((await linux.hedge(["apply", "--profile", profileDir([])])).code).toBe(0);
+    const secret = ["token", "z".repeat(24)].join("-");
+    linux.processes.table.set(4242, { args: `/home/bin/bun ${join(linux.home, ".local/share/fleet/engine")}/src/cli.ts nightly agent-update -- sh -c curl -H Authorization:${secret}`, stubborn: true });
+
+    const runs = [await linux.hedge(["retire-fleet"]), await linux.hedge(["apply"]), await linux.hedge(["doctor"])];
+
+    expect(runs.map((run) => run.code)).toEqual([1, 1, 1]);
+    for (const run of runs) {
+      expect(run.output).toContain("fleet nightly (process 4242)");
+      expect(run.output).not.toContain(secret);
+    }
   });
 
   test("leaves the old heavy slice alone: systemd shows a slice static, and it runs nothing by itself", async () => {

@@ -3,7 +3,7 @@ import { lstatSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { Finding } from "../../pack/types.ts";
 import type { Adapter } from "../../reconciler/apply.ts";
-import { isOldJob, legacyPaths, underLegacyPath } from "../../legacy.ts";
+import { legacyPaths, oldJob, underLegacyPath } from "../../legacy.ts";
 import { skipOtherHome, spawnRunner, type CommandRunner } from "../run.ts";
 import { localT3Server } from "../t3/session.ts";
 import type { T3Server } from "../t3/port.ts";
@@ -23,6 +23,26 @@ const notLoaded = 113;
 const cronMarker = /\s# fleet:([A-Za-z0-9._-]+)$/;
 const exitPolls = 20;
 const exitPollMs = 500;
+
+const shellPrograms = new Set(["sh", "bash", "dash", "zsh"]);
+const jobLauncher = /\/\.local\/state\/fleet\/jobs\/([A-Za-z0-9._-]+)\.sh$/;
+const packCommand = /\/packs\/[^/]+\/commands\/([a-z0-9-]+)\.ts$/;
+
+function fleetJob(home: string, words: string[]): string | undefined {
+  const [program = "", script = "", ...rest] = words;
+  const ours = (path: string) => path.startsWith("/") && underLegacyPath(home, path);
+  const job = (argv: string[]) => oldJob(argv)?.join(" ");
+  if (basename(program) === "fleet" && ours(program)) return job([script, ...rest]);
+  if (!ours(script)) return undefined;
+  if (shellPrograms.has(basename(program))) {
+    const launcher = jobLauncher.exec(script)?.[1];
+    return basename(script) === "fleet" ? job(rest) : launcher && `job ${launcher}`;
+  }
+  if (basename(program) !== "bun") return undefined;
+  if (script.endsWith("/src/cli.ts")) return job(rest);
+  const command = packCommand.exec(script)?.[1];
+  return command ? job([command, ...rest]) : undefined;
+}
 
 const present = (path: string) => lstatSync(path, { throwIfNoEntry: false }) !== undefined;
 const hadFleet = (home: string) => legacyPaths.some(([before]) => present(join(home, before)));
@@ -80,14 +100,13 @@ export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
   };
   const cronId = (line: string) => cronMarker.exec(line)?.[1];
   const sleep = options.sleep ?? Bun.sleep;
-  const oldCommands = async (home: string) => {
+  const oldCommands = async (home: string): Promise<{ pieces: FleetPiece[]; unclear?: string }> => {
     const listed = await run(["ps", "-ww", "-U", String(uid), "-o", "pid=,args="]);
-    if (listed.code !== 0) return { pieces: [], unclear: listed.code === 127 ? undefined : `ps did not answer (${why(listed)})` };
+    if (listed.code !== 0) return { pieces: [], unclear: `ps did not answer (${why(listed)})` };
     const pieces = lines(listed.stdout).flatMap((line): FleetPiece[] => {
       const [pid, ...words] = line.split(/\s+/);
-      const at = words.findIndex((word) => ["cli.ts", "fleet"].includes(basename(word)) && word.startsWith("/") && underLegacyPath(home, word));
-      const argv = words.slice(at + 1);
-      return at >= 0 && isOldJob(argv) ? [{ kind: "process", name: `fleet ${argv.join(" ")} (process ${pid})`, pid: Number(pid) }] : [];
+      const job = fleetJob(home, words);
+      return job ? [{ kind: "process", name: `fleet ${job} (process ${pid})`, pid: Number(pid) }] : [];
     });
     return { pieces };
   };
@@ -181,6 +200,7 @@ export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
 
   async function stop(home: string, piece: FleetPiece, tasks: OldTasks | undefined) {
     if (piece.kind === "process") {
+      if ((await stillRunning(home, piece)) !== "it has not ended") return;
       await run(["kill", "-TERM", String(piece.pid)]);
       for (let poll = 0; poll < exitPolls && (await stillRunning(home, piece)) === "it has not ended"; poll++) await sleep(exitPollMs);
     } else if (piece.kind === "launchd") {

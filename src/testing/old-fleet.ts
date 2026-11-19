@@ -77,15 +77,23 @@ export function fakeCrontab(text = "") {
 }
 
 export function fakeProcesses() {
-  const table = new Map<number, { args: string; stubborn?: boolean }>();
+  const table = new Map<number, { args: string; stubborn?: boolean; reusedBy?: string }>();
+  const state = { missing: false };
+  const killed: number[] = [];
   const run: CommandRunner = async (command) => {
-    if (command[0] === "ps") return { code: 0, stdout: [...table].map(([pid, item]) => `${String(pid).padStart(6)} ${item.args}\n`).join("") };
+    if (command[0] === "ps" && state.missing) return { code: 127, stdout: "", stderr: "ps could not start: No such file or directory\n" };
+    if (command[0] === "ps") {
+      const listed = [...table].map(([pid, item]) => `${String(pid).padStart(6)} ${item.args}\n`).join("");
+      for (const [pid, item] of table) if (item.reusedBy) table.set(pid, { args: item.reusedBy });
+      return { code: 0, stdout: listed };
+    }
     if (command[0] !== "kill") return { code: 127, stdout: "" };
     const pid = Number(command.at(-1));
+    killed.push(pid);
     if (!table.get(pid)?.stubborn) table.delete(pid);
     return { code: 0, stdout: "" };
   };
-  return { run, table };
+  return { run, table, state, killed };
 }
 
 export const runners = (...fakes: CommandRunner[]): CommandRunner => async (command, options) => {

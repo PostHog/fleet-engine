@@ -3,7 +3,7 @@ import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readF
 import { dirname, join } from "node:path";
 import { fleetAdapter } from "./adapters/fleet/adapter.ts";
 import { jobsAdapter } from "./adapters/jobs/adapter.ts";
-import type { CommandRunner } from "./adapters/run.ts";
+import type { CommandRunner, RunOptions } from "./adapters/run.ts";
 import { main } from "./cli.ts";
 import { fleetIsHedge, legacyPaths, underLegacyPath } from "./legacy.ts";
 import { saveAnswers, saveMachine } from "./profile/profile.ts";
@@ -37,7 +37,8 @@ function macMachine() {
   return { home, launchd, hedge: machineCommand(home, "darwin", launchd.run) };
 }
 
-function machineCommand(home: string, platform: NodeJS.Platform, run: CommandRunner) {
+function machineCommand(home: string, platform: NodeJS.Platform, machineRun: CommandRunner) {
+  const run = async (command: string[], options?: RunOptions) => (command[0] === "ps" ? { code: 0, stdout: "" } : await machineRun(command, options));
   const adapters = (): Adapter[] => [fleetAdapter({ run, uid: 501, accountHome: async () => home, tasks: async () => undefined }), filesAdapter, jobsAdapter({ run, engineRoot: repoRoot, uid: 501, accountHome: async () => home })];
   return async (args: string[]) => {
     const lines: string[] = [];
