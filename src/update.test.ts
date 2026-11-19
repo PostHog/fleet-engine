@@ -248,10 +248,10 @@ describe("hedge update", () => {
     expect(await originOf(engineDir)).toBe("https://github.com/Acme/fleet-engine.git");
   });
 
-  async function withFetchBeforeFirstCheckout<T>(work: () => Promise<T>) {
+  async function withFetchRightAfterHedgesFetch<T>(competing: string, work: () => Promise<T>) {
     const realGit = Bun.which("git")!;
     const bin = temp.make("bin-");
-    writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = -C ] && [ "$3" = checkout ] && [ ! -e "$2/.git/raced" ]; then : > "$2/.git/raced"; "${realGit}" -C "$2" fetch -q origin main; fi\nexec "${realGit}" "$@"\n`, { mode: 0o755 });
+    writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = -C ] && [ "$3" = fetch ] && [ ! -e "$2/.git/raced" ]; then "${realGit}" "$@"; status=$?; : > "$2/.git/raced"; "${realGit}" -C "$2" fetch -q origin ${competing}; exit $status; fi\nexec "${realGit}" "$@"\n`, { mode: 0o755 });
     const path = process.env.PATH;
     process.env.PATH = `${bin}:${path}`;
     try {
@@ -261,15 +261,25 @@ describe("hedge update", () => {
     }
   }
 
-  test("a fetch that lands between the release fetch and its checkout does not change the commit that hedge update installs and records", async () => {
+  test("a fetch that lands right after the release fetch, before hedge update reads it, does not change the release that hedge update installs, and hedge setup saves that release as the engine pin", async () => {
     const remote = await engineRemote(["v0.1.0", "v0.1.1"]);
     const engineDir = await engineCheckout(remote, "v0.1.0");
 
-    const result = await withFetchBeforeFirstCheckout(() => run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" }));
+    const result = await withFetchRightAfterHedgesFetch("main", () => run(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" }));
 
     expect(existsSync(join(engineDir, ".git/raced"))).toBe(true);
     expect(result).toMatchObject({ code: 0, version: "v0.1.1" });
-    expect(await spawnGit(engineDir, "rev-parse", "refs/hedge/releases/v0.1.1")).toBe(await spawnGit(remote, "rev-parse", "v0.1.1^{commit}"));
+    expect(await pinSavedBySetup(engineDir)).toEqual({ repo: "PostHog/hedge", ref: "v0.1.1", channel: "release" });
+  });
+
+  test("on the track channel, a fetch that lands right after the fetch of main, before hedge update reads it, does not change the commit that hedge update installs", async () => {
+    const remote = await engineRemote(["v0.1.0", "v0.1.1"]);
+    const engineDir = await engineCheckout(remote, "v0.1.0");
+
+    const result = await withFetchRightAfterHedgesFetch("v0.1.0", () => run(engineDir, { repo: remote, ref: "main", channel: "track" }));
+
+    expect(existsSync(join(engineDir, ".git/raced"))).toBe(true);
+    expect(result).toMatchObject({ code: 0, version: "main" });
   });
 
   async function triageEngineLine(engineDir: string) {
