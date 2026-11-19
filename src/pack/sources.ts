@@ -14,7 +14,6 @@ export type Clock = { sleep(ms: number): Promise<void> };
 
 const realClock: Clock = { sleep: (ms) => Bun.sleep(ms) };
 
-/** What the cache last loaded successfully: the source's repository, ref, and commit, and the ref a profile asked for when Hedge fell back to this one. */
 type Good = { repo: string; ref: string; commit: string; asked?: string };
 
 export const withoutUserinfo = (text: string) => text.replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, "$1");
@@ -223,7 +222,6 @@ async function advanceLocked(ref: SourceRef, dir: string, from: string, loadLimi
   return { state: "moved", commit: tip, source: { ref, dir, packs: loaded.packs } };
 }
 
-/** Loads a source from its cache while no other Hedge run works in it, and only when the checkout is what the profile asks for. */
 export async function cachedSource(ref: SourceRef, cacheRoot: string, clock: Clock = realClock): Promise<FetchedSource> {
   const dir = cacheDir(ref, cacheRoot);
   if (typeof dir !== "string") return { ref, error: dir.error };

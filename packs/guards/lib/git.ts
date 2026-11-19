@@ -178,9 +178,7 @@ const configRead = /\$(?:\{(?:GH_CONFIG_DIR|XDG_CONFIG_HOME|HOME)\}|(?:GH_CONFIG
 const environmentWrapper = /(?:^|[^\w.-])(?:sudo|doas|env)(?![\w.-])/;
 const commandBreak = /[;&|()`{}\n]/;
 const beforeCommand = /^(?:[A-Za-z_]\w*=\S*|\d*[<>]\S*|if|then|else|elif|do|while|until|!)$/;
-/** A ref or branch name, such as fix/env or origin/env:env, which git and gh read as data. */
 const refLike = /^\+?[\w-][\w.-]*(?:[/:][\w.-]+)+$/;
-/** git commands that read their operands as refs and paths, and the options and settings that make git run a program. */
 const gitDataCommands = new Set(["add", "branch", "checkout", "cherry-pick", "commit", "diff", "fetch", "log", "merge", "pull", "push", "reset", "restore", "revert", "show", "status", "switch", "tag", "worktree"]);
 const runsProgram = /^--(?:upload-pack|receive-pack|exec)(?:=|$)/;
 const wrapperWordsAreData = ([command = "", ...args]: string[]) => {
