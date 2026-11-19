@@ -160,18 +160,21 @@ test("fleet decisions keeps a marked answer over an old ✅ answer to the same q
   ].join("\n"));
 });
 
-test("fleet decisions lists a marked answer where it was given, not where an old ✅ answer to it stood", async () => {
-  const body = ["- ✅ **Which queue?** Redis", "- 🤖 **Which bus?** Kafka"].join("\n");
-  const comments = [{ author: "ada", body: "- 🤖 **Which queue?** SQS", url: url(1, "c1"), createdAt: "2026-11-14T09:00:00Z", updatedAt: "2026-11-14T09:00:00Z" }];
+test("fleet decisions lists a marked answer where it was given, and a newer ✅ answer where its question first stood", async () => {
+  const body = ["- ✅ **Which queue?** Redis", "- 🤖 **Which bus?** Kafka", "- ✅ **Which cache?** Memcached", "- ✅ **Which lock?** etcd"].join("\n");
+  const comments = [{ author: "ada", body: "- 🤖 **Which queue?** SQS\n- ✅ **Which cache?** Redis", url: url(1, "c1"), createdAt: "2026-11-14T09:00:00Z", updatedAt: "2026-11-14T09:00:00Z" }];
   const lines: string[] = [];
 
   await runDecisions(["acme/maps#1"], { ...fixtureFetchers({ issues: [issueNode(repository, 1)], discussions: { "acme/maps#1": { body, comments } } }), tracker: () => "", print: (line) => lines.push(line) });
 
+  const where = `[map #1](https://github.com/${repository}/issues/1)`;
   expect(lines.join("\n")).toBe([
     "| Question | Answer | Who | Where |",
     "| --- | --- | --- | --- |",
-    `| Which bus? | Kafka | 🤖 Agent | [map #1](https://github.com/${repository}/issues/1) |`,
+    `| Which bus? | Kafka | 🤖 Agent | ${where} |`,
     `| Which queue? | SQS | 🤖 Agent | [map](${url(1, "c1")}) |`,
+    `| Which cache? | Redis | ✅ Unmarked (before 2026-11-13) | [map](${url(1, "c1")}) |`,
+    `| Which lock? | etcd | ✅ Unmarked (before 2026-11-13) | ${where} |`,
     "",
     "Involvement: no human-in-the-loop tickets.",
   ].join("\n"));

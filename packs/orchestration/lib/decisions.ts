@@ -54,7 +54,7 @@ function newestPerQuestion(decisions: Decision[]): Decision[] {
     const question = decision.question.trim().toLowerCase();
     const kept = byQuestion.get(question);
     if (kept && kept.who !== unmarked && decision.who === unmarked) continue;
-    if (kept?.who === unmarked) byQuestion.delete(question);
+    if (kept?.who === unmarked && decision.who !== unmarked) byQuestion.delete(question);
     byQuestion.set(question, decision);
   }
   return [...byQuestion.values()];
