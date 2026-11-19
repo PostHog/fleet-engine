@@ -43,6 +43,18 @@ describe("the setup guide's workspace check", () => {
     expect([result.code, result.output]).toEqual([0, "ok region\nok hedge-hub runs and stays on\n"]);
   });
 
+  test("tells to restart a workspace whose parameter, with a name outside ASCII, the template lets change", () => {
+    const result = coder({ parameters: { ...built, région: "eu" }, mutable: { ...template, région: true } }).check(["région=us"]);
+    expect([result.code, result.output]).toEqual([1, "x région is not the value you passed. From this Mac, run: coder restart hedge-hub --parameter région=<value> --yes\nok hedge-hub runs and stays on\n"]);
+  });
+
+  test("fails when the request for the template's parameters fails, even after it delivered JSON", () => {
+    const result = coder({ parameters: built, mutable: template, templateTransferFails: true }).check(passed);
+    expect(result.code).not.toBe(0);
+    expect(result.output).toContain("Coder did not return the parameters of the template of hedge-hub.");
+    expect(result.output).not.toContain("ok hedge-hub runs and stays on");
+  });
+
   test("says which value differs, restarts with a value the template lets change, and sends one it cannot change to a new workspace", () => {
     const result = coder({ parameters: { ...built, disk_size: "100", instance_type: "m7g.xlarge" }, mutable: template }).check([...passed, "missing=1"]);
     expect(result.code).toBe(1);

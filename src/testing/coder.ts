@@ -8,9 +8,9 @@ export const envToken = "session-token-from-the-environment";
 const perl = Bun.which("perl")!;
 
 export type Build = { transition?: string; status?: string; deadline?: string };
-export type Coder = { parameters: Record<string, string>; mutable: Record<string, boolean>; defaultValue?: string; build?: Build; ttl?: number; token?: string };
+export type Coder = { parameters: Record<string, string>; mutable: Record<string, boolean>; defaultValue?: string; build?: Build; ttl?: number; token?: string; templateTransferFails?: boolean };
 
-export function fakeCoder(temp: ReturnType<typeof tempDirs>, { parameters, mutable, defaultValue = "", build = {}, ttl, token = storedToken }: Coder) {
+export function fakeCoder(temp: ReturnType<typeof tempDirs>, { parameters, mutable, defaultValue = "", build = {}, ttl, token = storedToken, templateTransferFails = false }: Coder) {
   const dir = temp.make("coder-");
   const workspaces = [
     { name: "hedge-hub-2", latest_build: { id: "other-build", template_version_id: "other-version", transition: "start", status: "running" }, ttl_ms: null },
@@ -36,7 +36,7 @@ IFS= read -r header
 for url; do :; done
 case "$url" in
   https://coder.test/api/v2/workspacebuilds/build-1/parameters) cat "${dir}/parameters.json" ;;
-  https://coder.test/api/v2/templateversions/version-1/rich-parameters) cat "${dir}/rich-parameters.json" ;;
+  https://coder.test/api/v2/templateversions/version-1/rich-parameters) cat "${dir}/rich-parameters.json"${templateTransferFails ? '; echo "curl: (18) transfer closed" >&2; exit 18' : ""} ;;
   *) echo "curl: (22) 404 $url" >&2; exit 22 ;;
 esac`);
   const check = (args: string[], env: Record<string, string> = {}) => {
