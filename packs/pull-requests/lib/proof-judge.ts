@@ -66,24 +66,24 @@ const videoExtensions = new Set([".mp4", ".webm", ".mov", ".mkv"]);
 const evidenceCap = 20_000;
 
 const named = (text: string) => text.replace(/[^\p{L}\p{N} ._@+/:,'()[\]-]/gu, "_");
-const untrusted = (source: string, text: string) => `<untrusted source="${named(source)}">\n${text.trim().replace(/<\/?untrusted/gi, (tag) => tag.replace("<", "&lt;"))}\n</untrusted>`;
+const untrusted = (source: string, text: string) => `<untrusted source="${named(source)}">\n${text.trim().replace(/<\/?untrusted/gi, (tag) => "&lt;" + tag.slice(1))}\n</untrusted>`;
 
 async function evidenceSection(evidence: JudgeInput["evidence"]) {
   const images: string[] = [];
   const readable: string[] = [];
   const parts: string[] = [];
   for (const { kind, line, directory } of evidence) {
-    parts.push(`### ${line}`);
+    parts.push(`### ${kind}`, untrusted(`the gate's line for ${kind}`, line));
     if (!directory) continue;
     readable.push(directory);
     for (const name of (await readdir(directory).catch(() => [])).sort()) {
       const path = join(directory, name);
       const extension = extname(name).toLowerCase();
-      if (imageExtensions.has(extension)) { images.push(path); parts.push(`Image: ${named(path)} (attached)`); continue; }
-      if (videoExtensions.has(extension)) { parts.push(`Video: ${named(path)} (not shown; judge it by the other evidence)`); continue; }
+      if (imageExtensions.has(extension)) { images.push(path); parts.push(untrusted(`${kind} evidence file`, `Image: ${path} (attached)`)); continue; }
+      if (videoExtensions.has(extension)) { parts.push(untrusted(`${kind} evidence file`, `Video: ${path} (not shown; judge it by the other evidence)`)); continue; }
       const bytes = await readFile(path);
       parts.push(...await runnerMark(directory, path, kind));
-      parts.push(bytes.includes(0) ? `Binary file: ${named(path)}` : untrusted(`${kind} evidence ${basename(path)}`, capped(bytes.toString(), evidenceCap)));
+      parts.push(bytes.includes(0) ? untrusted(`${kind} evidence file`, `Binary file: ${path}`) : untrusted(`${kind} evidence ${basename(path)}`, capped(bytes.toString(), evidenceCap)));
     }
   }
   return { images, readable, text: parts.join("\n\n") };
@@ -106,7 +106,7 @@ function reviewSection(reviews: JudgeInput["reviews"]) {
 
 export async function judgePrompt(input: JudgeInput) {
   const evidence = await evidenceSection(input.evidence);
-  const owed = input.owed.kinds.length ? input.owed.kinds.join(", ") : `none (${input.owed.none?.reason ?? "no reason recorded"})`;
+  const owed = input.owed.kinds.length ? input.owed.kinds.join(", ") : `none, for the reason below\n${untrusted("the reason no proof is owed", input.owed.none?.reason ?? "no reason recorded")}`;
   const independence = input.crossFamily ? "from the model family that did not write it" : "in a fresh session, apart from the session that wrote it";
   const prompt = `${instructions(independence, input.risk !== undefined)}
 

@@ -488,6 +488,10 @@ test("the gate counts a panel round only when its plan is published and every le
     ["panel.json is not JSON", (directory) => writeFileSync(join(directory, "panel.json"), "{")],
     ["panel.json names no lens", (directory) => writeFileSync(join(directory, "panel.json"), JSON.stringify({ lenses: [] }))],
     ["panel.json lenses is not a list", (directory) => writeFileSync(join(directory, "panel.json"), JSON.stringify({ lenses: { name: "correctness" } }))],
+    ["panel.json lenses holds null", (directory) => writeFileSync(join(directory, "panel.json"), JSON.stringify({ lenses: [null] }))],
+    ["panel.json names a lens twice", (directory) => writeFileSync(join(directory, "panel.json"), JSON.stringify({ lenses: [{ name: "correctness" }, { name: "correctness" }] }))],
+    ["panel.json names a lens outside the lenses directory", (directory) => { writeFileSync(join(directory, "done.json"), JSON.stringify({ state: "done" })); writeFileSync(join(directory, "panel.json"), JSON.stringify({ lenses: [{ name: "../done" }] })); }],
+    ["the author saved the findings", (directory) => { const path = join(directory, "round.json"); writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, "utf8")), capturedBy: "author" })); }],
     ["the plan is staged but not published", (directory) => { const plan = readFileSync(join(directory, "panel.json")); rmSync(join(directory, "panel.json")); writeFileSync(join(directory, "panel.staged.json"), plan); }],
   ];
   for (const [label, change] of tamper) {
@@ -502,7 +506,15 @@ test("the gate counts a panel round only when its plan is published and every le
     const gate = await pr.fleet("gate");
     expect({ label, code: gate.code }).toEqual({ label, code: 1 });
     expect({ label, line: gate.output.includes("review: no finished panel round on the PR") }).toEqual({ label, line: true });
+    expect({ label, single: gate.output.includes("single-reviewer") }).toEqual({ label, single: label === "the author saved the findings" });
   }
+
+  const staged = await checkout();
+  await staged.commit("feature.txt", "greet\n");
+  const reserved = JSON.parse((await staged.fleet("review-start", "--scope", "full")).output) as { directory: string };
+  writeFileSync(join(reserved.directory, "panel.staged.json"), JSON.stringify({ lenses: [{ name: "correctness" }] }));
+  writeFileSync(join(staged.repository, "review.md"), "No findings.\n");
+  await expect(staged.fleet("review-finish", "--round", "1", "--reviewer", "gpt-6.1-sol", "review.md")).rejects.toThrow("Round 1 is a panel round");
 });
 
 test("a panel gap holds the gate until the user accepts it, and still needs a review at HEAD", async () => {
