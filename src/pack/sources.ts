@@ -16,7 +16,7 @@ const realClock: Clock = { sleep: (ms) => Bun.sleep(ms) };
 
 type Good = { repo: string; ref: string; commit: string; asked?: string };
 
-export const withoutUserinfo = (text: string) => text.replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, "$1");
+export const withoutUserinfo = (text: string) => text.replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/?#]*@/gi, "$1");
 
 function cleaned(source: FetchedSource): FetchedSource {
   if ("error" in source) return { ...source, error: withoutUserinfo(source.error) };

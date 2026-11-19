@@ -699,6 +699,24 @@ describe("hedge apply while Fleet still runs", () => {
     expect(refreshed.output).toContain("https://127.0.0.1:9/extra.git");
   });
 
+  test("a source URL whose password holds an @ stays out of apply, refresh, and the unknown-command message", async () => {
+    const linux = machine("linux");
+    const source = sourceWithCommand();
+    const saved = source.profile("main");
+    expect((await linux.hedge(["apply", "--profile", saved])).code).toBe(0);
+    const [before, after] = [["ghp", "r".repeat(30)].join("_"), ["ghp", "s".repeat(30)].join("_")];
+    const secretUrl = `https://hedge:${before}@${after}@127.0.0.1:9/extra.git`;
+    const profile = JSON.parse(readFileSync(join(saved, "hedge.json"), "utf8"));
+    writeFileSync(join(saved, "hedge.json"), JSON.stringify({ ...profile, sources: [{ name: "extra", repo: secretUrl, ref: "main" }] }));
+
+    const refreshed = await linux.hedge(["refresh"]);
+    const applied = await linux.hedge(["apply", "--profile", source.profile("main", secretUrl)]);
+    const unknown = await linux.hedge(["no-such-command"]);
+
+    for (const output of [applied.output, unknown.output, refreshed.output]) for (const part of [before, after]) expect(output).not.toContain(part);
+    expect(refreshed.output).toContain("https://127.0.0.1:9/extra.git");
+  });
+
   test("hedge doctor with no profile yet, as get.sh leaves a machine where an old job still runs, names that job before it says the profile is missing", async () => {
     const linux = machine("linux");
     linux.processes.table.set(4242, { args: `/home/bin/bun ${join(linux.home, ".local/share/fleet/engine")}/src/cli.ts nightly` });
