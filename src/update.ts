@@ -1,19 +1,24 @@
 import { randomUUID } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
+import { constants } from "node:os";
 import { dirname, join } from "node:path";
 import { tryLock } from "./lock.ts";
 import { repoUrl, withoutUserinfo } from "./pack/sources.ts";
 import type { ProfileFile } from "./pack/types.ts";
 import { engineRepo } from "./setup/defaults.ts";
 
+export type Child = { exited: Promise<number>; kill(signal?: NodeJS.Signals): void };
+
 export type UpdateOptions = {
   home: string;
   engineDir: string;
-  profileDir: string;
-  engine: ProfileFile["engine"];
+  readProfile: () => Promise<{ profileDir: string; engine: ProfileFile["engine"] }>;
   print: (line: string) => void;
-  runApply: () => Promise<number>;
+  runApply: () => Child;
 };
+
+type Run = Omit<UpdateOptions, "readProfile"> & { profileDir: string; engine: ProfileFile["engine"] };
 
 type Version = { tag: string; parts: [number, number, number] };
 
@@ -33,20 +38,61 @@ export async function readNotice(home: string): Promise<string | undefined> {
   return notice.newMajor ? `Hedge ${notice.newMajor} is out. It is a new major version, so hedge update does not apply it. Read its changelog, then change the engine ref in your profile.` : undefined;
 }
 
-const updateLock = (home: string) => join(home, ".local", "state", "hedge", "update.lock");
+class Stopped extends Error {}
+
+const running = new Set<Child>();
+let stopping: NodeJS.Signals | undefined;
+
+function track<T extends Child>(start: () => T): T {
+  if (stopping) throw new Stopped();
+  const child = start();
+  running.add(child);
+  void child.exited.finally(() => running.delete(child));
+  return child;
+}
+
+const stop = (signal: NodeJS.Signals) => {
+  stopping = signal;
+  for (const child of running) child.kill(signal);
+};
+
+async function updateLock(engineDir: string): Promise<{ path: string } | { error: string }> {
+  const gitDir = await git(engineDir, "rev-parse", "--absolute-git-dir");
+  if (!gitDir.ok) return { error: `hedge update: ${engineDir} is not an engine checkout: ${gitDir.err}` };
+  return { path: join(realpathSync(gitDir.out), "hedge-update.lock") };
+}
+
+function lockOnce(path: string) {
+  try {
+    return tryLock(path, { follow: false });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ELOOP") return "link" as const;
+    throw error;
+  }
+}
 
 export async function update(given: UpdateOptions): Promise<number> {
-  const options = { ...given, print: (line: string) => given.print(withoutUserinfo(line)) };
-  const held = tryLock(updateLock(options.home));
-  if (!held) return options.print("hedge update: another hedge update is running. Run it again when that one ends."), 1;
+  const print = (line: string) => given.print(withoutUserinfo(line));
+  const lock = await updateLock(given.engineDir);
+  if ("error" in lock) return print(lock.error), 1;
+  const held = lockOnce(lock.path);
+  if (held === "link") return print(`hedge update: ${lock.path} is a link, so hedge update does not lock through it. Remove it, then run hedge update again.`), 1;
+  if (!held) return print("hedge update: another hedge update is running. Run it again when that one ends."), 1;
+  process.on("SIGTERM", stop).on("SIGINT", stop);
   try {
-    return await updateAlone(options);
+    const code = await updateAlone({ ...given, print, ...(await given.readProfile()) });
+    return stopping ? 128 + constants.signals[stopping] : code;
+  } catch (error) {
+    if (error instanceof Stopped && stopping) return 128 + constants.signals[stopping];
+    throw error;
   } finally {
+    process.off("SIGTERM", stop).off("SIGINT", stop);
+    stopping = undefined;
     held.release();
   }
 }
 
-async function updateAlone(options: UpdateOptions): Promise<number> {
+async function updateAlone(options: Run): Promise<number> {
   const origin = await ready(options);
   if (!origin) return 1;
   const before = (await git(options.engineDir, "rev-parse", "HEAD")).out;
@@ -57,11 +103,11 @@ async function updateAlone(options: UpdateOptions): Promise<number> {
   if (!(await recordRelease(options, moved))) return 1;
   if (!(await saveOrigin(options, origin))) return 1;
   const profileMoved = await pullProfile(options);
-  const applied = await options.runApply();
+  const applied = await track(options.runApply).exited;
   return applied === 0 && !profileMoved ? 1 : applied;
 }
 
-async function pullProfile(options: UpdateOptions) {
+async function pullProfile(options: Run) {
   const remotes = await git(options.profileDir, "remote");
   if (!remotes.ok || !remotes.out) return true;
   const pulled = await git(options.profileDir, "pull", "-q", "--ff-only");
@@ -75,7 +121,7 @@ const namesThisEngine = (wanted: string, origin: string) => formerEngines.has(gi
 
 type Origin = { url: string; switched: boolean; exists: boolean };
 
-async function ready(options: UpdateOptions): Promise<false | Origin> {
+async function ready(options: Run): Promise<false | Origin> {
   const status = await git(options.engineDir, "status", "--porcelain");
   if (!status.ok) return options.print(`hedge update: ${options.engineDir} is not an engine checkout: ${status.err}`), false;
   if (status.out) return options.print(`hedge update: ${options.engineDir} has local changes. Save them elsewhere and remove them, then run hedge update again.`), false;
@@ -85,7 +131,7 @@ async function ready(options: UpdateOptions): Promise<false | Origin> {
   return { url: wanted, switched: true, exists: origin.ok };
 }
 
-async function saveOrigin(options: UpdateOptions, origin: Origin) {
+async function saveOrigin(options: Run, origin: Origin) {
   if (!origin.switched) return true;
   const changed = await git(options.engineDir, "remote", origin.exists ? "set-url" : "add", "origin", origin.url);
   if (!changed.ok) return options.print(`hedge update: the engine's packages are installed, but could not point the engine at ${origin.url}: ${changed.err}. Run hedge update again to finish the update.`), false;
@@ -95,7 +141,7 @@ async function saveOrigin(options: UpdateOptions, origin: Origin) {
 
 type Moved = false | { release?: { tag: string; commit: string } };
 
-async function recordRelease(options: UpdateOptions, moved: Exclude<Moved, false>) {
+async function recordRelease(options: Run, moved: Exclude<Moved, false>) {
   if (!moved.release) return true;
   const { tag, commit } = moved.release;
   const recorded = await git(options.engineDir, "update-ref", `${releaseRefs}/${tag}`, commit);
@@ -103,7 +149,7 @@ async function recordRelease(options: UpdateOptions, moved: Exclude<Moved, false
   return recorded.ok;
 }
 
-async function withFetched(options: UpdateOptions, url: string, ref: string, use: (commit: string) => Promise<Moved>): Promise<Moved> {
+async function withFetched(options: Run, url: string, ref: string, use: (commit: string) => Promise<Moved>): Promise<Moved> {
   const fetching = `refs/hedge/fetching/${randomUUID()}/${ref.replace(/^refs\/(?:heads|tags)\//, "")}`;
   try {
     const fetched = await git(options.engineDir, "fetch", "-q", "--depth", "1", "--no-tags", url, `+${ref}:${fetching}`);
@@ -116,7 +162,7 @@ async function withFetched(options: UpdateOptions, url: string, ref: string, use
   }
 }
 
-async function trackMain(options: UpdateOptions, url: string): Promise<Moved> {
+async function trackMain(options: Run, url: string): Promise<Moved> {
   return withFetched(options, url, "refs/heads/main", async (commit) => {
     const checkedOut = await git(options.engineDir, "checkout", "-q", "--detach", commit);
     if (!checkedOut.ok) return options.print(`hedge update: could not check out main: ${checkedOut.err}`), false;
@@ -125,7 +171,7 @@ async function trackMain(options: UpdateOptions, url: string): Promise<Moved> {
   });
 }
 
-async function releases(options: UpdateOptions, url: string) {
+async function releases(options: Run, url: string) {
   const listed = await git(options.engineDir, "ls-remote", "--tags", url, "refs/tags/v*");
   if (!listed.ok) return options.print(`hedge update: could not fetch the engine: ${listed.err}`), undefined;
   const commits = new Map<string, string>();
@@ -139,7 +185,7 @@ async function releases(options: UpdateOptions, url: string) {
   });
 }
 
-async function followRelease(options: UpdateOptions, url: string, switched: boolean): Promise<Moved> {
+async function followRelease(options: Run, url: string, switched: boolean): Promise<Moved> {
   const versions = await releases(options, url);
   if (!versions) return false;
   const pin = parse(options.engine.ref);
@@ -160,7 +206,7 @@ async function followRelease(options: UpdateOptions, url: string, switched: bool
   return checkOutRelease(options, url, target);
 }
 
-async function checkOutRelease(options: UpdateOptions, url: string, target: Version): Promise<Moved> {
+async function checkOutRelease(options: Run, url: string, target: Version): Promise<Moved> {
   return withFetched(options, url, `refs/tags/${target.tag}`, async (commit) => {
     const checkedOut = await git(options.engineDir, "checkout", "-q", "--detach", commit);
     if (!checkedOut.ok) return options.print(`hedge update: could not check out ${target.tag}: ${checkedOut.err}`), false;
@@ -170,12 +216,17 @@ async function checkOutRelease(options: UpdateOptions, url: string, target: Vers
 }
 
 async function installPackages(engineDir: string) {
-  const child = Bun.spawn([process.execPath, "install", "--frozen-lockfile", "--production"], { cwd: engineDir, stdin: "ignore", stdout: "pipe", stderr: "pipe", timeout: 300_000 });
-  const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  const { code, out, err } = await piped([process.execPath, "install", "--frozen-lockfile", "--production"], { cwd: engineDir, timeout: 300_000 });
   return code === 0 ? undefined : (err || out).trim();
 }
 
-async function rollBack(options: UpdateOptions, before: string, installError: string) {
+async function piped(command: string[], options: { cwd?: string; env?: Record<string, string | undefined>; timeout: number }) {
+  const child = track(() => Bun.spawn(command, { ...options, stdin: "ignore", stdout: "pipe", stderr: "pipe" }));
+  const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  return { code, out, err };
+}
+
+async function rollBack(options: Run, before: string, installError: string) {
   const failed = `hedge update: could not install the engine's packages in ${options.engineDir}`;
   const restored = await git(options.engineDir, "checkout", "-q", "--force", "--detach", before);
   if (!restored.ok) return options.print(`${failed}, and could not roll the engine back to ${before.slice(0, 7)}: ${restored.err}. Run get.sh again to repair it.\n${installError}`);
@@ -201,7 +252,6 @@ function compare(a: Version, b: Version) {
 
 async function git(dir: string, ...args: string[]) {
   const env = { ...Bun.env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "true", SSH_ASKPASS: "true", GIT_SSH_COMMAND: "ssh -o BatchMode=yes" };
-  const child = Bun.spawn(["git", "-C", dir, ...args], { stdin: "ignore", stdout: "pipe", stderr: "pipe", env, timeout: 120_000 });
-  const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  const { code, out, err } = await piped(["git", "-C", dir, ...args], { env, timeout: 120_000 });
   return { ok: code === 0, out: out.trim(), err: err.trim().split("\n").at(-1) ?? "" };
 }

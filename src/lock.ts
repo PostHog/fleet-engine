@@ -18,9 +18,9 @@ function openLibc() {
  * Takes an exclusive flock on the file at path without waiting.
  * The kernel drops the lock when its process ends, so a dead holder never blocks the next run.
  */
-export function tryLock(path: string): Held | undefined {
+export function tryLock(path: string, { follow = true } = {}): Held | undefined {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  const fd = openSync(path, constants.O_RDWR | constants.O_CREAT, 0o600);
+  const fd = openSync(path, constants.O_RDWR | constants.O_CREAT | (follow ? 0 : constants.O_NOFOLLOW), 0o600);
   libc ??= openLibc();
   if (libc.symbols.flock(fd, exclusive | noWait) !== 0) {
     closeSync(fd);

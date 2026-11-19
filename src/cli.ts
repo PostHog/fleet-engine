@@ -243,17 +243,18 @@ async function change(command: keyof typeof changes | "hub", args: string[], opt
 }
 
 async function runUpdate(options: CliOptions) {
-  const machine = await loadMachine(options.home);
-  if (!machine?.profileDir) throw new Error("no profile on this machine. Run get.sh, or hedge apply --profile <dir>.");
-  const profileDir = hedgeProfile(options, machine.profileDir);
-  const profile = await loadProfile(profileDir);
+  const readProfile = async () => {
+    const machine = await loadMachine(options.home);
+    if (!machine?.profileDir) throw new Error("no profile on this machine. Run get.sh, or hedge apply --profile <dir>.");
+    const profileDir = hedgeProfile(options, machine.profileDir);
+    return { profileDir, engine: (await loadProfile(profileDir)).engine };
+  };
   return update({
     home: options.home,
     engineDir: options.engineRoot,
-    profileDir,
-    engine: profile.engine,
+    readProfile,
     print: options.print,
-    runApply: () => Bun.spawn(["sh", join(options.engineRoot, "hedge"), "apply"], { stdio: ["inherit", "inherit", "inherit"], env: { ...Bun.env, HOME: options.home } }).exited,
+    runApply: () => Bun.spawn(["sh", join(options.engineRoot, "hedge"), "apply"], { stdio: ["inherit", "inherit", "inherit"], env: { ...Bun.env, HOME: options.home } }),
   });
 }
 
