@@ -101,7 +101,9 @@ export async function registerUpstream(hub: Hub, upstream: Upstream) {
     await dropOAuth();
     await call(path, "PUT", { config: { ...fresh, ...want, enabled: false } });
     await dropOAuth().catch(async (error) => {
-      await call(path, "PUT", { config: { ...fresh, ...want, url: stored?.url, enabled: false } });
+      await call(path, "PUT", { config: { ...fresh, ...want, url: stored?.url, enabled: false } }).catch((rollback: Error) => {
+        throw new Error(`${upstream.title} is off in the MCP gateway at its new URL, and the state of its sign-in from ${originOf(stored?.url)} is unknown: Hedge could not drop that sign-in or put the old URL back (${rollback.message}). Run hedge apply again when the gateway answers. If ${upstream.title} then acts as an account you did not choose, sign in again. On the hub, run: hedge mcp-gateway sign-in${upstream.kind === "oauth" && upstream.loopback ? ` ${upstream.name}` : ""}`);
+      });
       throw error;
     });
   } else if (offWithoutSignIn) await dropOAuth();

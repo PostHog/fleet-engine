@@ -245,12 +245,12 @@ test("when the gateway does not drop the sign-in again after it saves the new UR
   expect(moved.hub.printed).toEqual([signInAsked]);
 });
 
-test("when the gateway also does not take the old URL back, the run fails with the upstream off, and the next run drops the sign-in before it turns the upstream on", async () => {
+test("when the gateway also does not take the old URL back, the run fails with the upstream off and says that the state of the old sign-in is unknown, and the next run drops the sign-in before it turns the upstream on", async () => {
   const moved = movedNotes();
   await moved.moveFromOldOrigin();
   moved.api.failing = ["POST servers/notes/oauth/disconnect #2", "PUT servers/notes #2"];
 
-  await expect(registerUpstreams(moved.hub)).rejects.toThrow();
+  await expect(registerUpstreams(moved.hub)).rejects.toThrow(/^Notes is off in the MCP gateway at its new URL, and the state of its sign-in from https:\/\/old\.example\.com is unknown: Hedge could not drop that sign-in or put the old URL back \(MCPHub API PUT servers failed with HTTP \d+\)\. Run hedge apply again when the gateway answers\. If Notes then acts as an account you did not choose, sign in again\. On the hub, run: hedge mcp-gateway sign-in$/);
 
   expect(moved.api.configs.notes).toMatchObject({ url: "https://notes.example.com/mcp", enabled: false });
   moved.api.failing = [];
