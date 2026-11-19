@@ -97,6 +97,26 @@ describe("hedge update", () => {
     expect(await originOf(engineDir)).toBe("https://github.com/Acme/fleet-engine.git");
   });
 
+  test("follows a fork whose newest release is older than the Hedge release it ran, and keeps no Hedge tag", async () => {
+    const remote = await engineRemote(["v0.1.0", "v0.1.5"]);
+    const fork = temp.make("fork-");
+    await spawnGit(fork, "clone", "-q", await engineRemote(["v0.1.0"]), ".");
+    writeFileSync(join(fork, "VERSION"), "fork v0.1.2");
+    await spawnGit(fork, "commit", "-q", "-am", "fork release");
+    await spawnGit(fork, "tag", "v0.1.2");
+    const engineDir = await engineCheckout(remote, "v0.1.5");
+    await spawnGit(engineDir, "fetch", "-q", "--tags", "origin");
+    await onGithub(engineDir, "PostHog/hedge", remote);
+    await spawnGit(engineDir, "config", `url.${fork}.insteadOf`, "https://github.com/Acme/fleet-engine.git");
+
+    const result = await run(engineDir, { repo: "Acme/fleet-engine", ref: "v0.1.0", channel: "release" });
+
+    expect(result.output).toContain("The engine now comes from Acme/fleet-engine.");
+    expect(result.code).toBe(0);
+    expect(result.version).toBe("fork v0.1.2");
+    expect((await spawnGit(engineDir, "tag", "--list")).trim().split("\n")).toEqual(["v0.1.0", "v0.1.2"]);
+  });
+
   test("moves the release channel to the newest tag of its major and reports a new major", async () => {
     const remote = await engineRemote(["v0.1.0", "v0.1.1", "v0.2.0", "v1.0.0"]);
     const result = await run(await engineCheckout(remote, "v0.1.0"), { repo: remote, ref: "v0.1.0", channel: "release" });

@@ -27,9 +27,10 @@ export async function readNotice(home: string): Promise<string | undefined> {
 }
 
 export async function update(options: UpdateOptions): Promise<number> {
-  if (!(await ready(options))) return 1;
+  const origin = await ready(options);
+  if (!origin) return 1;
   const before = (await git(options.engineDir, "rev-parse", "HEAD")).out;
-  const moved = options.engine.channel === "track" ? await trackMain(options) : await followRelease(options);
+  const moved = options.engine.channel === "track" ? await trackMain(options) : await followRelease(options, origin === "switched");
   if (!moved) return 1;
   const failed = await installPackages(options.engineDir);
   if (failed !== undefined) return await rollBack(options, before, failed), 1;
@@ -51,18 +52,18 @@ const formerEngines = new Set(["posthog/fleet-engine", "silthus/fleet-engine"]);
 const githubRepo = (url: string) => url.match(/^(?:https:\/\/|ssh:\/\/git@|git@)github\.com[:/]([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i)?.slice(1, 3).join("/").toLowerCase();
 const namesThisEngine = (wanted: string, origin: string) => formerEngines.has(githubRepo(wanted) ?? "") && githubRepo(origin) === engineRepo.toLowerCase();
 
-async function ready(options: UpdateOptions) {
+async function ready(options: UpdateOptions): Promise<false | "kept" | "switched"> {
   const status = await git(options.engineDir, "status", "--porcelain");
   if (!status.ok) return options.print(`hedge update: ${options.engineDir} is not an engine checkout: ${status.err}`), false;
   if (status.out) return options.print(`hedge update: ${options.engineDir} has local changes. Save them elsewhere and remove them, then run hedge update again.`), false;
   const wanted = repoUrl(options.engine.repo);
   const origin = await git(options.engineDir, "config", "--get", "remote.origin.url");
-  if (origin.ok && origin.out === wanted) return true;
-  if (origin.ok && namesThisEngine(wanted, origin.out)) return true;
+  if (origin.ok && origin.out === wanted) return "kept";
+  if (origin.ok && namesThisEngine(wanted, origin.out)) return "kept";
   const changed = await git(options.engineDir, "remote", origin.ok ? "set-url" : "add", "origin", wanted);
   if (!changed.ok) return options.print(`hedge update: could not point the engine at ${wanted}: ${changed.err}`), false;
   options.print(`The engine now comes from ${options.engine.repo}.`);
-  return true;
+  return "switched";
 }
 
 async function trackMain(options: UpdateOptions) {
@@ -74,8 +75,8 @@ async function trackMain(options: UpdateOptions) {
   return true;
 }
 
-async function followRelease(options: UpdateOptions) {
-  const fetched = await git(options.engineDir, "fetch", "-q", "--depth", "1", "--tags", "--force", "origin");
+async function followRelease(options: UpdateOptions, switched: boolean) {
+  const fetched = await git(options.engineDir, "fetch", "-q", "--depth", "1", "--tags", "--force", "--prune", "--prune-tags", "origin");
   if (!fetched.ok) return options.print(`hedge update: could not fetch the engine: ${fetched.err}`), false;
   const versions = (await git(options.engineDir, "tag", "--list", "v*")).out.split("\n").flatMap((tag) => parse(tag) ?? []);
   const pin = parse(options.engine.ref);
@@ -86,12 +87,17 @@ async function followRelease(options: UpdateOptions) {
   await saveNotice(options.home, newer?.tag);
   if (newer) options.print(`Hedge ${newer.tag} is out. It is a new major version, so this update stays on v${pin.parts[0]}.`);
   const installed = (await git(options.engineDir, "tag", "--points-at", "HEAD")).out.split("\n").flatMap((tag) => parse(tag) ?? []).sort(compare).at(-1);
+  if (switched) return checkOutRelease(options, target);
   if (!installed) {
     const head = (await git(options.engineDir, "rev-parse", "--short", "HEAD")).out;
     options.print(`Engine stays at ${head}, which is not a release, so hedge update does not move it back. Set engine.channel to track to follow main, or run get.sh --ref ${target.tag}.`);
     return true;
   }
   if (compare(installed, target) >= 0) return options.print(`Engine is at ${installed.tag}.`), true;
+  return checkOutRelease(options, target);
+}
+
+async function checkOutRelease(options: UpdateOptions, target: Version) {
   const checkedOut = await git(options.engineDir, "checkout", "-q", "--detach", `refs/tags/${target.tag}`);
   if (!checkedOut.ok) return options.print(`hedge update: could not check out ${target.tag}: ${checkedOut.err}`), false;
   options.print(`Engine is at ${target.tag}.`);
