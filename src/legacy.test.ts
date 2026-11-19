@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fleetAdapter } from "./adapters/fleet/adapter.ts";
 import { jobsAdapter } from "./adapters/jobs/adapter.ts";
@@ -310,23 +310,30 @@ describe("hedge import-fleet, which get.sh runs once the new engine is in place"
     expect(stateOf(home)).toEqual({ version: 1, groups: { hedge: { ".agents/AGENTS.md": record("new") } } } as never);
   });
 
-  test("after an import that stopped part way, the next import copies each file that is still missing and replaces none", async () => {
+  test("after an import that stopped part way, the next import copies each file that is still missing, replaces none, and leaves a new path it did not make alone", async () => {
     const home = temp.make("home-");
     mkdirSync(join(home, ".config/fleet/hooks"), { recursive: true });
     writeFileSync(join(home, ".config/fleet/kept.txt"), "mine\n");
-    writeFileSync(join(home, ".config/fleet/hooks/notes.md"), "notes\n");
-    mkdirSync(join(home, ".config/hedge/hooks"), { recursive: true });
-    writeFileSync(join(home, ".config/hedge/kept.txt"), "already here\n");
+    writeFileSync(join(home, ".config/fleet/hooks/notes.md"), "notes\n", { mode: 0 });
+    mkdirSync(join(home, ".local/share/fleet-mcphub"), { recursive: true });
+    writeFileSync(join(home, ".local/share/fleet-mcphub/auth.json"), "{}\n");
 
-    const first = await hedge(["import-fleet"], home);
+    const stopped = await hedge(["import-fleet"], home);
+    chmodSync(join(home, ".config/fleet/hooks/notes.md"), 0o600);
+    writeFileSync(join(home, ".config/hedge/kept.txt"), "changed since\n");
+    mkdirSync(join(home, ".local/share/hedge-mcphub"), { recursive: true });
+    const resumed = await hedge(["import-fleet"], home);
     rmSync(join(home, ".config/hedge/hooks/notes.md"));
-    const second = await hedge(["import-fleet"], home);
+    const again = await hedge(["import-fleet"], home);
 
-    expect(first.output).toContain("Hedge: copied ~/.config/fleet to ~/.config/hedge.");
-    expect(readFileSync(join(home, ".config/hedge/kept.txt"), "utf8")).toBe("already here\n");
-    expect(second.output).toBe("");
+    expect(stopped.code).toBe(1);
+    expect(resumed.code).toBe(0);
+    expect(resumed.output).toContain("Hedge: copied ~/.config/fleet to ~/.config/hedge.");
+    expect(readFileSync(join(home, ".config/hedge/kept.txt"), "utf8")).toBe("changed since\n");
+    expect(readdirSync(join(home, ".local/share/hedge-mcphub"))).toEqual([]);
+    expect(again.output).toBe("");
+    expect([...readdirSync(join(home, ".config/hedge")), ...readdirSync(join(home, ".config/hedge/hooks"))].filter((name) => name.includes(".partial"))).toEqual([]);
     expect(existsSync(join(home, ".config/hedge/hooks/notes.md"))).toBe(false);
-    expect(readdirSync(join(home, ".config/hedge")).filter((name) => name.includes(".partial"))).toEqual([]);
   });
 
   test("does not point the machine file at a profile copy whose profile file was a link", async () => {

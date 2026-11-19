@@ -4,6 +4,7 @@ import { dirname, join, relative } from "node:path";
 import { inside } from "./files/install.ts";
 import { inLegacyPath, legacyPaths, renamed, underLegacyPath } from "./legacy.ts";
 import { linkOnPath, withLock } from "./adapters/provider-config/store.ts";
+import { writePrivateFile } from "./files/private.ts";
 import { loadProfile } from "./profile/profile.ts";
 import { asLedger } from "./reconciler/ledger.ts";
 
@@ -13,6 +14,7 @@ const machineFile = ".config/fleet/machine.json";
 const stateFile = ".local/state/fleet/state.json";
 const ledgerFile = ".local/state/fleet/steps.json";
 const doneFile = ".local/state/hedge/fleet-imported";
+const claimsFile = ".local/state/hedge/fleet-import.json";
 const notImported = new Set([".local/state/fleet", ".local/share/fleet"]);
 const runState = /^(?:logs?|locks?|cache|caches|\.cache|node_modules|.+\.(?:log|lock|pid|partial|tmp))$/;
 
@@ -25,15 +27,34 @@ export async function importFleet(home: string): Promise<string[]> {
     const records = oldState(home);
     const writtenByApply = (target: string) => Object.values(records?.groups ?? {}).some((group) => Object.hasOwn(group, target));
     const done: string[] = [];
+    const claim = await claims(home);
     for (const [before, after] of legacyPaths.filter(([before]) => !notImported.has(before))) {
       const skip = (path: string) => path === join(home, machineFile) || writtenByApply(relative(home, path));
-      if (await importTree(home, join(home, before), after, skip)) done.push(`copied ~/${before} to ~/${after}`);
+      if (present(join(home, before)) && (await claim(after)) && (await importTree(home, join(home, before), after, skip))) done.push(`copied ~/${before} to ~/${after}`);
     }
     if (records && (await publishFile(home, ".local/state/hedge/state.json", (partial) => writeFileSync(partial, JSON.stringify(takenOver(records), null, 2) + "\n", { mode: 0o600 })))) done.push(`copied the files ~/${stateFile} owns`);
-    done.push(...(await importLedger(home)), ...(await importMachine(home)));
+    done.push(...(await importLedger(home)), ...(await importMachine(home, claim)));
     await publishFile(home, doneFile, (partial) => writeFileSync(partial, "", { mode: 0o600 }));
     return done;
   });
+}
+
+type Claim = (target: string) => Promise<boolean>;
+
+/** Whether the import may copy into target: it is not there yet, or an import that stopped part way made it. The import writes down each target before it makes it, so a path that was there before stays as it is. */
+async function claims(home: string): Promise<Claim> {
+  const path = inside(home, claimsFile);
+  const claimed = new Set<string>(present(path)?.isFile() ? (JSON.parse(readFileSync(path, "utf8")) as { claimed: string[] }).claimed : []);
+  return async (target) => {
+    await refuseLink(home, target);
+    if (claimed.has(target)) return true;
+    if (present(inside(home, target))) return false;
+    await refuseLink(home, claimsFile);
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    claimed.add(target);
+    await writePrivateFile(path, JSON.stringify({ claimed: [...claimed] }, null, 2) + "\n");
+    return true;
+  };
 }
 
 async function importLedger(home: string): Promise<string[]> {
@@ -64,7 +85,7 @@ function takenOver(state: State): State {
 }
 
 /** The machine file, with profileDir on a copy of the profile when the profile was in an old path. The copy counts only when it is the same repository at the same commit and Hedge loads it as a profile; else profileDir goes and setup asks for the profile again. */
-async function importMachine(home: string): Promise<string[]> {
+async function importMachine(home: string, claim: Claim): Promise<string[]> {
   const path = join(home, machineFile);
   if (!present(path)?.isFile()) return [];
   const machine = JSON.parse(readFileSync(path, "utf8")) as { profileDir?: unknown };
@@ -72,7 +93,7 @@ async function importMachine(home: string): Promise<string[]> {
   const profile = typeof machine.profileDir === "string" ? machine.profileDir : undefined;
   if (profile && underLegacyPath(home, profile)) {
     const target = renamed(relative(home, profile));
-    if (target && (await importTree(home, profile, target, () => false))) imported.push(`copied ${profile} to ~/${target}`);
+    if (target && (await claim(target)) && (await importTree(home, profile, target, () => false))) imported.push(`copied ${profile} to ~/${target}`);
     if (target && sameCheckout(profile, join(home, target)) && (await loads(join(home, target)))) machine.profileDir = join(home, target);
     else delete machine.profileDir;
   }
