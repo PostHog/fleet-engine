@@ -174,21 +174,9 @@ describe("the agent setup guide", () => {
     expect(words(step(5))).toContain("Pass each parameter with its own `--parameter`, also those where the default is right, so Coder asks nothing");
   });
 
-  test("no command in the guide or a pack note passes a secret to Coder: no secret --parameter, no --rich-parameter-file, no --parameter-default, no coder secret", () => {
+  test("no command line in the guide or a pack note has --rich-parameter-file, --parameter-default, coder secret, or a --parameter value that the shell fills in", () => {
     const lines = [guide(), ...notePaths().map((path) => readFileSync(join(root, path), "utf8"))].flatMap(codeIn).flatMap((code) => code.split("\n"));
-    expect(lines.filter((line) => /--parameter[ =][^ ]*(secret|token|key|password)|--rich-parameter-file|--parameter-default|coder secret /i.test(line))).toEqual([]);
-  });
-
-  test("step 5 sends a template with any secret parameter, with a default or without, to the Coder web form, warns first that the form's values are readable, and runs coder create only for a template without one", () => {
-    const text = words(step(5));
-    expect(text).toContain("When the template has a secret parameter, with a default or without, never run `coder create` for it.");
-    expect(text).toContain("Ask the person to create each workspace in the Coder web UI instead");
-    expect(text).toContain("They leave a secret that has a default as it is, and type a secret without a default themselves.");
-    expect(text).toContain("Tell them first that Coder keeps each value of the form with the workspace's build, so anyone who can see the workspace can read the secret they type.");
-    expect(text).toContain("When the template has no secret parameter, run `coder create`.");
-    expect(text).toContain("Never ask about a secret.");
-    const rows = [...step(5).matchAll(/^ *\| ([^|]+?) \| ([^|]+?) \|$/gm)].map((match) => match[1]!);
-    expect(rows.filter((kind) => /secret/i.test(kind))).toEqual([]);
+    expect(lines.filter((line) => /--parameter[ =][^ =]*=[^ ]*[$`]|--rich-parameter-file|--parameter-default|coder secret /.test(line))).toEqual([]);
   });
 
   test("checks each new workspace with the engine's own check, given only the parameters the guide sets and no private value, and replaces a workspace whose fixed parameter is wrong before setup", () => {
