@@ -139,7 +139,7 @@ function checkShapes(raw: Record<string, unknown>, fail: (message: string) => ne
   each("config", (item, label) => {
     const problem = configEntryProblem(item);
     if (problem) fail(`${label}: ${problem}`);
-    waitsWithin(item, label, true);
+    waitsWithin(item, label, item.provider !== "t3");
   });
   each("served", (item, label) => {
     need(typeof item.id === "string" && Number.isInteger(item.port) && typeof item.health === "string", `${label}: needs an id, a port, and a health path`);

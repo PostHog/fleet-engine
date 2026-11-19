@@ -10,7 +10,7 @@ import { hublessReason } from "./resolve.ts";
 import { withLegacyNames } from "../legacy.ts";
 
 export type AdapterContext = { home: string; dryRun: boolean; adopt: string[]; adoptFrom?: string[] };
-export type AdapterResult = { actions: Action[]; findings: Finding[]; blocked?: boolean; failed?: boolean; resolved?: string[] };
+export type AdapterResult = { actions: Action[]; findings: Finding[]; blocked?: boolean; failed?: boolean };
 export type Adapter = {
   name: "files" | "config" | "jobs" | "identity" | "t3" | "fleet";
   /** The targets that --adopt may name for this adapter. */
@@ -107,20 +107,18 @@ async function reconcile(plan: Plan, options: ApplyOptions): Promise<{ report: R
   const run = viaEngine(plan, options.run ?? spawnRunner(options.home, plan.machine.profileDir));
   const node = plan.onHub || plan.pullsFromHub ? plan.machine.name : undefined;
   const issue = !context.dryRun && node && options.issue ? (ready: CatalogEntry[]) => options.issue!(ready, node) : undefined;
-  const skipped = new Set(options.skip ?? []);
   const gated = await gate(plan, run, !context.dryRun, issue);
-  report.findings.push(...gated.issued, ...gated.failed.map((step) => humanFinding(step, context.dryRun)), ...gated.checks.filter(([, code]) => code !== 0).map(([item, code]) => checkFinding(item, code)));
+  report.findings.push(...gated.issued, ...gated.failed.map((step) => humanFinding(step, context.dryRun)));
   if (!context.dryRun && gated.failed.some(repairedByHedge)) report.ok = false;
-  const firstFindings = new Map<Adapter, Finding[]>();
-  for (const adapter of adapters) {
+  const afterSteps = adapters.filter((adapter) => adapter.name === "config");
+  for (const adapter of adapters.filter((each) => !afterSteps.includes(each))) {
     const result = await adapter.apply(gated.plan, context);
-    firstFindings.set(adapter, result.findings);
     report.actions.push(...result.actions);
     report.findings.push(...result.findings);
     if (result.failed) report.ok = false;
     if (!result.blocked) continue;
     report.ok = false;
-    if (!context.dryRun) return { report, checks: gated.checks };
+    if (!context.dryRun) return { report, checks: [] };
   }
   const before = await readLedger(options.home);
   const record = async (key: string, step?: LedgerStep) => {
@@ -155,6 +153,7 @@ async function reconcile(plan: Plan, options: ApplyOptions): Promise<{ report: R
       if (step.pack === "base") report.ok = false;
     }
   };
+  const skipped = new Set(options.skip ?? []);
   const items = undoItems(plan, before.steps).filter((item) => !skipped.has(ledgerKey(item.step)));
   await undo(items.filter((item) => item.cause === "pack"));
   const waits = waiter(plan, run);
@@ -184,48 +183,24 @@ async function reconcile(plan: Plan, options: ApplyOptions): Promise<{ report: R
     if (!heldCodes.includes(await run(step.probe, { [undoVariable]: ledgerKey(step) }))) await changeLedger(options.home, "human", ledgerKey(step));
   }
   await undo(items.filter((item) => item.cause !== "pack"));
-  if (context.dryRun) return { report, checks: gated.checks };
-  const rechecked = await recheck(plan, run, gated.checks, report.findings);
-  const settled = await gateConfig(plan, async (pack, id) => {
-    const human = plan.human.find((step) => step.pack === pack && step.id === id);
-    return human ? gated.passed.includes(human) : rechecked.some(([item, code]) => item.pack === pack && item.id === id && code === 0);
-  });
-  if (settled.config.length === gated.plan.config.length && settled.config.every((entry) => gated.plan.config.includes(entry))) return { report, checks: gated.checks };
-  const settledPlan = { ...gated.plan, config: settled.config, dropped: [...gated.plan.dropped.filter((entry) => !gated.configDropped.includes(entry)), ...settled.dropped] };
-  for (const adapter of adapters.filter((each) => readsConfig.includes(each.name))) {
-    const result = await adapter.apply(settledPlan, context);
-    const first = firstFindings.get(adapter) ?? [];
-    const stale = (finding: Finding) => first.includes(finding) && (result.findings.some((fresh) => fresh.id === finding.id && fresh.pack === finding.pack) || (result.resolved ?? []).includes(finding.id));
-    report.findings.splice(0, report.findings.length, ...report.findings.filter((finding) => !stale(finding)), ...result.findings);
+  const checks: Checked = [];
+  for (const item of plan.checks.filter((check) => check.todo || plan.config.some((entry) => entry.pack === check.pack && entry.after === check.id))) checks.push([item, await run(item.run)]);
+  report.findings.push(...checks.filter(([, code]) => code !== 0).map(([item, code]) => checkFinding(item, code)));
+  const passing = (entry: Plan["config"][number]) => checks.some(([item, code]) => item.pack === entry.pack && item.id === entry.after && code === 0);
+  const waiting = plan.config.filter((entry) => waitsForCheck(plan, entry));
+  const configured = { ...gated.plan, config: plan.config.filter((entry) => (waiting.includes(entry) ? passing(entry) : gated.plan.config.includes(entry))), dropped: [...gated.plan.dropped, ...waiting.filter((entry) => !passing(entry)).map(droppedConfig)] };
+  for (const adapter of afterSteps) {
+    const result = await adapter.apply(configured, context);
     report.actions.push(...result.actions);
+    report.findings.push(...result.findings);
     if (result.failed || result.blocked) report.ok = false;
   }
-  return { report, checks: gated.checks };
+  return { report, checks };
 }
 
-const readsConfig: Array<Adapter["name"]> = ["config", "t3"];
+const waitsForCheck = (plan: Plan, entry: Plan["config"][number]) => entry.after !== undefined && !plan.human.some((step) => step.pack === entry.pack && step.id === entry.after);
 
-/** Runs again, after the steps, every check that config waits for and every check that says what a person does, and puts each one's finding in place of the first. */
-async function recheck(plan: Plan, run: Runner, gated: Checked, findings: Finding[]): Promise<Checked> {
-  const rechecked: Checked = [];
-  for (const item of plan.checks.filter((check) => check.todo || gated.some(([ran]) => ran === check))) {
-    const code = await run(item.run);
-    const stale = findings.findIndex((finding) => finding.id === `check:${item.id}` && finding.pack === item.pack);
-    findings.splice(stale < 0 ? findings.length : stale, stale < 0 ? 0 : 1, ...(code === 0 ? [] : [checkFinding(item, code)]));
-    rechecked.push([item, code]);
-  }
-  return rechecked;
-}
-
-async function gateConfig(plan: Plan, passes: (pack: string, id: string) => Promise<boolean>): Promise<{ config: Plan["config"]; dropped: Plan["dropped"] }> {
-  const config: Plan["config"] = [];
-  const dropped: Plan["dropped"] = [];
-  for (const entry of plan.config) {
-    if (!entry.after || (await passes(entry.pack, entry.after))) config.push(entry);
-    else dropped.push({ pack: entry.pack, item: `config ${entry.provider}:${entry.key}`, reason: `check ${entry.after} does not pass`, check: entry.after, value: entry.value });
-  }
-  return { config, dropped };
-}
+const droppedConfig = (entry: Plan["config"][number]): Plan["dropped"][number] => ({ pack: entry.pack, item: `config ${entry.provider}:${entry.key}`, reason: `check ${entry.after} does not pass`, check: entry.after, value: entry.value });
 
 export async function check(plan: Plan, options: { home: string; adapters?: Adapter[]; run?: Runner }): Promise<Report> {
   const run = viaEngine(plan, options.run ?? spawnRunner(options.home, plan.machine.profileDir));
@@ -266,8 +241,8 @@ function humanFinding(step: Owned<HumanStep>, repairStillToRun: boolean): Findin
   return { id: `human:${step.id}`, pack: step.pack, say: step.command ? `${step.say} Run: ${step.command}` : step.say, repair: repairStillToRun && repairedByHedge(step) ? "apply" : "human" };
 }
 
-/** Tests each check once, running a Hedge repair first when a human step's probe fails and repairs are on, then drops the items whose check fails. A config entry may also wait for a pack check, which has no repair. It tests the checks that served services wait for first, which only the hub can, and fills their credentials, so a repair that reads a credential sees it in the same apply. */
-async function gate(plan: Plan, run: Runner, repair: boolean, issue?: (ready: CatalogEntry[]) => Promise<Finding[]>): Promise<{ plan: Plan; configDropped: Plan["dropped"]; failed: Array<Owned<HumanStep>>; passed: Array<Owned<HumanStep>>; checks: Checked; issued: Finding[] }> {
+/** Tests each check once, running a Hedge repair first when a human step's probe fails and repairs are on, then drops the items whose check fails. It tests the checks that served services wait for first, which only the hub can, and fills their credentials, so a repair that reads a credential sees it in the same apply. */
+async function gate(plan: Plan, run: Runner, repair: boolean, issue?: (ready: CatalogEntry[]) => Promise<Finding[]>): Promise<{ plan: Plan; failed: Array<Owned<HumanStep>>; passed: Array<Owned<HumanStep>>; issued: Finding[] }> {
   const tested = new Map<Owned<HumanStep>, boolean>();
   const probe = async (step: Owned<HumanStep>) => {
     if ((await run(step.probe)) === 0) return true;
@@ -289,20 +264,15 @@ async function gate(plan: Plan, run: Runner, repair: boolean, issue?: (ready: Ca
     if (!job.after || (await passes(plan.human.find((step) => step.pack === job.pack && step.id === job.after)))) jobs.push(job);
     else dropped.push({ pack: job.pack, item: `job ${job.id}`, reason: `check ${job.after} does not pass`, check: job.after });
   }
-  const checked = new Map<Owned<PackCheck>, number>();
-  const checkPasses = async (item: Owned<PackCheck>) => {
-    if (!checked.has(item)) checked.set(item, await run(item.run));
-    return checked.get(item) === 0;
-  };
-  const waitsFor = (pack: string, id: string) => {
-    const human = checkOf(pack, id);
-    const check = human ? undefined : plan.checks.find((item) => item.pack === pack && item.id === id);
-    return check ? checkPasses(check) : passes(human);
-  };
-  const config = await gateConfig(plan, waitsFor);
+  const config: Plan["config"] = [];
+  for (const entry of plan.config) {
+    if (waitsForCheck(plan, entry)) continue;
+    if (!entry.after || (await passes(checkOf(entry.pack, entry.after)))) config.push(entry);
+    else dropped.push(droppedConfig(entry));
+  }
   const failed = [...tested].filter(([, passed]) => !passed).map(([step]) => step);
   const passed = [...tested].filter(([, passed]) => passed).map(([step]) => step);
-  return { plan: { ...plan, jobs, config: config.config, dropped: [...plan.dropped, ...dropped, ...config.dropped] }, configDropped: config.dropped, failed, passed, checks: [...checked], issued };
+  return { plan: { ...plan, jobs, config, dropped: [...plan.dropped, ...dropped] }, failed, passed, issued };
 }
 
 type Cause = { workflow: string } | "pack" | "plan";

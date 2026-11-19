@@ -433,26 +433,26 @@ describe("the Own-account balancing workflow", () => {
       const { home, result, options } = emptyHub("claude");
       const fresh = await apply(result, options);
       expect(fresh.ok).toBe(true);
-      expect(fresh.findings.map((finding) => [finding.id, finding.todo ?? finding.repair])).toEqual([["check:cli-proxy-client", true], ["check:cli-proxy-accounts", true]]);
+      expect(fresh.findings.map((finding) => [finding.id, finding.todo ?? finding.repair])).toEqual([["check:cli-proxy-accounts", true], ["check:cli-proxy-client", true]]);
       expect(fresh.findings.map((finding) => finding.say.endsWith(`: ${login("claude")}`))).toEqual([true, true]);
       expect(existsSync(join(home, ".local/share/hedge-cli-proxy/cli-proxy-api"))).toBe(true);
       const applied = await apply(result, options);
       expect(applied.ok).toBe(true);
-      expect(applied.findings.map((finding) => [finding.id, finding.todo ?? finding.repair])).toEqual([["check:cli-proxy-client", true], ["check:cli-proxy-accounts", true]]);
+      expect(applied.findings.map((finding) => [finding.id, finding.todo ?? finding.repair])).toEqual([["check:cli-proxy-accounts", true], ["check:cli-proxy-client", true]]);
       expect(existsSync(join(home, ".claude/settings.json"))).toBe(false);
       const doctor = await check(result, options);
       expect(doctor.ok).toBe(true);
-      expect(doctor.findings.map((finding) => [finding.id, finding.todo])).toEqual([["check:cli-proxy-client", true], ["check:cli-proxy-accounts", true]]);
+      expect(doctor.findings.map((finding) => [finding.id, finding.todo])).toEqual([["check:cli-proxy-accounts", true], ["check:cli-proxy-client", true]]);
     });
 
     test("on the Codex plan, lists the Codex login as a To do and keeps Codex on its own sign-in", async () => {
       const { home, result, options } = emptyHub("codex");
       const fresh = await apply(result, options);
       expect(fresh.ok).toBe(true);
-      expect(fresh.findings.map((finding) => [finding.id, finding.todo ?? finding.repair])).toEqual([["check:cli-proxy-codex", true], ["check:cli-proxy-codex-accounts", true]]);
+      expect(fresh.findings.map((finding) => [finding.id, finding.todo ?? finding.repair])).toEqual([["check:cli-proxy-codex-accounts", true], ["check:cli-proxy-codex", true]]);
       const applied = await apply(result, options);
       expect(applied.ok).toBe(true);
-      expect(applied.findings.map((finding) => [finding.id, finding.todo])).toEqual([["check:cli-proxy-codex", true], ["check:cli-proxy-codex-accounts", true]]);
+      expect(applied.findings.map((finding) => [finding.id, finding.todo])).toEqual([["check:cli-proxy-codex-accounts", true], ["check:cli-proxy-codex", true]]);
       expect(applied.findings.map((finding) => finding.say).join("\n")).toContain(login("codex"));
       expect(existsSync(join(home, ".codex/config.toml"))).toBe(false);
       expect((await check(result, options)).ok).toBe(true);
@@ -488,7 +488,7 @@ describe("the Own-account balancing workflow", () => {
       const result = proxyOnly(plan({ ...balancing, plan: "claude" }, hub));
       const applied = await apply(result, { home, adapters: [providerConfigAdapter()], run: hedgeProxy(machine, result.engineRoot) });
       expect(applied.ok).toBe(false);
-      expect(applied.findings.map((finding) => [finding.id, finding.todo ?? finding.repair])).toEqual([["check:cli-proxy-client", "apply"], ["step:cli-proxy", "apply"], ["check:cli-proxy-accounts", true]]);
+      expect(applied.findings.map((finding) => [finding.id, finding.todo ?? finding.repair])).toEqual([["step:cli-proxy", "apply"], ["check:cli-proxy-accounts", true], ["check:cli-proxy-client", "apply"]]);
       expect(existsSync(join(home, ".claude/settings.json"))).toBe(false);
     });
 
@@ -519,7 +519,7 @@ describe("the Own-account balancing workflow", () => {
       return { home, result, routes, route, atInstall, hooks, options: { home, adapters: [providerConfigAdapter()], run } };
     };
     const foreignPlugin = { ".local/share/hedge-cli-proxy/plugins/other.so": "plugin" };
-    const unsafe: Array<[string, string | true | undefined]> = [["check:cli-proxy-client", "apply"], ["step:cli-proxy", "apply"], ["check:cli-proxy-accounts", true]];
+    const unsafe: Array<[string, string | true | undefined]> = [["step:cli-proxy", "apply"], ["check:cli-proxy-accounts", true], ["check:cli-proxy-client", "apply"]];
 
     test("with a running proxy that has a plugin Hedge did not install from the start, apply fails and never routes Claude Code to the proxy", async () => {
       const { result, routes, route, options } = runningHub("claude", { credentials: [{ provider: "claude" }] }, foreignPlugin);
@@ -530,7 +530,7 @@ describe("the Own-account balancing workflow", () => {
       expect(applied.findings.map((finding) => [finding.id, finding.todo ?? finding.repair])).toEqual(unsafe);
     });
 
-    test("after a successful apply, a plugin Hedge did not install appears while the proxy still lists the model: the next apply takes the route out before the proxy step runs, and fails", async () => {
+    test("after a successful apply, a plugin Hedge did not install appears while the proxy still lists the model: the next apply takes the route out by the time it ends, and fails", async () => {
       const { home, result, routes, route, atInstall, options } = runningHub("claude", { credentials: [{ provider: "claude" }] });
       expect((await apply(result, options)).ok).toBe(true);
       expect(route()).toBe("http://127.0.0.1:8317");
@@ -538,7 +538,7 @@ describe("the Own-account balancing workflow", () => {
       writeFileSync(join(dataDir(home), "plugins/other.so"), "plugin");
       atInstall.splice(0);
       const failed = await apply(result, options);
-      expect(atInstall).toEqual([undefined]);
+      expect(atInstall).toEqual(["http://127.0.0.1:8317"]);
       expect(route()).toBeUndefined();
       expect(failed.ok).toBe(false);
       expect(failed.findings.map((finding) => [finding.id, finding.todo ?? finding.repair])).toEqual(unsafe);
@@ -548,17 +548,17 @@ describe("the Own-account balancing workflow", () => {
       expect(route()).toBeUndefined();
     });
 
-    test("a plugin Hedge did not install that appears after the route check, while the proxy step runs, leaves no route when apply ends", async () => {
+    test("a plugin Hedge did not install that appears while the proxy step runs leaves no route when apply ends", async () => {
       const { home, result, route, atInstall, hooks, options } = runningHub("claude", { credentials: [{ provider: "claude" }] });
       hooks.beforeInstall = () => {
         mkdirSync(join(dataDir(home), "plugins"), { recursive: true });
         writeFileSync(join(dataDir(home), "plugins/other.so"), "plugin");
       };
       const applied = await apply(result, options);
-      expect(atInstall).toEqual(["http://127.0.0.1:8317"]);
+      expect(atInstall).toEqual([undefined]);
       expect(route()).toBeUndefined();
       expect(applied.ok).toBe(false);
-      expect(applied.findings.map((finding) => [finding.id, finding.todo ?? finding.repair])).toEqual([unsafe[1], unsafe[2], unsafe[0]]);
+      expect(applied.findings.map((finding) => [finding.id, finding.todo ?? finding.repair])).toEqual(unsafe);
     });
 
     test("with a running proxy that has a plugin Hedge did not install, a hedge-proxy Codex table of your own survives the failed step, and Codex keeps using it", async () => {
@@ -596,7 +596,7 @@ describe("the Own-account balancing workflow", () => {
       Object.assign(proxy, { credentials: [], models: [] });
       const emptied = await apply(result, options);
       expect(emptied.ok).toBe(true);
-      expect(emptied.findings.map((finding) => [finding.id, finding.todo])).toEqual([["check:cli-proxy-client", true], ["check:cli-proxy-accounts", true]]);
+      expect(emptied.findings.map((finding) => [finding.id, finding.todo])).toEqual([["check:cli-proxy-accounts", true], ["check:cli-proxy-client", true]]);
       const settings = existsSync(join(home, ".claude/settings.json")) ? JSON.parse(readFileSync(join(home, ".claude/settings.json"), "utf8")) : {};
       expect([settings.env?.ANTHROPIC_BASE_URL, settings.apiKeyHelper]).toEqual([undefined, undefined]);
     });

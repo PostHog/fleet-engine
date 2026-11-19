@@ -344,20 +344,6 @@ describe("T3 adapter with a running server", () => {
     expect(again.actions).toEqual([]);
   });
 
-  test("applies a setting whose check first passes once a step of this apply ran, in the same apply", async () => {
-    const home = temp.make("home-");
-    const { server, adapter } = setup({ settings: { sidebarAutoSettleAfterDays: 7 } });
-    const waiting = { ...plan("linux", [{ ...entry("sidebarAutoSettleAfterDays", 3), after: "ready" }]), checks: [{ id: "ready", run: ["ready"], say: "Not ready.", pack: "base" }], steps: [{ id: "prepare", run: ["prepare"], check: ["prepared"], pack: "base" }] };
-    let prepared = false;
-    const run = async ([command]: string[]) => {
-      if (command === "prepare") prepared = true;
-      return command === "prepared" || command === "ready" ? (prepared ? 0 : 1) : 0;
-    };
-    const report = await apply(waiting, { home, adapters: [adapter], run });
-    expect(report).toMatchObject({ ok: true, findings: [] });
-    expect(server.state.settings.sidebarAutoSettleAfterDays).toBe(3);
-  });
-
   test("retries a value T3 did not take on the next apply", async () => {
     const home = temp.make("home-");
     await seed(plan("linux", [entry("sidebarAutoSettleAfterDays", 3)]), home);

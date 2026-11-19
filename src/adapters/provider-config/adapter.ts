@@ -38,11 +38,11 @@ export function providerConfigAdapter(options: { run?: CommandRunner } = {}): Ad
       const gated = gatedKeys(plan);
       const reconcile = async () => {
         const { plugins, claudeEnabled, marketplaces, codexPlugins, ...result } = await reconcileFiles(plan, context.home, context.dryRun, context.adopt, outage, gated);
-        const installed = await reconcilePlugins(plan, context.home, context.dryRun, run, { outage, accepted: plugins, claudeEnabled, marketplaces, acceptedCodex: codexPlugins });
+        result.findings.push(...(await reconcilePlugins(plan, context.home, context.dryRun, run, { outage, accepted: plugins, claudeEnabled, marketplaces, acceptedCodex: codexPlugins })));
         const servers = await reconcileServers(plan, context.home, { dryRun: context.dryRun, adopt: context.adopt.includes(claudeJson), outage, gated: gatedPath(gated, "claude"), run });
         result.actions.push(...servers.actions);
-        result.findings.push(...installed.findings, ...servers.findings);
-        return { ...result, resolved: [...installed.resolved, ...servers.resolved] };
+        result.findings.push(...servers.findings);
+        return result;
       };
       const result = context.dryRun ? await reconcile() : await withLock(context.home, reconcile);
       if (outage) result.findings.push({ id: "config:outage", pack: "engine", say: "Kept every provider setting and plugin that Hedge would remove until all your pack sources can be fetched.", repair: "apply" });

@@ -281,13 +281,32 @@ describe("a config entry that waits for a pack check", () => {
     expect(settings(home)).toEqual({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: "cat key" });
   });
 
-  test("that passes before a step and fails after it takes the config back out before apply ends, and apply names the failed check", async () => {
+  test("with a todo, that exits 4 before a step and passes after it puts its config in within the same apply, and leaves no To do", async () => {
+    const home = temp.make("home-");
+    const { run } = stepping({ before: 4, after: 0 });
+    const waiting = [{ ...checks[0]!, todo: "Add an account to the proxy." }];
+    const applied = await apply(plan({ files: [], checks: waiting, config, steps }), { home, adapters: [providerConfigAdapter()], run: run(home) });
+    expect(applied).toMatchObject({ ok: true, findings: [] });
+    expect(settings(home)).toEqual({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: "cat key" });
+  });
+
+  test("that passes before a step and fails after it never puts its config in, and apply names the failed check", async () => {
     const home = temp.make("home-");
     const { run, seen } = stepping({ before: 0, after: 1 });
     const applied = await apply(plan({ files: [], checks, config, steps }), { home, adapters: [providerConfigAdapter()], run: run(home) });
-    expect(seen).toEqual(["http://127.0.0.1:8317"]);
+    expect(seen).toEqual([undefined]);
     expect(applied.findings).toEqual([down]);
-    expect(settings(home)).toEqual({});
+    expect(settings(home)).toBeUndefined();
+  });
+
+  test("that an earlier apply wrote, and whose check fails before a step and passes after it, stays in place, and apply changes nothing", async () => {
+    const home = temp.make("home-");
+    await apply(plan({ files: [], checks, config }), { home, adapters: [providerConfigAdapter()], run: proxy(() => true) });
+    const { run, seen } = stepping({ before: 1, after: 0 });
+    const applied = await apply(plan({ files: [], checks, config, steps }), { home, adapters: [providerConfigAdapter()], run: run(home) });
+    expect(seen).toEqual(["http://127.0.0.1:8317"]);
+    expect(applied).toMatchObject({ ok: true, actions: [], findings: [] });
+    expect(settings(home)).toEqual({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: "cat key" });
   });
 
   test("doctor changes nothing, reports the failed check once, and fails", async () => {
@@ -380,7 +399,7 @@ describe("a pack check that waits for the person", () => {
   const context7 = "context7@claude-plugins-official";
   const plugin = { provider: "claude" as const, key: `enabledPlugins.${context7}`, value: true, pack: "base" };
 
-  test("that config waits for and that passes once a step ran replaces the first config findings, so a plugin that waited for the step's Claude Code leaves no Fix and is installed for the user", async () => {
+  test("that config waits for and that passes once a step ran puts its config in after the step, so a plugin that waited for the step's Claude Code leaves no Fix and is installed for the user", async () => {
     const pool = installedPool();
     pool.set(0);
     let installed = false;
@@ -400,7 +419,7 @@ describe("a pack check that waits for the person", () => {
     expect((await check(plan({ files: [], checks, steps, config: [...config, plugin] }), options)).findings).toEqual([{ id: `plugin:${context7}`, pack: "engine", say: `The Claude plugin ${context7} needs to be installed.`, repair: "apply" }]);
   });
 
-  test("that config waits for and that passes once a step ran keeps the first pass's notice that an edited plugin is yours now", async () => {
+  test("that config waits for and that passes once a step ran keeps the notice that an edited plugin is yours now", async () => {
     const pool = installedPool();
     pool.set(0);
     const claude = claudeCli(() => true);
@@ -414,7 +433,7 @@ describe("a pack check that waits for the person", () => {
     expect(claude.installed).toEqual([{ id: context7, scope: "user" }]);
   });
 
-  test("that config waits for and that passes once a step ran keeps a Fix of the first pass for an operation the second pass skips", async () => {
+  test("that config waits for and that passes once a step ran still reports a marketplace update that failed", async () => {
     const pool = installedPool();
     pool.set(0);
     const installed: Array<{ id: string; scope: string }> = [];
