@@ -49,8 +49,14 @@ function decisionsIn(text: string, where: string, at: string): Decision[] {
 
 function newestPerQuestion(decisions: Decision[]): Decision[] {
   const byQuestion = new Map<string, Decision>();
-  const unmarkedFirst = decisions.toSorted((left, right) => Number(right.who === unmarked) - Number(left.who === unmarked) || left.at.localeCompare(right.at));
-  for (const decision of unmarkedFirst) byQuestion.set(decision.question.trim().toLowerCase(), decision);
+  const oldestFirst = decisions.toSorted((left, right) => left.at.localeCompare(right.at));
+  for (const decision of oldestFirst) {
+    const question = decision.question.trim().toLowerCase();
+    const kept = byQuestion.get(question);
+    if (kept && kept.who !== unmarked && decision.who === unmarked) continue;
+    if (kept?.who === unmarked) byQuestion.delete(question);
+    byQuestion.set(question, decision);
+  }
   return [...byQuestion.values()];
 }
 

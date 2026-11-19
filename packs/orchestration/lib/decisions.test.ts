@@ -160,6 +160,23 @@ test("fleet decisions keeps a marked answer over an old ✅ answer to the same q
   ].join("\n"));
 });
 
+test("fleet decisions lists a marked answer where it was given, not where an old ✅ answer to it stood", async () => {
+  const body = ["- ✅ **Which queue?** Redis", "- 🤖 **Which bus?** Kafka"].join("\n");
+  const comments = [{ author: "ada", body: "- 🤖 **Which queue?** SQS", url: url(1, "c1"), createdAt: "2026-11-14T09:00:00Z", updatedAt: "2026-11-14T09:00:00Z" }];
+  const lines: string[] = [];
+
+  await runDecisions(["acme/maps#1"], { ...fixtureFetchers({ issues: [issueNode(repository, 1)], discussions: { "acme/maps#1": { body, comments } } }), tracker: () => "", print: (line) => lines.push(line) });
+
+  expect(lines.join("\n")).toBe([
+    "| Question | Answer | Who | Where |",
+    "| --- | --- | --- | --- |",
+    `| Which bus? | Kafka | 🤖 Agent | [map #1](https://github.com/${repository}/issues/1) |`,
+    `| Which queue? | SQS | 🤖 Agent | [map](${url(1, "c1")}) |`,
+    "",
+    "Involvement: no human-in-the-loop tickets.",
+  ].join("\n"));
+});
+
 test("fleet decisions shows old ✅ lines as their own group after the three marks", async () => {
   const body = ["- ✅ **Old question?** Old answer", "- 🤖 **Agent question?** Took A", "- 👤 **Human question?** His answer"].join("\n");
   const lines: string[] = [];
