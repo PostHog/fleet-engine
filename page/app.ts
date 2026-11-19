@@ -131,16 +131,11 @@ function player(dialog: HTMLDialogElement) {
 function clips() {
   const videos = document.querySelectorAll<HTMLVideoElement>("video.clip");
   if (!videos.length || calm() || !("IntersectionObserver" in window)) return;
-  const resumeAt = new WeakMap<HTMLVideoElement, number>();
   const observer = new IntersectionObserver((entries) => {
-    for (const entry of entries) {
+    for (const entry of entries.filter((item) => item.intersectionRatio >= 0.5)) {
       const video = entry.target as HTMLVideoElement;
-      if (entry.intersectionRatio >= 0.5) {
-        if (video.paused && video.currentTime === (resumeAt.get(video) ?? 0)) start(video);
-      } else if (!video.paused) {
-        video.pause();
-        resumeAt.set(video, video.currentTime);
-      }
+      observer.unobserve(video);
+      if (video.paused && video.currentTime === 0) start(video);
     }
   }, { threshold: 0.5 });
   for (const video of videos) observer.observe(video);

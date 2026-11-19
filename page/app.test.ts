@@ -258,7 +258,7 @@ describe("the pack videos in a browser", () => {
     expect(video(page, "video.clip").paused).toBe(true);
   });
 
-  test("a pack page's video plays while at least half of it is in view, and pauses when it leaves", () => {
+  test("a pack page's video starts once at least half of it is in view, and then only the visitor plays or pauses it", () => {
     const window = visit("packs/hub/index.html");
     const clip = video(window, "video.clip");
     expect(clip.paused).toBe(true);
@@ -267,51 +267,23 @@ describe("the pack videos in a browser", () => {
     scrollTo(window, 0.6);
     expect(clip.paused).toBe(false);
     scrollTo(window, 0);
-    expect(clip.paused).toBe(true);
-    scrollTo(window, 1);
     expect(clip.paused).toBe(false);
-  });
-
-  test("a pack page's video that scrolling paused before the browser delivered its play event still resumes when it comes back", () => {
-    const window = visit("packs/hub/index.html");
-    const clip = video(window, "video.clip");
-    scrollTo(window, 1);
-    scrollTo(window, 0);
-    clip.dispatchEvent(new window.Event("play") as unknown as Event);
-    scrollTo(window, 1);
-    expect(clip.paused).toBe(false);
-  });
-
-  test("a pack page's video that the visitor paused stays paused when they scroll away and back, until they play it again", () => {
-    const window = visit("packs/hub/index.html");
-    const clip = video(window, "video.clip");
-    scrollTo(window, 1);
-    plays(clip, 2);
-    clip.pause();
-    scrollTo(window, 0);
-    scrollTo(window, 1);
-    expect(clip.paused).toBe(true);
-    plays(clip, 1);
-    scrollTo(window, 0);
-    expect(clip.paused).toBe(true);
-    scrollTo(window, 1);
-    expect(clip.paused).toBe(false);
-  });
-
-  test("a pack page's video that the visitor played and paused while less than half of it showed stays paused when they scroll back", () => {
-    const window = visit("packs/hub/index.html");
-    const clip = video(window, "video.clip");
-    scrollTo(window, 1);
-    plays(clip, 2);
-    scrollTo(window, 0.4);
-    expect(clip.paused).toBe(true);
-    plays(clip, 1);
     clip.pause();
     scrollTo(window, 1);
     expect(clip.paused).toBe(true);
   });
 
-  test("a pack page's video that the visitor played and paused before it ever started on its own stays paused when they scroll to it", () => {
+  test("a pack page's video that the visitor paused at once, before it moved, stays paused when they scroll away and back", () => {
+    const window = visit("packs/hub/index.html");
+    const clip = video(window, "video.clip");
+    scrollTo(window, 1);
+    clip.pause();
+    scrollTo(window, 0);
+    scrollTo(window, 1);
+    expect([clip.paused, clip.currentTime]).toEqual([true, 0]);
+  });
+
+  test("a pack page's video that the visitor played and paused before it started on its own stays paused when they scroll to it", () => {
     const window = visit("packs/hub/index.html");
     const clip = video(window, "video.clip");
     scrollTo(window, 0.4);
