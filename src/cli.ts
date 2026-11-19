@@ -114,7 +114,7 @@ const fleetOf = (options: CliOptions) => (options.adapters ?? engineAdapters)().
 async function retireFleet(args: string[], options: CliOptions) {
   if (args.length > 1 || (args.length && args[0] !== "--dry-run")) return options.print("Usage: hedge retire-fleet [--dry-run]"), 2;
   const fleet = fleetOf(options);
-  if (!fleet.installed(options.home)) return options.print("Hedge: this machine has no Fleet engine install in ~/.local/share/fleet/engine, so Hedge stops nothing."), 0;
+  if (!fleet.installed(options.home)) return options.print("Hedge: this machine has no Fleet engine install, so there is nothing from before the rename to stop."), 0;
   if (args.length) return listFleet(fleet, options);
   const fail = options.fail ?? options.print;
   const result = await fleet.retire(options.home, options.platform);

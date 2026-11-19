@@ -16,7 +16,7 @@ import { holdLock } from "./lock.ts";
 import { fakeSystemd } from "./testing/systemd.ts";
 
 const temp = tempDirs();
-const noEngine = "Hedge: this machine has no Fleet engine install in ~/.local/share/fleet/engine, so Hedge stops nothing.";
+const noEngine = "Hedge: this machine has no Fleet engine install, so there is nothing from before the rename to stop.";
 afterEach(() => temp.cleanup());
 const { profileDir } = cliFixtures(temp);
 

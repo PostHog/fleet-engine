@@ -403,8 +403,8 @@ only, go on to step 10. With a hub and nodes, go on to step 9.
 
 ### Go back to Fleet
 
-`hedge retire-fleet` turns Fleet's jobs off and keeps their files and
-launchers. It acts only on a machine with the Fleet engine install in
+On its first run, `get.sh` turns Fleet's jobs off and keeps their files and
+launchers. It does this only on a machine with the Fleet engine install in
 `~/.local/share/fleet/engine`. To go back on such a machine:
 
 1. Stop Hedge's jobs. On Linux, run
@@ -416,7 +416,7 @@ launchers. It acts only on a machine with the Fleet engine install in
 2. When `~/.local/share/fleet/engine/fleet doctor` prints `Fleet is now
    Hedge`, check out the commit before the rename:
    `git -C ~/.local/share/fleet/engine checkout -q --detach <commit>`.
-3. Turn the stopped units back on. Retire named each one as
+3. Turn the stopped units back on. `get.sh` named each one as
    `stopped and turned off the ...`. On Linux, run
    `systemctl --user enable --now <unit>`. On a Mac, run
    `launchctl enable gui/$(id -u)/<label>`, then
