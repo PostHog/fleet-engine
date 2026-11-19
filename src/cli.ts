@@ -568,10 +568,11 @@ function printReport(report: Report, command: string, print: (line: string) => v
 }
 
 function printToDo(report: Report, held: Report["findings"], print: (line: string) => void) {
-  const yours = (finding: Report["findings"][number]) => report.humanLeft.some((step) => finding.id === `human:${step.id}` && finding.pack === step.pack);
+  const yours = (finding: Report["findings"][number]) => finding.repair === "human" && report.humanLeft.some((step) => finding.id === `human:${step.id}` && finding.pack === step.pack);
   const others = [...held, ...report.findings.filter((finding) => (finding.repair || finding.id.startsWith("kept:")) && !yours(finding))];
+  const steps = report.humanLeft.filter((step) => report.findings.some((finding) => yours(finding) && finding.id === `human:${step.id}` && finding.pack === step.pack));
   printFindings(others, print);
-  print(JSON.stringify(report.humanLeft.map(({ pack, id, say, command }) => ({ pack, id, say, ...(command ? { command } : {}) }))));
+  print(JSON.stringify(steps.map(({ pack, id, say, command }) => ({ pack, id, say, ...(command ? { command } : {}) }))));
   return others.length ? 1 : 0;
 }
 

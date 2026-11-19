@@ -35,7 +35,7 @@ export async function devboxCommand(args: string[], context: DevboxCommandContex
   const hub = listedHub && listedHub !== host ? listedHub : undefined;
   const hubTook = hub !== undefined && (await tellHub(context, hub, host));
   let left: LeftStep[] = [];
-  const steps = () => devboxSteps(host, { terminal, machine: context.machine, nonInteractive: false, plan: context.plan.ai, models: context.plan.models, profile: () => profileForBox(context.machine, machineFile.profileDir), rerun: `hedge devbox add ${host}`, leftForYou: (steps) => (left = steps), ...(context.plan.engineRoot ? { engineRoot: context.plan.engineRoot } : {}) });
+  const steps = () => devboxSteps(host, { terminal, machine: context.machine, nonInteractive: false, plan: context.plan.ai, models: context.plan.models, profile: () => profileForBox(context.machine, machineFile.profileDir), rerun: `hedge devbox add ${host}`, leftForYou: (steps) => (left = [...left, ...steps]), ...(context.plan.engineRoot ? { engineRoot: context.plan.engineRoot } : {}) });
   try {
     await runSteps(steps, {
       terminal,

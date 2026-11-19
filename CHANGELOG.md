@@ -27,25 +27,34 @@
 - Each page of the site carries its own script and styles, so a cached page
   always runs its own script.
 - `hedge devbox add` signs a node in to Coder only at the hub's own Coder
-  address, and only over HTTPS. It writes the new token into the node's
-  Coder CLI files over SSH, so the token travels in no HTTP request during
-  setup, and it installs a missing Coder CLI only from that address over
-  HTTPS. When the node does not reach that address over HTTPS, it makes no
-  token and names the sign-in the person does there. It removes the token
-  of a failed sign-in, or names the token and the command that removes it.
+  address, and only over HTTPS, checked with no redirect followed. It
+  writes the new token into the node's Coder CLI files over SSH, through
+  new owner-only files, so the token travels in no HTTP request during
+  setup. It installs a missing Coder CLI only from that address over HTTPS,
+  only from an HTTP 200 answer with no redirect, and only after the
+  downloaded CLI runs. When the node does not reach that address over
+  HTTPS, it makes no token and names the sign-in the person does there.
+  When the node is signed in to Coder another way, at another address or
+  through `CODER_URL` or `CODER_SESSION_TOKEN`, it leaves that sign-in
+  alone, makes no token, and lists the sign-in among the steps for the
+  person. It removes a token that it could not write, or names the token
+  and the command that removes it.
   After the node applies the profile, it asks the node's
   `hedge doctor --to-do` which steps are left. When the apply passed and
   the node finds nothing but those steps, it goes on with the sign-ins,
   T3 Connect and the link, and ends with a list of them, each with its
   command, and a line to run `hedge apply` on the node after them. It runs
   none of them itself. When the apply failed, or the node finds anything
-  else, it stops at the profile step. A node with an older Hedge, which has
+  else, it stops at the profile step, with what `hedge doctor` there
+  found. A node with an older Hedge, which has
   no `--to-do`, finishes the step and points to `hedge doctor` there. A
   rerun keeps a node engine that runs the hub's engine commit, when its
   `hedge` command runs. When T3 Code on the hub reaches the node, it says
   so, and does not ask for `hedge peers link`.
 - `hedge doctor --to-do` prints the steps left for the person as JSON, and
   before it the other findings. It exits 1 when there are other findings.
+  A step that Hedge repairs itself is a finding, never a step for the
+  person.
 
 ### Fleet is now Hedge
 

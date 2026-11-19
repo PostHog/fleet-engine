@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, symlinkSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join, relative } from "node:path";
 import { cliFixtures, repoRoot } from "./testing/cli.ts";
+import { main } from "./cli.ts";
 import { spawnGit, tempDirs } from "./testing/git.ts";
 
 const temp = tempDirs();
@@ -303,6 +304,27 @@ describe("hedge doctor", () => {
     expect(after.output).toContain("Kept your .agents/AGENTS.md");
     expect(after.output).toContain("Fix: .codex/AGENTS.md needs to be updated.");
     expect(snapshot(home)).toEqual(drifted);
+  });
+
+  test("--to-do exits nonzero and lists no step for the person when a step that only Hedge repairs fails", async () => {
+    const home = temp.make("home-");
+    const root = temp.make("engine-");
+    cpSync(join(repoRoot, "packs/base"), join(root, "packs/base"), { recursive: true });
+    mkdirSync(join(root, "packs/box"), { recursive: true });
+    const human = [
+      { id: "gateway", say: "The gateway is not installed.", probe: ["gateway-installed"], repair: ["gateway-installed", "--repair"] },
+      { id: "key", say: "Paste your key.", command: "box key", probe: ["key-pasted"] },
+    ];
+    writeFileSync(join(root, "packs/box/pack.json"), JSON.stringify({ schema: 1, name: "box", summary: "box pack.", human }));
+    const profile = profileDir(["box"]);
+    const lines: string[] = [];
+    const options = { home, engineRoot: root, platform: "linux" as const, env: {}, print: (line: string) => void lines.push(line) };
+    expect(await main(["apply", "--profile", profile], { ...options, run: async () => 0 })).toBe(0);
+    lines.length = 0;
+    const unmet = async (command: string[]) => (["gateway-installed", "key-pasted"].includes(command[0]!) ? 1 : 0);
+    expect(await main(["doctor", "--to-do"], { ...options, run: unmet })).toBe(1);
+    expect(lines.slice(0, -1)).toEqual(["Fix: The gateway is not installed."]);
+    expect(JSON.parse(lines.at(-1)!)).toEqual([{ pack: "box", id: "key", say: "Paste your key.", command: "box key" }]);
   });
 });
 

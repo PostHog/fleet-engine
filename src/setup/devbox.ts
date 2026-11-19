@@ -116,7 +116,7 @@ export function devboxSteps(host: string, context: DevboxContext): Step[] {
   const chatgpt = chatgptSignIn(box, context.models);
   return [
     auto(host, "install", `Install Hedge on ${host}`, 4, context.terminal, () => install(box, host, context)),
-    ...(host.startsWith(coderPrefix) && context.machine.has("coder") ? [auto(host, "coder", `Sign in to Coder on ${host}`, 1, context.terminal, () => coderOnBox(host, box, context.machine))] : []),
+    ...(host.startsWith(coderPrefix) && context.machine.has("coder") ? [auto(host, "coder", `Sign in to Coder on ${host}`, 1, context.terminal, () => coderOnBox(host, box, context))] : []),
     humanStep(on(githubSignIn(box, async () => {})), human),
     auto(host, "profile", `Apply your profile on ${host}`, 3, context.terminal, () => applyProfile(box, host, context)),
     ...(context.plan === "codex" ? [] : [claudeOnBox(host, box, context)]),
@@ -126,7 +126,7 @@ export function devboxSteps(host: string, context: DevboxContext): Step[] {
   ];
 }
 
-function auto(host: string, id: string, title: string, minutes: number, terminal: Terminal, work: () => Promise<void>): Step {
+function auto(host: string, id: string, title: string, minutes: number, terminal: Terminal, work: () => Promise<string | void>): Step {
   return {
     id: `devbox:${host}:${id}`,
     title,
@@ -134,8 +134,7 @@ function auto(host: string, id: string, title: string, minutes: number, terminal
     kind: "auto",
     async run() {
       terminal.print(`▶ ${title}`);
-      await work();
-      terminal.print(`  ✓ ${title}: done`);
+      terminal.print((await work()) ?? `  ✓ ${title}: done`);
     },
   };
 }
@@ -209,34 +208,46 @@ const sameCoderUser = (here: CoderSession, box: CoderSession | undefined) => box
 
 const coderConfig = `"\${CODER_CONFIG_DIR:-\${XDG_CONFIG_HOME:-$HOME/.config}/coderv2}"`;
 
-/** Signs the workspace in to Coder at this machine's own Coder address, with a new token written to the files its Coder CLI reads, sent on standard input over SSH and never in an HTTP request, then writes its SSH config, so it reaches the hub by its coder. name. A workspace already signed in as the same Coder user keeps its session, whatever address it reaches Coder by. */
-async function coderOnBox(host: string, box: Machine, here: Machine) {
-  const session = await coderSession(here);
+/** Signs the workspace in to Coder at this machine's own Coder address, then writes its SSH config, so it reaches the hub by its coder. name. This machine makes the token, so it is valid as made, and it reaches the workspace only on standard input over SSH, into the files its Coder CLI reads: Hedge sends it in no HTTP request. A workspace already signed in as the same Coder user keeps its session, whatever address it reaches Coder by. A workspace signed in another way keeps that sign-in too, and its sign-in becomes a step for the person. */
+async function coderOnBox(host: string, box: Machine, context: DevboxContext) {
+  const session = await coderSession(context.machine);
   if (!session) throw new Error(`Coder is not signed in on this machine. Run coder login <your Coder address> here, then hedge devbox add ${host} again.`);
-  if (!sameCoderUser(session, await coderSession(box))) await signInBox(host, box, here, session);
+  if (!sameCoderUser(session, await coderSession(box)) && !(await signInBox(host, box, context, session.address))) return `  · Coder on ${host} is signed in another way, so Hedge leaves that sign-in alone and lists the sign-in to ${session.address} at the end.`;
   const ssh = await box.exec(["coder", "config-ssh", "--yes"]);
   if (ssh.code !== 0) throw new Error(`coder config-ssh failed on ${host}: ${ssh.output.trim()}`);
 }
 
-async function signInBox(host: string, box: Machine, here: Machine, session: CoderSession) {
-  const { address } = session;
+const otherSignIn = 87;
+
+const noOtherSignIn = (address: string) => `d=${coderConfig} a=${quote(address)}; if [ -n "$CODER_SESSION_TOKEN" ] || [ "\${CODER_URL:-$a}" != "$a" ] || { [ -e "$d/url" ] && [ "$(cat "$d/url")" != "$a" ]; } || { [ ! -e "$d/url" ] && [ -e "$d/session" ]; }; then exit ${otherSignIn}; fi;`;
+
+async function signInBox(host: string, box: Machine, context: DevboxContext, address: string) {
+  const here = context.machine;
+  const checked = await box.exec(["sh", "-c", noOtherSignIn(address)]);
+  if (checked.code === otherSignIn) return leaveSignIn(host, address, context), false;
+  if (checked.code !== 0) throw new Error(`Hedge could not read the Coder sign-in on ${host}: ${checked.output.trim()}`);
   if (!(await reachesOverHttps(box, address))) throw new Error(`${host} does not reach Coder at ${address} over HTTPS, so Hedge makes no Coder token for it and sends none. Sign ${host} in to Coder yourself: install the Coder CLI there from your Coder deployment, run coder login there with an HTTPS address it reaches, and paste a token from ${address}/cli-auth. Then run hedge devbox add ${host} again.`);
-  const cli = `"$HOME/.local/bin/coder"`;
-  const download = `command -v coder >/dev/null || { case $(uname -m) in x86_64) a=amd64;; aarch64|arm64) a=arm64;; *) exit 1;; esac; mkdir -p "$HOME/.local/bin" && curl -q --proto =https -fsS --max-time 300 -o ${cli}.part ${quote(`${address}/bin/coder-linux-`)}"$a" && chmod +x ${cli}.part && mv -f ${cli}.part ${cli}; }`;
+  const download = `command -v coder >/dev/null || { case $(uname -m) in x86_64) a=amd64;; aarch64|arm64) a=arm64;; *) exit 1;; esac; b="$HOME/.local/bin" && mkdir -p "$b" && p=$(mktemp "$b/.coder.XXXXXX") && { c=$(curl -q --proto =https --max-redirs 0 -fsS --max-time 300 -w '%{http_code}' -o "$p" ${quote(`${address}/bin/coder-linux-`)}"$a") && [ "$c" = 200 ] && [ -s "$p" ] && chmod +x "$p" && "$p" version >/dev/null && mv -f "$p" "$b/coder"; s=$?; rm -f "$p"; [ $s = 0 ] || echo "the download answered HTTP $c and gave no Coder CLI" >&2; exit $s; }; }`;
   const installed = await box.exec(["sh", "-c", download]);
   if (installed.code !== 0) throw new Error(`Hedge could not install the Coder CLI on ${host} from ${address}: ${installed.output.trim()}`);
   const name = `hedge-${Date.now().toString(36)}`;
   const token = await here.exec(["coder", "tokens", "create", "--name", name]);
   if (token.code !== 0 || !token.output.trim()) throw new Error(`Coder made no token for ${host}: ${token.output.trim()}`);
-  const write = `umask 077 && d=${coderConfig} && mkdir -p "$d" && IFS= read -r token && printf %s ${quote(address)} > "$d/url.hedge" && printf %s "$token" > "$d/session.hedge" && mv -f "$d/url.hedge" "$d/url" && mv -f "$d/session.hedge" "$d/session"`;
+  const write = `umask 077 && ${noOtherSignIn(address)} mkdir -p "$d" && u=$(mktemp "$d/.url.XXXXXX") && { s=$(mktemp "$d/.session.XXXXXX") && IFS= read -r token && printf %s "$a" > "$u" && printf %s "$token" > "$s" && mv -f "$u" "$d/url" && mv -f "$s" "$d/session"; c=$?; rm -f "$u" \${s:+"$s"}; exit $c; }`;
   const written = await box.exec(["sh", "-c", write], { input: `${token.stdout.trim()}\n` });
-  if (written.code === 0 && sameCoderUser(session, await coderSession(box))) return;
+  if (written.code === 0) return true;
   const removed = (await here.exec(["coder", "tokens", "remove", name])).code === 0;
   const cleanup = removed ? "" : ` Hedge could not remove the token it made, ${name}. Remove it with coder tokens remove ${name}.`;
-  throw new Error(`Coder did not sign in on ${host} with the token Hedge wrote there${written.code === 0 ? "" : `: ${written.output.trim()}`}.${cleanup}`);
+  throw new Error(`Hedge could not write the Coder sign-in on ${host}${written.code === otherSignIn ? ", because it is signed in another way now" : `: ${written.output.trim()}`}.${cleanup}`);
 }
 
-const reachesOverHttps = async (box: Machine, address: string) => address.startsWith("https://") && (await box.exec(["curl", "-q", "--proto", "=https", "-sS", "--max-time", "10", "-o", "/dev/null", "-w", "%{http_code}", `${address}/api/v2/buildinfo`])).stdout.trim() === "200";
+function leaveSignIn(host: string, address: string, context: DevboxContext) {
+  const step = { say: `Coder on ${host} is signed in another way, so Hedge left that sign-in alone. Sign it in to ${address}, so it reaches the hub and the other nodes by their coder. names.`, command: `coder login ${quote(address)} && coder config-ssh --yes` };
+  if (!context.leftForYou) throw new Error(`${step.say} Run on ${host}: ${step.command}. Then run ${again(context)} again.`);
+  context.leftForYou([step]);
+}
+
+const reachesOverHttps = async (box: Machine, address: string) => address.startsWith("https://") && (await box.exec(["curl", "-q", "--proto", "=https", "--max-redirs", "0", "-sS", "--max-time", "10", "-o", "/dev/null", "-w", "%{http_code}", `${address}/api/v2/buildinfo`])).stdout.trim() === "200";
 
 async function engineCurrent(box: Machine, context: DevboxContext) {
   const here = context.engineRoot && (await context.machine.exec(["git", "-C", context.engineRoot, "rev-parse", "HEAD"]));
@@ -298,12 +309,13 @@ const isLeftStep = (step: unknown): step is LeftStep => typeof step === "object"
 function applyFailure(host: string, context: DevboxContext, applied: boolean, left: NodeLeft | undefined) {
   const rerun = `then run ${again(context)} again.`;
   const steps = left?.steps ?? [];
+  const said = left && !left.clean ? left.said.map((line) => `  ${line}`) : [];
+  const failed = said.length ? "what it says above and what hedge doctor there finds below" : "what it says above";
   const intro = !applied
-    ? steps.length ? `The devbox could not apply your profile. Do what is left for you on ${host}, and fix what it says above, ${rerun}` : `The devbox could not apply your profile. Fix what it says above, ${rerun}`
+    ? steps.length ? `The devbox could not apply your profile. Do what is left for you on ${host}, and fix ${failed}, ${rerun}` : `The devbox could not apply your profile. Fix ${failed}, ${rerun}`
     : !left ? `Hedge could not read the steps left on ${host}. Run hedge doctor there and fix what it says, ${rerun}`
     : !left.clean ? `Your profile applied on ${host}, but hedge doctor there finds more than steps for you. Fix what it says, ${rerun}`
     : `Your profile applied on ${host}, but steps are left for you there. Do each one, ${rerun}`;
-  const said = applied && left && !left.clean ? left.said.map((line) => `  ${line}`) : [];
   return [intro, ...said, ...(steps.length ? ["Left for you:", ...yourSteps(host, steps)] : [])].join("\n");
 }
 

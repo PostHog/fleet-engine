@@ -656,6 +656,11 @@ creates no node ends at step 8 (see step 1).
    the sign-in the person does on the node: install the Coder CLI there,
    and run `coder login` with an HTTPS address the node reaches. Then run
    `hedge devbox add` again.
+   When the node is already signed in to Coder another way, at another
+   address or through `CODER_URL` or `CODER_SESSION_TOKEN`, it leaves that
+   sign-in alone and makes no token. It lists `coder login` with the hub's
+   Coder address among the steps for the person at the end. Ask the person
+   to run it only when the node should use the hub's Coder deployment.
 4. **Check.** Run the `hedge doctor` of step 8 on each node, and on the hub
    again. Explain each line as in step 8.
 

@@ -92,6 +92,14 @@ describe("hedge devbox add applies the profile on the node", () => {
     expect(io.output()).not.toContain(`Left for you on ${node}:`);
   });
 
+  test("names what hedge doctor on the node finds when the apply fails, though the apply printed none of it", async () => {
+    const { home, io, add } = await signedUp(guarded);
+    expect(await add(fakeMachine(home, {}, { node: { stepsFail: true } }))).toBe(1);
+    const failure = io.output().slice(io.output().lastIndexOf("hedge: ")).split("\n");
+    expect(failure[0]).toStartWith("hedge: The devbox could not apply your profile.");
+    expect(failure.filter((line) => line.includes("systemd older than 253"))).toHaveLength(1);
+  });
+
   test("finishes the profile step, and points to hedge doctor on the node, when the node runs an older Hedge without --to-do", async () => {
     const { home, io, add } = await signedUp(guarded);
     const box = fakeMachine(home, {}, { node: { olderEngine: true } });
