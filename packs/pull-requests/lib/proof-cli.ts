@@ -67,7 +67,10 @@ first when its review-start ended before it did. Commands on one round take turn
 its lock already held. A command that finds another hedge proof command at work on the round stops and names its
 process and lock file; wait for it to end, then run the command again, or, on a panel, run hedge proof review --wait,
 which waits for it. A round is taken over when its command is gone, when its process id now names a process that
-started later, or when its lock file stays empty for a minute.
+started later, or when its lock file stays empty for a minute. A lock that a command on another machine holds is
+never taken over: when that command is gone, delete the lock file the message names. A new review reads the reviews
+and reserves its round under the lock of the PR's reviews directory, and runs git, GitHub, and the arbiter outside it;
+when another review starts or ends meanwhile, it stops and asks you to run it again.
 The settings pull-requests.freeReviews and pull-requests.reviewCeiling set how many reviews run before the arbiter weighs
 one more and where the loop stops: the panel rounds and the final reads of the review phase count together, and the
 final reads of the babysit phase count apart. Only a review that leads to fixes counts: a finished review
@@ -623,7 +626,7 @@ async function reserveRound(options: Map<string, string>, head: ProofIdentity, c
   if (tier.name === "read" && capturedBy === "hedge" && !panel && !decision && !await panelCommit(context.home, head)) throw new Error("A PR of the Read tier gets one read, and it is the panel: run hedge proof review, which runs its combined lens");
   const firstPanel = panel && !await panelCommit(context.home, head);
   const limits = firstPanel ? permit.limits : { ...permit.limits, ceiling: tierCeiling(tier, permit.limits.ceiling) };
-  const reserved = await startReview(context.home, head, { scope, base, from, ...permit, limits, decision, phase: options.get("--phase"), cleanBaseMerge: cleanBaseMerge(head, context.run), quietCommit: quietCommitIn(context.run, () => baseRefs(head, context.run)), capturedBy, lock: async (directory) => lockNewRound(directory, await context.lock()), now: context.now });
+  const reserved = await startReview(context.home, head, { scope, base, from, ...permit, limits, decision, phase: options.get("--phase"), cleanBaseMerge: cleanBaseMerge(head, context.run), quietCommit: quietCommitIn(context.run, () => baseRefs(head, context.run)), capturedBy, lock: async (directory) => lockNewRound(directory, await context.lock()), lockBudget: async (reviews, step) => withRoundLock(reviews, await context.lock(), step) });
   return { ...reserved, scope, base, from, phase: options.get("--phase") };
 }
 

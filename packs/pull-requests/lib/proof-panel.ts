@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { link, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { hostname } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { anchorCheck } from "./finding-anchors.ts";
 import { readJson, roundId, storeCapturedFindings, writeJson, type ProofIdentity } from "./proof.ts";
@@ -264,7 +265,7 @@ function laneProblem(answer: string, changedFiles: string[]) {
   return missed.length ? `COVERED misses ${missed.join(", ")}` : undefined;
 }
 
-type Holder = { pid: number; token?: string; started?: string; reviewer?: number; reviewerStarted?: string };
+type Holder = { pid: number; host?: string; token?: string; started?: string; reviewer?: number; reviewerStarted?: string };
 export type Slot = { recordReviewer: (pid: number) => Promise<void> };
 export type RoundLock = { owner: LockOwner; holder: Holder };
 export class RoundBusy extends Error {}
@@ -280,7 +281,8 @@ export async function processStart(pid: number) {
   } catch { return undefined; }
 }
 
-const holderFor = async (owner: LockOwner): Promise<Holder> => ({ pid: owner.pid, token: crypto.randomUUID(), started: await owner.startTime(owner.pid) });
+const holderFor = async (owner: LockOwner): Promise<Holder> => ({ pid: owner.pid, host: hostname(), token: crypto.randomUUID(), started: await owner.startTime(owner.pid) });
+const elsewhere = (holder: Holder | undefined): holder is Holder & { host: string } => holder?.host !== undefined && holder.host !== hostname();
 
 export async function withSlot<T>(io: PanelIO, work: (slot: Slot) => Promise<T>) {
   const holder = await holderFor(io);
@@ -335,6 +337,7 @@ async function claimRound(directory: string, holder: Holder) {
 }
 
 async function busy(directory: string, holder: Holder | undefined) {
+  if (elsewhere(holder)) return new RoundBusy(`Process ${holder.pid} on ${holder.host}, another hedge proof command, holds the lock ${lockPath(directory)}. hedge never takes over a lock from another machine: when that command is gone, delete ${lockPath(directory)}, then run this command again`);
   const who = holder?.pid ? `Process ${holder.pid}, another hedge proof command,` : "Another hedge proof command";
   const panel = await readPlan(directory) ?? await stagedPlan(directory);
   return new RoundBusy(`${who} works on ${directory} and holds its lock ${lockPath(directory)}. Wait for it to end${panel ? ", or run hedge proof review --wait" : ", then run this command again"}`);
@@ -379,6 +382,7 @@ async function reclaimStale(path: string, owner: LockOwner) {
 
 async function stale(path: string, text: string, owner: LockOwner) {
   const holder = holderOf(text);
+  if (elsewhere(holder)) return false;
   if (!holder?.pid) return olderThanGrace(path, owner.now());
   if (!isAlive(holder.pid)) return true;
   if (!holder.started) return false;

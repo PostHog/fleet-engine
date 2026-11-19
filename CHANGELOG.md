@@ -115,21 +115,24 @@
   when the gate carries HEAD across quiet commits, whatever `--base` names.
   Its advice names only the retries that can run: `--agent` only while the
   budget is left, and no retry while a review is unfinished.
-- `hedge proof respond` takes a "known" answer only when the reviews that
-  count reach the ceiling. A review counts when the gate asks for an answer
-  to one of its items: a blocker, a major, a finding without a severity, or a
-  TESTS item.
-- A review that starts while another weighs the budget backs out when the
-  other one started first, or in the same millisecond, whatever their names,
-  such as `final-9` and `final-10`. This holds also when the other one reuses
-  the name of a final read that was dropped meanwhile: each reservation has
-  its own id in `round.json`. A reservation that
-  hedge cannot read for any reason other than a missing file stops the
-  command with the read error, so the budget is never counted short. A
-  review that stops after it reserves removes its own round, so a retry is
-  not blocked as unfinished. A final read takes the next free name in the
-  reviews directory, so a leftover directory without `round.json` never
-  blocks it.
+- `hedge proof respond` takes a "known" answer only when the finished reviews
+  that count reach the ceiling. A review counts when the gate asks for an
+  answer to one of its items: a blocker, a major, a finding without a
+  severity, or a TESTS item. An unfinished review does not count here, so a
+  review that later finishes clean never leaves a "known" answer below the
+  ceiling.
+- A new review reads the PR's reviews and reserves its round while it holds
+  a lock on the PR's reviews directory, and holds the lock only for these
+  file reads and writes. Git, GitHub, and the arbiter run outside the lock.
+  When another review started or ended meanwhile, it reserves nothing and
+  asks you to run it again. A reservation that hedge cannot read for any
+  reason other than a missing file stops the command with the read error,
+  so the budget is never counted short. A review that
+  finds the lock held stops and names the holder. hedge takes over a lock
+  whose command on this machine is gone, and never one that a command on
+  another machine holds: the message names the file to delete when that
+  command is gone. A final read takes the next free name in the reviews
+  directory, so a leftover directory without `round.json` never blocks it.
 
 ## v0.1.0
 
