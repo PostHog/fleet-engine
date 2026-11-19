@@ -62,6 +62,8 @@ export type DevboxContext = {
   models: ModelRow[];
   /** The profile's clone URL and the engine ref it pins, so the box runs what this machine runs. */
   profile(): Promise<{ url: string; engineRef: string }>;
+  /** The command that picks up where a failed sign-in on the box stopped. */
+  rerun?: string;
 };
 
 /** The profile's clone URL as stored, and the engine ref the profile pins. */
@@ -102,10 +104,12 @@ export function devboxQuestion(context: { terminal: Terminal; home: string; flag
   };
 }
 
+const again = (context: DevboxContext) => context.rerun ?? "hedge setup";
+
 /** The steps that make an SSH host a devbox: install, sign in, apply the profile, and link T3 Code both ways. */
 export function devboxSteps(host: string, context: DevboxContext): Step[] {
   const box = overSsh(context.machine, host);
-  const human: HumanContext = { terminal: context.terminal, machine: box, nonInteractive: context.nonInteractive, chat: context.chat, waited: context.waited };
+  const human: HumanContext = { terminal: context.terminal, machine: box, nonInteractive: context.nonInteractive, chat: context.chat, waited: context.waited, rerun: context.rerun };
   const on = (signIn: SignIn): SignIn => Object.assign(Object.create(signIn) as SignIn, { id: `devbox:${host}:${signIn.id}`, title: `${signIn.title} on ${host}` });
   const chatgpt = chatgptSignIn(box, context.models);
   return [
@@ -144,7 +148,7 @@ async function install(box: Machine, host: string, context: DevboxContext) {
   const getSh = `https://raw.githubusercontent.com/${engineRepo}/${engineRef}/get.sh`;
   await nameBox(box, host);
   const download = `installer=$(mktemp) && { curl -fsSL ${quote(getSh)} -o "$installer" && sh "$installer" --ref ${quote(engineRef)} --install-only; s=$?; rm -f "$installer"; exit $s; }`;
-  await shown(box, download, "Hedge did not install on the devbox. Fix what it says above, then run hedge setup again.");
+  await shown(box, download, `Hedge did not install on the devbox. Fix what it says above, then run ${again(context)} again.`);
 }
 
 const roleFolder = `"$HOME/.config/hedge"`;
@@ -219,7 +223,7 @@ async function coderOnBox(host: string, box: Machine, here: Machine) {
 async function applyProfile(box: Machine, context: DevboxContext) {
   const { url, engineRef } = await context.profile();
   const clone = `[ -d "${boxProfile}/.git" ] || gh repo clone ${quote(url)} "${boxProfile}" -- -q`;
-  await shown(box, `${clone} && sh "${boxEngine}/get.sh" --ref ${quote(engineRef)} --profile "${boxProfile}"`, "The devbox could not apply your profile. Fix what it says above, then run hedge setup again.");
+  await shown(box, `${clone} && sh "${boxEngine}/get.sh" --ref ${quote(engineRef)} --profile "${boxProfile}"`, `The devbox could not apply your profile. Fix what it says above, then run ${again(context)} again.`);
 }
 
 /** Claude signs in on the box in an SSH terminal: its sign-in asks for a code that the person pastes. */
@@ -241,7 +245,7 @@ function claudeOnBox(host: string, box: Machine, context: DevboxContext): Step {
       terminal.print(`  $ ssh -t ${host} claude auth login`);
       terminal.release?.();
       await box.run(["claude", "auth", "login"], { input: true });
-      if (!(await signIn.probe())) throw new Error(`Claude is not signed in on ${host} yet. Run hedge setup again to try once more.`);
+      if (!(await signIn.probe())) throw new Error(`Claude is not signed in on ${host} yet. Run ${again(context)} again to try once more.`);
       terminal.print(`  ✓ ${title}: done`);
     },
   };
@@ -362,18 +366,18 @@ async function linkBothWays(host: string, box: Machine, context: DevboxContext) 
   const link = async (from: Machine, fromName: string, address: string, to: Machine, toName: string) => {
     const paired = await from.exec(["t3", "pair", "--ttl", "5m", "--label", toName]);
     const found = paired.code === 0 ? pairing(paired.output) : undefined;
-    if (!found) throw new Error(`${fromName} did not give a pairing code. Check that T3 Code runs there, then run hedge setup again.`);
+    if (!found) throw new Error(`${fromName} did not give a pairing code. Check that T3 Code runs there, then run ${again(context)} again.`);
     const linked = await to.exec(["t3", "environment", "link", address, "--pairing-code", found.code, "--access", "full-access"]);
     if (linked.code !== 0) throw new Error(`could not link ${fromName} from ${toName}: ${linked.output.trim().split("\n").at(-1) ?? ""}`);
   };
   const boxAddress = await connectAddressWithin(box);
   const limit = boxAddress ? undefined : await tunnelLimitReached(box);
-  if (limit) throw new Error(`${host} has no T3 Connect tunnel: T3 Code there says ${limit}. Free one: run t3 connect logout on a machine that no longer needs T3 Connect, or unlink it in T3 Connect. Then run ${restartCommand} on ${host}, and run hedge setup again.`);
-  if (!boxAddress) throw new Error(`${host} has no T3 Connect address yet. Update T3 Code on ${host}, then run hedge setup again.`);
+  if (limit) throw new Error(`${host} has no T3 Connect tunnel: T3 Code there says ${limit}. Free one: run t3 connect logout on a machine that no longer needs T3 Connect, or unlink it in T3 Connect. Then run ${restartCommand} on ${host}, and run ${again(context)} again.`);
+  if (!boxAddress) throw new Error(`${host} has no T3 Connect address yet. Update T3 Code on ${host}, then run ${again(context)} again.`);
   await link(box, host, boxAddress, context.machine, here);
   const hereAddress = await connectAddress(context.machine);
   if (hereAddress) await link(context.machine, here, hereAddress, box, host);
-  else if (await linkedStatus(context.machine)) context.terminal.print(`  · T3 Connect is on here, but Hedge could not find this machine's tunnel address. Update T3 Code here, then run hedge setup again so ${host} links back.`);
+  else if (await linkedStatus(context.machine)) context.terminal.print(`  · T3 Connect is on here, but Hedge could not find this machine's tunnel address. Update T3 Code here, then run ${again(context)} again so ${host} links back.`);
   else context.terminal.print(`  · ${host} does not link back to this machine, because T3 Connect is off here. Turn it on with t3 up --connect, and T3 Code on ${host} can pair with this machine.`);
 }
 

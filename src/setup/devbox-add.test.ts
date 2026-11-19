@@ -15,7 +15,7 @@ describe("hedge devbox add", () => {
     const io = scripted([]);
     const options = { home, engineRoot, platform: "linux" as const, print: io.terminal.print, terminal: io.terminal };
     expect(await main(["devbox", "add", "node-2"], { ...options, setup: { machine: failing.machine } })).toBe(1);
-    expect(io.output()).toContain("hedge: Hedge did not install on the devbox. Fix what it says above, then run hedge setup again.");
+    expect(io.output()).toContain("hedge: Hedge did not install on the devbox. Fix what it says above, then run hedge devbox add node-2 again.");
 
     const box = fakeMachine(home);
     expect(await main(["devbox", "add", "node-2"], { ...options, setup: { machine: box.machine } })).toBe(0);
@@ -28,6 +28,18 @@ describe("hedge devbox add", () => {
     expect(await main(["devbox", "drop", "node-2"], options)).toBe(2);
     expect(await main(["devbox", "add", "-oProxyCommand=x"], options)).toBe(2);
     expect((await hedgeSetup(temp.make("home-"), ["--devbox", "-oProxyCommand=x"])).output).toStartWith("hedge setup: --devbox takes an SSH host");
+  });
+
+  test("when ChatGPT's sign-in fails on a node, hedge devbox add says to run hedge devbox add for that node again, not hedge setup", async () => {
+    const home = temp.make("home-");
+    expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "codex"], ["", ""])).code).toBe(0);
+    const io = scripted([]);
+    const options = { home, engineRoot, platform: "linux" as const, print: io.terminal.print, terminal: io.terminal };
+    const box = fakeMachine(home, { "box:chatgpt": 99 }, { exits: { "box:chatgpt": 1 } });
+    expect(await main(["devbox", "add", "coder.hedge-node-1"], { ...options, setup: { machine: box.machine } })).toBe(1);
+    expect(io.output()).toContain("codex login --device-auth ended with code 1, but Sign in to ChatGPT on coder.hedge-node-1 still does not pass its check. Fix what it says above, then run hedge devbox add coder.hedge-node-1 again.");
+    expect(io.output()).toContain("and open the link it prints. Then run hedge devbox add coder.hedge-node-1 again.");
+    expect(io.output()).not.toContain("hedge setup again");
   });
 
   test("hedge devbox add signs a Coder workspace in to Coder and writes its SSH config, so it reaches the hub and the other nodes by their coder. names", async () => {

@@ -108,7 +108,7 @@ export function chatgptSignIn(machine: Machine, models: ModelRow[]): SignIn {
     minutes: 1,
     why: "Codex signs in with your ChatGPT plan. Setup checks with a real request, because a stale sign-in still looks signed in.",
     command: ["codex", "login", "--device-auth"],
-    whenItFails: "When it says that device code sign-in is off, turn on device code authorization for Codex in ChatGPT's settings under Security. In a ChatGPT workspace, a workspace admin turns it on. Or sign in in the browser of your own computer: run ssh -L 1455:localhost:1455 <this box> there, then codex login in that SSH session, and open the link it prints. Then run hedge setup again.",
+    whenItFails: "When it says that device code sign-in is off, turn on device code authorization for Codex in ChatGPT's settings under Security. In a ChatGPT workspace, a workspace admin turns it on. Or sign in in the browser of your own computer: run ssh -L 1455:localhost:1455 <this box> there, then codex login in that SSH session, and open the link it prints.",
     async probe() {
       const dir = mkdtempSync(join(tmpdir(), "hedge-codex-probe-"));
       try {

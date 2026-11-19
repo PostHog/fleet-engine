@@ -10,10 +10,10 @@ export const pollMs = 2000;
 /** Polls left once the sign-in command finished well, for the probe to see the new sign-in, such as a T3 Connect tunnel after its restart. */
 const graceAfterExit = 15;
 
-function ended(signIn: SignIn, code: number) {
+function ended(signIn: SignIn, code: number, rerun = "hedge setup") {
   const name = signIn.command![0];
-  if (code === 127) return `${name} is not installed here. Install it, then run hedge setup again.`;
-  return `${signIn.command!.join(" ")} ended${code ? ` with code ${code}` : ""}, but ${signIn.title} still does not pass its check. Fix what it says above, then run hedge setup again.${signIn.whenItFails ? ` ${signIn.whenItFails}` : ""}`;
+  if (code === 127) return `${name} is not installed here. Install it, then run ${rerun} again.`;
+  return `${signIn.command!.join(" ")} ended${code ? ` with code ${code}` : ""}, but ${signIn.title} still does not pass its check. Fix what it says above, then run ${rerun} again.${signIn.whenItFails ? ` ${signIn.whenItFails} Then run ${rerun} again.` : ""}`;
 }
 
 export type SignIn = {
@@ -34,8 +34,8 @@ export type SignIn = {
   after?(): Promise<void>;
 };
 
-/** chat: setup runs in an agent's chat, so it waits for a browser sign-in though it asks nothing. */
-export type HumanContext = { terminal: Terminal; machine: Machine; nonInteractive: boolean; chat?: boolean; waited?(): void };
+/** chat: setup runs in an agent's chat, so it waits for a browser sign-in though it asks nothing. rerun: the command that picks up where a failed sign-in stopped. */
+export type HumanContext = { terminal: Terminal; machine: Machine; nonInteractive: boolean; chat?: boolean; waited?(): void; rerun?: string };
 
 /**
  * A step that needs the person: it checks first, then starts the sign-in,
@@ -46,7 +46,7 @@ export function humanStep(signIn: SignIn, context: HumanContext): Step {
   return { id: signIn.id, title: signIn.title, minutes: signIn.minutes, kind: "human", run: () => waitForPerson(signIn, context) };
 }
 
-async function waitForPerson(signIn: SignIn, { terminal, machine, nonInteractive, chat, waited }: HumanContext): Promise<StepOutcome> {
+async function waitForPerson(signIn: SignIn, { terminal, machine, nonInteractive, chat, waited, rerun }: HumanContext): Promise<StepOutcome> {
   if (await signIn.probe()) {
     terminal.print(`  ✓ ${signIn.title}: already done`);
     return signIn.after?.();
@@ -59,7 +59,7 @@ async function waitForPerson(signIn: SignIn, { terminal, machine, nonInteractive
   waited?.();
   terminal.print(`▶ ${signIn.title}  (step needs you, about ${signIn.minutes} min)`);
   terminal.print(`  ${signIn.why}`);
-  if (signIn.interactive && signIn.command) return withKeyboard(signIn, { terminal, machine, nonInteractive });
+  if (signIn.interactive && signIn.command) return withKeyboard(signIn, { terminal, machine, nonInteractive, rerun });
   const started = signIn.command && (terminal.print(`  $ ${signIn.command.join(" ")}`), machine.start(signIn.command));
   if (signIn.url) {
     await machine.openUrl(signIn.url);
@@ -73,7 +73,7 @@ async function waitForPerson(signIn: SignIn, { terminal, machine, nonInteractive
     for (;;) {
       await machine.sleep(pollMs);
       if (await signIn.probe()) break;
-      if (exit !== undefined && (exit !== 0 || ++pollsAfterExit > graceAfterExit)) throw new Error(ended(signIn, exit));
+      if (exit !== undefined && (exit !== 0 || ++pollsAfterExit > graceAfterExit)) throw new Error(ended(signIn, exit, rerun));
     }
   } finally {
     if (!signIn.finishes) started?.stop();
@@ -89,12 +89,12 @@ function howToStart({ command, interactive, url, why }: SignIn) {
   return `${interactive ? "In a terminal, run" : "Run"}: ${command.map(quote).join(" ")}${open ? `, and ${open}` : ""}`;
 }
 
-async function withKeyboard(signIn: SignIn, { terminal, machine }: HumanContext): Promise<StepOutcome> {
+async function withKeyboard(signIn: SignIn, { terminal, machine, rerun }: HumanContext): Promise<StepOutcome> {
   terminal.print(`  $ ${signIn.command!.join(" ")}`);
   terminal.print("  It needs your keyboard. Setup goes on when it ends.");
   terminal.release?.();
   const code = await machine.run(signIn.command!, { input: true });
-  if (!(await signIn.probe())) throw new Error(ended(signIn, code));
+  if (!(await signIn.probe())) throw new Error(ended(signIn, code, rerun));
   terminal.print(`  ✓ ${signIn.title}: done`);
   return signIn.after?.();
 }
