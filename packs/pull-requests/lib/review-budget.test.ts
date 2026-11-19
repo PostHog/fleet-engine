@@ -581,6 +581,23 @@ test("a HEAD that the gate carries across a revert of the latest reviewed fix ne
   await expect(pr.hedge("review-start", "--scope", "final", "--base", fix, "--agent", "The revert needs a read.")).rejects.toThrow("The review budget of 2 reviews is spent");
 });
 
+test("with every review finished and budget left, a HEAD the gate carries gets its needs-no-final-read answer with the --agent and --override retry advice", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: graded("non-critical", "medium") });
+  pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 10, "pull-requests.reviewCeiling": 10 });
+  await pr.commit("feature.txt", "greet\n");
+  await pr.hedge("require", "--none", "--reason", "fixture");
+  const panel = await cannedPanel(pr, { design: minor, others: major("the greeting drops the name") });
+  const fix = await pr.commit("feature.txt", "greet the member\n");
+  await pr.hedge("review-start", "--scope", "fixes", "--base", panel);
+  await finishWith(pr, "2", major("the member goes unnamed"));
+  const change = await pr.commit("feature.txt", "greet the new member\n");
+  await pr.git("revert", "--no-edit", change);
+
+  const refused = await pr.hedge("review-start", "--scope", "final", "--base", fix).then(() => "", (error: Error) => error.message);
+  expect(refused).toContain(`HEAD needs no final read: final read carried from ${fix.slice(0, 7)}: revert of a PR commit. hedge proof gate counts the carry. To read it anyway, pass --agent '<your reason>', or the user's --override`);
+});
+
 test("a fixes round left unfinished and then reverted still gets the needs-no-final-read answer, without retry advice that the unfinished review would refuse", async () => {
   const pr = await checkout();
   pr.pullRequestState({ body: graded("non-critical", "medium") });
