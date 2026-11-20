@@ -4,6 +4,8 @@ import { diffSize, forkPoint, type DiffSize } from "./proof-checkout.ts";
 import { finishedReviews, summaryGaps, type GapProof, type ProofIdentity, type ProofSummary } from "./proof.ts";
 import type { SanityPass } from "./proof-sanity.ts";
 
+const commitSha = /^[0-9a-f]{40}$/;
+
 type Sized = DiffSize & { commit: string };
 export type Growth = { rounds: number; finalReads: number; first?: Sized; final?: Sized; sanity?: SanityPass };
 export type EndRow = { ref: PrRef; summary: ProofSummary; reason: (kind: string, reason: string) => string };
@@ -20,7 +22,7 @@ export async function measureGrowth(home: string, head: ProofIdentity, run: Run,
   const rounds = reviews.filter(({ name }) => isRound(name)).sort((a, b) => Number(a.name) - Number(b.name));
   const opening = rounds[0];
   const first = opening?.scope === "full" && opening.from ? sizeAt({ ...head, commit: opening.commit }, run, opening.from) : undefined;
-  const final = sizeAt(head, run, baseSha ? forkPoint(head, run, baseSha) : undefined);
+  const final = sizeAt(head, run, baseSha && commitSha.test(baseSha) ? forkPoint(head, run, baseSha) : undefined);
   return { rounds: rounds.length, finalReads: reviews.length - rounds.length, ...first ? { first } : {}, ...final ? { final } : {} };
 }
 

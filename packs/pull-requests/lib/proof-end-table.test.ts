@@ -200,7 +200,7 @@ test("a reason with pipes and a run of spaces inside code renders in one cell, w
   expect(cells[4]).toStartWith("ui-walk: <code>a|b</code> is not <code>a|b</code>, and <code>printf 'a  b'</code> keeps its spaces (🤖 agent ");
 });
 
-test("a count past git's rename limit still pairs each moved file, so it counts the edited lines", async () => {
+test("a count where git warns, as when it skips rename detection, reads unknown, not as whole files added and removed", async () => {
   const pr = await checkout();
   await pr.advanceBase("first.ts", lines(20, "first"));
   await pr.advanceBase("second.ts", lines(20, "second"));
@@ -215,7 +215,7 @@ test("a count past git's rename limit still pairs each moved file, so it counts 
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | 4 at HEAD | not run | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | unknown at HEAD | not run | none |");
 });
 
 test("a reason with a carriage return or an escaped pipe stays in its cell", async () => {
@@ -438,4 +438,34 @@ test("a PR named twice in the report shows one table row", async () => {
   await pr.hedge("gate");
 
   expect(tableIn((await pr.decide("report", "--pr", "example/product#42", "--pr", "example/product#42")).output)).toHaveLength(2);
+});
+
+test("a base commit from GitHub that is not a full SHA counts unknown, not from a local branch of that name", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.ts", lines(3, "greet"));
+  pr.pullRequestState({ body: graded("non-critical"), baseSha: "main" });
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  await pr.hedge("gate");
+
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | unknown at HEAD | not run | none |");
+});
+
+test("a gate saved by an engine without the end table shows no row until the gate runs again", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.ts", lines(10, "greet"));
+  pr.pullRequestState({ body: `## Testing\n\nThe greeting.\n\n${graded("non-critical")}` });
+  await reviewHead(pr);
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  await pr.hedge("gate");
+  const saved = join(pr.pullRequest, "gate-outcome", `${await pr.git("rev-parse", "HEAD")}.json`);
+  const outcome = JSON.parse(readFileSync(saved, "utf8"));
+  const { baseSha: _baseSha, endTable: _endTable, ...oldKey } = outcome.key;
+  const { growth: _growth, ...oldSummary } = outcome.gate.summary;
+  writeFileSync(saved, JSON.stringify({ ...outcome, key: oldKey, gate: { ...outcome.gate, summary: oldSummary } }));
+
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)).toEqual([]);
+  expect((await pr.hedge("receipt")).code).toBe(0);
+  expect(block(pr.githubBody())).toContain("**End table:** no gate at HEAD yet. Run hedge proof gate, then hedge proof receipt.");
+  await pr.hedge("gate");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | not run | none |");
 });
