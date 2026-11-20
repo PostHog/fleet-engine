@@ -46,6 +46,11 @@ Add one `--parameter` for each other parameter of the template. Do not use
 `--copy-parameters-from`: Coder then takes the copied workspace's values
 over every `--parameter` you pass.
 
+When the template has a secret parameter, do not pass it with `--parameter`:
+the value would stay in your shell history. Create that workspace in the
+create form of the Coder web app, and pick the preset None when the form
+shows a preset picker.
+
 `coder schedule stop <workspace> manual` turns off the stop schedule, but a
 build that is already running can keep a stop time from its template.
 [`scripts/check-workspace.sh`](../scripts/check-workspace.sh) checks both:
