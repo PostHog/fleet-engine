@@ -269,7 +269,8 @@ test("a round-one count git could not read waits for a sanity pass at HEAD befor
   await pr.git("mv", "first.ts", "moved-first.ts");
   await pr.git("mv", "second.ts", "moved-second.ts");
   writeFileSync(join(pr.repository, "moved-first.ts"), lines(19, "first") + "edited\n");
-  await pr.git("add", "moved-first.ts");
+  writeFileSync(join(pr.repository, "moved-second.ts"), lines(19, "second") + "edited\n");
+  await pr.git("add", "moved-first.ts", "moved-second.ts");
   const reviewed = await firstRound(pr, ["- major | feature.ts:2 | the greeting drops the last name | anchor: greet 1"], ["1. fixed: the greeting keeps it"]);
   await pr.commit("feature.ts", lines(11, "greet"));
 
@@ -328,12 +329,20 @@ test("a [base] marker in bold still keeps a finding from buying a round", async 
   await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(stops);
 });
 
-test("a finding with a long run of spaces across lines is read in linear time", async () => {
+test("a finding with long runs of spaces and brackets in its location is read in linear time", async () => {
   const pr = await checkout();
-  const reviewed = await firstRound(pr, [`- minor | feature.ts:1 | the word${" ".repeat(100000)}reads oddly`, "  and twice | anchor: greet 0"], ["1. fixed: the word reads plainly"]);
+  const reviewed = await firstRound(pr, [`- major | docs${" ".repeat(100000)}x${"[".repeat(100000)}:1 | the word${" ".repeat(100000)}reads oddly`, "  and twice | anchor: greet 0"], ["1. fixed: the word reads plainly"]);
   await pr.commit("feature.ts", lines(11, "greet"));
   const started = performance.now();
 
-  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(stops);
+  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).code).toBe(0);
   expect(performance.now() - started).toBeLessThan(2000);
+});
+
+test("an escaped pipe in a finding's problem does not split it, so a [base] after it does not stop the round", async () => {
+  const pr = await checkout();
+  const reviewed = await firstRound(pr, ["- major | feature.ts:2 | the output holds \\| [base] on success | anchor: greet 1"], ["1. fixed: the output drops it"]);
+  await pr.commit("feature.ts", lines(11, "greet"));
+
+  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).code).toBe(0);
 });
