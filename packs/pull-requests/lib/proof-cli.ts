@@ -6,7 +6,8 @@ import { askGap, authorOf, readDecisions, finishReview, startGateRun, ledgerRoot
 import { AnswerTaken, appendOnce, decideAlone, hearUser, ledgerHolds, ledgerOf } from "./decision-cli.ts";
 import { HubUnreachable, keptOwed, refText, thisMachine, type Decision, type Ssh } from "./decision-ledger.ts";
 import { autonomyOf, gradeOf, type Autonomy, type Grade } from "./proof-autonomy.ts";
-import { readComment, runIn } from "./pr-ci.ts";
+import { readComment, readPullRequest, runIn } from "./pr-ci.ts";
+import { isCommitSha } from "./proof-end-table.ts";
 import { askModel, family, familyOf, isQuotaExhausted, modelLabel, quotaExitCode, readRubric, reviewerRow, sessionFamily, skillReferences, type Family } from "./proof-models.ts";
 import { runProof, type RunIO } from "./proof-run.ts";
 import { combinedLens, parseGuide, lensBrief, lensIdle, lensLog, panelGuideText, panelLines, publishPanel, readPanelGuide, readPlan, recordWorker, requeueFailed, resolveLens, runLens, stagedPlan, stagePanel, waitForPanel, withRoundLock, withSlot, lockNewRound, processStart, roundLock, RoundBusy, RoundGone, type Lens, type LockOwner, type PanelGuide, type PanelIO, type Plan, type RoundLock, type StartTime } from "./proof-panel.ts";
@@ -643,11 +644,12 @@ async function reserveRound(options: Map<string, string>, head: ProofIdentity, c
   const lastRead = scope === "final" && (options.get("--phase") ?? "review") === "review";
   const from = lastRead ? await panelCommit(context.home, head) ?? base : rangeStart(scope, base, head, context.run);
   const { decision, ...permit } = await decisionOf(options, head, context);
-  const tier = tierOf(head, context);
+  const pull = pullOf(head, context.run);
+  const tier = reviewTier(head, context.run, pull?.body);
   if (tier.name === "read" && capturedBy === "hedge" && !panel && !decision && !await panelCommit(context.home, head)) throw new Error("A PR of the Read tier gets one read, and it is the panel: run hedge proof review, which runs its combined lens");
   const firstPanel = panel && !await panelCommit(context.home, head);
   const limits = firstPanel ? permit.limits : { ...permit.limits, ceiling: tierCeiling(tier, permit.limits.ceiling) };
-  const reserved = await startReview(context.home, head, { opening: async () => panel && !await panelCommit(context.home, head), sanity: () => requireSanity(context.home, head, context.run), scope, base, from, ...permit, limits, decision, phase: options.get("--phase"), cleanBaseMerge: cleanBaseMerge(head, context.run), quietCommit: quietCommitIn(context.run, () => baseRefs(head, context.run)), capturedBy, lock: async (directory) => lockNewRound(directory, await context.lock()), lockBudget: async (reviews, step) => withRoundLock(reviews, await context.lock(), step), now: context.now ?? (() => new Date()) });
+  const reserved = await startReview(context.home, head, { opening: async () => panel && !await panelCommit(context.home, head), sanity: () => requireSanity(context.home, head, context.run), scope, base, from, ...isCommitSha(pull?.baseSha) ? { forkBase: pull.baseSha } : {}, ...permit, limits, decision, phase: options.get("--phase"), cleanBaseMerge: cleanBaseMerge(head, context.run), quietCommit: quietCommitIn(context.run, () => baseRefs(head, context.run)), capturedBy, lock: async (directory) => lockNewRound(directory, await context.lock()), lockBudget: async (reviews, step) => withRoundLock(reviews, await context.lock(), step), now: context.now ?? (() => new Date()) });
   return { ...reserved, scope, base, from, phase: options.get("--phase") };
 }
 
@@ -709,14 +711,14 @@ async function recordRound(directory: string, context: CommandContext) {
 const rangeStart = (scope: string, base: string | undefined, head: ProofIdentity, run: Run) => scope === "full" ? mergeBase(head, run) : base;
 
 function gradeAt(head: ProofIdentity, { run }: CommandContext): Grade {
-  try { return gradeOf(pullRequestDetails(head, run).body); } catch { return gradeOf(undefined); }
+  return gradeOf(pullOf(head, run)?.body);
 }
 
-function tierOf(head: ProofIdentity, { run }: CommandContext): ReviewTier {
-  let body: string | undefined;
-  try { body = pullRequestDetails(head, run).body; } catch { body = undefined; }
-  return reviewTier(head, run, body);
+function pullOf(head: ProofIdentity, run: Run) {
+  try { return readPullRequest(head, run); } catch { return undefined; }
 }
+
+const tierOf = (head: ProofIdentity, { run }: CommandContext): ReviewTier => reviewTier(head, run, pullOf(head, run)?.body);
 
 async function panelRequested({ lists, options, flags }: Parsed, head: ProofIdentity, context: CommandContext) {
   if (flags.has("--single") && lists.has("--lens")) throw usageError("review", "--single runs one reviewer; leave out --lens");

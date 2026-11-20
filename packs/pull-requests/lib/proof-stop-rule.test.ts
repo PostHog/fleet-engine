@@ -302,7 +302,7 @@ test("a round 1 that read an empty range counts zero lines, so the next round ne
 });
 
 test("a docs-only major whose location is a Markdown link, bold or in backticks buys no other round", async () => {
-  for (const location of ["[README.md:12](README.md#L12)", "**README.md:12**", "`README.md`:12", "`` README.md:12 ``", "[`README.md:12`](README.md#L12)", "`` README.md ``:12"]) {
+  for (const location of ["[README.md:12](README.md#L12)", "**README.md:12**", "`README.md`:12", "`` README.md:12 ``", "[`README.md:12`](README.md#L12)", "`` README.md ``:12", "[docs/(guide)/README.md:12](docs/(guide)/README.md#L12)"]) {
     const pr = await checkout();
     const reviewed = await firstRound(pr, [`- major | ${location} | the setting is named wrong | anchor: greet 1`], ["1. fixed: the docs name it right"]);
     await pr.commit("README.md", lines(3, "explain"));
@@ -326,4 +326,14 @@ test("a [base] marker in bold still keeps a finding from buying a round", async 
   await pr.commit("feature.ts", lines(11, "greet"));
 
   await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(stops);
+});
+
+test("a finding with a long run of spaces across lines is read in linear time", async () => {
+  const pr = await checkout();
+  const reviewed = await firstRound(pr, [`- minor | feature.ts:1 | the word${" ".repeat(100000)}reads oddly`, "  and twice | anchor: greet 0"], ["1. fixed: the word reads plainly"]);
+  await pr.commit("feature.ts", lines(11, "greet"));
+  const started = performance.now();
+
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(stops);
+  expect(performance.now() - started).toBeLessThan(2000);
 });

@@ -21,15 +21,9 @@ export async function measureGrowth(home: string, head: ProofIdentity, run: Run,
   const reviews = await finishedReviews(home, head);
   const rounds = reviews.filter(({ name }) => isRound(name)).sort((a, b) => Number(a.name) - Number(b.name));
   const opening = rounds[0];
-  const fork = (commit: string) => isCommitSha(baseSha) ? forkPoint({ ...head, commit }, run, baseSha) : undefined;
-  const sizes = opening?.scope === "full" ? [opening.from, fork(opening.commit)].flatMap((start) => {
-    if (!start) return [];
-    const size = start === opening.commit ? { production: 0, tests: 0, docs: 0, commit: start } : sizeAt({ ...head, commit: opening.commit }, run, start);
-    return size ? [size] : [];
-  }) : [];
-  const total = (size: Sized) => size.production + size.tests + size.docs;
-  const first = sizes.reduce<Sized | undefined>((least, size) => least && total(least) <= total(size) ? least : size, undefined);
-  const final = sizeAt(head, run, fork(head.commit));
+  const start = opening?.scope !== "full" ? undefined : isCommitSha(opening.forkBase) ? forkPoint({ ...head, commit: opening.commit }, run, opening.forkBase) : opening.from;
+  const first = !opening || !start ? undefined : start === opening.commit ? { production: 0, tests: 0, docs: 0, commit: start } : sizeAt({ ...head, commit: opening.commit }, run, start);
+  const final = sizeAt(head, run, isCommitSha(baseSha) ? forkPoint(head, run, baseSha) : undefined);
   return { rounds: rounds.length, finalReads: reviews.length - rounds.length, ...first ? { first } : {}, ...final ? { final } : {} };
 }
 
