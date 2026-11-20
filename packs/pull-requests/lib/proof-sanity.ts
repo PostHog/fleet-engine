@@ -18,7 +18,7 @@ async function growthAtHead(home: string, head: ProofIdentity, run: Run) {
   const growth = await measureGrowth(home, head, run, pull?.baseSha);
   if (growth.final || !pull || !isCommitSha(pull.baseSha) || run(["git", "cat-file", "-e", `${pull.baseSha}^{commit}`]).code === 0) return { growth };
   const remote = remotesOf(head.repository, run)[0] ?? `<a remote of ${head.repository}>`;
-  return { growth, missing: `Hedge cannot count the production lines at HEAD, since the base commit ${pull.baseSha.slice(0, 7)} that GitHub reports is not in this checkout. Run git fetch ${remote} ${pull.base}, then run this command again` };
+  return { growth, missing: `Hedge cannot count the production lines at HEAD, since the base commit ${pull.baseSha.slice(0, 7)} that GitHub reports is not in this checkout. Run git fetch ${remote} ${pull.baseSha}, then run this command again` };
 }
 
 const sanityDirectory = (home: string, identity: ProofIdentity) => join(pullRequestDirectory(home, identity), "sanity");
@@ -47,12 +47,13 @@ export async function recordSanity(home: string, head: ProofIdentity, run: Run, 
 export async function requireSanity(home: string, head: ProofIdentity, run: Run) {
   const { growth, missing } = await growthAtHead(home, head, run);
   const [first, final] = [growth.first?.production, growth.final?.production];
-  if (!first) return;
+  if (first === 0) return;
   if (missing) throw new Error(missing);
   const last = (await readSanity(home, head)).at(-1);
-  if (final === undefined) {
+  if (first === undefined || final === undefined) {
     if (last?.commit === head.commit) return;
-    throw new Error(`Hedge cannot count the production lines at HEAD, so it cannot tell whether they grew past twice the ${first} of round 1. Before another round, read the growth since round 1 by hand, then cut it back to base behaviour or justify it: hedge proof sanity --verdict cut|justified --reason '<why>'`);
+    const unknown = first === undefined ? "at round 1, so it cannot tell whether they grew past twice those of round 1" : `at HEAD, so it cannot tell whether they grew past twice the ${first} of round 1`;
+    throw new Error(`Hedge cannot count the production lines ${unknown}. Before another round, read the growth since round 1 by hand, then cut it back to base behaviour or justify it: hedge proof sanity --verdict cut|justified --reason '<why>'`);
   }
   if (final <= 2 * first) return;
   if ((last?.production ?? -1) >= final) return;

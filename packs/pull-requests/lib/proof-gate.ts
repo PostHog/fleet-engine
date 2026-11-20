@@ -83,7 +83,7 @@ export async function finalGate(head: ProofIdentity, context: GateContext, { lan
 function unmeasured(head: ProofIdentity, run: Run, pull: PullRequest | undefined, growth: Growth, landed: boolean) {
   if (growth.final || !isCommitSha(pull?.baseSha) || run(["env", "GIT_NO_LAZY_FETCH=1", "git", "cat-file", "-e", `${pull.baseSha}^{commit}`]).code === 0) return [];
   const remote = remotesOf(head.repository, run)[0] ?? `<a remote of ${head.repository}>`;
-  return [`growth: unknown at HEAD, since the base commit ${pull.baseSha.slice(0, 7)} that GitHub reports is not in this checkout. Run git fetch ${remote} ${pull.base}, then hedge proof gate${landed ? " --landed" : ""} again`];
+  return [`growth: unknown at HEAD, since the base commit ${pull.baseSha.slice(0, 7)} that GitHub reports is not in this checkout. Run git fetch ${remote} ${pull.baseSha}, then hedge proof gate${landed ? " --landed" : ""} again`];
 }
 
 async function grownBy(home: string, head: ProofIdentity, run: Run, baseSha: string | undefined): Promise<Growth> {

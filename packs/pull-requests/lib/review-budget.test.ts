@@ -1224,3 +1224,15 @@ test("a test-only commit after 21 clean base merges gets its final read without 
   expect((await pr.hedge("gate")).output).toContain(`review: HEAD not reviewed, last review covered ${fix.slice(0, 7)}`);
   expect((await pr.hedge("review-start", "--scope", "final", "--base", first)).output).toContain(`"round":"final"`);
 });
+
+test("a git warning about an attribute name keeps a small diff on the Read tier, since the tier counts what git printed", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: graded("non-critical", "low") });
+  writeFileSync(join(pr.repository, ".gitattributes"), "*.md bad^name\n");
+  await pr.git("add", ".gitattributes");
+  await pr.commit("README.md", "Greets new members.\n");
+  await pr.hedge("require", "--none", "--reason", "fixture");
+  fakeModel(pr, "REVIEWER", "FINDINGS:\nCOVERED: README.md\n");
+
+  expect((await pr.hedge("review")).output).toContain("review tier: read: merge-risk grade low, 1 authored production lines");
+});

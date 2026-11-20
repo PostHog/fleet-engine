@@ -75,9 +75,9 @@ function gradeOf(body: string | undefined) {
   return grade ?? (/merge[- ]risk/i.test(body) ? "unreadable" : "none");
 }
 
-function changedLines(identity: ProofIdentity, run: Run, start: string, renames: boolean) {
-  const stat = run(["git", "diff", "--numstat", "-z", renames ? "--find-renames" : "--no-renames", "--no-relative", start, identity.commit]);
-  if (stat.code !== 0 || stat.stderr.trim()) return undefined;
+function changedLines(identity: ProofIdentity, run: Run, start: string, measuring: boolean) {
+  const stat = run(["git", "diff", "--numstat", "-z", measuring ? "--find-renames" : "--no-renames", "--no-relative", start, identity.commit]);
+  if (stat.code !== 0 || measuring && stat.stderr.trim()) return undefined;
   const fields = stat.stdout.split("\0");
   const changed: { lines: number; path: string }[] = [];
   for (let index = 0; index < fields.length; index++) {
@@ -104,15 +104,17 @@ const productionLines = (identity: ProofIdentity, run: Run) => {
 
 export type DiffSize = { production: number; tests: number; docs: number };
 
+const offline = (run: Run): Run => (command) => run(["env", "GIT_NO_LAZY_FETCH=1", ...command]);
+
 export function forkPoint(identity: ProofIdentity, run: Run, baseSha: string) {
-  const found = run(["env", "GIT_NO_LAZY_FETCH=1", "git", "merge-base", identity.commit, baseSha]);
+  const found = offline(run)(["git", "merge-base", identity.commit, baseSha]);
   return found.code === 0 && found.stdout.trim() || undefined;
 }
 
 export function diffSize(identity: ProofIdentity, run: Run, start: string): DiffSize | undefined {
   try {
     if (start === identity.commit) return undefined;
-    const changed = changedLines(identity, run, start, true)?.filter(({ lines }) => Number.isFinite(lines));
+    const changed = changedLines(identity, offline(run), start, true)?.filter(({ lines }) => Number.isFinite(lines));
     return changed && { production: linesOf(changed, authored), tests: linesOf(changed, isTestFile), docs: linesOf(changed, (path) => docsFile.test(path)) };
   } catch { return undefined; }
 }

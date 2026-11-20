@@ -1,7 +1,10 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkout, cleanFixtures, graded, type Checkout } from "./proof-testing.ts";
+import { runIn } from "./pr-ci.ts";
+import { diffSize } from "./proof-checkout.ts";
+import { checkout, cleanFixtures, graded, reviewHead as reviewedForGate, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
 
@@ -179,7 +182,7 @@ test("a checkout without the base commit GitHub reports counts unknown, not from
   await pr.git("update-ref", "refs/remotes/origin/main", fork);
   pr.pullRequestState({ body: graded("non-critical"), baseSha: "0123456789abcdef0123456789abcdef01234567" });
   await pr.hedge("require", "--none", "--reason", "Docs only");
-  expect((await pr.hedge("gate")).output).toContain("growth: unknown at HEAD, since the base commit 0123456 that GitHub reports is not in this checkout. Run git fetch origin main, then hedge proof gate again");
+  expect((await pr.hedge("gate")).output).toContain("growth: unknown at HEAD, since the base commit 0123456 that GitHub reports is not in this checkout. Run git fetch origin 0123456789abcdef0123456789abcdef01234567, then hedge proof gate again");
 
   expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | unknown at HEAD | not run | none |");
 });
@@ -432,7 +435,7 @@ test("a merged PR's receipt without a gate names the landed gate", async () => {
   expect(block(pr.githubBody())).toContain("**End table:** no gate at HEAD yet. Run hedge proof gate --landed, then hedge proof receipt.");
 });
 
-test("a PR named twice in the report, in any letter case, reads once and shows one row in each table", async () => {
+test("a PR named twice in the report, in any letter case and order, shows one row in each table, from the spelling its gate was saved under", async () => {
   const pr = await checkout();
   await pr.commit("feature.ts", lines(10, "greet"));
   pr.pullRequestState({ body: graded("non-critical") });
@@ -440,10 +443,12 @@ test("a PR named twice in the report, in any letter case, reads once and shows o
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
 
-  const report = (await pr.decide("report", "--pr", "example/product#42", "--pr", "Example/Product#42")).output;
-  expect(tableIn(report)).toHaveLength(2);
-  expect(report).toContain("## End-of-run report: example/product#42\n");
-  expect(report.split("\n").filter((line) => /^\| example\/product#42 \| /i.test(line))).toHaveLength(2);
+  for (const order of [["example/product#42", "Example/Product#42"], ["Example/Product#42", "example/product#42"]]) {
+    const report = (await pr.decide("report", ...order.flatMap((ref) => ["--pr", ref]))).output;
+    expect(tableIn(report)).toHaveLength(2);
+    expect(report).toContain("## End-of-run report: example/product#42\n");
+    expect(report.split("\n").filter((line) => /^\| example\/product#42 \| /i.test(line))).toHaveLength(2);
+  }
 });
 
 test("a base commit from GitHub that is not a full SHA counts unknown, not from a local branch of that name", async () => {
@@ -485,4 +490,64 @@ test("a base commit from GitHub that is not a string counts unknown, and the gat
 
   expect(gate.output).not.toContain("TypeError");
   expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | unknown at HEAD | not run | none |");
+});
+
+test("counting lines in a partial clone reads unknown and fetches no missing file", () => {
+  const root = mkdtempSync(join(tmpdir(), "hedge-partial-"));
+  const env = { PATH: process.env.PATH, HOME: root, GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0" };
+  const origin = join(root, "origin");
+  const clone = join(root, "clone");
+  const git = (cwd: string, ...args: string[]) => runIn(cwd, env)(["git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", ...args]).stdout.trim();
+  try {
+    mkdirSync(origin);
+    git(origin, "init", "-q", "-b", "main");
+    git(origin, "config", "uploadpack.allowFilter", "true");
+    writeFileSync(join(origin, "feature.ts"), lines(3, "greet"));
+    git(origin, "add", "feature.ts");
+    git(origin, "commit", "-q", "-m", "first");
+    const first = git(origin, "rev-parse", "HEAD");
+    writeFileSync(join(origin, "feature.ts"), lines(9, "greet"));
+    git(origin, "commit", "-q", "-am", "second");
+    const second = git(origin, "rev-parse", "HEAD");
+    git(root, "clone", "-q", "--no-checkout", "--filter=blob:none", `file://${origin}`, clone);
+
+    expect(diffSize({ repository: "example/product", pr: 42, commit: second }, runIn(clone, env), first)).toBeUndefined();
+    expect(runIn(clone, { ...env, GIT_NO_LAZY_FETCH: "1" })(["git", "cat-file", "-e", `${second}:feature.ts`]).code).not.toBe(0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a PR gated under two spellings with different verdicts reports the failing one, in either order", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.txt", "greet new members\n");
+  pr.pullRequestState({ body: graded("non-critical") });
+  await reviewedForGate(pr);
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  expect((await pr.hedge("gate")).code).toBe(0);
+  const other = join(pr.pullRequest, "..", "..", "..", "Example", "Product", "42");
+  mkdirSync(join(other, ".."), { recursive: true });
+  cpSync(pr.pullRequest, other, { recursive: true });
+  const saved = join(other, "gate-outcome", `${await pr.git("rev-parse", "HEAD")}.json`);
+  const record = JSON.parse(readFileSync(saved, "utf8"));
+  record.gate.code = 1;
+  record.gate.summary.code = 1;
+  writeFileSync(saved, JSON.stringify(record));
+
+  for (const order of [["example/product#42", "Example/Product#42"], ["Example/Product#42", "example/product#42"]]) {
+    const report = (await pr.decide("report", ...order.flatMap((ref) => ["--pr", ref]))).output;
+    expect(report).not.toContain("waits on your merge word");
+    expect(report).toContain("its proofs are not shown to pass");
+  }
+});
+
+test("a round 1 that read an empty range shows zero lines at round 1, not unknown", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: graded("non-critical") });
+  expect((await pr.hedge("review-start", "--scope", "full")).code).toBe(0);
+  writeFileSync(join(pr.repository, "findings.md"), "No findings.\n");
+  expect((await pr.hedge("review-finish", "--round", "1", "--reviewer", "gpt-6.1-sol", "findings.md")).code).toBe(0);
+  await pr.commit("feature.ts", lines(30, "greet"));
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  await pr.hedge("gate");
+
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 0 → 30 | not run | none |");
 });

@@ -119,13 +119,14 @@ test("a first review that saw no production lines never asks for a sanity pass, 
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).code).toBe(0);
 });
 
-test("the first panel after a clean single review still runs, since the gate needs it", async () => {
+test("the first panel after a clean single review still runs on the whole PR diff, since the gate needs it", async () => {
   const pr = await checkout();
   const reviewed = await firstRound(pr, ["- minor | feature.ts:1 | the word reads oddly | anchor: greet 0"], ["1. rejected: it is the domain term"]);
-  fakeModel(pr, "REVIEWER", "FINDINGS:\n(none)\nCOVERED: feature.ts\n");
+  const reviewer = fakeModel(pr, "REVIEWER", "FINDINGS:\n(none)\nCOVERED: feature.ts\n");
   await pr.hedge("require", "--none", "--reason", "docs only", "--author", "claude");
 
-  expect((await pr.hedge("review", "--lens", "correctness", "--scope", "fixes", "--base", reviewed)).code).toBe(0);
+  expect((await pr.hedge("review", "--lens", "correctness")).code).toBe(0);
+  expect(reviewer.prompts().join("\n")).toContain("+greet 9");
   expect((await pr.hedge("review", "--wait")).code).toBe(0);
   await expect(pr.hedge("review", "--lens", "correctness", "--scope", "fixes", "--base", reviewed)).rejects.toThrow("Round 2 found no bug in production code");
 });
@@ -212,7 +213,7 @@ test("past twice the first lines with GitHub's base commit missing here, the nex
   pr.pullRequestState({ baseSha: "0123456789abcdef0123456789abcdef01234567" });
 
   await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(
-    "Hedge cannot count the production lines at HEAD, since the base commit 0123456 that GitHub reports is not in this checkout. Run git fetch origin main, then run this command again");
+    "Hedge cannot count the production lines at HEAD, since the base commit 0123456 that GitHub reports is not in this checkout. Run git fetch origin 0123456789abcdef0123456789abcdef01234567, then run this command again");
 });
 
 test("a [base] marker on the wrapped line of a finding still keeps it from buying a round", async () => {
@@ -247,6 +248,55 @@ test("a code span that holds a longer backtick run keeps its pipes, so a [base] 
   const pr = await checkout();
   const reviewed = await firstRound(pr, ["- major | feature.ts:2 | `` flags ``` | [base] `` drops the last flag | anchor: greet 1"], ["1. fixed: the flags keep it"]);
   await pr.commit("feature.ts", lines(11, "greet"));
+
+  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).code).toBe(0);
+});
+
+test("a docs-only major whose location sits in backticks before its line buys no other round", async () => {
+  const pr = await checkout();
+  const reviewed = await firstRound(pr, ["- major | `README.md`:12 | the setting is named wrong | anchor: greet 1"], ["1. fixed: the docs name it right"]);
+  await pr.commit("README.md", lines(3, "explain"));
+
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(stops);
+});
+
+test("a round-one count git could not read waits for a sanity pass at HEAD before another round, as an unknown HEAD count does", async () => {
+  const pr = await checkout();
+  await pr.advanceBase("first.ts", lines(20, "first"));
+  await pr.advanceBase("second.ts", lines(20, "second"));
+  await pr.git("merge", "-q", "--no-edit", "refs/remotes/origin/main");
+  await pr.git("config", "diff.renameLimit", "1");
+  await pr.git("mv", "first.ts", "moved-first.ts");
+  await pr.git("mv", "second.ts", "moved-second.ts");
+  writeFileSync(join(pr.repository, "moved-first.ts"), lines(19, "first") + "edited\n");
+  await pr.git("add", "moved-first.ts");
+  const reviewed = await firstRound(pr, ["- major | feature.ts:2 | the greeting drops the last name | anchor: greet 1"], ["1. fixed: the greeting keeps it"]);
+  await pr.commit("feature.ts", lines(11, "greet"));
+
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(
+    "Hedge cannot count the production lines at round 1, so it cannot tell whether they grew past twice those of round 1. Before another round, read the growth since round 1 by hand");
+  expect((await pr.hedge("sanity", "--verdict", "justified", "--reason", "The renames move code and add none")).code).toBe(0);
+  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).code).toBe(0);
+});
+
+test("a docs-only major whose location sits in a double-backtick span buys no other round", async () => {
+  const pr = await checkout();
+  const reviewed = await firstRound(pr, ["- major | `` README.md:12 `` | the setting is named wrong | anchor: greet 1"], ["1. fixed: the docs name it right"]);
+  await pr.commit("README.md", lines(3, "explain"));
+
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(stops);
+});
+
+test("a round 1 that read an empty range counts zero lines, so the next round needs no sanity pass", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: graded("non-critical") });
+  expect((await pr.hedge("review-start", "--scope", "full")).code).toBe(0);
+  writeFileSync(join(pr.repository, "findings.md"), "- major | feature.ts:2 | the greeting is missing | anchor: greet\n");
+  expect((await pr.hedge("review-finish", "--round", "1", "--reviewer", "gpt-6.1-sol", "findings.md")).code).toBe(0);
+  writeFileSync(join(pr.repository, "responses.md"), "1. fixed: the greeting is there\n");
+  expect((await pr.hedge("respond", "--round", "1", "responses.md")).code).toBe(0);
+  const reviewed = await pr.git("rev-parse", "HEAD");
+  await pr.commit("feature.ts", lines(30, "greet"));
 
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).code).toBe(0);
 });
