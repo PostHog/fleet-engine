@@ -66,8 +66,10 @@ export async function readBloat(home: string, head: ProofIdentity, inputs: () =>
 const digestOf = (prompt: string) => createHash("sha256").update(prompt).digest("hex");
 
 export function inputsDigest(head: ProofIdentity, run: Run, growth: { first?: Sized; final?: Sized }, body: string) {
-  const prompt = growth.first && growth.final ? promptOf(body, head, run, growth.first, growth.final) : undefined;
-  return prompt && digestOf(prompt);
+  try {
+    const prompt = growth.first && growth.final ? promptOf(body, head, run, growth.first, growth.final) : undefined;
+    return prompt && digestOf(prompt);
+  } catch { return undefined; }
 }
 
 function promptOf(body: string, head: ProofIdentity, run: Run, first: Sized, final: Sized) {
@@ -82,7 +84,12 @@ function promptOf(body: string, head: ProofIdentity, run: Run, first: Sized, fin
   ].join("\n\n");
 }
 
-export async function scoreBloat(home: string, head: ProofIdentity, run: Run, growth: { first: Sized; final: Sized; body: string }, judgeOf: () => Promise<BloatJudge>): Promise<BloatScore | string> {
+type Scoring = { first: Sized; final: Sized; body: string };
+
+export const scoreBloat = (home: string, head: ProofIdentity, run: Run, growth: Scoring, judgeOf: () => Promise<BloatJudge>): Promise<BloatScore | string> =>
+  askBloat(home, head, run, growth, judgeOf).catch((error: Error) => `the bloat judge cannot run here: ${error.message}`);
+
+async function askBloat(home: string, head: ProofIdentity, run: Run, growth: Scoring, judgeOf: () => Promise<BloatJudge>): Promise<BloatScore | string> {
   const { first, final, body } = growth;
   const prompt = promptOf(body, head, run, first, final);
   if (!prompt) return `the diffs pass the bloat judge's cap of ${diffCap} characters`;

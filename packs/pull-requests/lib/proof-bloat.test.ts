@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { checkout, cleanFixtures, fakeModel, graded, type Checkout } from "./proof-testing.ts";
 
@@ -131,4 +131,22 @@ test("with no reviewer row in the model table, the growth is read by hand and th
     "past twice the first. Read the growth by hand: the bloat judge has no model: the model table of your AI plan has no review row. Before another round, cut the PR back to base behaviour, or justify the growth");
   expect((await pr.hedge("sanity", "--verdict", "cut", "--reason", "Dropped the retries")).code).toBe(0);
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).code).toBe(0);
+});
+
+test("a round-one diff git cannot print leaves the growth to be read by hand, and the gate drops the score and saves its verdict", async () => {
+  const pr = await checkout();
+  const reviewed = await grownPastTwice(pr, problem);
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow("reads 0%");
+  const shim = join(pr.home, "failing-git");
+  mkdirSync(shim);
+  writeFileSync(join(shim, "git"), `#!/bin/sh\ncase " $* " in *" --no-textconv "*" ${reviewed} "*) echo "fatal: bad object ${reviewed}" >&2; exit 128;; esac\nexec ${Bun.which("git")} "$@"\n`);
+  chmodSync(join(shim, "git"), 0o755);
+  pr.env.PATH = `${shim}:${pr.env.PATH}`;
+  pr.pullRequestState({ body: "## Problem\n\nThe greeting drops the last name and the title.\n\n" + graded("non-critical") });
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(
+    `past twice the first. Read the growth by hand: the bloat judge cannot run here: Cannot diff`);
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  expect((await pr.hedge("gate")).output).toMatch(/^gate: (pass|fail)/m);
+  const report = (await pr.decide("report", "--pr", "example/product#42")).output.split("\n");
+  expect(report.find((line) => /^\| example\/product#42 \| \d+ rounds? \|/.test(line))).toBe("| example/product#42 | 1 round | 10 → 21 (×2.1) | not run | none |");
 });
