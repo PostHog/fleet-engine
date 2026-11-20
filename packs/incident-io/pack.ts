@@ -3,7 +3,7 @@ import type { Pack } from "../../src/sdk/index.ts";
 export default {
   sdk: 1,
   name: "incident-io",
-  title: "incident.io",
+  title: "Paging (incident.io)",
   summary: "An agent that watches a risky change pages you, and only you, through incident.io when it goes wrong.",
   day: "You roll out a risky production change and go to dinner. The agent that watches it sees the error rate cross the tripwire you named, and your phone rings through Do Not Disturb with the title and the undo step. Nobody on the on-call rotation is paged, and no incident is declared.",
   cost: "You need an incident.io On-call seat, and the rights to create one HTTP alert source and one alert route, or an admin who makes them for you.",
@@ -13,7 +13,7 @@ export default {
     const paging = hedge.workflow({
       id: "page-owner",
       name: "Page you through incident.io",
-      default: false,
+      default: true,
       sentence: "An agent that watches a change you name pages you, and only you, through your own incident.io alert source when its tripwire fires, without paging the on-call rotation or declaring an incident.",
       risk: "Anyone with the alert source token can page you, and each page shows in your organization's alert list.",
     });

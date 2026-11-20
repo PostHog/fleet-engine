@@ -52,9 +52,9 @@ test("through hedge, box says Boxes needs a pack that brings Coder while the wor
 });
 
 test("through hedge, dream refuses without the Memory pack, and dream digest prints this machine's sessions without their tokens", async () => {
-  const home = await hubProfile();
-  const refused = await runHedge(["dream", "budget"], { HOME: home });
-  expect(refused).toMatchObject({ code: 1, stderr: "Dream needs the Memory pack: turn it on, then run hedge apply\n" });
+  const refused = await runHedge(["dream", "budget"], { HOME: await hubProfile() });
+  expect(refused).toMatchObject({ code: 2, stdout: "hedge dream comes from the memory pack, which is off. Turn it on with hedge packs.\n" });
+  const home = await hubProfile({ boxes: true }, { ...answered, "memory.repo": "me/memory" }, ["hub", "posthog", "memory"]);
   const token = `ghp_${"a1".repeat(18)}`;
   const project = join(home, ".claude/projects/-dev-app");
   mkdirSync(project, { recursive: true });

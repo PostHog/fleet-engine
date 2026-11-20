@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadPacks } from "../pack/manifest.ts";
+import { loadPacks, parseManifest } from "../pack/manifest.ts";
 import type { AvailableSource, FetchedSource, MachineFile, MachineRole, PackManifest, Plan, Profile } from "../pack/types.ts";
 import { tempDirs } from "../testing/git.ts";
 import { apply, check } from "./apply.ts";
@@ -55,6 +55,8 @@ function withPack(manifest: PackManifest, files: Record<string, string> = {}): A
   }
   return { ref: { name: manifest.name, repo: dir, ref: "v1" }, dir, packs: [{ manifest, dir: packDir }] };
 }
+
+const validPack = (manifest: PackManifest) => withPack(parseManifest(manifest, manifest.name));
 
 const temp = tempDirs();
 
@@ -229,6 +231,61 @@ describe("resolve", () => {
     expect(states({})).toEqual([["direct", false, "yields to workflow routed"], ["after-direct", false, "needs workflow direct"], ["routed", true, undefined], ["base-route", true, undefined]]);
     expect(states({ routed: false }).slice(0, 2)).toEqual([["direct", true, undefined], ["after-direct", true, undefined]]);
     expect(states({ "base-route": false }).slice(0, 3)).toEqual([["direct", true, undefined], ["after-direct", true, undefined], ["routed", false, "needs workflow base-route"]]);
+  });
+
+  test("a fallback whose setting is answered stays on while the workflow it yields to waits for its own setting", () => {
+    const setting = (key: string) => ({ key, question: `${key}?`, type: "string" as const });
+    const flow = (id: string, fields: { yields?: string[] }) => ({ id, name: id, sentence: `${id}.`, default: true, settings: [`pair.${id}`], offUntilSet: [`pair.${id}`], ...fields });
+    const pair = withPack({ schema: 1, name: "pair", summary: "Pair.", settings: [setting("pair.fallback"), setting("pair.preferred")], workflows: [flow("fallback", { yields: ["preferred"] }), flow("preferred", {})] });
+    const states = plan({ packs: ["pair"], settings: { "pair.fallback": "set" } }, mac, [engine, pair]).workflows.filter((state) => state.pack === "pair").map(({ id, active, reason }) => [id, active, reason]);
+    expect(states).toEqual([["fallback", true, undefined], ["preferred", false, "waits for setting pair.preferred"]]);
+  });
+
+  test("asks the settings of a fallback that takes over from a workflow waiting for its setting", () => {
+    const pair = withPack({
+      schema: 1, name: "pair", summary: "Pair.",
+      settings: [{ key: "pair.preferred", question: "Preferred?", type: "string", ask: "never", optional: true }, { key: "pair.fallback", question: "Which fallback?", type: "string", ask: "setup" }],
+      workflows: [
+        { id: "fallback", name: "Fallback", sentence: "Fallback.", default: true, settings: ["pair.fallback"], yields: ["preferred"] },
+        { id: "preferred", name: "Preferred", sentence: "Preferred.", default: true, settings: ["pair.preferred"], offUntilSet: ["pair.preferred"] },
+      ],
+    });
+    const resolved = plan({ packs: ["pair"] }, mac, [engine, pair]);
+    expect(resolved.workflows.filter((state) => state.pack === "pair").map(({ id, active }) => [id, active])).toEqual([["fallback", true], ["preferred", false]]);
+    expect(resolved.ask.map((setting) => setting.key)).toContain("pair.fallback");
+    expect(resolved.unanswered.map((setting) => setting.key)).toEqual(["pair.fallback"]);
+  });
+
+  test("a workflow waits for an engine setting that only an inactive workflow of a later pack gives a default", () => {
+    const library = withPack({ schema: 1, name: "library", summary: "Library.", settings: [{ key: "context.repo", question: "Repo?", type: "string", ask: "never", optional: true }], workflows: [{ id: "shelf", name: "Shelf", sentence: "Shelf.", default: true, settings: ["context.repo"], offUntilSet: ["context.repo"] }] });
+    const later = withPack({ schema: 1, name: "later", summary: "Later.", settings: [{ key: "context.repo", question: "Repo?", type: "string", ask: "never", default: "me/context" }], workflows: [{ id: "archive", name: "Archive", sentence: "Archive.", default: false, settings: ["context.repo"] }] });
+    const resolved = plan({ packs: ["library", "later"] }, mac, [engine, library, later]);
+    expect(resolved.workflows.find((state) => state.id === "shelf")).toMatchObject({ active: false, reason: "waits for setting context.repo" });
+    expect(resolved.settings["context.repo"]).toBeUndefined();
+  });
+
+  test("releases a workflow waiting for a setting that the fallback of another held workflow supplies, and keeps holding a workflow whose own fallback supplies its setting", () => {
+    const cloud = withPack({ schema: 1, name: "cloud", summary: "Cloud.", settings: [{ key: "cloud.token", question: "Token?", type: "string", ask: "never", optional: true }], workflows: [{ id: "cloud", name: "Cloud", sentence: "Cloud.", default: true, settings: ["cloud.token"], offUntilSet: ["cloud.token"] }] });
+    const local = withPack({ schema: 1, name: "local", summary: "Local.", settings: [{ key: "context.repo", question: "Repo?", type: "string", ask: "never", default: "me/context" }], workflows: [{ id: "local", name: "Local", sentence: "Local.", default: true, settings: ["context.repo"], yields: ["cloud"] }] });
+    const shelf = withPack({ schema: 1, name: "shelf", summary: "Shelf.", settings: [{ key: "context.repo", question: "Repo?", type: "string", ask: "never", optional: true }], workflows: [{ id: "shelf", name: "Shelf", sentence: "Shelf.", default: true, settings: ["context.repo"], offUntilSet: ["context.repo"] }] });
+    const resolved = plan({ packs: ["shelf", "cloud", "local"] }, mac, [engine, cloud, local, shelf]);
+    expect(resolved.workflows.filter((state) => state.pack !== "base").map(({ id, active, reason }) => [id, active, reason])).toEqual([["shelf", true, undefined], ["cloud", false, "waits for setting cloud.token"], ["local", true, undefined]]);
+    expect(resolved.settings["context.repo"]).toBe("me/context");
+  });
+
+  test("keeps holding a workflow whose own fallback supplies its setting", () => {
+    const own = validPack({ schema: 1, name: "own", summary: "Own.", settings: [{ key: "context.repo", question: "Repo?", type: "string", ask: "never", optional: true }], workflows: [{ id: "preferred", name: "Preferred", sentence: "Preferred.", default: true, settings: ["context.repo"], offUntilSet: ["context.repo"] }, { id: "fallback", name: "Fallback", sentence: "Fallback.", default: true, yields: ["preferred"] }] });
+    const spare = validPack({ schema: 1, name: "spare", summary: "Spare.", settings: [{ key: "context.repo", question: "Repo?", type: "string", ask: "never", default: "me/context" }], workflows: [{ id: "feeder", name: "Feeder", sentence: "Feeder.", default: true, settings: ["context.repo"], requires: ["fallback"] }] });
+    const resolved = plan({ packs: ["own", "spare"] }, mac, [engine, own, spare]);
+    expect(resolved.workflows.filter((state) => state.pack !== "base").map(({ id, active, reason }) => [id, active, reason])).toEqual([["preferred", false, "waits for setting context.repo"], ["fallback", true, undefined], ["feeder", true, undefined]]);
+  });
+
+  test("names the setting a held workflow still misses after a fallback supplies its first one", () => {
+    const remote = validPack({ schema: 1, name: "remote", summary: "Remote.", settings: [{ key: "remote.token", question: "Token?", type: "string", ask: "never", optional: true }, { key: "context.repo", question: "Repo?", type: "string", ask: "never", default: "me/context" }], workflows: [{ id: "cloud", name: "Cloud", sentence: "Cloud.", default: true, settings: ["remote.token"], offUntilSet: ["remote.token"] }, { id: "local", name: "Local", sentence: "Local.", default: true, settings: ["context.repo"], yields: ["cloud"] }] });
+    const shelf = validPack({ schema: 1, name: "shelf", summary: "Shelf.", settings: [{ key: "context.repo", question: "Repo?", type: "string", ask: "never", optional: true }, { key: "context.path", question: "Path?", type: "string", ask: "never", optional: true }], workflows: [{ id: "shelf", name: "Shelf", sentence: "Shelf.", default: true, settings: ["context.repo", "context.path"], offUntilSet: ["context.repo", "context.path"] }] });
+    const resolved = plan({ packs: ["shelf", "remote"] }, mac, [engine, remote, shelf]);
+    expect(resolved.workflows.filter((state) => state.pack !== "base").map(({ id, active, reason }) => [id, active, reason])).toEqual([["shelf", false, "waits for setting context.path"], ["cloud", false, "waits for setting remote.token"], ["local", true, undefined]]);
+    expect(resolved.settings["context.repo"]).toBe("me/context");
   });
 
   test("settles a chain of yields: the first stays on when the one it yields to yields in turn", () => {
@@ -890,5 +947,72 @@ describe("a step's undo", () => {
     await expect(loadPacks(team([{ id: "auto-box", run: ["box-on"], undo: ["box-off"] }]).dir)).rejects.toThrow("steps auto-box: undo needs a check");
     await expect(loadPacks(team([{ ...step, check: [] }]).dir)).rejects.toThrow("steps auto-box: undo needs a check");
     await expect(loadPacks(team([{ ...step, undo: "box-off" as unknown as string[] }]).dir)).rejects.toThrow("steps auto-box: undo must be a command list");
+  });
+});
+
+describe("a pack that a profile names only by its old name", () => {
+  const renamed = withPack(
+    {
+      schema: 1,
+      name: "notes",
+      title: "Notes",
+      summary: "Keeps notes.",
+      aliases: [{ name: "library", workflows: ["recall"] }],
+      workflows: [
+        { id: "recall", name: "Recall", sentence: "Recalls notes.", default: true },
+        { id: "shared", name: "Shared", sentence: "Shares notes.", default: true },
+      ],
+      jobs: [
+        { id: "recall-pull", command: ["pull"], schedule: { every: "5m" }, workflow: "recall" },
+        { id: "sweep", command: ["sweep"], schedule: { every: "1d" } },
+      ],
+      skills: ["skills/notes"],
+    } as PackManifest,
+    { "skills/notes/SKILL.md": "# Notes\n" },
+  );
+
+  test("gets only what the old name's workflows hold", () => {
+    const result = plan({ packs: ["library"], settings: {} }, mac, [engine, renamed]);
+    expect(result.jobs.filter((job) => job.pack === "notes").map((job) => job.id)).toEqual(["recall-pull"]);
+    expect(result.files.some((item) => item.target.endsWith("skills/notes"))).toBe(false);
+  });
+
+  test("gets the whole pack once the profile names it", () => {
+    const result = plan({ packs: ["library", "notes"], settings: {} }, mac, [engine, renamed]);
+    expect(result.jobs.filter((job) => job.pack === "notes").map((job) => job.id)).toEqual(["recall-pull", "sweep"]);
+    expect(result.files.some((item) => item.target.endsWith("skills/notes"))).toBe(true);
+  });
+
+  test("keeps a workflow outside the old name's workflows off, even when the profile turns it on", () => {
+    const result = plan({ packs: ["library"], settings: {}, workflows: { shared: true } }, mac, [engine, renamed]);
+    expect(result.workflows.filter((workflow) => workflow.pack === "notes").map(({ id, active }) => ({ id, active }))).toEqual([{ id: "recall", active: true }, { id: "shared", active: false }]);
+  });
+
+  test("meets a requirement written with the old name by the old name's workflows, and a requirement of the new name only by the new name", () => {
+    const needing = (name: string, requires: string) => ({ schema: 1, name, summary: "Needs notes.", requires: [requires] }) as PackManifest;
+    const sources = [engine, renamed, withPack(needing("old-reader", "library")), withPack(needing("new-reader", "notes"))];
+    const result = plan({ packs: ["library", "old-reader", "new-reader"], settings: {} }, mac, sources);
+    expect(result.packs.filter((pack) => pack.name.endsWith("reader")).map(({ name, available, reason }) => ({ name, available, reason }))).toEqual([
+      { name: "old-reader", available: true, reason: undefined },
+      { name: "new-reader", available: false, reason: "requires notes" },
+    ]);
+    expect(result.jobs.filter((job) => job.pack === "notes").map((job) => job.id)).toEqual(["recall-pull"]);
+  });
+
+  test("lists in the service catalog only the services that the hub runs for the old name", () => {
+    const service = (id: string, port: number, workflow?: string) => ({ id, port, health: "/health", roles: ["hub", "solo"], ...(workflow ? { workflow } : {}) });
+    const job = (id: string, workflow?: string) => ({ id, command: ["hedge", "run", `notes/${id}`], schedule: { every: "always" }, roles: ["hub", "solo"], ...(workflow ? { workflow } : {}) });
+    const serving = withPack({ ...renamed.packs[0]!.manifest, served: [service("recall-api", 4700, "recall"), service("sweep-api", 4701)], jobs: [job("recall-api", "recall"), job("sweep-api")] } as PackManifest);
+    const sources = [engine, serving];
+    const onHub = plan({ packs: ["library"], hub: "hub-1", settings: {} }, { schema: 1, role: "linux", name: "hub-1" }, sources);
+    const onNode = plan({ packs: ["library"], hub: "hub-1", settings: {} }, { schema: 1, role: "linux", name: "node-2" }, sources);
+    expect(onHub.jobs.filter((item) => item.pack === "notes").map((item) => item.id)).toEqual(["recall-api"]);
+    expect([onHub, onNode].map((result) => (result.catalog ?? []).map((entry) => `${entry.pack}/${entry.id}`))).toEqual([["notes/recall-api"], ["notes/recall-api"]]);
+  });
+
+  test("refuses an old name that a pack still has, or that two packs take", () => {
+    const taking = (name: string) => withPack({ schema: 1, name, summary: "Takes library.", aliases: [{ name: "library", workflows: [] }] } as PackManifest);
+    expect(() => plan({ packs: ["notes"], settings: {} }, mac, [engine, renamed, taking("boxes")])).toThrow("packs notes and boxes both take the old name library");
+    expect(() => plan({ packs: ["notes"], settings: {} }, mac, [engine, renamed, withPack({ schema: 1, name: "library", summary: "Still here." } as PackManifest)])).toThrow("pack notes takes the old name library, which another pack still has");
   });
 });

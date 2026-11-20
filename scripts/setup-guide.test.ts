@@ -119,12 +119,16 @@ describe("the agent setup guide", () => {
     expect(keys.filter((key) => !settings.has(key))).toEqual([]);
   });
 
-  test("its hedge setup command sets up each preset to the end without asking the person anything", async () => {
+  test("its hedge setup command sets up each preset to the end, or stops only at a step that a note of its packs walks through", async () => {
+    const noteAnswers: Record<string, string[]> = { slack: ["--set", "slack.userId=U012ABCDEF"] };
+    const noteSteps: Record<string, string> = { slack: "Make your own Slack app" };
     for (const preset of presets()) {
       const home = temp.make("home-");
-      const args = setupArgs().replace("<id>", preset.id).replace("<claude|codex|both>", "both").split(" ");
+      const args = [...setupArgs().replace("<id>", preset.id).replace("<claude|codex|both>", "both").split(" "), ...preset.packs.flatMap((pack) => noteAnswers[pack] ?? [])];
       const result = await hedgeSetup(home, args, [], fakeMachine(home));
-      expect({ code: result.code, prompts: result.prompts, packs: savedAnswers(home).packs }).toEqual({ code: 0, prompts: [], packs: preset.packs });
+      const stops = preset.packs.flatMap((pack) => (noteSteps[pack] ? [noteSteps[pack]] : []));
+      const needs = [...result.output.matchAll(/^ {2}Needs you: (.+)$/gm)].map((match) => match[1]!);
+      expect({ code: result.code, prompts: result.prompts, packs: savedAnswers(home).packs, needs: needs.map((line) => stops.find((stop) => line.startsWith(stop)) ?? line) }).toEqual({ code: stops.length ? 2 : 0, prompts: [], packs: preset.packs, needs: stops });
     }
   });
 
@@ -325,11 +329,11 @@ describe("the agent setup guide", () => {
     expect(words(step(7))).toContain("a line `To do: This machine cannot reach the MCP gateway` or `Fix: This machine cannot reach the MCP gateway` means that the profile turns on the MCP gateway, and the gateway needs a named hub. Run `hedge hub status` on the hub. When it prints `The hub: not named.`, run the `hedge hub here` of item 4 now.");
   });
 
-  test("the Recovery note sends the proxy's Claude callback from a file to the waiting sign-in, past the hub's proxy, and never shows its code", async () => {
+  test("the Hub note sends the proxy's Claude callback from a file to the waiting sign-in, past the hub's proxy, and never shows its code", async () => {
     const received: string[] = [];
     const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (request) => (received.push(new URL(request.url).pathname + new URL(request.url).search), new Response("signed in\n")) });
     try {
-      const note = readFileSync(join(root, "packs/recovery/SETUP.md"), "utf8");
+      const note = readFileSync(join(root, "packs/hub/SETUP.md"), "utf8");
       const remote = remotePart(blockWith(note, "ssh coder.<hub> '", "url = "));
       const code = ["one", "time", "fixture"].join("-");
       const proxy = "http://127.0.0.1:9";
@@ -485,9 +489,9 @@ describe("the agent setup guide", () => {
   });
 
   test("offers the Hub pack and the packs that need a running hub in step 9, each with its setup note", () => {
-    const later = packRows().filter((row) => ["hub", "mcp-gateway", "recovery"].includes(row.name));
-    expect(later.map((row) => row.note)).toEqual(["`packs/recovery/SETUP.md`", "`packs/hub/SETUP.md`", "`packs/mcp-gateway/SETUP.md`"]);
-    for (const name of ["hub", "mcp-gateway", "recovery"]) expect(words(hubStep())).toContain(`\`packs/${name}/SETUP.md\``);
+    const later = packRows().filter((row) => ["hub", "mcp-gateway"].includes(row.name));
+    expect(later.map((row) => row.note)).toEqual(["`packs/hub/SETUP.md`", "`packs/mcp-gateway/SETUP.md`"]);
+    for (const name of ["hub", "mcp-gateway"]) expect(words(hubStep())).toContain(`\`packs/${name}/SETUP.md\``);
   });
 
   test("gives every command in the guide and the pack notes the same PATH, with Bun's Homebrew folders on it", () => {
@@ -545,12 +549,12 @@ describe("the agent setup guide", () => {
     const command = setupArgs().replace("<claude|codex|both>", "codex");
     const home = temp.make("home-");
     const box = fakeMachine(home);
-    const first = await hedgeSetup(home, [...command.replace("<id>", "everyday").split(" "), "--add", "guards", "--workflows", "package-age=on", "--set", "orchestration.tracker=nora/maps"], [], box);
-    const again = await hedgeSetup(home, [...command.replace("--preset <id> ", "").split(" "), "--add", "memory"], [], box);
+    const first = await hedgeSetup(home, [...command.replace("<id>", "everyday").split(" "), "--add", "guards", "--workflows", "oom-survival=on", "--set", "orchestration.tracker=nora/maps"], [], box);
+    const again = await hedgeSetup(home, [...command.replace("--preset <id> ", "").split(" "), "--add", "integrations"], [], box);
     expect({ first: first.code, again: again.code }).toEqual({ first: 0, again: 0 });
     expect(again.output).toContain("Reusing your repo nora/hedge-profile");
-    expect(savedAnswers(home).packs).toEqual([...presets().find((preset) => preset.id === "everyday")!.packs, "guards", "memory"]);
-    expect(savedAnswers(home).workflows["package-age"]).toBe(true);
+    expect(savedAnswers(home).packs).toEqual([...presets().find((preset) => preset.id === "everyday")!.packs, "guards", "integrations"]);
+    expect(savedAnswers(home).workflows["oom-survival"]).toBe(true);
     expect(savedAnswers(home).settings["orchestration.tracker"]).toBe("nora/maps");
   });
 

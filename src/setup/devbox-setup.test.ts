@@ -68,11 +68,11 @@ describe("hedge setup with a devbox", () => {
 
     expect(stopped.code).toBe(1);
     expect(stopped.output).toContain(`hedge: another machine pushed to your profile before setup could. Commit or discard the changes in ${profilePath(home)} that are not committed. Bring it up to date with git -C ${profilePath(home)} pull --rebase, or drop setup's commit, then run the same hedge setup command again.`);
-    expect(JSON.parse(await spawnGit(profilePath(home), "show", "HEAD:hedge.json")).settings).toEqual({ "orchestration.loopProject": "~/code/app" });
-    expect((await pushedAnswers(home)).settings).toEqual({});
+    expect(JSON.parse(await spawnGit(profilePath(home), "show", "HEAD:hedge.json")).settings).toEqual({ "memory.repo": "nora/hedge-memory", "orchestration.loopProject": "~/code/app" });
+    expect((await pushedAnswers(home)).settings).toEqual({ "memory.repo": "nora/hedge-memory" });
     await spawnGit(profilePath(home), "pull", "-q", "--rebase");
     expect((await hedgeSetup(home, devboxArgs, [""], fakeMachine(home))).code).toBe(0);
-    expect((await pushedAnswers(home)).settings).toEqual({ "orchestration.loopProject": "~/code/app" });
+    expect((await pushedAnswers(home)).settings).toEqual({ "memory.repo": "nora/hedge-memory", "orchestration.loopProject": "~/code/app" });
     expect(await spawnGit(home, "--git-dir", githubRepo(home, "nora/hedge-profile"), "show", "main:about-me.md")).toBe("# Changed on another machine");
   });
 
@@ -85,10 +85,10 @@ describe("hedge setup with a devbox", () => {
 
     expect(stopped.code).toBe(1);
     expect(stopped.output).toContain(`hedge: another machine pushed to your profile before setup could.`);
-    expect((await pushedAnswers(home)).settings).toEqual({ "orchestration.loopProject": "after" });
+    expect((await pushedAnswers(home)).settings).toEqual({ "memory.repo": "nora/hedge-memory", "orchestration.loopProject": "after" });
     await spawnGit(profilePath(home), "reset", "-q", "--keep", "@{upstream}");
     expect((await hedgeSetup(home, devboxArgs, ["~/code/app"], fakeMachine(home))).code).toBe(0);
-    expect((await pushedAnswers(home)).settings).toEqual({ "orchestration.loopProject": "~/code/app" });
+    expect((await pushedAnswers(home)).settings).toEqual({ "memory.repo": "nora/hedge-memory", "orchestration.loopProject": "~/code/app" });
   });
 
   test("a checkout with an unrelated staged file that diverged from origin gets advice that lets the same command run again save the devbox setting", async () => {
@@ -113,7 +113,7 @@ describe("hedge setup with a devbox", () => {
     await spawnGit(dir, "pull", "-q", "--rebase");
     const rerun = await hedgeSetup(home, devboxArgs, ["~/code/app"], fakeMachine(home));
     expect(rerun.code).toBe(0);
-    expect((await pushedAnswers(home)).settings).toEqual({ "orchestration.loopProject": "~/code/app" });
+    expect((await pushedAnswers(home)).settings).toEqual({ "memory.repo": "nora/hedge-memory", "orchestration.loopProject": "~/code/app" });
     const onOrigin = (path: string) => spawnGit(home, "--git-dir", githubRepo(home, "nora/hedge-profile"), "show", `main:${path}`);
     expect([await onOrigin("about-me.md"), await onOrigin("README.md")]).toEqual(["# Changed on another machine", "# Changed here"]);
   });

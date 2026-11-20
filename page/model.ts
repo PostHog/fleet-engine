@@ -44,19 +44,26 @@ function inPageOrder(data: PromptData, names: Iterable<string>) {
 
 export function toggleSelected(data: PromptData, selected: string[], name: string): string[] {
   const packs = new Set(selected);
+  const card = (target: string) => data.packs.find((pack) => pack.name === target && !pack.always);
   const drop = (target: string) => {
     packs.delete(target);
     for (const pack of data.packs) if (packs.has(pack.name) && pack.requires.includes(target)) drop(pack.name);
   };
   const add = (target: string) => {
-    const pack = data.packs.find((item) => item.name === target);
-    if (!pack || pack.always || packs.has(target)) return;
+    const pack = card(target);
+    if (!pack || packs.has(target)) return;
     packs.add(target);
     pack.requires.forEach(add);
   };
   if (packs.has(name)) drop(name);
   else add(name);
   return inPageOrder(data, packs);
+}
+
+export function installNames(data: PromptData, picks: string[]): string[] {
+  const names = new Set([...picks.flatMap((name) => data.packs.find((pack) => pack.name === name)?.requires ?? []), ...picks]);
+  const onPage = new Set(data.packs.map((pack) => pack.name));
+  return [...[...names].filter((name) => !onPage.has(name)), ...inPageOrder(data, names)];
 }
 
 export const startPacksOn = (data: PromptData, start: Start) => data.startPacks.filter((name) => !start.off.includes(name));
@@ -103,22 +110,23 @@ function noteStep(notes: PromptPack[]) {
   ].join("\n");
 }
 
-export function installPrompt(data: PromptData, selected: string[]) {
-  const packs = data.packs.filter((pack) => selected.includes(pack.name));
-  if (!packs.length) return "";
+export function installPrompt(data: PromptData, picks: string[]) {
+  const named = installNames(data, picks);
+  const packs = data.packs.filter((pack) => named.includes(pack.name));
+  if (!named.length) return "";
   const guide = `https://raw.githubusercontent.com/${data.engineRepo}/main/SETUP.md`;
   const notes = packs.filter((pack) => pack.setupNote);
   const steps = [
     findHub(guide, notes.length > 0),
     "Run `hedge update` on the hub, so it has the newest engine and packs. Then run `hedge packs` there, and leave out each pack that is already on.",
     ...(notes.length ? [noteStep(notes)] : []),
-    `Turn the packs on with one command on the hub${notes.length ? ", and add the flags that the notes name" : ""}:\n   ${installCommand(packs.map((pack) => pack.name))}`,
+    `Turn the packs on with one command on the hub${notes.length ? ", and add the flags that the notes name" : ""}:\n   ${installCommand(named)}`,
     ...(notes.length ? ["Do the steps that each note puts after the command."] : []),
     "Run `hedge doctor` on the hub, and explain each line. Do each `To do:` line with me, and say what a sign-in is for before it opens.",
     "My nodes take the change at their next `hedge update`. To give it to one now, run `hedge update` there.",
   ];
   return [
-    `Add ${packs.length === 1 ? "this Hedge pack" : "these Hedge packs"} to my setup with me: ${listed(packs.map((pack) => pack.title))}.`,
+    `Add ${named.length === 1 ? "this Hedge pack" : "these Hedge packs"} to my setup with me: ${listed(named.map((name) => packs.find((pack) => pack.name === name)?.title ?? name))}.`,
     "",
     `Hedge runs on my hub and my nodes in the cloud, not on my Mac. Run each command of this prompt on the hub, over SSH with the \`PATH\` line of ${guide} when you run elsewhere. Install nothing from Hedge here. Ask me each choice with your question tool, and run every command yourself.`,
     "",

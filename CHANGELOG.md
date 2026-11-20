@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### A smaller pack set
+
+- Base and Hub are in every Hedge. The site shows them first, without a
+  switch, and then groups the picks: how your agents work, what they know,
+  and what they reach.
+- The Pull requests pack is now titled Quality gates. It also holds the QA
+  swarm, the quality loop, the signal loop, the PR digest, `impact`, and
+  `codebase-design`. Orchestration keeps maps, side threads, and parking.
+- The Context library pack is now part of Memory, and Dream moved from Hub
+  to Memory. Memory is in the Everyday preset. The library waits until you
+  set `context-library.repo`, and setup no longer asks for it.
+- The Recovery pack is now the `provider-recovery` workflow of the Hub pack.
+  It needs own-account balancing.
+- A profile that still lists `context-library` or `recovery` keeps working.
+  Hedge reads the old name as the new pack, turns on only the old pack's
+  workflows, moves the step ledger to the new name, and leaves the profile
+  as it is. `hedge packs --add` and `--remove` take the old names too.
+- Picking Slack, Paging, Memory, or Guards turns on its main workflow. A
+  profile from before keeps those workflows off: the next save writes
+  `false` for each one it never set, once.
+- The Integrations pack stays, but the site no longer shows it.
+  The Everything preset still has it.
+
 ### Hedge is cloud only
 
 - Hedge runs your agents on a hub and one or more nodes in the cloud. The

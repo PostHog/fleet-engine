@@ -2,6 +2,7 @@
   "schema": 1,
   "name": "integrations",
   "title": "Integrations",
+  "onSite": false,
   "summary": "Claude Code and Codex get the official GitHub, Context7, and Convex plugins, and Claude can hand work to Codex.",
   "day": "Agents read and change your GitHub issues and pull requests, look up current library docs before they write code, and inspect your Convex deployments. With both AI plans, Claude hands a task or a review to Codex.",
   "cost": "Each plugin signs in once on each machine, and hedge doctor says how: a GitHub token for Claude, Context7 through its own sign-in or an API key, and Convex through its CLI. Codex's GitHub and Convex plugins use your ChatGPT sign-in. Convex starts off.",

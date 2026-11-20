@@ -3,7 +3,7 @@ import { runCommand } from "../../base/lib/command.ts";
 import { optionalStringSetting, stringSetting } from "../../base/lib/settings.ts";
 import { boxCommand } from "../lib/box-command.ts";
 import { Coder } from "../lib/coder.ts";
-import { dreamHooks } from "../lib/dream/digest.ts";
+import { dreamHooks } from "../../memory/lib/dream/digest.ts";
 import { peerMachine, thisMachine, type Machine } from "../lib/machine.ts";
 
 const coderOf = (here: Machine) => new Coder({ home: homedir(), env: Bun.env, coderUrl: here.settings.coderUrl, template: here.settings.template });

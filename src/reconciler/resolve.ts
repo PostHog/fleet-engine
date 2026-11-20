@@ -22,6 +22,7 @@ import type {
 } from "../pack/types.ts";
 import { signerSetting } from "../adapters/identity/signers.ts";
 import { engineSettings } from "../pack/manifest.ts";
+import { oldNameOnly, packAliases, packNamed, packsNamed, type PackAliases } from "../pack/aliases.ts";
 import { placedMachine } from "../profile/profile.ts";
 import { forwardId, hubForward } from "../hub/ssh.ts";
 import { asHedgeLine } from "./engine-command.ts";
@@ -45,7 +46,7 @@ type Candidate = LoadedPack & { source: AvailableSource };
 export function resolve(profile: Profile, saved: MachineFile, sources: FetchedSource[]): Plan {
   const machine = placedMachine(saved, profile.hub);
   const os: Os = machine.role === "mac" ? "darwin" : "linux";
-  const { order, packs } = choosePacks(profile, sources);
+  const { order, packs, aliases, byOldName } = choosePacks(profile, sources);
   checkUniqueIds(order);
   const engine = sources.find((source): source is AvailableSource => source.ref.name === "engine" && !("error" in source));
   const plan: Plan = {
@@ -55,6 +56,7 @@ export function resolve(profile: Profile, saved: MachineFile, sources: FetchedSo
     os,
     ai: profile.plan,
     packs,
+    ...(aliases.size ? { aliases: Object.fromEntries([...aliases].map(([name, alias]) => [name, alias.pack])) } : {}),
     workflows: [],
     files: [],
     config: [],
@@ -71,8 +73,8 @@ export function resolve(profile: Profile, saved: MachineFile, sources: FetchedSo
     ask: [],
     dropped: [],
   };
-  const names = new Set(order.map((pack) => pack.manifest.name));
-  const active = activateWorkflows(profile, machine, order, names, plan);
+  const names = new Set(order.map((pack) => pack.manifest.name).filter((name) => !byOldName.has(name)));
+  const active = activateWorkflows(profile, machine, order, names, byOldName, plan);
   const solo = !profile.hub && machine.role !== "devbox" && !names.has("hub") && !profile.devboxes?.length && !machine.devboxes?.length;
   const hubless = !profile.hub && Boolean(profile.devboxes?.length);
   const onceRunner = profile.devboxes?.find((name) => name !== profile.hub) ?? profile.hub;
@@ -87,6 +89,7 @@ export function resolve(profile: Profile, saved: MachineFile, sources: FetchedSo
       : elected === false ? `runs on one of your machines only, ${onceRunner}`
       : !elected && item.roles && !item.roles.includes(machine.role) && !(solo && item.roles.includes("solo")) ? (hubless && item.roles.includes("hub") ? hublessReason : `not on a ${machine.role}`)
       : item.plans && !item.plans.includes(profile.plan) ? `not for plan ${profile.plan}`
+      : byOldName.has(pack) && !(item.workflow && byOldName.get(pack)!.has(item.workflow)) ? `your profile names ${pack} only by an old name`
       : item.workflow && !active.has(item.workflow) ? `workflow ${item.workflow} is off`
       : item.unless?.some((id) => active.has(id)) ? `gives way to workflow ${item.unless.find((id) => active.has(id))}`
       : undefined;
@@ -94,7 +97,7 @@ export function resolve(profile: Profile, saved: MachineFile, sources: FetchedSo
     return !reason;
   };
 
-  plan.catalog = serviceCatalog(order, profile, activeIds(workflowStates(profile, { ...machine, role: "hub" }, order, names)), machine.role === "hub" ? os : "linux");
+  plan.catalog = serviceCatalog(order, profile, activeIds(settledWorkflows(profile, { ...machine, role: "hub" }, order, names, byOldName)), byOldName, machine.role === "hub" ? os : "linux");
   const packFiles: DesiredFile[] = [];
   for (const { manifest, dir } of order) {
     const pack = manifest.name;
@@ -142,7 +145,7 @@ export function resolve(profile: Profile, saved: MachineFile, sources: FetchedSo
   }
 
   const settings = machineDefaults(activeSettings(order, active), machine);
-  plan.settings = settingValues(settings, profile.hub && settings.some((setting) => setting.key === hubAlias) ? { ...profile.settings, [hubAlias]: profile.hub } : profile.settings);
+  plan.settings = settingValues(settings, answersOf(profile, settings));
   plan.unanswered = settings.filter((setting) => plan.settings[setting.key] === undefined && !setting.optional && setting.ask !== "never");
   plan.ask = askedOnce(settings.filter((setting) => setting.ask === "setup" || (setting.ask !== "never" && setting.default === undefined)), settings, profile.settings).map(({ pack: _, ...setting }) => setting);
   for (const job of plan.models.length ? plan.jobs : []) {
@@ -153,17 +156,18 @@ export function resolve(profile: Profile, saved: MachineFile, sources: FetchedSo
     const project = job.task && plan.settings[job.task.projectSetting];
     return job.task && project !== undefined ? { ...job, task: { ...job.task, project: String(project) } } : job;
   });
-  plan.files = checkTargets([...instructionFiles(order, profile, plan.models), ...packFiles, ...guideFiles(order, settings, plan.settings), ...skillFiles(order, profile, sources, plan)]);
+  const whole = order.map((candidate) => (byOldName.has(candidate.manifest.name) ? { ...candidate, manifest: { ...candidate.manifest, instructions: undefined, guides: undefined, skills: undefined } } : candidate));
+  plan.files = checkTargets([...instructionFiles(whole, profile, plan.models, active), ...packFiles, ...guideFiles(whole, settings, plan.settings), ...skillFiles(whole, profile, sources, plan)]);
   plan.commands = packCommands(order);
   return plan;
 }
 
 /** Every served service of the profile, judged the same way on every node: plans and workflows from the profile, the os of the hub (Linux off the hub), and no gate, which only the hub can test. Two services that claim one port fail. */
-function serviceCatalog(order: Candidate[], profile: Profile, active: Set<string>, hubOs: Os) {
+function serviceCatalog(order: Candidate[], profile: Profile, active: Set<string>, byOldName: ByOldName, hubOs: Os) {
   const ports = new Map<number, string>();
   return order.flatMap(({ manifest }) =>
     (manifest.served ?? []).flatMap(({ id, port, health, after, ...scope }) => {
-      if ((scope.on && !scope.on.includes(hubOs)) || (scope.plans && !scope.plans.includes(profile.plan)) || (scope.workflow && !active.has(scope.workflow))) return [];
+      if ((scope.on && !scope.on.includes(hubOs)) || (scope.plans && !scope.plans.includes(profile.plan)) || (byOldName.has(manifest.name) && !scope.workflow) || (scope.workflow && !active.has(scope.workflow))) return [];
       const name = `${manifest.name}/${id}`;
       const other = ports.get(port);
       if (other) throw new ResolveError(`port ${port} is claimed by both ${other} and ${name}`);
@@ -223,6 +227,10 @@ function checkTargets(files: DesiredFile[]) {
   return files;
 }
 
+function answersOf(profile: Profile, settings: PackSetting[]) {
+  return profile.hub && settings.some((setting) => setting.key === hubAlias) ? { ...profile.settings, [hubAlias]: profile.hub } : profile.settings;
+}
+
 function choosePacks(profile: Profile, sources: FetchedSource[]) {
   const byName = new Map<string, Candidate>();
   for (const source of sources) {
@@ -234,6 +242,8 @@ function choosePacks(profile: Profile, sources: FetchedSource[]) {
     }
   }
   if (!byName.has("base")) throw new ResolveError("the base pack is missing");
+  const aliases = namedAliases([...byName.values()].map((candidate) => candidate.manifest));
+  const listed = packsNamed(aliases, profile.packs);
   const unreachable = sources.filter((source) => "error" in source).map((source) => source.ref.name);
   const packs: ResolvedPack[] = [];
   const order: Candidate[] = [];
@@ -249,8 +259,9 @@ function choosePacks(profile: Profile, sources: FetchedSource[]) {
       return false;
     }
     visiting.add(name);
-    const missing = (candidate.manifest.requires ?? []).filter((required) => !profile.packs.includes(required) && required !== "base");
-    const blocked = (candidate.manifest.requires ?? []).filter((required) => !missing.includes(required) && !visit(required));
+    const requires = candidate.manifest.requires ?? [];
+    const missing = requires.filter((name) => name !== "base" && !profile.packs.includes(name) && !profile.packs.includes(packNamed(aliases, name)));
+    const blocked = requires.filter((name) => !missing.includes(name) && !visit(packNamed(aliases, name)));
     visiting.delete(name);
     const entry = { name, source: candidate.source.ref.name, ref: candidate.source.ref.ref };
     if (missing.length || blocked.length) {
@@ -261,26 +272,62 @@ function choosePacks(profile: Profile, sources: FetchedSource[]) {
     order.push(candidate);
     return true;
   };
-  for (const name of ["base", ...profile.packs.filter((name) => name !== "base"), ...carriedPacks(profile)]) visit(name);
+  for (const name of ["base", ...listed.filter((name) => name !== "base"), ...carriedPacks(profile, listed)]) visit(name);
   const base = packs.find((pack) => pack.name === "base");
   if (!base?.available) throw new ResolveError(`the base pack is not available: ${base?.reason ?? "missing"}`);
-  return { order, packs };
+  return { order, packs, aliases, byOldName: oldNameOnly(aliases, profile.packs) };
 }
+
+function namedAliases(manifests: PackManifest[]): PackAliases {
+  try {
+    return packAliases(manifests);
+  } catch (error) {
+    throw new ResolveError(error instanceof Error ? error.message : String(error));
+  }
+}
+
+export const listedPack = (plan: Pick<Plan, "aliases">, name: string) => (plan.aliases && Object.hasOwn(plan.aliases, name) ? plan.aliases[name]! : name);
 
 /** The MCP gateway left the Hub pack for its own pack. A profile that lists the Hub pack keeps the gateway until it turns the old mcp-gateway workflow off. */
-function carriedPacks(profile: Profile) {
-  return profile.packs.includes("hub") && !profile.packs.includes("mcp-gateway") && profile.workflows["mcp-gateway"] !== false ? ["mcp-gateway"] : [];
+function carriedPacks(profile: Profile, listed: string[]) {
+  return profile.packs.includes("hub") && !listed.includes("mcp-gateway") && profile.workflows["mcp-gateway"] !== false ? ["mcp-gateway"] : [];
 }
 
-function activateWorkflows(profile: Profile, machine: MachineFile, order: Candidate[], names: Set<string>, plan: Plan) {
-  const states = workflowStates(profile, machine, order, names);
+type ByOldName = Map<string, Set<string>>;
+
+function activateWorkflows(profile: Profile, machine: MachineFile, order: Candidate[], names: Set<string>, byOldName: ByOldName, plan: Plan) {
+  const states = settledWorkflows(profile, machine, order, names, byOldName);
   plan.workflows.push(...states);
   return activeIds(states);
 }
 
+function settledWorkflows(profile: Profile, machine: MachineFile, order: Candidate[], names: Set<string>, byOldName: ByOldName) {
+  const held = new Map<string, string>();
+  const released = new Set<string>();
+  for (;;) {
+    const states = workflowStates(profile, machine, order, names, byOldName, held);
+    const waiting = unsetGates(profile, machine, order, activeIds(states));
+    const freed = [...held.keys()].filter((id) => !waiting.has(id) && !released.has(id));
+    const added = [...waiting].filter(([id, key]) => held.get(id) !== key);
+    if (!freed.length && !added.length) return states;
+    for (const id of freed) held.delete(id), released.add(id);
+    for (const [id, key] of added) held.set(id, key);
+  }
+}
+
+function unsetGates(profile: Profile, machine: MachineFile, order: Candidate[], active: Set<string>) {
+  const gated = order.flatMap(({ manifest }) => manifest.workflows ?? []).filter((workflow) => workflow.offUntilSet);
+  return new Map(gated.flatMap((workflow) => {
+    const settings = machineDefaults(activeSettings(order, new Set([...active, workflow.id])), machine);
+    const values = settingValues(settings, answersOf(profile, settings));
+    const unset = workflow.offUntilSet!.find((key) => values[key] === undefined || values[key] === "");
+    return unset ? [[workflow.id, unset] as const] : [];
+  }));
+}
+
 const activeIds = (states: Plan["workflows"]) => new Set(states.filter((state) => state.active).map((state) => state.id));
 
-function workflowStates(profile: Profile, machine: MachineFile, order: Candidate[], names: Set<string>): Plan["workflows"] {
+function workflowStates(profile: Profile, machine: MachineFile, order: Candidate[], names: Set<string>, byOldName: ByOldName, held = new Map<string, string>()): Plan["workflows"] {
   const devbox = (profile.devboxes?.length ?? 0) > 0 || machine.role === "devbox" || machine.role === "hub";
   const holds: Record<Need, boolean> = {
     gh: true,
@@ -292,10 +339,11 @@ function workflowStates(profile: Profile, machine: MachineFile, order: Candidate
   };
   const workflows = order.flatMap(({ manifest }) => (manifest.workflows ?? []).map((workflow) => ({ workflow, pack: manifest.name })));
   const own = workflows.map(({ workflow, pack }) => {
-    const chosen = profile.workflows[workflow.id] ?? workflow.default;
+    const chosen = (byOldName.get(pack)?.has(workflow.id) ?? true) && (profile.workflows[workflow.id] ?? workflow.default);
     const unmet = (workflow.needs ?? []).filter((need) => !holds[need]);
-    const reason = !chosen ? "turned off" : unmet.length ? `needs ${unmet.join(", ")}` : undefined;
-    return { id: workflow.id, pack, active: !reason, ...(reason ? { reason } : {}) };
+    const unset = held.get(workflow.id);
+    const reason = !chosen ? "turned off" : unmet.length ? `needs ${unmet.join(", ")}` : unset ? `waits for setting ${unset}` : undefined;
+    return { id: workflow.id, pack, active: !reason, ...(reason ? { reason } : {}), ...(chosen && !unmet.length && unset ? { unset } : {}) };
   });
   const settle = (start: Plan["workflows"]) => {
     let states = start;
@@ -414,9 +462,10 @@ function renderModels(rows: ModelRow[]) {
   return ["## Model selection", "", "| Work | Model | Effort |", "| --- | --- | --- |", ...lines].join("\n");
 }
 
-function instructionFiles(order: Candidate[], profile: Profile, models: ModelRow[]): DesiredFile[] {
+function instructionFiles(order: Candidate[], profile: Profile, models: ModelRow[], active: Set<string>): DesiredFile[] {
   const fragments = order.flatMap(({ manifest, dir }) => [
     ...(manifest.instructions ? [read(dir, manifest.instructions, manifest.name)] : []),
+    ...(manifest.workflows ?? []).flatMap((workflow) => (workflow.instructions && active.has(workflow.id) ? [read(dir, workflow.instructions, manifest.name)] : [])),
     ...(manifest.models && models.length ? [renderModels(models)] : []),
   ]);
   if (profile.aboutMe?.trim()) fragments.push(`## About me\n\n${profile.aboutMe.trim()}\n`);

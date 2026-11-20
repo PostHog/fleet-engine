@@ -20,6 +20,14 @@ _Avoid_: Module, plugin, add-on, extension, group
 The one pack every user gets.
 _Avoid_: Core, default pack
 
+**In every Hedge**:
+The packs every setup gets: Base, and Hub on the hub. The site shows them without a switch.
+_Avoid_: Required packs, core packs
+
+**Old pack name**:
+The name a pack had before it moved into another pack, such as `context-library` for Memory and `recovery` for Hub. A profile that still lists it keeps working: Hedge reads it as the new pack, with only the old pack's workflows on, and keeps the profile as it is.
+_Avoid_: Legacy pack, deprecated pack
+
 **Seed**:
 A verb only: to bring an outside pack or plugin into Hedge, such as a Claude plugin marketplace. Hedge has no seed command yet. Never call a pack a seed.
 _Avoid_: Import, install (for an outside pack), seeds (for packs)
@@ -37,7 +45,7 @@ One person's repo of what their agents learn and record: memory, dreams, notes, 
 _Avoid_: Personal repo, notes repo, knowledge base
 
 **Workflow**:
-One way of working a pack offers, described in one plain sentence. It is on when its pack is on, the profile does not turn it off, and everything it needs holds.
+One way of working a pack offers, described in one plain sentence. It is on when its pack is on, the profile does not turn it off, everything it needs holds, and every setting it waits for is set.
 _Avoid_: Feature, capability
 
 **Preset**:

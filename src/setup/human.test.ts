@@ -78,8 +78,8 @@ describe("hedge setup sign-ins", () => {
     const result = await hedgeSetup(home, ["--plan", "claude"], ["", "", ""], box, teamSource());
     expect(result.code).toBe(0);
     expect(result.output).toContain("  ✓ You are in the PostHog org, so the Posthog pack is ticked");
-    expect(result.output).toContain("  1) Everyday  Pull requests, Orchestration, Communication, Posthog (default)");
-    expect(savedAnswers(home).packs).toEqual(["pull-requests", "orchestration", "communication", "posthog"]);
+    expect(result.output).toContain("  1) Everyday  Quality gates, Orchestration, Communication, Memory, Posthog (default)");
+    expect(savedAnswers(home).packs).toEqual(["pull-requests", "orchestration", "communication", "memory", "posthog"]);
     expect(savedAnswers(home).sources.map((source: SourceRef) => source.name)).toEqual(["agent-skills", "mattpocock-skills", "posthog"]);
     expect(box.starts).toContainEqual(["sh", "-c", "coder login"]);
     expect(box.runs).toEqual([]);

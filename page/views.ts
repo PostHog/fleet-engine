@@ -1,8 +1,8 @@
-import { crew, logos, packCast, scenes, teamRole, type Art, type Role, type Tone } from "./cast.ts";
+import { crew, logos, packCast, packGroups, scenes, teamRole, type Art, type Role, type Tone } from "./cast.ts";
 import { packFlows } from "./flows.ts";
 import { brandIcons, packIcon, uiIcons } from "./icons.ts";
 import { logoMark } from "./logo.ts";
-import { firstStart, installPrompt, promptData, startPacksOn, startPrompt, toggleSelected, type PageData, type PagePack } from "./model.ts";
+import { firstStart, installPrompt, promptData, startPacksOn, startPrompt, type PageData, type PagePack } from "./model.ts";
 import { esc, fmt, promptHtml, t3Link } from "./prompt.ts";
 
 export type ArtSizes = Record<string, { width: number; height: number }>;
@@ -146,7 +146,7 @@ ${pageJson ? `<script id="hedge-data" type="application/json">${JSON.stringify(p
       pack.always ? `<span class="tag on">On in every Hedge</span>` : "",
       onByDefault(pack) ? `<span class="tag on">On by default</span>` : "",
       needsHub(pack) ? `<span class="tag">Needs a hub</span>` : "",
-      ...pack.requires.map((name) => `<span class="tag">Adds ${esc(packOf(name).title)}</span>`),
+      ...pack.requires.map((name) => `<span class="tag">Adds ${esc(data.packs.find((item) => item.name === name)?.title ?? name)}</span>`),
     ].join("");
 
   const packCard = (root: string, pack: PagePack) => {
@@ -164,6 +164,17 @@ ${pageJson ? `<script id="hedge-data" type="application/json">${JSON.stringify(p
     </li>`;
   };
 
+  const groupedPacks = () => {
+    const always = data.packs.filter((pack) => pack.always);
+    const team = data.packs.filter((pack) => data.teamPacks.includes(pack.name));
+    const grouped = packGroups.map(({ title, packs }) => ({ title, packs: packs.flatMap((name) => data.packs.filter((pack) => pack.name === name && !pack.always)) }));
+    const placed = new Set([...always, ...team, ...grouped.flatMap((group) => group.packs)]);
+    return [{ title: "In every Hedge", packs: always }, ...grouped, { title: "Your team's packs", packs: team }, { title: "More packs", packs: data.packs.filter((pack) => !placed.has(pack)) }].filter((group) => group.packs.length);
+  };
+
+  const packGroup = (root: string, group: { title: string; packs: PagePack[] }, index: number) =>
+    `<section class="pack-group" aria-labelledby="group-${index}"><h2 class="group-head" id="group-${index}">${esc(group.title)}</h2><ul class="pack-grid">${group.packs.map((pack) => packCard(root, pack)).join("")}</ul></section>`;
+
   const packs = () => {
     const root = "../";
     const body = `<section class="hero hero-small"><div class="wrap hero-in">
@@ -176,7 +187,7 @@ ${pageJson ? `<script id="hedge-data" type="application/json">${JSON.stringify(p
 </div></section>
 <section class="band band-tight"><div class="wrap">
   <form id="picker" class="picker" autocomplete="off">
-    <ul class="pack-grid" aria-label="Packs">${data.packs.map((pack) => packCard(root, pack)).join("")}</ul>
+    <div class="pack-groups">${groupedPacks().map((group, index) => packGroup(root, group, index)).join("")}</div>
     <aside class="tray" aria-label="Install prompt">
       <div class="tray-empty" id="install-empty">${image(root, scenes.empty)}<p><b>Select a pack.</b> The install prompt appears here.</p></div>
       <div id="install-full" hidden><p class="tray-count" id="install-count"></p>${promptCard("install", "Your install prompt", "")}</div>
@@ -207,13 +218,13 @@ ${pageJson ? `<script id="hedge-data" type="application/json">${JSON.stringify(p
     const root = "../../";
     const role = roleOf(pack);
     const flow = packFlows[pack.name];
-    const prompt = installPrompt(data, toggleSelected(data, [], pack.name));
-    const add = pack.always
+    const prompt = installPrompt(data, [pack.name]);
+    const add = pack.name === "base"
       ? `<section class="band band-tight" id="add"><div class="wrap"><p class="note">Every Hedge has this pack. You add nothing.</p></div></section>`
       : `<section class="band band-pick band-tight" id="add" aria-labelledby="add-h"><div class="wrap">
   <header class="band-head"><h2 id="add-h">Add ${esc(pack.title)} to your Hedge</h2><p class="lead">Paste this prompt into a T3 Code thread on a machine that runs Hedge.</p></header>
   ${promptCard("install", "Your install prompt", prompt)}
-  <p class="after"><a class="link-arrow" href="../" data-select="${esc(pack.name)}">Add more packs in one prompt${uiIcons.arrow}</a></p>
+  ${pack.always ? "" : `<p class="after"><a class="link-arrow" href="../" data-select="${esc(pack.name)}">Add more packs in one prompt${uiIcons.arrow}</a></p>`}
 </div></section>`;
     const body = `<section class="hero hero-small"><div class="wrap hero-in">
   <div class="hero-text">
@@ -221,7 +232,7 @@ ${pageJson ? `<script id="hedge-data" type="application/json">${JSON.stringify(p
     <h1 class="pack-title">${icon(pack.name, "big")}<span>${esc(pack.title)}</span></h1>
     <p class="lead">${esc(pack.summary)}</p>
     <p class="tags">${packTags(pack)}</p>
-    ${pack.always ? "" : `<p class="cta"><a class="btn btn-yellow big" href="#add">Add to your Hedge</a></p>`}
+    ${pack.name === "base" ? "" : `<p class="cta"><a class="btn btn-yellow big" href="#add">Add to your Hedge</a></p>`}
   </div>
   ${stage(root, role.art, role.tone, true)}
 </div></section>
