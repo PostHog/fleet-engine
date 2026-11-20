@@ -53,7 +53,9 @@ function scoreOf(text: string): Pick<BloatScore, "cuttable" | "hunks"> | undefin
   } catch { return undefined; }
 }
 
-const shaped = (score: BloatScore | undefined): score is BloatScore => score !== undefined && scoreOf(JSON.stringify(score)) !== undefined;
+const shaped = (score: BloatScore | undefined): score is BloatScore =>
+  score !== undefined && scoreOf(JSON.stringify(score)) !== undefined && /^[0-9a-f]{40}$/.test(String(score.commit)) && Number.isInteger(score.first) && score.first > 0
+  && Number.isInteger(score.production) && [score.model, score.recordedAt, score.digest].every((field) => typeof field === "string");
 
 export async function readBloat(home: string, head: ProofIdentity, inputs: () => string | undefined) {
   const directory = bloatDirectory(home, head);

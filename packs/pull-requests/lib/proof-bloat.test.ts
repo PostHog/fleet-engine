@@ -106,7 +106,7 @@ test("a later HEAD or an edited Problem section gets its own score, a gate shows
     `| example/product#42 | 1 round | 10 → 15 (×1.5) | ×2.3, 56% cuttable at ${scored.slice(0, 7)}; cut at HEAD: Dropped most retries | none |`);
 });
 
-test("diffs past the judge's cap are read by hand, and a score saved after a gate leaves that gate standing", async () => {
+test("diffs past the judge's cap are read by hand, a score saved after a gate leaves that gate standing, and a partial score file is skipped", async () => {
   const pr = await checkout();
   const judge = fakeModel(pr, "BLOAT_JUDGE", JSON.stringify({ cuttable: 0, hunks: [] }));
   const reviewed = await grownPastTwice(pr, problem);
@@ -116,10 +116,13 @@ test("diffs past the judge's cap are read by hand, and a score saved after a gat
   const report = (await pr.decide("report", "--pr", "example/product#42")).output.split("\n");
   expect(report.find((line) => /^\| example\/product#42 \| \d+ rounds? \|/.test(line))).toBe("| example/product#42 | 1 round | 10 → 21 (×2.1) | not run | none |");
 
+  mkdirSync(join(pr.pullRequest, "judge", "bloat"), { recursive: true });
+  for (const name of ["0", "1"]) writeFileSync(join(pr.pullRequest, "judge", "bloat", `${name.repeat(40)}.json`), JSON.stringify({ cuttable: 0, hunks: [] }));
   await pr.commit("README.md", "x".repeat(300_001));
   await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(
     "Read the growth by hand: the diffs pass the bloat judge's cap of 300000 characters. Before another round, cut the PR back to base behaviour");
   expect(judge.prompts()).toHaveLength(1);
+  expect((await pr.hedge("gate")).output).toMatch(/^gate: (pass|fail)/m);
 });
 
 test("with no reviewer row in the model table, the growth is read by hand and the round still waits for the sanity pass", async () => {
