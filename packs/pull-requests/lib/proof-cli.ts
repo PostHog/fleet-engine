@@ -687,9 +687,9 @@ async function recordRound(directory: string, context: CommandContext) {
 const rangeStart = (scope: string, base: string | undefined, head: ProofIdentity, run: Run) => scope === "full" ? mergeBase(head, run) : base;
 
 function tierOf(head: ProofIdentity, { run }: CommandContext): ReviewTier {
-  let details: { body?: string; baseSha?: string } = {};
-  try { details = pullRequestDetails(head, run); } catch { details = {}; }
-  return reviewTier(head, run, details.body, details.baseSha);
+  let body: string | undefined;
+  try { body = pullRequestDetails(head, run).body; } catch { body = undefined; }
+  return reviewTier(head, run, body);
 }
 
 async function panelRequested({ lists, options, flags }: Parsed, head: ProofIdentity, context: CommandContext) {

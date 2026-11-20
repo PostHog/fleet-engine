@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { checkout, cleanFixtures, fakeModel, graded, markPanel, reviewHead, type Checkout } from "./proof-testing.ts";
+import { checkout, cleanFixtures, graded, markPanel, reviewHead, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
 
@@ -98,17 +98,6 @@ async function staleBaseRef(pr: Checkout, githubBase: (fresh: string) => string)
   await pr.git("update-ref", "refs/remotes/origin/main", stale);
 }
 
-test("the review tier counts from the base GitHub reports too, so it agrees with the table", async () => {
-  const pr = await checkout();
-  await pr.commit("feature.ts", lines(10, "greet"));
-  pr.pullRequestState({ body: graded("non-critical", "low") });
-  await staleBaseRef(pr, (fresh) => fresh);
-  await pr.hedge("require", "--none", "--reason", "Docs only");
-  fakeModel(pr, "REVIEWER", "No findings.\n");
-
-  expect((await pr.hedge("review")).output).toContain("review tier: read: merge-risk grade low, 10 authored production lines");
-});
-
 test("a base GitHub reports that this checkout cannot fetch leaves the HEAD lines unknown, not counted from a stale ref", async () => {
   const pr = await checkout();
   await pr.commit("feature.ts", lines(10, "greet"));
@@ -178,5 +167,69 @@ test("a reason with a carriage return or an escaped pipe stays in its cell", asy
   await agentAccepts(pr, "ui-walk");
   await pr.hedge("gate");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toContain("| ui-walk: No page yet a\\\\\\|b (🤖 agent ");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toContain("| ui-walk: No page yet a\\|b (🤖 agent ");
+});
+
+test("a base GitHub reports that this checkout lacks is fetched, and the lines count from it", async () => {
+  const pr = await checkout();
+  const hub = join(pr.home, "../hub/github.com/example/product.git");
+  const upstream = join(pr.home, "../upstream");
+  mkdirSync(hub, { recursive: true });
+  await pr.git("init", "-q", "--bare", "-b", "main", hub);
+  await pr.git("remote", "set-url", "origin", hub);
+  await pr.git("push", "-q", "origin", "main");
+  await pr.git("clone", "-q", hub, upstream);
+  writeFileSync(join(upstream, "base.ts"), lines(50, "base"));
+  await pr.git("-C", upstream, "add", "base.ts");
+  await pr.git("-C", upstream, "commit", "-q", "-m", "Advance the base");
+  await pr.git("-C", upstream, "push", "-q", "origin", "main");
+  await pr.commit("feature.ts", lines(10, "greet"));
+  pr.pullRequestState({ body: graded("non-critical") });
+  await reviewHead(pr);
+  writeFileSync(join(pr.home, "../github/base-sha"), await pr.git("-C", upstream, "rev-parse", "HEAD"));
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  await pr.hedge("gate");
+
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | none |");
+});
+
+test("a rename counts its deleted lines on the old path and its added lines on the new one", async () => {
+  const pr = await checkout();
+  await pr.advanceBase("engine.ts", lines(50, "engine"));
+  await pr.git("merge", "-q", "--no-edit", "main");
+  await pr.commit("feature.ts", lines(10, "greet"));
+  pr.pullRequestState({ body: graded("non-critical") });
+  await reviewHead(pr);
+  await pr.git("mv", "engine.ts", "engine.test.ts");
+  await pr.commit("engine.test.ts", lines(40, "engine"));
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  await pr.hedge("gate");
+
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 20 (×2.0) | none |");
+});
+
+test("a PR gated before any review shows its lines at HEAD, tests and docs apart", async () => {
+  const pr = await checkout();
+  writeFileSync(join(pr.repository, "README.md"), lines(2, "explain"));
+  await pr.git("add", "README.md");
+  await pr.commit("feature.test.ts", lines(4, "check"));
+  pr.pullRequestState({ body: graded("non-critical") });
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  await pr.hedge("gate");
+
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | 0 at HEAD; tests 4; docs 2 | none |");
+});
+
+test("the receipt keeps the escapes its guard adds to a reason, so emphasis and links stay literal", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.ts", lines(10, "greet"));
+  pr.pullRequestState({ body: `## Testing\n\nThe greeting.\n\n${graded("non-critical")}` });
+  await reviewHead(pr);
+  await pr.hedge("require", "--kinds", "ui-walk");
+  await pr.hedge("gap", "--kind", "ui-walk", "--reason", "Walk it *later* with [the plan](https://plan.example)");
+  await agentAccepts(pr, "ui-walk");
+  await pr.hedge("gate");
+  expect((await pr.hedge("receipt")).code).toBe(0);
+
+  expect(tableIn(block(pr.githubBody()))[1]).toContain("| ui-walk: Walk it \\*later\\* with \\[the plan\\](https://plan.example) (🤖 agent ");
 });
