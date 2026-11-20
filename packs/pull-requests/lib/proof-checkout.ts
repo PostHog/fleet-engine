@@ -17,21 +17,18 @@ export function topLevel(run: Run) {
  * remote once; without such a remote, or without the commit, the error names the commands that fix it.
  */
 export function mergeBase(identity: ProofIdentity, run: Run) {
-  const { baseRefName: base, baseSha } = pullRequestDetails(identity, run);
+  const base = pullRequestDetails(identity, run).baseRefName;
   const remotes = remotesOf(identity.repository, run);
-  const present = (commit: string) => run(["git", "rev-parse", "--verify", "--quiet", `${commit}^{commit}`]).code === 0;
-  const fetchBase = () => { for (const remote of remotes) run(["git", "fetch", "--quiet", remote, `+refs/heads/${base}:refs/remotes/${remote}/${base}`]); };
-  const descends = (ref: string, from: string) => run(["git", "merge-base", "--is-ancestor", from, ref]).code === 0;
   const found = () => {
-    const refs = remotes.map((remote) => `refs/remotes/${remote}/${base}`).filter(present);
-    const tips = baseSha && present(baseSha) ? [baseSha, ...refs.filter((ref) => descends(ref, baseSha))] : refs;
-    if (!tips.length) return undefined;
-    const result = run(["git", "merge-base", identity.commit, ...tips]);
-    return result.code === 0 && result.stdout.trim() || undefined;
+    for (const remote of remotes) {
+      const result = run(["git", "merge-base", `refs/remotes/${remote}/${base}`, identity.commit]);
+      if (result.code === 0) return result.stdout.trim();
+    }
+    return undefined;
   };
   const before = found();
   if (before) return before;
-  fetchBase();
+  for (const remote of remotes) run(["git", "fetch", "--quiet", remote, `+refs/heads/${base}:refs/remotes/${remote}/${base}`]);
   const after = found();
   if (after) return after;
   const where = `Cannot find where ${identity.repository}#${identity.pr} branched from its base ${base} here`;
@@ -106,9 +103,15 @@ const productionLines = (identity: ProofIdentity, run: Run) => {
 
 export type DiffSize = { production: number; tests: number; docs: number };
 
+function countStart(identity: ProofIdentity, run: Run) {
+  const { baseSha } = pullRequestDetails(identity, run);
+  const reported = baseSha ? run(["git", "merge-base", identity.commit, baseSha]) : undefined;
+  return reported?.code === 0 && reported.stdout.trim() || mergeBase(identity, run);
+}
+
 export function diffSize(identity: ProofIdentity, run: Run, from?: string): DiffSize | undefined {
   try {
-    const start = from ?? mergeBase(identity, run);
+    const start = from ?? countStart(identity, run);
     if (start === identity.commit) return undefined;
     const changed = changedLines(identity, run, start, true)?.filter(({ lines }) => Number.isFinite(lines));
     return changed && { production: linesOf(changed, authored), tests: linesOf(changed, isTestFile), docs: linesOf(changed, (path) => docsFile.test(path)) };
