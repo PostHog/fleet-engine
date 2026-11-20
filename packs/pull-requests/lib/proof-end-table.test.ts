@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { checkout, cleanFixtures, graded, type Checkout } from "./proof-testing.ts";
 
@@ -163,7 +163,7 @@ test("a checkout without the base commit GitHub reports counts unknown, not from
   await pr.git("update-ref", "refs/remotes/origin/main", fork);
   pr.pullRequestState({ body: graded("non-critical"), baseSha: "0123456789abcdef0123456789abcdef01234567" });
   await pr.hedge("require", "--none", "--reason", "Docs only");
-  await pr.hedge("gate");
+  expect((await pr.hedge("gate")).output).toContain("growth: unknown at HEAD, since the base commit 0123456 that GitHub reports is not in this checkout. Run git fetch origin main, then hedge proof gate again");
 
   expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | unknown at HEAD | none |");
 });
@@ -332,6 +332,34 @@ test("a gap reason with a long run of backslashes prints in the table at once", 
 
   const row = tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1];
   expect(row).toEndWith(" no page (🤖 agent " + await decisionId(pr) + ") |");
+});
+
+test("a gap reason with a long run of backticks prints in the table at once", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.ts", lines(10, "greet"));
+  pr.pullRequestState({ body: graded("non-critical") });
+  await reviewHead(pr);
+  await pr.hedge("require", "--kinds", "ui-walk");
+  await pr.hedge("gap", "--kind", "ui-walk", "--reason", "`".repeat(100_000) + " no page");
+  await agentAccepts(pr, "ui-walk");
+  await pr.hedge("gate");
+
+  const row = tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1];
+  expect(row).toEndWith(" no page (🤖 agent " + await decisionId(pr) + ") |");
+});
+
+test("a saved count with a field that is not a number reads unknown, and the report still prints", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.ts", lines(3, "greet"));
+  pr.pullRequestState({ body: graded("non-critical") });
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  await pr.hedge("gate");
+  const saved = join(pr.pullRequest, "gate-outcome", `${await pr.git("rev-parse", "HEAD")}.json`);
+  const record = JSON.parse(readFileSync(saved, "utf8"));
+  record.gate.summary.growth.final.production = null;
+  writeFileSync(saved, JSON.stringify(record));
+
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | unknown at HEAD | none |");
 });
 
 test("a merged PR's receipt without a gate names the landed gate", async () => {

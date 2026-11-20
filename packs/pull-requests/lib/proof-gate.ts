@@ -8,9 +8,9 @@ import { ciOf, readPullRequest, type PullRequest, type Run } from "./pr-ci.ts";
 import { askGap, authorOf, judgeDirectory, judgeGap, judgeGapProof, listStanding, parseVerdict, prDirectory, proofGate, pullRequestDirectory, readDecisions, readJson, receiptOf, reviewRecords, withBrokenConditions, writeJson, type Arbiter, type Decisions, type JudgeSummary, type ProofIdentity, type ProofSummary, type PushedHead } from "./proof.ts";
 import { displayEntry } from "./proof-display.ts";
 import { receiptMarker } from "./proof-receipt.ts";
-import { baseRefs, cleanBaseMerge, devPullOf, diffOf, mergeBase, pullRequestDetails, topLevel } from "./proof-checkout.ts";
+import { baseRefs, cleanBaseMerge, devPullOf, diffOf, mergeBase, pullRequestDetails, remotesOf, topLevel } from "./proof-checkout.ts";
 import { quietCommitIn } from "./proof-delta.ts";
-import { measureGrowth } from "./proof-end-table.ts";
+import { measureGrowth, type Growth } from "./proof-end-table.ts";
 import { judge, readCriticalPaths, type JudgeInput } from "./proof-judge.ts";
 import { askModel, familyOf, modelLabel, readRiskRubric, readRubric, reviewerRow, skillReferences } from "./proof-models.ts";
 
@@ -65,17 +65,24 @@ export async function finalGate(head: ProofIdentity, context: GateContext, { lan
   const judged: Judged = checked.code === 0 ? await judgeHead(head, checked, context) : { code: checked.code, lines: [], covered: "", judge: { state: "skipped", lines: [] }, reason: checked.failure };
   const shown = pull === undefined ? undefined : receiptMarker((pull as PullRequest).body);
   const stale = shown && shown.head !== head.commit ? [`receipt: the PR body shows the receipt of ${shown.head.slice(0, 7)}, not HEAD ${head.commit.slice(0, 7)}. Refresh it with hedge proof receipt`] : [];
+  const growth = await grownBy(home, head, run, landed, pull);
   const gate = {
     code: judged.code,
     reason: judged.code === 0 ? "pass" : judged.reason ?? `exit ${judged.code}`,
-    lines: [...checked.lines, ...judged.lines, ...stale],
+    lines: [...checked.lines, ...judged.lines, ...stale, ...unmeasured(head, run, pull, growth)],
     verdict: judged.code === 0 ? `gate: pass (${checked.summary}; judge: ${judged.covered})` : `gate: fail (exit ${judged.code})`,
-    summary: { ...checked.proofSummary, code: judged.code, judge: judged.judge, growth: await grownBy(home, head, run, landed, pull) },
+    summary: { ...checked.proofSummary, code: judged.code, judge: judged.judge, growth },
   };
   if (pull) await writeJson(savedPath(home, head, head.commit), { key: keyOf(pull, landed, await fingerprintOf(home, head, files, checked.decisions)), gate, conditions: checked.conditions } satisfies SavedGate);
   return gate;
 }
 
+
+function unmeasured(head: ProofIdentity, run: Run, pull: PullRequest | undefined, growth: Growth) {
+  if (growth.final || !pull?.baseSha || run(["git", "cat-file", "-e", `${pull.baseSha}^{commit}`]).code === 0) return [];
+  const remote = remotesOf(head.repository, run)[0] ?? `<a remote of ${head.repository}>`;
+  return [`growth: unknown at HEAD, since the base commit ${pull.baseSha.slice(0, 7)} that GitHub reports is not in this checkout. Run git fetch ${remote} ${pull.base}, then hedge proof gate again`];
+}
 
 async function grownBy(home: string, head: ProofIdentity, run: Run, landed: boolean, pull: PullRequest | undefined) {
   const growth = await measureGrowth(home, head, run, pull?.baseSha);

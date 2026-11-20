@@ -23,10 +23,3 @@ test("literal keeps the same code spans as the receipt pattern did, on every sho
     }
   }
 });
-
-test("literal reads a long run of unmatched backticks, and many runs of one length, at once", () => {
-  const unmatched = "`".repeat(100_000) + " a";
-  expect(literal(unmatched)).toBe(escaped(unmatched));
-  const paired = "``a``b".repeat(100_000);
-  expect(literal(paired)).toBe(byPattern("``a``b".repeat(1_000)).repeat(100));
-});

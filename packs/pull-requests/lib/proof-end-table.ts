@@ -24,7 +24,7 @@ export async function measureGrowth(home: string, head: ProofIdentity, run: Run,
 }
 
 const counted = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
-const figure = (lines: number | undefined) => lines === undefined ? "unknown" : lines.toLocaleString("en-US");
+const figure = (lines: number | undefined) => typeof lines === "number" ? lines.toLocaleString("en-US") : "unknown";
 const span = (from: number | undefined, to: number | undefined) => `${figure(from)} → ${figure(to)}`;
 
 function roundsCell(growth: Growth | undefined) {
