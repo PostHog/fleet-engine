@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { checkout, cleanFixtures, graded, type Checkout } from "./proof-testing.ts";
 
@@ -228,6 +228,21 @@ test("a gate after the PR merged counts the review that finished after the last 
   pr.pullRequestState({ merged: true });
   await pr.hedge("gate", "--landed");
 
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | none |");
+});
+
+test("a landed gate with a damaged saved gate still counts the PR", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.ts", lines(10, "greet"));
+  pr.pullRequestState({ body: graded("non-critical") });
+  await reviewHead(pr);
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  const head = await pr.git("rev-parse", "HEAD");
+  mkdirSync(join(pr.pullRequest, "gate-outcome"), { recursive: true });
+  writeFileSync(join(pr.pullRequest, "gate-outcome", `${head}.json`), "{\"gate\":");
+  pr.pullRequestState({ merged: true });
+
+  expect((await pr.hedge("gate", "--landed")).output).not.toContain("SyntaxError");
   expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | none |");
 });
 
