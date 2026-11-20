@@ -610,7 +610,7 @@ cat "$(dirname "$0")/VERSION" > "$HOME/applied"
     [".local/state with a link to another folder that holds a hedge folder", (home, other) => `mkdir -p '${other}/hedge' && rm -rf '${home}/.local/state' && ln -s '${other}' '${home}/.local/state'`],
   ];
 
-  test.each(swaps)("skips the update notice with a warning when something replaces %s after the early check, and leaves that folder's update.json as it was", async (_kind, swap) => {
+  test.each(swaps)("skips the update notice with a warning when something replaces %s after the early check, leaves that folder's update.json as it was, and goes on to record the release", async (_kind, swap) => {
     const remote = await engineRemote(["v0.1.0", "v1.0.0"]);
     const engineDir = await engineCheckout(remote, "v0.1.0");
     const home = temp.make("home-");
@@ -626,6 +626,7 @@ cat "$(dirname "$0")/VERSION" > "$HOME/applied"
     expect(result.version).toBe("v0.1.1");
     expect(result.output).toContain(`hedge update: warning: could not save the new major notice in ${noticePath(home)}, so hedge doctor may name the wrong release: Parent is not a real directory: `);
     expect([readFileSync(join(other, "update.json"), "utf8"), readFileSync(join(other, "hedge/update.json"), "utf8")]).toEqual([fleetsOwn, fleetsOwn]);
+    expect((await spawnGit(engineDir, "for-each-ref", "--format=%(refname)", "refs/hedge/releases")).trim()).toBe("refs/hedge/releases/v0.1.1");
   });
 
   const noticeCases: Array<[string, string[], (home: string, outside: string) => string]> = [
