@@ -116,7 +116,7 @@ export function devboxSteps(host: string, context: DevboxContext): Step[] {
   const chatgpt = chatgptSignIn(box, context.models);
   return [
     auto(host, "install", `Install Hedge on ${host}`, 4, context.terminal, () => install(box, host, context)),
-    ...(onCoder(host) && context.machine.has("coder") ? [auto(host, "coder", `Sign in to Coder on ${host}`, 1, context.terminal, () => coderOnBox(host, box, context))] : []),
+    ...(host.startsWith(coderPrefix) && context.machine.has("coder") ? [auto(host, "coder", `Sign in to Coder on ${host}`, 1, context.terminal, () => coderOnBox(host, box, context))] : []),
     humanStep(on(githubSignIn(box, async () => {})), human),
     auto(host, "profile", `Apply your profile on ${host}`, 3, context.terminal, () => applyProfile(box, host, context)),
     ...(context.plan === "codex" ? [] : [claudeOnBox(host, box, context)]),
@@ -180,7 +180,7 @@ function roleOf(host: string, text: string): Record<string, unknown> {
   }
 }
 
-export const onCoder = (host: string) => host.startsWith("coder.");
+const coderPrefix = "coder.";
 
 /** The Coder address in what coder whoami prints: "Coder is running at <address>, You're authenticated as <user> !". */
 export function coderAddress(whoami: string): string | undefined {

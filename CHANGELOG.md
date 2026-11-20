@@ -64,10 +64,7 @@
   no `--to-do`, finishes the step and points to `hedge doctor` there. A
   rerun keeps a node engine that runs the hub's engine commit, when its
   `hedge` command runs. When T3 Code on the hub reaches the node, it says
-  so, and does not ask for `hedge peers link`. For a Coder workspace, it
-  ends with a line that says a Coder startup log with a ✘ on `ssh` to the
-  node is from when the node last started, before Hedge set it up, and that
-  the startup script runs again when the node restarts.
+  so, and does not ask for `hedge peers link`.
 - `hedge doctor --to-do` prints the steps left for the person as JSON, and
   before it the other findings. It exits 1 when there are other findings.
   A step that Hedge repairs itself is a finding, never a step for the

@@ -3,7 +3,7 @@ import { saveMachine, validHost } from "../profile/profile.ts";
 import type { Machine } from "../setup/commands.ts";
 import { balanceThreads } from "../setup/devbox-balance.ts";
 import { removeDevbox } from "../setup/devbox-remove.ts";
-import { addressHere, devboxSteps, type LeftStep, linkFromHub, listInProfile, nameBox, onCoder, overSsh, printLeftForYou, profileForBox, tellHub } from "../setup/devbox.ts";
+import { addressHere, devboxSteps, type LeftStep, linkFromHub, listInProfile, nameBox, overSsh, printLeftForYou, profileForBox, tellHub } from "../setup/devbox.ts";
 import { FlagError, refuseUnusableDevbox } from "../setup/flags.ts";
 import { runSteps } from "../setup/runner.ts";
 import { Stopped, type Terminal } from "../setup/terminal.ts";
@@ -47,7 +47,6 @@ export async function devboxCommand(args: string[], context: DevboxCommandContex
     });
     terminal.print("");
     terminal.print(`${host} is your devbox now. It runs your profile, and T3 Code here and there can reach each other.`);
-    if (onCoder(host)) terminal.print(`When ssh ${host} shows a Coder startup log with a ✘, that log is from when ${host} last started, before Hedge set it up. The startup script runs again when ${host} restarts.`);
     if (hub) await linkFromHub({ ...context, ...(machineFile.name ? { self: machineFile.name } : {}) }, hub, host, hubTook);
     await balanceThreads(context);
     return 0;
