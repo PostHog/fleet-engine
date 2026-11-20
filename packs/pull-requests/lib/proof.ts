@@ -558,8 +558,33 @@ const listItem = /^\s*(?:[-*]|\d+[.)])\s+(.*)/;
 const severityField = /^\**(blocker|major|minor|nit)\**$/i;
 const severityShorthand = /^\**(?:minor|nit)(?:[,:]\**|\**[,:])\s/i;
 
-const fieldsOutsideCode = (text: string) => listItem.exec(text.split("\n")[0]!)?.[1]
-  ?.replace(/(`+)[^`][\s\S]*?\1(?!`)/g, (span) => span.replace(/\|/g, "\u0000")).split("|").map((field) => field.replace(/\u0000/g, "|").trim());
+function closingRun(line: string, size: number, from: number) {
+  let at = from;
+  for (;;) {
+    at = line.indexOf("`".repeat(size), at);
+    if (at < 0 || (line[at - 1] !== "`" && line[at + size] !== "`")) return at;
+    while (line[at] === "`") at++;
+  }
+}
+
+function splitOutsideCode(line: string) {
+  const fields: string[] = [];
+  let start = 0, at = 0;
+  while (at < line.length) {
+    if (line[at] === "|") { fields.push(line.slice(start, at)); start = ++at; continue; }
+    if (line[at] !== "`") { at++; continue; }
+    let end = at;
+    while (line[end] === "`") end++;
+    const close = closingRun(line, end - at, end);
+    at = close < 0 ? end : close + end - at;
+  }
+  return [...fields, line.slice(start)].map((field) => field.trim());
+}
+
+const fieldsOutsideCode = (text: string) => {
+  const item = listItem.exec(text.replace(/\s*\n\s*/g, " "))?.[1];
+  return item === undefined ? undefined : splitOutsideCode(item);
+};
 
 const itemFields = (text: string) => listItem.exec(text.split("\n")[0]!)?.[1]?.split("|").map((field) => field.trim());
 

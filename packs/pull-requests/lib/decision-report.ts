@@ -104,13 +104,14 @@ function proofRow(pr: Row, decisions: DecisionState[]) {
   return `| ${refText(ref)} | ${cell(ran, "none")} | ${cell(deferred, "none")} | ${cell(voided, "none")} | ${receiptCell(summary.receipt)} |`;
 }
 
-export async function renderReport({ prs, thread, lane }: { prs: PrRef[]; thread?: string; lane?: string }, ledger: Ledger, decisions: DecisionState[], context: ReportContext): Promise<string> {
+export async function renderReport({ prs: named, thread, lane }: { prs: PrRef[]; thread?: string; lane?: string }, ledger: Ledger, decisions: DecisionState[], context: ReportContext): Promise<string> {
+  const prs = named.filter((ref, index) => named.findIndex((other) => refText(other).toLowerCase() === refText(ref).toLowerCase()) === index);
   const secrets = lane === undefined ? undefined : await context.laneSecrets(lane);
   const rows = await Promise.all(prs.map((ref) => lanePr(ref, ledger, context)));
   const card = thread && await (context.pendingCard ?? t3PendingCard(context.home))(thread) ? thread : undefined;
   const ours = decisions.filter((decision) => prs.some((ref) => covers(decision, ref)) || (thread !== undefined && sameThread(decision.where.thread, thread)));
   const sorted = [...ours].sort((a, b) => markOrder.indexOf(a.mark) - markOrder.indexOf(b.mark));
-  const gatedRows = rows.filter(gated).filter((row, index, all) => all.findIndex((other) => refText(other.ref) === refText(row.ref)) === index);
+  const gatedRows = rows.filter(gated);
   const sideFixes = ours.filter((decision) => decision.class === "scope" && decision.where.link)
     .map((decision) => `- ${decision.question} ${decision.answer}: ${decision.where.link} [${decision.id}]`);
   return [

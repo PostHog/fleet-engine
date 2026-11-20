@@ -204,3 +204,49 @@ test("a pipe inside code in a finding stays in its field, so a docs file buys no
   await code.commit("feature.ts", lines(11, "greet"));
   expect((await code.hedge("review-start", "--scope", "fixes", "--base", codeReviewed)).code).toBe(0);
 });
+
+test("past twice the first lines with GitHub's base commit missing here, the next round waits for the fetch, not a skipped sanity pass", async () => {
+  const pr = await checkout();
+  const reviewed = await firstRound(pr, ["- major | feature.ts:2 | the greeting drops the last name | anchor: greet 1"], ["1. fixed: the greeting keeps it"]);
+  await pr.commit("feature.ts", lines(21, "greet"));
+  pr.pullRequestState({ baseSha: "0123456789abcdef0123456789abcdef01234567" });
+
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(
+    "Hedge cannot count the production lines at HEAD, since the base commit 0123456 that GitHub reports is not in this checkout. Run git fetch origin main, then run this command again");
+});
+
+test("a [base] marker on the wrapped line of a finding still keeps it from buying a round", async () => {
+  const pr = await checkout();
+  const reviewed = await firstRound(pr, ["- major | feature.ts:2 |", "  [base] the base drops an empty name too, base feature.ts:2 | anchor: greet 1"], ["1. fixed: an empty name is kept now"]);
+  await pr.commit("feature.ts", lines(11, "greet"));
+
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(stops);
+});
+
+test("a sanity reason the receipt would read as a figure is refused when it is recorded", async () => {
+  const pr = await checkout();
+  await firstRound(pr, ["- major | feature.ts:2 | the greeting drops the last name | anchor: greet 1"], ["1. fixed: the greeting keeps it"]);
+  await pr.commit("feature.ts", lines(21, "greet"));
+
+  await expect(pr.hedge("sanity", "--verdict", "justified", "--reason", "Compare 48   213 rows")).rejects.toThrow("looks like a production figure");
+});
+
+test("past round 1's count with HEAD's count unknown, the next round waits for a sanity pass at HEAD", async () => {
+  const pr = await checkout();
+  const reviewed = await firstRound(pr, ["- major | feature.ts:2 | the greeting drops the last name | anchor: greet 1"], ["1. fixed: the greeting keeps it"]);
+  await pr.commit("feature.ts", lines(21, "greet"));
+  pr.pullRequestState({ baseSha: "main" });
+
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(
+    "Hedge cannot count the production lines at HEAD, so it cannot tell whether they grew past twice the 10 of round 1. Before another round, read the growth since round 1 by hand, then cut it back to base behaviour or justify it: hedge proof sanity --verdict cut|justified --reason '<why>'");
+  expect((await pr.hedge("sanity", "--verdict", "justified", "--reason", "The fix needs its own parser")).code).toBe(0);
+  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).code).toBe(0);
+});
+
+test("a code span that holds a longer backtick run keeps its pipes, so a [base] inside it does not stop the round", async () => {
+  const pr = await checkout();
+  const reviewed = await firstRound(pr, ["- major | feature.ts:2 | `` flags ``` | [base] `` drops the last flag | anchor: greet 1"], ["1. fixed: the flags keep it"]);
+  await pr.commit("feature.ts", lines(11, "greet"));
+
+  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).code).toBe(0);
+});
