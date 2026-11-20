@@ -49,17 +49,34 @@ async function namedHubWithTeam(packs: LoadedPack[]) {
 
 const run = (hedge: (args: string[]) => Promise<number>, command: string) => hedge(command.split(" ").slice(1));
 
-type Visit = { from?: Window; files?: SiteFiles; url?: string };
+type Visit = { from?: Window; files?: SiteFiles; url?: string; motion?: "reduce" | "no-preference"; inView?: boolean };
 
-function visit(path: string, { from, files = site, url = `https://hedge.test/hedge-engine/${path.replace(/index\.html$/, "")}` }: Visit = {}) {
-  const window = new Window({ url, settings: { enableJavaScriptEvaluation: true, suppressInsecureJavaScriptEnvironmentWarning: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true } });
+function visit(path: string, { from, files = site, url = `https://hedge.test/hedge-engine/${path.replace(/index\.html$/, "")}`, motion = "no-preference", inView = false }: Visit = {}) {
+  const window = new Window({ url, settings: { enableJavaScriptEvaluation: true, suppressInsecureJavaScriptEnvironmentWarning: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true, device: { prefersReducedMotion: motion } } });
   open.push(window);
+  if (inView) showEverything(window);
   if (from) carryStorage(from, window);
   window.document.addEventListener("click", (event) => {
     if ((event.target as unknown as Element).closest("a")) event.preventDefault();
   });
   window.document.write(files[path] as string);
   return window;
+}
+
+function showEverything(window: Window) {
+  Object.assign(window, {
+    IntersectionObserver: class {
+      constructor(private readonly report: (entries: object[], observer: object) => void) {}
+      observe(target: Element) {
+        this.report([{ target, isIntersecting: true, intersectionRatio: 1 }], this);
+      }
+      unobserve() {}
+      disconnect() {}
+      takeRecords() {
+        return [];
+      }
+    },
+  });
 }
 
 function carryStorage(from: Window, to: Window) {
@@ -136,6 +153,9 @@ describe("the landing page in a browser", () => {
       const local = [...window.document.querySelectorAll("a")].map((link) => link.getAttribute("href")!).filter((href) => !/^(https?:|#)/.test(href));
       expect([path, local.length > 3, local.filter((href) => !/\/index\.html(#.*)?$/.test(href))]).toEqual([path, true, []]);
     }
+    const packs = visit("packs/index.html", { url: "file:///tmp/site/packs/index.html" });
+    watchButton(packs, "Memory").click();
+    expect(packs.document.querySelector("dialog a")!.getAttribute("href")).toBe("memory/index.html");
   });
 });
 
@@ -236,5 +256,72 @@ describe("the Packs page in a browser", () => {
     const publicPacks = visit("packs/index.html", { from: team });
     expect(selected(publicPacks)).toEqual(["slack"]);
     expect(command(publicPacks)).toBe("hedge packs --add slack");
+  });
+});
+
+const video = (window: Window, selector: string) => window.document.querySelector(selector) as unknown as HTMLVideoElement;
+const dialog = (window: Window) => window.document.querySelector("dialog") as unknown as HTMLDialogElement;
+const accessibleName = (element: Element) => {
+  const labelledBy = element.getAttribute("aria-labelledby");
+  if (labelledBy) return labelledBy.split(" ").map((id) => element.ownerDocument.getElementById(id)!.textContent).join(" ");
+  const label = element.getAttribute("aria-label");
+  if (label) return label;
+  const copy = element.cloneNode(true) as Element;
+  for (const hidden of copy.querySelectorAll('[aria-hidden="true"]')) hidden.remove();
+  return copy.textContent!.replace(/\s+/g, " ").trim();
+};
+const watchButtons = (window: Window) => [...window.document.querySelectorAll("button.watch")] as unknown as HTMLButtonElement[];
+const watchButton = (window: Window, title: string) => watchButtons(window).find((button) => accessibleName(button).endsWith(`the ${title} video`))!;
+const pathOf = (window: Window, url: string) => new URL(url, window.location.href).pathname;
+describe("the pack videos in a browser", () => {
+  test("each Watch button is named for its length and pack, and opens one large player with that pack's name, line, video, poster and a link to its page as text", () => {
+    const window = visit("packs/index.html");
+    const player = video(window, "dialog video");
+    const textOf = (attribute: string) => window.document.getElementById(dialog(window).getAttribute(attribute)!)!.textContent;
+    const opened = watchButtons(window).map((button) => {
+      const card = button.closest(".pack-card")!;
+      const title = card.querySelector(".pack-name")!.textContent;
+      button.click();
+      const link = window.document.querySelector("dialog a") as unknown as HTMLAnchorElement;
+      const shown = [accessibleName(button), button.closest("[hidden], [aria-hidden='true'], [inert]") === null, dialog(window).open, textOf("aria-labelledby") === title, textOf("aria-describedby") === card.querySelector(".pack-line")!.textContent, pathOf(window, player.src), pathOf(window, player.poster), player.paused, link.textContent === `Read how ${title} works`, pathOf(window, link.href) === pathOf(window, (card.querySelector("a.more") as unknown as HTMLAnchorElement).href)];
+      (window.document.querySelector("dialog button") as unknown as HTMLButtonElement).click();
+      return shown;
+    });
+    const row = (pack: string, name: string) => [name, true, true, true, true, `/hedge-engine/assets/video/${pack}.mp4`, `/hedge-engine/assets/video/${pack}.jpg`, false, true, true];
+    expect(opened).toEqual([
+      row("hub", "Watch · 29 s, the Hub video"),
+      row("pull-requests", "Watch · 29 s, the Quality gates video"),
+      row("orchestration", "Watch · 30 s, the Orchestration video"),
+      row("memory", "Watch · 29 s, the Memory video"),
+      row("slack", "Watch · 20 s, the Slack video"),
+    ]);
+    expect([dialog(window).open, player.paused, selected(window)]).toEqual([false, true, []]);
+  });
+
+  test("the Close button closes the player and stops the video", () => {
+    const window = visit("packs/index.html");
+    watchButton(window, "Memory").click();
+    expect(video(window, "dialog video").paused).toBe(false);
+    (window.document.querySelector("dialog button") as unknown as HTMLButtonElement).click();
+    expect(dialog(window).open).toBe(false);
+    expect(video(window, "dialog video").paused).toBe(true);
+  });
+
+  test("a visitor who asks for reduced motion gets the player without autoplay, and presses play", async () => {
+    const window = visit("packs/index.html", { motion: "reduce" });
+    watchButton(window, "Orchestration").click();
+    await window.happyDOM.waitUntilComplete();
+    const player = video(window, "dialog video");
+    expect([dialog(window).open, player.paused, player.controls]).toEqual([true, true, true]);
+    await player.play();
+    expect(player.paused).toBe(false);
+  });
+
+  test("a pack page's video waits for the visitor to press play, even when it shows in full", async () => {
+    const window = visit("packs/hub/index.html", { inView: true });
+    window.dispatchEvent(new window.Event("scroll"));
+    window.dispatchEvent(new window.Event("load"));
+    await window.happyDOM.waitUntilComplete();
+    expect(video(window, "video.clip").paused).toBe(true);
   });
 });

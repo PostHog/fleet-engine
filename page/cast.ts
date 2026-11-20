@@ -19,6 +19,20 @@ export const packCast: Record<string, Role> = {
   "mcp-gateway": { art: hog("hog-welder"), tone: "mint", line: "Sign in once on the hub. Every box reaches Slack, Gmail, and your MCP servers." },
 };
 
+export type Video = { file: string; poster: string; seconds: number };
+
+const clip = (pack: string, seconds: number): Video => ({ file: `${pack}.mp4`, poster: `${pack}.jpg`, seconds });
+
+export const packVideos: Record<string, Video> = {
+  "pull-requests": clip("pull-requests", 28.5),
+  orchestration: clip("orchestration", 30),
+  memory: clip("memory", 29),
+  hub: clip("hub", 28.5),
+  slack: clip("slack", 20),
+};
+
+export const videoFiles = () => Object.values(packVideos).flatMap((video) => [video.file, video.poster]);
+
 export const packGroups: Array<{ title: string; packs: string[] }> = [
   { title: "How your agents work", packs: ["pull-requests", "orchestration", "communication", "guards"] },
   { title: "What your agents know", packs: ["memory"] },

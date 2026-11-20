@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { artFiles, packGroups } from "../page/cast.ts";
+import { artFiles, packGroups, videoFiles } from "../page/cast.ts";
 import type { PageData, PagePack } from "../page/model.ts";
 import { site, type ArtSizes } from "../page/views.ts";
 import { engineSettings, loadPacks } from "../src/pack/manifest.ts";
@@ -12,6 +12,7 @@ import { catalogAliases, choosablePacks, defaultPreset, packTitle, type Catalog 
 
 const engineRoot = join(import.meta.dir, "..");
 const artDir = join(engineRoot, "page/art");
+const videoDir = join(engineRoot, "page/video");
 
 export const needPacks: Partial<Record<Need, string>> = { hub: "hub", coder: "posthog", "posthog-org": "posthog" };
 
@@ -98,10 +99,13 @@ export async function buildSite(options: PageOptions): Promise<SiteFiles> {
   const script = await bundle.outputs[0]!.text();
   const styles = await Bun.file(join(engineRoot, "page/style.css")).text();
   const routes = site(data, sizes, { script, styles });
-  const shown = art.filter(([file]) => routes.some((route) => route.html.includes(`assets/art/${file}"`)));
+  const used = (folder: string, file: string) => routes.some((route) => route.html.includes(`assets/${folder}/${file}"`));
+  const shown = art.filter(([file]) => used("art", file));
+  const videos = await Promise.all(videoFiles().filter((file) => used("video", file)).map(async (file) => [file, await Bun.file(join(videoDir, file)).bytes()] as const));
   return {
     ...Object.fromEntries(routes.map((route) => [route.path, route.html])),
     ...Object.fromEntries(shown.map(([file, bytes]) => [`assets/art/${file}`, bytes])),
+    ...Object.fromEntries(videos.map(([file, bytes]) => [`assets/video/${file}`, bytes])),
   };
 }
 

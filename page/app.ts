@@ -98,16 +98,41 @@ function selectLinks() {
     link.addEventListener("click", () => storeSelection([...new Set([...storedSelection(), link.dataset.select!])]));
 }
 
+const fromDisk = (href: string) => (location.protocol === "file:" ? href.replace(/\/(#.*)?$/, "/index.html$1") : href);
+
 function linksFromDisk() {
   if (location.protocol !== "file:") return;
-  for (const link of document.querySelectorAll<HTMLAnchorElement>('a[href^="."], a[href$="/"]:not([href*=":"])'))
-    link.setAttribute("href", link.getAttribute("href")!.replace(/\/(#.*)?$/, "/index.html$1"));
+  for (const link of document.querySelectorAll<HTMLAnchorElement>('a[href^="."], a[href$="/"]:not([href*=":"])')) link.setAttribute("href", fromDisk(link.getAttribute("href")!));
+}
+
+function player(dialog: HTMLDialogElement) {
+  const video = dialog.querySelector("video")!;
+  document.addEventListener("click", (event) => {
+    const button = (event.target as Element).closest<HTMLButtonElement>("button[data-video]");
+    if (!button) return;
+    video.poster = button.dataset.poster!;
+    video.src = button.dataset.video!;
+    document.getElementById(dialog.getAttribute("aria-labelledby")!)!.textContent = button.dataset.title!;
+    document.getElementById(dialog.getAttribute("aria-describedby")!)!.textContent = button.dataset.line!;
+    const page = dialog.querySelector<HTMLAnchorElement>(".player-page")!;
+    page.setAttribute("href", fromDisk(button.dataset.page!));
+    page.textContent = `Read how ${button.dataset.title} works`;
+    dialog.showModal();
+    if (!matchMedia("(prefers-reduced-motion: reduce)").matches) video.play().catch(() => {});
+  });
+  dialog.querySelector(".player-close")!.addEventListener("click", () => dialog.close());
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog) dialog.close();
+  });
+  dialog.addEventListener("close", () => video.pause());
 }
 
 const chooserForm = document.getElementById("chooser") as HTMLFormElement | null;
 const pickerForm = document.getElementById("picker") as HTMLFormElement | null;
 if (chooserForm && data) chooser(chooserForm, data);
 if (pickerForm && data) picker(pickerForm, data);
+const playerDialog = document.querySelector<HTMLDialogElement>("dialog.player");
+if (playerDialog) player(playerDialog);
 copyButtons();
 selectLinks();
 linksFromDisk();
