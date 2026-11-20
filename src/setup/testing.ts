@@ -1,10 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { parse as parseToml } from "smol-toml";
 import { main } from "../cli.ts";
 import type { FetchedSource, SourceRef } from "../pack/types.ts";
 import type { ExecResult, Machine } from "./commands.ts";
 import { quote } from "../hub/ssh.ts";
-import { gitEnv } from "../testing/git.ts";
+import { gitEnv, spawnGit } from "../testing/git.ts";
 import { profilePath } from "./profile.ts";
 import { Stopped, type Terminal } from "./terminal.ts";
 import { remoteLauncher } from "../hub/ssh.ts";
@@ -66,6 +67,10 @@ export const coderToken = ["hedge", "test", "coder", "token"].join("-");
 
 const hostKeyAdded = (host: string) => `Warning: Permanently added '${host}' (ED25519) to the list of known hosts.\n`;
 
+const enterpriseHostKeys = [["ssh-ed25519", ["AAAA", "enterprise", "ed"].join("")]].map((words) => words.join(" "));
+
+export const fakeGitHubHostKeys = [["ssh-ed25519", ["AAAA", "github", "ed"].join("")], ["ecdsa-sha2-nistp256", ["AAAA", "github", "ecdsa"].join("")]].map((words) => words.join(" "));
+
 export type HereLink = { environmentId: string; label: string };
 
 export const boxHome = (home: string, host: string) => join(home, "boxes", host);
@@ -101,7 +106,7 @@ export const onBox = (command: string[]) => (command[0] === "ssh" ? command.at(-
  * Each box's T3 environment id is env-<host>, except on the hosts withoutT3, where T3 never ran.
  * T3 here lists hereLinks as its linked environments, and unlink forgets one, or fails with unlinkFails. ssh never reaches the hosts named unreachable.
  */
-export function fakeMachine(home: string, polls: Partial<Record<SignInName, number>> = {}, options: { org?: boolean; createFails?: string; createFailsAfterMaking?: string; lookupFails?: string; publicRepos?: string[]; scopes?: string; failRun?: boolean; exits?: Partial<Record<SignInName, number>>; connectHere?: boolean; boxFiles?: Record<string, string>; hubDown?: boolean; hubUpdateFails?: string; boxCoderAt?: string; boxCoderSameUser?: boolean; claude?: Partial<Record<"claude" | "box:claude", ClaudeSignedIn>>; startedAt?: number; cliPrintsTunnel?: boolean; serverWithoutLinkState?: Array<"box" | "here">; runtimeOrigin?: string; runtimePid?: unknown; serverGone?: boolean; boxConnect?: { authenticated: unknown; linked: unknown }; hereConnect?: { desired?: unknown; authenticated?: unknown; linked?: unknown }; t3Home?: string; devServerUrl?: string; tunnelStartsAfter?: number; hereTunnelStartsAfter?: number; withoutT3?: string[]; hereLinks?: HereLink[]; unreachable?: string[]; unlinkFails?: string; hereStatusFailures?: number; installers?: Record<string, string>; installerEnv?: Record<string, string> } = {}) {
+export function fakeMachine(home: string, polls: Partial<Record<SignInName, number>> = {}, options: { org?: boolean; createFails?: string; createFailsAfterMaking?: string; lookupFails?: string; publicRepos?: string[]; scopes?: string; failRun?: boolean; exits?: Partial<Record<SignInName, number>>; connectHere?: boolean; boxFiles?: Record<string, string>; hubDown?: boolean; hubUpdateFails?: string; boxCoderAt?: string; boxCoderSameUser?: boolean; claude?: Partial<Record<"claude" | "box:claude", ClaudeSignedIn>>; startedAt?: number; cliPrintsTunnel?: boolean; serverWithoutLinkState?: Array<"box" | "here">; runtimeOrigin?: string; runtimePid?: unknown; serverGone?: boolean; boxConnect?: { authenticated: unknown; linked: unknown }; hereConnect?: { desired?: unknown; authenticated?: unknown; linked?: unknown }; t3Home?: string; devServerUrl?: string; tunnelStartsAfter?: number; hereTunnelStartsAfter?: number; withoutT3?: string[]; hereLinks?: HereLink[]; unreachable?: string[]; unlinkFails?: string; hereStatusFailures?: number; installers?: Record<string, string>; installerEnv?: Record<string, string>; codexProbe?: { output: string; loggedIn: boolean; statusError?: string; afterSignIn?: string }; codexConfig?: string; boxCodexAfterSignIn?: string } = {}) {
   const left: Record<SignInName, number> = { github: 0, claude: 0, chatgpt: 0, coder: 0, "box:github": 0, "box:claude": 0, "box:chatgpt": 0, "box:t3": 0, "box:coder": 0, ...polls };
   const started = new Set<SignInName>();
   const calls: Array<{ command: string[]; cwd?: string; timeoutMs?: number; input?: string }> = [];
@@ -118,6 +123,18 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
   const opened: string[] = [];
   let devbox = false;
   const passes = (name: SignInName) => left[name] === 0;
+  const codexSaved: Partial<Record<SignInName, string>> = {};
+  let codexCredential = options.codexProbe?.loggedIn ? "kept" : undefined;
+  const storeIn = (text: string) => /cli_auth_credentials_store\s*=\s*"([^"]*)"/.exec(text)?.[1];
+  const configuredStore = (name: SignInName) => {
+    const store = name === "chatgpt" && options.codexConfig !== undefined ? parseToml(options.codexConfig).cli_auth_credentials_store : undefined;
+    return typeof store === "string" ? store : undefined;
+  };
+  const codexReads = (name: SignInName, line: string) => {
+    const store = storeIn(line) ?? (line.includes("--ignore-user-config") ? "auto" : (configuredStore(name) ?? "auto"));
+    const saved = codexSaved[name];
+    return passes(name) && (saved === undefined || saved === store || (store === "auto" && saved === "file"));
+  };
   const result = (ok: boolean, output = ""): ExecResult => ({ code: ok ? 0 : 1, output, stdout: output });
   const reached = new Set<string>();
   const claudeStatus = (name: "claude" | "box:claude") => {
@@ -238,7 +255,10 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
     if (line === "gh auth setup-git") return result(true);
     if (line === "claude auth status") return claudeStatus("box:claude");
     if (line === "claude -p ok") return claudeReply("box:claude");
-    if (line.includes("codex exec")) return result(passes("box:chatgpt"), "ok");
+    if (line.includes("codex exec") && options.boxCodexAfterSignIn && started.has("box:chatgpt") && passes("box:chatgpt")) return result(false, options.boxCodexAfterSignIn);
+    if (line.includes("codex exec")) return result(codexReads("box:chatgpt", line), "ok");
+    if (line === "codex login status") return passes("box:chatgpt") ? result(true, "Logged in using ChatGPT") : result(false, "Not logged in");
+    if (line.includes('cat "${CODEX_HOME:-$HOME/.codex}/config.toml"')) return result(false, "cat: config.toml: No such file or directory");
     if (line.startsWith("sh -c 'if [ -f ")) return result(true, Object.entries(options.boxFiles ?? {}).map(([path, text]) => `=== file ${path}\n${text}\n`).join(""));
     if (line.includes("/.config/hedge/machine.json")) return forReal(line, host, input);
     if (line.includes("/userdata/logs/boot-service.log")) return forReal(line, host, input);
@@ -263,13 +283,19 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
       if (line.startsWith("gh api user/memberships/orgs/")) return options.org ? result(true, "active\n") : result(false, "Not Found");
       if (line === "claude auth status") return claudeStatus("claude");
       if (line === "claude -p ok") return claudeReply("claude");
-      if (line.startsWith("codex exec")) return result(passes("chatgpt"), "ok");
+      if (line.startsWith("codex exec") && options.codexProbe?.afterSignIn && codexCredential === "replaced") return result(false, options.codexProbe.afterSignIn);
+      if (line.startsWith("codex exec")) return codexReads("chatgpt", line) ? result(true, "ok") : result(false, options.codexProbe?.output ?? "ok");
+      if (line.startsWith("sh -c ") && line.endsWith("/config.toml\"")) return options.codexConfig === undefined ? result(false, "cat: config.toml: No such file or directory") : result(true, options.codexConfig);
+      if (line === "codex login status" && options.codexProbe?.statusError) return result(false, options.codexProbe.statusError);
+      if (line === "codex login status") return codexCredential ? result(true, "Logged in using ChatGPT") : result(false, "Not logged in");
       if (line === "coder whoami") return passes("coder") ? result(true, coderWhoami) : result(false, "You are not logged in");
       if (line === "coder whoami -o json") return passes("coder") ? result(true, coderWhoamiJson("https://coder.example.com", coderUserId)) : result(false, "You are not logged in");
       if (line === "coder tokens create") return passes("coder") ? result(true, `${coderToken}\n`) : result(false, "You are not logged in");
       if (line === "hogli devbox:status") return result(devbox);
       if (line === "hogli devbox:start") return (devbox = true), result(true, "up");
       if (line === "gh api user --jq .login") return result(true, "nora\n");
+      if (line === "gh api --hostname github.com meta --jq .ssh_keys[]") return result(true, `${fakeGitHubHostKeys.join("\n")}\n`);
+      if (line === "gh api meta --jq .ssh_keys[]") return result(true, `${enterpriseHostKeys.join("\n")}\n`);
       if (line.startsWith("gh repo view ") && existsSync(githubRepo(home, command[3]!)) && command[3]!.split("/")[0] === options.lookupFails) return result(false, "HTTP 502: Bad Gateway");
       if (line.startsWith("gh repo view ")) return existsSync(githubRepo(home, command[3]!)) ? result(true, line.endsWith("--json visibility --jq .visibility") ? `${options.publicRepos?.includes(command[3]!) ? "PUBLIC" : "PRIVATE"}\n` : "") : result(false, "Could not resolve to a Repository");
       if (line.startsWith("gh repo create ")) {
@@ -290,6 +316,8 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
       const name = word === "gh" ? "github" : word === "claude" ? "claude" : word === "codex" ? "chatgpt" : word === "t3" ? "t3" : "coder";
       const signIn = (remote === undefined ? name : `box:${name}`) as SignInName;
       started.add(signIn);
+      if (word === "codex") codexSaved[signIn] = storeIn(remote ?? command.join(" ")) ?? configuredStore(signIn) ?? "auto";
+      if (signIn === "chatgpt") codexCredential = undefined;
       const exit = options.exits?.[signIn];
       if (exit !== undefined) return { stop: () => {}, exited: Promise.resolve(exit) };
       let kill = () => {};
@@ -312,13 +340,14 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
       sleeps.push(ms);
       now += ms;
       for (const name of started) if (left[name] > 0) left[name]--;
+      if (started.has("chatgpt") && passes("chatgpt") && codexCredential === undefined) codexCredential = "replaced";
     },
     async openUrl(url) {
       opened.push(url);
     },
     has: () => true,
   };
-  return { machine, clock, calls, starts, runs, sleeps, opened, coderSsh, hubUpdates, credentials, hubLinked, sessions: () => [...hereSessions, ...boxSessions], hereLinks: () => hereLinks, peerLinks };
+  return { machine, clock, codexCredential: () => codexCredential, calls, starts, runs, sleeps, opened, coderSsh, hubUpdates, credentials, hubLinked, sessions: () => [...hereSessions, ...boxSessions], hereLinks: () => hereLinks, peerLinks };
 }
 
 function installerBin(home: string, installers: Record<string, string>) {
@@ -350,4 +379,14 @@ export const savedAnswers = (home: string) => JSON.parse(readFileSync(join(profi
 /** The answers as pushed to the fake github.com. */
 export async function pushedAnswers(home: string, repo = "nora/hedge-profile") {
   return JSON.parse((await realGit(home, ["--git-dir", githubRepo(home, repo), "show", "main:hedge.json"])).output);
+}
+
+export async function changeOnFirstCommit(home: string, elsewhere: string, change: string) {
+  await spawnGit(home, "clone", "-q", githubRepo(home, "nora/hedge-profile"), elsewhere);
+  const publish = join(elsewhere, "..", "publish.ts");
+  writeFileSync(publish, `const [file, value] = process.argv.slice(2);\nconst profile = await Bun.file(file).json();\n${change}\nawait Bun.write(file, JSON.stringify(profile, null, 2) + "\\n");\n`);
+  const changeElsewhere = (value: string) => `'${process.execPath}' '${publish}' hedge.json ${value}`;
+  const marker = join(elsewhere, "..", "published");
+  const hook = `#!/bin/sh\n[ -e '${marker}' ] && exit 0\ntouch '${marker}'\nunset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX\ncd '${elsewhere}' && git pull -q && ${changeElsewhere("after")} && git commit -q -am 'Change the profile on another machine' && git push -q\n`;
+  writeFileSync(join(profilePath(home), ".git/hooks/post-commit"), hook, { mode: 0o755 });
 }

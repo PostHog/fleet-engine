@@ -43,7 +43,7 @@ describe("the devbox over SSH", () => {
   onLinuxHost("installs Hedge on the chosen host, signs it in with the codes shown here, applies the profile, and links T3 Code both ways", async () => {
     const home = homeWithHosts();
     const node = sandbox("Linux");
-    const box = fakeMachine(home, { "box:github": 1, "box:claude": 1, "box:chatgpt": 2, "box:t3": 1 }, { installerEnv: shellEnv(node) });
+    const box = fakeMachine(home, { "box:github": 1, "box:claude": 1, "box:chatgpt": 2, "box:t3": 1 }, { installerEnv: shellEnv(node), exits: { "box:chatgpt": 0 } });
     const result = await hedgeSetup(home, ["--preset", "starter"], ["", "", "", "1"], box);
     expect(result.code).toBe(0);
     expect(result.output).toContain("? Which SSH host is your devbox?");
@@ -63,7 +63,7 @@ describe("the devbox over SSH", () => {
     expect(onTheBox).toContain("gh auth login --hostname github.com --git-protocol https --web --scopes repo,read:org,admin:public_key,admin:ssh_signing_key,workflow");
     expect(onTheBox).toContain("gh auth setup-git");
     expect(onTheBox).toContainEqual(expect.stringContaining(`gh repo clone https://github.com/nora/hedge-profile.git "$HOME/.local/share/hedge/profile" -- -q && sh "$HOME/.local/share/hedge/engine/get.sh" --ref main --profile "$HOME/.local/share/hedge/profile"`));
-    expect(onTheBox).toContain("codex login --device-auth");
+    expect((await overSsh(box.machine, "node-1").exec(["codex", "exec", "ok"])).code).toBe(0);
     expect(onTheBox).toContain("t3 up --connect --yes --headless");
     expect(box.runs).toContainEqual({ command: ["ssh", "-t", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "node-1", expect.stringContaining("claude auth login")], input: true });
     expect(box.opened).toEqual(["https://github.com/login/device"]);

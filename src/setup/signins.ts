@@ -1,10 +1,11 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { parse } from "smol-toml";
 import { environmentToken, tokenScopes } from "../adapters/identity/github.ts";
 import type { ModelRow, SourceRef } from "../pack/types.ts";
 import type { Machine } from "./commands.ts";
-import type { SignIn } from "./human.ts";
+import { SignInKept, type SignIn } from "./human.ts";
 
 export const githubScopes = ["repo", "read:org", "admin:public_key", "admin:ssh_signing_key", "workflow"];
 
@@ -100,23 +101,54 @@ function environmentApiKeyDead(host: string | undefined) {
 
 export const codexProbeTimeoutMs = 20_000;
 
+const fileStore = 'cli_auth_credentials_store="file"';
+const codexConfig = ["sh", "-c", 'cat "${CODEX_HOME:-$HOME/.codex}/config.toml"'];
+
+async function codexStore(machine: Machine) {
+  const config = await machine.exec(codexConfig);
+  if (config.code !== 0) return undefined;
+  try {
+    const store = parse(config.stdout).cli_auth_credentials_store;
+    return typeof store === "string" ? store : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function chatgptSignIn(machine: Machine, models: ModelRow[]): SignIn {
   const model = (models.find((row) => row.provider === "codex" && row.role === "lookup") ?? models.find((row) => row.provider === "codex"))?.model;
+  let store: string | undefined;
+  const storeOption = () => (store === undefined ? fileStore : `cli_auth_credentials_store="${store}"`);
   return {
     id: "chatgpt",
     title: "Sign in to ChatGPT",
     minutes: 1,
-    why: "Codex signs in with your ChatGPT plan. Setup checks with a real request, because a stale sign-in still looks signed in.",
-    command: ["codex", "login", "--device-auth"],
-    whenItFails: "When it says that device code sign-in is off, turn on device code authorization for Codex in ChatGPT's settings under Security. In a ChatGPT workspace, a workspace admin turns it on. Or sign in in the browser of your own computer: run ssh -L 1455:localhost:1455 <this box> there, then codex login in that SSH session, and open the link it prints.",
+    why: "Codex on this machine signs in with your ChatGPT plan, and saves the sign-in in a file, unless its config names another store, so it lasts after the SSH session ends. This sign-in is only for Codex here. The gateway's ChatGPT sign-ins only let agents reach apps such as Slack, and the hub's proxy keeps its own subscriptions. Setup checks with a real request, because a stale sign-in still looks signed in.",
+    get command() {
+      return ["codex", "login", ...(store === undefined ? ["-c", fileStore] : []), "--device-auth"];
+    },
+    get whenItFails() {
+      return `When it says that device code sign-in is off, turn on device code authorization for Codex in ChatGPT's settings under Security. In a ChatGPT workspace, a workspace admin turns it on. Or sign in in the browser of your own computer: run ssh -L 1455:localhost:1455 <this box> there, then codex login${store === undefined ? ` -c '${fileStore}'` : ""} in that SSH session, and open the link it prints.`;
+    },
     async probe() {
+      store = await codexStore(machine);
       const dir = mkdtempSync(join(tmpdir(), "hedge-codex-probe-"));
       try {
-        const command = ["codex", "exec", "--ephemeral", "--sandbox", "read-only", "--ignore-user-config", "--skip-git-repo-check", ...(model ? ["--model", model] : []), "Reply with the word ok."];
-        return (await machine.exec(command, { cwd: dir, timeoutMs: codexProbeTimeoutMs })).code === 0;
+        const command = ["codex", "exec", "--ephemeral", "--sandbox", "read-only", "--ignore-user-config", "-c", storeOption(), "--skip-git-repo-check", ...(model ? ["--model", model] : []), "Reply with the word ok."];
+        const reply = await machine.exec(command, { cwd: dir, timeoutMs: codexProbeTimeoutMs });
+        if (reply.code === 0) return true;
+        const status = await machine.exec(["codex", "login", "status"]);
+        if (status.code !== 0 && status.output.split("\n").some((line) => line.trim() === "Not logged in")) return false;
+        if (status.code === 0) throw new SignInKept(`Codex is signed in, but its test request failed: ${probeError(reply.output)}. Setup keeps that sign-in and starts no new one. To replace it, run codex logout first.`);
+        throw new SignInKept(`Codex's test request failed: ${probeError(reply.output)}, and codex login status could not tell whether Codex is signed in: ${probeError(status.output)}. Setup keeps the sign-in it may have and starts no new one.`);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
     },
   };
+}
+
+function probeError(output: string) {
+  const lines = output.split("\n").map((line) => line.trim().replace(/^ERROR:\s*/, "").replace(/\.$/, "")).filter(Boolean);
+  return lines.at(-1) ?? "it printed nothing";
 }

@@ -16,6 +16,19 @@ function ended(signIn: SignIn, code: number, rerun = "hedge setup") {
   return `${signIn.command!.join(" ")} ended${code ? ` with code ${code}` : ""}, but ${signIn.title} still does not pass its check. Fix what it says above, then run ${rerun} again.${signIn.whenItFails ? ` ${signIn.whenItFails} Then run ${rerun} again.` : ""}`;
 }
 
+export class SignInKept extends Error {}
+
+const kept = (signIn: SignIn) => signIn.probe().catch((error: unknown) => {
+  if (error instanceof SignInKept) return error;
+  throw error;
+});
+
+function keptNeeds(signIn: SignIn, held: SignInKept, terminal: Terminal, rerun = "hedge setup"): StepOutcome {
+  terminal.print(`  Needs you: ${signIn.title}`);
+  terminal.print(`  ${held.message} Fix that, then run ${rerun} again.`);
+  return "unanswered";
+}
+
 export type SignIn = {
   id: string;
   title: string;
@@ -47,10 +60,12 @@ export function humanStep(signIn: SignIn, context: HumanContext): Step {
 }
 
 async function waitForPerson(signIn: SignIn, { terminal, machine, nonInteractive, chat, waited, rerun }: HumanContext): Promise<StepOutcome> {
-  if (await signIn.probe()) {
+  const first = await kept(signIn);
+  if (first === true) {
     terminal.print(`  ✓ ${signIn.title}: already done`);
     return signIn.after?.();
   }
+  if (first instanceof SignInKept) return keptNeeds(signIn, first, terminal, rerun);
   if (nonInteractive && !(chat && !signIn.interactive)) {
     terminal.print(`  Needs you: ${signIn.title}`);
     terminal.print(`  ${howToStart(signIn)}`);
@@ -72,8 +87,12 @@ async function waitForPerson(signIn: SignIn, { terminal, machine, nonInteractive
     let pollsAfterExit = 0;
     for (;;) {
       await machine.sleep(pollMs);
-      if (await signIn.probe()) break;
-      if (exit !== undefined && (exit !== 0 || ++pollsAfterExit > graceAfterExit)) throw new Error(ended(signIn, exit, rerun));
+      const passed = await kept(signIn);
+      if (passed === true) break;
+      if (exit !== undefined && (exit !== 0 || ++pollsAfterExit > graceAfterExit)) {
+        if (passed instanceof SignInKept) return keptNeeds(signIn, passed, terminal, rerun);
+        throw new Error(ended(signIn, exit, rerun));
+      }
     }
   } finally {
     if (!signIn.finishes) started?.stop();
@@ -81,6 +100,21 @@ async function waitForPerson(signIn: SignIn, { terminal, machine, nonInteractive
   if (signIn.finishes && started && exit === undefined) await started.exited;
   terminal.print(`  ✓ ${signIn.title}: done`);
   return signIn.after?.();
+}
+
+export function optionalStep(signIn: SignIn, { terminal, rerun = "hedge setup" }: HumanContext, notNeeded: string): Step {
+  return {
+    id: `${signIn.id}:optional`,
+    title: signIn.title,
+    minutes: signIn.minutes,
+    kind: "auto",
+    async run() {
+      const passed = await kept(signIn);
+      if (passed === true) return void terminal.print(`  ✓ ${signIn.title}: already done`);
+      const next = passed instanceof SignInKept ? `${passed.message} Fix that, then run ${rerun} again.` : `${howToStart(signIn)}.`;
+      terminal.print(`  To do: ${signIn.title}. ${notNeeded} ${next}`);
+    },
+  };
 }
 
 function howToStart({ command, interactive, url, why }: SignIn) {
@@ -94,7 +128,9 @@ async function withKeyboard(signIn: SignIn, { terminal, machine, rerun }: HumanC
   terminal.print("  It needs your keyboard. Setup goes on when it ends.");
   terminal.release?.();
   const code = await machine.run(signIn.command!, { input: true });
-  if (!(await signIn.probe())) throw new Error(ended(signIn, code, rerun));
+  const passed = await kept(signIn);
+  if (passed instanceof SignInKept) return keptNeeds(signIn, passed, terminal, rerun);
+  if (!passed) throw new Error(ended(signIn, code, rerun));
   terminal.print(`  ✓ ${signIn.title}: done`);
   return signIn.after?.();
 }
