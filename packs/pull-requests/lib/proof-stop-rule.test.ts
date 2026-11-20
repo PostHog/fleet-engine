@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { checkout, cleanFixtures, fakeModel, graded, type Checkout } from "./proof-testing.ts";
 
@@ -116,5 +116,77 @@ test("a first review that saw no production lines never asks for a sanity pass, 
   const reviewed = await pr.git("rev-parse", "HEAD");
   await pr.commit("helper.ts", lines(5, "help"));
 
+  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).code).toBe(0);
+});
+
+test("the first panel after a clean single review still runs, since the gate needs it", async () => {
+  const pr = await checkout();
+  const reviewed = await firstRound(pr, ["- minor | feature.ts:1 | the word reads oddly | anchor: greet 0"], ["1. rejected: it is the domain term"]);
+  fakeModel(pr, "REVIEWER", "FINDINGS:\n(none)\nCOVERED: feature.ts\n");
+  await pr.hedge("require", "--none", "--reason", "docs only", "--author", "claude");
+
+  expect((await pr.hedge("review", "--lens", "correctness", "--scope", "fixes", "--base", reviewed)).code).toBe(0);
+  expect((await pr.hedge("review", "--wait")).code).toBe(0);
+  await expect(pr.hedge("review", "--lens", "correctness", "--scope", "fixes", "--base", reviewed)).rejects.toThrow("Round 2 found no bug in production code");
+});
+
+test("[base] counts only where a field starts with it, and the site comes from the location field alone", async () => {
+  for (const finding of [
+    "- major | feature.ts:2 | the lookup reads ranges[base] past its end | anchor: const range = ranges[base]",
+    "- major | the greeting drops the last name, as feature.test.ts:3 shows",
+    "- feature.ts:2 | major | Correctness | the greeting drops the last name | keep it | anchor: greet 1",
+  ]) {
+    const pr = await checkout();
+    const reviewed = await firstRound(pr, [finding], ["1. fixed: the greeting keeps it"]);
+    await pr.commit("feature.ts", lines(11, "greet"));
+    expect((await pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).code).toBe(0);
+  }
+});
+
+test("an ungraded finding and a TESTS item without a file buy no round", async () => {
+  for (const [finding, response] of [
+    ["- No findings, the greeting is right.", "1. rejected: nothing to fix"],
+    ["TESTS:\n- the suite mocks the clock", "1. fixed: the suite uses a real clock"],
+  ] as const) {
+    const pr = await checkout();
+    const reviewed = await firstRound(pr, [finding], [response]);
+    await pr.commit("feature.ts", lines(11, "greet"));
+    await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(stops);
+  }
+});
+
+test("the stop rule speaks before the scope of the next round, and names the question that gets the user's override", async () => {
+  const pr = await checkout();
+  await firstRound(pr, ["- minor | feature.ts:1 | the word reads oddly | anchor: greet 0"], ["1. rejected: it is the domain term"]);
+
+  await expect(pr.hedge("review-start", "--scope", "full")).rejects.toThrow(stops);
+  await expect(pr.hedge("review-start", "--scope", "full")).rejects.toThrow(`Question: "Run one more review round? example/product#42: ${stops}." Options: "Run one more round", "Stop here"`);
+});
+
+test("the user's override waits for a sanity pass too, and only the latest pass counts", async () => {
+  const pr = await checkout();
+  const reviewed = await firstRound(pr, ["- major | feature.ts:2 | the greeting drops the last name | anchor: greet 1"], ["1. fixed: the greeting keeps it"]);
+  await pr.commit("feature.ts", lines(30, "greet"));
+  expect((await pr.hedge("sanity", "--verdict", "justified", "--reason", "The fix needs its own parser")).code).toBe(0);
+  pr.clock.now = new Date("2026-10-25T12:05:00Z");
+  await pr.commit("feature.ts", lines(21, "greet"));
+  expect((await pr.hedge("sanity", "--verdict", "cut", "--reason", "The parser went back to the base")).code).toBe(0);
+  await pr.commit("feature.ts", lines(25, "greet"));
+
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow("Production lines grew from 10 at round 1 to 25 at HEAD");
+  pr.choose("Run one more round", `Run one more review round? example/product#42: ${stops}.`);
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed, "--override", `2026-10-25 "Run one more round"`)).rejects.toThrow("Production lines grew from 10 at round 1 to 25 at HEAD");
+});
+
+test("a sanity pass needs a reason without figures, and a half-written pass file is skipped", async () => {
+  const pr = await checkout();
+  const reviewed = await firstRound(pr, ["- major | feature.ts:2 | the greeting drops the last name | anchor: greet 1"], ["1. fixed: the greeting keeps it"]);
+  await pr.commit("feature.ts", lines(21, "greet"));
+
+  await expect(pr.hedge("sanity", "--verdict", "cut", "--reason", " ")).rejects.toThrow("--reason needs why");
+  await expect(pr.hedge("sanity", "--verdict", "cut", "--reason", "cut 40% of the growth")).rejects.toThrow("sanity reason");
+  mkdirSync(join(pr.pullRequest, "sanity"), { recursive: true });
+  writeFileSync(join(pr.pullRequest, "sanity", `${await pr.git("rev-parse", "HEAD")}.json.1234`), "{\"commit\":");
+  expect((await pr.hedge("sanity", "--verdict", "justified", "--reason", "The fix needs its own parser")).code).toBe(0);
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).code).toBe(0);
 });

@@ -81,7 +81,7 @@ test("only an override round may review the whole PR diff again, so a reviewed H
   const answer = `2026-10-25 "Run one more round"`;
   pr.choose("Run one more round");
 
-  await expect(pr.hedge("review", "--single", "--scope", "full")).rejects.toThrow(`--scope fixes --base ${reviewed}`);
+  await expect(pr.hedge("review", "--single", "--scope", "full")).rejects.toThrow("found no bug in production code that the PR introduced, so the review loop stops");
   await expect(pr.hedge("review", "--scope", "fixes", "--base", await pr.git("rev-parse", "main"), "--override", answer, "--thread", "thread-1")).rejects.toThrow(`needs --base ${reviewed}`);
   await expect(pr.hedge("review", "--single", "--scope", "full", "--base", reviewed, "--override", answer, "--thread", "thread-1")).rejects.toThrow("--scope full reads the diff from the merge base");
   expect((await pr.hedge("review", "--single", "--scope", "full", "--override", answer, "--thread", "thread-1")).code).toBe(0);
@@ -227,12 +227,12 @@ test("hedge proof review runs the reviewer of the model table on the PR diff and
   await expect(pr.hedge("review", "--single")).rejects.toThrow("empty answer");
   expect(existsSync(join(pr.pullRequest, "reviews/1/findings.md"))).toBe(false);
 
-  reviewer.answer("1. [medium] feature.txt:1 names no member.\n");
+  reviewer.answer("1. major | feature.txt:1 | names no member.\n");
   expect((await pr.hedge("review", "--single")).code).toBe(0);
   const prompt = reviewer.prompts().at(-1)!;
   for (const part of ["+greet the new member", "Greet new members", "Keep things simple.", ".agents/skills/tdd/SKILL.md"]) expect(prompt).toContain(part);
   const findings = readFileSync(join(pr.pullRequest, "reviews/1/findings.md"), "utf8");
-  expect(findings).toBe("1. [medium] feature.txt:1 names no member.\n");
+  expect(findings).toBe("1. major | feature.txt:1 | names no member.\n");
   const anchors = readFileSync(join(pr.pullRequest, "reviews/1/anchors.md"), "utf8");
   expect(anchors).toContain("## Anchor check");
   expect(anchors).toContain("1 finding quotes no anchor.");

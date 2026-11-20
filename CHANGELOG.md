@@ -5,9 +5,10 @@
 ### The review loop stops on its own
 
 - A review round runs after another review only when the latest review found
-  a bug in production code that the pull request introduced. Otherwise
-  `hedge proof review` refuses the round, and only the user's `--override`
-  runs it. Give the fixes a final read instead.
+  a blocker or major in production code that the pull request introduced.
+  Otherwise `hedge proof review` refuses the round, and only the user's
+  `--override` runs it. Give the fixes a final read instead. The first panel
+  of a pull request still runs.
 - The reviewer reads that behaviour the base has too is not a blocker or a
   major. Such a finding is a minor that starts with `[base]` and cites the
   base line.
