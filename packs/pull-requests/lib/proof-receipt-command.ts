@@ -55,14 +55,14 @@ export async function runReceipt(head: ProofIdentity, items: string[] | undefine
   if (!Array.isArray(decisions)) { print(`receipt: the hub ledger cannot be reached (${decisions.unreachable}); nothing written`); return 3; }
   const heading = stringSetting("pull-requests.receiptHeading", env);
   checkPlacement(first.body, heading);
-  const summary = await receiptSummary(head, first, ledger, context);
+  const { summary, gated } = await receiptSummary(head, first, ledger, context);
   const display = await readDisplay(home, head);
   const notChecked = items ?? await readNotChecked(home, head);
   const covered = decisions.filter((decision) => covers(decision, head));
   const reviews = await receiptReviews(head, home);
   let rendered: ReturnType<typeof renderSection>;
   try {
-    rendered = renderSection({ summary, decisions: covered, display, notChecked, reviews, screenshots: await screenshotFiles(summary) });
+    rendered = renderSection({ summary, gated, landed: first.state === "merged", display, notChecked, reviews, screenshots: await screenshotFiles(summary) });
   } catch (error) { if (error instanceof GuardRefusal) { print(error.message); return 2; } throw error; }
   for (const warning of rendered.warnings) print(warning);
   const title = `Proof receipt: ${head.repository}#${head.pr}`;

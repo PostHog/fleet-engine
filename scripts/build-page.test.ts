@@ -7,6 +7,7 @@ import { spawnAsync } from "../src/testing/spawn.ts";
 import { logoMark } from "../page/logo.ts";
 import { firstStart, installPrompt, promptData, startPrompt, toggleSelected, type PageData, type PromptData } from "../page/model.ts";
 import { buildSite, pageData, type SiteFiles } from "./build-page.ts";
+import { withLessons } from "../src/testing/lessons.ts";
 
 const root = join(import.meta.dir, "..");
 const temp = tempDirs();
@@ -31,7 +32,7 @@ let data: PageData;
 let files: SiteFiles;
 beforeAll(async () => {
   data = await pageData({ audience: "public" });
-  files = await buildSite({ audience: "public" });
+  files = await buildSite({ ...withLessons(), audience: "public" });
 });
 
 const pagesOf = (site: SiteFiles) => Object.entries(site).flatMap(([path, content]) => (path.endsWith(".html") ? [[path, content as string] as const] : []));
@@ -54,8 +55,8 @@ function localTargets(path: string, html: string) {
 }
 
 describe("the site build", () => {
-  test("writes one page for the landing, one for the packs, and one for every pack", () => {
-    expect(pagesOf(files).map(([path]) => path)).toEqual(["index.html", "packs/index.html", ...data.packs.map((pack) => `packs/${pack.name}/index.html`)]);
+  test("writes one page for the landing, one for the packs, one for every pack, one for the lessons, and one for every lesson", () => {
+    expect(pagesOf(files).map(([path]) => path)).toEqual(["index.html", "packs/index.html", ...data.packs.map((pack) => `packs/${pack.name}/index.html`), "learn/index.html", "learn/tour/index.html"]);
     expect(data.packs.map((pack) => pack.name)).toEqual(["base", "hub", "pull-requests", "orchestration", "communication", "guards", "memory", "slack", "incident-io", "mcp-gateway", "security", "t3", "herdr"]);
   });
 
@@ -137,7 +138,7 @@ describe("the site build", () => {
     expect(hub).toContain('<button type="button" class="btn btn-yellow" data-copy="install-text">Copy prompt</button>');
     expect([copied.split("\n")[0], copied.match(/^ {3}(hedge packs .*)$/m)?.[1], new URL(t3LinkOn(hub, "install")).searchParams.get("prompt")]).toEqual(["Add this Hedge pack to my setup with me: Hub.", "hedge packs --add hub", copied]);
     expect(Object.keys(files)).not.toContain("packs/integrations/index.html");
-    const team = await buildSite({ audience: "posthog", team: [teamPack()] });
+    const team = await buildSite({ ...withLessons(), audience: "posthog", team: [teamPack()] });
     expect(groupsOf(page("packs/index.html", team)).at(-1)).toEqual(["Your team's packs", ["Posthog (switch)"]]);
   });
 
@@ -212,7 +213,7 @@ describe("the site build", () => {
       const own = page(`packs/${pack.name}/index.html`);
       expect([pack.name, iconOf(own.slice(own.indexOf("<h1"))), hogOf(own)]).toEqual([pack.name, iconOf(cards[index]!), hogOf(cards[index]!)]);
     });
-    const team = await buildSite({ audience: "posthog", team: [teamPack({ name: "acme", audience: undefined, workflows: [], settings: [] })] });
+    const team = await buildSite({ ...withLessons(), audience: "posthog", team: [teamPack({ name: "acme", audience: undefined, workflows: [], settings: [] })] });
     const teamCard = cardsOf(page("packs/index.html", team)).at(-1)!;
     expect(teamCard).toContain('value="acme"');
     expect(cards.map(iconOf)).not.toContain(iconOf(teamCard));
@@ -221,7 +222,7 @@ describe("the site build", () => {
 
   test("a build ships each picture its pages show, unchanged, and no other picture", async () => {
     const artDir = join(root, "page/art");
-    const team = await buildSite({ audience: "posthog", team: [teamPack()] });
+    const team = await buildSite({ ...withLessons(), audience: "posthog", team: [teamPack()] });
     for (const site of [files, team]) {
       const shipped = Object.keys(site).filter((path) => path.startsWith("assets/art/"));
       const shown = new Set(pagesOf(site).flatMap(([path, html]) => localTargets(path, html)));
@@ -239,7 +240,7 @@ describe("the site build", () => {
     const credits = readFileSync(join(artDir, "README.md"), "utf8");
     expect(held.filter((name) => !new RegExp(`^\\| \`${name}\` \\| \`[^\`]+/${name}\` \\| \`[0-9a-f]{40}\` \\|$`, "m").test(credits))).toEqual([]);
     expect(readFileSync(join(artDir, "LICENSE"), "utf8")).toStartWith("Copyright (c) 2020-2026 PostHog Inc.");
-    const team = await buildSite({ audience: "posthog", team: [teamPack()] });
+    const team = await buildSite({ ...withLessons(), audience: "posthog", team: [teamPack()] });
     expect(held.filter((name) => !(`assets/art/${name}` in team)).toSorted()).toEqual(keptUnshown);
     expect(held.length).toBeGreaterThan(15);
   });
@@ -301,7 +302,7 @@ describe("the site build", () => {
 
   test("a build ships each video and poster its pages show, unchanged, and a pack without a video adds no file", async () => {
     const videoDir = join(root, "page/video");
-    const team = await buildSite({ audience: "posthog", team: [teamPack()] });
+    const team = await buildSite({ ...withLessons(), audience: "posthog", team: [teamPack()] });
     const expected = videoPacks.flatMap((name) => [`assets/video/${name}.jpg`, `assets/video/${name}.mp4`]).toSorted();
     for (const site of [files, team]) {
       const shipped = Object.keys(site).filter((path) => path.startsWith("assets/video/"));
@@ -333,13 +334,13 @@ describe("the site build", () => {
 
   test("the public build refuses a private pack source", async () => {
     expect(pageData({ audience: "public", team: [teamPack()] })).rejects.toThrow("no pack from a private source");
-    expect(buildSite({ audience: "public", team: [teamPack()] })).rejects.toThrow("no pack from a private source");
+    expect(buildSite({ ...withLessons(), audience: "public", team: [teamPack()] })).rejects.toThrow("no pack from a private source");
   });
 
   test("a team build puts the team pack in the box and in the first setup, and gives it a page", async () => {
     const team = [teamPack({ title: "PostHog" })];
     const teamData = await pageData({ audience: "posthog", team });
-    const site = await buildSite({ audience: "posthog", team });
+    const site = await buildSite({ ...withLessons(), audience: "posthog", team });
     expect(teamData.teamPacks).toEqual(["posthog"]);
     expect(startPrompt(teamData, firstStart)).toContain("- Packs on the first setup: pull-requests, orchestration, communication, memory, posthog\n");
     expect(startPrompt(teamData, { off: teamData.startPacks })).toContain("- Packs on the first setup: posthog\n");
@@ -356,7 +357,7 @@ describe("the site build", () => {
   test("a team pack that requires a hidden, an old or an unknown pack builds, and a hidden team pack stays off the site", async () => {
     const team = [teamPack({ title: "PostHog", requires: ["integrations", "context-library", "gone"] }), teamPack({ name: "quiet", onSite: false, workflows: [], settings: [] })];
     const teamData = await pageData({ audience: "posthog", team });
-    const site = await buildSite({ audience: "posthog", team });
+    const site = await buildSite({ ...withLessons(), audience: "posthog", team });
     expect(teamData.teamPacks).toEqual(["posthog"]);
     expect(visibleText(page("packs/index.html", site))).toContain("Adds integrations Adds context-library Adds gone");
     expect(promptOn(page("packs/posthog/index.html", site), "install")).toContain("hedge packs --add integrations --add context-library --add gone --add posthog\n");

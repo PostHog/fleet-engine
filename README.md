@@ -18,6 +18,8 @@ the agent workflows you pick as **packs**. Your answers live in your own
 private **profile** repo, so every box gets the same setup. Your Mac and
 your phone run only the T3 Code app. Hedge installs nothing on them.
 
+https://github.com/user-attachments/assets/153cb394-af22-4096-8344-2c5487af3cfe
+
 ## Getting started
 
 You need a Coder deployment where you can create workspaces. The setup agent
@@ -49,7 +51,7 @@ Base and Hub are in every Hedge. You pick the rest.
 - [Base](https://posthog.github.io/hedge/packs/base/): every box gets safety rules, the model table, T3 Code defaults, and the jobs that keep it current.
 - [Hub](https://posthog.github.io/hedge/packs/hub/): the hub links your boxes, cleans their disks, and keeps your pack secrets. Turn on recovery, and threads go on after a usage limit.
 - [Quality gates](https://posthog.github.io/hedge/packs/pull-requests/): every change passes proof and a second-model review before it merges, and a risky change also passes a QA swarm.
-- [Orchestration](https://posthog.github.io/hedge/packs/orchestration/): big work becomes a map of tickets that a conductor thread works through, and side work gets its own thread.
+- [Orchestration](https://posthog.github.io/hedge/packs/orchestration/): type /build and say what you want: small work goes straight to a pull request, big work becomes a map that a conductor thread works through, and side work gets its own thread.
 - [Communication](https://posthog.github.io/hedge/packs/communication/): agents write in your voice, give short updates, and share plans and previews as links.
 - [Guards](https://posthog.github.io/hedge/packs/guards/): hooks stop risky shell commands, such as a push past review or a polling loop.
 - [Memory](https://posthog.github.io/hedge/packs/memory/): one private repo holds what your agents learn and what you save, and every box reads it.

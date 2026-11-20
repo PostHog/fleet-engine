@@ -4,7 +4,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawnAsync } from "../../../src/testing/spawn.ts";
 import { answeredFindings, reviewedFindings } from "./proof.ts";
-import { checkout, cleanFixtures, fakeModel, lockHolder, finishRound, fixture, graded, markPanel, models, recordingModel, settings, stuckRoundLock, type Checkout } from "./proof-testing.ts";
+import { answerFixed, checkout, cleanFixtures, fakeModel, lockHolder, finishRound, fixture, graded, markPanel, models, recordingModel, settings, stuckRoundLock, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
 
@@ -78,10 +78,10 @@ test("the Anchor check an author saves with the findings repeats them, so its no
   await pr.commit("feature.txt", "greet\n");
   await pr.hedge("require", "--none", "--reason", "fixture");
   const panel = await cannedPanel(pr, { design: minor, others: lensAnswer("(none)") });
-  const fix = await pr.commit("feature.txt", "greet the member\n");
-  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", panel)).output).toContain(`"round":2`);
+  await pr.commit("feature.txt", "greet the member\n");
+  expect((await pr.hedge("review-start", "--scope", "final", "--base", panel)).output).toContain(`"id":"final-1"`);
   const answer = "- minor | feature.txt:1 | the word reads oddly | anchor: greet the guest";
-  await finishWith(pr, "2", [
+  await finishWith(pr, "final-1", [
     answer,
     "",
     "## Anchor check",
@@ -94,7 +94,7 @@ test("the Anchor check an author saves with the findings repeats them, so its no
   await pr.commit("feature.txt", "greet every member\n");
 
   expect((await pr.hedge("gate")).output).not.toContain("unanswered findings");
-  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", fix)).output).toContain(`"round":3`);
+  await expect(answerKnown(pr, "final-1", 1)).rejects.toThrow(spentOf(1, 0));
 });
 
 test("a reviewer who quotes the Anchor check heading keeps every finding after it, so the gate asks for each blocker", async () => {
@@ -419,8 +419,9 @@ test("a Read tier PR keeps its panel read after a single read the author saved",
   const read = await pr.commit("README.md", "Greet new members.\n");
   await pr.hedge("require", "--none", "--reason", "docs only");
   expect((await pr.hedge("review-start", "--scope", "full")).code).toBe(0);
-  writeFileSync(join(pr.repository, "findings.md"), "No findings.\n");
+  writeFileSync(join(pr.repository, "findings.md"), "- major | the page names no member | anchor: Greet new members.\n");
   await pr.hedge("review-finish", "--round", "1", "--reviewer", "gpt-6.1-sol", "findings.md");
+  await answerFixed(pr, "1");
   await pr.commit("README.md", "Greet every new member.\n");
   expect((await pr.hedge("gate")).code).toBe(1);
 
@@ -452,7 +453,8 @@ test("the last read reads every fix since the panel commit with the Correctness 
   pr.pullRequestState({ body: graded("non-critical", "medium") });
   const panel = await pr.commit("feature.txt", "greet\n");
   await pr.hedge("require", "--none", "--reason", "fixture");
-  await panelReview(pr);
+  await panelReview(pr, "- feature.txt:1 | major | Correctness | the greeting names no member | name the member | anchor: greet");
+  await answerFixed(pr, "1", 3);
   const fixes = await pr.commit("feature.txt", "greet the member\n");
   await pr.hedge("review-start", "--scope", "fixes", "--base", panel);
   await finishRound(pr, "2");
@@ -578,11 +580,11 @@ test("respond refuses a known answer when as many reviews ran as the ceiling all
   await pr.hedge("require", "--none", "--reason", "fixture");
   const panel = await cannedPanel(pr, { design: minor, others: lensAnswer("(none)") });
   await pr.commit("feature.txt", "greet the member\n");
-  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", panel)).output).toContain(`"round":2`);
-  await finishWith(pr, "2", major("the member goes unnamed"));
+  expect((await pr.hedge("review-start", "--scope", "final", "--base", panel)).output).toContain(`"id":"final-1"`);
+  await finishWith(pr, "final-1", major("the member goes unnamed"));
 
   writeFileSync(join(pr.repository, "responses.md"), "1. known: listed under Known issues.\n");
-  await expect(pr.hedge("respond", "--round", "2", "responses.md")).rejects.toThrow("Answer a finding \"known\" only once the review budget of 2 reviews is spent; 1 ran");
+  await expect(pr.hedge("respond", "--round", "final-1", "responses.md")).rejects.toThrow("Answer a finding \"known\" only once the review budget of 2 reviews is spent; 1 ran");
 });
 
 test("a revert carries only from a reviewed commit before the reverted one", async () => {
@@ -888,6 +890,13 @@ async function finishWith(pr: Checkout, round: string, findings: string) {
   await pr.hedge("review-finish", "--round", round, "--reviewer", "gpt-6.1-sol", "findings.md");
 }
 
+async function answerKnown(pr: Checkout, round: string, ...findings: number[]) {
+  writeFileSync(join(pr.repository, "responses.md"), findings.map((finding) => `${finding}. known: listed under Known issues.\n`).join(""));
+  return pr.hedge("respond", "--round", round, "responses.md");
+}
+
+const spentOf = (ceiling: number, ran: number) => `Answer a finding "known" only once the review budget of ${ceiling} reviews is spent; ${ran} ran`;
+
 async function atCeiling(pr: Checkout) {
   pr.pullRequestState({ body: graded("non-critical", "medium") });
   pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 10, "pull-requests.reviewCeiling": 2 });
@@ -908,16 +917,18 @@ test("a finished review with no blocker or major spends no review budget, while 
   await pr.hedge("require", "--none", "--reason", "fixture");
   const panel = await cannedPanel(pr, { design: minor, others: lensAnswer("(none)") });
   const second = await pr.commit("feature.txt", "greet the member\n");
-  await pr.hedge("review-start", "--scope", "fixes", "--base", panel);
-  await finishWith(pr, "2", "No findings.\n");
+  await pr.hedge("review-start", "--scope", "final", "--base", panel);
+  await finishWith(pr, "final-1", "No findings.\n");
   const third = await pr.commit("feature.txt", "greet the new member\n");
 
-  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", second)).output).toContain(`"round":3`);
-  await finishWith(pr, "3", "The greeting drops the name.\n");
+  await expect(answerKnown(pr, "1", 1)).rejects.toThrow(spentOf(2, 0));
+  expect((await pr.hedge("review-start", "--scope", "final", "--base", second)).output).toContain(`"id":"final-2"`);
+  await finishWith(pr, "final-2", "The greeting drops the name.\n");
   await pr.commit("feature.txt", "greet every member\n");
-  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", third)).output).toContain(`"round":4`);
-  await finishWith(pr, "4", major("the greeting drops the name"));
-  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", await pr.git("rev-parse", "HEAD"))).rejects.toThrow("The review budget of 2 reviews is spent");
+  await expect(answerKnown(pr, "final-2", 1)).rejects.toThrow(spentOf(2, 1));
+  expect((await pr.hedge("review-start", "--scope", "final", "--base", third)).output).toContain(`"id":"final-3"`);
+  await finishWith(pr, "final-3", major("the greeting drops the name"));
+  expect((await answerKnown(pr, "final-3", 1)).code).toBe(0);
 });
 
 test("every TESTS item needs an answer and spends review budget whatever words it starts with, while a nit finding above TESTS needs none", async () => {
@@ -934,17 +945,18 @@ test("every TESTS item needs an answer and spends review budget whatever words i
     "feature.test.ts:6 reads a private field of the greeter",
   ];
   for (const [index, item] of testsItems.entries()) {
-    const round = String(index + 2);
-    await pr.commit("feature.txt", `greet member ${round}\n`);
-    expect((await pr.hedge("review-start", "--scope", "fixes", "--base", base)).output).toContain(`"round":${round}`);
-    await finishWith(pr, round, `- nit: feature.txt:1 the greeting could be warmer\n\nTESTS:\n\n- ${item}\n`);
+    const read = `final-${index + 1}`;
+    await pr.commit("feature.txt", `greet member ${index + 2}\n`);
+    expect((await pr.hedge("review-start", "--scope", "final", "--base", base)).output).toContain(`"id":"${read}"`);
+    await finishWith(pr, read, `- nit: feature.txt:1 the greeting could be warmer\n\nTESTS:\n\n- ${item}\n`);
+    if (index < testsItems.length - 1) await expect(answerKnown(pr, read, 2)).rejects.toThrow(spentOf(4, index + 1));
     base = await pr.git("rev-parse", "HEAD");
   }
   await pr.commit("feature.txt", "greet every member\n");
 
   const gate = (await pr.hedge("gate")).output;
-  for (const round of ["2", "3", "4", "5"]) expect(gate).toContain(`review: round ${round} has unanswered findings 2;`);
-  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", base)).rejects.toThrow("The review budget of 4 reviews is spent");
+  for (const read of ["1", "2", "3", "4"]) expect(gate).toContain(`review: final read ${read} has unanswered findings 2;`);
+  expect((await answerKnown(pr, "final-4", 2)).code).toBe(0);
 });
 
 async function fixesRoundWith(findings: string) {
@@ -954,25 +966,25 @@ async function fixesRoundWith(findings: string) {
   await pr.commit("feature.txt", "greet\n");
   await pr.hedge("require", "--none", "--reason", "fixture");
   const panel = await cannedPanel(pr, { design: minor, others: lensAnswer("(none)") });
-  const fix = await pr.commit("feature.txt", "greet the member\n");
-  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", panel)).output).toContain(`"round":2`);
-  await finishWith(pr, "2", findings);
+  await pr.commit("feature.txt", "greet the member\n");
+  expect((await pr.hedge("review-start", "--scope", "final", "--base", panel)).output).toContain(`"id":"final-1"`);
+  await finishWith(pr, "final-1", findings);
   await pr.commit("feature.txt", "greet every member\n");
-  return { pr, fix };
+  return pr;
 }
 
 test("a line that starts with TESTS opens a TESTS block as it did before, so a nit below a prose TESTS line needs an answer and spends review budget", async () => {
-  const { pr, fix } = await fixesRoundWith("TESTS pass under Bun.\n\n- nit: feature.txt:1 the greeting could be warmer\n");
+  const pr = await fixesRoundWith("TESTS pass under Bun.\n\n- nit: feature.txt:1 the greeting could be warmer\n");
 
-  expect((await pr.hedge("gate")).output).toContain("review: round 2 has unanswered findings 1;");
-  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", fix)).rejects.toThrow("The review budget of 1 reviews is spent");
+  expect((await pr.hedge("gate")).output).toContain("review: final read 1 has unanswered findings 1;");
+  expect((await answerKnown(pr, "final-1", 1)).code).toBe(0);
 });
 
 test("a review with a prose TESTS line and then No findings. needs no answer and spends no review budget", async () => {
-  const { pr, fix } = await fixesRoundWith("TESTS pass under Bun.\n\nNo findings.\n");
+  const pr = await fixesRoundWith("TESTS pass under Bun.\n\nNo findings.\n");
 
   expect((await pr.hedge("gate")).output).not.toContain("has unanswered findings");
-  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", fix)).output).toContain(`"round":3`);
+  await expect(answerKnown(pr, "1", 1)).rejects.toThrow(spentOf(1, 0));
 });
 
 test("a saved answer to a major below a prose TESTS line stays on the major when the review ends with an Anchor check note", async () => {
@@ -1007,11 +1019,11 @@ test("a panel lens's TESTS items under a ## TESTS: ## heading need an answer and
   pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 10, "pull-requests.reviewCeiling": 1 });
   await pr.commit("feature.txt", "greet\n");
   await pr.hedge("require", "--none", "--reason", "fixture");
-  const panel = await cannedPanel(pr, { design: `${lensAnswer("- feature.txt:1 | nit | Design | a name reads plain | rename it | anchor: greet")}## TESTS: ##\n- nit: feature.test.ts:3 asserts the call count of greet | rewrite\n`, others: lensAnswer("(none)") });
+  await cannedPanel(pr, { design: `${lensAnswer("- feature.txt:1 | nit | Design | a name reads plain | rename it | anchor: greet")}## TESTS: ##\n- nit: feature.test.ts:3 asserts the call count of greet | rewrite\n`, others: lensAnswer("(none)") });
   await pr.commit("feature.txt", "greet the member\n");
 
   expect((await pr.hedge("gate")).output).toContain("review: round 1 has unanswered findings 2;");
-  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", panel)).rejects.toThrow("The review budget of 1 reviews is spent");
+  expect((await answerKnown(pr, "1", 2)).code).toBe(0);
 });
 
 test("a review that lists only minor or nit items that lead with the severity and a comma or colon needs no answer and spends no review budget, while a minor that may be a major still does", async () => {
@@ -1022,16 +1034,17 @@ test("a review that lists only minor or nit items that lead with the severity an
   await pr.hedge("require", "--none", "--reason", "fixture");
   const panel = await cannedPanel(pr, { design: minor, others: lensAnswer("(none)") });
   const fix = await pr.commit("feature.txt", "greet the member\n");
-  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", panel)).output).toContain(`"round":2`);
-  await finishWith(pr, "2", "# GPT-6.1 Sol final read 1\n\n1. minor, feature.txt:1: the word reads oddly.\n2. **nit**, feature.txt:1: the name could be shorter.\n3. nit: feature.test.ts:3 has no case for an empty name.\n4. **Minor:** feature.txt:1 the greeting could be warmer.\n5. nit: feature.ts:2 Use a clearer type name | anchor: type Greeting = string | undefined\n");
-  const later = await pr.commit("feature.txt", "greet every member\n");
+  expect((await pr.hedge("review-start", "--scope", "final", "--base", panel)).output).toContain(`"id":"final-1"`);
+  await finishWith(pr, "final-1", "# GPT-6.1 Sol final read 1\n\n1. minor, feature.txt:1: the word reads oddly.\n2. **nit**, feature.txt:1: the name could be shorter.\n3. nit: feature.test.ts:3 has no case for an empty name.\n4. **Minor:** feature.txt:1 the greeting could be warmer.\n5. nit: feature.ts:2 Use a clearer type name | anchor: type Greeting = string | undefined\n");
+  await pr.commit("feature.txt", "greet every member\n");
 
   expect((await pr.hedge("gate")).output).not.toContain("has unanswered findings");
-  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", fix)).output).toContain(`"round":3`);
-  await finishWith(pr, "3", "- feature.txt:1 | minor (major if two members share a name) | the greeting drops the name\n- minor:42 | blocker | the build breaks on an empty name\n- minor: helpers.ts:42 | blocker | the helper throws on an empty name\n\nTESTS:\n\n- feature.test.ts:4 asserts the hardcoded output Severity | minor\n");
+  await expect(answerKnown(pr, "final-1", 1)).rejects.toThrow(spentOf(1, 0));
+  expect((await pr.hedge("review-start", "--scope", "final", "--base", fix)).output).toContain(`"id":"final-2"`);
+  await finishWith(pr, "final-2", "- feature.txt:1 | minor (major if two members share a name) | the greeting drops the name\n- minor:42 | blocker | the build breaks on an empty name\n- minor: helpers.ts:42 | blocker | the helper throws on an empty name\n\nTESTS:\n\n- feature.test.ts:4 asserts the hardcoded output Severity | minor\n");
   await pr.commit("feature.txt", "greet each member\n");
-  expect((await pr.hedge("gate")).output).toContain("review: round 3 has unanswered findings 1, 2, 3, 4;");
-  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", later)).rejects.toThrow("The review budget of 1 reviews is spent");
+  expect((await pr.hedge("gate")).output).toContain("review: final read 2 has unanswered findings 1, 2, 3, 4;");
+  expect((await answerKnown(pr, "final-2", 1, 2, 3, 4)).code).toBe(0);
 });
 
 test.skipIf(process.getuid?.() === 0)("a findings file that cannot be read stops the next review with the read error, instead of counting its review as unfinished", async () => {
@@ -1042,15 +1055,15 @@ test.skipIf(process.getuid?.() === 0)("a findings file that cannot be read stops
   await pr.hedge("require", "--none", "--reason", "fixture");
   const panel = await cannedPanel(pr, { design: minor, others: lensAnswer("(none)") });
   const fix = await pr.commit("feature.txt", "greet the member\n");
-  await pr.hedge("review-start", "--scope", "fixes", "--base", panel);
-  await finishWith(pr, "2", "No findings.\n");
+  await pr.hedge("review-start", "--scope", "final", "--base", panel);
+  await finishWith(pr, "final-1", "No findings.\n");
   await pr.commit("feature.txt", "greet every member\n");
-  const findings = join(pr.pullRequest, "reviews", "2", "findings.md");
+  const findings = join(pr.pullRequest, "reviews", "final-1", "findings.md");
   chmodSync(findings, 0o000);
 
-  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", fix)).rejects.toThrow(`EACCES: permission denied, open '${findings}'`);
+  await expect(pr.hedge("review-start", "--scope", "final", "--base", fix)).rejects.toThrow(`EACCES: permission denied, open '${findings}'`);
   chmodSync(findings, 0o600);
-  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", fix)).output).toContain(`"round":3`);
+  expect((await pr.hedge("review-start", "--scope", "final", "--base", fix)).output).toContain(`"id":"final-2"`);
 });
 
 test("for a panel that mixes a prose-only lens with a lens that lists a minor, the review budget spends exactly when the gate asks for an answer", async () => {
@@ -1060,15 +1073,16 @@ test("for a panel that mixes a prose-only lens with a lens that lists a minor, t
   await pr.commit("feature.txt", "greet\n");
   await pr.hedge("require", "--none", "--reason", "fixture");
   const panel = await cannedPanel(pr, { design: lensAnswer("The greeting drops the name."), others: minor });
-  const fix = await pr.commit("feature.txt", "greet the member\n");
+  await pr.commit("feature.txt", "greet the member\n");
 
   expect((await pr.hedge("gate")).output).not.toContain("has unanswered findings");
-  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", panel)).output).toContain(`"round":2`);
-  await finishWith(pr, "2", lensAnswer("The member goes unnamed."));
+  await expect(answerKnown(pr, "1", 1)).rejects.toThrow(spentOf(1, 0));
+  expect((await pr.hedge("review-start", "--scope", "final", "--base", panel)).output).toContain(`"id":"final-1"`);
+  await finishWith(pr, "final-1", lensAnswer("The member goes unnamed."));
   await pr.commit("feature.txt", "greet every member\n");
 
-  expect((await pr.hedge("gate")).output).toContain("review: round 2 has unanswered findings 1;");
-  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", fix)).rejects.toThrow("The review budget of 1 reviews is spent");
+  expect((await pr.hedge("gate")).output).toContain("review: final read 1 has unanswered findings 1;");
+  expect((await answerKnown(pr, "final-1", 1)).code).toBe(0);
 });
 
 test("the ceiling never refuses a final read of a HEAD the gate does not carry, while a final read's major spends the last review and stops the fixes round after it", async () => {
@@ -1113,8 +1127,8 @@ test("with as many finished rounds as the ceiling but budget left by a clean pan
   await pr.hedge("require", "--none", "--reason", "fixture");
   const panel = await cannedPanel(pr, { design: minor, others: minor });
   const fix = await pr.commit("feature.txt", "greet the member\n");
-  await pr.hedge("review-start", "--scope", "fixes", "--base", panel);
-  await finishWith(pr, "2", major("the member goes unnamed"));
+  await pr.hedge("review-start", "--scope", "final", "--base", panel);
+  await finishWith(pr, "final-1", major("the member goes unnamed"));
   const change = await pr.commit("feature.txt", "greet the new member\n");
   await pr.git("revert", "--no-edit", change);
 
@@ -1209,4 +1223,16 @@ test("a test-only commit after 21 clean base merges gets its final read without 
 
   expect((await pr.hedge("gate")).output).toContain(`review: HEAD not reviewed, last review covered ${fix.slice(0, 7)}`);
   expect((await pr.hedge("review-start", "--scope", "final", "--base", first)).output).toContain(`"round":"final"`);
+});
+
+test("a git warning about an attribute name keeps a small diff on the Read tier, since the tier counts what git printed", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: graded("non-critical", "low") });
+  writeFileSync(join(pr.repository, ".gitattributes"), "*.md bad^name\n");
+  await pr.git("add", ".gitattributes");
+  await pr.commit("README.md", "Greets new members.\n");
+  await pr.hedge("require", "--none", "--reason", "fixture");
+  fakeModel(pr, "REVIEWER", "FINDINGS:\nCOVERED: README.md\n");
+
+  expect((await pr.hedge("review")).output).toContain("review tier: read: merge-risk grade low, 1 authored production lines");
 });

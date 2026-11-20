@@ -39,9 +39,9 @@ export function securityRow(env: Record<string, string | undefined>): ModelRow |
 export type Usage = { input?: number; cacheRead?: number; cacheWrite?: number; output?: number; total?: number; costUsd?: number };
 export type ModelAnswer = { ok: true; text: string; model: string; usage?: Usage } | { ok: false; cause: string; model: string };
 export type ModelRequest = { prompt: string; cwd: string; readable?: string[]; images?: string[]; schema?: object; started?: (pid: number) => Promise<void> };
-export type Role = "arbiter" | "reviewer" | "judge" | "eval-judge";
+export type Role = "arbiter" | "reviewer" | "judge" | "bloat-judge" | "eval-judge";
 
-const prefixes: Record<Role, string> = { arbiter: "HEDGE_REVIEW_ARBITER", reviewer: "HEDGE_PROOF_REVIEWER", judge: "HEDGE_PROOF_JUDGE", "eval-judge": "HEDGE_PROOF_EVAL_JUDGE" };
+const prefixes: Record<Role, string> = { arbiter: "HEDGE_REVIEW_ARBITER", reviewer: "HEDGE_PROOF_REVIEWER", judge: "HEDGE_PROOF_JUDGE", "bloat-judge": "HEDGE_PROOF_BLOAT_JUDGE", "eval-judge": "HEDGE_PROOF_EVAL_JUDGE" };
 const prefixOf = (role: Role) => prefixes[role];
 
 export function modelLabel(role: Role, row: ModelRow, env: Record<string, string | undefined>, pinned = false) {

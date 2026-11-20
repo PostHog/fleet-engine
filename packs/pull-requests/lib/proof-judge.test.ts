@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { cleanFixtures, lookup, checkout, type Checkout, verdict, fakeModel, reviewHead, finishRound, recordingModel, stalledOnQuota, acceptGap, graded } from "./proof-testing.ts";
+import { cleanFixtures, lookup, checkout, type Checkout, verdict, fakeModel, reviewHead, reviewHeadFixed, finishRound, recordingModel, stalledOnQuota, acceptGap, graded } from "./proof-testing.ts";
 import { riskCalloutOf, tierOf } from "./decision-ledger.ts";
 import { withoutReceipt } from "./proof-receipt.ts";
 
@@ -209,7 +209,7 @@ test("an answer the user gave before the judge gap was recorded never accepts it
 test("without a replacement command, the judge runs the reviewer's row of the model table, and names its independence", async () => {
   const pr = await checkout();
   await pr.commit("feature.txt", "greet new members\n");
-  await reviewHead(pr);
+  await reviewHeadFixed(pr, "feature.txt:1", "greet new members");
   await pr.hedge("require", "--none", "--reason", "Docs only");
   pr.env.HEDGE_PROOF_JUDGE = undefined;
   pr.env.HEDGE_PROOF_JUDGE_MODEL = undefined;

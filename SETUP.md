@@ -87,9 +87,23 @@ A prompt from an earlier page can carry more lines. Use them too:
 
 ## While something runs
 
-Steps 5, 7, and 9 start commands that take minutes. While one runs in the
-background, explain one of these, in two or three lines, and do not repeat
-one. Skip a topic that does not fit their picks:
+Steps 5, 7, and 9 start commands that take minutes. At the first wait, in
+step 5, offer the three-minute lesson "What Hedge is". In T3 Code, download
+it on the Mac and show it in the chat, so it plays there:
+
+```sh
+mkdir -p ~/.cache/hedge-setup && curl -fsSL -o ~/.cache/hedge-setup/what-hedge-is.mp4 https://posthog.github.io/hedge/assets/lessons/what-hedge-is.mp4
+```
+
+Then show it with its full path, such as
+`![What Hedge is](/Users/<login>/.cache/hedge-setup/what-hedge-is.mp4)`,
+and under it the lesson page
+`https://posthog.github.io/hedge/learn/what-hedge-is/`, which plays it in a
+browser when the chat cannot. In a terminal, or when the download fails,
+give the page link only.
+
+At each later wait, explain one of these, in two or three lines, and do not
+repeat one. Skip a topic that does not fit their picks:
 
 - **T3 Code's inbox.** A thread that finishes or waits for them shows up in
   the inbox. They answer it there, on the Mac or the phone.
@@ -421,7 +435,7 @@ command only once step 7 has named the hub.
 | Pack | What it does | Offer it | Setup note |
 | --- | --- | --- | --- |
 | `pull-requests` | Every change passes proof, a second-model review and a QA swarm before it merges, and a nightly loop you turn on improves one area. | Always | None |
-| `orchestration` | Big work becomes a map of tickets that a conductor thread works through, and side work gets its own thread. | Always | `packs/orchestration/SETUP.md` |
+| `orchestration` | Type /build and say what you want: small work goes straight to a pull request, big work becomes a map that a conductor thread works through, and side work gets its own thread. | Always | `packs/orchestration/SETUP.md` |
 | `communication` | Agents write in your voice, give short updates, and share plans and previews as links. | Always | None |
 | `integrations` | Claude Code and Codex get the official GitHub, Context7, and Convex plugins, and Claude can hand work to Codex. | Always | None |
 | `memory` | One private repo holds what your agents learn and what you save, and every box reads it. | Always | `packs/memory/SETUP.md` |
@@ -857,8 +871,11 @@ Then give them these habits, one line each:
 - Hedge keeps itself up to date: each box runs `hedge update` every night.
 - **Side fix.** When an agent finds an unrelated problem, it hands the fix to
   a new thread with its own pull request, and stays on its task.
-- **Conductor.** For big work, one thread writes a map of tickets and starts
-  one worker thread per ticket.
+- **Build.** Type `/build` and say what you want. The agent sizes the work:
+  a small change goes to a pull request, and big work becomes a map of
+  tickets with one worker thread per ticket.
+- **Learn.** The video lessons at `https://posthog.github.io/hedge/learn/`
+  show each part of Hedge in a few minutes.
 
-Leave out a habit whose pack they did not pick: the last two need the
-Orchestration pack.
+Leave out a habit whose pack they did not pick: **Side fix** and **Build**
+need the Orchestration pack.

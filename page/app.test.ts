@@ -8,6 +8,7 @@ import { profilePath } from "../src/setup/profile.ts";
 import { engineRoot, fakeMachine, githubRepo, hedgeSetup, pushedAnswers, scripted } from "../src/setup/testing.ts";
 import { cachedCheckout, isolateGit, spawnGit, tempDirs } from "../src/testing/git.ts";
 import { buildSite, type SiteFiles } from "../scripts/build-page.ts";
+import { withLessons } from "../src/testing/lessons.ts";
 
 isolateGit();
 const temp = tempDirs();
@@ -17,8 +18,8 @@ const teamPack: LoadedPack = { dir: "/team/packs/acme", manifest: { schema: 1, n
 let site: SiteFiles;
 let teamSite: SiteFiles;
 beforeAll(async () => {
-  site = await buildSite({ audience: "public" });
-  teamSite = await buildSite({ audience: "posthog", team: [teamPack] });
+  site = await buildSite({ ...withLessons(), audience: "public" });
+  teamSite = await buildSite({ ...withLessons(), audience: "posthog", team: [teamPack] });
 });
 
 const open: Window[] = [];
@@ -208,7 +209,7 @@ describe("the Packs page in a browser", () => {
 
   test("ticking a team pack adds to the command each pack its card says it adds, also a pack with no card, and unticking it takes them back", async () => {
     const needy: LoadedPack = { dir: "/team/packs/acme", manifest: { schema: 1, name: "acme", summary: "A team pack.", requires: ["integrations", "context-library", "gone"] } };
-    const team = visit("packs/index.html", { files: await buildSite({ audience: "posthog", team: [needy] }) });
+    const team = visit("packs/index.html", { files: await buildSite({ ...withLessons(), audience: "posthog", team: [needy] }) });
     input(team, "#pick-acme").click();
     expect(selected(team)).toEqual(["acme"]);
     expect([text(team, "install-count"), command(team)]).toEqual(["4 packs selected", "hedge packs --add integrations --add context-library --add gone --add acme"]);
@@ -219,7 +220,7 @@ describe("the Packs page in a browser", () => {
   test("a pack that requires Hub through a hidden helper adds hub to the command a visitor copies from the packs page and from its own page, and hedge packs on a named hub without Hub takes that command", async () => {
     const acme: LoadedPack = { dir: "/team/packs/acme", manifest: { schema: 1, name: "acme", summary: "A team pack.", requires: ["helper"] } };
     const helper: LoadedPack = { dir: "/team/packs/helper", manifest: { schema: 1, name: "helper", summary: "A hidden helper.", onSite: false, requires: ["hub"] } };
-    const files = await buildSite({ audience: "posthog", team: [acme, helper] });
+    const files = await buildSite({ ...withLessons(), audience: "posthog", team: [acme, helper] });
     const picker = visit("packs/index.html", { files });
     input(picker, "#pick-acme").click();
     const expected = "hedge packs --add helper --add hub --add acme";
@@ -236,7 +237,7 @@ describe("the Packs page in a browser", () => {
   test("a hidden helper that requires context-library adds context-library by that name, so the command leaves shared memory off and makes no memory repo", async () => {
     const acme: LoadedPack = { dir: "/team/packs/acme", manifest: { schema: 1, name: "acme", summary: "A team pack.", requires: ["helper"] } };
     const helper: LoadedPack = { dir: "/team/packs/helper", manifest: { schema: 1, name: "helper", summary: "A hidden helper.", onSite: false, requires: ["context-library"] } };
-    const files = await buildSite({ audience: "posthog", team: [acme, helper] });
+    const files = await buildSite({ ...withLessons(), audience: "posthog", team: [acme, helper] });
     const picker = visit("packs/index.html", { files });
     input(picker, "#pick-acme").click();
     const expected = "hedge packs --add helper --add context-library --add acme";

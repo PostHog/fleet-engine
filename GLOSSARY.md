@@ -116,6 +116,10 @@ _Avoid_: Decision type, category
 The `Tier:` line of a pull request's merge-risk callout at HEAD: critical or non-critical. A pull request without it is ungraded. The tier limits what an agent may decide alone.
 _Avoid_: Risk level, grade
 
+**Autonomy**:
+The setting `pull-requests.autonomy`: how often an agent asks the user about a review round or a proof gap. On `ask`, the default, `hedge proof` tells the agent to ask the user each time. On `end`, it tells the agent to decide alone as a 🤖 decision, wherever the tier lets it, and the user reads every such decision under Decisions in `hedge decision report`, beside the end table. A one-way door, an ungraded pull request, a panel gap, and a product gap on a critical pull request still go to the user.
+_Avoid_: Trust level, mode
+
 **Acceptance**:
 A decision that lets the gate pass over a proof gap. The user's acceptance always counts; an agent's acceptance counts only while nothing lapses it.
 _Avoid_: Waiver, override
@@ -137,8 +141,28 @@ The proof state of a pull request at HEAD that the gate builds: each owed kind, 
 _Avoid_: Proof status, gate result
 
 **End-of-run report**:
-The Markdown that `hedge decision report` prints when a lane ends: what is still the user's, merges under the narrow grant, the lane's decisions, one proofs row per pull request, and the side fixes it started. It never runs the judge. It builds the proof summary again at HEAD, so CI, the standing rules, the decisions and the tier are read as they are now, and it takes the judge's verdict from the summary the gate saved at HEAD. When a decision was recorded after the gate, or the head, base, merge-risk callout or proofs changed, it says the gate has not run at HEAD with these proofs. When the summary it builds does not pass, such as after a check fails, outside the checkout where a review carried across commits cannot be checked, when an accepted gap now rests on a condition the saved judge did not weigh, when CI shows other checks than the ones the judge weighed, or when the head, base or tier moves while the report reads it, it sends the user to the gate and offers no merge. This holds for a merged pull request too, which it sends to `hedge proof gate --landed`. A pull request whose proofs Hedge cannot read is still the user's, with the reason, and the other rows still print.
+The Markdown that `hedge decision report` prints when a lane ends: what is still the user's, merges under the narrow grant, the lane's decisions, one proofs row per pull request, the end table, and the side fixes it started. It never runs the judge. It builds the proof summary again at HEAD, so CI, the standing rules, the decisions and the tier are read as they are now, and it takes the judge's verdict from the summary the gate saved at HEAD. When a decision was recorded after the gate, or the head, base, merge-risk callout or proofs changed, it says the gate has not run at HEAD with these proofs. When the summary it builds does not pass, such as after a check fails, outside the checkout where a review carried across commits cannot be checked, when an accepted gap now rests on a condition the saved judge did not weigh, when CI shows other checks than the ones the judge weighed, or when the head, base or tier moves while the report reads it, it sends the user to the gate and offers no merge. This holds for a merged pull request too, which it sends to `hedge proof gate --landed`. A pull request whose proofs Hedge cannot read is still the user's, with the reason, and the other rows still print.
 _Avoid_: Summary, wrap-up
+
+**End table**:
+One row per pull request: its review rounds and final reads, its production lines at the first reviewed commit and at HEAD with the growth between them, its latest sanity pass, and each skipped proof with its reason and who accepted it. The proof receipt in the pull request and the end-of-run report print the same table. The gate measures the lines at HEAD, so the table holds a pull request only once a gate ran at its HEAD.
+_Avoid_: Summary table, scorecard
+
+**Production lines**:
+The lines a pull request adds and deletes against the commit where it branched from its base, without tests, docs, lock files and generated files. Tests and docs are counted apart.
+_Avoid_: Diff size, LOC
+
+**Stop rule**:
+A review round runs after another review only when the latest finished review, a round or a final read, found a bug in production code that the pull request introduced. Such a finding states its severity as blocker or major, and its location field names a production file or no file. It is not a TESTS item, none of its fields starts with `[base]`, and it is not answered rejected or known. Without one, `hedge proof review` refuses the round and prints the question that asks the user, and only the user's `--override` runs it. The first panel of a pull request still runs, since the gate needs it. Fixes since the last round get a final read.
+_Avoid_: Round limit, cutoff
+
+**Sanity pass**:
+A check that a pull request needs when its production lines at HEAD are more than twice the lines at its first reviewed commit. Before the next round, the agent cuts the pull request back to base behaviour or justifies the growth, and records the verdict with `hedge proof sanity --verdict cut|justified --reason '<why>'`. The latest pass covers the production lines it saw, so a head that grows again needs a new pass. A round the user's `--override` runs waits for the pass too. The reason must not hold figures. A first review that saw no production lines needs none. Before it asks for the pass, the bloat judge scores the growth.
+_Avoid_: Bloat check
+
+**Bloat judge**:
+A fresh model with no part in the review loop. When a pull request needs a sanity pass, it reads the Problem section, the diff at the first review round and the diff at HEAD, and returns the cuttable share: the share of HEAD's production lines that the problem does not need, with the hunks it would cut. The sanity pass cuts those hunks or justifies each. The end table shows the growth ratio and the cuttable share in the Sanity pass cell.
+_Avoid_: Bloat score, bloat reviewer
 
 ## Secrets
 

@@ -5,7 +5,7 @@ import { join } from "node:path";
 const root = join(import.meta.dir, "..");
 const read = (path: string) => readFileSync(join(root, path), "utf8");
 
-type Step = { uses?: string; run?: string; id?: string; with?: Record<string, string> };
+type Step = { uses?: string; run?: string; id?: string; with?: Record<string, string>; env?: Record<string, string> };
 type Job = { needs?: string; if?: string; permissions?: Record<string, string>; environment?: { name: string }; steps: Step[] };
 type Workflow = {
   on: { push?: { branches: string[]; paths?: string[] }; pull_request?: { paths?: string[] }; workflow_dispatch?: unknown };
@@ -25,18 +25,19 @@ describe("GitHub Pages", () => {
     expect(on).toHaveProperty("workflow_dispatch");
   });
 
-  test("builds the site from the pack data with the Bun version of CI, then uploads that folder as the Pages artifact", () => {
-    const [checkout, bun, install, build, upload, ...rest] = workflow().jobs.stage.steps;
+  test("builds the site from the pack data and the lesson videos of the lessons release, with the Bun version of CI, then uploads that folder as the Pages artifact", () => {
+    const [checkout, bun, install, media, build, upload, ...rest] = workflow().jobs.stage.steps;
     expect([checkout!.uses?.split("@")[0], bun!.uses?.split("@")[0], upload!.uses?.split("@")[0], rest]).toEqual(["actions/checkout", "oven-sh/setup-bun", "actions/upload-pages-artifact", []]);
     const ci = Bun.YAML.parse(read(".github/workflows/ci.yml")) as { jobs: Record<string, Job> };
     const ciBun = Object.values(ci.jobs).flatMap((job) => job.steps).find((step) => step.uses?.startsWith("oven-sh/setup-bun@"))!;
     expect(bun!.with).toEqual({ "bun-version": ciBun.with!["bun-version"]! });
     expect(install!.run).toBe("bun install --frozen-lockfile");
-    expect(build!.run).toBe(`bun scripts/build-page.ts --out ${upload!.with!.path}`);
+    expect(media).toEqual({ run: 'gh release download lessons --repo "$GITHUB_REPOSITORY" --dir lessons/media', env: { GH_TOKEN: "${{ github.token }}" } });
+    expect(build!.run).toBe(`bun scripts/build-page.ts --lesson-media lessons/media --out ${upload!.with!.path}`);
   });
 
   test("git ignores the folder a local build writes to, so the repository holds no built site", () => {
-    expect(read(".gitignore").split("\n")).toContain("/site/");
+    expect(read(".gitignore").split("\n")).toEqual(expect.arrayContaining(["/site/", "/lessons/media/"]));
   });
 
   test("deploys after staging, from main only, once the repo is public, with only the Pages permissions", () => {

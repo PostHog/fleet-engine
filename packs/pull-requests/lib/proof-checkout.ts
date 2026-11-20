@@ -56,6 +56,7 @@ const lockFile = /(^|\/)([^/]+\.lockb?|package-lock\.json|pnpm-lock\.yaml|go\.su
 const generatedFile = /(^|\/)(__generated__|generated)\/|\.(generated|gen|min)\.[a-z]+$|\.pb\.go$|_pb2\.pyi?$/;
 const readLines = 50;
 const authored = (path: string) => !isTestFile(path) && ![docsFile, lockFile, generatedFile].some((pattern) => pattern.test(path));
+export const isProductionFile = authored;
 
 export type TierName = "read" | "pair" | "panel";
 export type ReviewTier = { name: TierName; why: string };
@@ -74,15 +75,48 @@ function gradeOf(body: string | undefined) {
   return grade ?? (/merge[- ]risk/i.test(body) ? "unreadable" : "none");
 }
 
-function productionLines(identity: ProofIdentity, run: Run) {
-  const stat = run(["git", "diff", "--numstat", "-z", "--no-renames", "--no-relative", mergeBase(identity, run), identity.commit]);
-  if (stat.code !== 0) return undefined;
-  return stat.stdout.split("\0").filter(Boolean).map((entry) => {
-    const [added = "", deleted = "", ...path] = entry.split("\t");
-    // Git prints "-" for a binary file; its size is unknown, so it never counts as small.
+function changedLines(identity: ProofIdentity, run: Run, start: string, measuring: boolean) {
+  const stat = run(["git", "diff", "--numstat", "-z", measuring ? "--find-renames" : "--no-renames", "--no-relative", start, identity.commit]);
+  if (stat.code !== 0 || measuring && stat.stderr.trim()) return undefined;
+  const fields = stat.stdout.split("\0");
+  const changed: { lines: number; path: string }[] = [];
+  for (let index = 0; index < fields.length; index++) {
+    if (!fields[index]) continue;
+    const [added = "", deleted = "", ...named] = fields[index]!.split("\t");
     const binary = added === "-" || deleted === "-";
-    return { lines: binary ? Number.POSITIVE_INFINITY : (Number(added) || 0) + (Number(deleted) || 0), path: path.join("\t") };
-  }).filter(({ path }) => authored(path)).reduce((sum, { lines }) => sum + lines, 0);
+    const path = named.join("\t");
+    if (path) changed.push({ lines: binary ? Number.POSITIVE_INFINITY : (Number(added) || 0) + (Number(deleted) || 0), path });
+    else {
+      changed.push({ lines: binary ? Number.POSITIVE_INFINITY : Number(deleted) || 0, path: fields[index + 1] ?? "" }, { lines: binary ? Number.POSITIVE_INFINITY : Number(added) || 0, path: fields[index + 2] ?? "" });
+      index += 2;
+    }
+  }
+  return changed;
+}
+
+const linesOf = (changed: { lines: number; path: string }[], kept: (path: string) => boolean) =>
+  changed.filter(({ path }) => kept(path)).reduce((sum, { lines }) => sum + lines, 0);
+
+const productionLines = (identity: ProofIdentity, run: Run) => {
+  const changed = changedLines(identity, run, mergeBase(identity, run), false);
+  return changed && linesOf(changed, authored);
+};
+
+export type DiffSize = { production: number; tests: number; docs: number };
+
+const offline = (run: Run): Run => (command) => run(["env", "GIT_NO_LAZY_FETCH=1", ...command]);
+
+export function forkPoint(identity: ProofIdentity, run: Run, baseSha: string) {
+  const found = offline(run)(["git", "merge-base", identity.commit, baseSha]);
+  return found.code === 0 && found.stdout.trim() || undefined;
+}
+
+export function diffSize(identity: ProofIdentity, run: Run, start: string): DiffSize | undefined {
+  try {
+    if (start === identity.commit) return undefined;
+    const changed = changedLines(identity, offline(run), start, true)?.filter(({ lines }) => Number.isFinite(lines));
+    return changed && { production: linesOf(changed, authored), tests: linesOf(changed, isTestFile), docs: linesOf(changed, (path) => docsFile.test(path)) };
+  } catch { return undefined; }
 }
 
 export function reviewTier(identity: ProofIdentity, run: Run, body: string | undefined): ReviewTier {

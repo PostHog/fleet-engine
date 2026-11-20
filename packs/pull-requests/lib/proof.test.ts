@@ -42,7 +42,7 @@ test("hedge proof explains each command and fails closed with one line when it c
 test("hedge proof lists only the commands this version ships", async () => {
   const pr = await checkout();
   const listed = (await pr.hedge("--help")).output.split("\n").flatMap((line) => /^  hedge proof (\S+)/.exec(line)?.[1] ?? []);
-  expect(listed).toEqual(["path", "save", "run", "publish", "receipt", "require", "review", "show", "respond", "standing", "gap", "gate", "miss", "eval", "review-start", "review-finish"]);
+  expect(listed).toEqual(["path", "save", "run", "publish", "receipt", "require", "review", "show", "respond", "standing", "gap", "sanity", "gate", "miss", "eval", "review-start", "review-finish"]);
   await expect(pr.hedge("lessons")).rejects.toThrow("Unknown command lessons. Run hedge proof --help");
   expect((await pr.hedge("require", "--help")).output).toContain("the review row of the model table for a PR that Claude wrote, and the\nreview-codex row for one that Codex wrote");
 });
@@ -381,7 +381,7 @@ test("without a replacement command, the arbiter runs the lookup row of the mode
   const claude = recordingModel(pr, "claude", "CONTINUE");
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", head)).code).toBe(0);
   expect(claude.calls()).toEqual([expect.stringMatching(/^-p --model lookup-model --effort medium --setting-sources  --strict-mcp-config .* --no-session-persistence --output-format json --tools  --permission-mode dontAsk$/)]);
-  expect(claude.prompt()).toContain("# round 2\n\nFindings of 2.");
+  expect(claude.prompt()).toContain("# round 2\n\n- major | Findings of 2.");
   expect(JSON.parse(readFileSync(join(pr.pullRequest, "reviews/3/round.json"), "utf8"))).toMatchObject({ arbiter: { verdict: "continue", model: "lookup-model" } });
 
   await finishRound(pr, "3");
@@ -586,7 +586,7 @@ test("the gate fails while a finding has no answer, and respond refuses answers 
   const head = await pr.commit("feature.txt", "new\n");
   await pr.hedge("require", "--none", "--reason", "docs only");
   await pr.hedge("review-start", "--scope", "full");
-  writeFileSync(join(pr.repository, "findings.md"), "- high, feature.txt:1, the greeting is wrong | anchor: new\n- low, feature.txt:1, a nit | anchor: new\n");
+  writeFileSync(join(pr.repository, "findings.md"), "- major | feature.txt:1 | the greeting is wrong | anchor: new\n- low, feature.txt:1, a nit | anchor: new\n");
   await pr.hedge("review-finish", "--round", "1", "--reviewer", "gpt-6.1-sol", "findings.md");
   markPanel(pr, "1");
   await pr.commit("feature.txt", "fixed\n");

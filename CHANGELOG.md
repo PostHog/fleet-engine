@@ -28,6 +28,53 @@
 - Packs in other repos keep loading: `runner: "t3"` now means
   `runner: "agent"`, and `t3ProjectScripts` means `projectScripts`.
 
+### A fresh judge scores the growth
+
+- When the production lines at HEAD pass twice the lines at round 1, a fresh
+  bloat judge reads the Problem section of the pull request, the round-1 diff
+  and the HEAD diff. It has no part in the review loop. It returns the share
+  of HEAD's production lines that the problem does not need, and the hunks it
+  would cut. `hedge proof review` prints both with the sanity pass it asks
+  for: cut those hunks or justify each. The judge runs once per HEAD, with the
+  model of the model table's reviewer row, and `HEDGE_PROOF_BLOAT_JUDGE`
+  replaces it.
+- The Sanity pass cell of the end table shows the growth ratio and the
+  cuttable share, such as `×2.4, 30% cuttable`, before the latest pass.
+
+### Decide alone, and show one table at the end
+
+- The setting `pull-requests.autonomy` sets how often an agent asks about a
+  review round or a proof gap. `ask`, the default, keeps the question. With
+  `end`, `hedge proof` tells the agent to decide alone as a 🤖 decision, and
+  the user reads each one under Decisions in `hedge decision report`.
+- A one-way door, an ungraded pull request, a panel gap, and a product gap on
+  a critical pull request still go to the user.
+
+### The review loop stops on its own
+
+- A review round runs after another review only when the latest review found
+  a blocker or major in production code that the pull request introduced.
+  Otherwise `hedge proof review` refuses the round, and only the user's
+  `--override` runs it. Give the fixes a final read instead. The first panel
+  of a pull request still runs.
+- The reviewer reads that behaviour the base has too is not a blocker or a
+  major. Such a finding is a minor that starts with `[base]` and cites the
+  base line.
+- When the production lines at HEAD are more than twice the lines at round 1,
+  the next round waits for a sanity pass: cut the pull request back to base
+  behaviour, or justify the growth with
+  `hedge proof sanity --verdict cut|justified --reason '<why>'`. The end
+  table shows the latest pass.
+
+### One end table for the review and the skipped proofs
+
+- The proof receipt and `hedge decision report` print one table: the review
+  rounds and final reads, the production lines at round 1 and at HEAD with
+  tests and docs apart, and each skipped proof with its reason and who
+  accepted it. `hedge proof gate` measures the lines and saves them, so the
+  table holds a pull request once a gate ran at its HEAD. A gate saved by an
+  older Hedge no longer counts, so run `hedge proof gate` again once.
+
 ### The Security pack reads Wiz
 
 - The new **Security** pack has one workflow, `wiz`, off by default. Agents
