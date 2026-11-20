@@ -103,15 +103,15 @@ export async function currentSummary(ref: PrRef, pull: PullRequest, ledger: Ledg
   return { ...saved.gate.summary, ...receipt ? { receipt } : {}, ...live.proofSummary, code: live.code !== 0 ? live.code : judged ? saved.gate.code : 1 };
 }
 
-export async function receiptSummary(head: ProofIdentity, pull: PullRequest, ledger: Ledger, context: GateContext): Promise<ProofSummary> {
+export async function receiptSummary(head: ProofIdentity, pull: PullRequest, ledger: Ledger, context: GateContext): Promise<{ summary: ProofSummary; gated: boolean }> {
   const current = await currentSummary(head, pull, ledger, context);
-  if (current) return current;
+  if (current) return { summary: current, gated: true };
   const { home, run, now } = context;
   const live = await proofGate(home, head, {
     landed: pull.state === "merged", cleanBaseMerge: cleanBaseMerge(head, run), quietCommit: quietCommitIn(run, () => baseRefs(head, run)),
     ci: () => ciOf(home, head, run, now?.() ?? new Date()), pushedHead: pushedHeadOf(head, run), ledger, now: now?.(), devPull: devPullOf(run),
   });
-  return { ...live.proofSummary, code: live.code, judge: { state: "skipped", lines: [] } };
+  return { summary: { ...live.proofSummary, code: live.code, judge: { state: "skipped", lines: [] } }, gated: false };
 }
 
 async function savedGate(home: string, ref: PrRef, pull: PullRequest, ledger: Ledger): Promise<SavedGate | undefined> {

@@ -233,3 +233,31 @@ test("the receipt keeps the escapes its guard adds to a reason, so emphasis and 
 
   expect(tableIn(block(pr.githubBody()))[1]).toContain("| ui-walk: Walk it \\*later\\* with \\[the plan\\](https://plan.example) (🤖 agent ");
 });
+
+test("the receipt guard reads a reason the way the table prints it, so a line break cannot split a figure past it", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.ts", lines(10, "greet"));
+  pr.pullRequestState({ body: `## Testing\n\nThe greeting.\n\n${graded("non-critical")}` });
+  await reviewHead(pr);
+  await pr.hedge("require", "--kinds", "ui-walk");
+  await pr.hedge("gap", "--kind", "ui-walk", "--reason", "Read 48\r213 rows");
+  await agentAccepts(pr, "ui-walk");
+  await pr.hedge("gate");
+
+  const receipt = await pr.hedge("receipt");
+  expect(receipt.code).toBe(2);
+  expect(receipt.output).toStartWith("receipt refused: the gap reason of ui-walk looks like a production figure");
+});
+
+test("a receipt without a gate at HEAD shows no end table row, as the report shows none", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.ts", lines(10, "greet"));
+  pr.pullRequestState({ body: `## Testing\n\nThe greeting.\n\n${graded("non-critical")}` });
+  await reviewHead(pr);
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  expect((await pr.hedge("receipt")).code).toBe(0);
+
+  expect(tableIn(block(pr.githubBody()))).toEqual([]);
+  expect(block(pr.githubBody())).toContain("**End table:** no gate at HEAD yet. Run hedge proof gate, then hedge proof receipt.");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)).toEqual([]);
+});
