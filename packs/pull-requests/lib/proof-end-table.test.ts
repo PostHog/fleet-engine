@@ -154,6 +154,20 @@ test("a second remote whose base holds commits GitHub's base does not leaves the
   expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | 3 at HEAD | none |");
 });
 
+test("a checkout without the base commit GitHub reports counts unknown, not from a stale base ref", async () => {
+  const pr = await checkout();
+  const fork = await pr.git("rev-parse", "refs/remotes/origin/main");
+  await pr.advanceBase("base.ts", lines(50, "landed"));
+  await pr.git("merge", "-q", "--no-edit", "refs/remotes/origin/main");
+  await pr.commit("feature.ts", lines(3, "greet"));
+  await pr.git("update-ref", "refs/remotes/origin/main", fork);
+  pr.pullRequestState({ body: graded("non-critical"), baseSha: "0123456789abcdef0123456789abcdef01234567" });
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  await pr.hedge("gate");
+
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | unknown at HEAD | none |");
+});
+
 test("a reason with a carriage return or an escaped pipe stays in its cell", async () => {
   const pr = await checkout();
   await pr.commit("feature.ts", lines(10, "greet"));

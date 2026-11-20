@@ -1,6 +1,6 @@
 import { refText, type PrRef } from "./decision-ledger.ts";
 import type { Run } from "./pr-ci.ts";
-import { diffSize, type DiffSize } from "./proof-checkout.ts";
+import { diffSize, forkPoint, type DiffSize } from "./proof-checkout.ts";
 import { finishedReviews, summaryGaps, type GapProof, type ProofIdentity, type ProofSummary } from "./proof.ts";
 
 type Sized = DiffSize & { commit: string };
@@ -9,17 +9,17 @@ export type EndRow = { ref: PrRef; summary: ProofSummary; reason: (kind: string,
 
 const isRound = (name: string) => /^\d+$/.test(name);
 
-function sizeAt(identity: ProofIdentity, run: Run, from?: string): Sized | undefined {
-  const size = diffSize(identity, run, from);
+function sizeAt(identity: ProofIdentity, run: Run, from: string | undefined): Sized | undefined {
+  const size = from === undefined ? undefined : diffSize(identity, run, from);
   return size && { ...size, commit: identity.commit };
 }
 
-export async function measureGrowth(home: string, head: ProofIdentity, run: Run): Promise<Growth> {
+export async function measureGrowth(home: string, head: ProofIdentity, run: Run, baseSha: string | undefined): Promise<Growth> {
   const reviews = await finishedReviews(home, head);
   const rounds = reviews.filter(({ name }) => isRound(name)).sort((a, b) => Number(a.name) - Number(b.name));
   const opening = rounds[0];
   const first = opening?.scope === "full" && opening.from ? sizeAt({ ...head, commit: opening.commit }, run, opening.from) : undefined;
-  const final = sizeAt(head, run);
+  const final = sizeAt(head, run, baseSha ? forkPoint(head, run, baseSha) : undefined);
   return { rounds: rounds.length, finalReads: reviews.length - rounds.length, ...first ? { first } : {}, ...final ? { final } : {} };
 }
 

@@ -48,14 +48,39 @@ function views(text: string) {
 
 const holdsFigure = (seen: string) => figures.some((pattern) => pattern.test(kept.reduce((value, exempt) => value.replace(exempt, " "), seen)));
 
-const codeSpan = /(`+)(?!`)[\s\S]*?[^`]\1(?!`)/g;
+function codeSpans(text: string) {
+  const runs = Array.from(text.matchAll(/`+/g), (match) => ({ at: match.index, size: match[0].length }));
+  const bySize = new Map<number, number[]>();
+  runs.forEach(({ size }, index) => { const same = bySize.get(size); if (same) same.push(index); else bySize.set(size, [index]); });
+  const cursors = new Map<number, number>();
+  const closer = (size: number, after: number) => {
+    const later = bySize.get(size) ?? [];
+    let cursor = cursors.get(size) ?? 0;
+    while (cursor < later.length && later[cursor]! <= after) cursor++;
+    cursors.set(size, cursor);
+    return later[cursor];
+  };
+  const spans: { start: number; end: number }[] = [];
+  for (let index = 0; index < runs.length; index++) {
+    const { at, size } = runs[index]!;
+    for (let open = size; open > 0; open--) {
+      const close = closer(open, index);
+      if (close === undefined) continue;
+      spans.push({ start: at + size - open, end: runs[close]!.at + open });
+      index = close;
+      break;
+    }
+  }
+  return spans;
+}
+
 const escapeMarkup = (text: string) => text.replace(/[\\`*_~[\]<>&!]/g, "\\$&");
 export function literal(text: string) {
   let out = "";
   let last = 0;
-  for (const span of text.matchAll(codeSpan)) {
-    out += escapeMarkup(text.slice(last, span.index)) + span[0];
-    last = span.index + span[0].length;
+  for (const { start, end } of codeSpans(text)) {
+    out += escapeMarkup(text.slice(last, start)) + text.slice(start, end);
+    last = end;
   }
   return out + escapeMarkup(text.slice(last));
 }

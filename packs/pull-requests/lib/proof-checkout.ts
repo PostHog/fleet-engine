@@ -103,15 +103,13 @@ const productionLines = (identity: ProofIdentity, run: Run) => {
 
 export type DiffSize = { production: number; tests: number; docs: number };
 
-function countStart(identity: ProofIdentity, run: Run) {
-  const { baseSha } = pullRequestDetails(identity, run);
-  const reported = baseSha ? run(["git", "merge-base", identity.commit, baseSha]) : undefined;
-  return reported?.code === 0 && reported.stdout.trim() || mergeBase(identity, run);
+export function forkPoint(identity: ProofIdentity, run: Run, baseSha: string) {
+  const found = run(["git", "merge-base", identity.commit, baseSha]);
+  return found.code === 0 && found.stdout.trim() || undefined;
 }
 
-export function diffSize(identity: ProofIdentity, run: Run, from?: string): DiffSize | undefined {
+export function diffSize(identity: ProofIdentity, run: Run, start: string): DiffSize | undefined {
   try {
-    const start = from ?? countStart(identity, run);
     if (start === identity.commit) return undefined;
     const changed = changedLines(identity, run, start, true)?.filter(({ lines }) => Number.isFinite(lines));
     return changed && { production: linesOf(changed, authored), tests: linesOf(changed, isTestFile), docs: linesOf(changed, (path) => docsFile.test(path)) };
@@ -130,8 +128,8 @@ export function reviewTier(identity: ProofIdentity, run: Run, body: string | und
 
 export function pullRequestDetails(identity: ProofIdentity, run: Run) {
   try {
-    const { title, body, base, baseSha } = readPullRequest(identity, run);
-    return { title, body, baseRefName: base, baseSha };
+    const { title, body, base } = readPullRequest(identity, run);
+    return { title, body, baseRefName: base };
   } catch (error) {
     throw new Error(`Cannot read ${identity.repository}#${identity.pr} over GitHub's REST API (${(error as Error).message})`);
   }
