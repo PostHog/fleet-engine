@@ -17,20 +17,18 @@ export function topLevel(run: Run) {
  * remote once; without such a remote, or without the commit, the error names the commands that fix it.
  */
 export function mergeBase(identity: ProofIdentity, run: Run) {
-  const { baseRefName: base, baseSha } = pullRequestDetails(identity, run);
+  const base = pullRequestDetails(identity, run).baseRefName;
   const remotes = remotesOf(identity.repository, run);
-  const present = (commit: string) => run(["git", "rev-parse", "--verify", "--quiet", `${commit}^{commit}`]).code === 0;
-  const fetchBase = () => { for (const remote of remotes) run(["git", "fetch", "--quiet", remote, `+refs/heads/${base}:refs/remotes/${remote}/${base}`]); };
   const found = () => {
-    const tips = [...remotes.map((remote) => `refs/remotes/${remote}/${base}`), ...baseSha ? [baseSha] : []].filter(present);
-    if (!tips.length) return undefined;
-    const result = run(["git", "merge-base", identity.commit, ...tips]);
-    return result.code === 0 && result.stdout.trim() || undefined;
+    for (const remote of remotes) {
+      const result = run(["git", "merge-base", `refs/remotes/${remote}/${base}`, identity.commit]);
+      if (result.code === 0) return result.stdout.trim();
+    }
+    return undefined;
   };
-  if (baseSha && !present(baseSha)) fetchBase();
   const before = found();
   if (before) return before;
-  fetchBase();
+  for (const remote of remotes) run(["git", "fetch", "--quiet", remote, `+refs/heads/${base}:refs/remotes/${remote}/${base}`]);
   const after = found();
   if (after) return after;
   const where = `Cannot find where ${identity.repository}#${identity.pr} branched from its base ${base} here`;
@@ -78,7 +76,7 @@ function gradeOf(body: string | undefined) {
 }
 
 function changedLines(identity: ProofIdentity, run: Run, start: string, renames: boolean) {
-  const stat = run(["git", "diff", "--numstat", "-z", renames ? "--find-renames" : "--no-renames", "--no-relative", start, identity.commit]);
+  const stat = run(["git", "diff", "--numstat", "-z", ...renames ? ["--find-renames", "-l0"] : ["--no-renames"], "--no-relative", start, identity.commit]);
   if (stat.code !== 0) return undefined;
   const fields = stat.stdout.split("\0");
   const changed: { lines: number; path: string }[] = [];
@@ -106,9 +104,13 @@ const productionLines = (identity: ProofIdentity, run: Run) => {
 
 export type DiffSize = { production: number; tests: number; docs: number };
 
-export function diffSize(identity: ProofIdentity, run: Run, from?: string): DiffSize | undefined {
+export function forkPoint(identity: ProofIdentity, run: Run, baseSha: string) {
+  const found = run(["git", "merge-base", identity.commit, baseSha]);
+  return found.code === 0 && found.stdout.trim() || undefined;
+}
+
+export function diffSize(identity: ProofIdentity, run: Run, start: string): DiffSize | undefined {
   try {
-    const start = from ?? mergeBase(identity, run);
     if (start === identity.commit) return undefined;
     const changed = changedLines(identity, run, start, true)?.filter(({ lines }) => Number.isFinite(lines));
     return changed && { production: linesOf(changed, authored), tests: linesOf(changed, isTestFile), docs: linesOf(changed, (path) => docsFile.test(path)) };
@@ -127,8 +129,8 @@ export function reviewTier(identity: ProofIdentity, run: Run, body: string | und
 
 export function pullRequestDetails(identity: ProofIdentity, run: Run) {
   try {
-    const { title, body, base, baseSha } = readPullRequest(identity, run);
-    return { title, body, baseRefName: base, baseSha };
+    const { title, body, base } = readPullRequest(identity, run);
+    return { title, body, baseRefName: base };
   } catch (error) {
     throw new Error(`Cannot read ${identity.repository}#${identity.pr} over GitHub's REST API (${(error as Error).message})`);
   }
