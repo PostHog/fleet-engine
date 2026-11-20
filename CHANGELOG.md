@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### The Herdr pack runs threads in Herdr
+
+- The new **Herdr** pack starts the threads that Hedge starts, such as a
+  Slack thread, as herdr-core terminals in the Hedge space, not as T3
+  threads. The Herdr app on your Mac and your phone shows them on every box.
+- `hedge apply` writes one herdr-core template for each row of the model
+  table, such as `hedge-implementation`, so `hc templates` lists them.
+- A hook reports the state of Claude Code and Codex to herdr-core, so the
+  Inbox on your phone shows which agent is working, done, or blocked.
+- Packs that read T3 threads, such as Orchestration and Quality gates, still
+  read T3. The Everything preset leaves the Herdr pack off.
+
 ### The Security pack reads Wiz
 
 - The new **Security** pack has one workflow, `wiz`, off by default. Agents

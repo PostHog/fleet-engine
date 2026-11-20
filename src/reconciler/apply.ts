@@ -13,7 +13,7 @@ import { withLegacyNames } from "../legacy.ts";
 export type AdapterContext = { home: string; dryRun: boolean; adopt: string[]; adoptFrom?: string[] };
 export type AdapterResult = { actions: Action[]; findings: Finding[]; blocked?: boolean; failed?: boolean };
 export type Adapter = {
-  name: "files" | "config" | "jobs" | "identity" | "t3" | "fleet";
+  name: "files" | "config" | "jobs" | "identity" | "t3" | "herdr" | "fleet";
   /** The targets that --adopt may name for this adapter. */
   targets(plan: Plan): string[];
   apply(plan: Plan, context: AdapterContext): Promise<AdapterResult>;

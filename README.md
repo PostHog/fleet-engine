@@ -56,6 +56,7 @@ Base and Hub are in every Hedge. You pick the rest.
 - [Slack](https://posthog.github.io/hedge/packs/slack/): your own Slack message or reaction with your trigger emoji, or a mention of your Slack app, starts a T3 thread about it.
 - [Paging (incident.io)](https://posthog.github.io/hedge/packs/incident-io/): an agent that watches a risky change pages you, and only you, when it goes wrong.
 - [MCP gateway](https://posthog.github.io/hedge/packs/mcp-gateway/): the hub signs in to your MCP servers once, and agents on every box reach them through it.
+- [Herdr](https://posthog.github.io/hedge/packs/herdr/): threads that Hedge starts run in Herdr, and the Herdr app on your Mac and your phone shows which agent needs you.
 
 Switch Quality gates, Orchestration, Communication, and Memory on
 [the Hedge site](https://posthog.github.io/hedge/), and it builds the prompt

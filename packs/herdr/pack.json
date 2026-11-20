@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "name": "herdr",
+  "summary": "Threads that Hedge starts run in Herdr, and every agent shows its state in the Herdr app on your Mac and your phone.",
+  "day": "Your Slack reaction starts a thread on your devbox. It shows in the Hedge space of the Herdr app, and the Inbox on your phone shows it as blocked when the agent asks for a permission.",
+  "cost": "You install herdr-core on each box, and the Herdr app on your Mac and your phone. The app reaches each box over SSH, so your phone needs SSH to your boxes, for example through Tailscale.",
+  "risk": "Hedge threads start in Herdr, not in T3 Code. Packs that read T3 threads, such as Orchestration and Quality gates, still read T3, and they do not see threads in Herdr.",
+  "instructions": "instructions.md",
+  "files": [
+    { "path": "hooks/report-status.ts", "target": ".config/hedge/hooks/SessionStart/herdr-status.ts" },
+    { "path": "hooks/report-status.ts", "target": ".config/hedge/hooks/UserPromptSubmit/herdr-status.ts" },
+    { "path": "hooks/report-status.ts", "target": ".config/hedge/hooks/PreToolUse/herdr-status.ts" },
+    { "path": "hooks/report-status.ts", "target": ".config/hedge/hooks/PostToolUse/herdr-status.ts" },
+    { "path": "hooks/report-status.ts", "target": ".config/hedge/hooks/Stop/herdr-status.ts" },
+    { "path": "hooks/report-status.ts", "target": ".config/hedge/hooks/Notification/herdr-status.ts" }
+  ],
+  "config": [
+    {
+      "provider": "claude",
+      "key": "hooks.Notification",
+      "value": [{ "hooks": [{ "type": "command", "command": "sh \"$HOME/.config/hedge/hooks/run.sh\" claude Notification", "timeout": 30 }] }]
+    }
+  ],
+  "checks": [
+    {
+      "id": "herdr-core",
+      "run": ["sh", "-c", "test -x \"$HOME/.local/bin/herdr-core\" || command -v hc >/dev/null"],
+      "say": "herdr-core is not installed, so Hedge cannot start threads in Herdr. Run curl -fsSL https://releases.herdr.dev/core/install.sh | sh, then hedge apply."
+    }
+  ]
+}

@@ -2,6 +2,8 @@ import { constants } from "node:fs";
 import { chmod, mkdir, open } from "node:fs/promises";
 import { join } from "node:path";
 import { writePrivateFile } from "../files/private.ts";
+import { usesHerdr } from "../adapters/herdr/adapter.ts";
+import { herdrThreads } from "../integrations/herdr/threads.ts";
 import { t3Threads } from "../integrations/t3/index.ts";
 import { isSecretName } from "../pack/register.ts";
 import type { PackCode, Plan, Workflow } from "../pack/types.ts";
@@ -16,7 +18,7 @@ export const credentialName = (id: string) => `credential.${id}`;
 export async function packContext({ home, plan, pack, code, workflows, print, clock, stdin = () => Bun.stdin.stream() }: ContextOptions): Promise<Context> {
   const stateDir = join(home, ".local/state/hedge", pack);
   await mkdir(stateDir, { recursive: true, mode: 0o700 });
-  const threads = t3Threads(plan.models, { home });
+  const threads = usesHerdr(plan) ? herdrThreads(plan.models, { home }) : t3Threads(plan.models, { home });
   const secrets = secretStore(home, pack);
   return {
     get: <T extends Value>(setting: Setting<T>) => {

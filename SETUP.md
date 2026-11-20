@@ -428,6 +428,7 @@ command only once step 7 has named the hub.
 | `guards` | Hooks stop an agent's shell commands from running network code, using GitHub outside your owners, pushing past review, or polling in loops. | Always | `packs/guards/SETUP.md` |
 | `slack` | Your own message, reaction, or mention in Slack starts a T3 thread about it. | Always | `packs/slack/SETUP.md` |
 | `incident-io` | An agent that watches a risky change pages you, and only you, through incident.io when it goes wrong. | Always | `packs/incident-io/SETUP.md` |
+| `herdr` | Threads that Hedge starts run in Herdr, and every agent shows its state in the Herdr app on your Mac and your phone. | Always | None |
 | `hub` | The hub links your boxes, cleans their disks, and keeps your pack secrets. Turn on recovery, and threads go on after a usage limit. | Step 9 | `packs/hub/SETUP.md` |
 | `mcp-gateway` | The hub signs in to your MCP servers once, and agents on every machine reach them through it. | Step 9 | `packs/mcp-gateway/SETUP.md` |
 | `security` | Agents on every machine read your Wiz findings, threats and inventory through the hub, and cannot change them. | Step 9 | `packs/security/SETUP.md` |
