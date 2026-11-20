@@ -51,7 +51,7 @@ export function lessonProblems(lesson: Lesson, names: Names): string[] {
   if (cut.narration !== narrationHash(lesson)) problems.push(`${where}: the narration changed after its cut. Render the lesson again`);
   if (cut.chapters.length !== lesson.chapters.length) problems.push(`${where}: has ${lesson.chapters.length} chapters, but its cut has ${cut.chapters.length}`);
   if (cut.captions.length !== sentences(lesson).length) problems.push(`${where}: has ${sentences(lesson).length} sentences, but its cut has ${cut.captions.length} captions`);
-  const inVideo = (time: number) => time >= 0 && time <= cut.seconds;
+  const inVideo = (time: unknown) => typeof time === "number" && time >= 0 && time <= cut.seconds;
   const chaptersInOrder = cut.chapters.every((time, index) => inVideo(time) && (index === 0 || time > cut.chapters[index - 1]!));
   const captionsInOrder = cut.captions.every((cue, index) => cue.length === 2 && inVideo(cue[0]) && inVideo(cue[1]) && cue[0] < cue[1] && (index === 0 || cue[0] >= cut.captions[index - 1]![1]));
   if (!chaptersInOrder || !captionsInOrder) problems.push(`${where}: its cut has chapter or caption times out of order or outside the video`);

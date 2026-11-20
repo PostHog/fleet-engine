@@ -67,6 +67,7 @@ describe("lessons", () => {
     expect(lessonProblems({ ...built, cut: { ...built.cut, captions: [[0, 4], [9, 5], [10, 14], [15, 19]] } }, names)).toEqual(problem);
     expect(lessonProblems({ ...built, cut: { ...built.cut, chapters: [0, 151] } }, names)).toEqual(problem);
     expect(lessonProblems({ ...built, cut: { ...built.cut, chapters: [65, 0] } }, names)).toEqual(problem);
+    expect(lessonProblems({ ...built, cut: { ...built.cut, chapters: [null, 65] as unknown as number[] } }, names)).toEqual(problem);
     expect(lessonProblems({ ...built, cut: { ...built.cut, captions: [[0, 4], [5] as unknown as [number, number], [10, 14], [15, 19]] } }, names)).toEqual(problem);
     expect(lessonProblems({ ...built, cut: { ...built.cut, captions: [[0, 4], [4, 9], [9, 14], [15, 19]] } }, names)).toEqual([]);
   });
