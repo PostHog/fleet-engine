@@ -13,22 +13,21 @@
 - **Grows with your work.** Add a node when you need more agents at once.
 
 Hedge sets up one **hub** and one or more **nodes**: Linux boxes in the
-cloud, such as Coder workspaces. Each gets T3 Code, Claude Code, Codex, and a
-set of agent workflows. You pick the workflows as **packs**. Your answers live
-in your own private **profile** repo, so every box gets the same setup. Your
-Mac and your phone run only the T3 Code app. Hedge installs nothing on them.
+cloud, such as Coder workspaces. Each gets T3 Code, Claude Code, Codex, and
+the agent workflows you pick as **packs**. Your answers live in your own
+private **profile** repo, so every box gets the same setup. Your Mac and
+your phone run only the T3 Code app. Hedge installs nothing on them.
 
 ## Getting started
 
-You need a Coder deployment where you can create workspaces. The agent
-creates your boxes with the Coder CLI and reaches them over SSH, so the
-agent setup needs Coder today. Plain Linux boxes over SSH, without Coder,
-are not supported yet.
+You need a Coder deployment where you can create workspaces. The setup agent
+creates your boxes with the Coder CLI and reaches them over SSH. Plain Linux
+boxes without Coder are not supported yet.
 
 1. **Download [T3 Code](https://t3.codes)** on your Mac, and open it. Its
    Welcome page sets up one agent, Claude Code or Codex, and signs you in.
-   The first setup runs there, because it needs the Coder CLI and SSH. Add
-   T3 Code on your phone once your boxes are linked, to read and steer them.
+   The first setup runs there. Add T3 Code on your phone once your boxes are
+   linked.
 2. **Sign in with T3 Connect.** In T3 Code, open **Settings → Sharing &
    access**, sign in, and turn on **T3 Connect**. It shows your hub and your
    nodes in T3 Code on your Mac and your phone.
@@ -39,67 +38,79 @@ are not supported yet.
    Set up Hedge with me. Read https://raw.githubusercontent.com/PostHog/hedge/main/SETUP.md and follow it step by step.
    ```
 
-From here the agent leads. It creates your hub with the Coder CLI, sets Hedge
-up on the hub over SSH, and adds your nodes from the hub. It asks what you
-know and what you want, explains each part, and runs the steps itself. You
-answer its questions and do your own sign-ins.
+From here the agent leads. It creates your hub, sets Hedge up there over
+SSH, and adds your nodes from the hub. It explains each part and runs the
+steps itself. You answer its questions and do your own sign-ins.
 
-## See what it does
+## Packs
 
-Open [the Hedge site](https://posthog.github.io/hedge/) to switch the
-Quality gates, Orchestration, Communication, and Memory packs on or off. The
-site builds the prompt above with your picks in it, so the agent skips those
-questions.
+Base and Hub are in every Hedge. You pick the rest.
 
-The [Packs page](https://posthog.github.io/hedge/packs/) shows the packs in
-groups. Base and Hub are in every Hedge. Then come the packs for how your
-agents work, what they know, and what they reach. Each pack has its own page.
-Select packs there, and copy one prompt that adds them to a Hedge you already
-run.
+- [Base](https://posthog.github.io/hedge/packs/base/): every box gets safety rules, the model table, T3 Code defaults, and the jobs that keep it current.
+- [Hub](https://posthog.github.io/hedge/packs/hub/): the hub links your boxes, cleans their disks, and keeps your pack secrets. Turn on recovery, and threads go on after a usage limit.
+- [Quality gates](https://posthog.github.io/hedge/packs/pull-requests/): every change passes proof, a second-model review, and a QA swarm before it merges.
+- [Orchestration](https://posthog.github.io/hedge/packs/orchestration/): big work becomes a map of tickets that a conductor thread works through, and side work gets its own thread.
+- [Communication](https://posthog.github.io/hedge/packs/communication/): agents write in your voice, give short updates, and share plans and previews as links.
+- [Guards](https://posthog.github.io/hedge/packs/guards/): hooks stop risky shell commands, such as a push past review or a polling loop.
+- [Memory](https://posthog.github.io/hedge/packs/memory/): one private repo holds what your agents learn and what you save, and every box reads it.
+- [Slack](https://posthog.github.io/hedge/packs/slack/): your own message, reaction, or mention in Slack starts a T3 thread about it.
+- [Paging (incident.io)](https://posthog.github.io/hedge/packs/incident-io/): an agent that watches a risky change pages you, and only you, when it goes wrong.
+- [MCP gateway](https://posthog.github.io/hedge/packs/mcp-gateway/): the hub signs in to your MCP servers once, and agents on every box reach them through it.
 
-`bun scripts/build-page.ts` generates the site from the pack data into
-`site/`. To see it, open `site/index.html`.
+Switch Quality gates, Orchestration, Communication, and Memory on
+[the Hedge site](https://posthog.github.io/hedge/), and the prompt above takes
+your picks. [The Packs page](https://posthog.github.io/hedge/packs/) builds a
+prompt that adds packs to a Hedge you already run. Five pack pages have a
+short video.
+
+## Day to day
+
+On the hub or a node:
+
+- `hedge packs` lists your packs. `--add <pack>` or `--remove <pack>` turns
+  one on or off.
+- `hedge doctor` checks the box against your profile and changes nothing.
+- `hedge update` moves the engine and your profile forward, then applies.
+  Every box also runs it each night.
+- `hedge devbox add <ssh host>`, on the hub, makes a box one of your nodes.
+
+[Getting started](docs/getting-started.md) shows each setup step by hand. The
+[Slack](docs/slack.md), [incident.io](docs/incident-io.md), and
+[secret store](docs/secret-store.md) docs cover those parts in depth.
+
+## Coming from Fleet
+
+Hedge was named Fleet before. Run the `get.sh` line below once on each box
+that ran Fleet: it stops Fleet, copies your setup, and starts Hedge. On a
+Mac, it only stops Fleet's jobs. `fleet` still runs the same command. To
+undo the move, see [Go back to Fleet](SETUP.md#go-back-to-fleet).
 
 ## Status
 
-Version 0.1.0 is the first public release. It is early. On every pull
-request, CI runs the install as a new Linux user, then `hedge setup` and
-`hedge doctor`, with a sandbox GitHub account. Other paths are built but not
-yet proved end to end, such as the real sign-ins on a new hub. The
-[changelog](CHANGELOG.md) lists them under "Known gaps".
+Hedge is early. No release is tagged yet, so `get.sh` installs `main`. On
+every pull request, CI runs the install, `hedge setup`, and `hedge doctor` as
+a new Linux user. The real sign-ins, T3 Connect, and a live Coder workspace
+need a person, so CI does not prove them yet. The [changelog](CHANGELOG.md)
+lists every change since v0.1.0, released under the name Fleet.
 
 ## Set it up by hand
 
-Run this on the hub, as your login user, not with `sudo`. It runs on Linux
-(x64 or arm64). On a Mac it stops: Hedge runs on cloud boxes, and the Mac
-runs only the T3 Code app.
+Run this on the hub as your login user, not with `sudo`. It needs Linux (x64
+or arm64) with `curl`, `git`, `tar`, `sha256sum`, `python3`, cron, and
+systemd's user manager. To keep T3 Code running after you log out, an
+administrator runs `sudo loginctl enable-linger <your user>` once. On a Mac,
+`get.sh` installs nothing.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh | sh
 ```
 
-Read [`get.sh`](get.sh) first if you want to know what runs. It:
-
-- installs what Hedge needs if it is missing: the GitHub CLI, Bun, and T3
-  Code. Install `curl`, `git`, `tar`, `sha256sum`, `python3`, and cron first.
-  Hedge also needs systemd's user manager, so T3 Code can run as a service.
-  To keep it running after you log out, an administrator runs
-  `sudo loginctl enable-linger <your user>` once.
-- fetches the engine into `~/.local/share/hedge/engine` and puts `hedge` in
-  `~/.local/bin`.
-- adds one line to your shell's login file, so `~/.local/bin` and
-  `~/.bun/bin` are on your `PATH`.
-- starts `hedge setup`.
-
-`hedge setup` asks plain-language questions. It asks you to sign in to
-GitHub, and to Claude, ChatGPT, or both, depending on the plan you pick. It
-then creates the private repo `hedge-profile` in your GitHub account, pushes
-your answers there, and applies your packs to this box. Running `get.sh`
-again picks up where it stopped.
-
-[Getting started](docs/getting-started.md) walks through it step by step, from
-a new Coder workspace to a hub with a linked node, with what each sign-in
-asks.
+[`get.sh`](get.sh) installs the GitHub CLI, Bun, and T3 Code when they are
+missing, fetches the engine into `~/.local/share/hedge/engine`, and puts
+`hedge` on your `PATH`. Then `hedge setup` asks plain-language questions, has
+you sign in to GitHub and to Claude, ChatGPT, or both, saves your answers to
+a new private `hedge-profile` repo, and applies your packs. Run `get.sh` again
+to pick up where it stopped.
 
 ## Develop
 
@@ -107,9 +118,11 @@ asks.
 bun install
 bun run test
 bun run typecheck
+bun scripts/build-page.ts
 ```
 
-See [GLOSSARY.md](GLOSSARY.md) for the words Hedge uses.
+The last command writes the site to `site/`. [GLOSSARY.md](GLOSSARY.md) holds
+the words Hedge uses.
 
 ## License
 
