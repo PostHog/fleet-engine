@@ -369,8 +369,16 @@ async function requireBoughtRound(home: string, identity: ProofIdentity) {
 
 type AnsweredFinding = ReturnType<typeof answeredFindings>["findings"][number];
 
+function unbold(text: string) {
+  let [start, end] = [0, text.length];
+  while (text[start] === "*") start++;
+  while (end > start && text[end - 1] === "*") end--;
+  return text.slice(start, end).trim();
+}
+
 function locationOf(field: string) {
-  const plain = (field.startsWith("[") && field.endsWith(")") ? /^\[([^\]]*)\]\(/.exec(field)?.[1] ?? field : field).replace(/[`*]/g, "").trim();
+  const bare = unbold(field.trim());
+  const plain = (bare.startsWith("[") && bare.endsWith(")") ? /^\[([^\]]*)\]\(/.exec(bare)?.[1] ?? bare : bare).replace(/[`*]/g, "").trim();
   const colon = plain.lastIndexOf(":");
   return colon > 0 && /^\d+(?:-\d+)?$/.test(plain.slice(colon + 1)) ? plain.slice(0, colon).trim() : undefined;
 }

@@ -51,7 +51,7 @@ export async function requireSanity(home: string, head: ProofIdentity, run: Run)
   if (missing) throw new Error(missing);
   const last = (await readSanity(home, head)).at(-1);
   if (first === undefined || final === undefined) {
-    if (last?.commit === head.commit) return;
+    if (last?.commit === head.commit && (final === undefined || (last.production ?? -1) >= final)) return;
     const unknown = first === undefined ? "at round 1, so it cannot tell whether they grew past twice those of round 1" : `at HEAD, so it cannot tell whether they grew past twice the ${first} of round 1`;
     throw new Error(`Hedge cannot count the production lines ${unknown}. Before another round, read the growth since round 1 by hand, then cut it back to base behaviour or justify it: hedge proof sanity --verdict cut|justified --reason '<why>'`);
   }
