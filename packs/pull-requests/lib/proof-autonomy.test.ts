@@ -122,6 +122,9 @@ test("on end, a judge gap the user keeps owed goes back to the user, not to anot
   const gate = await pr.hedge("gate");
   expect(gate.output).toContain("The judge reads feature.txt as code. Ask the user with your question tool");
   expect(gate.output).not.toContain("Decide the gap yourself");
+  const again = await pr.hedge("gap", "--kind", "judge", "--reason", "The judge reads feature.txt as code");
+  expect(again.output).toContain("Ask the user with your question tool");
+  expect(again.output).not.toContain("Decide the gap yourself");
 });
 
 test("on ask, a gap reads no merge-risk grade from GitHub", async () => {

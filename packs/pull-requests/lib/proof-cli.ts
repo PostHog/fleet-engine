@@ -2,9 +2,9 @@ import { closeSync, existsSync, openSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { askGap, authorOf, finishReview, startGateRun, ledgerRoot, listStanding, panelCommit, proofDirectory, readJson, readOwed, recordGap, recordGapCommand, recordStanding, requireChoice, requireNone, devPr, requireProofs, requireReservation, respondToReview, reuseProof, reviewDirectory, reviewOfCommit, reviewRecords, roundId, roundQuestion, runOption, saveProof, startReview, stopOption, storeCapturedFindings, unfinishedReview, writeJson, markRecorded, readReservation, recordReceipt, roundDirectories, unrecordedElsewhere, type Arbiter, type Reservation, type CapturedBy, type ProofIdentity } from "./proof.ts";
+import { askGap, authorOf, readDecisions, finishReview, startGateRun, ledgerRoot, listStanding, panelCommit, proofDirectory, readJson, readOwed, recordGap, recordGapCommand, recordStanding, requireChoice, requireNone, devPr, requireProofs, requireReservation, respondToReview, reuseProof, reviewDirectory, reviewOfCommit, reviewRecords, roundId, roundQuestion, runOption, saveProof, startReview, stopOption, storeCapturedFindings, unfinishedReview, writeJson, markRecorded, readReservation, recordReceipt, roundDirectories, unrecordedElsewhere, type Arbiter, type Reservation, type CapturedBy, type ProofIdentity } from "./proof.ts";
 import { AnswerTaken, appendOnce, decideAlone, hearUser, ledgerHolds, ledgerOf } from "./decision-cli.ts";
-import { HubUnreachable, refText, thisMachine, type Decision, type Ssh } from "./decision-ledger.ts";
+import { HubUnreachable, keptOwed, refText, thisMachine, type Decision, type Ssh } from "./decision-ledger.ts";
 import { autonomyOf, gradeOf, type Autonomy, type Grade } from "./proof-autonomy.ts";
 import { readComment, runIn } from "./pr-ci.ts";
 import { askModel, family, familyOf, isQuotaExhausted, modelLabel, quotaExitCode, readRubric, reviewerRow, sessionFamily, skillReferences, type Family } from "./proof-models.ts";
@@ -374,7 +374,9 @@ command instead, unless the PR is a one-way door or its tier keeps the gap the u
       const reason = required(options, "--reason", "gap");
       const gap = await recordGap(context.home, identity(), kind, reason, context.now?.());
       context.print(JSON.stringify(gap));
-      context.print(askGap(identity(), kind, reason, autonomyOf(context.env, () => gradeAt(identity(), context), "proof-gap", [kind])));
+      const autonomy = autonomyOf(context.env, () => gradeAt(identity(), context), "proof-gap", [kind]);
+      const decisions = autonomy === "end" ? await readDecisions(ledgerOf(context)) : [];
+      context.print(askGap(identity(), kind, reason, Array.isArray(decisions) && !keptOwed(decisions, identity(), kind) ? autonomy : "ask"));
       return 0;
     },
   },
