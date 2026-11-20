@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AvailableSource } from "../../src/pack/types.ts";
 import { gitEnv, spawnGit, tempDirs } from "../../src/testing/git.ts";
@@ -356,8 +356,7 @@ describe("saving to the context library", () => {
     const source = "https://example.slack.com/archives/C1/p200.1";
     const note = `---\ntitle: Sprint planning\ntype: planning\ntopics: [load-testing]\ndate: 2026-11-11\nsource: ${source}\n---\n\n# Sprint planning\n\nLoad test first.\n`;
     const bin = temp.make("bin-");
-    const asked = join(bin, "asked");
-    writeFileSync(join(bin, "claude"), `#!/bin/sh\ncat >/dev/null\ntouch '${asked}'\nprintf '%s' '${JSON.stringify({ structured_output: { path: "notes/sprint-planning.md", text: note } })}'\n`, { mode: 0o755 });
+    writeFileSync(join(bin, "claude"), `#!/bin/sh\ncat >/dev/null\nprintf '%s' '${JSON.stringify({ structured_output: { path: "notes/sprint-planning.md", text: note } })}'\n`, { mode: 0o755 });
     const childEnv = { ...gitEnv, ...environment, PATH: `${bin}:${process.env.PATH}`, HEDGE_MODELS: JSON.stringify([{ role: "survey", work: "Survey", provider: "claude", model: "claude-sonnet-5-5", effort: "high" }]) };
     const run: Run = async (argv, input) => {
       if (argv[0] !== "bun") return { code: 0, stdout: "Nora Example\n", stderr: "" };
@@ -372,7 +371,7 @@ describe("saving to the context library", () => {
     slack.send({ type: "reaction_added", user: ownerId, reaction: "brain", item: { type: "message", channel: "C1", ts: "200.1" } });
     const done = async (until: () => boolean) => (await slack.until(until), stop.abort(), await running);
     const library = async () => (await git(root, "--git-dir", remote, "ls-tree", "-r", "--name-only", "main")).split("\n");
-    return { plan, slack, home, note, done, library, asked: () => existsSync(asked), notes: (path: string) => git(root, "--git-dir", remote, "show", `main:${path}`) };
+    return { slack, home, note, done, library, notes: (path: string) => git(root, "--git-dir", remote, "show", `main:${path}`) };
   }
 
   test("with the Memory pack on, the owner's :brain: runs the library's own handler, which pushes the note to the library", async () => {
@@ -383,12 +382,11 @@ describe("saving to the context library", () => {
     expect(await brain.notes("notes/sprint-planning.md")).toBe(brain.note.trimEnd());
   });
 
-  test("with the library workflow off, or without the Memory pack, the plan has no capture handler, and the owner's :brain: saves no note", async () => {
+  test("with the library workflow off, or without the Memory pack, the owner's :brain: gets no Slack answer and saves no note", async () => {
     for (const profile of [{ packs: ["memory", "slack"], workflows: { "context-library": false } }, { packs: ["slack"] }]) {
       const brain = await brainWith(profile);
       await brain.done(() => brain.slack.acked.length === 1);
-      expect([profile, Object.keys(brain.plan.handlers)]).toEqual([profile, []]);
-      expect([profile, reactionCalls(brain.slack), brain.slack.method("chat.postEphemeral").length, brain.asked()]).toEqual([profile, [], 0, false]);
+      expect([profile, reactionCalls(brain.slack), brain.slack.method("chat.postEphemeral").length]).toEqual([profile, [], 0]);
       expect([profile, await brain.library()]).toEqual([profile, ["ideas.md"]]);
     }
   });

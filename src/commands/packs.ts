@@ -1,3 +1,4 @@
+import { oldNameOnly } from "../pack/aliases.ts";
 import { keptWorkflows, workflowDefaults } from "../profile/profile.ts";
 import { FlagError, parseSetupFlags } from "../setup/flags.ts";
 import { memoryRepo, namedMemory } from "../setup/profile.ts";
@@ -52,11 +53,15 @@ export async function packsCommand(args: string[], context: ChangeContext): Prom
 
 function listPacks(context: ChangeContext) {
   const on = new Set(activePacks(context).map((manifest) => manifest.name));
+  const aliases = catalogAliases(context);
+  const partly = oldNameOnly(aliases, context.profile.packs);
   const missing = context.plan.packs.filter((pack) => !pack.available);
   context.print("Your packs:");
   for (const manifest of manifests(context)) {
-    const mark = manifest.name === "base" || on.has(manifest.name) ? "✓" : "·";
+    const mark = manifest.name === "base" || (on.has(manifest.name) && !partly.has(manifest.name)) ? "✓" : "·";
     context.print(`  ${mark} ${manifest.name}  ${manifest.summary}`);
+    const kept = partly.get(manifest.name);
+    if (on.has(manifest.name) && kept) context.print(`      Only part is on, through the old name ${context.profile.packs.filter((name) => aliases.get(name)?.pack === manifest.name).join(", ")}: ${[...kept].join(", ")}. Add ${manifest.name} for the whole pack.`);
     const workflows = context.plan.workflows.filter((workflow) => workflow.pack === manifest.name);
     if (on.has(manifest.name) && workflows.length) context.print(`      Workflows: ${workflows.map((workflow) => `${workflow.id} ${workflow.active ? "on" : workflow.reason && workflow.reason !== "turned off" ? `off: ${workflow.reason}` : "off"}`).join(", ")}`);
     if (on.has(manifest.name)) for (const workflow of manifest.workflows ?? []) if (workflow.risk) context.print(`      Terms note for ${workflow.id}: ${workflow.risk}`);

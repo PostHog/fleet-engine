@@ -999,6 +999,17 @@ describe("a pack that a profile names only by its old name", () => {
     expect(result.jobs.filter((job) => job.pack === "notes").map((job) => job.id)).toEqual(["recall-pull"]);
   });
 
+  test("lists in the service catalog only the services that the hub runs for the old name", () => {
+    const service = (id: string, port: number, workflow?: string) => ({ id, port, health: "/health", roles: ["hub", "solo"], ...(workflow ? { workflow } : {}) });
+    const job = (id: string, workflow?: string) => ({ id, command: ["hedge", "run", `notes/${id}`], schedule: { every: "always" }, roles: ["hub", "solo"], ...(workflow ? { workflow } : {}) });
+    const serving = withPack({ ...renamed.packs[0]!.manifest, served: [service("recall-api", 4700, "recall"), service("sweep-api", 4701)], jobs: [job("recall-api", "recall"), job("sweep-api")] } as PackManifest);
+    const sources = [engine, serving];
+    const onHub = plan({ packs: ["library"], hub: "hub-1", settings: {} }, { schema: 1, role: "linux", name: "hub-1" }, sources);
+    const onNode = plan({ packs: ["library"], hub: "hub-1", settings: {} }, { schema: 1, role: "linux", name: "node-2" }, sources);
+    expect(onHub.jobs.filter((item) => item.pack === "notes").map((item) => item.id)).toEqual(["recall-api"]);
+    expect([onHub, onNode].map((result) => (result.catalog ?? []).map((entry) => `${entry.pack}/${entry.id}`))).toEqual([["notes/recall-api"], ["notes/recall-api"]]);
+  });
+
   test("refuses an old name that a pack still has, or that two packs take", () => {
     const taking = (name: string) => withPack({ schema: 1, name, summary: "Takes library.", aliases: [{ name: "library", workflows: [] }] } as PackManifest);
     expect(() => plan({ packs: ["notes"], settings: {} }, mac, [engine, renamed, taking("boxes")])).toThrow("packs notes and boxes both take the old name library");

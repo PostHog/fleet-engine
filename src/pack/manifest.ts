@@ -128,6 +128,7 @@ function checkShapes(raw: Record<string, unknown>, fail: (message: string) => ne
     if (problem) fail(`${label}: ${problem}`);
   };
   for (const field of ["requires", "skills"]) need(raw[field] === undefined || isStrings(raw[field]), `${field} must list names`);
+  for (const name of isStrings(raw.requires) ? raw.requires : []) need(packName.test(name), `requires ${JSON.stringify(name)}: must be a pack name in lowercase words joined by dashes`);
   need(raw.onSite === undefined || raw.onSite === false, "onSite must be false when set");
   need(raw.settingPrefixes === undefined || (isStrings(raw.settingPrefixes) && raw.settingPrefixes.every((prefix) => packName.test(prefix))), "settingPrefixes must list pack names");
   each("aliases", (item, label) => {

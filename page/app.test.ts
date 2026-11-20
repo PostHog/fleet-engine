@@ -151,14 +151,23 @@ describe("the Packs page in a browser", () => {
   });
 
   test("ticking a team pack adds to the command each pack its card says it adds, also a pack with no card, and unticking it takes them back", async () => {
-    const needy: LoadedPack = { dir: "/team/packs/acme", manifest: { schema: 1, name: "acme", summary: "A team pack.", requires: ["integrations", "context-library"] } };
+    const needy: LoadedPack = { dir: "/team/packs/acme", manifest: { schema: 1, name: "acme", summary: "A team pack.", requires: ["integrations", "context-library", "gone"] } };
     const team = visit("packs/index.html", { files: await buildSite({ audience: "posthog", team: [needy] }) });
     input(team, "#pick-acme").click();
     expect(selected(team)).toEqual(["memory", "acme"]);
-    expect([text(team, "install-count"), command(team)]).toEqual(["3 packs selected", "hedge packs --add integrations --add memory --add acme"]);
+    expect([text(team, "install-count"), command(team)]).toEqual(["4 packs selected", "hedge packs --add integrations --add gone --add memory --add acme"]);
     input(team, "#pick-acme").click();
     input(team, "#pick-memory").click();
     expect([shown(team, "install-empty"), shown(team, "install-full")]).toEqual([true, false]);
+  });
+
+  test("ticking a team pack that requires a hidden helper adds the helper and each pack the helper requires to the command", async () => {
+    const acme: LoadedPack = { dir: "/team/packs/acme", manifest: { schema: 1, name: "acme", summary: "A team pack.", requires: ["helper"] } };
+    const helper: LoadedPack = { dir: "/team/packs/helper", manifest: { schema: 1, name: "helper", summary: "A hidden helper.", onSite: false, requires: ["context-library"] } };
+    const team = visit("packs/index.html", { files: await buildSite({ audience: "posthog", team: [acme, helper] }) });
+    input(team, "#pick-acme").click();
+    expect(selected(team)).toEqual(["memory", "acme"]);
+    expect(command(team)).toBe("hedge packs --add helper --add memory --add acme");
   });
 
   test("leaves out a remembered pack that this site does not have", () => {

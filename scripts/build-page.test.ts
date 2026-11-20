@@ -119,7 +119,7 @@ describe("the site build", () => {
     expect(localTargets("index.html", html).filter((target) => /^packs\/.+\//.test(target))).toEqual([]);
   });
 
-  test("the packs page shows Base and Hub in every Hedge without a switch, then the picks in three groups, and leaves Integrations off the site", async () => {
+  test("the packs page shows Base and Hub in every Hedge without a switch, then the picks in three groups, leaves Integrations off the site, and lets a visitor add Hub from its page", async () => {
     const groupsOf = (html: string) =>
       [...html.matchAll(/<section[^>]*aria-labelledby="(group-\d+)"[^>]*>([\s\S]*?)<\/section>/g)].map(([, id, body]) => [
         visibleText(body!.match(new RegExp(`<h2[^>]*id="${id}"[^>]*>([\\s\\S]*?)</h2>`))![1]!).trim(),
@@ -131,7 +131,10 @@ describe("the site build", () => {
       ["What your agents know", ["Memory (switch)"]],
       ["What your agents reach", ["Slack (switch)", "Paging (incident.io) (switch)", "MCP gateway (switch)"]],
     ]);
-    expect(visibleText(page("packs/hub/index.html"))).toContain("Every Hedge has this pack. You add nothing.");
+    const hub = page("packs/hub/index.html");
+    expect([visibleText(hub).includes("You add nothing"), visibleText(hub).includes("Add to your Hedge")]).toEqual([false, true]);
+    expect(promptOn(hub, "install")).toBe(installPrompt(data, ["hub"]));
+    expect(promptOn(hub, "install")).toContain("\n   hedge packs --add hub\n");
     expect(Object.keys(files)).not.toContain("packs/integrations/index.html");
     const team = await buildSite({ audience: "posthog", team: [teamPack()] });
     expect(groupsOf(page("packs/index.html", team)).at(-1)).toEqual(["Your team's packs", ["Posthog (switch)"]]);
@@ -277,7 +280,6 @@ describe("the site build", () => {
     expect(teamData.teamPacks).toEqual(["posthog"]);
     expect(visibleText(page("packs/index.html", site))).toContain("Adds integrations Adds Memory Adds gone");
     expect(promptOn(page("packs/posthog/index.html", site), "install")).toContain("hedge packs --add integrations --add gone --add memory --add posthog\n");
-    expect(installPrompt(carried(page("packs/index.html", site)), toggleSelected(carried(page("packs/index.html", site)), [], "posthog"))).toContain("hedge packs --add integrations --add gone --add memory --add posthog\n");
     expect(Object.keys(site)).not.toContain("packs/quiet/index.html");
   });
 
