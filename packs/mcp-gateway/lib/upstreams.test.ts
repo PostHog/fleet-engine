@@ -138,26 +138,38 @@ test("a local upstream whose folder is missing on the hub waits with a warning w
   expect(await upstreamsRegistered(hub)).toBe(true);
 });
 
-function movedNotes() {
+const atOldOrigin = { type: "streamable-http", url: "https://old.example.com/mcp", description: "Added by Hedge", startOnDemand: true };
+const oldOrigins = {
+  "an OAuth sign-in": (api: FakeMcpHub) => {
+    api.configs.notes = { ...atOldOrigin, oauth: { redirectUri: "http://127.0.0.1:3317/mcphub/oauth/callback", clientId: "old-client", clientSecret: "old-secret", accessToken: "old-access", refreshToken: "old-refresh" } };
+    api.oauthClients.notes = { clientId: "old-client", clientSecret: "old-secret" };
+  },
+  "per-user credentials": (api: FakeMcpHub) => {
+    api.configs.notes = { ...atOldOrigin, headers: { Authorization: "Bearer old-header" }, credentialTemplate: [{ target: "headers", name: "X-Api-Key" }] };
+    api.bindings.notes = { "headers.X-Api-Key": "old-binding" };
+  },
+};
+
+function movedNotes(from: keyof typeof oldOrigins = "an OAuth sign-in") {
   const { api, hub } = hubWith({ "notes.json": notes });
   return {
     api,
     hub,
     async moveFromOldOrigin() {
       await registerUpstreams(hub);
-      api.configs.notes = { type: "streamable-http", url: "https://old.example.com/mcp", description: "Added by Hedge", startOnDemand: true, headers: { Authorization: "Bearer old-header" }, credentialTemplate: [{ target: "headers", name: "X-Api-Key" }], oauth: { redirectUri: "http://127.0.0.1:3317/mcphub/oauth/callback" } };
-      api.bindings.notes = { "headers.X-Api-Key": "old-binding" };
-      api.oauthClients.notes = { clientId: "old-client", clientSecret: "old-secret" };
+      oldOrigins[from](api);
       api.received = [];
+      hub.printed.length = 0;
     },
     sentToNewOrigin: () => api.received.filter((sent) => typeof sent.url === "string" && new URL(sent.url).origin === "https://notes.example.com"),
   };
 }
 
-const oldCredentials = ["old-header", "old-binding", "old-client", "old-secret", "https://old.example.com"];
+const oldCredentials = ["old-header", "old-binding", "old-client", "old-secret", "old-access", "old-refresh", "https://old.example.com"];
+const signInAsked = "Notes is in the MCP gateway. To sign in to it, on the hub, run: hedge mcp-gateway sign-in";
 
-test("an upstream that moves to another origin receives none of the old origin's credentials at any point of the move, also those the gateway keeps by server name", async () => {
-  const moved = movedNotes();
+test.each(Object.keys(oldOrigins) as Array<keyof typeof oldOrigins>)("an upstream that moves to another origin receives none of the old origin's credentials at any point of the move, with %s that the gateway keeps by server name", async (from) => {
+  const moved = movedNotes(from);
   await moved.moveFromOldOrigin();
 
   await registerUpstreams(moved.hub);
@@ -180,6 +192,74 @@ test("when the gateway does not drop the old origin's sign-in, the upstream keep
 
   expect(moved.sentToNewOrigin().length).toBeGreaterThan(0);
   for (const old of oldCredentials) expect(JSON.stringify(moved.sentToNewOrigin())).not.toContain(old);
+});
+
+test("when the gateway does not turn the moved upstream back on, the next run turns it on and still asks for the sign-in", async () => {
+  const moved = movedNotes();
+  await moved.moveFromOldOrigin();
+  moved.api.failing = ['POST servers/notes/toggle {"enabled":true}'];
+
+  await expect(registerUpstreams(moved.hub)).rejects.toThrow();
+
+  expect(moved.api.configs.notes).toMatchObject({ url: "https://notes.example.com/mcp", enabled: false });
+  moved.api.failing = [];
+  await registerUpstreams(moved.hub);
+
+  expect(moved.api.configs.notes).toMatchObject({ url: "https://notes.example.com/mcp", enabled: true });
+  expect(moved.hub.printed).toEqual([signInAsked]);
+  for (const old of oldCredentials) expect(JSON.stringify(moved.sentToNewOrigin())).not.toContain(old);
+});
+
+test("a client registration at the old origin that ends after the gateway drops the sign-in does not reach the new origin", async () => {
+  const moved = movedNotes();
+  await moved.moveFromOldOrigin();
+  moved.api.lateRegistrations.notes = { clientId: "old-client", clientSecret: "old-secret" };
+
+  await registerUpstreams(moved.hub);
+
+  expect(moved.sentToNewOrigin().length).toBeGreaterThan(0);
+  for (const old of oldCredentials) expect(JSON.stringify(moved.sentToNewOrigin())).not.toContain(old);
+  expect(moved.hub.printed).toEqual([signInAsked]);
+});
+
+const lateOldTokens = (api: FakeMcpHub) => {
+  api.configs.notes!.oauth = { ...(api.configs.notes!.oauth as Record<string, unknown>), accessToken: "old-access", refreshToken: "old-refresh" };
+};
+
+test("when the gateway does not drop the sign-in again after it saves the new URL, the upstream stays off at its old URL, and the next run drops old tokens that arrive late before it turns the upstream on", async () => {
+  const moved = movedNotes();
+  await moved.moveFromOldOrigin();
+  moved.api.lateRegistrations.notes = { clientId: "old-client", clientSecret: "old-secret" };
+  moved.api.failing = ["POST servers/notes/oauth/disconnect #2"];
+
+  await expect(registerUpstreams(moved.hub)).rejects.toThrow();
+
+  expect(moved.api.configs.notes).toMatchObject({ url: "https://old.example.com/mcp", enabled: false });
+  lateOldTokens(moved.api);
+  moved.api.failing = [];
+  await registerUpstreams(moved.hub);
+
+  expect(moved.api.configs.notes).toMatchObject({ url: "https://notes.example.com/mcp", enabled: true });
+  expect(moved.sentToNewOrigin().length).toBeGreaterThan(0);
+  for (const old of oldCredentials) expect(JSON.stringify(moved.sentToNewOrigin())).not.toContain(old);
+  expect(moved.hub.printed).toEqual([signInAsked]);
+});
+
+test("when the gateway also does not take the old URL back, the run fails with the upstream off, and the next run drops the sign-in before it turns the upstream on", async () => {
+  const moved = movedNotes();
+  await moved.moveFromOldOrigin();
+  moved.api.failing = ["POST servers/notes/oauth/disconnect #2", "PUT servers/notes #2"];
+
+  await expect(registerUpstreams(moved.hub)).rejects.toThrow();
+
+  expect(moved.api.configs.notes).toMatchObject({ url: "https://notes.example.com/mcp", enabled: false });
+  moved.api.failing = [];
+  await registerUpstreams(moved.hub);
+
+  expect(moved.api.configs.notes).toMatchObject({ url: "https://notes.example.com/mcp", enabled: true });
+  expect(moved.sentToNewOrigin().length).toBeGreaterThan(0);
+  for (const old of oldCredentials) expect(JSON.stringify(moved.sentToNewOrigin())).not.toContain(old);
+  expect(moved.hub.printed).toEqual([signInAsked]);
 });
 
 test("an upstream that Fleet added before the rename becomes Hedge's and keeps its sign-in at the same origin", async () => {
@@ -268,7 +348,7 @@ test("one ChatGPT sign-in serves every Google route and the gateway reloads all 
   const { api, home, hub } = hubWith({});
   for (const app of googleApps) await registerUpstream(hub, app);
   const codex = join(home, ".local/share/hedge/codex/current/bin/codex");
-  writeFileSync(codex, `#!/bin/sh\necho "$*" >> "${home}/logins"\necho '{}' > "$CODEX_HOME/auth.json"\n`);
+  writeFileSync(codex, `#!/bin/sh\ncase "$*" in *'cli_auth_credentials_store="file"'*) echo '{}' > "$CODEX_HOME/auth.json" ;; *) echo "Successfully logged in" ;; esac\n`);
   chmodSync(codex, 0o755);
   api.calls.length = 0;
   expect(await signInApp(hub, gmail)).toBe(0);
@@ -278,8 +358,8 @@ test("one ChatGPT sign-in serves every Google route and the gateway reloads all 
   writeFileSync(join(home, ".local/share/hedge-mcphub/data/google-codex/auth.json"), "broken");
   api.calls.length = 0;
   expect(await signInApp(hub, googleCalendar)).toBe(0);
-  expect(readFileSync(join(home, "logins"), "utf8")).toBe("login --device-auth\nlogin --device-auth\n");
   expect(readFileSync(join(home, ".local/share/hedge-mcphub/data/google-codex/auth.json"), "utf8")).toBe("{}\n");
+  for (const app of googleApps) expect(await appSignedIn(hub, app)).toBe(true);
   expect(writes(api)).toEqual(["POST servers/gmail/reload", "POST servers/google-calendar/reload", "POST servers/google-drive/reload"]);
 });
 

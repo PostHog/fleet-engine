@@ -173,8 +173,18 @@ describe("hedge devbox add", () => {
     const options = { home, engineRoot, platform: "linux" as const, print: io.terminal.print, terminal: io.terminal };
     const box = fakeMachine(home, { "box:chatgpt": 99 }, { exits: { "box:chatgpt": 1 } });
     expect(await main(["devbox", "add", "coder.hedge-node-1"], { ...options, setup: { machine: box.machine } })).toBe(1);
-    expect(io.output()).toContain("codex login --device-auth ended with code 1, but Sign in to ChatGPT on coder.hedge-node-1 still does not pass its check. Fix what it says above, then run hedge devbox add coder.hedge-node-1 again.");
+    expect(io.output()).toContain(`codex login -c cli_auth_credentials_store="file" --device-auth ended with code 1, but Sign in to ChatGPT on coder.hedge-node-1 still does not pass its check. Fix what it says above, then run hedge devbox add coder.hedge-node-1 again.`);
     expect(io.output()).toContain("and open the link it prints. Then run hedge devbox add coder.hedge-node-1 again.");
+    expect(io.output()).not.toContain("hedge setup again");
+  });
+
+  test("when a node's ChatGPT check fails after its sign-in ended, hedge devbox add keeps that sign-in and says to run hedge devbox add for that node again", async () => {
+    const home = temp.make("home-");
+    expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "codex"], ["", ""])).code).toBe(0);
+    const io = scripted([]);
+    const box = fakeMachine(home, { "box:chatgpt": 1 }, { exits: { "box:chatgpt": 0 }, boxCodexAfterSignIn: "ERROR: You hit your spend cap.\n" });
+    await main(["devbox", "add", "coder.hedge-node-1"], { home, engineRoot, platform: "linux", print: io.terminal.print, terminal: io.terminal, setup: { machine: box.machine } });
+    expect(io.output()).toContain("Codex is signed in, but its test request failed: You hit your spend cap. Setup keeps that sign-in and starts no new one. To replace it, run codex logout first. Fix that, then run hedge devbox add coder.hedge-node-1 again.");
     expect(io.output()).not.toContain("hedge setup again");
   });
 

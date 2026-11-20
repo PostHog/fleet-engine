@@ -1,6 +1,5 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { hedgeOnMac } from "./legacy.ts";
 import { repoUrl, withoutUserinfo } from "./pack/sources.ts";
 import type { ProfileFile } from "./pack/types.ts";
 import { engineRepo } from "./setup/defaults.ts";
@@ -17,6 +16,11 @@ export type UpdateOptions = {
 
 type Version = { tag: string; parts: [number, number, number] };
 
+const releaseRefs = "refs/hedge/releases";
+export const recordedReleasesAtHead = (engineDir: string) => ["git", "-C", engineDir, "for-each-ref", "--points-at", "HEAD", "--format=%(refname)", releaseRefs];
+export const releaseRefsAtHead = (engineDir: string) => ["git", "-C", engineDir, "for-each-ref", "--points-at", "HEAD", "--format=%(refname)", releaseRefs, "refs/tags"];
+export const releaseIn = (refs: string) => refs.split("\n").map((ref) => ref.trim().replace(/^refs\/(?:hedge\/releases|tags)\//, "")).find((tag) => parse(tag)?.tag === tag);
+
 export function noticePath(home: string) {
   return join(home, ".local", "state", "hedge", "update.json");
 }
@@ -29,10 +33,7 @@ export async function readNotice(home: string): Promise<string | undefined> {
 }
 
 export async function update(given: UpdateOptions): Promise<number> {
-  const options = { ...given, print: (line: string) => given.print(withoutUserinfo(line)) };
-  const code = await moveEngine(options);
-  if (code !== 0 && options.platform === "darwin") options.print(hedgeOnMac);
-  return code;
+  return moveEngine({ ...given, print: (line: string) => given.print(withoutUserinfo(line)) });
 }
 
 async function moveEngine(options: UpdateOptions) {
@@ -40,9 +41,11 @@ async function moveEngine(options: UpdateOptions) {
   if (!origin) return 1;
   const before = (await git(options.engineDir, "rev-parse", "HEAD")).out;
   const moved = options.engine.channel === "track" ? await trackMain(options, origin.url) : await followRelease(options, origin.url, origin.switched);
-  if (!moved || !(await saveOrigin(options, origin))) return 1;
+  if (!moved) return 1;
   const failed = await installPackages(options.engineDir);
   if (failed !== undefined) return await rollBack(options, before, failed), 1;
+  if (!(await recordRelease(options, moved))) return 1;
+  if (!(await saveOrigin(options, origin))) return 1;
   const profileMoved = await pullProfile(options);
   const applied = await options.runApply();
   return applied === 0 && !profileMoved ? 1 : applied;
@@ -75,18 +78,36 @@ async function ready(options: UpdateOptions): Promise<false | Origin> {
 async function saveOrigin(options: UpdateOptions, origin: Origin) {
   if (!origin.switched) return true;
   const changed = await git(options.engineDir, "remote", origin.exists ? "set-url" : "add", "origin", origin.url);
-  if (!changed.ok) return options.print(`hedge update: could not point the engine at ${origin.url}: ${changed.err}`), false;
+  if (!changed.ok) return options.print(`hedge update: the engine's packages are installed, but could not point the engine at ${origin.url}: ${changed.err}. Run hedge update again to finish the update.`), false;
   options.print(`The engine now comes from ${options.engine.repo}.`);
   return true;
 }
 
-async function trackMain(options: UpdateOptions, url: string) {
-  const fetched = await git(options.engineDir, "fetch", "-q", "--depth", "1", "--no-tags", url, "main");
-  if (!fetched.ok) return options.print(`hedge update: could not fetch the engine: ${fetched.err}`), false;
-  const checkedOut = await git(options.engineDir, "checkout", "-q", "--detach", "FETCH_HEAD");
+type Moved = false | { release?: { tag: string; commit: string } };
+
+async function recordRelease(options: UpdateOptions, moved: Exclude<Moved, false>) {
+  if (!moved.release) return true;
+  const { tag, commit } = moved.release;
+  const recorded = await git(options.engineDir, "update-ref", `${releaseRefs}/${tag}`, commit);
+  if (!recorded.ok) options.print(`hedge update: the engine is at ${tag}, but could not record that release: ${recorded.err}. Run hedge update again to finish the update.`);
+  return recorded.ok;
+}
+
+async function fetchedCommit(options: UpdateOptions, url: string, ref: string) {
+  const fetched = await git(options.engineDir, "fetch", "-q", "--depth", "1", "--no-tags", url, ref);
+  if (!fetched.ok) return options.print(`hedge update: could not fetch the engine: ${fetched.err}`), undefined;
+  const commit = await git(options.engineDir, "rev-parse", "--verify", "FETCH_HEAD^{commit}");
+  if (!commit.ok) return options.print(`hedge update: could not read the fetched engine: ${commit.err}`), undefined;
+  return commit.out;
+}
+
+async function trackMain(options: UpdateOptions, url: string): Promise<Moved> {
+  const commit = await fetchedCommit(options, url, "main");
+  if (!commit) return false;
+  const checkedOut = await git(options.engineDir, "checkout", "-q", "--detach", commit);
   if (!checkedOut.ok) return options.print(`hedge update: could not check out main: ${checkedOut.err}`), false;
   options.print(`Engine follows main at ${(await git(options.engineDir, "rev-parse", "--short", "HEAD")).out}.`);
-  return true;
+  return {};
 }
 
 async function releases(options: UpdateOptions, url: string) {
@@ -103,7 +124,7 @@ async function releases(options: UpdateOptions, url: string) {
   });
 }
 
-async function followRelease(options: UpdateOptions, url: string, switched: boolean) {
+async function followRelease(options: UpdateOptions, url: string, switched: boolean): Promise<Moved> {
   const versions = await releases(options, url);
   if (!versions) return false;
   const pin = parse(options.engine.ref);
@@ -117,20 +138,20 @@ async function followRelease(options: UpdateOptions, url: string, switched: bool
   const installed = versions.filter((version) => version.commit === head).sort(compare).at(-1);
   if (switched) return checkOutRelease(options, url, target);
   if (!installed) {
-    options.print(`Engine stays at ${head.slice(0, 7)}, which is not a release, so hedge update does not move it back. Set engine.channel to track to follow main, or run get.sh --ref ${target.tag}.`);
-    return true;
+    options.print(`Engine stays at ${head.slice(0, 7)}, which is not a release, so hedge update does not move it back. Set engine.channel to track to follow main${options.platform === "darwin" ? "" : `, or run get.sh --ref ${target.tag}`}.`);
+    return {};
   }
-  if (compare(installed, target) >= 0) return options.print(`Engine is at ${installed.tag}.`), true;
+  if (compare(installed, target) >= 0) return options.print(`Engine is at ${installed.tag}.`), { release: { tag: installed.tag, commit: head } };
   return checkOutRelease(options, url, target);
 }
 
-async function checkOutRelease(options: UpdateOptions, url: string, target: Version) {
-  const fetched = await git(options.engineDir, "fetch", "-q", "--depth", "1", "--no-tags", "--force", url, `+refs/tags/${target.tag}:refs/tags/${target.tag}`);
-  if (!fetched.ok) return options.print(`hedge update: could not fetch the engine: ${fetched.err}`), false;
-  const checkedOut = await git(options.engineDir, "checkout", "-q", "--detach", `refs/tags/${target.tag}`);
+async function checkOutRelease(options: UpdateOptions, url: string, target: Version): Promise<Moved> {
+  const commit = await fetchedCommit(options, url, `refs/tags/${target.tag}`);
+  if (!commit) return false;
+  const checkedOut = await git(options.engineDir, "checkout", "-q", "--detach", commit);
   if (!checkedOut.ok) return options.print(`hedge update: could not check out ${target.tag}: ${checkedOut.err}`), false;
   options.print(`Engine is at ${target.tag}.`);
-  return true;
+  return { release: { tag: target.tag, commit } };
 }
 
 async function installPackages(engineDir: string) {
