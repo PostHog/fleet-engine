@@ -143,9 +143,10 @@ test("[base] counts only where a field starts with it, and the site comes from t
   }
 });
 
-test("an ungraded finding, a TESTS item without a file, and a major on a quoted docs path with spaces buy no round", async () => {
+test("an ungraded finding, a TESTS item without a file, and a major on a docs path with spaces, quoted or not, buy no round", async () => {
   for (const [finding, response] of [
     ["- major | `docs/User Guide.md:12` | the guide names the old flag", "1. fixed: the guide names the new flag"],
+    ["- major | docs/User Guide.md:12 | the guide names the old flag", "1. fixed: the guide names the new flag"],
     ["- No findings, the greeting is right.", "1. fixed: the greeting reads right"],
     ["TESTS:\n- the suite mocks the clock", "1. fixed: the suite uses a real clock"],
   ] as const) {
