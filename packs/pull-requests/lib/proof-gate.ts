@@ -11,6 +11,7 @@ import { receiptMarker } from "./proof-receipt.ts";
 import { baseRefs, cleanBaseMerge, devPullOf, diffOf, mergeBase, pullRequestDetails, topLevel } from "./proof-checkout.ts";
 import { quietCommitIn } from "./proof-delta.ts";
 import { measureGrowth } from "./proof-end-table.ts";
+import { readSanity } from "./proof-sanity.ts";
 import { judge, readCriticalPaths, type JudgeInput } from "./proof-judge.ts";
 import { askModel, familyOf, modelLabel, readRiskRubric, readRubric, reviewerRow, skillReferences } from "./proof-models.ts";
 
@@ -78,7 +79,8 @@ export async function finalGate(head: ProofIdentity, context: GateContext, { lan
 
 async function grownBy(home: string, head: ProofIdentity, run: Run, baseSha: string | undefined) {
   const growth = await measureGrowth(home, head, run, baseSha);
-  return growth ? { growth } : {};
+  const sanity = (await readSanity(home, head)).at(-1);
+  return growth ? { growth: { ...growth, ...sanity ? { sanity } : {} } } : {};
 }
 
 const pushedHeadOf = (head: ProofIdentity, run: Run, seen: (pull: PullRequest) => void = () => {}) => (): PushedHead => {

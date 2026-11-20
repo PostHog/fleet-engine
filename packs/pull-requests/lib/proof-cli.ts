@@ -24,6 +24,7 @@ import { baseRefs, baseTip, cleanBaseMerge, mergeBase, pullRequestDetails, remot
 import { arbiterOf, finalGate, reviewLimit, type FinalGate } from "./proof-gate.ts";
 import { anchorCheck } from "./finding-anchors.ts";
 import { reviewRules } from "./review-rules.ts";
+import { recordSanity, requireSanity } from "./proof-sanity.ts";
 import type { ThreadWords } from "./proof-answers.ts";
 import { modelFor } from "../../base/lib/models.ts";
 import { numberSetting } from "../../base/lib/settings.ts";
@@ -374,6 +375,21 @@ HEAD.`,
       return 0;
     },
   },
+  sanity: {
+    usage: "sanity --verdict cut|justified --reason <why>",
+    summary: `Record the sanity pass at HEAD. Once the production lines pass twice the lines of the first review round, hedge
+proof review starts no other round until a sanity pass covers them. Read the diff against the first reviewed commit, cut
+what the problem does not need back to base behaviour, and record --verdict cut, or record --verdict justified with
+the reason the growth is needed. A pass covers the production lines it saw: a later head that grows past them needs a
+new pass. The end table of the receipt and of hedge decision report shows the last pass.`,
+    examples: ["hedge proof sanity --verdict cut --reason 'Dropped the retry layer; the base never retried'"],
+    options: ["--verdict", "--reason"],
+    run: async ({ options }, identity, context) => {
+      const pass = await recordSanity(context.home, identity(), context.run, required(options, "--verdict", "sanity"), required(options, "--reason", "sanity"), context.now?.() ?? new Date());
+      context.print(JSON.stringify(pass));
+      return 0;
+    },
+  },
   gate: {
     usage: "gate [--landed] [--json]",
     summary: `Check the owed proofs, the review and the answers to its findings, and the CI of the commit on GitHub, then let
@@ -621,6 +637,7 @@ async function reserveRound(options: Map<string, string>, head: ProofIdentity, c
   const lastRead = scope === "final" && (options.get("--phase") ?? "review") === "review";
   const from = lastRead ? await panelCommit(context.home, head) ?? base : rangeStart(scope, base, head, context.run);
   const { decision, ...permit } = await decisionOf(options, head, context);
+  if (scope !== "final" && decision?.mark !== "👤") await requireSanity(context.home, head, context.run);
   const tier = tierOf(head, context);
   if (tier.name === "read" && capturedBy === "hedge" && !panel && !decision && !await panelCommit(context.home, head)) throw new Error("A PR of the Read tier gets one read, and it is the panel: run hedge proof review, which runs its combined lens");
   const firstPanel = panel && !await panelCommit(context.home, head);

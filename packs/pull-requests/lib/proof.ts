@@ -5,6 +5,7 @@ import { normalized, type HeardAnswer } from "./proof-answers.ts";
 import { agentRefusal, agentsAcceptance, covers, fold, keptOwed, panelRefusal, tierOf, usersAcceptance, type Decision, type DecisionState, type Ledger, type Mark, type PrRef, type Tier } from "./decision-ledger.ts";
 import type { Family, Usage } from "./proof-models.ts";
 import { quietReason, type DeltaKind, type QuietStep } from "./proof-delta.ts";
+import { isProductionFile } from "./proof-checkout.ts";
 import { panelOutcome } from "./proof-panel.ts";
 import { anchorHeading } from "./finding-anchors.ts";
 import type { Growth } from "./proof-end-table.ts";
@@ -316,6 +317,7 @@ async function startRound(home: string, identity: ProofIdentity, reviews: string
   const permitRound = async ({ round, spent }: Awaited<ReturnType<typeof snapshot>>) => {
     if (round === 1 && scope !== "full") throw new Error("Round 1 is --scope full: it reviews the whole PR diff. Drop --base");
     if (round > 1) await checkLaterRound(reviews, round, scope, base, decision, cleanBaseMerge);
+    if (round > 1 && decision?.mark !== "👤") await requireBoughtRound(reviews, round - 1);
     return permitReview(home, identity, spent >= free, spent >= ceiling ? budgetSpent(permit.limits) : undefined, decision, permit);
   };
   return reserveWeighed(reviews, lockBudget, snapshot, permitRound, async ({ round }, verdict) => {
@@ -345,6 +347,21 @@ async function checkLaterRound(reviews: string, round: number, scope: string, ba
   const previous = JSON.parse(await readFile(join(reviews, String(round - 1), "round.json"), "utf8")) as ProofIdentity;
   if (scope !== "fixes" || !base) throw new Error(`Round ${round} needs --scope fixes --base ${previous.commit}, the commit of round ${round - 1}. With --agent '<your reason>', or the user's --override, --scope full reviews the whole PR diff again`);
   if (!coversReview(base, previous.commit, cleanBaseMerge)) throw new Error(`Round ${round} needs --base ${previous.commit}, the commit of round ${round - 1}`);
+}
+
+async function requireBoughtRound(reviews: string, round: number) {
+  const findings = await readFile(join(reviews, String(round), "findings.md"), "utf8");
+  const responses = await readFile(join(reviews, String(round), "responses.md"), "utf8").catch(() => "");
+  if (answeredFindings(findings, responses).findings.some(buysRound)) return;
+  throw new Error(`Round ${round} found no bug in production code that the PR introduced, so the review loop stops. Reject a finding the base has too with its base lines, and list it under Known issues. When fixes since round ${round} changed production code, give them a final read with --scope final. Only the user's --override runs another round`);
+}
+
+type AnsweredFinding = ReturnType<typeof answeredFindings>["findings"][number];
+
+function buysRound({ text, note, test, answer }: AnsweredFinding) {
+  if (note || test || flooredItem(text) || /\[base\]/i.test(text) || answer?.verdict === "rejected" || answer?.verdict === "known") return false;
+  const site = locations(text)[0]?.replace(/:\d+$/, "");
+  return site === undefined || isProductionFile(site);
 }
 
 function claimedOn(text: string) {
