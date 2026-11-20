@@ -89,3 +89,32 @@ test("the reviewer reads that behaviour the base has too is no blocker, and that
 
   expect(reviewer.prompts().at(-1)).toContain("Behaviour that the base branch has too is not a blocker or a major: mark such a finding minor, start its problem with [base], and cite the base line. Every other finding is one the PR introduced.");
 });
+
+test("the latest finished review decides: a final read that finds a production bug the PR introduced buys the next round", async () => {
+  const pr = await checkout();
+  const reviewed = await firstRound(pr, ["- minor | feature.ts:1 | the word reads oddly | anchor: greet 0"], ["1. fixed: the word reads plainly"]);
+  await pr.commit("feature.ts", lines(11, "greet"));
+  expect((await pr.hedge("review-start", "--scope", "final", "--base", reviewed)).code).toBe(0);
+  writeFileSync(join(pr.repository, "findings.md"), "- major | feature.ts:11 | the new greeting drops the name | anchor: greet 10\n");
+  expect((await pr.hedge("review-finish", "--round", "final-1", "--reviewer", "gpt-6.1-sol", "findings.md")).code).toBe(0);
+  writeFileSync(join(pr.repository, "responses.md"), "1. fixed: the greeting keeps the name\n");
+  expect((await pr.hedge("respond", "--round", "final-1", "responses.md")).code).toBe(0);
+  await pr.commit("feature.ts", lines(12, "greet"));
+
+  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).code).toBe(0);
+});
+
+test("a first review that saw no production lines never asks for a sanity pass, as the table shows no ratio for it", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.test.ts", lines(10, "check"));
+  pr.pullRequestState({ body: graded("non-critical") });
+  expect((await pr.hedge("review-start", "--scope", "full")).code).toBe(0);
+  writeFileSync(join(pr.repository, "findings.md"), "- major | the check never runs | anchor: check 0\n");
+  expect((await pr.hedge("review-finish", "--round", "1", "--reviewer", "gpt-6.1-sol", "findings.md")).code).toBe(0);
+  writeFileSync(join(pr.repository, "responses.md"), "1. fixed: the check runs\n");
+  expect((await pr.hedge("respond", "--round", "1", "responses.md")).code).toBe(0);
+  const reviewed = await pr.git("rev-parse", "HEAD");
+  await pr.commit("helper.ts", lines(5, "help"));
+
+  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).code).toBe(0);
+});

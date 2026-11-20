@@ -31,7 +31,7 @@ export async function recordSanity(home: string, head: ProofIdentity, run: Run, 
 export async function requireSanity(home: string, head: ProofIdentity, run: Run) {
   const growth = await measureGrowth(home, head, run, baseShaOf(head, run));
   const [first, final] = [growth?.first?.production, growth?.final?.production];
-  if (first === undefined || final === undefined || final <= 2 * first) return;
+  if (!first || final === undefined || final <= 2 * first) return;
   if ((await readSanity(home, head)).some((pass) => pass.production >= final)) return;
   throw new Error(`Production lines grew from ${first} at round 1 to ${final} at HEAD, past twice the first. Before another round, cut the PR back to base behaviour, or justify the growth: hedge proof sanity --verdict cut|justified --reason '<why>'`);
 }

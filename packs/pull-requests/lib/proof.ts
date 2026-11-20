@@ -317,7 +317,7 @@ async function startRound(home: string, identity: ProofIdentity, reviews: string
   const permitRound = async ({ round, spent }: Awaited<ReturnType<typeof snapshot>>) => {
     if (round === 1 && scope !== "full") throw new Error("Round 1 is --scope full: it reviews the whole PR diff. Drop --base");
     if (round > 1) await checkLaterRound(reviews, round, scope, base, decision, cleanBaseMerge);
-    if (round > 1 && decision?.mark !== "👤") await requireBoughtRound(reviews, round - 1);
+    if (round > 1 && decision?.mark !== "👤") await requireBoughtRound(home, identity);
     return permitReview(home, identity, spent >= free, spent >= ceiling ? budgetSpent(permit.limits) : undefined, decision, permit);
   };
   return reserveWeighed(reviews, lockBudget, snapshot, permitRound, async ({ round }, verdict) => {
@@ -349,11 +349,15 @@ async function checkLaterRound(reviews: string, round: number, scope: string, ba
   if (!coversReview(base, previous.commit, cleanBaseMerge)) throw new Error(`Round ${round} needs --base ${previous.commit}, the commit of round ${round - 1}`);
 }
 
-async function requireBoughtRound(reviews: string, round: number) {
-  const findings = await readFile(join(reviews, String(round), "findings.md"), "utf8");
-  const responses = await readFile(join(reviews, String(round), "responses.md"), "utf8").catch(() => "");
+async function requireBoughtRound(home: string, identity: ProofIdentity) {
+  const last = (await finishedReviews(home, identity)).at(-1);
+  if (!last) return;
+  const directory = join(pullRequestDirectory(home, identity), "reviews", last.name);
+  const findings = await readFile(join(directory, "findings.md"), "utf8");
+  const responses = await readFile(join(directory, "responses.md"), "utf8").catch(() => "");
   if (answeredFindings(findings, responses).findings.some(buysRound)) return;
-  throw new Error(`Round ${round} found no bug in production code that the PR introduced, so the review loop stops. Reject a finding the base has too with its base lines, and list it under Known issues. When fixes since round ${round} changed production code, give them a final read with --scope final. Only the user's --override runs another round`);
+  const label = reviewLabel(last.name);
+  throw new Error(`${label[0]!.toUpperCase()}${label.slice(1)} found no bug in production code that the PR introduced, so the review loop stops. Reject a finding the base has too with its base lines, and list it under Known issues. When fixes since ${label} changed production code, give them a final read with --scope final. Only the user's --override runs another round`);
 }
 
 type AnsweredFinding = ReturnType<typeof answeredFindings>["findings"][number];
