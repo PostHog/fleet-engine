@@ -41,6 +41,17 @@ test("on end, an ungraded PR still sends an escalated round to the user", async 
   await expect(pr.hedge("review-finish", "--round", "3", "--reviewer", "gpt-6.1-sol", "findings.md")).rejects.toThrow();
 });
 
+test("on end, a one-way door sends an escalated round to the user and offers no agent decision", async () => {
+  const pr = await checkout();
+  decideAtEnd(pr);
+  pr.pullRequestState({ body: graded("critical", "medium").replace("two-way door", "one-way door") });
+  const third = await escalatedRound(pr);
+
+  await expect(pr.hedge(...third)).rejects.toThrow("The arbiter escalates: Round 2 undoes the rename round 1 asked for. Ask the user with your question tool");
+  await expect(pr.hedge(...third)).rejects.toThrow("On a one-way door an agent never decides the round.");
+  await expect(pr.hedge(...third)).rejects.not.toThrow("--agent");
+});
+
 test("on ask, an escalated round asks the user as before", async () => {
   const pr = await checkout();
   pr.pullRequestState({ body: graded("critical", "medium") });

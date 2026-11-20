@@ -1,7 +1,7 @@
 import { optionalStringSetting } from "../../base/lib/settings.ts";
 import { agentRefusal, riskCalloutOf, tierOf, type AskClass, type Env, type Tier } from "./decision-ledger.ts";
 
-export type Autonomy = "ask" | "end";
+export type Autonomy = "ask" | "end" | "user";
 export type Grade = { tier: Tier; oneWay: boolean };
 
 export const endTableNote = "the user reads it in hedge decision report, under Decisions";
@@ -14,5 +14,6 @@ export const gradeOf = (body: string | undefined): Grade =>
 export function autonomyOf(env: Env, gradeAt: () => Grade, decisionClass: AskClass, kinds?: string[]): Autonomy {
   if (optionalStringSetting("pull-requests.autonomy", env) !== "end") return "ask";
   const { tier, oneWay } = gradeAt();
-  return !oneWay && !agentRefusal(tier, decisionClass, kinds) ? "end" : "ask";
+  if (oneWay) return "user";
+  return agentRefusal(tier, decisionClass, kinds) ? "ask" : "end";
 }
