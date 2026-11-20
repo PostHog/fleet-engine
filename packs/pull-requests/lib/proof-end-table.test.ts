@@ -237,13 +237,13 @@ test("a gap reason with a long run of backslashes prints in the table at once", 
   pr.pullRequestState({ body: graded("non-critical") });
   await reviewHead(pr);
   await pr.hedge("require", "--kinds", "ui-walk");
-  await pr.hedge("gap", "--kind", "ui-walk", "--reason", "\\".repeat(20_000) + " no page");
+  await pr.hedge("gap", "--kind", "ui-walk", "--reason", "\\".repeat(40_000) + " no page");
   await agentAccepts(pr, "ui-walk");
   await pr.hedge("gate");
 
   const started = performance.now();
   const row = tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1];
-  expect(performance.now() - started).toBeLessThan(2_000);
+  expect(performance.now() - started).toBeLessThan(4_000);
   expect(row).toEndWith(" no page (🤖 agent " + await decisionId(pr) + ") |");
 });
 
