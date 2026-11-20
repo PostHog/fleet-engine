@@ -246,9 +246,23 @@
   once. It makes a fresh checkout of the engine in
   `~/.local/share/hedge/engine`. It never reuses the old checkout. It ignores
   a `FLEET_ENGINE_DIR` or `HEDGE_ENGINE_DIR` that leads into a Fleet path, by
-  its real path, or that is the Fleet checkout: its launcher is `fleet`, its
-  remote is `fleet-engine`, or the old `fleet` command runs it. It stops when
-  a Hedge folder is a link into a Fleet path.
+  its real path, or that is the Fleet checkout: its launcher is `fleet`, or
+  its remote is `fleet-engine`. It stops when a Hedge folder is a link into a
+  Fleet path.
+- Hedge moves only a Fleet engine in `~/.local/share/fleet/engine`. When
+  Fleet's `~/.local/bin/fleet` command, the one with the installer's
+  `# Fleet` line, runs an engine in another folder, or names a folder that
+  Hedge cannot read, such as one with an escaped apostrophe, `get.sh` stops
+  before it changes anything and names the folder. `hedge retire-fleet`, its
+  dry run, and `hedge apply` refuse on such a machine too. Stop Fleet's
+  services, cron jobs and `fleet:` tasks by hand and delete
+  `~/.local/bin/fleet`, or move the engine to `~/.local/share/fleet/engine`
+  and change the path in `~/.local/bin/fleet` to match, then run `get.sh`
+  again. A `~/.local/bin/fleet` without the `# Fleet` line is not Fleet's,
+  and Hedge ignores it. When `~/.local/share/fleet/engine` itself is a link,
+  `get.sh`, `hedge retire-fleet`, its dry run, and `hedge apply` refuse the
+  same way and name the link.
+  Stop Fleet by hand and delete the link, or move the engine into its place.
 - On the first run, `get.sh` first runs `hedge retire-fleet`, also with
   `--install-only`. When it cannot show that each piece of Fleet stopped, it
   copies and applies nothing and exits 1. Stop what it names by hand, or
@@ -288,8 +302,16 @@
   runs no setup. `hedge retire-fleet --dry-run` names the same pieces. An
   engine from before `retire-fleet` took `--dry-run` is never asked to list
   them, so a preview at such a `--ref` stops nothing.
-- `hedge retire-fleet` and `hedge apply` do not look up the account's home
-  folder on a machine that never had Fleet.
+- `hedge retire-fleet`, its dry run, and both checks in `hedge apply`, for
+  Fleet's jobs and for its `fleet:` T3 tasks, act only on a machine with a
+  Fleet engine install in `~/.local/share/fleet/engine`. `get.sh` points
+  `fleet` at Hedge only after retire, never in a preview. On any other
+  machine, such as
+  one that runs a private Fleet copy, retire stops nothing and says that the
+  machine has no Fleet engine install, and apply does not wait for that
+  copy's `fleet-*` units or `fleet:` tasks. They do not look up the
+  account's home folder there.
+- To go back to Fleet, follow "Go back to Fleet" in `SETUP.md`.
 - `hedge apply` starts nothing while a piece of Fleet still runs, or while it
   cannot tell. It checks before it fetches a source or writes the machine
   file. It names each piece and says to run `hedge retire-fleet`.
@@ -308,6 +330,20 @@
   Set `engine.ref` in the profile to a Hedge release, or move the link away.
 - `hedge update` keeps the engine's origin when the profile still names
   `PostHog/fleet-engine`, so a Hedge checkout never looks like Fleet's.
+- `hedge update` refuses an engine ref whose commit has no `hedge` launcher
+  file before the checkout moves, and records nothing. Only a regular file
+  named `hedge` counts, not a folder or a link. It writes or removes its
+  update notice only after the new engine's packages installed, so a refused
+  or rolled-back update leaves the notice as it was. It writes the notice
+  only to a regular file in a real folder. Before the checkout moves, it
+  checks `~/.local/state/hedge`, where `hedge apply` keeps its state. When
+  that folder or a folder above it is a link, a file or anything else that is
+  not a real folder, `hedge update` names the path, moves nothing and exits 1.
+  It checks those folders again just before it writes the notice. When a
+  folder changed into a link in between, or only `update.json` is a link,
+  leads into Fleet's state folder or cannot be written, it skips the notice
+  with a warning and the update goes on. It never writes Fleet's state.
+- `hedge update` runs apply with the profile it pulled.
 - `hedge update` and `hedge refresh` use the Hedge copy of a profile that the
   machine file still names in a Fleet path, or refuse, before they pull.
 - Hedge operations that change the machine take an `flock` lock on
@@ -330,11 +366,14 @@
   checkout of the same repository, with the commit the old profile is at.
   The profile and machine writers also refuse a file that links into a Fleet
   path. Delete the old paths when you no longer need them.
-- Hedge still takes what Fleet wrote: the `# fleet-hub-tunnel` hosts entry,
-  the `fleet-management` key of MCPHub, the Claude key helper and the
+- Hedge still takes what Fleet wrote: the `fleet-management` key of MCPHub, the Claude key helper and the
   `fleet-proxy` Codex provider of `fleet cli-proxy connect`, a T3 Claude
   instance bound to `~/.config/fleet/recovery/claude`, a gateway upstream
-  marked "Added by Fleet", a Codex install under
+  marked "Added by Fleet", Node links in `~/.local/bin` that point into
+  `~/.local/share/fleet/node`, which Base's `node-runtime` step links to
+  Hedge's package, since its check `hedge install-node --check` fails while
+  they are there, a Codex
+  install under
   `~/.local/share/fleet/codex` that Base and the nightly update move to
   Hedge's own, a `fleet-proof-receipt`
   block in a PR, and Git allowlist helpers that say "Fleet blocked Git
@@ -342,6 +381,14 @@
   `fleet heavy --`.
 - Crontab lines and T3 worktree scripts from before the rename are replaced
   by the new ones.
+- Hedge never edits or removes a `# fleet-hub-tunnel` line in `/etc/hosts`.
+  Hedge's own line is `127.0.0.1 <host> # hedge-hub-tunnel <home>`, where
+  `<home>` is the `HOME` that installed it. `hedge ssh-tunnels install`,
+  `remove`, `left` and `doctor` act only on the line that ends with this
+  `HOME`. So a run with another `HOME` does not change the hosts file or call
+  `sudo`. Install keeps a Fleet line, or a line of another home, that maps the
+  host to `127.0.0.1`. When such a line maps the host to another address,
+  install stops, as it does for a line the person wrote.
 - A profile with `fleet.json` and no `hedge.json` still works. Each `FLEET_`
   variable still works while its `HEDGE_` variable is unset. A `HEDGE_`
   variable that is set, even to an empty string, wins. Setup reuses a
@@ -350,6 +397,56 @@
   https://posthog.github.io/hedge/. GitHub sends the old repository address
   to the new one, so git, `get.sh` links and profiles that name
   `PostHog/fleet-engine` keep working. The old site address no longer works.
+
+### The review budget
+
+- Only a review that leads to fixes spends the review budget. The budget
+  reads findings with the parser of `hedge proof gate` and
+  `hedge proof respond`, so a finished review spends exactly when the gate
+  asks for an answer to one of its findings. A review with only minor and nit
+  findings spends nothing. A blocker, a major, a finding without a severity,
+  and a `TESTS` item count, and an unfinished review counts. An item reads as
+  minor or nit in the form `- file:line | minor | ...` and in the forms
+  `1. minor, file:line: ...` and `1. nit: file:line ...`.
+- Every item under the `TESTS:` heading of a review or a panel lens needs an
+  answer and spends the review budget, even when it starts with `nit` or
+  `minor`. Only a finding above that heading can read as minor or nit. A line
+  that starts with `TESTS` opens the block, as before, so a nit below a prose
+  line such as `TESTS pass under Bun.` needs an answer too.
+- A prose finding that a review writes beside only the notes of its Anchor
+  check is a finding. It gets the number after all other items, so an answer
+  that an older hedge took still answers the same item.
+- The ceiling never refuses a final read of a HEAD that `hedge proof gate`
+  does not carry. It asks the gate's own question, from the same reviews,
+  whatever `--base` names. A blocker or major that the read finds still
+  counts, so the fixes rounds after it stop at the ceiling.
+- A final read without `--agent` stops with "HEAD needs no final read" only
+  when the gate carries HEAD across quiet commits, whatever `--base` names.
+  Its advice names only the retries that can run: `--agent` only while the
+  budget is left, and no retry while a review is unfinished.
+- `hedge proof respond` takes a "known" answer only when the finished reviews
+  that count reach the ceiling. A review counts when the gate asks for an
+  answer to one of its items: a blocker, a major, a finding without a
+  severity, or a TESTS item. An unfinished review does not count here, so a
+  review that later finishes clean never leaves a "known" answer below the
+  ceiling.
+- A new review reads the PR's reviews and reserves its round while it holds
+  a lock on the PR's reviews directory, and holds the lock only for these
+  file reads and writes. Git, GitHub, and the arbiter run outside the lock.
+  When another review started or ended meanwhile, it reserves nothing and
+  asks you to run it again. This holds also when a dropped review comes back
+  under the same name and phase: each reservation has its own id in
+  `round.json`. A reservation or findings file that hedge cannot read for
+  any reason other than a missing file stops the command with the read
+  error, so the budget is never counted short. A review that
+  finds the lock held stops and names the holder. This lock, a round lock,
+  and a panel slot follow one rule: hedge takes over the lock when the
+  process that holds it is gone. When ten takeovers of the budget lock or
+  a round lock in a row stopped before they ended, the command stops, names
+  the lock files, and gives the `rm` command that clears them. A stuck
+  panel slot counts as taken. A
+  final read takes the next free name in the reviews directory, so a
+  leftover directory without `round.json` never blocks it.
 
 ## v0.1.0
 

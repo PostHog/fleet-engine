@@ -625,6 +625,42 @@ whether `hedge doctor` passes while it stays. Then ask:
 
 Recommend taking Hedge's version, unless they set the value on purpose.
 
+### Go back to Fleet
+
+On its first run, `get.sh` turns Fleet's jobs off and keeps their files and
+launchers. It does this only on a machine with a Fleet engine install in
+`~/.local/share/fleet/engine`. When Fleet's `~/.local/bin/fleet` runs an
+engine in another folder, `get.sh` stops before it changes anything, so there
+is nothing to go back from. To go back on a machine that `get.sh` moved:
+
+1. Stop Hedge's jobs. On Linux, run
+   `systemctl --user disable --now` for each unit that
+   `systemctl --user list-units --all 'hedge-*'` names, and delete the
+   `# hedge:` lines with `crontab -e`. On a Mac, run
+   `launchctl bootout gui/$(id -u)/<label>` for each `dev.hedge.*` agent.
+   In T3 Code, turn off each `hedge:` scheduled task. For the MCP hub, run
+   `docker update --restart=no hedge-mcphub` and `docker stop hedge-mcphub`,
+   because both hubs use port 3317.
+2. When `~/.local/share/fleet/engine/fleet doctor` prints `Fleet is now Hedge`, check out the
+   commit before the rename:
+   `git -C ~/.local/share/fleet/engine checkout -q --detach <commit>`.
+3. Run `~/.local/share/fleet/engine/fleet packs --workflows nightly-updates=off`. This turns
+   off Fleet's nightly updates, so its updater does not check out Hedge
+   again. It also turns off the nightly Claude Code, Codex and T3 Code
+   updates. It saves the change in the profile, pushes it, and applies, so
+   it writes the `# fleet:` crontab lines again. Other machines on this
+   profile take the change at their next apply.
+4. Turn the stopped units back on. `get.sh` named each one as
+   `stopped and turned off the ...`. On Linux, run
+   `systemctl --user enable --now <unit>`. On a Mac, run
+   `launchctl enable gui/$(id -u)/<label>`, then
+   `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/<label>.plist`.
+   Skip `dev.fleet.fleet-update` and `dev.fleet.agent-update`: step 3 turned
+   them off. For the MCP hub, run
+   `docker update --restart=unless-stopped fleet-mcphub` and
+   `docker start fleet-mcphub`.
+5. In T3 Code, turn each `fleet:` scheduled task back on.
+
 ## 9. Add the hub packs and the nodes
 
 Run each item on the hub over SSH. `hedge devbox add` takes minutes; use each

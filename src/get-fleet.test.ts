@@ -91,13 +91,12 @@ describe("get.sh on a machine from before the rename", () => {
     }
   });
 
-  onLinuxHost("never reuses a custom engine folder that is a Fleet checkout, by its launcher, the old command, or its remote", () => {
-    const cases = ["launcher", "old command", "remote"].map((by) => {
+  onLinuxHost("never reuses a custom engine folder that is a Fleet checkout, by its launcher or its remote", () => {
+    const cases = ["launcher", "remote"].map((by) => {
       const box = sandbox("Linux");
       const custom = join(box.home, "src/engine");
       git(box.home, "clone", "-q", engine.repo, custom);
       git(custom, "checkout", "-q", by === "launcher" ? "v0.0.9" : "v0.1.0");
-      if (by === "old command") mkdirSync(join(box.home, ".local/bin"), { recursive: true }), writeFileSync(join(box.home, ".local/bin/fleet"), `#!/bin/sh\n# Fleet\nexec sh '${custom}/fleet' "$@"\n`, { mode: 0o755 });
       if (by === "remote") git(custom, "remote", "set-url", "origin", "https://github.com/PostHog/fleet-engine.git");
       const head = git(custom, "rev-parse", "HEAD");
       const result = getSh(box, ["--ref", "v0.1.0", "--install-only"], { env: { FLEET_ENGINE_DIR: custom } });

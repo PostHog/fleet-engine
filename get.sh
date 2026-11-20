@@ -131,15 +131,31 @@ refuse_fleet() {
   ! leads_into_fleet "$1" || fail "$(fleet_link "$1") leads into a Fleet path from before the rename. Move that link away, then run get.sh again."
 }
 
-old_launcher() { sed -n "s|^exec sh '\\(.*\\)/fleet' \"\\\$@\"\$|\\1|p" "$HOME/.local/bin/fleet" 2>/dev/null; }
-
 fleet_checkout() {
   [ -d "$1" ] || return 1
   { [ -e "$1/fleet" ] && [ ! -e "$1/hedge" ]; } && return 0
   case "$(git -C "$1" remote get-url origin 2>/dev/null)" in */fleet-engine|*/fleet-engine.git) return 0 ;; esac
-  recorded=$(old_launcher)
-  [ -n "$recorded" ] && [ -d "$recorded" ] && [ "$(real_path "$recorded")" = "$(real_path "$1")" ]
+  return 1
 }
+
+fleet_engine=$HOME/.local/share/fleet/engine
+fleet_wrapper=$HOME/.local/bin/fleet
+
+custom_fleet_engine() {
+  [ "$(sed -n 2p "$fleet_wrapper" 2>/dev/null)" = "# Fleet" ] || return 1
+  named=$(sed -n "s|^exec sh '\\(.*\\)/fleet' \"\\\$@\"\$|\\1|p" "$fleet_wrapper" 2>/dev/null | head -n 1)
+  case "$named" in *"'"*) return 0 ;; /*) ;; *) return 0 ;; esac
+  [ "$named" != "$fleet_engine" ] && [ "$(real_path "$named")" != "$(real_path "$fleet_engine")" ]
+}
+
+if [ -L "$fleet_engine" ]; then
+  fail "$fleet_engine is a link, and Hedge finds and stops only a Fleet engine that sits in $fleet_engine itself, so Hedge changed nothing. Stop Fleet's services, cron jobs and fleet: tasks in T3 Code by hand and delete the link $fleet_engine, or move the engine to $fleet_engine in place of the link. Then run get.sh again."
+fi
+
+if custom_fleet_engine; then
+  folder=$(printf '%s' "$named" | sed "s/'\\\\''/'/g")
+  fail "$fleet_wrapper runs a Fleet engine in ${folder:-a folder that Hedge cannot read from that file}, and Hedge finds and stops only the Fleet engine in $fleet_engine, so Hedge changed nothing. Stop Fleet's services, cron jobs and fleet: tasks in T3 Code by hand and delete $fleet_wrapper, or move the engine to $fleet_engine and change the path in $fleet_wrapper to match. Then run get.sh again."
+fi
 
 setting ENGINE_REPO "https://github.com/$engine_slug.git"
 engine_repo=$value
@@ -297,7 +313,6 @@ link_hedge() {
   mkdir -p "$bin_dir"
   quoted=$(printf '%s' "$launcher" | sed "s/'/'\\\\''/g")
   link_command hedge
-  link_command fleet
 }
 
 add_login_line() {
@@ -355,6 +370,7 @@ if [ -n "$renamed" ]; then
   sh "$launcher" import-fleet || fail "could not copy the setup from before the rename."
   grep -q '"profileDir"' "$machine" 2>/dev/null || rm -f "$pending"
 fi
+[ -n "$preview" ] || link_command fleet
 
 [ -z "$install_only" ] || exit 0
 

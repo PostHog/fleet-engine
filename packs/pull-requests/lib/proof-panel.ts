@@ -7,6 +7,7 @@ import { readJson, roundId, storeCapturedFindings, writeJson, type ProofIdentity
 import { askModel, familyOf, isQuotaExhausted, quotaExitCode, reviewerRow, sameFamilyRow, securityRow, type Family, type Usage } from "./proof-models.ts";
 import type { ModelRow } from "../../base/lib/models.ts";
 import { capped, diffCap, reviewedDiff } from "./proof-review.ts";
+import { quote } from "../../hub/lib/machine.ts";
 import type { ReviewTier } from "./proof-checkout.ts";
 
 export type PanelGuide = { brief: string; lenses: Map<string, { title: string; text: string }>; freshEyes: Set<string>; security: Set<string>; contextFree: Set<string> };
@@ -321,7 +322,7 @@ async function takeLock(directory: string, { owner, holder }: RoundLock) {
     const current = holderOf(text);
     if (current?.token === holder.token) return;
     if (!await stale(path, text, owner)) throw await busy(directory, current);
-    await reclaim(path, text, owner);
+    if (await reclaim(path, text, owner) === "stuck") throw new Error(stuckLock(path));
   }
   throw new Error(`Cannot take the lock ${path}: other commands keep taking it over. Run the command again`);
 }
@@ -374,7 +375,7 @@ export async function reclaimSlots(io: PanelIO) {
 
 async function reclaimStale(path: string, owner: LockOwner) {
   const text = await readSlot(path);
-  return text !== undefined && await stale(path, text, owner) && await reclaim(path, text, owner);
+  return text !== undefined && await stale(path, text, owner) && await reclaim(path, text, owner) === "reclaimed";
 }
 
 async function stale(path: string, text: string, owner: LockOwner) {
@@ -393,29 +394,33 @@ async function olderThanGrace(path: string, now: Date) {
 
 const guardGenerations = 10;
 
-async function guard(path: string, text: string, holder: Holder, owner: LockOwner) {
+const stuckLock = (path: string) => `The lock ${path} is stuck: its holder is gone, and ${guardGenerations} takeovers of it stopped before they ended. Check that no hedge proof command runs on this PR, then run rm -f ${quote(path)} ${quote(path)}.reclaim-* and run this command again`;
+
+type Guarded = { lock?: string; stuck: boolean };
+
+async function guard(path: string, text: string, holder: Holder, owner: LockOwner): Promise<Guarded> {
   const first = `${path}.reclaim-${createHash("sha256").update(text).digest("hex").slice(0, 16)}`;
   let generation = 1;
   for (let attempt = 0; attempt < lockAttempts && generation <= guardGenerations; attempt++) {
     const lock = generation === 1 ? first : `${first}.${generation}`;
-    if (await claim(lock, holder)) return lock;
+    if (await claim(lock, holder)) return { lock, stuck: false };
     const current = await readSlot(lock);
     if (current === undefined) continue;
-    if (!await stale(lock, current, owner)) return undefined;
+    if (!await stale(lock, current, owner)) return { stuck: false };
     generation++;
   }
-  return undefined;
+  return { stuck: generation > guardGenerations };
 }
 
-async function reclaim(path: string, text: string, owner: LockOwner) {
+async function reclaim(path: string, text: string, owner: LockOwner): Promise<"reclaimed" | "kept" | "stuck"> {
   const holder = await holderFor(owner);
-  const lock = await guard(path, text, holder, owner);
-  if (!lock) return false;
+  const { lock, stuck } = await guard(path, text, holder, owner);
+  if (!lock) return stuck ? "stuck" : "kept";
   try {
-    if (await readSlot(path) !== text) return false;
+    if (await readSlot(path) !== text) return "kept";
     await stopReviewer(holderOf(text), owner);
     await rm(path, { force: true });
-    return true;
+    return "reclaimed";
   } finally { await release(lock, holder); }
 }
 

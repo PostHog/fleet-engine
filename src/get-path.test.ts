@@ -59,7 +59,7 @@ describe("hedge on the PATH", () => {
     const box = sandbox("Linux");
     const fleet = join(box.home, ".local/bin/fleet");
     mkdirSync(join(box.home, ".local/bin"), { recursive: true });
-    writeFileSync(fleet, "#!/bin/sh\n# Fleet\nexit 3\n");
+    writeFileSync(fleet, `#!/bin/sh\n# Fleet\nexec sh '${box.home}/.local/share/fleet/engine/fleet' "$@"\n`);
     expect(getSh(box, ["--ref", "v0.1.0", "--install-only"]).code).toBe(0);
     const ran = (command: string) => Bun.spawnSync([join(box.home, ".local/bin", command), "--help"], { cwd: box.home, env: { PATH: box.bin, HOME: box.home } });
     expect(ran("fleet").stdout.toString()).toBe(ran("hedge").stdout.toString());
@@ -91,7 +91,7 @@ describe("hedge on the PATH", () => {
   test("installs a pinned engine from before the rename, whose launcher is fleet, and both the hedge and the fleet command run it", () => {
     const box = sandbox("Linux");
     mkdirSync(join(box.home, ".local/bin"), { recursive: true });
-    writeFileSync(join(box.home, ".local/bin/fleet"), "#!/bin/sh\n# Fleet\necho the old fleet\n", { mode: 0o755 });
+    writeFileSync(join(box.home, ".local/bin/fleet"), `#!/bin/sh\n# Fleet\nexec sh '${box.home}/.local/share/fleet/engine/fleet' "$@"\n`, { mode: 0o755 });
     expect(getSh(box, ["--ref", "v0.0.9", "--install-only"]).code).toBe(0);
     for (const command of ["hedge", "fleet"]) {
       const result = Bun.spawnSync([join(box.home, ".local/bin", command), "--help"], { cwd: box.home, env: { PATH: box.bin, HOME: box.home } });

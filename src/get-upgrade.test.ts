@@ -1,5 +1,5 @@
 import { describe, expect } from "bun:test";
-import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { git } from "./testing/git.ts";
 import { getShHarness, onLinuxHost } from "./testing/get-sh.ts";
@@ -23,9 +23,12 @@ function engineWithWatcher(change?: (repo: string) => void) {
   return repo;
 }
 
-type Upgrade = { failing?: string[]; stuck?: string[]; lastWords?: (home: string) => SchedulerState["lastWords"]; engine?: (repo: string) => void };
+const fleetWrapper = (engine: string) => `#!/bin/sh\n# Fleet\nexec sh '${engine.replaceAll("'", "'\\''")}/fleet' "$@"\n`;
+const tree = (home: string) => readdirSync(home, { recursive: true, withFileTypes: true }).map((entry) => `${join(entry.parentPath, entry.name)} ${entry.isFile() ? readFileSync(join(entry.parentPath, entry.name), "utf8") : entry.isSymbolicLink() ? "link" : "dir"}`).sort();
 
-function fleetMachine({ failing = [], stuck, lastWords, engine: change }: Upgrade = {}) {
+type Upgrade = { failing?: string[]; stuck?: string[]; lastWords?: (home: string) => SchedulerState["lastWords"]; engine?: (repo: string) => void; oldEngine?: string; wrapper?: (engine: string) => string };
+
+function fleetMachine({ failing = [], stuck, lastWords, engine: change, oldEngine: folder = ".local/share/fleet/engine", wrapper = fleetWrapper }: Upgrade = {}) {
   const box = sandbox("Linux");
   const home = box.home;
   const repo = profile();
@@ -39,6 +42,10 @@ function fleetMachine({ failing = [], stuck, lastWords, engine: change }: Upgrad
   git(home, "clone", "-q", repo, oldProfile);
   mkdirSync(join(home, ".config/fleet"), { recursive: true });
   writeFileSync(join(home, ".config/fleet/machine.json"), JSON.stringify({ schema: 1, role: "devbox", profileDir: oldProfile }));
+  const oldEngine = join(home, folder);
+  mkdirSync(oldEngine, { recursive: true });
+  mkdirSync(join(home, ".local/bin"), { recursive: true });
+  writeFileSync(join(home, ".local/bin/fleet"), wrapper(oldEngine), { mode: 0o755 });
   mkdirSync(join(home, ".config/systemd/user"), { recursive: true });
   writeFileSync(join(home, ".config/systemd/user/fleet-watch.service"), "[Unit]\nDescription=Fleet: watch\n");
   const stateFile = join(box.root, "schedulers.json");
@@ -63,6 +70,68 @@ describe("get.sh upgrades a machine that Fleet runs", () => {
     expect(state.crontab).toContain("*/5 * * * * my-own-job\n");
     expect(state.crontab).not.toContain("# fleet:");
     expect(state.both).toEqual([]);
+  });
+
+  onLinuxHost("stops before it changes anything when the fleet command runs a Fleet engine in a custom folder while Fleet's service runs, in a preview too", () => {
+    const machine = fleetMachine({ oldEngine: "src/fleet-engine" });
+    const before = tree(machine.home);
+
+    const preview = machine.getSh(["--", "--dry-run"]);
+    const result = machine.getSh([]);
+
+    expect(preview.code).toBe(1);
+    expect(result.code).toBe(1);
+    expect(result.output).toContain(`Hedge: ${machine.home}/.local/bin/fleet runs a Fleet engine in ${machine.home}/src/fleet-engine, and Hedge finds and stops only the Fleet engine in ${machine.home}/.local/share/fleet/engine, so Hedge changed nothing.`);
+    expect(result.output).toContain("Then run get.sh again.");
+    expect(tree(machine.home)).toEqual(before);
+    const state = machine.state();
+    expect(state.units).toEqual({ "fleet-watch.service": running });
+    expect(state.crontab).toBe(oldCron);
+  });
+
+  onLinuxHost.each(["a custom checkout", "a missing folder"])("stops before it changes anything when the default Fleet engine folder links to %s, and names only the link and no shell command with its path", (target) => {
+    const machine = fleetMachine({ oldEngine: "src/fleet-engine" });
+    const checkout = join(machine.home, "src/other-engine");
+    if (target === "a custom checkout") {
+      mkdirSync(checkout);
+      writeFileSync(join(checkout, "fleet"), "");
+      writeFileSync(join(checkout, "hedge"), "");
+    }
+    const link = join(machine.home, ".local/share/fleet/engine");
+    symlinkSync(checkout, link);
+    const before = tree(machine.home);
+
+    const result = machine.getSh([]);
+
+    expect(result.code).toBe(1);
+    expect(result.output).toContain(`Hedge: ${link} is a link, and Hedge finds and stops only a Fleet engine that sits in ${link} itself, so Hedge changed nothing. Stop Fleet's services, cron jobs and fleet: tasks in T3 Code by hand and delete the link ${link}, or move the engine to ${link} in place of the link. Then run get.sh again.`);
+    expect(result.output).not.toContain("ls -l");
+    expect(tree(machine.home)).toEqual(before);
+    expect(machine.state().units).toEqual({ "fleet-watch.service": running });
+  });
+
+  onLinuxHost("stops before it changes anything when the fleet command names a Fleet engine folder with an escaped apostrophe", () => {
+    const machine = fleetMachine({ oldEngine: "src/it's fleet" });
+    const before = tree(machine.home);
+
+    const result = machine.getSh([]);
+
+    expect(result.code).toBe(1);
+    expect(result.output).toContain(`Hedge: ${machine.home}/.local/bin/fleet runs a Fleet engine in ${machine.home}/src/it's fleet, and Hedge finds and stops only`);
+    expect(tree(machine.home)).toEqual(before);
+    expect(machine.state().units).toEqual({ "fleet-watch.service": running });
+  });
+
+  onLinuxHost("ignores a fleet command without the installer's # Fleet line, even when it names another folder, and moves the Fleet engine install", () => {
+    const unmarked = "#!/bin/sh\nexec sh '/opt/other/fleet' \"$@\"\n";
+    const machine = fleetMachine({ wrapper: () => unmarked });
+
+    const result = machine.getSh([]);
+
+    expect(result.code).toBe(0);
+    const state = machine.state();
+    expect([state.units["fleet-watch.service"], state.units["hedge-watch.service"]]).toEqual([off, running]);
+    expect(readFileSync(join(machine.home, ".local/bin/fleet"), "utf8")).toBe(unmarked);
   });
 
   onLinuxHost("exits 1 when the Hedge service does not start, keeps Fleet's off, and an identical retry applies again", () => {

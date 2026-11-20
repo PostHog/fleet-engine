@@ -856,8 +856,9 @@
         "install-node"
       ],
       "check": [
-        "npx",
-        "--version"
+        "hedge",
+        "install-node",
+        "--check"
       ],
       "on": [
         "linux"

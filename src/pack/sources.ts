@@ -124,12 +124,11 @@ function goodPath(dir: string) {
 }
 
 async function lastGood(dir: string): Promise<Good | undefined> {
-  for (const path of [goodPath(dir), join(dir, ".git", "fleet-source.json")]) {
-    try {
-      return JSON.parse(await readFile(path, "utf8")) as Good;
-    } catch {}
+  try {
+    return JSON.parse(await readFile(goodPath(dir), "utf8")) as Good;
+  } catch {
+    return undefined;
   }
-  return undefined;
 }
 
 async function saveGood(dir: string, good: Good) {

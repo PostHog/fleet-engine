@@ -7,7 +7,15 @@ fail() {
 }
 
 PATH="$HOME/.local/bin:$PATH"
-if node --version >/dev/null 2>&1 && npx --version >/dev/null 2>&1; then exit 0; fi
+fleets="$HOME/.local/share/fleet/node"
+from_fleet() {
+  for tool in node npm npx; do
+    case "$(readlink "$HOME/.local/bin/$tool" 2>/dev/null || true)" in "$fleets"/*) return 0 ;; esac
+  done
+  return 1
+}
+if ! from_fleet && node --version >/dev/null 2>&1 && npx --version >/dev/null 2>&1; then exit 0; fi
+[ "${1:-}" != --check ] || exit 1
 
 release="$(dirname "$0")/node.release"
 pin() {
@@ -44,7 +52,7 @@ fi
 
 point() {
   case "$(readlink "$1" 2>/dev/null || true)" in
-    "$share"/*) ;;
+    "$share"/*|"$fleets"/*) ;;
     *) { [ -e "$1" ] || [ -L "$1" ]; } && return 0 ;;
   esac
   rm -f "$1.new.$$"

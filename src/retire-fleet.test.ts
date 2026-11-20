@@ -5,7 +5,7 @@ import { Database } from "bun:sqlite";
 import { fleetAdapter, procProcesses, scheduledTasks, type FleetOptions } from "./adapters/fleet/adapter.ts";
 import { spawnRunner, type CommandRunner } from "./adapters/run.ts";
 import type { T3Server } from "./adapters/t3/port.ts";
-import { jobsAdapter } from "./adapters/jobs/adapter.ts";
+import { jobsAdapter, type HedgeTask, type T3Tasks } from "./adapters/jobs/adapter.ts";
 import { main } from "./cli.ts";
 import { filesAdapter, type Adapter } from "./reconciler/apply.ts";
 import { cliFixtures, repoRoot } from "./testing/cli.ts";
@@ -16,12 +16,14 @@ import { holdLock } from "./lock.ts";
 import { fakeSystemd } from "./testing/systemd.ts";
 
 const temp = tempDirs();
+const noEngine = "Hedge: this machine has no Fleet engine install, so there is nothing from before the rename to stop.";
 afterEach(() => temp.cleanup());
 const { profileDir } = cliFixtures(temp);
 
 function oldInstall(home = temp.make("home-")) {
   mkdirSync(join(home, ".config/fleet"), { recursive: true });
   writeFileSync(join(home, ".config/fleet/machine.json"), JSON.stringify({ role: "devbox" }));
+  mkdirSync(join(home, ".local/share/fleet/engine"), { recursive: true });
   return home;
 }
 
@@ -56,7 +58,8 @@ function machine(platform: NodeJS.Platform, home = oldInstall(), tasks?: FleetOp
   const processes = fakeProcesses();
   const run = runners(cron.run, systemd.run, launchd.run, docker.run, live?.run ?? processes.run);
   const fleet = fleetAdapter({ run, uid: live?.uid ?? 501, accountHome: async () => home, tasks: tasks ?? (async () => t3.client), sleep: live?.sleep ?? (async () => {}), processes: live ? live.processes : processes.list });
-  const adapters = (): Adapter[] => [fleet, filesAdapter, jobsAdapter({ run, engineRoot: repoRoot, uid: 501, accountHome: async () => home })];
+  const hedgeTasks: T3Tasks = { list: async () => [...t3.items.values()] as HedgeTask[], upsert: async (task) => void t3.items.set(task.id, task), setEnabled: t3.client.setEnabled };
+  const adapters = (): Adapter[] => [fleet, filesAdapter, jobsAdapter({ run, engineRoot: repoRoot, uid: 501, accountHome: async () => home, t3: async () => hedgeTasks })];
   const engine = engineWithService();
   const clock = { now: Date.now, sleep: async (_ms: number) => {} };
   const hedge = async (args: string[]) => {
@@ -515,6 +518,33 @@ describe("hedge retire-fleet", () => {
     expect(linux.systemd.units.has("hedge-watch.service")).toBe(false);
   });
 
+  test("leaves alone a package install that a person runs in another folder under a Fleet path, such as a kept Fleet worktree, and apply starts", async () => {
+    const home = oldInstall();
+    const worktree = join(home, ".local/share/fleet/worktrees/engine-fix");
+    mkdirSync(worktree, { recursive: true });
+    const proc = temp.make("proc-");
+    mkdirSync(join(proc, "4280"));
+    writeFileSync(join(proc, "4280/cmdline"), "/home/.bun/bin/bun\0install\0--frozen-lockfile\0--production\0");
+    writeFileSync(join(proc, "4280/stat"), "4280 (bun) S 1 4280 4280 0");
+    writeFileSync(join(proc, "4280/environ"), `HOME=${home}\0`);
+    symlinkSync(worktree, join(proc, "4280/cwd"));
+    const signalEnds: CommandRunner = async (command) => {
+      if (command[0] !== "kill") return { code: 127, stdout: "" };
+      for (const target of command.slice(2)) if (Math.abs(Number(target)) === 4280) rmSync(join(proc, "4280"), { recursive: true, force: true });
+      return { code: 0, stdout: "" };
+    };
+    const linux = machine("linux", home, undefined, { run: signalEnds, uid: process.getuid!(), sleep: async () => {}, processes: procProcesses(process.getuid!(), proc) });
+
+    const retired = await linux.hedge(["retire-fleet"]);
+    const applied = await linux.hedge(["apply", "--profile", profileDir(["watcher"])]);
+
+    expect(retired.code).toBe(0);
+    expect(existsSync(join(proc, "4280/cmdline"))).toBe(true);
+    expect(applied.output).not.toContain("process 4280");
+    expect(applied.code).toBe(0);
+    expect(linux.systemd.units.has("hedge-watch.service")).toBe(true);
+  });
+
   test("names an old job's command by its job and process only, so arguments that can hold a secret stay out of retire, apply and doctor", async () => {
     const linux = machine("linux");
     expect((await linux.hedge(["apply", "--profile", profileDir([])])).code).toBe(0);
@@ -559,7 +589,7 @@ describe("hedge retire-fleet", () => {
       return { code, output: lines.join("\n") };
     };
 
-    expect(await hedge(["retire-fleet"])).toEqual({ code: 0, output: "Hedge: nothing from before the rename runs." });
+    expect(await hedge(["retire-fleet"])).toEqual({ code: 0, output: noEngine });
     const applied = await hedge(["apply", "--profile", profileDir([])]);
     expect(applied.output).not.toContain("fleet:home");
     expect(applied.output).not.toContain("could not look up your account's home folder");
@@ -575,12 +605,117 @@ describe("hedge retire-fleet", () => {
     expect(await linux.hedge(["retire-fleet", "--now"])).toEqual({ code: 2, output: "Usage: hedge retire-fleet [--dry-run]" });
   });
 
-  test("on a machine without Fleet, or with a HOME that is not the account's, stops nothing", async () => {
-    const fresh = machine("linux", temp.make("home-"));
-    fresh.systemd.units.set("fleet-own.service", { active: true, enabled: true });
-    expect(await fresh.hedge(["retire-fleet"])).toEqual({ code: 0, output: "Hedge: nothing from before the rename runs." });
-    expect(fresh.systemd.units.get("fleet-own.service")).toEqual({ active: true, enabled: true });
+  test("on a machine that runs a private Fleet copy and has no Fleet engine install, retire leaves its units and fleet: tasks running and apply runs", async () => {
+    const home = temp.make("home-");
+    mkdirSync(join(home, ".config/fleet"), { recursive: true });
+    const privateCopy = machine("linux", home);
+    privateCopy.systemd.units.set("fleet-peer-box-t3.service", { active: true, enabled: false });
+    privateCopy.t3.items.set("fleet:pr-digest", { id: "fleet:pr-digest", enabled: true });
 
+    expect(await privateCopy.hedge(["retire-fleet"])).toEqual({ code: 0, output: noEngine });
+    expect(await privateCopy.hedge(["retire-fleet", "--dry-run"])).toEqual({ code: 0, output: noEngine });
+    const applied = await privateCopy.hedge(["apply", "--profile", profileDir(["watcher"])]);
+
+    expect(privateCopy.systemd.units.get("fleet-peer-box-t3.service")).toEqual({ active: true, enabled: false });
+    expect(applied.output).not.toContain("from before the rename");
+    expect(applied.code).toBe(0);
+    expect(privateCopy.systemd.units.get("hedge-watch.service")?.active).toBe(true);
+    expect(privateCopy.t3.items.get("fleet:pr-digest")?.enabled).toBe(true);
+  });
+
+  const withFleetCommand = (folder: string, marker = "# Fleet\n") => {
+    const home = temp.make("home-");
+    mkdirSync(join(home, ".config/fleet"), { recursive: true });
+    mkdirSync(join(home, folder), { recursive: true });
+    mkdirSync(join(home, ".local/bin"), { recursive: true });
+    writeFileSync(join(home, ".local/bin/fleet"), `#!/bin/sh\n${marker}exec sh '${join(home, folder).replaceAll("'", "'\\''")}/fleet' "$@"\n`);
+    const custom = machine("linux", home);
+    custom.systemd.units.set("fleet-peer-box-t3.service", { active: true, enabled: true });
+    return custom;
+  };
+
+  test("on a machine whose fleet command runs a Fleet engine in a custom folder, retire, its dry run and apply refuse, and stop and start nothing", async () => {
+    const custom = withFleetCommand("src/fleet-engine");
+    const refusal = `Hedge: ${custom.home}/.local/bin/fleet runs a Fleet engine in ${custom.home}/src/fleet-engine, and Hedge finds and stops only the Fleet engine in ${custom.home}/.local/share/fleet/engine, so Hedge changed nothing.`;
+
+    const retired = await custom.hedge(["retire-fleet"]);
+    const listed = await custom.hedge(["retire-fleet", "--dry-run"]);
+    const applied = await custom.hedge(["apply", "--profile", profileDir(["watcher"])]);
+
+    expect([retired.code, listed.code, applied.code]).toEqual([1, 1, 1]);
+    expect(retired.output).toStartWith(refusal);
+    expect(retired.output).toEndWith("Then run hedge retire-fleet again.");
+    expect(listed.output).toStartWith(refusal);
+    expect(applied.output).toContain(refusal.slice("Hedge: ".length));
+    expect(applied.output).toContain("Then run hedge apply again.");
+    expect(custom.systemd.units.get("fleet-peer-box-t3.service")).toEqual({ active: true, enabled: true });
+    expect(custom.systemd.units.has("hedge-watch.service")).toBe(false);
+    expect(existsSync(join(custom.home, ".local/state/hedge/state.json"))).toBe(false);
+  });
+
+  const withLinkedEngine = (target = "a checkout") => {
+    const linked = withFleetCommand(".local/share/fleet/engine");
+    const link = join(linked.home, ".local/share/fleet/engine");
+    const checkout = join(linked.home, "src/fleet-engine");
+    if (target === "a checkout") mkdirSync(checkout, { recursive: true });
+    rmSync(link, { recursive: true });
+    symlinkSync(checkout, link);
+    const refusal = `Hedge: ${link} is a link, and Hedge finds and stops only a Fleet engine that sits in ${link} itself, so Hedge changed nothing. Stop Fleet's services, cron jobs and fleet: tasks in T3 Code by hand and delete the link ${link}, or move the engine to ${link} in place of the link.`;
+    const files = () => readdirSync(linked.home, { recursive: true }).map(String).sort();
+    return { ...linked, refusal, files };
+  };
+
+  test.each(["a checkout", "a missing folder"])("on a machine whose default Fleet engine folder is a link to %s, retire and its dry run refuse, name only the link and no shell command with its path, and change nothing", async (target) => {
+    const linked = withLinkedEngine(target);
+    const before = linked.files();
+
+    const retired = await linked.hedge(["retire-fleet"]);
+    const listed = await linked.hedge(["retire-fleet", "--dry-run"]);
+
+    expect([retired.code, listed.code]).toEqual([1, 1]);
+    expect(retired.output).toStartWith(linked.refusal);
+    expect(retired.output).toEndWith("Then run hedge retire-fleet again.");
+    expect(listed.output).toStartWith(linked.refusal);
+    expect(linked.systemd.units.get("fleet-peer-box-t3.service")).toEqual({ active: true, enabled: true });
+    expect(linked.files()).toEqual(before);
+  });
+
+  test("on a machine whose default Fleet engine folder is a link, apply refuses, names only the link and no shell command with its path, and starts and changes nothing", async () => {
+    const linked = withLinkedEngine();
+    const profile = profileDir(["watcher"]);
+    const before = linked.files();
+
+    const applied = await linked.hedge(["apply", "--profile", profile]);
+
+    expect(applied.code).toBe(1);
+    expect(applied.output).toContain(linked.refusal.slice("Hedge: ".length));
+    expect(applied.output).toContain("Then run hedge apply again.");
+    expect(linked.systemd.units.get("fleet-peer-box-t3.service")).toEqual({ active: true, enabled: true });
+    expect(linked.systemd.units.has("hedge-watch.service")).toBe(false);
+    expect(linked.files()).toEqual(before);
+  });
+
+  test("on a machine whose fleet command names a Fleet engine folder with an escaped apostrophe, retire refuses and stops nothing", async () => {
+    const custom = withFleetCommand("src/it's fleet");
+
+    const retired = await custom.hedge(["retire-fleet"]);
+
+    expect(retired.code).toBe(1);
+    expect(retired.output).toStartWith(`Hedge: ${custom.home}/.local/bin/fleet runs a Fleet engine in ${custom.home}/src/it's fleet, and Hedge finds and stops only`);
+    expect(custom.systemd.units.get("fleet-peer-box-t3.service")).toEqual({ active: true, enabled: true });
+  });
+
+  test("ignores a fleet command without the installer's # Fleet line: retire finds no Fleet engine install and apply runs", async () => {
+    const unmarked = withFleetCommand("src/fleet-engine", "");
+
+    expect(await unmarked.hedge(["retire-fleet"])).toEqual({ code: 0, output: noEngine });
+    const applied = await unmarked.hedge(["apply", "--profile", profileDir(["watcher"])]);
+
+    expect(applied.code).toBe(0);
+    expect(unmarked.systemd.units.get("hedge-watch.service")?.active).toBe(true);
+  });
+
+  test("with a HOME that is not the account's, stops nothing", async () => {
     const other = machine("linux");
     other.systemd.units.set("fleet-own.service", { active: true, enabled: true });
     const lines: string[] = [];

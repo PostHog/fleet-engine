@@ -1,4 +1,4 @@
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 
 export const profileFileName = "hedge.json";
@@ -69,10 +69,40 @@ const real = (path: string): string => {
   }
 };
 
-export function underLegacyPath(home: string, path: string): boolean {
+function underHome(home: string, path: string, inside: (relative: string) => boolean): boolean {
   const homes = new Set([resolve(home), real(home)]);
-  return [resolve(path), real(path)].some((full) => [...homes].some((root) => full.startsWith(`${root}/`) && inLegacyPath(full.slice(root.length + 1))));
+  return [resolve(path), real(path)].some((full) => [...homes].some((root) => full.startsWith(`${root}/`) && inside(full.slice(root.length + 1))));
 }
+
+export const underLegacyPath = (home: string, path: string): boolean => underHome(home, path, inLegacyPath);
+
+export const legacyEngine = ".local/share/fleet/engine";
+
+export function fleetEngineInstalled(home: string): boolean {
+  return lstatSync(join(home, legacyEngine), { throwIfNoEntry: false }) !== undefined;
+}
+
+const fleetCommand = /^exec sh '(.*)\/fleet' "\$@"$/m;
+
+export function customFleetEngine(home: string, next: string): string | undefined {
+  const engine = join(home, legacyEngine);
+  if (lstatSync(engine, { throwIfNoEntry: false })?.isSymbolicLink()) return `${engine} is a link, and Hedge finds and stops only a Fleet engine that sits in ${engine} itself, so Hedge changed nothing. Stop Fleet's services, cron jobs and fleet: tasks in T3 Code by hand and delete the link ${engine}, or move the engine to ${engine} in place of the link. Then run ${next} again.`;
+  const wrapper = join(home, ".local/bin/fleet");
+  let text: string;
+  try {
+    text = readFileSync(wrapper, "utf8");
+  } catch {
+    return undefined;
+  }
+  if (text.split("\n")[1] !== "# Fleet") return undefined;
+  const named = fleetCommand.exec(text)?.[1];
+  const plain = named !== undefined && named.startsWith("/") && !named.includes("'");
+  if (plain && (resolve(named) === resolve(engine) || real(named) === real(engine))) return undefined;
+  const folder = named === undefined ? "a folder that Hedge cannot read from that file" : named.replaceAll("'\\''", "'");
+  return `${wrapper} runs a Fleet engine in ${folder}, and Hedge finds and stops only the Fleet engine in ${engine}, so Hedge changed nothing. Stop Fleet's services, cron jobs and fleet: tasks in T3 Code by hand and delete ${wrapper}, or move the engine to ${engine} and change the path in ${wrapper} to match. Then run ${next} again.`;
+}
+
+export const inLegacyEngine = (home: string, path: string): boolean => underHome(home, path, (relative) => relative === legacyEngine || relative.startsWith(`${legacyEngine}/`));
 
 export function renamedPath(home: string, path: string): string | undefined {
   for (const full of [resolve(path), real(path)])

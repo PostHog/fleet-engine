@@ -60,16 +60,6 @@ export async function upstreamRegistered(hub: Hub, upstream: Upstream) {
   return upstream.kind === "oauth" || gatewayCurrent(hub);
 }
 
-const originOf = (url: unknown) => (typeof url === "string" && URL.canParse(url) ? new URL(url).origin : undefined);
-
-function forThisOrigin(config: Config | undefined, want: Config): Config | undefined {
-  if (!config || config.url === undefined || originOf(config.url) === originOf(want.url)) return config;
-  const { oauth: _oauth, headers: _headers, credentialTemplate: _credentialTemplate, ...rest } = config;
-  return rest;
-}
-
-const signedIn = (config: Config) => plain(config.oauth) && Boolean(config.oauth.accessToken || config.oauth.refreshToken);
-
 const refuseTheirs = (config: Config | undefined, upstream: Upstream) => {
   if (config && !ours(config)) throw new Error(`Keep the MCP gateway's ${upstream.name} server: Hedge did not add it. Remove it in the gateway's dashboard to use ${upstream.title}.`);
 };
@@ -84,28 +74,14 @@ export async function registerUpstream(hub: Hub, upstream: Upstream) {
   const call = await managementApi(hub);
   refuseTheirs(await current(call, upstream.name), upstream);
   if (upstream.kind !== "oauth") await install(hub);
-  const stored = await current(call, upstream.name);
-  refuseTheirs(stored, upstream);
+  const config = await current(call, upstream.name);
+  refuseTheirs(config, upstream);
   if (upstream.kind === "codex-app") {
     await mkdir(appHome(hub.home, upstream), { recursive: true, mode: 0o700 });
     await chmod(appHome(hub.home, upstream), 0o700);
   }
   const want = wanted(upstream, hub);
-  const fresh = forThisOrigin(stored, want);
   const path = `servers/${encodeURIComponent(upstream.name)}`;
-  const dropOAuth = () => call(`${path}/oauth/disconnect`, "POST", { scope: "all" });
-  const dropsSignIn = upstream.kind === "oauth" && fresh !== stored;
-  const offWithoutSignIn = upstream.kind === "oauth" && stored?.enabled === false && !signedIn(stored);
-  if (dropsSignIn) {
-    await call(`${path}/toggle`, "POST", { enabled: false });
-    await dropOAuth();
-    await call(path, "PUT", { config: { ...fresh, ...want, enabled: false } });
-    await dropOAuth().catch(async (error) => {
-      await call(path, "PUT", { config: { ...fresh, ...want, url: stored?.url, enabled: false } });
-      throw error;
-    });
-  } else if (offWithoutSignIn) await dropOAuth();
-  const config = dropsSignIn || offWithoutSignIn ? await current(call, upstream.name) : fresh;
   const newClient = upstream.kind === "oauth" && upstream.loopback && !loopbackClientOf(config);
   if (newClient) want.oauth = { ...(want.oauth as Config), clientId: await registerLoopbackClient(hub.fetch, upstream) };
   if (!config) await call("servers", "POST", { name: upstream.name, config: want });
@@ -116,7 +92,7 @@ export async function registerUpstream(hub: Hub, upstream: Upstream) {
   const kept = (await current(call, upstream.name)) ?? {};
   if (!holds(kept, want) || !(await groupServes(call, upstream))) throw new Error(`The MCP gateway did not keep the settings of ${upstream.title}. Run: hedge mcp-gateway doctor`);
   if (upstream.kind === "oauth") {
-    const signIn = signedIn(kept) ? undefined : upstream.loopback ? `hedge mcp-gateway sign-in ${upstream.name}` : "hedge mcp-gateway sign-in";
+    const signIn = upstream.loopback ? (newClient ? `hedge mcp-gateway sign-in ${upstream.name}` : undefined) : config ? undefined : "hedge mcp-gateway sign-in";
     return hub.print(`${upstream.title} is in the MCP gateway.${signIn ? ` To sign in to it, on the hub, run: ${signIn}` : ""}`);
   }
   hub.print(`${upstream.title} is in the MCP gateway.`);
