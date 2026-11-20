@@ -1,10 +1,10 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runIn } from "./pr-ci.ts";
 import { diffSize } from "./proof-checkout.ts";
-import { checkout, cleanFixtures, graded, type Checkout } from "./proof-testing.ts";
+import { checkout, cleanFixtures, graded, reviewHead as reviewedForGate, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
 
@@ -514,4 +514,40 @@ test("counting lines in a partial clone reads unknown and fetches no missing fil
     expect(diffSize({ repository: "example/product", pr: 42, commit: second }, runIn(clone, env), first)).toBeUndefined();
     expect(runIn(clone, { ...env, GIT_NO_LAZY_FETCH: "1" })(["git", "cat-file", "-e", `${second}:feature.ts`]).code).not.toBe(0);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a PR gated under two spellings with different verdicts reports the failing one, in either order", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.txt", "greet new members\n");
+  pr.pullRequestState({ body: graded("non-critical") });
+  await reviewedForGate(pr);
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  expect((await pr.hedge("gate")).code).toBe(0);
+  const other = join(pr.pullRequest, "..", "..", "..", "Example", "Product", "42");
+  mkdirSync(join(other, ".."), { recursive: true });
+  cpSync(pr.pullRequest, other, { recursive: true });
+  const saved = join(other, "gate-outcome", `${await pr.git("rev-parse", "HEAD")}.json`);
+  const record = JSON.parse(readFileSync(saved, "utf8"));
+  record.gate.code = 1;
+  record.gate.summary.code = 1;
+  writeFileSync(saved, JSON.stringify(record));
+
+  for (const order of [["example/product#42", "Example/Product#42"], ["Example/Product#42", "example/product#42"]]) {
+    const report = (await pr.decide("report", ...order.flatMap((ref) => ["--pr", ref]))).output;
+    expect(report).not.toContain("waits on your merge word");
+    expect(report).toContain("its proofs are not shown to pass");
+  }
+});
+
+test("a round 1 that read an empty range shows zero lines at round 1, not unknown", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: graded("non-critical") });
+  expect((await pr.hedge("review-start", "--scope", "full")).code).toBe(0);
+  writeFileSync(join(pr.repository, "findings.md"), "No findings.\n");
+  expect((await pr.hedge("review-finish", "--round", "1", "--reviewer", "gpt-6.1-sol", "findings.md")).code).toBe(0);
+  await pr.commit("feature.ts", lines(30, "greet"));
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  await pr.hedge("gate");
+
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 0 → 30 | none |");
 });
