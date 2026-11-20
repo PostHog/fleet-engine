@@ -214,9 +214,19 @@ async function trackedOnOrigin(machine: Machine, dir: string) {
   return head.code === 0 ? upstreamOf(machine, dir, head.output.trim()) : undefined;
 }
 
-export async function takeOrigin(machine: Machine, home: string, dir: string) {
+export async function fetchOrigin(machine: Machine, home: string, dir: string) {
   await knowGitHub(machine, home, dir);
-  await git(machine, dir, "fetch", "-q", "--prune", "origin");
+  const fetched = await machine.exec(["git", "-C", dir, "fetch", "-q", "--prune", "origin"]);
+  return fetched.code === 0 ? undefined : lastLine(fetched.output);
+}
+
+export async function takeOrigin(machine: Machine, home: string, dir: string) {
+  const unreached = await fetchOrigin(machine, home, dir);
+  if (unreached !== undefined) throw new Error(`git fetch in ${dir} failed: ${unreached}`);
+  return takeFetched(machine, dir);
+}
+
+export async function takeFetched(machine: Machine, dir: string) {
   const merge = await trackedOnOrigin(machine, dir);
   if (!merge) return undefined;
   const fetched = await machine.exec(["git", "-C", dir, "rev-parse", "@{upstream}"]);

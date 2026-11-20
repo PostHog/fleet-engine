@@ -12,7 +12,7 @@ import { humanStep, optionalStep, packSignIn, type HumanContext, type SignIn } f
 import { devboxQuestion, devboxSteps, hubSteps, notTakenByHub, profileForBox, type DevboxContext } from "./devbox.ts";
 import { doneScreen, finalCheck, repoName, runsByItself } from "./done.ts";
 import { readTimings, usableSeconds } from "../commands/triage-record.ts";
-import { existingProfile, profileStep, saveSettings, takeOrigin } from "./profile.ts";
+import { existingProfile, fetchOrigin, profileStep, saveSettings, takeFetched } from "./profile.ts";
 import { runSteps, type Step } from "./runner.ts";
 import { chatgptSignIn, claudeSignIn, githubSignIn, memberSources } from "./signins.ts";
 import { Stopped, type Terminal } from "./terminal.ts";
@@ -51,7 +51,7 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
   const machine: MachineFile = thisMachine(await loadMachine(options.home), options.platform, options.env ?? process.env);
   const unfinished = Boolean(machine.setup?.done.length) && !checked(machine.setup?.done);
   const box: Machine = { ...realMachine, ...options.machine };
-  if (machine.profileDir) await fastForward(box, options.home, machine.profileDir);
+  if (machine.profileDir) await fastForward(box, options.home, machine.profileDir, terminal.print);
   const progress = { done: machine.setup?.done ?? [], draft: machine.profileDir ? profileDraft(await loadProfile(machine.profileDir)) : withInferred(machine.setup ?? { done: [] }) };
   const catalog = await loadCatalog(options.engineRoot, teamRefs(progress.draft), options.home);
   const remember = () => saveMachine(options.home, { ...machine, setup: machine.profileDir ? { done: progress.done } : { done: progress.done, ...withoutInferred(progress.draft) } });
@@ -294,8 +294,10 @@ function chatgptStep(signIn: SignIn, human: HumanContext, plan: Plan): Step {
   return balanced ? optionalStep(signIn, human, proxyServesCodex) : humanStep(signIn, human);
 }
 
-async function fastForward(box: Machine, home: string, dir: string) {
-  const failed = await takeOrigin(box, home, dir);
+async function fastForward(box: Machine, home: string, dir: string, print: (line: string) => void) {
+  const unreached = await fetchOrigin(box, home, dir);
+  if (unreached !== undefined) return print(`  · Your profile's origin could not be reached (${unreached}). Setup goes on with the copy in ${dir}.`);
+  const failed = await takeFetched(box, dir);
   if (failed && Number((await box.exec(["git", "-C", dir, "rev-list", "--count", "@{upstream}..HEAD"])).output.trim()) > 0) throw new Error(divergedFromOrigin(dir));
   if (failed) throw new Error(`could not take the new commits of your profile in ${dir}: ${failed.output.trim().split("\n").at(-1)}. Run git -C ${dir} pull, then run hedge setup again.`);
 }

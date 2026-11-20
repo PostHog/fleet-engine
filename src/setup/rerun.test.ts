@@ -57,6 +57,26 @@ describe("hedge setup after a stop", () => {
     expect(resumed.code).toBe(0);
     expect(applied).toBe("# Changed on another machine\n");
   });
+
+  test("goes on with the copy on this machine, and says so, when the profile's origin cannot be reached", async () => {
+    const home = temp.make("home-");
+    const stopped = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""], undefined, undefined, 0, "linux", () => {
+      throw new Error("apply stopped");
+    });
+    expect(stopped.code).toBe(1);
+    const profile = profilePath(home);
+    await spawnGit(profile, "remote", "set-url", "origin", join(home, "gone.git"));
+
+    let applied = false;
+    const resumed = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""], undefined, undefined, 0, "linux", () => {
+      applied = true;
+    });
+
+    expect(resumed.output).toContain(`Your profile's origin could not be reached (`);
+    expect(resumed.output).toContain(`Setup goes on with the copy in ${profile}.`);
+    expect(applied).toBe(true);
+    expect(resumed.code).toBe(0);
+  });
 });
 
 describe("hedge setup while another machine changes the profile", () => {
