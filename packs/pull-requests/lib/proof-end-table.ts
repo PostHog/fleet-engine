@@ -9,17 +9,17 @@ export type EndRow = { ref: PrRef; summary: ProofSummary; reason: (kind: string,
 
 const isRound = (name: string) => /^\d+$/.test(name);
 
-function sizeAt(identity: ProofIdentity, run: Run, start: { baseSha?: string; from?: string }): Sized | undefined {
-  const size = diffSize(identity, run, start);
+function sizeAt(identity: ProofIdentity, run: Run, from?: string): Sized | undefined {
+  const size = diffSize(identity, run, from);
   return size && { ...size, commit: identity.commit };
 }
 
-export async function measureGrowth(home: string, head: ProofIdentity, run: Run, baseSha?: string): Promise<Growth> {
+export async function measureGrowth(home: string, head: ProofIdentity, run: Run): Promise<Growth> {
   const reviews = await finishedReviews(home, head);
   const rounds = reviews.filter(({ name }) => isRound(name)).sort((a, b) => Number(a.name) - Number(b.name));
   const opening = rounds[0];
-  const first = opening && sizeAt({ ...head, commit: opening.commit }, run, opening.scope === "full" && opening.from ? { from: opening.from } : { baseSha });
-  const final = sizeAt(head, run, { baseSha });
+  const first = opening?.scope === "full" && opening.from ? sizeAt({ ...head, commit: opening.commit }, run, opening.from) : undefined;
+  const final = sizeAt(head, run);
   return { rounds: rounds.length, finalReads: reviews.length - rounds.length, ...first ? { first } : {}, ...final ? { final } : {} };
 }
 
@@ -28,7 +28,7 @@ const figure = (lines: number | undefined) => lines === undefined ? "unknown" : 
 const span = (from: number | undefined, to: number | undefined) => `${figure(from)} → ${figure(to)}`;
 
 function roundsCell(growth: Growth | undefined) {
-  if (!growth) return "not measured; run hedge proof gate";
+  if (!growth) return "not measured";
   if (!growth.rounds && !growth.finalReads) return "no review";
   return [counted(growth.rounds, "round"), ...growth.finalReads ? [counted(growth.finalReads, "final read")] : []].join(", ");
 }

@@ -9,7 +9,7 @@
   tests and docs apart, and each skipped proof with its reason and who
   accepted it. `hedge proof gate` measures the lines and saves them, so the
   table holds a pull request once a gate ran at its HEAD. A gate saved by an
-  older Hedge reads "not measured; run hedge proof gate".
+  older Hedge no longer counts, so run `hedge proof gate` again once.
 
 ### Fleet is now Hedge
 
