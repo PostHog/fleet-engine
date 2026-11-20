@@ -254,7 +254,7 @@ test("the report never offers the merge when GitHub moves the PR to a new base w
   expect((await reportOf(pr)).stillYours).toEqual(["- Merge example/product#42: its proofs pass, and it waits on your merge word."]);
 
   const movedBase = await pr.git("commit-tree", "main^{tree}", "-p", "main", "-m", "Change the base");
-  pr.whileGithubReadsPull(`printf '%s' ${movedBase} > "$(dirname "$0")/base-sha"`);
+  pr.whileGithubReadsPull(`printf '"%s"' ${movedBase} > "$(dirname "$0")/base-sha"`);
   expect((await reportOf(pr)).stillYours).toEqual([`- example/product#42: its proofs are not shown to pass at HEAD ${head.slice(0, 7)} as read now (gate exit 1). Run hedge proof gate in its checkout to see why.`]);
 });
 
