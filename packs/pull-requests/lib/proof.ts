@@ -7,6 +7,7 @@ import type { Family, Usage } from "./proof-models.ts";
 import { quietReason, type DeltaKind, type QuietStep } from "./proof-delta.ts";
 import { panelOutcome } from "./proof-panel.ts";
 import { anchorHeading } from "./finding-anchors.ts";
+import type { Growth } from "./proof-end-table.ts";
 
 export type ProofIdentity = { repository: string; pr: number; commit: string };
 const sha = /^[0-9a-f]{40}$/;
@@ -1052,7 +1053,7 @@ async function devObservedStatus(weigh: Weigh, cleanBaseMerge: CleanBaseMerge, d
 
 type FinishedReview = { name: string; commit: string; reviewer?: string; finishedAt: bigint; panel: boolean };
 
-async function finishedReviews(home: string, identity: ProofIdentity) {
+export async function finishedReviews(home: string, identity: ProofIdentity) {
   const reviews = join(pullRequestDirectory(home, identity), "reviews");
   const finished: FinishedReview[] = [];
   for (const name of await reviewNames(reviews)) {
@@ -1212,7 +1213,7 @@ export type ProofSummary = {
   head: { state: "pushed" | "missing"; line: string };
   ci: { state: CiResult["state"]; detail: string; checks?: string[]; gap?: GapProof; line: string };
   judge: JudgeSummary;
-  lapsed: string[]; lapsedLine?: string; voided: string[]; receipt?: string; held?: string;
+  lapsed: string[]; lapsedLine?: string; voided: string[]; receipt?: string; held?: string; growth?: Growth;
 };
 
 export type JudgeSummary = { state: "pass" | "fail" | "unavailable" | "skipped"; model?: string; gap?: GapProof; lines: string[] };

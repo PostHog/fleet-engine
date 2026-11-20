@@ -4,7 +4,8 @@ import { riskCalloutOf, type DecisionState } from "./decision-ledger.ts";
 import type { Plan } from "./proof-panel.ts";
 import type { Display } from "./proof-display.ts";
 import type { ReviewDisplay } from "./proof-review-display.ts";
-import { summaryGaps, type GapProof, type KindProof, type ProofSummary } from "./proof.ts";
+import { endTable } from "./proof-end-table.ts";
+import type { KindProof, ProofSummary } from "./proof.ts";
 
 export const receiptOpen = "<!-- hedge-proof-receipt";
 export const receiptClose = "<!-- /hedge-proof-receipt -->";
@@ -126,21 +127,10 @@ function reviewRow(reviews: ReceiptReview[]) {
 const judgeResults: Record<ProofSummary["judge"]["state"], string> = { pass: "✅ passed at", fail: "❌ failed at", unavailable: "unavailable at", skipped: "not yet run at" };
 const judgeRow = ({ judge, commit, code }: ProofSummary) => row(["Proof judge", "an independent model reads the evidence against the diff", `${judgeResults[judge.state]} ${at(commit)}${judge.state === "pass" && code !== 0 ? ", but the gate fails now" : ""}`, ""]);
 
-function acceptedBy(gap: GapProof, decisions: DecisionState[]) {
-  const accepted = gap.accepted;
-  if (!accepted) return "not accepted";
-  if (accepted.by === "standing rule") return "accepted by a standing rule";
-  const decision = decisions.find((candidate) => candidate.id === accepted.id);
-  return `accepted by ${accepted.mark ? `${accepted.mark} ` : ""}${accepted.by}${decision ? ` ${decision.at.slice(0, 10)}` : ""}`;
-}
-
-const gapLines = (input: ReceiptInput) => summaryGaps(input.summary).map(({ kind, gap }) => `${kind}: ${gap.reason ? guardField(`gap reason of ${kind}`, gap.reason) : "no reason recorded"}, ${acceptedBy(gap, input.decisions)}`);
-
 export function renderSection(input: ReceiptInput) {
   const warnings: string[] = [];
   const rows = input.summary.kinds.map((kind) => kindRow(kind, input, warnings));
   const notChecked = input.notChecked.map((item, index) => guardField(`not-checked item ${index + 1}`, item));
-  const gaps = gapLines(input);
   const captioned = new Set(input.display.screenshots.map((shot) => `${shot.commit}/${shot.name}`));
   for (const { commit, names } of input.screenshots) for (const name of names) {
     if (!captioned.has(`${commit}/${name}`)) warnings.push(`warning: screenshot ${name} at ${short(commit)} has no caption. Run hedge proof save --commit ${commit} --kind ui-walk --caption '<what it shows>' <the screenshot>`);
@@ -151,7 +141,7 @@ export function renderSection(input: ReceiptInput) {
   const section = [
     "| Proof | What ran | Result | Commit |", "| --- | --- | --- | --- |", ...rows, reviewRow(input.reviews), judgeRow(input.summary), "",
     `**Not checked:** ${notChecked.join("; ") || "none recorded"}`,
-    ...gaps.length ? [`**Gaps:** ${gaps.join("; ")}`] : [],
+    "", ...endTable([{ ref: input.summary, summary: input.summary, reason: (kind, reason) => guardField(`gap reason of ${kind}`, reason) }]),
   ].join("\n");
   return { section, warnings };
 }

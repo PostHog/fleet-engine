@@ -82,7 +82,10 @@ test("the body section shows each owed proof, the review and the judge in the te
     `| Proof judge | an independent model reads the evidence against the diff | ✅ passed at \`${short(head)}\` | |`,
     "",
     "**Not checked:** Safari; the mobile layout",
-    `**Gaps:** cross-version: The old client is retired, accepted by 👤 the user 2026-10-25`,
+    "",
+    "| PR | Review rounds | Production lines | Skipped proofs |",
+    "| --- | --- | --- | --- |",
+    expect.stringMatching(/^\| example\/product#42 \| 1 round \| 1 → 1 \(×1\.0\) \| cross-version: The old client is retired \(👤 the user d-[0-9a-f]+\) \|$/),
   ]);
   expect(body).not.toContain("Accept the gap");
 

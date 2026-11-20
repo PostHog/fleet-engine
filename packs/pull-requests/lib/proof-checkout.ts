@@ -74,15 +74,31 @@ function gradeOf(body: string | undefined) {
   return grade ?? (/merge[- ]risk/i.test(body) ? "unreadable" : "none");
 }
 
-function productionLines(identity: ProofIdentity, run: Run) {
+function changedLines(identity: ProofIdentity, run: Run) {
   const stat = run(["git", "diff", "--numstat", "-z", "--no-renames", "--no-relative", mergeBase(identity, run), identity.commit]);
   if (stat.code !== 0) return undefined;
   return stat.stdout.split("\0").filter(Boolean).map((entry) => {
     const [added = "", deleted = "", ...path] = entry.split("\t");
-    // Git prints "-" for a binary file; its size is unknown, so it never counts as small.
     const binary = added === "-" || deleted === "-";
     return { lines: binary ? Number.POSITIVE_INFINITY : (Number(added) || 0) + (Number(deleted) || 0), path: path.join("\t") };
-  }).filter(({ path }) => authored(path)).reduce((sum, { lines }) => sum + lines, 0);
+  });
+}
+
+const linesOf = (changed: { lines: number; path: string }[], kept: (path: string) => boolean) =>
+  changed.filter(({ path }) => kept(path)).reduce((sum, { lines }) => sum + lines, 0);
+
+const productionLines = (identity: ProofIdentity, run: Run) => {
+  const changed = changedLines(identity, run);
+  return changed && linesOf(changed, authored);
+};
+
+export type DiffSize = { production: number; tests: number; docs: number };
+
+export function diffSize(identity: ProofIdentity, run: Run): DiffSize | undefined {
+  try {
+    const changed = changedLines(identity, run)?.filter(({ lines }) => Number.isFinite(lines));
+    return changed && { production: linesOf(changed, authored), tests: linesOf(changed, isTestFile), docs: linesOf(changed, (path) => docsFile.test(path)) };
+  } catch { return undefined; }
 }
 
 export function reviewTier(identity: ProofIdentity, run: Run, body: string | undefined): ReviewTier {

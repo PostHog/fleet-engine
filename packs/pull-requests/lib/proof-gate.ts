@@ -10,6 +10,7 @@ import { displayEntry } from "./proof-display.ts";
 import { receiptMarker } from "./proof-receipt.ts";
 import { baseRefs, cleanBaseMerge, devPullOf, diffOf, mergeBase, pullRequestDetails, topLevel } from "./proof-checkout.ts";
 import { quietCommitIn } from "./proof-delta.ts";
+import { measureGrowth } from "./proof-end-table.ts";
 import { judge, readCriticalPaths, type JudgeInput } from "./proof-judge.ts";
 import { askModel, familyOf, modelLabel, readRiskRubric, readRubric, reviewerRow, skillReferences } from "./proof-models.ts";
 
@@ -69,10 +70,15 @@ export async function finalGate(head: ProofIdentity, context: GateContext, { lan
     reason: judged.code === 0 ? "pass" : judged.reason ?? `exit ${judged.code}`,
     lines: [...checked.lines, ...judged.lines, ...stale],
     verdict: judged.code === 0 ? `gate: pass (${checked.summary}; judge: ${judged.covered})` : `gate: fail (exit ${judged.code})`,
-    summary: { ...checked.proofSummary, code: judged.code, judge: judged.judge },
+    summary: { ...checked.proofSummary, code: judged.code, judge: judged.judge, ...await grownBy(home, head, run) },
   };
   if (pull) await writeJson(savedPath(home, head, head.commit), { key: keyOf(pull, landed, await fingerprintOf(home, head, files, checked.decisions)), gate, conditions: checked.conditions } satisfies SavedGate);
   return gate;
+}
+
+async function grownBy(home: string, head: ProofIdentity, run: Run) {
+  const growth = await measureGrowth(home, head, run);
+  return growth ? { growth } : {};
 }
 
 const pushedHeadOf = (head: ProofIdentity, run: Run, seen: (pull: PullRequest) => void = () => {}) => (): PushedHead => {
@@ -108,7 +114,7 @@ export async function receiptSummary(head: ProofIdentity, pull: PullRequest, led
     landed: pull.state === "merged", cleanBaseMerge: cleanBaseMerge(head, run), quietCommit: quietCommitIn(run, () => baseRefs(head, run)),
     ci: () => ciOf(home, head, run, now?.() ?? new Date()), pushedHead: pushedHeadOf(head, run), ledger, now: now?.(), devPull: devPullOf(run),
   });
-  return { ...live.proofSummary, code: live.code, judge: { state: "skipped", lines: [] } };
+  return { ...live.proofSummary, code: live.code, judge: { state: "skipped", lines: [] }, ...await grownBy(home, head, run) };
 }
 
 async function savedGate(home: string, ref: PrRef, pull: PullRequest, ledger: Ledger): Promise<SavedGate | undefined> {
