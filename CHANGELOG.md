@@ -164,6 +164,56 @@
   to the new one, so git, `get.sh` links and profiles that name
   `PostHog/fleet-engine` keep working. The old site address no longer works.
 
+### The review budget
+
+- Only a review that leads to fixes spends the review budget. The budget
+  reads findings with the parser of `hedge proof gate` and
+  `hedge proof respond`, so a finished review spends exactly when the gate
+  asks for an answer to one of its findings. A review with only minor and nit
+  findings spends nothing. A blocker, a major, a finding without a severity,
+  and a `TESTS` item count, and an unfinished review counts. An item reads as
+  minor or nit in the form `- file:line | minor | ...` and in the forms
+  `1. minor, file:line: ...` and `1. nit: file:line ...`.
+- Every item under the `TESTS:` heading of a review or a panel lens needs an
+  answer and spends the review budget, even when it starts with `nit` or
+  `minor`. Only a finding above that heading can read as minor or nit. A line
+  that starts with `TESTS` opens the block, as before, so a nit below a prose
+  line such as `TESTS pass under Bun.` needs an answer too.
+- A prose finding that a review writes beside only the notes of its Anchor
+  check is a finding. It gets the number after all other items, so an answer
+  that an older hedge took still answers the same item.
+- The ceiling never refuses a final read of a HEAD that `hedge proof gate`
+  does not carry. It asks the gate's own question, from the same reviews,
+  whatever `--base` names. A blocker or major that the read finds still
+  counts, so the fixes rounds after it stop at the ceiling.
+- A final read without `--agent` stops with "HEAD needs no final read" only
+  when the gate carries HEAD across quiet commits, whatever `--base` names.
+  Its advice names only the retries that can run: `--agent` only while the
+  budget is left, and no retry while a review is unfinished.
+- `hedge proof respond` takes a "known" answer only when the finished reviews
+  that count reach the ceiling. A review counts when the gate asks for an
+  answer to one of its items: a blocker, a major, a finding without a
+  severity, or a TESTS item. An unfinished review does not count here, so a
+  review that later finishes clean never leaves a "known" answer below the
+  ceiling.
+- A new review reads the PR's reviews and reserves its round while it holds
+  a lock on the PR's reviews directory, and holds the lock only for these
+  file reads and writes. Git, GitHub, and the arbiter run outside the lock.
+  When another review started or ended meanwhile, it reserves nothing and
+  asks you to run it again. This holds also when a dropped review comes back
+  under the same name and phase: each reservation has its own id in
+  `round.json`. A reservation or findings file that hedge cannot read for
+  any reason other than a missing file stops the command with the read
+  error, so the budget is never counted short. A review that
+  finds the lock held stops and names the holder. This lock, a round lock,
+  and a panel slot follow one rule: hedge takes over the lock when the
+  process that holds it is gone. When ten takeovers of the budget lock or
+  a round lock in a row stopped before they ended, the command stops, names
+  the lock files, and gives the `rm` command that clears them. A stuck
+  panel slot counts as taken. A
+  final read takes the next free name in the reviews directory, so a
+  leftover directory without `round.json` never blocks it.
+
 ## v0.1.0
 
 The first public release. Fleet sets up T3 Code, Claude Code, Codex, and a set

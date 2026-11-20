@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gitEnv, template } from "../../../src/testing/git.ts";
@@ -33,8 +33,8 @@ const seedRepository = template(async (repository) => {
   }
 });
 
-export async function checkout() {
-  const directory = fixture("hedge-proof-checkout-");
+export async function checkout(prefix = "hedge-proof-checkout-") {
+  const directory = fixture(prefix);
   const [home, repository, bin, github] = ["home", "repository", "bin", "github"].map((name) => join(directory, name));
   for (const path of [home, bin, github]) mkdirSync(path);
   writeFileSync(join(bin, "gh"), `#!/bin/sh
@@ -189,6 +189,56 @@ printf '{"number":42,"url":"https://github.com/example/product/pull/42","baseRef
 export type Checkout = Awaited<ReturnType<typeof checkout>>;
 
 export const exitedPid = async () => (await spawnAsync(["true"])).pid;
+
+const panelModule = JSON.stringify(join(import.meta.dir, "proof-panel.ts"));
+
+const lockHolderScript = `import { roundLock, withRoundLock } from ${panelModule};
+const owner = { pid: process.pid, now: () => new Date(), startTime: async () => "Sun Oct 25 11:00:00 2026" };
+await withRoundLock(process.argv[2]!, await roundLock(owner), async () => { console.log("held"); await Bun.stdin.text(); });
+`;
+
+const reviewerSlotScript = `import { withSlot } from ${panelModule};
+const io = { pid: process.pid, now: () => new Date(), startTime: async () => "Sun Oct 25 11:00:00 2026", env: {}, pause: async () => {}, slots: process.argv[2]!, slotCount: 1, limit: 1 };
+await withSlot(io, async ({ recordReviewer }) => { await recordReviewer(Number(process.argv[3])); console.log("held"); await Bun.stdin.text(); });
+`;
+
+const takeoverScript = `import { roundLock, withRoundLock } from ${panelModule};
+const owner = { pid: process.pid, now: () => new Date(), startTime: async (pid: number) => {
+  if (pid === process.pid) return "Sun Oct 25 11:00:00 2026";
+  console.log("held");
+  await Bun.stdin.text();
+  return undefined;
+} };
+await withRoundLock(process.argv[2]!, await roundLock(owner), async () => {});
+`;
+
+async function holding(name: string, source: string, args: string[]) {
+  const script = join(fixture(`hedge-${name}-`), "hold.ts");
+  writeFileSync(script, source);
+  const child = Bun.spawn([process.execPath, script, ...args], { stdin: "pipe", stdout: "pipe", stderr: "inherit" });
+  const reader = child.stdout.getReader();
+  let said = "";
+  while (!said.includes("held")) {
+    const { done, value } = await reader.read();
+    if (done) throw new Error(`The ${name} exited with ${await child.exited} before it held ${args[0]}`);
+    said += new TextDecoder().decode(value);
+  }
+  return {
+    pid: child.pid,
+    release: async () => { child.stdin.end(); return child.exited; },
+    crash: async () => { child.kill("SIGKILL"); await child.exited; },
+  };
+}
+
+export const lockHolder = (directory: string) => holding("lock-holder", lockHolderScript, [directory]);
+
+/** Leaves the round lock of the directory stuck: a crashed holder that recorded a reviewer, and takeovers of it that crashed while they stopped that reviewer. */
+export async function stuckRoundLock(directory: string, takeovers: number) {
+  const slots = fixture("hedge-reviewer-slots-");
+  await (await holding("reviewer slot holder", reviewerSlotScript, [slots, String(await exitedPid())])).crash();
+  renameSync(join(slots, readdirSync(slots)[0]!), join(directory, "round.lock"));
+  for (let takeover = 0; takeover < takeovers; takeover++) await (await holding("takeover", takeoverScript, [directory])).crash();
+}
 
 export const panelGuide = `# QA swarm panel
 

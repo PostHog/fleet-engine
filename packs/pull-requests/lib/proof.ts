@@ -6,6 +6,7 @@ import { agentRefusal, agentsAcceptance, covers, fold, keptOwed, panelRefusal, t
 import type { Family, Usage } from "./proof-models.ts";
 import { quietReason, type DeltaKind, type QuietStep } from "./proof-delta.ts";
 import { panelOutcome } from "./proof-panel.ts";
+import { anchorHeading } from "./finding-anchors.ts";
 
 export type ProofIdentity = { repository: string; pr: number; commit: string };
 const sha = /^[0-9a-f]{40}$/;
@@ -123,13 +124,14 @@ export async function reuseProof(home: string, identity: ProofIdentity, kind: st
 }
 
 export type LockRound = (directory: string) => Promise<void>;
+export type LockBudget = <T>(reviews: string, step: () => Promise<T>) => Promise<T>;
 
-async function reserve(reviews: string, name: string, record: object, lock: LockRound | undefined) {
+async function reserve(reviews: string, name: string, record: object, { lock, now }: Stamping) {
   const temporary = join(reviews, `.reservation-${crypto.randomUUID()}`);
   await mkdir(temporary, { mode: 0o700 });
   try {
     await lock?.(temporary);
-    await writeFile(join(temporary, "round.json"), JSON.stringify({ ...record, startedAt: new Date().toISOString() }) + "\n", { flag: "wx", mode: 0o600 });
+    await writeFile(join(temporary, "round.json"), JSON.stringify({ ...record, reservationId: crypto.randomUUID(), startedAt: now().toISOString() }) + "\n", { flag: "wx", mode: 0o600 });
     await rename(temporary, join(reviews, name));
     return true;
   } catch (error) {
@@ -144,21 +146,49 @@ type FinalReadPhase = (typeof finalReadPhases)[number];
 
 const isReviewName = (name: string) => /^(\d+|final-\d+)$/.test(name);
 const reviewNames = async (reviews: string) => (await entries(reviews)).filter(isReviewName);
-/** When a round was reserved; a round that vanished meanwhile sorts last, so it never makes another back out. */
-const reservedAt = async (reviews: string, name: string) =>
-  (await readJson<{ startedAt?: string } | undefined>(join(reviews, name, "round.json"), undefined))?.startedAt ?? "￿";
 
 function finalReadPhase(value: string): FinalReadPhase {
   if (!(finalReadPhases as readonly string[]).includes(value)) throw new Error("Final read phase must be review or babysit");
   return value as FinalReadPhase;
 }
 
-async function reviewsSpent(reviews: string, started: string[], phase: FinalReadPhase) {
-  const reads = started.filter((name) => name.startsWith(finalReadPrefix));
-  const rounds = phase === "review" ? started.length - reads.length : 0;
-  const phases = await Promise.all(reads.map(async (name) => (JSON.parse(await readFile(join(reviews, name, "round.json"), "utf8")) as { phase?: FinalReadPhase }).phase ?? "review"));
-  return rounds + phases.filter((readPhase) => readPhase === phase).length;
+type Spending = "unfinished spends" | "finished only";
+type Spent = { spent: number; names: string[]; reservations: string[]; finished: string[]; round?: number };
+type ReservedAs = { reservationId?: string; startedAt?: string; commit?: string; scope?: string; phase?: FinalReadPhase };
+const reservationOf = ({ reservationId, startedAt, commit, scope, phase }: ReservedAs) => JSON.stringify([reservationId, startedAt, commit, scope, phase]);
+
+async function savedFindings(directory: string) {
+  try { return await readFile(join(directory, "findings.md"), "utf8"); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
 }
+
+async function reviewsSpent(reviews: string, phase: FinalReadPhase, spending: Spending): Promise<Spent> {
+  const rounds = await Promise.all((await reviewNames(reviews)).map(async (name) => {
+    const round = await readJson<ReservedAs | undefined>(join(reviews, name, "round.json"), undefined);
+    if (!round) return undefined;
+    const findings = await savedFindings(join(reviews, name));
+    const leadsToFixes = findings === undefined ? spending === "unfinished spends" : unanswered(findings, "").length > 0;
+    return { name, reservation: reservationOf(round), finished: findings !== undefined, spends: (round.phase ?? "review") === phase && leadsToFixes };
+  }));
+  const present = rounds.filter((round) => round !== undefined).sort((a, b) => a.name.localeCompare(b.name));
+  return { spent: present.filter(({ spends }) => spends).length, names: present.map(({ name }) => name), reservations: present.map(({ reservation }) => reservation), finished: present.filter(({ finished }) => finished).map(({ name }) => name) };
+}
+
+const budgetState = ({ spent, names, reservations, finished, round }: Spent) => JSON.stringify([spent, names, reservations, finished, round]);
+
+async function reserveWeighed<T extends Spent>(reviews: string, lockBudget: LockBudget, snapshot: () => Promise<T>, permit: (weighed: T) => Promise<ArbiterVerdict | undefined>, reserveIt: (weighed: T, verdict: ArbiterVerdict | undefined) => Promise<Reserved>) {
+  const before = await lockBudget(reviews, snapshot);
+  const verdict = await permit(before);
+  return lockBudget(reviews, async () => {
+    const after = await snapshot();
+    const started = after.names.filter((name) => !before.names.includes(name));
+    if (started.length) throw new Error(`Review ${started.join(", ")} started while this one weighed the budget. ${weighAgain}`);
+    if (budgetState(after) !== budgetState(before)) throw new Error(`The reviews changed while this one weighed the budget. ${weighAgain}`);
+    return reserveIt(before, verdict);
+  });
+}
+
+const weighAgain = "Run this command again to weigh it anew";
 
 export type ArbiterVerdict = { verdict: "continue" | "escalate" | "unavailable"; reason: string; model: string };
 export type Arbiter = (prompt: string) => Promise<ArbiterVerdict>;
@@ -200,7 +230,7 @@ export function parseVerdict(output: string, model: string): ArbiterVerdict {
 
 export type ReviewLimits = { free: number; ceiling: number };
 
-export const atCeiling = `hedge proof asks nothing more. For each open blocker or major, revert the fix that brought it in, or list it in a "## Known issues" section of the PR body, one "- <blocker|major>: <file:line> <finding>" item each, and answer its finding "<n>. known: <why>". A blocker or major that the last read found in the fixes since the panel is reverted, never listed. An open blocker holds the merge; the user's merge word accepts the rest. Only the user's --override runs another review`;
+export const atCeiling = `hedge proof asks nothing more. For each open blocker or major, revert the fix that brought it in, or list it in a "## Known issues" section of the PR body, one "- <blocker|major>: <file:line> <finding>" item each, and answer its finding "<n>. known: <why>". A blocker or major that the last read found in the fixes since the panel is reverted, never listed. An open blocker holds the merge; the user's merge word accepts the rest. Only the user's --override runs another review, or a final read of a HEAD that the gate does not carry`;
 
 const budgetSpent = ({ ceiling }: ReviewLimits) => `The review budget of ${ceiling} reviews is spent. ${atCeiling}`;
 
@@ -223,52 +253,48 @@ function askUser(identity: ProofIdentity, stop: string) {
 
 export type CapturedBy = "hedge" | "author";
 export type DecisionMark = Pick<Decision, "mark" | "id">;
-export type ReviewRequest = { scope: string; base?: string; from?: string; decision?: Decision; phase?: string; arbiter: Arbiter; limits: ReviewLimits; cleanBaseMerge?: CleanBaseMerge; quietCommit?: QuietCommit; capturedBy?: CapturedBy; lock?: LockRound };
+export type ReviewRequest = { scope: string; base?: string; from?: string; decision?: Decision; phase?: string; arbiter: Arbiter; limits: ReviewLimits; cleanBaseMerge?: CleanBaseMerge; quietCommit?: QuietCommit; capturedBy?: CapturedBy; lock?: LockRound; lockBudget: LockBudget; now: () => Date };
 export type Reserved = { round: number | "final"; id: string; directory: string };
 type Permit = { arbiter: Arbiter; limits: ReviewLimits };
 
-const reserveDecided = (reviews: string, name: string, record: object, decision: Decision | undefined, lock: LockRound | undefined) => reserve(reviews, name, { ...record, ...decision ? { decision } : {} }, lock);
+async function reserveDecided(reviews: string, name: string, record: object, decision: Decision | undefined, stamping: Stamping) {
+  if (!await reserve(reviews, name, { ...record, ...decision ? { decision } : {} }, stamping)) throw new Error(`Review ${name} started while this one weighed the budget. ${weighAgain}`);
+}
 
-async function startFinalRead(home: string, identity: ProofIdentity, base: string | undefined, decision: Decision | undefined, phase: FinalReadPhase, permit: Permit, cleanBaseMerge: CleanBaseMerge, quietCommit: QuietCommit, capturedBy: CapturedBy, from: string | undefined, lock: LockRound | undefined): Promise<Reserved> {
+type Stamping = { lock: LockRound | undefined; now: () => Date };
+type Reserving = Stamping & { lockBudget: LockBudget };
+
+async function startFinalRead(home: string, identity: ProofIdentity, base: string | undefined, decision: Decision | undefined, phase: FinalReadPhase, permit: Permit, cleanBaseMerge: CleanBaseMerge, quietCommit: QuietCommit, capturedBy: CapturedBy, from: string | undefined, { lockBudget, ...stamping }: Reserving): Promise<Reserved> {
   if (base === undefined) throw new Error("A final read needs --base with the latest reviewed commit");
   if (base === identity.commit) throw new Error("HEAD is already reviewed. Skip the final read.");
-  const quiet = decision ? undefined : reviewedThrough(identity.commit, new Set([base]), cleanBaseMerge, quietCommit);
-  if (quiet?.quiet.length) throw new Error(`HEAD needs no final read: final read carried from ${short(base)}: ${quietReason(quiet.kinds)}. hedge proof gate counts the carry. To read it anyway, pass --agent '<your reason>', or the user's --override`);
   const reviews = join(pullRequestDirectory(home, identity), "reviews");
-  for (let attempt = 1; attempt <= 100; attempt++) {
-    const started = await reviewNames(reviews);
-    const finished = await finishedReviews(home, identity);
-    if (finished.length < started.length) throw new Error("A review is unfinished. Finish it before a final read.");
+  const { free, ceiling } = permit.limits;
+  const snapshot = async () => ({ ...await reviewsSpent(reviews, phase, "unfinished spends"), reviews: await finishedReviews(home, identity) });
+  const permitRead = async ({ spent, names, reviews: finished }: Awaited<ReturnType<typeof snapshot>>) => {
+    const carried = gateCarry(identity, finished, cleanBaseMerge, quietCommit).found;
     const latest = finished.at(-1);
     if (!latest) throw new Error("A final read needs a finished earlier review");
     if (!coversReview(base, latest.commit, cleanBaseMerge)) throw new Error(`Final read base must be the latest reviewed commit ${latest.commit}, or a clean base merge the gate carried it to`);
-    const spent = await reviewsSpent(reviews, started, phase);
-    const { free, ceiling } = permit.limits;
-    const stop = spent >= ceiling ? budgetSpent(permit.limits) : undefined;
-    const verdict = await permitReview(home, identity, spent >= free, stop, decision, permit);
+    const unfinished = names.some((name) => !finished.some((review) => review.name === name));
+    const retry = unfinished ? "" : ` To read it anyway, pass ${spent < ceiling ? "--agent '<your reason>', or " : ""}the user's --override`;
+    if (!decision && carried?.quiet.length) throw new Error(`HEAD needs no final read: final read carried from ${short(carried.from)}: ${quietReason(carried.kinds)}. hedge proof gate counts the carry.${retry}`);
+    if (unfinished) throw new Error("A review is unfinished. Finish it before a final read.");
+    return permitReview(home, identity, spent >= free, carried && spent >= ceiling ? budgetSpent(permit.limits) : undefined, decision, permit);
+  };
+  return reserveWeighed(reviews, lockBudget, snapshot, permitRead, async (_snapshot, verdict) => {
+    const taken = new Set(await reviewNames(reviews));
     let read = 1;
-    while (started.includes(finalReadPrefix + read)) read++;
+    while (taken.has(finalReadPrefix + read)) read++;
     const name = finalReadPrefix + read;
-    if (await reserveDecided(reviews, name, { ...identity, round: "final", read, scope: "final", base, from, phase, arbiter: verdict, capturedBy }, decision, lock)) return await reservedAlone(reviews, started, name, { round: "final", id: name, directory: join(reviews, name) });
-  }
-  throw new Error("Final read limit exceeded");
-}
-
-async function reservedAlone(reviews: string, counted: string[], name: string, reserved: Reserved) {
-  const others = (await reviewNames(reviews)).filter((started) => started !== name && !counted.includes(started));
-  const mine = await reservedAt(reviews, name);
-  // Both racers see each other, so only the later reservation backs out; the earlier one keeps its round.
-  const other = (await Promise.all(others.map(async (started) => ({ started, at: await reservedAt(reviews, started) }))))
-    .find(({ started, at }) => at < mine || (at === mine && started < name))?.started;
-  if (!other) return reserved;
-  await rm(join(reviews, name), { recursive: true, force: true });
-  throw new Error(`Review ${other} started while this one weighed the budget. Run this one again to weigh it anew`);
+    await reserveDecided(reviews, name, { ...identity, round: "final", read, scope: "final", base, from, phase, arbiter: verdict, capturedBy }, decision, stamping);
+    return { round: "final", id: name, directory: join(reviews, name) };
+  });
 }
 
 const coversReview = (base: string, reviewed: string, cleanBaseMerge: CleanBaseMerge) => reviewedThroughMerges(base, new Set([reviewed]), cleanBaseMerge) !== undefined;
 
 export async function startReview(home: string, identity: ProofIdentity, request: ReviewRequest): Promise<Reserved> {
-  const { scope, base, phase, decision, cleanBaseMerge = () => undefined, quietCommit = () => undefined, capturedBy = "author", lock } = request;
+  const { scope, base, phase, decision, cleanBaseMerge = () => undefined, quietCommit = () => undefined, capturedBy = "author", lock, lockBudget, now } = request;
   const from = request.from ?? base;
   const permit = { arbiter: request.arbiter, limits: request.limits };
   if (!["full", "fixes", "final"].includes(scope)) throw new Error("Review scope must be full, fixes, or final");
@@ -277,25 +303,33 @@ export async function startReview(home: string, identity: ProofIdentity, request
   if (base !== undefined && scope === "full") throw new Error("--scope full reads the diff from the merge base. Drop --base");
   const reviews = join(pullRequestDirectory(home, identity), "reviews");
   await mkdir(reviews, { recursive: true, mode: 0o700 });
-  if (scope === "final") return startFinalRead(home, identity, base, decision, finalReadPhase(phase ?? "review"), permit, cleanBaseMerge, quietCommit, capturedBy, from, lock);
-  return startRound(home, identity, reviews, { scope, base, from, decision, permit, cleanBaseMerge, capturedBy, lock });
+  if (scope === "final") return startFinalRead(home, identity, base, decision, finalReadPhase(phase ?? "review"), permit, cleanBaseMerge, quietCommit, capturedBy, from, { lock, lockBudget, now });
+  return startRound(home, identity, reviews, { scope, base, from, decision, permit, cleanBaseMerge, capturedBy, reserving: { lock, lockBudget, now } });
 }
 
-type RoundStart = { scope: string; base?: string; from?: string; decision: Decision | undefined; permit: Permit; cleanBaseMerge: CleanBaseMerge; capturedBy: CapturedBy; lock: LockRound | undefined };
+type RoundStart = { scope: string; base?: string; from?: string; decision: Decision | undefined; permit: Permit; cleanBaseMerge: CleanBaseMerge; capturedBy: CapturedBy; reserving: Reserving };
 
-async function startRound(home: string, identity: ProofIdentity, reviews: string, { scope, base, from, decision, permit, cleanBaseMerge, capturedBy, lock }: RoundStart): Promise<Reserved> {
-  for (let round = 1; round <= 100; round++) {
-    const directory = join(reviews, String(round));
-    try { await access(directory); continue; }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+async function startRound(home: string, identity: ProofIdentity, reviews: string, { scope, base, from, decision, permit, cleanBaseMerge, capturedBy, reserving: { lockBudget, ...stamping } }: RoundStart): Promise<Reserved> {
+  const { free, ceiling } = permit.limits;
+  const snapshot = async () => ({ ...await reviewsSpent(reviews, "review", "unfinished spends"), round: await nextRound(reviews) });
+  const permitRound = async ({ round, spent }: Awaited<ReturnType<typeof snapshot>>) => {
     if (round === 1 && scope !== "full") throw new Error("Round 1 is --scope full: it reviews the whole PR diff. Drop --base");
     if (round > 1) await checkLaterRound(reviews, round, scope, base, decision, cleanBaseMerge);
-    const started = await reviewNames(reviews);
-    const spent = await reviewsSpent(reviews, started, "review");
-    const { free, ceiling } = permit.limits;
-    const stop = spent >= ceiling ? budgetSpent(permit.limits) : undefined;
-    const verdict = await permitReview(home, identity, spent >= free, stop, decision, permit);
-    if (await reserveDecided(reviews, String(round), { ...identity, round, scope, base, from, arbiter: verdict, capturedBy }, decision, lock)) return await reservedAlone(reviews, started, String(round), { round, id: String(round), directory });
+    return permitReview(home, identity, spent >= free, spent >= ceiling ? budgetSpent(permit.limits) : undefined, decision, permit);
+  };
+  return reserveWeighed(reviews, lockBudget, snapshot, permitRound, async ({ round }, verdict) => {
+    await reserveDecided(reviews, String(round), { ...identity, round, scope, base, from, arbiter: verdict, capturedBy }, decision, stamping);
+    return { round, id: String(round), directory: join(reviews, String(round)) };
+  });
+}
+
+async function nextRound(reviews: string) {
+  for (let round = 1; round <= 100; round++) {
+    try { await access(join(reviews, String(round))); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      return round;
+    }
   }
   throw new Error("Review limit exceeded");
 }
@@ -457,15 +491,14 @@ export async function respondToReview(home: string, identity: ProofIdentity, rou
   const bytes = await readFile(responses);
   if (!bytes.toString().trim()) throw new Error(`${responses} is empty. Answer each finding: fixed in which commit, or rejected and why`);
   const directory = await roundDirectory(home, identity, round);
-  const findings = await readFile(join(directory, "findings.md"), "utf8").catch(() => undefined);
+  const findings = await savedFindings(directory);
   if (findings === undefined) throw new Error(`Review round ${round} has no findings yet`);
   const missing = unanswered(findings, bytes.toString());
   if (missing.length) throw new Error(`Answer findings ${missing.join(", ")} too: one line each, numbered in the order of findings.md, such as "${missing[0]}. fixed in 1a2b3c4: <how>", "${missing[0]}. rejected: <why>", or, at the review budget, "${missing[0]}. known: <why>" for a finding listed under Known issues. Minor and nit findings need no answer; a TESTS item gets a test-only rewrite or delete`);
   if (answeredFindings(findings, bytes.toString()).findings.some(({ answer }) => answer?.verdict === "known")) {
     const reviews = join(pullRequestDirectory(home, identity), "reviews");
-    const started = await reviewNames(reviews);
     const phase = (await readJson<{ phase?: FinalReadPhase }>(join(directory, "round.json"), {})).phase ?? "review";
-    const spent = await reviewsSpent(reviews, started, phase);
+    const { spent } = await reviewsSpent(reviews, phase, "finished only");
     if (spent < ceiling) throw new Error(`Answer a finding "known" only once the review budget of ${ceiling} reviews is spent; ${spent} ran. Fix or reject it now`);
   }
   const destination = join(directory, "responses.md");
@@ -482,23 +515,53 @@ const noFinding = /^(?:#.*|no findings\.?|findings:?|\(none\))$/i;
 
 const findingsBlock = /^\s*FINDINGS\b:?/;
 const testsBlock = /^\s*(?:#+\s*)?\**TESTS\b/;
-const flooredItem = /^\s*(?:[-*]|\d+[.)])\s+(?:[^|\n]*\|)?\s*\**(?:minor|nit)\**\s*\|/i;
+const listItem = /^\s*(?:[-*]|\d+[.)])\s+(.*)/;
+const severityField = /^\**(blocker|major|minor|nit)\**$/i;
+const severityShorthand = /^\**(?:minor|nit)(?:[,:]\**|\**[,:])\s/i;
+
+function flooredItem(text: string) {
+  const item = listItem.exec(text.split("\n")[0]!)?.[1];
+  if (item === undefined) return false;
+  const fields = item.split("|");
+  const stated = fields.slice(0, Math.min(2, fields.length - 1)).map((field) => severityField.exec(field.trim())?.[1]?.toLowerCase()).find(Boolean);
+  return stated ? stated === "minor" || stated === "nit" : severityShorthand.test(item);
+}
+
+const anchorIntro = /^(?:fleet|hedge) compared each finding's anchor with the diff and with earlier reviews of this PR\.$/;
+const anchorNote = /^- (?:Not in the diff, so check it before triage: \S|Seen before in [^:\n]+: \S|\d+ findings? quotes? no anchor\.$)/;
+
+type ReviewedLine = { text: string; note: boolean };
+
+function anchorCheckLines(lines: string[]) {
+  const notes = new Set<number>();
+  lines.forEach((line, index) => {
+    if (line.trim() !== anchorHeading) return;
+    let next = index + 1;
+    while (next < lines.length && !lines[next]!.trim()) next++;
+    if (!anchorIntro.test(lines[next]?.trim() ?? "")) return;
+    notes.add(index).add(next);
+    for (next++; next < lines.length && (!lines[next]!.trim() || anchorNote.test(lines[next]!)); next++) notes.add(next);
+  });
+  return notes;
+}
 
 function reviewedLines(findings: string) {
-  const lines = findings.split("\n");
+  const lines = findings.replace(/\r\n?/g, "\n").split("\n");
+  const notes = anchorCheckLines(lines);
   const lensAnswer = lines.some((line) => findingsBlock.test(line));
   let inside = !lensAnswer;
   let tests = false;
-  const kept: string[] = [];
-  const tested: string[] = [];
-  for (const line of lines) {
-    if (testsBlock.test(line)) { tests = true; inside = false; continue; }
-    if (findingsBlock.test(line)) { tests = false; inside = true; kept.push(line.replace(findingsBlock, "")); continue; }
+  const kept: ReviewedLine[] = [];
+  const tested: ReviewedLine[] = [];
+  lines.forEach((line, index) => {
+    const note = notes.has(index);
+    if (testsBlock.test(line)) { tests = true; inside = false; return; }
+    if (findingsBlock.test(line)) { tests = false; inside = true; kept.push({ text: line.replace(findingsBlock, ""), note }); return; }
     if (/^COVERED\b/.test(line)) { tests = false; inside = false; }
     else if (/^#/.test(line)) { tests = false; if (!lensAnswer) inside = true; }
-    if (tests) tested.push(line);
-    else if (inside) kept.push(line);
-  }
+    if (tests) tested.push({ text: line, note });
+    else if (inside) kept.push({ text: line, note });
+  });
   return { kept, tested };
 }
 
@@ -507,37 +570,50 @@ function ladderFindings(findings: string) {
   return findings.split("\n").filter((line) => {
     if (testsBlock.test(line)) tests = true;
     else if (findingsBlock.test(line) || /^(COVERED\b|#)/.test(line)) tests = false;
-    return !tests && !flooredItem.test(line);
+    return !tests && !flooredItem(line);
   }).join("\n");
 }
 
 const continued = /^\s+\S/;
 const lazyContinued = /^[^\s#]/;
 
-/** The findings, then the TESTS items. Each part on its own: prose without list items is one finding of its part. */
+/** The findings, then the TESTS items. Each part on its own: prose without list items is one finding of its part, and prose beside only Anchor check notes is one finding after all items, so no earlier number moves. */
 export function reviewedFindings(findings: string) {
-  const { kept, tested } = reviewedLines(findings);
-  return [...listedItems(kept), ...listedItems(tested)];
+  return reviewedItems(findings).map(({ text }) => text);
 }
 
-function listedItems(reviewed: string[]) {
-  const items: string[] = [];
+function reviewedItems(findings: string) {
+  const { kept, tested } = reviewedLines(findings);
+  const parts = [listedItems(kept), testItems(listedItems(tested))];
+  return [...parts.flatMap(({ items }) => items), ...parts.flatMap(({ recovered }) => recovered)];
+}
+
+function testItems({ items, recovered }: { items: ReviewedItem[]; recovered: ReviewedItem[] }) {
+  const mark = (item: ReviewedItem) => ({ ...item, test: true });
+  return { items: items.map(mark), recovered: recovered.map(mark) };
+}
+
+type ReviewedItem = ReviewedLine & { test?: boolean };
+
+function listedItems(reviewed: ReviewedLine[]): { items: ReviewedItem[]; recovered: ReviewedItem[] } {
+  const items: ReviewedLine[] = [];
   let open = false;
-  for (const line of reviewed) {
+  for (const { text: line, note } of reviewed) {
     const joins: boolean = items.length > 0 && (continued.test(line) || (open && lazyContinued.test(line)));
-    if (findingItem.test(line)) items.push(line.trim());
-    else if (joins) items[items.length - 1] += `\n${line.trim()}`;
+    if (findingItem.test(line)) items.push({ text: line.trim(), note });
+    else if (joins) items[items.length - 1]!.text += `\n${line.trim()}`;
     open = Boolean(line.trim()) && (findingItem.test(line) || joins);
   }
-  const text = reviewed.map((line) => line.trim()).filter(Boolean);
-  if (items.length || text.every((line) => noFinding.test(line))) return items;
-  return [text.join("\n")];
+  const text = reviewed.flatMap(({ text: line, note }) => note || !line.trim() ? [] : [line.trim()]);
+  if (items.some(({ note }) => !note) || text.every((line) => noFinding.test(line))) return { items, recovered: [] };
+  const prose = { text: text.join("\n"), note: false };
+  return items.length ? { items, recovered: [prose] } : { items: [prose], recovered: [] };
 }
 
 export type Answer = { verdict: "fixed" | "rejected" | "known"; text: string };
 
 export function answeredFindings(findings: string, responses: string) {
-  const items = reviewedFindings(findings);
+  const items = reviewedItems(findings);
   const answers = new Map<number, Answer>();
   const other: string[] = [];
   let last: Answer | undefined;
@@ -548,13 +624,13 @@ export function answeredFindings(findings: string, responses: string) {
     else if (!match && last && continued.test(line)) last.text += `\n${line.trim()}`;
     else if (line.trim()) { last = undefined; other.push(line.trim()); }
   }
-  return { findings: items.map((text, index) => ({ text, ...answers.has(index + 1) ? { answer: answers.get(index + 1)! } : {} })), other: other.join("\n") };
+  return { findings: items.map(({ text, note, test }, index) => ({ text, ...note ? { note } : {}, ...test ? { test } : {}, ...answers.has(index + 1) ? { answer: answers.get(index + 1)! } : {} })), other: other.join("\n") };
 }
 
 const majorItem = /^\s*(?:[-*]|\d+[.)])\s+(?:[^|\n]*\|)?\s*\**major\**\s*\|/i;
 
 const knownBlockers = (findings: string, responses: string) =>
-  answeredFindings(findings, responses).findings.flatMap(({ text, answer }, index) => answer?.verdict === "known" && !majorItem.test(text) && !flooredItem.test(text) ? [index + 1] : []);
+  answeredFindings(findings, responses).findings.flatMap((finding, index) => finding.answer?.verdict === "known" && !majorItem.test(finding.text) && !needsNoAnswer(finding) ? [index + 1] : []);
 
 const locations = (text: string) => [...text.matchAll(/(?<![\w./-])([\w./-]+:\d+)(?![\w:])/g)].map((match) => match[1]!);
 
@@ -564,8 +640,10 @@ const unlistedKnown = (findings: string, responses: string, listed: string[]) =>
     return answer?.verdict === "known" && !(location && listed.some((item) => locations(item).includes(location))) ? [index + 1] : [];
   });
 
+const needsNoAnswer = ({ text, note, test }: { text: string; note?: boolean; test?: boolean }) => note || (!test && flooredItem(text));
+
 const unanswered = (findings: string, responses: string) =>
-  answeredFindings(findings, responses).findings.flatMap(({ text, answer }, index) => answer || flooredItem.test(text) ? [] : [index + 1]);
+  answeredFindings(findings, responses).findings.flatMap((finding, index) => finding.answer || needsNoAnswer(finding) ? [] : [index + 1]);
 
 export const proofKinds = ["live-run", "ui-walk", "prod-shape", "cross-version", "shadow-diff", "post-deploy-watch", "dev-observed"] as const;
 export type ProofKind = (typeof proofKinds)[number];
@@ -1023,8 +1101,13 @@ function reviewedThrough(start: string, reviewed: Set<string>, cleanBaseMerge: C
   return undefined;
 }
 
-async function carryForward(home: string, identity: ProofIdentity, reviewed: Set<string>, cleanBaseMerge: CleanBaseMerge, quietCommit: QuietCommit) {
-  const found = reviewedThrough(identity.commit, reviewed, cleanBaseMerge, quietCommit);
+function gateCarry(identity: ProofIdentity, finished: FinishedReview[], cleanBaseMerge: CleanBaseMerge, quietCommit: QuietCommit) {
+  const firstPanel = finished.find((review) => review.panel);
+  const counted = firstPanel ? finished.filter((review) => review.finishedAt >= firstPanel.finishedAt) : finished;
+  return { counted, found: reviewedThrough(identity.commit, new Set(counted.map((review) => review.commit)), cleanBaseMerge, quietCommit) };
+}
+
+async function carryForward(home: string, identity: ProofIdentity, found: ReturnType<typeof reviewedThrough>) {
   if (!found || (!found.merges.length && !found.quiet.length)) return undefined;
   const quiet = found.quiet.length ? { quiet: found.quiet, reason: quietReason(found.kinds) } : {};
   const carried: Carried = { commit: identity.commit, from: found.from, merges: found.merges, ...quiet, recordedAt: new Date().toISOString() };
@@ -1037,26 +1120,26 @@ const panelHint = "Run hedge proof review, which runs the lenses of the PR's rev
 async function reviewStatus(weigh: Weigh, cleanBaseMerge: CleanBaseMerge, quietCommit: QuietCommit): Promise<Status & { panelGap?: GapProof }> {
   const { home, identity, decisions } = weigh;
   const all = await finishedReviews(home, identity);
-  const firstPanel = all.find((review) => review.panel);
-  if (firstPanel) return headReview(home, identity, all.filter((review) => review.finishedAt >= firstPanel.finishedAt), cleanBaseMerge, quietCommit);
+  const carry = gateCarry(identity, all, cleanBaseMerge, quietCommit);
+  if (all.some((review) => review.panel)) return headReview(home, identity, carry);
   const gap = await readJson<Gap | undefined>(gapPath(home, identity, "panel"), undefined);
   const weighed = await gapAcceptance(weigh, gap, "panel");
   const acceptance = weighed.acceptance;
   if (!gap && acceptance?.by !== "the user") return { problem: "missing", line: `review: no finished panel round on the PR${all.length ? `; ${all.length} single-reviewer review(s) do not count` : ""}. ${panelHint}`, ...lapseOf(weighed) };
   const panelGap = gapProof(gap, weighed, decisions);
   const line = `panel ${gapText(panelGap)}`;
-  const head = await headReview(home, identity, all, cleanBaseMerge, quietCommit);
+  const head = await headReview(home, identity, carry);
   if (!acceptance) return { problem: head.problem ?? "gap", line: `${head.line}; ${line}`, panelGap, ...countedGap(weighed) };
   return { ...head, line: `${head.line}; ${line}`, covered: head.covered && `${head.covered}, ${line}`, panelGap, ...countedGap(weighed) };
 }
 
-async function headReview(home: string, identity: ProofIdentity, finished: FinishedReview[], cleanBaseMerge: CleanBaseMerge, quietCommit: QuietCommit): Promise<Status> {
+async function headReview(home: string, identity: ProofIdentity, { counted: finished, found }: ReturnType<typeof gateCarry>): Promise<Status> {
   const head = finished.filter((review) => review.commit === identity.commit).at(-1);
   if (head) {
     const covered = `${reviewLabel(head.name)}${head.reviewer ? ` by ${head.reviewer}` : ""}`;
     return { problem: undefined, line: `review: HEAD reviewed in ${covered}`, covered };
   }
-  const carried = await carryForward(home, identity, new Set(finished.map((review) => review.commit)), cleanBaseMerge, quietCommit);
+  const carried = await carryForward(home, identity, found);
   if (carried?.reason) {
     const review = finished.filter((done) => done.commit === carried.from).at(-1)!;
     const merges = carried.merges.length ? ` and ${carried.merges.length} clean merge(s) of the base` : "";

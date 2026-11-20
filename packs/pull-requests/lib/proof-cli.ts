@@ -45,7 +45,8 @@ type Subcommand = {
 };
 
 const overrideHelp = `--override takes the user's answer to the question that review-start prints when the arbiter escalates or gives no
-verdict. At the review budget hedge asks nothing, and only the user's --override runs another review. Ask it with your question tool, with the options "Run one more round" and "Stop
+verdict. At the review budget hedge asks nothing, and only the user's --override runs another review, or a final read
+of a HEAD that the gate does not carry. Ask it with your question tool, with the options "Run one more round" and "Stop
 here". Only their choice of "Run one more round" there counts, quoted with the date they gave it, for example
 --override '2026-10-24 "Run one more round"'. --thread names the T3 thread where they answered and defaults to this
 one (T3CODE_THREAD_ID). A typed message, a refusal, or a general rule, such as "ship everything autonomously", does
@@ -66,12 +67,19 @@ first when its review-start ended before it did. Commands on one round take turn
 its lock already held. A command that finds another hedge proof command at work on the round stops and names its
 process and lock file; wait for it to end, then run the command again, or, on a panel, run hedge proof review --wait,
 which waits for it. A round is taken over when its command is gone, when its process id now names a process that
-started later, or when its lock file stays empty for a minute.
+started later, or when its lock file stays empty for a minute. A new review reads the reviews and reserves its round
+under the lock of the PR's reviews directory, which is taken over by the same rule, and runs git, GitHub, and the
+arbiter outside it; when another review starts or ends meanwhile, it stops and asks you to run it again.
 The settings pull-requests.freeReviews and pull-requests.reviewCeiling set how many reviews run before the arbiter weighs
 one more and where the loop stops: the panel rounds and the final reads of the review phase count together, and the
-final reads of the babysit phase count apart. The default budget is the panel, the fixes read, and the last read. A
-PR of the Read tier gets its one read and one final read of its fixes. The arbiter is the lookup model of your
-AI plan; HEDGE_REVIEW_ARBITER replaces its command.`;
+final reads of the babysit phase count apart. Only a review that leads to fixes counts: a finished review
+counts when the gate asks for an answer to one of its findings, so one with only minor and nit findings spends nothing,
+and an unfinished one counts. The
+budget never refuses a final read of a HEAD that the gate does not carry; a blocker or major that it finds still
+counts, so the fixes rounds after it stop at the ceiling. The default budget is the panel, the fixes read, and the last read. On
+a PR of the Read tier the ceiling is two reviews that count: its one read and one final read of its fixes. At the
+ceiling, a further final read runs only when the gate does not carry HEAD; below it, --agent still reads a carried HEAD. The arbiter is the lookup model of your AI plan;
+HEDGE_REVIEW_ARBITER replaces its command.`;
 
 const subcommands: Record<string, Subcommand> = {
   path: {
@@ -231,9 +239,9 @@ with the merge time and the time it was saved.`,
     summary: `Without --lens, --scope full runs the panel of the PR's review tier, which hedge picks from the merge-risk grade
 of the PR description and the authored production lines of the diff: lines outside tests, docs, lockfiles, and
 generated files. Read: grade low or no grade, and under 50 authored lines; one combined Correctness and Risk lens on the
-other family, and at most one final read of its fixes. Pair: any other grade but high, or a grade hedge cannot read;
-the lenses correctness:other, risk:other, and fresh-eyes:same. Panel: grade high; the lenses fresh-eyes, correctness,
-risk, design, and anti-overengineering. --lens adds lenses to the tier's set, such as security, ui, systems, or a
+other family, and one final read of its fixes that counts; at that ceiling, more run only when the gate does not carry HEAD. Pair:
+any other grade but high, or a grade hedge cannot read; the lenses correctness:other, risk:other, and fresh-eyes:same.
+Panel: grade high; the lenses fresh-eyes, correctness, risk, design, and anti-overengineering. --lens adds lenses to the tier's set, such as security, ui, systems, or a
 Team perspective; it never removes one. The output and hedge proof show name the tier and why. An unfinished panel
 runs again with the lenses it started with when you pass no --lens.
 --single, --scope fixes, and --scope final reserve a review round and run one reviewer yourself, read-only, from the model table of your AI plan: the review
@@ -617,7 +625,7 @@ async function reserveRound(options: Map<string, string>, head: ProofIdentity, c
   if (tier.name === "read" && capturedBy === "hedge" && !panel && !decision && !await panelCommit(context.home, head)) throw new Error("A PR of the Read tier gets one read, and it is the panel: run hedge proof review, which runs its combined lens");
   const firstPanel = panel && !await panelCommit(context.home, head);
   const limits = firstPanel ? permit.limits : { ...permit.limits, ceiling: tierCeiling(tier, permit.limits.ceiling) };
-  const reserved = await startReview(context.home, head, { scope, base, from, ...permit, limits, decision, phase: options.get("--phase"), cleanBaseMerge: cleanBaseMerge(head, context.run), quietCommit: quietCommitIn(context.run, () => baseRefs(head, context.run)), capturedBy, lock: async (directory) => lockNewRound(directory, await context.lock()) });
+  const reserved = await startReview(context.home, head, { scope, base, from, ...permit, limits, decision, phase: options.get("--phase"), cleanBaseMerge: cleanBaseMerge(head, context.run), quietCommit: quietCommitIn(context.run, () => baseRefs(head, context.run)), capturedBy, lock: async (directory) => lockNewRound(directory, await context.lock()), lockBudget: async (reviews, step) => withRoundLock(reviews, await context.lock(), step), now: context.now ?? (() => new Date()) });
   return { ...reserved, scope, base, from, phase: options.get("--phase") };
 }
 
