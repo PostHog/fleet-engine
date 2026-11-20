@@ -7,6 +7,7 @@ afterEach(cleanFixtures);
 
 const lines = (count: number, word: string) => Array.from({ length: count }, (_, index) => `${word} ${index}`).join("\n") + "\n";
 const block = (body: string) => /<!-- hedge-proof-receipt[\s\S]*?<!-- \/hedge-proof-receipt -->/.exec(body)?.[0] ?? "";
+const rendered = (row: string) => [...Bun.markdown.html(`| a | b | c | d |\n| --- | --- | --- | --- |\n${row}\n`).matchAll(/<td>([\s\S]*?)<\/td>/g)].map((match) => match[1]!);
 const tableIn = (text: string) => text.split("\n").filter((line) => line.startsWith("| PR | Review rounds") || line.startsWith("| example/product#42 | ") && line.split(" | ").length === 4);
 
 async function reviewHead(pr: Checkout) {
@@ -168,7 +169,7 @@ test("a checkout without the base commit GitHub reports counts unknown, not from
   expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | unknown at HEAD | none |");
 });
 
-test("a reason keeps a backslash before a pipe and a run of spaces inside code, so two quoted commands stay apart", async () => {
+test("a reason with pipes and a run of spaces inside code renders in one cell, with who accepted it", async () => {
   const pr = await checkout();
   await pr.commit("feature.ts", lines(10, "greet"));
   pr.pullRequestState({ body: graded("non-critical") });
@@ -178,11 +179,13 @@ test("a reason keeps a backslash before a pipe and a run of spaces inside code, 
   await agentAccepts(pr, "ui-walk");
   await pr.hedge("gate");
 
-  const row = tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1];
-  expect(row).toContain("ui-walk: `a\\\\|b` is not `a\\|b`, and `printf 'a  b'` keeps its spaces (");
+  const row = tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]!;
+  const cells = rendered(row);
+  expect(cells).toHaveLength(4);
+  expect(cells[3]).toStartWith("ui-walk: <code>a|b</code> is not <code>a|b</code>, and <code>printf 'a  b'</code> keeps its spaces (🤖 agent ");
 });
 
-test("a count where git skips rename detection reads unknown, not as whole files added and removed", async () => {
+test("a count past git's rename limit still pairs each moved file, so it counts the edited lines", async () => {
   const pr = await checkout();
   await pr.advanceBase("first.ts", lines(20, "first"));
   await pr.advanceBase("second.ts", lines(20, "second"));
@@ -197,7 +200,7 @@ test("a count where git skips rename detection reads unknown, not as whole files
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | unknown at HEAD | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | 4 at HEAD | none |");
 });
 
 test("a reason with a carriage return or an escaped pipe stays in its cell", async () => {
@@ -286,24 +289,20 @@ test("a receipt without a gate at HEAD shows no end table row, as the report sho
   expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)).toEqual([]);
 });
 
-test("a gate after the PR merged keeps the counts it saved before, not the lines of a head the base now holds", async () => {
+test("a gate after the PR merged counts from the base commit GitHub reports for it, the base before the merge", async () => {
   const pr = await checkout();
   await pr.commit("feature.ts", lines(10, "greet"));
   pr.pullRequestState({ body: graded("non-critical") });
   await reviewHead(pr);
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
-  await pr.git("checkout", "-q", "main");
-  await pr.git("merge", "-q", "--no-ff", "--no-edit", "feature");
-  await pr.git("update-ref", "refs/remotes/origin/main", "HEAD");
-  await pr.git("checkout", "-q", "feature");
-  pr.pullRequestState({ merged: true });
+  await mergeIntoMain(pr);
   await pr.hedge("gate", "--landed");
 
   expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | none |");
 });
 
-test("a gate after the PR merged into another base keeps no count measured against the old base", async () => {
+test("a gate after the PR merged into another base reads unknown when that base holds HEAD", async () => {
   const pr = await checkout();
   await pr.commit("feature.ts", lines(10, "greet"));
   pr.pullRequestState({ body: graded("non-critical") });
@@ -323,34 +322,20 @@ test("a gate after the PR merged counts the review that finished after the last 
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
   await reviewHead(pr);
-  await pr.git("checkout", "-q", "main");
-  await pr.git("merge", "-q", "--no-ff", "--no-edit", "feature");
-  await pr.git("update-ref", "refs/remotes/origin/main", "HEAD");
-  await pr.git("checkout", "-q", "feature");
-  pr.pullRequestState({ merged: true });
+  await mergeIntoMain(pr);
   await pr.hedge("gate", "--landed");
 
   expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | none |");
 });
 
-test("a landed gate whose base holds HEAD reads a damaged saved gate as no count", async () => {
-  const pr = await checkout();
-  await pr.commit("feature.ts", lines(10, "greet"));
-  pr.pullRequestState({ body: graded("non-critical") });
-  await reviewHead(pr);
-  await pr.hedge("require", "--none", "--reason", "Docs only");
-  const head = await pr.git("rev-parse", "HEAD");
-  mkdirSync(join(pr.pullRequest, "gate-outcome"), { recursive: true });
-  writeFileSync(join(pr.pullRequest, "gate-outcome", `${head}.json`), "{\"gate\":");
+async function mergeIntoMain(pr: Checkout) {
+  const before = await pr.git("rev-parse", "refs/remotes/origin/main");
   await pr.git("checkout", "-q", "main");
   await pr.git("merge", "-q", "--no-ff", "--no-edit", "feature");
   await pr.git("update-ref", "refs/remotes/origin/main", "HEAD");
   await pr.git("checkout", "-q", "feature");
-  pr.pullRequestState({ merged: true });
-
-  expect((await pr.hedge("gate", "--landed")).output).not.toContain("SyntaxError");
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → unknown | none |");
-});
+  pr.pullRequestState({ baseSha: before, merged: true });
+}
 
 test("a gap reason with a long run of backslashes prints in the table at once", async () => {
   const pr = await checkout();
@@ -427,4 +412,15 @@ test("a merged PR's receipt without a gate names the landed gate", async () => {
   expect((await pr.hedge("receipt")).code).toBe(0);
 
   expect(block(pr.githubBody())).toContain("**End table:** no gate at HEAD yet. Run hedge proof gate --landed, then hedge proof receipt.");
+});
+
+test("a PR named twice in the report shows one table row", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.ts", lines(10, "greet"));
+  pr.pullRequestState({ body: graded("non-critical") });
+  await reviewHead(pr);
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  await pr.hedge("gate");
+
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42", "--pr", "example/product#42")).output)).toHaveLength(2);
 });

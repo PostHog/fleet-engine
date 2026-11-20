@@ -75,8 +75,8 @@ function gradeOf(body: string | undefined) {
 }
 
 function changedLines(identity: ProofIdentity, run: Run, start: string, renames: boolean) {
-  const stat = run(["git", "diff", "--numstat", "-z", renames ? "--find-renames" : "--no-renames", "--no-relative", start, identity.commit]);
-  if (stat.code !== 0 || /rename detection was skipped/.test(stat.stderr)) return undefined;
+  const stat = run(["git", "diff", "--numstat", "-z", ...renames ? ["--find-renames", "-l0"] : ["--no-renames"], "--no-relative", start, identity.commit]);
+  if (stat.code !== 0) return undefined;
   const fields = stat.stdout.split("\0");
   const changed: { lines: number; path: string }[] = [];
   for (let index = 0; index < fields.length; index++) {

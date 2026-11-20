@@ -53,7 +53,7 @@ const skipped = ({ summary, reason }: EndRow) =>
   summaryGaps(summary).map(({ kind, gap }) => `${kind}: ${gap.reason ? reason(kind, gap.reason) : "no reason recorded"} (${acceptor(gap)})`);
 
 export const oneLine = (text: string) => text.replace(/\r\n?|\n/g, " ");
-const cell = (text: string) => oneLine(text.replace(/\|/g, "\\|"));
+const cell = (text: string) => oneLine(text.replace(/(?<!\\)(\\*)\|/g, (pipe, slashes: string) => slashes.length % 2 ? pipe : `${slashes}\\|`));
 
 export function endTable(rows: EndRow[]) {
   return [

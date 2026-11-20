@@ -65,7 +65,7 @@ export async function finalGate(head: ProofIdentity, context: GateContext, { lan
   const judged: Judged = checked.code === 0 ? await judgeHead(head, checked, context) : { code: checked.code, lines: [], covered: "", judge: { state: "skipped", lines: [] }, reason: checked.failure };
   const shown = pull === undefined ? undefined : receiptMarker((pull as PullRequest).body);
   const stale = shown && shown.head !== head.commit ? [`receipt: the PR body shows the receipt of ${shown.head.slice(0, 7)}, not HEAD ${head.commit.slice(0, 7)}. Refresh it with hedge proof receipt`] : [];
-  const growth = await grownBy(home, head, run, landed, pull);
+  const growth = await measureGrowth(home, head, run, pull?.baseSha);
   const gate = {
     code: judged.code,
     reason: judged.code === 0 ? "pass" : judged.reason ?? `exit ${judged.code}`,
@@ -82,14 +82,6 @@ function unmeasured(head: ProofIdentity, run: Run, pull: PullRequest | undefined
   if (growth.final || !pull?.baseSha || run(["git", "cat-file", "-e", `${pull.baseSha}^{commit}`]).code === 0) return [];
   const remote = remotesOf(head.repository, run)[0] ?? `<a remote of ${head.repository}>`;
   return [`growth: unknown at HEAD, since the base commit ${pull.baseSha.slice(0, 7)} that GitHub reports is not in this checkout. Run git fetch ${remote} ${pull.base}, then hedge proof gate${landed ? " --landed" : ""} again`];
-}
-
-async function grownBy(home: string, head: ProofIdentity, run: Run, landed: boolean, pull: PullRequest | undefined) {
-  const growth = await measureGrowth(home, head, run, pull?.baseSha);
-  if (!landed || growth.final) return growth;
-  const saved = await readJson<SavedGate | undefined>(savedPath(home, head, head.commit), undefined).catch(() => undefined);
-  const kept = saved?.key?.base === pull?.base ? saved?.gate?.summary?.growth?.final : undefined;
-  return kept ? { ...growth, final: kept } : growth;
 }
 
 const pushedHeadOf = (head: ProofIdentity, run: Run, seen: (pull: PullRequest) => void = () => {}) => (): PushedHead => {

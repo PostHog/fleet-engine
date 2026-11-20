@@ -110,7 +110,7 @@ export async function renderReport({ prs, thread, lane }: { prs: PrRef[]; thread
   const card = thread && await (context.pendingCard ?? t3PendingCard(context.home))(thread) ? thread : undefined;
   const ours = decisions.filter((decision) => prs.some((ref) => covers(decision, ref)) || (thread !== undefined && sameThread(decision.where.thread, thread)));
   const sorted = [...ours].sort((a, b) => markOrder.indexOf(a.mark) - markOrder.indexOf(b.mark));
-  const gatedRows = rows.filter(gated);
+  const gatedRows = rows.filter(gated).filter((row, index, all) => all.findIndex((other) => refText(other.ref) === refText(row.ref)) === index);
   const sideFixes = ours.filter((decision) => decision.class === "scope" && decision.where.link)
     .map((decision) => `- ${decision.question} ${decision.answer}: ${decision.where.link} [${decision.id}]`);
   return [
