@@ -134,7 +134,7 @@ test("[base] counts only where a field starts with it, and the site comes from t
   for (const finding of [
     "- major | feature.ts:2 | the lookup reads ranges[base] past its end | anchor: const range = ranges[base]",
     "- major | the greeting drops the last name, as feature.test.ts:3 shows",
-    "- feature.ts:2 | major | Correctness | the greeting drops the last name | keep it | anchor: greet 1",
+    "- feature.ts:2 | major | Correctness | the greeting drops the last name | keep it | anchor: return flags | [base].length",
   ]) {
     const pr = await checkout();
     const reviewed = await firstRound(pr, [finding], ["1. fixed: the greeting keeps it"]);
@@ -143,9 +143,10 @@ test("[base] counts only where a field starts with it, and the site comes from t
   }
 });
 
-test("an ungraded finding and a TESTS item without a file buy no round", async () => {
+test("an ungraded finding, a TESTS item without a file, and a major on a quoted docs path with spaces buy no round", async () => {
   for (const [finding, response] of [
-    ["- No findings, the greeting is right.", "1. rejected: nothing to fix"],
+    ["- major | `docs/User Guide.md:12` | the guide names the old flag", "1. fixed: the guide names the new flag"],
+    ["- No findings, the greeting is right.", "1. fixed: the greeting reads right"],
     ["TESTS:\n- the suite mocks the clock", "1. fixed: the suite uses a real clock"],
   ] as const) {
     const pr = await checkout();
