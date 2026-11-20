@@ -325,6 +325,27 @@ describe("hedge doctor", () => {
     expect(after.output).toContain("Fix: .codex/AGENTS.md needs to be updated.");
     expect(snapshot(home)).toEqual(drifted);
   });
+
+  test("--to-do exits nonzero and lists no step for the person when a step that only Hedge repairs fails", async () => {
+    const home = temp.make("home-");
+    const root = temp.make("engine-");
+    cpSync(join(repoRoot, "packs/base"), join(root, "packs/base"), { recursive: true });
+    mkdirSync(join(root, "packs/box"), { recursive: true });
+    const human = [
+      { id: "gateway", say: "The gateway is not installed.", probe: ["gateway-installed"], repair: ["gateway-installed", "--repair"] },
+      { id: "key", say: "Paste your key.", command: "box key", probe: ["key-pasted"] },
+    ];
+    writeFileSync(join(root, "packs/box/pack.json"), JSON.stringify({ schema: 1, name: "box", summary: "box pack.", human }));
+    const profile = profileDir(["box"]);
+    const lines: string[] = [];
+    const options = { home, engineRoot: root, platform: "linux" as const, env: {}, print: (line: string) => void lines.push(line) };
+    expect(await main(["apply", "--profile", profile], { ...options, run: async () => 0 })).toBe(0);
+    lines.length = 0;
+    const unmet = async (command: string[]) => (["gateway-installed", "key-pasted"].includes(command[0]!) ? 1 : 0);
+    expect(await main(["doctor", "--to-do"], { ...options, run: unmet })).toBe(1);
+    expect(lines.slice(0, -1)).toEqual(["Fix: The gateway is not installed."]);
+    expect(JSON.parse(lines.at(-1)!)).toEqual([{ pack: "box", id: "key", say: "Paste your key.", command: "box key" }]);
+  });
 });
 
 describe("a profile source that would run code it does not ship", () => {
