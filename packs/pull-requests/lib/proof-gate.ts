@@ -69,7 +69,7 @@ export async function finalGate(head: ProofIdentity, context: GateContext, { lan
   const gate = {
     code: judged.code,
     reason: judged.code === 0 ? "pass" : judged.reason ?? `exit ${judged.code}`,
-    lines: [...checked.lines, ...judged.lines, ...stale, ...unmeasured(head, run, pull, growth)],
+    lines: [...checked.lines, ...judged.lines, ...stale, ...unmeasured(head, run, pull, growth, landed)],
     verdict: judged.code === 0 ? `gate: pass (${checked.summary}; judge: ${judged.covered})` : `gate: fail (exit ${judged.code})`,
     summary: { ...checked.proofSummary, code: judged.code, judge: judged.judge, growth },
   };
@@ -78,10 +78,10 @@ export async function finalGate(head: ProofIdentity, context: GateContext, { lan
 }
 
 
-function unmeasured(head: ProofIdentity, run: Run, pull: PullRequest | undefined, growth: Growth) {
+function unmeasured(head: ProofIdentity, run: Run, pull: PullRequest | undefined, growth: Growth, landed: boolean) {
   if (growth.final || !pull?.baseSha || run(["git", "cat-file", "-e", `${pull.baseSha}^{commit}`]).code === 0) return [];
   const remote = remotesOf(head.repository, run)[0] ?? `<a remote of ${head.repository}>`;
-  return [`growth: unknown at HEAD, since the base commit ${pull.baseSha.slice(0, 7)} that GitHub reports is not in this checkout. Run git fetch ${remote} ${pull.base}, then hedge proof gate again`];
+  return [`growth: unknown at HEAD, since the base commit ${pull.baseSha.slice(0, 7)} that GitHub reports is not in this checkout. Run git fetch ${remote} ${pull.base}, then hedge proof gate${landed ? " --landed" : ""} again`];
 }
 
 async function grownBy(home: string, head: ProofIdentity, run: Run, landed: boolean, pull: PullRequest | undefined) {

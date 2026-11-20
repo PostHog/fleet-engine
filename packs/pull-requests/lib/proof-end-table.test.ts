@@ -362,6 +362,30 @@ test("a saved count with a field that is not a number reads unknown, and the rep
   expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | unknown at HEAD | none |");
 });
 
+test("a saved final figure that is not a number shows no ratio beside the first count", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.ts", lines(10, "greet"));
+  pr.pullRequestState({ body: graded("non-critical") });
+  await reviewHead(pr);
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  await pr.hedge("gate");
+  const saved = join(pr.pullRequest, "gate-outcome", `${await pr.git("rev-parse", "HEAD")}.json`);
+  const record = JSON.parse(readFileSync(saved, "utf8"));
+  record.gate.summary.growth.final.production = null;
+  writeFileSync(saved, JSON.stringify(record));
+
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → unknown | none |");
+});
+
+test("a landed gate without GitHub's base commit names the landed gate to run again", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.ts", lines(3, "greet"));
+  pr.pullRequestState({ body: graded("non-critical"), baseSha: "0123456789abcdef0123456789abcdef01234567", merged: true });
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+
+  expect((await pr.hedge("gate", "--landed")).output).toContain("then hedge proof gate --landed again");
+});
+
 test("a merged PR's receipt without a gate names the landed gate", async () => {
   const pr = await checkout();
   await pr.commit("feature.ts", lines(10, "greet"));

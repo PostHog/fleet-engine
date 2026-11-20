@@ -38,7 +38,7 @@ function linesCell(growth: Growth | undefined) {
   const { first, final } = growth;
   const parts = (["tests", "docs"] as const).filter((part) => first?.[part] || final?.[part]);
   if (!growth.rounds) return [`${figure(final?.production)} at HEAD`, ...parts.map((part) => `${part} ${figure(final?.[part])}`)].join("; ");
-  const ratio = first && final && first.production > 0 ? ` (×${(final.production / first.production).toFixed(1)})` : "";
+  const ratio = typeof first?.production === "number" && typeof final?.production === "number" && first.production > 0 ? ` (×${(final.production / first.production).toFixed(1)})` : "";
   return [`${span(first?.production, final?.production)}${ratio}`, ...parts.map((part) => `${part} ${span(first?.[part], final?.[part])}`)].join("; ");
 }
 
