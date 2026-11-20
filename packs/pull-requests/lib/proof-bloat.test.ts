@@ -36,6 +36,7 @@ test("past twice the first lines, a fresh judge scores the cuttable share once p
   expect(prompts[0]).toContain("+retry 10");
   expect(prompts[0]).not.toContain("the greeting keeps it");
   expect(prompts[0]).toContain(": 21 production lines");
+  expect(prompts[0]).toContain("outside tests, docs, lockfiles and generated files. Leave those files out");
 
   expect((await pr.hedge("sanity", "--verdict", "justified", "--reason", "Retries are the fix")).code).toBe(0);
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).code).toBe(0);
