@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { readdirSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { checkout, cleanFixtures, fakeModel, graded, type Checkout } from "./proof-testing.ts";
 
@@ -89,7 +89,9 @@ test("a later HEAD or an edited Problem section gets its own score, a gate shows
   expect(unscored.find((line) => /^\| example\/product#42 \| \d+ rounds? \|/.test(line))).toBe("| example/product#42 | 1 round | 10 → 21 (×2.1) | not run | none |");
   judge.answer("no score");
   await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow("Read the growth by hand");
-  expect(readdirSync(join(pr.pullRequest, "judge", "bloat"))).toEqual([]);
+  judge.answer(JSON.stringify({ cuttable: 52, hunks: [hunk] }));
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow("reads 52%");
+  expect(judge.prompts()).toHaveLength(4);
   await pr.commit("retry.ts", lines(13, "retry"));
   judge.answer(JSON.stringify({ cuttable: 56, hunks: [hunk] }));
   pr.clock.now = new Date("2026-10-25T13:00:00Z");
@@ -97,7 +99,7 @@ test("a later HEAD or an edited Problem section gets its own score, a gate shows
   const scored = await pr.git("rev-parse", "HEAD");
   await pr.commit("retry.ts", lines(5, "retry"));
   expect((await pr.hedge("sanity", "--verdict", "cut", "--reason", "Dropped most retries")).code).toBe(0);
-  expect(judge.prompts()).toHaveLength(4);
+  expect(judge.prompts()).toHaveLength(5);
   await pr.hedge("gate");
   const report = (await pr.decide("report", "--pr", "example/product#42")).output.split("\n");
   expect(report.find((line) => /^\| example\/product#42 \| \d+ rounds? \|/.test(line))).toBe(
