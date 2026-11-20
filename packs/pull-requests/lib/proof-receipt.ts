@@ -95,6 +95,11 @@ export function guardField(field: string, text: string) {
   return literal(text);
 }
 
+function guardedReason(kind: string, reason: string) {
+  guardField(`gap reason of ${kind}`, reason.replace(/\s+/g, " "));
+  return literal(oneLine(reason));
+}
+
 const modelSnapshot = /-20\d{6}$/;
 function guardModel(field: string, model: string) {
   guardField(field, model.replace(modelSnapshot, ""));
@@ -166,7 +171,7 @@ export function renderSection(input: ReceiptInput) {
   const section = [
     "| Proof | What ran | Result | Commit |", "| --- | --- | --- | --- |", ...rows, reviewRow(input.reviews), judgeRow(input.summary), "",
     ...input.gated
-      ? endTable([{ ref: input.summary, summary: input.summary, reason: (kind, reason) => guardField(`gap reason of ${kind}`, oneLine(reason)) }])
+      ? endTable([{ ref: input.summary, summary: input.summary, reason: (kind, reason) => guardedReason(kind, reason) }])
       : [`**End table:** no gate at HEAD yet. Run hedge proof gate${input.landed ? " --landed" : ""}, then hedge proof receipt.`],
     "",
     `**Not checked:** ${notChecked.join("; ") || "none recorded"}`,

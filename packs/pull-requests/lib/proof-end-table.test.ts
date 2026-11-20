@@ -168,6 +168,38 @@ test("a checkout without the base commit GitHub reports counts unknown, not from
   expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | unknown at HEAD | none |");
 });
 
+test("a reason keeps a backslash before a pipe and a run of spaces inside code, so two quoted commands stay apart", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.ts", lines(10, "greet"));
+  pr.pullRequestState({ body: graded("non-critical") });
+  await reviewHead(pr);
+  await pr.hedge("require", "--kinds", "ui-walk");
+  await pr.hedge("gap", "--kind", "ui-walk", "--reason", "`a\\|b` is not `a|b`, and `printf 'a  b'` keeps\nits spaces");
+  await agentAccepts(pr, "ui-walk");
+  await pr.hedge("gate");
+
+  const row = tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1];
+  expect(row).toContain("ui-walk: `a\\\\|b` is not `a\\|b`, and `printf 'a  b'` keeps its spaces (");
+});
+
+test("a count where git skips rename detection reads unknown, not as whole files added and removed", async () => {
+  const pr = await checkout();
+  await pr.advanceBase("first.ts", lines(20, "first"));
+  await pr.advanceBase("second.ts", lines(20, "second"));
+  await pr.git("merge", "-q", "--no-edit", "refs/remotes/origin/main");
+  await pr.git("config", "diff.renameLimit", "1");
+  await pr.git("mv", "first.ts", "moved-first.ts");
+  await pr.git("mv", "second.ts", "moved-second.ts");
+  writeFileSync(join(pr.repository, "moved-first.ts"), lines(19, "first") + "edited\n");
+  await pr.git("add", "moved-first.ts");
+  await pr.commit("moved-second.ts", lines(19, "second") + "edited\n");
+  pr.pullRequestState({ body: graded("non-critical") });
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  await pr.hedge("gate");
+
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | unknown at HEAD | none |");
+});
+
 test("a reason with a carriage return or an escaped pipe stays in its cell", async () => {
   const pr = await checkout();
   await pr.commit("feature.ts", lines(10, "greet"));
