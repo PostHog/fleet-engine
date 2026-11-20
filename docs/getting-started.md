@@ -20,8 +20,9 @@ You need:
 ## 1. Create the hub and a node
 
 On your Mac, sign in to Coder and create two workspaces: a hub with a 200 GB
-disk and a node with a 500 GB disk. Give every template parameter with its
-own `--parameter`, so you see each value Coder uses. Set the dotfiles
+disk and a node with a 500 GB disk. When the template has no secret
+parameter, give every template parameter with its own `--parameter`, so you
+see each value Coder uses. Set the dotfiles
 parameter to the SSH address of your profile repo:
 `git@github.com:<login>/hedge-profile.git`, or
 `git@github.com:<login>/fleet-profile.git` when you have a profile from
@@ -32,6 +33,16 @@ have none. When setup prints another repo in step 2, such as a profile in a
 team's org, change the dotfiles parameter of each workspace to
 `git@github.com:<repo>.git` in the Coder web app: open the workspace, go to
 **Settings → Parameters**, set it, and submit.
+
+When the template has a secret parameter, do not run `coder create` for it:
+a value you pass with `--parameter` stays in your shell history, and Coder
+can print the default of one you leave out. Create that workspace in the
+create form of the Coder web app, with the name that the commands below use:
+`hedge-hub` or `hedge-node-1`. Pick the preset None when the form shows a
+preset picker, and leave a secret that has a default as it is. Coder keeps
+each value of that form with the build, so anyone who can see the workspace
+can read it. Then run the other lines of the block below: `coder login`, the
+two `coder schedule stop` lines, and `coder config-ssh`.
 
 ```sh
 coder login <your Coder URL>
