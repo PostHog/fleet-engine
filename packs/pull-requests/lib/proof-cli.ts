@@ -2,9 +2,10 @@ import { closeSync, existsSync, openSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { askGap, authorOf, finishReview, startGateRun, ledgerRoot, listStanding, panelCommit, proofDirectory, readJson, readOwed, recordGap, recordGapCommand, recordStanding, requireChoice, requireNone, devPr, requireProofs, requireReservation, respondToReview, reuseProof, reviewDirectory, reviewOfCommit, reviewRecords, roundId, roundQuestion, runOption, saveProof, startReview, stopOption, storeCapturedFindings, unfinishedReview, writeJson, markRecorded, readReservation, recordReceipt, roundDirectories, unrecordedElsewhere, type Arbiter, type Reservation, type CapturedBy, type ProofIdentity } from "./proof.ts";
+import { askGap, authorOf, readDecisions, finishReview, startGateRun, ledgerRoot, listStanding, panelCommit, proofDirectory, readJson, readOwed, recordGap, recordGapCommand, recordStanding, requireChoice, requireNone, devPr, requireProofs, requireReservation, respondToReview, reuseProof, reviewDirectory, reviewOfCommit, reviewRecords, roundId, roundQuestion, runOption, saveProof, startReview, stopOption, storeCapturedFindings, unfinishedReview, writeJson, markRecorded, readReservation, recordReceipt, roundDirectories, unrecordedElsewhere, type Arbiter, type Reservation, type CapturedBy, type ProofIdentity } from "./proof.ts";
 import { AnswerTaken, appendOnce, decideAlone, hearUser, ledgerHolds, ledgerOf } from "./decision-cli.ts";
-import { HubUnreachable, refText, thisMachine, type Decision, type Ssh } from "./decision-ledger.ts";
+import { HubUnreachable, keptOwed, refText, usersAcceptance, thisMachine, type Decision, type Ssh } from "./decision-ledger.ts";
+import { autonomyOf, gradeOf, type Autonomy, type Grade } from "./proof-autonomy.ts";
 import { readComment, readPullRequest, runIn } from "./pr-ci.ts";
 import { isCommitSha } from "./proof-end-table.ts";
 import { askModel, family, familyOf, isQuotaExhausted, modelLabel, quotaExitCode, readRubric, reviewerRow, sessionFamily, skillReferences, type Family } from "./proof-models.ts";
@@ -55,7 +56,8 @@ one (T3CODE_THREAD_ID). A typed message, a refusal, or a general rule, such as "
 not answer a round. The question names the PR, and an answer to the question of another PR does not count. The
 answer lands in the decision ledger as a 👤 review decision; one answer records one decision and starts one round.
 --agent takes your own reason for a round that the arbiter escalates; it never passes the review budget. It lands in the ledger
-as a 🤖 review decision, refused on a PR whose merge-risk callout has no Tier line at HEAD. --standing is its old
+as a 🤖 review decision, refused on a PR whose merge-risk callout has no Tier line at HEAD. With pull-requests.autonomy set
+to end, an escalation tells you to decide the round with --agent, unless the PR is a one-way door or ungraded. --standing is its old
 name. The round keeps the decision and the arbiter's verdict. List decisions with hedge decision list.
 A round starts only once its decision is in the ledger. A round that holds a decision stays reserved until the
 ledger holds another decision for the same answer. A round of another commit whose decision is still not in the
@@ -363,7 +365,8 @@ rule (hedge proof standing) covers the kinds it still takes. The user's acceptan
 ignores that kind's evidence, and the judge does not see it. Kind ci records that CI cannot run on HEAD, such as on
 a fork PR. Kind panel records that the PR runs no qa-swarm panel under an exception in the user's rules; once
 accepted, any finished review at HEAD covers it. A judge gap counts only decisions made after it was recorded on
-HEAD.`,
+HEAD. With pull-requests.autonomy set to end, it prints the hedge decision record --mark 🤖
+command instead, unless the PR is a one-way door or its tier keeps the gap the user's.`,
     examples: ["hedge proof gap --kind prod-shape --reason 'No production read access'"],
     options: ["--kind", "--reason", "--accept", "--thread"],
     run: async ({ options }, identity, context) => {
@@ -372,7 +375,11 @@ HEAD.`,
       const reason = required(options, "--reason", "gap");
       const gap = await recordGap(context.home, identity(), kind, reason, context.now?.());
       context.print(JSON.stringify(gap));
-      context.print(askGap(identity(), kind, reason));
+      const autonomy = autonomyOf(context.env, () => gradeAt(identity(), context), "proof-gap", [kind]);
+      const decisions = autonomy === "end" ? await readDecisions(ledgerOf(context)) : [];
+      const afterGap = Array.isArray(decisions) ? decisions.filter((decision) => kind !== "judge" || decision.at >= gap.recordedAt) : undefined;
+      const owed = afterGap && keptOwed(afterGap, identity(), kind) && !usersAcceptance(afterGap, identity(), kind);
+      context.print(askGap(identity(), kind, reason, afterGap && !owed ? autonomy : "ask"));
       return 0;
     },
   },
@@ -704,6 +711,10 @@ async function recordRound(directory: string, context: CommandContext) {
 
 const rangeStart = (scope: string, base: string | undefined, head: ProofIdentity, run: Run) => scope === "full" ? mergeBase(head, run) : base;
 
+function gradeAt(head: ProofIdentity, { run }: CommandContext): Grade {
+  return gradeOf(pullOf(head, run)?.body);
+}
+
 function pullOf(head: ProofIdentity, run: Run) {
   try { return readPullRequest(head, run); } catch { return undefined; }
 }
@@ -950,8 +961,8 @@ function roundOption(options: Map<string, string>) {
   return round === undefined ? undefined : round === "final" ? "final" : roundId(round);
 }
 
-async function decisionOf(options: Map<string, string>, head: ProofIdentity, context: CommandContext): Promise<{ arbiter: Arbiter; limits: { free: number; ceiling: number }; decision?: Decision }> {
-  const rest = { arbiter: arbiterOf(context), limits: { free: numberSetting("pull-requests.freeReviews", context.env), ceiling: numberSetting("pull-requests.reviewCeiling", context.env) } };
+async function decisionOf(options: Map<string, string>, head: ProofIdentity, context: CommandContext): Promise<{ arbiter: Arbiter; autonomy: () => Autonomy; limits: { free: number; ceiling: number }; decision?: Decision }> {
+  const rest = { arbiter: arbiterOf(context), autonomy: () => autonomyOf(context.env, () => gradeAt(head, context), "review"), limits: { free: numberSetting("pull-requests.freeReviews", context.env), ceiling: numberSetting("pull-requests.reviewCeiling", context.env) } };
   const words = options.get("--override");
   const reason = options.get("--agent") ?? options.get("--standing");
   if (options.has("--agent") && options.has("--standing")) throw new Error("Pass --agent, not --standing too: --standing is its old name");

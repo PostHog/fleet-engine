@@ -2,13 +2,14 @@ import { createHash } from "node:crypto";
 import { access, link, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
 import { normalized, type HeardAnswer } from "./proof-answers.ts";
-import { agentRefusal, agentsAcceptance, covers, fold, keptOwed, panelRefusal, tierOf, usersAcceptance, type Decision, type DecisionState, type Ledger, type Mark, type PrRef, type Tier } from "./decision-ledger.ts";
+import { agentRefusal, agentsAcceptance, covers, fold, keptOwed, panelRefusal, usersAcceptance, type Decision, type DecisionState, type Ledger, type Mark, type PrRef, type Tier } from "./decision-ledger.ts";
 import type { Family, Usage } from "./proof-models.ts";
 import { quietReason, type DeltaKind, type QuietStep } from "./proof-delta.ts";
 import { isProductionFile } from "./proof-checkout.ts";
 import { panelOutcome } from "./proof-panel.ts";
 import { anchorHeading } from "./finding-anchors.ts";
 import type { Growth } from "./proof-end-table.ts";
+import { endTableNote, gradeOf, shellQuoted, type Autonomy } from "./proof-autonomy.ts";
 
 export type ProofIdentity = { repository: string; pr: number; commit: string };
 const sha = /^[0-9a-f]{40}$/;
@@ -236,12 +237,12 @@ export const atCeiling = `hedge proof asks nothing more. For each open blocker o
 
 const budgetSpent = ({ ceiling }: ReviewLimits) => `The review budget of ${ceiling} reviews is spent. ${atCeiling}`;
 
-async function permitReview(home: string, identity: ProofIdentity, due: boolean, ceiling: string | undefined, decision: DecisionMark | undefined, { arbiter }: Permit) {
+async function permitReview(home: string, identity: ProofIdentity, due: boolean, ceiling: string | undefined, decision: DecisionMark | undefined, { arbiter, autonomy }: Permit) {
   if (decision?.mark === "👤") return undefined;
   if (ceiling) throw new Error(ceiling);
   if (!due) return undefined;
   const verdict = await arbiter(await arbiterPrompt(home, identity));
-  if (verdict.verdict !== "continue" && !decision) throw new Error(askUser(identity, verdict.verdict === "escalate" ? `The arbiter escalates: ${verdict.reason}.` : `The arbiter gave no verdict: ${verdict.reason}.`));
+  if (verdict.verdict !== "continue" && !decision) throw new Error(askUser(identity, verdict.verdict === "escalate" ? `The arbiter escalates: ${verdict.reason}.` : `The arbiter gave no verdict: ${verdict.reason}.`, autonomy?.() ?? "ask"));
   return verdict;
 }
 
@@ -249,15 +250,17 @@ export const roundQuestion = "Run one more review round?";
 export const runOption = "Run one more round";
 export const stopOption = "Stop here";
 
-function askUser(identity: ProofIdentity, stop: string) {
-  return `${stop} Ask the user with your question tool. Question: "${roundQuestion} ${identity.repository}#${identity.pr}: ${stop}" Options: "${runOption}", "${stopOption}". When they choose "${runOption}", run this command again with --override '<date> "${runOption}"'. Or decide the round yourself with --agent '<your reason>', a 🤖 review decision in the ledger, when the PR's tier lets you.`;
+function askUser(identity: ProofIdentity, stop: string, autonomy: Autonomy) {
+  if (autonomy === "end") return `${stop} Decide the round yourself: run this command again with --agent '<your reason>'. It lands in the ledger as a 🤖 review decision, and ${endTableNote}.`;
+  const ask = `${stop} Ask the user with your question tool. Question: "${roundQuestion} ${identity.repository}#${identity.pr}: ${stop}" Options: "${runOption}", "${stopOption}". When they choose "${runOption}", run this command again with --override '<date> "${runOption}"'.`;
+  return autonomy === "user" ? `${ask} On a one-way door an agent never decides the round.` : `${ask} Or decide the round yourself with --agent '<your reason>', a 🤖 review decision in the ledger, when the PR's tier lets you.`;
 }
 
 export type CapturedBy = "hedge" | "author";
 export type DecisionMark = Pick<Decision, "mark" | "id">;
-export type ReviewRequest = { opening?: () => Promise<boolean>; sanity?: () => Promise<void>; scope: string; base?: string; from?: string; forkBase?: string; decision?: Decision; phase?: string; arbiter: Arbiter; limits: ReviewLimits; cleanBaseMerge?: CleanBaseMerge; quietCommit?: QuietCommit; capturedBy?: CapturedBy; lock?: LockRound; lockBudget: LockBudget; now: () => Date };
+export type ReviewRequest = { autonomy?: () => Autonomy; opening?: () => Promise<boolean>; sanity?: () => Promise<void>; scope: string; base?: string; from?: string; forkBase?: string; decision?: Decision; phase?: string; arbiter: Arbiter; limits: ReviewLimits; cleanBaseMerge?: CleanBaseMerge; quietCommit?: QuietCommit; capturedBy?: CapturedBy; lock?: LockRound; lockBudget: LockBudget; now: () => Date };
 export type Reserved = { round: number | "final"; id: string; directory: string };
-type Permit = { arbiter: Arbiter; limits: ReviewLimits };
+type Permit = { arbiter: Arbiter; limits: ReviewLimits; autonomy?: () => Autonomy };
 
 async function reserveDecided(reviews: string, name: string, record: object, decision: Decision | undefined, stamping: Stamping) {
   if (!await reserve(reviews, name, { ...record, ...decision ? { decision } : {} }, stamping)) throw new Error(`Review ${name} started while this one weighed the budget. ${weighAgain}`);
@@ -298,7 +301,7 @@ const coversReview = (base: string, reviewed: string, cleanBaseMerge: CleanBaseM
 export async function startReview(home: string, identity: ProofIdentity, request: ReviewRequest): Promise<Reserved> {
   const { scope, base, phase, decision, cleanBaseMerge = () => undefined, quietCommit = () => undefined, capturedBy = "author", lock, lockBudget, now } = request;
   const from = request.from ?? base;
-  const permit = { arbiter: request.arbiter, limits: request.limits };
+  const permit = { arbiter: request.arbiter, limits: request.limits, autonomy: request.autonomy };
   if (!["full", "fixes", "final"].includes(scope)) throw new Error("Review scope must be full, fixes, or final");
   if (phase !== undefined && scope !== "final") throw new Error("--phase applies only to final reads");
   if (base !== undefined && !sha.test(base)) throw new Error("Review base needs a full commit SHA");
@@ -418,7 +421,8 @@ export const gapQuestion = (identity: ProofIdentity, kind: string, reason: strin
 
 export const recordGapCommand = (identity: ProofIdentity, kind: string) => `hedge decision record --mark 👤 --class proof-gap --kind ${kind} --pr ${identity.repository}#${identity.pr}`;
 
-export function askGap(identity: ProofIdentity, kind: string, reason: string) {
+export function askGap(identity: ProofIdentity, kind: string, reason: string, autonomy: Autonomy) {
+  if (autonomy === "end") return `Decide the gap yourself: run hedge decision record --mark 🤖 --class proof-gap --kind ${kind} --pr ${identity.repository}#${identity.pr} --question ${shellQuoted(gapQuestion(identity, kind, reason))} --answer ${shellQuoted(acceptGapOption)} --rejected ${shellQuoted(keepGapOption)} --reason '<your reason>'. Keep the gap open while the proof can still run. It lands in the ledger as a 🤖 proof-gap decision, and ${endTableNote}.`;
   return `Ask the user with your question tool. Question: "${gapQuestion(identity, kind, reason)}" Options: "${acceptGapOption}", "${keepGapOption}". When they choose "${acceptGapOption}", run ${recordGapCommand(identity, kind)}`;
 }
 
@@ -922,7 +926,7 @@ export async function judgeGap(home: string, identity: ProofIdentity, now: Date,
   const gap = await readJson<Gap | undefined>(gapPath(home, identity, "judge"), undefined);
   if (gap?.commit !== identity.commit) return undefined;
   const weighed = await gapAcceptance({ home, identity, now, decisions, tier }, gap, "judge");
-  return { reason: gap.reason, acceptance: weighed.acceptance, lapsed: weighed.lapsed, line: weighed.acceptance?.line ?? notAccepted(decisions, weighed), condition: weighed.condition };
+  return { reason: gap.reason, acceptance: weighed.acceptance, lapsed: weighed.lapsed, kept: weighed.kept, line: weighed.acceptance?.line ?? notAccepted(decisions, weighed), condition: weighed.condition };
 }
 
 export type JudgeGap = NonNullable<Awaited<ReturnType<typeof judgeGap>>>;
@@ -946,7 +950,7 @@ export async function readDecisions(ledger: Ledger): Promise<Decisions> {
 type Acceptance = { by: "the user" | "agent" | "standing rule"; line: string; id?: string; mark?: Mark };
 export type Condition = { id: string; kind: string; condition: string };
 type Weigh = { home: string; identity: ProofIdentity; now: Date; decisions: Decisions; tier: Tier; ci?: CiResult };
-type Weighed = { acceptance?: Acceptance; lapsed?: { id: string; reason: string }; condition?: Condition };
+type Weighed = { acceptance?: Acceptance; lapsed?: { id: string; reason: string }; condition?: Condition; kept?: string };
 
 async function gapAcceptance(weigh: Weigh, gap: Gap | undefined, kind: GapKind): Promise<Weighed> {
   const { home, identity, now, decisions, tier, ci } = weigh;
@@ -968,7 +972,7 @@ async function gapAcceptance(weigh: Weigh, gap: Gap | undefined, kind: GapKind):
   if (agent && !lapse) return accepted(agent, "agent");
   const lapsed = agent && lapse ? { id: agent.id, reason: lapse } : undefined;
   const standing = kept || !Array.isArray(decisions) ? undefined : await standingFor(home, kind, now, identity.repository);
-  if (!standing) return { lapsed };
+  if (!standing) return { lapsed, ...kept ? { kept: kept.id } : {} };
   const scoped = standing.repositories ? { condition: { id: `standing rule ${kind} until ${standing.until}`, kind, condition: standing.rule } } : {};
   return { acceptance: { by: "standing rule", line: `accepted by standing rule until ${standing.until}${standing.repositories ? ` for ${standing.repositories.join(", ")}` : ""}` }, ...scoped };
 }
@@ -1327,7 +1331,8 @@ async function readDev(dev: DevPr | undefined, devPull: GateOptions["devPull"]):
 
 export async function proofGate(home: string, identity: ProofIdentity, { ci, pushedHead, ledger, landed = false, cleanBaseMerge = () => undefined, quietCommit = () => undefined, now = new Date(), devPull }: GateOptions) {
   const before = pushedHead();
-  const tier = "error" in before || before.body === undefined ? "ungraded" : tierOf(before.body);
+  const grade = gradeOf("error" in before ? undefined : before.body);
+  const tier = grade.tier;
   const decisions = await readDecisions(ledger);
   const weigh: Weigh = { home, identity, now, decisions, tier };
   const owed = await readOwed(home, identity);
@@ -1357,7 +1362,7 @@ export async function proofGate(home: string, identity: ProofIdentity, { ci, pus
   };
   const summary = `kinds: ${owed?.kinds.length ? owed.kinds.join(", ") : "none"}; review: ${review.covered}; CI: ${checks.covered}`;
   const evidence = kinds.map(({ proof, evidence }) => ({ kind: proof.kind, line: proof.line, directory: evidence }));
-  return { code, failure, lines: summaryLines(proofSummary), summary, owed, evidence, ci: ciResult, decisions, tier, conditions, voided, proofSummary };
+  return { code, failure, lines: summaryLines(proofSummary), summary, owed, evidence, ci: ciResult, decisions, tier, grade, conditions, voided, proofSummary };
 }
 
 const receiptPath = (home: string, ref: PrRef) => join(prDirectory(home, ref), "receipt.json");
