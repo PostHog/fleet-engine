@@ -80,21 +80,21 @@ describe("hedge setup after a stop", () => {
     expect(resumed.code).toBe(0);
   });
 
-  test("names an origin that cannot be reached without the sign-in in its address", async () => {
+  test("names an origin that cannot be reached without the sign-in in its address, also when the password holds an apostrophe", async () => {
     const home = temp.make("home-");
     const stopped = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""], undefined, undefined, 0, "linux", () => {
       throw new Error("apply stopped");
     });
     expect(stopped.code).toBe(1);
-    const password = ["pretend", "pass", "x"].join("-");
+    const password = ["pretend", "pa'ss", "x"].join("-");
     const box = fakeMachine(home);
     const exec = box.machine.exec;
     box.machine.exec = async (command, ...rest) => (command.includes("fetch") ? { code: 128, stdout: "", output: `fatal: unable to access 'https://nora:${password}@git.example/nora/profile.git/': Could not resolve host: git.example` } : exec(command, ...rest));
 
     const resumed = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""], box);
 
-    expect(resumed.output).toContain("Your profile's origin could not be reached (fatal: unable to access 'https://git.example/nora/profile.git/': Could not resolve host: git.example).");
-    expect(resumed.output).not.toContain(password);
+    expect(resumed.output).toContain("Your profile's origin could not be reached (fatal: unable to access 'https://git.example/nora/profile.git': Could not resolve host: git.example).");
+    for (const part of password.split("'")) expect(resumed.output).not.toContain(part);
     expect(resumed.code).toBe(0);
   });
 });
