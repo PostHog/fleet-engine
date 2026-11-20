@@ -70,12 +70,18 @@ export async function finalGate(head: ProofIdentity, context: GateContext, { lan
     reason: judged.code === 0 ? "pass" : judged.reason ?? `exit ${judged.code}`,
     lines: [...checked.lines, ...judged.lines, ...stale],
     verdict: judged.code === 0 ? `gate: pass (${checked.summary}; judge: ${judged.covered})` : `gate: fail (exit ${judged.code})`,
-    summary: { ...checked.proofSummary, code: judged.code, judge: judged.judge, growth: (landed ? (await readJson<SavedGate | undefined>(savedPath(home, head, head.commit), undefined))?.gate.summary.growth : undefined) ?? await measureGrowth(home, head, run) },
+    summary: { ...checked.proofSummary, code: judged.code, judge: judged.judge, growth: await grownBy(home, head, run, landed) },
   };
   if (pull) await writeJson(savedPath(home, head, head.commit), { key: keyOf(pull, landed, await fingerprintOf(home, head, files, checked.decisions)), gate, conditions: checked.conditions } satisfies SavedGate);
   return gate;
 }
 
+
+async function grownBy(home: string, head: ProofIdentity, run: Run, landed: boolean) {
+  const growth = await measureGrowth(home, head, run);
+  const kept = landed ? (await readJson<SavedGate | undefined>(savedPath(home, head, head.commit), undefined))?.gate.summary.growth?.final : undefined;
+  return kept && !growth.final ? { ...growth, final: kept } : growth;
+}
 
 const pushedHeadOf = (head: ProofIdentity, run: Run, seen: (pull: PullRequest) => void = () => {}) => (): PushedHead => {
   try {

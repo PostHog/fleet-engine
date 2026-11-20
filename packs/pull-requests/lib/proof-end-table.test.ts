@@ -214,6 +214,39 @@ test("a gate after the PR merged keeps the counts it saved before, not the lines
   expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | none |");
 });
 
+test("a gate after the PR merged counts the review that finished after the last gate before it", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.ts", lines(10, "greet"));
+  pr.pullRequestState({ body: graded("non-critical") });
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  await pr.hedge("gate");
+  await reviewHead(pr);
+  await pr.git("checkout", "-q", "main");
+  await pr.git("merge", "-q", "--no-ff", "--no-edit", "feature");
+  await pr.git("update-ref", "refs/remotes/origin/main", "HEAD");
+  await pr.git("checkout", "-q", "feature");
+  pr.pullRequestState({ merged: true });
+  await pr.hedge("gate", "--landed");
+
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | none |");
+});
+
+test("a gap reason with a long run of backslashes prints in the table at once", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.ts", lines(10, "greet"));
+  pr.pullRequestState({ body: graded("non-critical") });
+  await reviewHead(pr);
+  await pr.hedge("require", "--kinds", "ui-walk");
+  await pr.hedge("gap", "--kind", "ui-walk", "--reason", "\\".repeat(20_000) + " no page");
+  await agentAccepts(pr, "ui-walk");
+  await pr.hedge("gate");
+
+  const started = performance.now();
+  const row = tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1];
+  expect(performance.now() - started).toBeLessThan(2_000);
+  expect(row).toEndWith(" no page (🤖 agent " + await decisionId(pr) + ") |");
+});
+
 test("a merged PR's receipt without a gate names the landed gate", async () => {
   const pr = await checkout();
   await pr.commit("feature.ts", lines(10, "greet"));
