@@ -48,12 +48,12 @@ Base and Hub are in every Hedge. You pick the rest.
 
 - [Base](https://posthog.github.io/hedge/packs/base/): every box gets safety rules, the model table, T3 Code defaults, and the jobs that keep it current.
 - [Hub](https://posthog.github.io/hedge/packs/hub/): the hub links your boxes, cleans their disks, and keeps your pack secrets. Turn on recovery, and threads go on after a usage limit.
-- [Quality gates](https://posthog.github.io/hedge/packs/pull-requests/): every change passes proof, a second-model review, and a QA swarm before it merges.
+- [Quality gates](https://posthog.github.io/hedge/packs/pull-requests/): every change passes proof and a second-model review before it merges, and a risky change also passes a QA swarm.
 - [Orchestration](https://posthog.github.io/hedge/packs/orchestration/): big work becomes a map of tickets that a conductor thread works through, and side work gets its own thread.
 - [Communication](https://posthog.github.io/hedge/packs/communication/): agents write in your voice, give short updates, and share plans and previews as links.
 - [Guards](https://posthog.github.io/hedge/packs/guards/): hooks stop risky shell commands, such as a push past review or a polling loop.
 - [Memory](https://posthog.github.io/hedge/packs/memory/): one private repo holds what your agents learn and what you save, and every box reads it.
-- [Slack](https://posthog.github.io/hedge/packs/slack/): your own message, reaction, or mention in Slack starts a T3 thread about it.
+- [Slack](https://posthog.github.io/hedge/packs/slack/): your own Slack message or reaction with your trigger emoji, or a mention of your Slack app, starts a T3 thread about it.
 - [Paging (incident.io)](https://posthog.github.io/hedge/packs/incident-io/): an agent that watches a risky change pages you, and only you, when it goes wrong.
 - [MCP gateway](https://posthog.github.io/hedge/packs/mcp-gateway/): the hub signs in to your MCP servers once, and agents on every box reach them through it.
 
@@ -71,7 +71,7 @@ On the hub or a node:
   one on or off.
 - `hedge doctor` checks the box against your profile and changes nothing.
 - `hedge update` moves the engine and your profile forward, then applies.
-  Every box also runs it each night.
+  Every box also runs it each night while Nightly updates is on.
 - `hedge devbox add <ssh host>`, on the hub, makes a box one of your nodes.
 
 [Getting started](docs/getting-started.md) shows each setup step by hand. The
@@ -108,7 +108,8 @@ curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh | sh
 
 [`get.sh`](get.sh) installs the GitHub CLI, Bun, and T3 Code when they are
 missing, fetches the engine into `~/.local/share/hedge/engine`, and puts
-`hedge` on your `PATH`. Then `hedge setup` asks plain-language questions, has
+`hedge` on your `PATH` in your shell profile, so open a new shell to use it.
+Then `hedge setup` asks plain-language questions, has
 you sign in to GitHub and to Claude, ChatGPT, or both, saves your answers to
 a new private `hedge-profile` repo, and applies your packs. Run `get.sh` again
 to pick up where it stopped.
