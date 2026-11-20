@@ -138,7 +138,7 @@ test("a second remote of the same repository with a stale base does not count th
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | 3 at HEAD | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | 3 at HEAD | not run | none |");
 });
 
 test("a stale base ref counts from the base commit GitHub reports, so the base's later work is not the PR's", async () => {
@@ -153,7 +153,7 @@ test("a stale base ref counts from the base commit GitHub reports, so the base's
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | 3 at HEAD | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | 3 at HEAD | not run | none |");
 });
 
 test("a reason with a carriage return or an escaped pipe stays in its cell", async () => {
