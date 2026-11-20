@@ -125,6 +125,10 @@ test("on end, a judge gap the user keeps owed goes back to the user, not to anot
   const again = await pr.hedge("gap", "--kind", "judge", "--reason", "The judge reads feature.txt as code");
   expect(again.output).toContain("Ask the user with your question tool");
   expect(again.output).not.toContain("Decide the gap yourself");
+
+  await pr.commit("feature.txt", "greet new members twice\n");
+  pr.clock.now = new Date("2026-10-25T13:00:00Z");
+  expect((await pr.hedge("gap", "--kind", "judge", "--reason", "The judge reads feature.txt as code")).output).toContain("Decide the gap yourself");
 });
 
 test("on ask, a gap reads no merge-risk grade from GitHub", async () => {
