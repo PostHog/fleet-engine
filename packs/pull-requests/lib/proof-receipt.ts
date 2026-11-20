@@ -84,7 +84,7 @@ export const prodShapeResult = "measured on production; details in the receipt";
 
 export type ReceiptReview = ReviewDisplay & { lenses?: Plan["lenses"] };
 export type ReceiptInput = {
-  summary: ProofSummary; decisions: DecisionState[]; display: Display; notChecked: string[]; reviews: ReceiptReview[];
+  summary: ProofSummary; display: Display; notChecked: string[]; reviews: ReceiptReview[];
   screenshots: { commit: string; names: string[] }[];
 };
 
@@ -140,8 +140,8 @@ export function renderSection(input: ReceiptInput) {
   }
   const section = [
     "| Proof | What ran | Result | Commit |", "| --- | --- | --- | --- |", ...rows, reviewRow(input.reviews), judgeRow(input.summary), "",
+    ...endTable([{ ref: input.summary, summary: input.summary, reason: (kind, reason) => guardField(`gap reason of ${kind}`, reason) }]), "",
     `**Not checked:** ${notChecked.join("; ") || "none recorded"}`,
-    "", ...endTable([{ ref: input.summary, summary: input.summary, reason: (kind, reason) => guardField(`gap reason of ${kind}`, reason) }]),
   ].join("\n");
   return { section, warnings };
 }

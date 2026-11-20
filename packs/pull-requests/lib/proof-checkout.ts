@@ -16,6 +16,10 @@ export function topLevel(run: Run) {
  * Where the PR branched from its base. A base branch this checkout has not fetched is fetched from the repository's
  * remote once; without such a remote, or without the commit, the error names the commands that fix it.
  */
+const fetchBase = (run: Run, base: string, remotes: string[]) => {
+  for (const remote of remotes) run(["git", "fetch", "--quiet", remote, `+refs/heads/${base}:refs/remotes/${remote}/${base}`]);
+};
+
 export function mergeBase(identity: ProofIdentity, run: Run) {
   const base = pullRequestDetails(identity, run).baseRefName;
   const remotes = remotesOf(identity.repository, run);
@@ -28,7 +32,7 @@ export function mergeBase(identity: ProofIdentity, run: Run) {
   };
   const before = found();
   if (before) return before;
-  for (const remote of remotes) run(["git", "fetch", "--quiet", remote, `+refs/heads/${base}:refs/remotes/${remote}/${base}`]);
+  fetchBase(run, base, remotes);
   const after = found();
   if (after) return after;
   const where = `Cannot find where ${identity.repository}#${identity.pr} branched from its base ${base} here`;
@@ -76,42 +80,55 @@ function gradeOf(body: string | undefined) {
 }
 
 function branchPoint(identity: ProofIdentity, run: Run, baseSha?: string) {
-  const fromBase = baseSha ? run(["git", "merge-base", baseSha, identity.commit]) : undefined;
-  return fromBase?.code === 0 ? fromBase.stdout.trim() : mergeBase(identity, run);
+  if (!baseSha) return mergeBase(identity, run);
+  const found = () => run(["git", "merge-base", baseSha, identity.commit]);
+  let point = found();
+  if (point.code !== 0) {
+    fetchBase(run, pullRequestDetails(identity, run).baseRefName, remotesOf(identity.repository, run));
+    point = found();
+  }
+  if (point.code !== 0) throw new Error(`Cannot find the base ${short(baseSha)} that GitHub reports for ${identity.repository}#${identity.pr} here`);
+  return point.stdout.trim();
 }
 
-function changedLines(identity: ProofIdentity, run: Run, baseSha?: string) {
-  const stat = run(["git", "diff", "--numstat", "-z", "--no-renames", "--no-relative", branchPoint(identity, run, baseSha), identity.commit]);
+function changedLines(identity: ProofIdentity, run: Run, start: string, renames: boolean) {
+  const stat = run(["git", "diff", "--numstat", "-z", renames ? "--find-renames" : "--no-renames", "--no-relative", start, identity.commit]);
   if (stat.code !== 0) return undefined;
-  return stat.stdout.split("\0").filter(Boolean).map((entry) => {
-    const [added = "", deleted = "", ...path] = entry.split("\t");
+  const fields = stat.stdout.split("\0");
+  const changed: { lines: number; path: string }[] = [];
+  for (let index = 0; index < fields.length; index++) {
+    if (!fields[index]) continue;
+    const [added = "", deleted = "", ...named] = fields[index]!.split("\t");
+    let path = named.join("\t");
+    if (!path) { path = fields[index + 2] ?? ""; index += 2; }
     const binary = added === "-" || deleted === "-";
-    return { lines: binary ? Number.POSITIVE_INFINITY : (Number(added) || 0) + (Number(deleted) || 0), path: path.join("\t") };
-  });
+    changed.push({ lines: binary ? Number.POSITIVE_INFINITY : (Number(added) || 0) + (Number(deleted) || 0), path });
+  }
+  return changed;
 }
 
 const linesOf = (changed: { lines: number; path: string }[], kept: (path: string) => boolean) =>
   changed.filter(({ path }) => kept(path)).reduce((sum, { lines }) => sum + lines, 0);
 
-const productionLines = (identity: ProofIdentity, run: Run) => {
-  const changed = changedLines(identity, run);
+const productionLines = (identity: ProofIdentity, run: Run, baseSha: string | undefined) => {
+  const changed = changedLines(identity, run, branchPoint(identity, run, baseSha), false);
   return changed && linesOf(changed, authored);
 };
 
 export type DiffSize = { production: number; tests: number; docs: number };
 
-export function diffSize(identity: ProofIdentity, run: Run, baseSha?: string): DiffSize | undefined {
+export function diffSize(identity: ProofIdentity, run: Run, { baseSha, from }: { baseSha?: string; from?: string }): DiffSize | undefined {
   try {
-    const changed = changedLines(identity, run, baseSha)?.filter(({ lines }) => Number.isFinite(lines));
+    const changed = changedLines(identity, run, from ?? branchPoint(identity, run, baseSha), true)?.filter(({ lines }) => Number.isFinite(lines));
     return changed && { production: linesOf(changed, authored), tests: linesOf(changed, isTestFile), docs: linesOf(changed, (path) => docsFile.test(path)) };
   } catch { return undefined; }
 }
 
-export function reviewTier(identity: ProofIdentity, run: Run, body: string | undefined): ReviewTier {
+export function reviewTier(identity: ProofIdentity, run: Run, body: string | undefined, baseSha?: string): ReviewTier {
   const grade = gradeOf(body);
   if (grade === "high") return { name: "panel", why: "merge-risk grade high" };
   let lines: number | undefined;
-  try { lines = productionLines(identity, run); } catch { lines = undefined; }
+  try { lines = productionLines(identity, run, baseSha); } catch { lines = undefined; }
   const size = lines === undefined || Number.isNaN(lines) ? "size unknown" : `${lines} authored production lines`;
   const read = ["low", "none"].includes(grade) && lines !== undefined && lines < readLines;
   return { name: read ? "read" : "pair", why: `merge-risk grade ${grade}, ${size}` };
@@ -119,8 +136,8 @@ export function reviewTier(identity: ProofIdentity, run: Run, body: string | und
 
 export function pullRequestDetails(identity: ProofIdentity, run: Run) {
   try {
-    const { title, body, base } = readPullRequest(identity, run);
-    return { title, body, baseRefName: base };
+    const { title, body, base, baseSha } = readPullRequest(identity, run);
+    return { title, body, baseRefName: base, baseSha };
   } catch (error) {
     throw new Error(`Cannot read ${identity.repository}#${identity.pr} over GitHub's REST API (${(error as Error).message})`);
   }

@@ -78,9 +78,8 @@ export async function finalGate(head: ProofIdentity, context: GateContext, { lan
 }
 
 async function grownBy(home: string, head: ProofIdentity, run: Run, baseSha: string | undefined) {
-  const growth = await measureGrowth(home, head, run, baseSha);
   const sanity = (await readSanity(home, head)).at(-1);
-  return growth ? { growth: { ...growth, ...sanity ? { sanity } : {} } } : {};
+  return { growth: { ...await measureGrowth(home, head, run, baseSha), ...sanity ? { sanity } : {} } };
 }
 
 const pushedHeadOf = (head: ProofIdentity, run: Run, seen: (pull: PullRequest) => void = () => {}) => (): PushedHead => {
@@ -116,7 +115,7 @@ export async function receiptSummary(head: ProofIdentity, pull: PullRequest, led
     landed: pull.state === "merged", cleanBaseMerge: cleanBaseMerge(head, run), quietCommit: quietCommitIn(run, () => baseRefs(head, run)),
     ci: () => ciOf(home, head, run, now?.() ?? new Date()), pushedHead: pushedHeadOf(head, run), ledger, now: now?.(), devPull: devPullOf(run),
   });
-  return { ...live.proofSummary, code: live.code, judge: { state: "skipped", lines: [] }, ...await grownBy(home, head, run, pull.baseSha) };
+  return { ...live.proofSummary, code: live.code, judge: { state: "skipped", lines: [] } };
 }
 
 async function savedGate(home: string, ref: PrRef, pull: PullRequest, ledger: Ledger): Promise<SavedGate | undefined> {

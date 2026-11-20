@@ -81,11 +81,11 @@ test("the body section shows each owed proof, the review and the judge in the te
     `| Review | 1-lens panel (gpt-6.1-sol), round 1 | 0 findings: 0 fixed, 0 rejected, 0 other | \`${short(head)}\` |`,
     `| Proof judge | an independent model reads the evidence against the diff | ✅ passed at \`${short(head)}\` | |`,
     "",
-    "**Not checked:** Safari; the mobile layout",
-    "",
     "| PR | Review rounds | Production lines | Skipped proofs |",
     "| --- | --- | --- | --- |",
     expect.stringMatching(/^\| example\/product#42 \| 1 round \| 1 → 1 \(×1\.0\) \| cross-version: The old client is retired \(👤 the user d-[0-9a-f]+\) \|$/),
+    "",
+    "**Not checked:** Safari; the mobile layout",
   ]);
   expect(body).not.toContain("Accept the gap");
 
@@ -364,6 +364,7 @@ test("a publisher handler gets the page, title and previous id, and its link goe
   expect(published.page).toContain("**What ran:** Sent a test email to the sandbox inbox. **Result:** Delivered in one attempt.");
   expect(repaired.previous).toEqual({ id: "receipt-2", url: "https://receipts.example/r/receipt-2" });
   expect(block(pr.githubBody())).toEndWith("Full receipt: https://receipts.example/r/receipt-2\n<!-- /hedge-proof-receipt -->");
+  expect(block(pr.githubBody())).toMatch(/\*\*Not checked:\*\* [^\n]*\nFull receipt: /);
   const report = (await pr.decide("report", "--pr", "example/product#42")).output;
   expect(report).toContain("[receipt](https://receipts.example/r/receipt-2)");
 
