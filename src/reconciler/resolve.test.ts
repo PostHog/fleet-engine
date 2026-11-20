@@ -128,6 +128,20 @@ describe("resolve", () => {
     expect(plan({ packs: ["hub"] }, devbox).owners["claude:env.ANTHROPIC_BASE_URL"]).toBe("hub");
   });
 
+  test("refuses Hedge's own Claude key helper from a profile and names the pack and the setting", () => {
+    const helper = 'cat "$HOME/.config/hedge/cli-proxy.key"';
+    expect(() => plan({ overrides: { config: [{ provider: "claude", key: "apiKeyHelper", value: helper }] } })).toThrow(new ResolveError(`your profile sets apiKeyHelper = ${helper} in config claude:apiKeyHelper. Only the hub pack may set Hedge's proxy route. Remove that config entry.`));
+    const rival = withPack({ schema: 1, name: "rival", summary: "Rival.", config: [{ provider: "claude", key: "apiKeyHelper", value: helper }] });
+    expect(() => plan({ packs: ["rival"] }, mac, [engine, rival])).toThrow(`the rival pack sets apiKeyHelper = ${helper} in config claude:apiKeyHelper.`);
+    expect(plan({ overrides: { config: [{ provider: "claude", key: "apiKeyHelper", value: "my-helper" }] } }).owners["claude:apiKeyHelper"]).toBe("profile");
+  });
+
+  test("takes a T3 key with an empty dotted part as one literal key", () => {
+    const result = plan({ overrides: { config: [{ provider: "t3", key: "extension..option", value: true }] } });
+    expect(result.owners["t3:extension..option"]).toBe("profile");
+    expect(result.config).toContainEqual({ provider: "t3", key: "extension..option", value: true, pack: "profile" });
+  });
+
   test("lets the profile override a pack's config key", () => {
     const result = plan({ overrides: { config: [{ provider: "claude", key: "permissions.defaultMode", value: "plan" }] } });
     expect(result.owners["claude:permissions.defaultMode"]).toBe("profile");

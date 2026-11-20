@@ -27,7 +27,10 @@ export const proxyRoute: Partial<Record<Provider, Route>> = {
 };
 
 const hubOnly: Partial<Record<Provider, Array<{ path: string[]; value?: unknown; name: string }>>> = {
-  claude: [{ path: baseUrl, value: proxyUrl, name: `env.ANTHROPIC_BASE_URL = ${proxyUrl}` }],
+  claude: [
+    { path: baseUrl, value: proxyUrl, name: `env.ANTHROPIC_BASE_URL = ${proxyUrl}` },
+    { path: ["apiKeyHelper"], value: keyHelper, name: `apiKeyHelper = ${keyHelper}` },
+  ],
   codex: [
     { path: ["model_provider"], value: codexProvider, name: `model_provider = "${codexProvider}"` },
     { path: codexTable, name: `the ${codexProvider} provider table` },
@@ -35,8 +38,10 @@ const hubOnly: Partial<Record<Provider, Array<{ path: string[]; value?: unknown;
 };
 
 export function hubOnlySetting(provider: Provider, key: string, value: unknown) {
+  const reserved = hubOnly[provider];
+  if (!reserved) return undefined;
   const path = keyPath(key);
-  return hubOnly[provider]?.find((item) => {
+  return reserved.find((item) => {
     if (path.length > item.path.length) return item.value === undefined && samePath(path.slice(0, item.path.length), item.path);
     if (!samePath(item.path.slice(0, path.length), path)) return false;
     const held = get({ value }, ["value", ...item.path.slice(path.length)]);

@@ -76,7 +76,10 @@
   names each removed setting, never its value, and says the agent now
   uses its own sign-in. The backup in `~/.local/state/hedge/backups`
   holds the file as it was. Only Hedge's own proxy values form the
-  route. A credential beside the route stays only while its value equals
+  route. The route leaves when a file holds Hedge's proxy value before
+  apply and another value or none after it, so a gateway from your
+  profile in place of Hedge's proxy address also takes a proxy token
+  beside it out, with its `To do:` line. A credential beside the route stays only while its value equals
   the value a pack sets for it now. So a key helper your profile sets in
   the same apply stays and is recorded. A value that differs, such as a
   helper you edited or a proxy token you set by hand, leaves with the
@@ -85,11 +88,14 @@
   your profile are set and removed one by one, as before.
 - Only the Hub pack may set Hedge's proxy values:
   `model_provider = "hedge-proxy"`, the `hedge-proxy` Codex provider
-  table, and `http://127.0.0.1:8317` as the Claude
-  `env.ANTHROPIC_BASE_URL`. When your profile or another pack sets one of
+  table, `http://127.0.0.1:8317` as the Claude
+  `env.ANTHROPIC_BASE_URL`, and `cat "$HOME/.config/hedge/cli-proxy.key"`
+  as the Claude `apiKeyHelper`. When your profile or another pack sets one of
   them, Hedge refuses the profile when it loads, and the error names the
   pack and the setting. So no selector of yours can point at Hedge's
-  table after the table leaves.
+  table after the table leaves, and no helper of yours sends the hub's
+  proxy key to Anthropic. T3 keys hold no proxy value, so Hedge does not
+  check them.
 - When an adapter that runs before the steps fails, or a later part of
   the provider config step fails after the settings write, such as a
   malformed `provider-plugins.json`, the error that apply throws holds

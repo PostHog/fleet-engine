@@ -128,6 +128,21 @@ describe("provider config", () => {
     expect(read(edited, claude)).toEqual({ apiKeyHelper: "team-helper" });
   });
 
+  test("switching from Hedge's Claude proxy URL to a profile's own gateway takes a proxy token beside it out and names it in the To do", async () => {
+    const home = temp.make("home-");
+    const route = [{ provider: "claude" as const, key: "env.ANTHROPIC_BASE_URL", value: "http://127.0.0.1:8317", pack: "hub" }, { provider: "claude" as const, key: "apiKeyHelper", value: 'cat "$HOME/.config/hedge/cli-proxy.key"', pack: "hub" }];
+    const gateway = [{ provider: "claude" as const, key: "env.ANTHROPIC_BASE_URL", value: "https://gateway.example.com", pack: "profile" }];
+    await apply(plan(route), { home, adapters: adapters() });
+    write(home, claude, { ...read(home, claude), env: { ...read(home, claude).env, ANTHROPIC_AUTH_TOKEN: "proxy-token" } });
+
+    const switched = await apply(plan(gateway), { home, adapters: adapters() });
+
+    expect(read(home, claude)).toEqual({ env: { ANTHROPIC_BASE_URL: "https://gateway.example.com" } });
+    expect(switched.findings).toContainEqual({ id: `route:${claude}`, pack: "engine", say: `Took Hedge's proxy route out of ${claude}, and with it your env.ANTHROPIC_AUTH_TOKEN, which only worked through that route. Claude Code now uses its own sign-in: sign in there if it asks.`, todo: true });
+    expect(JSON.stringify(switched.findings)).not.toContain("proxy-token");
+    expect((await apply(plan(gateway), { home, adapters: adapters() })).actions).toEqual([]);
+  });
+
   test("a proxy token you set by hand leaves with Hedge's route even when a profile sets a token of its own, and the next apply sets the profile's token", async () => {
     const home = temp.make("home-");
     const route = [{ provider: "claude" as const, key: "env.ANTHROPIC_BASE_URL", value: "http://127.0.0.1:8317", pack: "hub" }, { provider: "claude" as const, key: "apiKeyHelper", value: 'cat "$HOME/.config/hedge/cli-proxy.key"', pack: "hub" }];

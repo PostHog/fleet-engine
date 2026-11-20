@@ -163,25 +163,19 @@ test("a box apply that exits nonzero makes the hub say only the exit code and th
   proxy.models = [];
   writeHome(box.home, { ".config/hedge/provider-plugins.json": "{", ".claude/settings.json": JSON.stringify({ env: { ANTHROPIC_BASE_URL: proxyUrl, ANTHROPIC_AUTH_TOKEN: "my-token" }, apiKeyHelper: keyHelper }) });
   const exit = (code: number) => `box-lane: hedge apply exited ${code} there. To see why, run on the hub: hedge box run box-lane -- hedge apply`;
-  const seen: Array<{ code: number; stderr: string }> = [];
-  const real = await handOverTo(box, async () => {
-    const result = await applyNow();
-    seen.push(result);
-    return result;
-  });
-  expect(seen).toHaveLength(1);
-  expect(seen[0]!.code).toBe(1);
-  expect(seen[0]!.stderr).toContain("\nTo do: Took Hedge's proxy route out of .claude/settings.json");
-  expect(real.lines.filter((line) => line.startsWith("box-lane"))).toEqual([exit(1)]);
-  expect(real.lines.join("\n")).not.toContain("Took Hedge's proxy route");
+  const thrown = await applyNow();
+  expect(thrown.code).toBe(1);
+  expect(thrown.stderr).toContain("\nTo do: Took Hedge's proxy route out of .claude/settings.json");
+  const real = await handOverTo(box, async () => ({ ...thrown, stdout: `${thrown.stdout}${thrown.stderr}` }));
+  const skipped = ["skip ~/.config/hedge/mcphub.client.json: this machine has none", "skip ~/.config/hedge/box-claude-token: this machine has none", "skip the GitHub CLI login: gh is not logged in here"];
+  expect(real.lines).toEqual([...skipped, exit(1)]);
 
   const sentinel = "sentinel-7f3a";
   const checks = [checkLine("cli-proxy-client", "todo"), checkLine("cli-proxy-client", "say"), checkLine("cli-proxy-codex", "todo"), checkLine("cli-proxy-codex", "say")];
   const output = `${checks.join("\n")}\n${sentinel}\n`;
   const failed = await handOverTo(box, async () => ({ code: 2, stdout: output, stderr: output }));
   const said = failed.lines.join("\n");
-  expect(failed.lines.filter((line) => line.startsWith("box-lane"))).toEqual([exit(2)]);
-  expect(failed.lines).toEqual(real.lines.map((line) => (line === exit(1) ? exit(2) : line)));
+  expect(failed.lines).toEqual([...skipped, exit(2)]);
   expect(said).not.toContain(sentinel);
   for (const line of checks) expect(said).not.toContain(line.replace(/^(To do|Fix): /, ""));
 });

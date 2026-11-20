@@ -114,6 +114,7 @@ function owned(plan: Plan, target: Target): Field[] {
 
 function merge(target: Target, text: string | undefined, previous: Field[], wanted: Field[], adopt: boolean, options: { outage: boolean; gated: (path: string[]) => boolean; configPath: string }): Merged {
   const current: Document = text === undefined ? {} : target.format.decode(text);
+  const onDisk: Document = text === undefined ? {} : target.format.decode(text);
   const original = target.format.encode(current);
   const record: Field[] = [];
   const kept: string[] = [];
@@ -160,16 +161,15 @@ function merge(target: Target, text: string | undefined, previous: Field[], want
     trust.push(...retained);
   }
   const all = [...wanted, ...trust];
-  const routeLeft: string[][] = [];
   for (const field of previous) {
     if (all.some((item) => overlaps(item.path, field.path))) continue;
     if ((options.outage && !options.gated(field.path)) || keepsEdit(field)) record.push(field);
     else if (get(current, field.path) !== undefined) {
       remove(current, field.path);
       removed.push(field.path.join("."));
-      if (onRoute(field)) routeLeft.push(field.path);
     }
   }
+  const routeLeft = (route?.fields ?? []).filter((item) => same(get(onDisk, item.path), item.value) && !same(get(current, item.path), item.value)).map((item) => item.path);
   const setByPack = (path: string[]) => wanted.some((field) => overlaps(field.path, path) && same(get(current, path), get({ value: field.value }, ["value", ...path.slice(field.path.length)])));
   const beside = (route?.beside(current, routeLeft) ?? []).filter((path) => !setByPack(path));
   for (const path of beside) {
