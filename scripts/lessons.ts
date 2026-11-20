@@ -43,7 +43,7 @@ export function lessonProblems(lesson: Lesson, names: Names): string[] {
   const problems = [
     ...[...text.matchAll(/`hedge ([a-z][a-z-]*)/g)].filter(([, name]) => !names.commands.includes(name!)).map(([, name]) => `${where}: names hedge ${name}, which no command ships`),
     ...[...text.matchAll(/`\/([a-z][a-z-]*)`/g)].filter(([, name]) => !names.skills.includes(name!)).map(([, name]) => `${where}: names /${name}, which no pack's skill ships`),
-    ...[...text.matchAll(/\b[Tt]he ([A-Z][\w.-]*(?: [A-Z][\w.-]*)*(?: [a-z][\w.-]*){0,2}) pack\b/g)].filter(([, title]) => !names.packs.includes(title!.toLowerCase())).map(([, title]) => `${where}: names the ${title} pack, which does not exist`),
+    ...[...text.matchAll(/\b[Tt]he ([A-Z][^.,:;!?\n]*?) pack\b/g)].filter(([, title]) => !names.packs.includes(title!.toLowerCase())).map(([, title]) => `${where}: names the ${title} pack, which does not exist`),
     ...(lesson.next && !names.lessons.includes(lesson.next) ? [`${where}: next names lesson ${lesson.next}, which does not exist`] : []),
   ];
   if (!lesson.cut) return problems;
@@ -53,7 +53,8 @@ export function lessonProblems(lesson: Lesson, names: Names): string[] {
   if (cut.captions.length !== sentences(lesson).length) problems.push(`${where}: has ${sentences(lesson).length} sentences, but its cut has ${cut.captions.length} captions`);
   const inVideo = (time: unknown) => typeof time === "number" && time >= 0 && time <= cut.seconds;
   const chaptersInOrder = cut.chapters.every((time, index) => inVideo(time) && (index === 0 || time > cut.chapters[index - 1]!));
-  const captionsInOrder = cut.captions.every((cue, index) => cue.length === 2 && inVideo(cue[0]) && inVideo(cue[1]) && cue[0] < cue[1] && (index === 0 || cue[0] >= cut.captions[index - 1]![1]));
+  const isCue = (cue: unknown): cue is [number, number] => Array.isArray(cue) && cue.length === 2 && cue.every(inVideo) && cue[0] < cue[1];
+  const captionsInOrder = cut.captions.every((cue, index) => isCue(cue) && (index === 0 || cue[0] >= cut.captions[index - 1]![1]));
   if (!chaptersInOrder || !captionsInOrder) problems.push(`${where}: its cut has chapter or caption times out of order or outside the video`);
   return problems;
 }
