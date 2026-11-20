@@ -1,233 +1,65 @@
-# The Mac path of a first run
-
-This document follows a new user on a clean Mac, from `curl … | sh` to the done screen. It maps each step to the code that does it and the test that covers it.
-
-No agent can run a real Mac. Agents work on Linux devboxes. So this document, plus the unit tests it names, is the Mac proof. A test name is written as `file › describe › test`.
-
-"Agent can run" means an agent can run the covered code in a test on Linux, with stubs. It never means an agent ran it on a Mac.
-
-## 1. `get.sh` on macOS: Command Line Tools and Homebrew
-
-**What happens.** `get.sh` refuses root, puts `~/.local/bin` and `~/.bun/bin` on `PATH`, and reads `uname -s`. On `Darwin` it runs `mac_tools`:
-
-1. It puts `/opt/homebrew/bin` and `/usr/local/bin` first on `PATH`.
-2. When `xcode-select -p` fails, it runs `xcode-select --install`. Then it waits until `xcode-select -p` passes, checking every 5 seconds. The person finishes the window that macOS opens.
-3. When the T3 Code app is there, in `/Applications` or wherever `open -Ra "T3 Code"` finds it, Homebrew is not needed, and the next two steps do not run.
-4. When `brew` is missing, it downloads the Homebrew installer and runs it with `/bin/bash`. Under `curl | sh`, standard input is the script itself. So when standard input is not a terminal and `/dev/tty` opens, the installer reads from `/dev/tty`. This lets Homebrew ask for the Mac password.
-5. When `brew` is still not on `PATH` after the installer, it stops with "Homebrew installed, but brew is not on PATH."
-
-**Code.** `get.sh`: `mac_tools`, `download`, the `case "$(uname -s)"` block.
-
-**Tests.**
-
-- `src/get.test.ts › get.sh › on macOS installs the Command Line Tools first and waits until they are there` (new)
-- `src/get-macos.test.ts › get.sh › on macOS without the T3 Code app, installs Homebrew and the app, then applies the profile`
-- `src/get-macos.test.ts › get.sh › under curl | sh, gives the Homebrew installer the terminal so it can ask for the password`
-- `src/get-macos.test.ts › get.sh › on macOS with the T3 Code app, needs no Homebrew and nothing from the person`
-- `src/get.test.ts › get.sh › on macOS stops when the Homebrew installer leaves no brew on PATH` (new)
-- `src/get.test.ts › get.sh › passes sh -n`
-
-These tests stub `uname`, `xcode-select`, `curl`, `brew` and `sleep` in a sandbox `PATH` with a temporary `HOME`. They run only on a Linux host: `get.sh` puts the real `/opt/homebrew/bin` first on `PATH`, so on a Mac they could reach the real `brew`. CI runs Linux.
-
-**Agent can run.** Yes, with stubs. The real Command Line Tools window, the real Homebrew installer and the real password prompt need a person on a Mac.
-
-## 2. `gh`, Bun, and the T3 Code app
-
-**What happens.** Still in `mac_tools`:
-
-- Without the T3 Code app: `brew install --cask t3-code`.
-- `has gh || mac_gh`: it downloads `gh_<version>_macOS_<arm64|amd64>.zip` of the pinned gh release and checks it against the SHA-256 that `get.sh` pins from the release's checksums file.
-- `has bun || direct_bun`: it downloads `bun-darwin-<aarch64|x64>.zip` of the pinned Bun release and checks it against the pinned SHA-256 from Bun's `SHASUMS256.txt`, as on Linux.
-- Checksums use `sha256sum` when it is there and `shasum -a 256` otherwise. Python's `zipfile` unpacks the zips. Both binaries go to `~/.local/bin/gh` and `~/.bun/bin/bun`, which `get.sh` puts on `PATH`.
-
-Then, on both systems, `t3_cli` installs the `t3` command from `https://t3.codes/install.sh` with `T3CODE_CHANNEL=nightly`, unless `t3` is on `PATH`. `fetch_engine` fetches the engine at the pinned ref into `~/.local/share/hedge/engine`. `install_packages` runs `bun install --frozen-lockfile --production` there. `link_hedge` writes `~/.local/bin/hedge`, a short script that runs the engine's `hedge`. Its second line is `# Hedge`. When `~/.local/bin/hedge` exists without that line, `get.sh` leaves it as it is and says how to run the engine directly. `login_path` adds one line, once, to the login file of the shell in `$SHELL`. For zsh, the macOS default, and when `$SHELL` is not set, that file is `~/.zprofile`. The line puts `~/.local/bin`, `~/.bun/bin` and `/opt/homebrew/bin` on the login `PATH`, because zsh's default `PATH` has none of them. When it adds the line, `get.sh` says to open a new terminal. With no `--profile`, `get.sh` runs `hedge setup`. Under `curl | sh` it gives `hedge setup` the terminal through `/dev/tty`.
-
-**Code.** `get.sh`: `mac_tools`, `t3_cli`, `fetch_engine`, `install_packages`, `link_hedge`, `login_path`, the last `exec` lines.
-
-**Tests.**
-
-- `src/get-macos.test.ts › get.sh › on macOS without the T3 Code app, installs Homebrew and the app, then applies the profile`: `brew install --cask t3-code`, no other `brew install`.
-- `src/get-macos.test.ts › get.sh › on macOS downloads gh for the Mac's chip from its pinned release, and refuses a file that does not match the pinned checksum`, and the same for Bun.
-- `src/get.test.ts › get.sh › under curl | sh, hands hedge setup the terminal so it can ask its questions` (new)
-- `src/get.test.ts › get.sh with an existing engine directory › refuses a directory that is not an engine, and an engine with local changes`
-- `src/get.test.ts › get.sh › a second run changes nothing`
-- `src/get.test.ts › get.sh › installs the engine's packages in the engine directory` (new)
-- `src/get-path.test.ts › hedge on the PATH › puts hedge into ~/.local/bin, where it runs the engine even from a directory it cannot read` (new)
-- `src/get-path.test.ts › hedge on the PATH › on macOS adds the PATH line, with Homebrew's bin, to ~/.zprofile once` (new)
-- `src/get-path.test.ts › hedge on the PATH › replaces its own hedge in ~/.local/bin and leaves another hedge there alone` (new)
-
-**Agent can run.** Yes, with stubs. The skip for an existing `/Applications/T3 Code.app` has no test: the path is absolute, and a test cannot make it.
-
-## 3. `hedge setup` on the Mac
-
-**What happens.** `thisMachine` makes a new Mac the `mac` role. It never marks a Mac as a Coder workspace, even when Coder's variables are set. `plan.os` is `darwin` for the `mac` role. Setup then runs these steps in order:
-
-1. **Install the basics**: checks that `git`, `gh`, `bun` and `t3` are on `PATH`.
-2. **Sign in to GitHub** (section 9).
-3. **Packs**, then **AI plans**.
-4. **Pack settings** marked `ask: setup`. A team pack can add its own, such as a setting with a default from the time zone.
-5. **Profile**: Hedge creates the private profile repo and pushes the answers.
-6. **Set up this Mac**: runs `hedge apply` with the profile. This writes the T3 settings (section 4), the launchd jobs (section 5) and the identity (section 7). It also runs the pack steps for `darwin` (section 8).
-7. **Pack human steps**, such as a team pack's sign-in (section 8).
-8. **Your devbox**: without the PostHog pack, setup offers an SSH host from `~/.ssh/config`, or a skip.
-9. **Sign in to Claude**, then **Sign in to ChatGPT**, for the chosen plans only.
-10. **Devbox steps** for a chosen SSH host (section 9).
-11. **Check everything**, then the done screen with a "This Mac" row.
-
-**Code.** `src/profile/profile.ts` (`thisMachine`); `src/reconciler/resolve.ts` (`os` from the role); `src/setup/setup.ts` (`setup`, `setupSteps`, `bootstrapStep`, `applyStep`); `src/setup/questions.ts`; `src/setup/done.ts` (`doneScreen`).
-
-**Tests.**
-
-- `src/profile/profile.test.ts › machine file › a new Mac is a mac and never a Coder devbox, even with Coder's variables set` (new)
-- `src/setup/setup.test.ts › hedge setup questions › on a Mac, saves the mac role, offers a devbox, and sets up this Mac` (new)
-- `src/setup/setup.test.ts › hedge setup questions › asks packs and plans with defaults, shows progress, and moves the answers into the profile`. It runs as a Linux machine, but the steps share every line of code except the role and the title.
-- `src/setup/questions.test.ts › a setting's time-zone default › picks eu in Europe/Berlin`, and the other tests in that block.
-- `src/setup/done.test.ts › … › sums up this Mac, the profile, and what runs by itself, then gives a first prompt`
-- `src/reconciler/resolve.test.ts › … › limits items by os and role`
-
-**Agent can run.** Yes. Setup takes the platform as an option, and the tests pass `darwin`.
-
-## 4. T3 Code settings before T3's first start
-
-**What happens.** `brew install --cask t3-code` installs the app but does not open it. So the T3 server does not answer during setup's apply step. In that case the T3 adapter writes the settings files directly:
-
-- `~/.t3/userdata/settings.json`: the keys the packs set for T3.
-- `~/.t3/userdata/desktop-settings.json`, on the Mac only: `updateChannel: "nightly"` and `updateChannelConfiguredByUser: true`. Hedge keeps a channel that the person picked in T3 Code.
-
-Hedge records what it owns in `~/.config/hedge/t3-settings.json`. On the Mac the adapter never touches a service. T3 Code runs as the desktop app. Projects and scheduled tasks wait for the first `hedge apply` after T3 Code starts. The nightly `hedge-update` job does that apply.
-
-The spec names this phase `seedT3`. In the product, `t3Adapter().apply` does it: when no server answers, it writes the settings files first. On Linux it installs and starts the T3 service only after that, so T3 Code's first start reads Hedge's settings.
-
-**Code.** `src/adapters/t3/adapter.ts` (`t3Adapter`, `targets`); `src/adapters/t3/settings.ts` (`desktopFields`, `reconcileSettings`, `desktopTarget`).
-
-**Tests.**
-
-- `src/adapters/t3/t3.test.ts › T3 settings while T3 Code is stopped › sets the nightly update channel in desktop-settings.json on the Mac only`
-- `src/adapters/t3/t3.test.ts › T3 settings while T3 Code is stopped › keeps an update channel the user picked in T3 Code`
-- `src/adapters/t3/t3.test.ts › T3 settings while T3 Code is stopped › keeps a channel the user picked when T3 leaves the build's default channel out`
-- `src/adapters/t3/t3.test.ts › T3 on Linux › does not touch the service on the Mac`
-- `src/adapters/t3/t3.test.ts › T3 on Linux › writes Hedge's settings before it installs t3 or its service, so T3 Code's first start reads them`
-- `src/adapters/t3/t3.test.ts › T3 adapter guards › doctor reports each missing piece and writes nothing` (a `darwin` plan)
-
-**Agent can run.** Yes, against a temporary `HOME`. Two things need a Mac: whether the real T3 Code app reads the seeded files on its first start, and how Hedge finds the app's server. `serverCli` in `src/adapters/t3/session.ts` reads `ps` and the `.app` bundle path on the Mac. It has no test.
-
-## 5. launchd jobs
-
-**What happens.** On `darwin` the Jobs adapter uses launchd, not cron. The Mac gets `hedge-update` (hourly at :17) and `agent-update` (hourly at :47), which run only from 00:00 to 05:59 UTC and stop for the day after their first success, and `worktree-prune` (every 5 minutes) from the Base pack, and `memory-sync` (every 5 minutes) with the Memory pack. The Orchestration T3 tasks are for devboxes and hubs only.
-
-For each job:
-
-1. **Launcher.** It writes `~/.local/state/hedge/jobs/<id>.sh`. Its `PATH` has `/opt/homebrew/bin` on the Mac.
-2. **Plist.** It writes `~/Library/LaunchAgents/dev.hedge.<id>.plist` with the label `dev.hedge.<id>`. It runs `/bin/sh <launcher>` and logs to `<id>.log`. A daily job uses `StartCalendarInterval`; a frequent job uses `StartInterval`. It escapes `&`, `<` and `>` in paths.
-3. **Load.** It runs `launchctl bootstrap gui/<uid> <plist>`, and reports a job that launchd does not load. Before it replaces or removes a loaded job, it runs `launchctl bootout` and checks with `launchctl print` (exit 113 means gone).
-4. **Ownership.** It keeps a copy of each plist it wrote in `~/.local/state/hedge/jobs/<id>.plist`. It touches a `dev.hedge.*` plist only when the plist matches what Hedge wants or what Hedge last wrote. Otherwise it leaves the file alone and asks the person to move it.
-5. **Removal.** A dropped job loses its agent, launcher and copy. Agents with other labels are never touched. While a pack source cannot be fetched, every Hedge agent stays.
-
-**Code.** `src/adapters/jobs/adapter.ts` (`reconcileLaunchd`); `src/adapters/jobs/launchd.ts` (`plist`, `labelPrefix`); `src/adapters/jobs/launcher.ts`; `src/adapters/jobs/schedule.ts` (`launchdTimer`).
-
-**Tests.** In `src/adapters/jobs/jobs.test.ts › launchd jobs on a Mac`:
-
-- `writes a dev.hedge plist that runs the launcher script, and loads it`
-- `escapes &, <, and > in the plist's paths, so a home with them still loads` (new)
-- `reports a job that launchd does not load, and loads it on the next apply` (new)
-- `keeps an agent that launchd does not stop`
-- `keeps an agent and its launcher when launchd cannot say whether the agent stopped`
-- `keeps the old launcher when launchd does not stop the agent it would update`
-- `leaves a dev.hedge plist that Hedge did not write alone`
-- `leaves an agent alone once someone edits the plist Hedge wrote`
-- `saves its copy of an agent that already matches, so a later change still applies`
-- `removes the copy and launcher of a dropped job whose agent is already gone`
-- `uses an interval for frequent jobs, reruns without reloading, and removes only its own agents`
-- `keeps every agent, launcher, and copy until a pack source that cannot be fetched is back` (new)
-
-**Agent can run.** Yes, with a fake `launchctl`. Real `launchctl` exit codes and a real job firing need a Mac.
-
-## 6. The account-home lookup
-
-**What happens.** Before the Jobs, Identity and T3 adapters change anything, `skipOtherHome` compares `HOME` with the account's real home. On a Mac, `accountHome` asks `/usr/bin/dscacheutil -q user -a uid <uid>` and reads the `dir:` line. When `dscacheutil` is missing or gives no home, it reads `/etc/passwd`. It never asks `getent` on a Mac. When no home is found, the adapter changes nothing and reports one finding. When `HOME` is another folder, such as a test's temporary `HOME`, the adapter changes nothing and reports nothing.
-
-**Code.** `src/adapters/run.ts` (`accountHome`, `directoryHome`, `passwdHome`, `skipOtherHome`).
-
-**Tests.** In `src/adapters/run.test.ts`:
-
-- `account home lookup › reads the home folder from the Mac directory service answer`
-- `account home lookup › asks the Mac directory service for the uid`
-- `account home lookup › on a Mac, falls back to /etc/passwd when dscacheutil is missing or knows no home, and never asks getent` (new)
-- `the jobs adapter's home guard › …`, `the identity adapter's home guard › …`, `the t3 adapter's home guard › …`: three tests each.
-
-**Agent can run.** Yes, with fake sources. The real `dscacheutil` answer on a current macOS needs a Mac.
-
-## 7. Identity
-
-**What happens.** The Identity adapter takes the name and email from `gh api user`. The default signer, `ssh`, makes `~/.ssh/hedge_ed25519` with `ssh-keygen`. It registers the key on GitHub twice, for authentication and for signing. It writes `~/.config/hedge/gitconfig` and adds an include to `~/.gitconfig`. The `ssh` signer has no Mac branch. The opt-in `1password` signer uses `/Applications/1Password.app/Contents/MacOS/op-ssh-sign` on the Mac. `gh` comes from Homebrew (section 2), and its sign-in is in section 9.
-
-**Code.** `src/adapters/identity/adapter.ts`, `signers.ts` (`signer`, `onePasswordPrograms`), `github.ts`, `gitconfig.ts`.
-
-**Tests.** In `src/adapters/identity/identity.test.ts`:
-
-- `the ssh signer › takes name and email from GitHub, makes a key, and registers it for authentication and signing`, and the rest of that block. They use a Linux plan; the code is the same on the Mac.
-- `the 1Password signer › signs through op-ssh-sign with the saved public key` (a `darwin` plan)
-- `the 1Password signer › asks for the public key of the 1Password SSH key`
-
-**Agent can run.** Yes, with a fake `gh` and `ssh-keygen`. The real key registration and a signed commit on the Mac need a person.
-
-## 8. Team packs
-
-A team pack, such as the PostHog pack, is not part of this repo. Hedge fetches it only for members of its GitHub org. It adds its own steps, human steps and files to the Mac and the devbox. The team pack's own repo traces those steps and their tests.
-
-**In this engine.** During setup's apply step, `apply` runs the team pack's steps for `darwin`. It skips a step whose `after` names a human step whose probe does not pass yet (`waiter` in `src/reconciler/apply.ts`). Then setup runs the pack's human steps. An interactive one runs in the foreground with the keyboard (`packSignIn` and `withKeyboard` in `src/setup/human.ts`). When its probe passes, the waiting steps run. With the PostHog pack, setup asks no SSH devbox question.
-
-**Tests in this engine.**
-
-- `src/setup/human.test.ts › … › a member of the PostHog org gets its pack ticked, and the pack's sign-in runs its waiting steps`
-- `src/setup/human.test.ts › … › an interactive pack sign-in runs in the foreground with the keyboard, then its probe decides, with no polling`
-- `src/setup/human.test.ts › … › an interactive one reads the keyboard through a pseudo-terminal while setup's own input is not the terminal`
-- `src/reconciler/resolve.test.ts › … › limits items by os and role`
-
-**Agent can run.** The engine side, yes, with stubs. A team pack's real sign-ins need a person with an account.
-
-## 9. Sign-ins and T3 Connect
-
-| Sign-in | Command | Probe | Code | Tests |
-| --- | --- | --- | --- | --- |
-| GitHub | `gh auth login --web` with four scopes, or `gh auth refresh` when scopes are missing; then `gh auth setup-git` | `gh auth status` lists the four scopes | `src/setup/signins.ts` `githubSignIn` | `src/setup/human.test.ts`: `GitHub opens the device page, polls every 2 s with no key press, and asks for all four scopes`; `GitHub refreshes a sign-in that lacks scopes, and a run without a person only lists it`; `GitHub sets up Git's credentials before a team pack is fetched, and checks the active account` |
-| Claude | `claude auth login` | `claude auth status` says `loggedIn` | `signins.ts` `claudeSignIn` | `src/setup/human.test.ts`: `Claude and ChatGPT advance on their probes, only for the chosen plans, and the ChatGPT probe is isolated`; `a sign-in command that fails, or is missing, stops setup with what to do instead of waiting` |
-| ChatGPT (Codex) | `codex login` | a real `codex exec` in a temporary folder, 20 s timeout | `signins.ts` `chatgptSignIn` | the same two tests |
-| A team pack's sign-in | the pack's human step | the step's probe | section 8 | section 8 |
-
-A human step opens the browser with `open` on the Mac (`realMachine.openUrl` in `src/setup/commands.ts`). It polls its probe every 2 seconds.
-
-**T3 Code app sign-in and T3 Connect on the Mac.** Spec step 13, "T3 Code app sign-in, then the agent link both ways", was never built for the Mac. No step signs in to the T3 Code app on the Mac, or turns on T3 Connect there. What exists:
-
-- **SSH-host devbox** (no PostHog pack): `devboxSteps` in `src/setup/devbox.ts` runs `t3 up --connect --yes --headless` on the box. Then `linkBothWays` links the box from the Mac with `t3 pair` and `t3 environment link`. The box links back only when T3 Connect is already on the Mac. Otherwise setup prints one line that says how to turn it on. Tests: `src/setup/devbox.test.ts`: `installs Hedge on the chosen host, signs it in with the codes shown here, applies the profile, and links T3 Code both ways`, and `links back from the devbox when T3 Connect is on here, and installs the engine of a tracking profile from main`.
-- **A team pack's devbox**, such as the PostHog pack's: setup has no T3 link step at all.
-- **Every apply**: `checkLinks` in `src/adapters/t3/adapter.ts` reports expired and unreachable links. Test: `src/adapters/t3/t3.test.ts › T3 adapter with a running server › reports expired and unreachable links without failing the apply`.
-
-**Agent can run.** The setup logic, yes, with a fake machine. Every real sign-in needs a person.
-
-## Steps no agent can run
-
-Each step is for a person on a clean macOS user account.
-
-1. Run the public `curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh | sh` in Terminal.
-2. Finish the Command Line Tools window when it opens.
-3. Without the T3 Code app only: type the Mac password once when Homebrew asks for it.
-4. Check that `gh`, `bun`, `t3` and `/Applications/T3 Code.app` exist when `get.sh` ends.
-5. Approve the GitHub device code in the browser that setup opens.
-6. After the step "Set up this Mac", check that `claude --version` and `codex --version` work. The Base pack's `claude-cli` step installs Claude, and its `codex-cli` step installs Codex from its release package, for the chosen plans only.
-7. Finish `claude auth login` and `codex login` in the browser.
-8. With a team pack: finish its sign-ins. Its own repo lists what to check.
-9. Before you open T3 Code, check that `~/.t3/userdata/desktop-settings.json` holds `"updateChannel": "nightly"`. Then open T3 Code and check that it starts on the nightly channel with the seeded settings.
-10. Run `launchctl print gui/$(id -u)/dev.hedge.hedge-update` and check that the job is loaded. The next day, check `~/.local/state/hedge/jobs/hedge-update.log`.
-11. Make a commit in any repo and run `git verify-commit HEAD`.
-12. Run `hedge doctor` and check that it passes.
-
-## Gaps
-
-- **Agent CLIs on the Mac, fixed here.** The Base pack's `claude-cli` and `codex-cli` steps ran only on Linux, so a clean Mac stopped at "Sign in to Claude" with "claude is not installed here". Now `claude-cli` runs on every machine. The Bun package of Codex starts with a Node launcher, and a clean Mac or Linux box has no Node. So the `codex-cli` step runs `hedge install-codex` on both. It installs the checked release package from Codex's GitHub releases to `~/.local/bin/codex`. Each release unpacks to its own folder in `~/.local/share/hedge/codex/releases`, and the `current` link moves to a new release in one step. One install runs at a time, under a lock on `~/.local/share/hedge/codex.lock`. Linux takes it with `flock`. The Mac has no `flock`, so the installer starts itself again under Python's `fcntl.flock`. The system frees the lock when the install stops, also on a crash. Under Rosetta, the installer still takes the Apple silicon package. The installer keeps the previous release and every release a running Codex still uses, and removes the others. It finds running programs in `/proc` on Linux and with `lsof` on the Mac. When it cannot list them, it removes nothing. Each step's check (`claude --version`, `codex --version`) skips a CLI that is already there. Tests: `packs/base/base.test.ts` › `installs the agent CLIs on a Mac too, Codex from its release package, so a clean Mac without Node or Homebrew can sign in`, and the Mac tests in `packs/base/lib/install-codex.test.ts`. A person still has to prove both installers on a clean Mac (step 6 above).
-- **Spec step 13 is not built.** No T3 Code app sign-in on the Mac, and no T3 Connect on the Mac. With a team pack's devbox there is no T3 link at all.
-- **No test:** finding the T3 server on the Mac through `ps` and the `.app` bundle (`serverCli` in `src/adapters/t3/session.ts`).
-- **No test:** `open` in place of `xdg-open` on the Mac (`realMachine.openUrl` in `src/setup/commands.ts`). It reads the platform from `node:os`, so a test cannot choose it.
-- **No test with the real files:** the pinned gh and Bun zips. The tests serve a wrong file and check the refusal. An agent ran `get.sh` as a fake arm64 Mac on Linux with the real downloads: both checksums matched, and both binaries are Mach-O.
-- **No test:** the skip for an existing `/Applications/T3 Code.app` (the tests stub `open -Ra`), and `/opt/homebrew/bin` on `PATH` in `get.sh`. Both use absolute paths that a test cannot make.
-- **Shell.** The tests run `get.sh` with Linux's `sh`. macOS runs it with its own `/bin/sh`. `sh -n` and the POSIX-only script lower this risk, but only a Mac run proves it.
+# The Mac in Hedge
+
+Hedge runs on cloud boxes: one hub and one or more nodes. The Mac and the
+phone run only the T3 Code app. This document says what still touches the
+Mac, how each part is tested, and which Mac code is still in the engine.
+
+A test name is written as `file › describe › test`.
+
+## What runs on the Mac
+
+| Part | Who | Test |
+| --- | --- | --- |
+| The T3 Code app, signed in with T3 Connect | The person installs it and signs in. | None. It is not Hedge code. |
+| The setup agent's thread in T3 Code | The agent follows `SETUP.md`. It runs the Coder CLI here, to create the hub and the nodes, and SSH. Every `hedge` command and the Hedge install run on the hub. | `scripts/setup-guide.test.ts › the agent setup guide › installs nothing from Hedge on the Mac: every hedge command runs over SSH on a cloud box` |
+| The Coder CLI | The agent installs it to `~/.local/bin` with Coder's own script when it is missing. | None. It is not Hedge code. |
+| Load balancing in T3 Code | The person turns it on in **Settings → Environments → Load balancing**, with the hub and the Mac set to **Manual only**. The setting lives in the app on each device, and no T3 Connect command writes it. | None. A person step. |
+
+## `get.sh` on macOS
+
+`get.sh` installs nothing on `Darwin` and writes no file. First it reads its
+flags and checks that it does not run as root. Then it says that Hedge runs
+on cloud boxes and points at the setup page.
+
+On a Mac with an earlier Fleet or Hedge, it changes launchd settings. It
+stops each of their launchd jobs (`dev.fleet.*`, `com.fleet.*`,
+`dev.hedge.*`) with `launchctl bootout`, and turns it off with
+`launchctl disable`, so that it stays off at the next login. It keeps their
+files. To turn a job on again, run
+`launchctl enable gui/<uid>/<label>`, then
+`launchctl bootstrap gui/<uid> ~/Library/LaunchAgents/<label>.plist`.
+
+With `-- --dry-run`, it changes nothing. It only names each job that it
+would stop and turn off.
+
+**Code.** `get.sh`: `retire_mac_jobs` and the `uname -s` check after it.
+
+**Tests.** In `src/get-macos.test.ts › get.sh on macOS`:
+
+- `stops before it installs or writes anything, says that Hedge runs on cloud boxes, and points at the setup page`
+- `with an earlier Fleet or Hedge on the Mac, stops and turns off each of their launchd jobs, keeps their files, installs nothing, and points at the setup page`
+- `with --dry-run, names each launchd job of an earlier Fleet or Hedge it would stop and turn off, and leaves every job as it was`
+- `with an unknown flag, stops before it touches a launchd job`
+- `with sudo, stops before it touches a launchd job`
+
+## Mac code kept for outside engineers
+
+The engine still holds code that runs only on a Mac. Nothing in the setup
+path reaches it now. It stays for a later map that lets engineers outside
+PostHog run Hedge on their own machines, a Mac among them.
+
+| Code | What it did on the Mac |
+| --- | --- |
+| `src/adapters/jobs/launchd.ts`, `reconcileLaunchd` in `src/adapters/jobs/adapter.ts`, `launchdTimer` in `src/adapters/jobs/schedule.ts` | Ran Hedge's jobs as launchd agents. |
+| The `mac` role: `thisMachine` in `src/profile/profile.ts`, the roles in `src/pack/manifest.ts` and `src/pack/types.ts`, the `os` from the role in `src/reconciler/resolve.ts`, and the "Set up this Mac" title and devbox question in `src/setup/setup.ts` | Made a Mac its own kind of machine, with `darwin` items. |
+| `balanceThreads` in `src/setup/devbox-balance.ts` | Wrote T3 Code's load balancing weights on the Mac after `hedge devbox add`. |
+| `accountHome` with `dscacheutil` in `src/adapters/run.ts` | Looked up the account's home folder. |
+| `desktopTarget` and `desktopFields` in `src/adapters/t3/settings.ts`, `serverCli` in `src/adapters/t3/session.ts`, `darwinServerCommand` in `src/integrations/t3/server.ts` | Seeded the T3 Code app's settings, and found its server. |
+| The 1Password signer path in `src/adapters/identity/signers.ts` | Signed commits with 1Password's Mac app. |
+| `open` in `realMachine.openUrl` in `src/setup/commands.ts` | Opened sign-in pages in the Mac's browser. |
+| `packs/hub/lib/hub-tunnel.ts` | Kept the Mac's own tunnel to the hub as a launchd agent. |
+| The `darwin` branches in `packs/base/lib/prune.ts`, `packs/guards/lib/package-age.ts`, `src/lock.ts`, and `src/commands/triage.ts` | Used `lsof`, `rm -x`, `~/Library/Preferences`, `libSystem`, and `sw_vers`. |
+| The Mac lock in `packs/base/lib/install-codex.sh` | Took the install lock with Python's `fcntl.flock`, because a Mac has no `flock`. |
+| The human steps for the `mac` role in `packs/hub/pack.json`, such as trusting the hub's certificate in Keychain Access | Asked the person to do Mac-only steps. |
+| The launchd pieces in `src/adapters/fleet/adapter.ts` | Retired an old Fleet's launchd agents. |
+| The `needed-you` phases in `src/setup/timings.ts` | Read the Mac install's waits for the person. `get.sh` no longer writes them. |

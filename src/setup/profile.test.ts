@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadPacks } from "../pack/manifest.ts";
 import type { FetchedSource, SourceRef } from "../pack/types.ts";
 import { isolateGit, spawnGit, tempDirs } from "../testing/git.ts";
 import { defaultSources } from "./defaults.ts";
 import { profileGuide, profilePath } from "./profile.ts";
-import { fakeMachine, hedgeSetup, githubRepo, machineFile, pushedAnswers } from "./testing.ts";
+import { fakeMachine, hedgeSetup, fakeGitHubHostKeys, githubRepo, machineFile, pushedAnswers } from "./testing.ts";
 
 isolateGit();
 const temp = tempDirs();
@@ -38,11 +38,12 @@ describe("hedge setup profile", () => {
       sources: defaultSources,
       settings: {},
       workflows: {},
+      migrations: ["picks-turn-on"],
       packs: ["pull-requests"],
       plan: "claude",
     });
     const guide = await spawnGit(githubRepo(home, "nora/hedge-profile"), "show", "main:README.md");
-    expect(guide).toContain("### Pull requests");
+    expect(guide).toContain("### Quality gates");
     expect(guide).toContain("| `pull-requests.freeReviews` |");
   });
 
@@ -123,6 +124,151 @@ describe("hedge setup profile", () => {
     expect(rerun.output).toContain("  ✓ Reusing your repo acme/hedge-profile-nora");
     expect(existsSync(githubRepo(home, "nora/hedge-profile"))).toBe(false);
     expect((await pushedAnswers(home, "acme/hedge-profile-nora")).packs).not.toContain("posthog");
+  });
+
+  async function branchCheckout(home: string, origin = "https://github.com/nora/dotfiles.git") {
+    expect((await hedgeSetup(home, starter, ["", ""])).code).toBe(0);
+    const dotfiles = githubRepo(home, "nora/dotfiles");
+    await spawnGit(home, "clone", "-q", "--bare", githubRepo(home, "nora/hedge-profile"), dotfiles);
+    await spawnGit(dotfiles, "branch", "hub", "main");
+    const checkout = join(home, ".config/coderv2/dotfiles");
+    const remotes = `url.${join(home, "github-remotes")}/.insteadOf`;
+    await spawnGit(home, "clone", "-q", "--config", `${remotes}=https://github.com/`, "--config", `${remotes}=git@github.com:`, "-b", "hub", "https://github.com/nora/dotfiles.git", checkout);
+    await spawnGit(checkout, "remote", "set-url", "origin", origin);
+    rmSync(profilePath(home), { recursive: true });
+    writeFileSync(join(home, ".config/hedge/machine.json"), JSON.stringify({ schema: 1, role: "linux", profileDir: checkout }));
+    return { dotfiles, checkout };
+  }
+
+  test("uses the profile checkout this machine applies and its branch, and leaves the profile's main alone", async () => {
+    const home = temp.make("home-");
+    const { dotfiles, checkout } = await branchCheckout(home);
+    const mainBefore = await spawnGit(dotfiles, "rev-parse", "main");
+
+    const rerun = await hedgeSetup(home, ["--non-interactive", "--plan", "codex"], []);
+
+    expect(rerun.code).toBe(0);
+    expect(rerun.output).toContain("  ✓ Reusing your repo nora/dotfiles");
+    expect(JSON.parse(await spawnGit(dotfiles, "show", "hub:hedge.json")).plan).toBe("codex");
+    expect(await spawnGit(dotfiles, "rev-parse", "main")).toBe(mainBefore);
+    expect((await pushedAnswers(home)).plan).toBe("claude");
+    expect(machineFile(home).profileDir).toBe(checkout);
+    expect(existsSync(profilePath(home))).toBe(false);
+  });
+
+  test("stops before it saves when the checkout's branch tracks no remote branch, and never renames that branch or moves a local main", async () => {
+    const home = temp.make("home-");
+    const { dotfiles, checkout } = await branchCheckout(home);
+    await spawnGit(checkout, "branch", "--unset-upstream");
+    await spawnGit(checkout, "update-ref", "-d", "refs/remotes/origin/hub");
+    await spawnGit(checkout, "checkout", "-q", "-b", "main");
+    await spawnGit(checkout, "commit", "-q", "--allow-empty", "-m", "Only on this machine's main");
+    await spawnGit(checkout, "checkout", "-q", "hub");
+    const localMain = await spawnGit(checkout, "rev-parse", "main");
+    const remoteMain = await spawnGit(dotfiles, "rev-parse", "main");
+    const remoteHub = await spawnGit(dotfiles, "rev-parse", "hub");
+
+    const rerun = await hedgeSetup(home, ["--non-interactive", "--plan", "codex"], []);
+
+    expect(rerun.code).toBe(1);
+    expect(rerun.output).toContain(`${checkout} is on the branch hub, which tracks no remote branch, so setup does not know where to save your answers.`);
+    expect(await spawnGit(checkout, "symbolic-ref", "--short", "HEAD")).toBe("hub");
+    expect(await spawnGit(checkout, "rev-parse", "main")).toBe(localMain);
+    expect([await spawnGit(dotfiles, "rev-parse", "main"), await spawnGit(dotfiles, "rev-parse", "hub")]).toEqual([remoteMain, remoteHub]);
+  });
+
+  test("stops before it commits when the checkout's branch tracks a local branch, and moves neither branch", async () => {
+    const home = temp.make("home-");
+    const { dotfiles, checkout } = await branchCheckout(home);
+    await spawnGit(checkout, "branch", "-q", "main", "origin/main");
+    await spawnGit(checkout, "branch", "-q", "--set-upstream-to", "main");
+    const before = [await spawnGit(checkout, "rev-parse", "hub"), await spawnGit(checkout, "rev-parse", "main"), await spawnGit(dotfiles, "rev-parse", "hub")];
+
+    const rerun = await hedgeSetup(home, ["--non-interactive", "--plan", "codex"], []);
+
+    expect(rerun.code).toBe(1);
+    expect(rerun.output).toContain(`${checkout} is on the branch hub, which tracks the local branch main, not origin. Setup takes and saves your answers only on origin, the repo it checks. Run git -C ${checkout} branch --set-upstream-to origin/<branch>, then run hedge setup again.`);
+    expect([await spawnGit(checkout, "rev-parse", "hub"), await spawnGit(checkout, "rev-parse", "main"), await spawnGit(dotfiles, "rev-parse", "hub")]).toEqual(before);
+  });
+
+  test("stops before it commits when the checkout's branch tracks a remote other than origin, and pushes nothing there", async () => {
+    const home = temp.make("home-");
+    const { dotfiles, checkout } = await branchCheckout(home);
+    const mirror = githubRepo(home, "nora/public-mirror");
+    await spawnGit(home, "clone", "-q", "--bare", dotfiles, mirror);
+    await spawnGit(checkout, "remote", "add", "mirror", mirror);
+    await spawnGit(checkout, "fetch", "-q", "mirror");
+    await spawnGit(checkout, "branch", "-q", "--set-upstream-to", "mirror/hub");
+    const ahead = join(temp.make("mirror-"), "clone");
+    await spawnGit(home, "clone", "-q", "-b", "hub", mirror, ahead);
+    await spawnGit(ahead, "commit", "-q", "--allow-empty", "-m", "Only on the mirror");
+    await spawnGit(ahead, "push", "-q", "origin", "hub");
+    const before = [await spawnGit(checkout, "rev-parse", "hub"), await spawnGit(mirror, "rev-parse", "hub"), await spawnGit(dotfiles, "rev-parse", "hub")];
+
+    const rerun = await hedgeSetup(home, ["--non-interactive", "--plan", "codex"], []);
+
+    expect(rerun.code).toBe(1);
+    expect(rerun.output).toContain(`${checkout} is on the branch hub, which tracks mirror/hub, not origin.`);
+    expect([await spawnGit(checkout, "rev-parse", "hub"), await spawnGit(mirror, "rev-parse", "hub"), await spawnGit(dotfiles, "rev-parse", "hub")]).toEqual(before);
+  });
+
+  test("takes the commits another machine pushed to the origin branch it tracks, and saves on top of them", async () => {
+    const home = temp.make("home-");
+    const { dotfiles } = await branchCheckout(home);
+    const elsewhere = join(temp.make("elsewhere-"), "dotfiles");
+    await spawnGit(home, "clone", "-q", "-b", "hub", dotfiles, elsewhere);
+    writeFileSync(join(elsewhere, "about-me.md"), "# Changed on another machine\n");
+    await spawnGit(elsewhere, "commit", "-q", "-am", "Change about me");
+    await spawnGit(elsewhere, "push", "-q", "origin", "hub");
+
+    const rerun = await hedgeSetup(home, ["--non-interactive", "--plan", "codex"], []);
+
+    expect(rerun.code).toBe(0);
+    expect(JSON.parse(await spawnGit(dotfiles, "show", "hub:hedge.json")).plan).toBe("codex");
+    expect(await spawnGit(dotfiles, "show", "hub:about-me.md")).toBe("# Changed on another machine");
+  });
+
+  test("takes the commits another machine pushed when origin fetches into its own remote-tracking namespace", async () => {
+    const home = temp.make("home-");
+    const { dotfiles, checkout } = await branchCheckout(home);
+    await spawnGit(checkout, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin-view/*");
+    const elsewhere = join(temp.make("elsewhere-"), "dotfiles");
+    await spawnGit(home, "clone", "-q", "-b", "hub", dotfiles, elsewhere);
+    writeFileSync(join(elsewhere, "about-me.md"), "# Changed on another machine\n");
+    await spawnGit(elsewhere, "commit", "-q", "-am", "Change about me");
+    await spawnGit(elsewhere, "push", "-q", "origin", "hub");
+
+    const rerun = await hedgeSetup(home, ["--non-interactive", "--plan", "codex"], []);
+
+    expect(rerun.code).toBe(0);
+    expect(JSON.parse(await spawnGit(dotfiles, "show", "hub:hedge.json")).plan).toBe("codex");
+    expect(await spawnGit(dotfiles, "show", "hub:about-me.md")).toBe("# Changed on another machine");
+  });
+
+  test("stops before it applies when another machine deleted the branch the checkout tracks on origin, and names why", async () => {
+    const home = temp.make("home-");
+    const { dotfiles, checkout } = await branchCheckout(home);
+    await spawnGit(dotfiles, "branch", "-D", "hub");
+    const applied = join(home, "applied");
+
+    const rerun = await hedgeSetup(home, ["--non-interactive"], [], undefined, undefined, 0, "linux", () => writeFileSync(applied, ""));
+
+    expect(rerun.code).toBe(1);
+    expect(rerun.output).toContain(`hedge: could not find refs/heads/hub of origin in ${checkout} after fetching origin: fatal: ambiguous argument '@{upstream}': unknown revision or path not in the working tree. Run git -C ${checkout} pull, then run hedge setup again.`);
+    expect(existsSync(applied)).toBe(false);
+  });
+
+  test("adds the host keys of github.com, not of the host gh uses by default, before it reaches a profile over SSH, and keeps the lines already there", async () => {
+    const home = temp.make("home-");
+    const { dotfiles } = await branchCheckout(home, "git@github.com:nora/dotfiles.git");
+    mkdirSync(join(home, ".ssh"));
+    writeFileSync(join(home, ".ssh/known_hosts"), "example.com ssh-ed25519 AAAAexample");
+
+    const rerun = await hedgeSetup(home, ["--non-interactive", "--plan", "codex"], []);
+
+    expect(rerun.code).toBe(0);
+    expect(readFileSync(join(home, ".ssh/known_hosts"), "utf8")).toBe(["example.com ssh-ed25519 AAAAexample", ...fakeGitHubHostKeys.map((key) => `github.com ${key}`), ""].join("\n"));
+    expect(JSON.parse(await spawnGit(dotfiles, "show", "hub:hedge.json")).plan).toBe("codex");
   });
 
   test("uses the org repo when its creation reports a failure but the repo was made", async () => {
@@ -217,7 +363,7 @@ describe("hedge setup profile", () => {
     expect(rerun.prompts).toEqual(["Press ↵ to keep them, or e to change them: "]);
     expect(rerun.output).toContain("  ✓ Reusing your repo nora/hedge-profile");
     expect(rerun.output).not.toContain("Created the private repo");
-    expect(await pushedAnswers(home)).toMatchObject({ packs: ["pull-requests", "orchestration", "communication"], plan: "both", settings: { "memory.repo": "nora/hedge-memory" } });
+    expect(await pushedAnswers(home)).toMatchObject({ packs: ["pull-requests", "orchestration", "communication", "memory"], plan: "both", settings: { "memory.repo": "nora/hedge-memory" } });
     expect(await spawnGit(githubRepo(home, "nora/hedge-profile"), "rev-list", "--count", "main")).toBe("3");
   });
 
@@ -253,9 +399,23 @@ describe("hedge setup profile", () => {
     const home = temp.make("home-");
     expect((await hedgeSetup(home, starter, ["", ""])).code).toBe(0);
     await spawnGit(profilePath(home), "remote", "set-url", "origin", "https://github.com/nora/hedge-profile-public.git");
-    const rerun = await hedgeSetup(home, ["--set", "pull-requests.freeReviews=2"]);
+    writeFileSync(join(home, ".config/hedge/machine.json"), JSON.stringify({ schema: 1, role: "linux" }));
+    const rerun = await hedgeSetup(home, starter, ["", ""]);
     expect(rerun.code).toBe(1);
-    expect(rerun.output).toContain(`hedge: ${profilePath(home)} is a clone of https://github.com/nora/hedge-profile-public.git, not nora/hedge-profile.`);
+    expect(rerun.output).toContain(`hedge: ${profilePath(home)} is a clone of nora/hedge-profile-public, not nora/hedge-profile.`);
+  });
+
+  test.each([["plain text", ["pretend", "pass", "x"]], ["text with an apostrophe", ["pretend", "pa'ss", "x"]], ["text with a double quote", ["pretend", 'pa"ss', "x"]], ["text with an at sign", ["pretend", "pa@ss", "x"]]])("names a profile folder that pushes outside GitHub as another remote, with no part of that address, when its sign-in, query and fragment hold a password that is %s", async (_, parts) => {
+    const home = temp.make("home-");
+    expect((await hedgeSetup(home, starter, ["", ""])).code).toBe(0);
+    const password = parts.join("-");
+    await spawnGit(profilePath(home), "config", "remote.origin.pushurl", `HTTPS://nora:${password}@git.example/nora/my mirror.git?access_token=${password}#${password}.`);
+    writeFileSync(join(home, ".config/hedge/machine.json"), JSON.stringify({ schema: 1, role: "linux" }));
+    const rerun = await hedgeSetup(home, starter, ["", ""]);
+    expect(rerun.code).toBe(1);
+    expect(rerun.output).toContain(`hedge: ${profilePath(home)} is a clone of another remote, not nora/hedge-profile.`);
+    expect(rerun.output).not.toContain("git.example");
+    for (const part of password.split(/['"@]/)) expect(rerun.output).not.toContain(part);
   });
 
   test("refuses to take over a folder that is not the profile", async () => {

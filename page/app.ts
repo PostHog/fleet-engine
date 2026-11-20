@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-import { installPrompt, startPrompt, toggleSelected, toggleStart, whereLabels, type PromptData, type Start, type Where } from "./model.ts";
+import { installNames, installPrompt, startPrompt, startStatus, toggleSelected, toggleStart, type PromptData, type Start } from "./model.ts";
 import { promptHtml, t3Link } from "./prompt.ts";
 
 const selectionKey = "hedge-packs";
@@ -29,26 +29,19 @@ function showPrompt(id: string, text: string, status: string) {
 }
 
 function chooser(form: HTMLFormElement, data: PromptData) {
-  const switchOf = (where: Where, pack: string) => form.elements.namedItem(`${where}:${pack}`) as HTMLInputElement;
-  const radioOf = (where: Where) => form.querySelector<HTMLInputElement>(`#where-${where}`)!;
-  const starts: Record<Where, Start> = { mac: { where: "mac", off: [] }, hub: { where: "hub", off: [] } };
-  for (const where of ["mac", "hub"] as const) starts[where].off = data.startPacks.filter((pack) => !switchOf(where, pack).checked);
-  let where: Where = radioOf("hub").checked ? "hub" : "mac";
+  const switchOf = (pack: string) => form.elements.namedItem(`start:${pack}`) as HTMLInputElement | null;
+  let start: Start = { off: data.startPacks.filter((pack) => switchOf(pack)?.checked === false) };
 
   const show = () => {
-    radioOf(where).checked = true;
-    for (const start of Object.values(starts)) for (const pack of data.startPacks) switchOf(start.where, pack).checked = !start.off.includes(pack);
-    showPrompt("start", startPrompt(data, starts[where]), `The prompt is for ${whereLabels[where]}.`);
+    for (const pack of data.startPacks) {
+      const box = switchOf(pack);
+      if (box) box.checked = !start.off.includes(pack);
+    }
+    showPrompt("start", startPrompt(data, start), startStatus(data, start));
   };
 
   form.addEventListener("change", (event) => {
-    const input = event.target as HTMLInputElement;
-    if (input.name === "where") where = input.value as Where;
-    else {
-      const [box, pack] = input.name.split(":") as [Where, string];
-      starts[box] = toggleStart(data, starts[box], pack);
-      where = box;
-    }
+    start = toggleStart(data, start, (event.target as HTMLInputElement).name.slice("start:".length));
     show();
   });
   show();
@@ -64,7 +57,8 @@ function picker(form: HTMLFormElement, data: PromptData) {
     storeSelection(selected);
     document.getElementById("install-empty")!.hidden = selected.length > 0;
     document.getElementById("install-full")!.hidden = selected.length === 0;
-    const count = selected.length === 1 ? "1 pack selected" : `${selected.length} packs selected`;
+    const named = installNames(data, selected).length;
+    const count = named === 1 ? "1 pack selected" : `${named} packs selected`;
     document.getElementById("install-count")!.textContent = count;
     const jump = document.getElementById("install-jump")!;
     jump.hidden = selected.length === 0;
@@ -104,16 +98,41 @@ function selectLinks() {
     link.addEventListener("click", () => storeSelection([...new Set([...storedSelection(), link.dataset.select!])]));
 }
 
+const fromDisk = (href: string) => (location.protocol === "file:" ? href.replace(/\/(#.*)?$/, "/index.html$1") : href);
+
 function linksFromDisk() {
   if (location.protocol !== "file:") return;
-  for (const link of document.querySelectorAll<HTMLAnchorElement>('a[href^="."], a[href$="/"]:not([href*=":"])'))
-    link.setAttribute("href", link.getAttribute("href")!.replace(/\/(#.*)?$/, "/index.html$1"));
+  for (const link of document.querySelectorAll<HTMLAnchorElement>('a[href^="."], a[href$="/"]:not([href*=":"])')) link.setAttribute("href", fromDisk(link.getAttribute("href")!));
+}
+
+function player(dialog: HTMLDialogElement) {
+  const video = dialog.querySelector("video")!;
+  document.addEventListener("click", (event) => {
+    const button = (event.target as Element).closest<HTMLButtonElement>("button[data-video]");
+    if (!button) return;
+    video.poster = button.dataset.poster!;
+    video.src = button.dataset.video!;
+    document.getElementById(dialog.getAttribute("aria-labelledby")!)!.textContent = button.dataset.title!;
+    document.getElementById(dialog.getAttribute("aria-describedby")!)!.textContent = button.dataset.line!;
+    const page = dialog.querySelector<HTMLAnchorElement>(".player-page")!;
+    page.setAttribute("href", fromDisk(button.dataset.page!));
+    page.textContent = `Read how ${button.dataset.title} works`;
+    dialog.showModal();
+    if (!matchMedia("(prefers-reduced-motion: reduce)").matches) video.play().catch(() => {});
+  });
+  dialog.querySelector(".player-close")!.addEventListener("click", () => dialog.close());
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog) dialog.close();
+  });
+  dialog.addEventListener("close", () => video.pause());
 }
 
 const chooserForm = document.getElementById("chooser") as HTMLFormElement | null;
 const pickerForm = document.getElementById("picker") as HTMLFormElement | null;
 if (chooserForm && data) chooser(chooserForm, data);
 if (pickerForm && data) picker(pickerForm, data);
+const playerDialog = document.querySelector<HTMLDialogElement>("dialog.player");
+if (playerDialog) player(playerDialog);
 copyButtons();
 selectLinks();
 linksFromDisk();

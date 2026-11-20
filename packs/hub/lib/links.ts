@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { tryLockBox } from "./box-lock.ts";
 import { slugFor, type Coder, type Result } from "./coder.ts";
 import { proxyPort, relayPortOf } from "./run.ts";
+import hubPack from "../pack.json";
 import { quote, remoteHedge, type Machine, type PeerLinkInput, type PeerMachine } from "./machine.ts";
 import { GatewayClientError, gatewayPort, localGatewayUrl, readGatewayClient, writePrivateFile, type GatewaySettings } from "../../mcp-gateway/lib/client.ts";
 import { boxPrefix, isBoxName } from "../../../src/hub/names.ts";
@@ -69,8 +70,18 @@ async function handOverProxy(coder: Pick<Coder, "ssh">, here: Machine, box: stri
   const key = join(here.home, proxyKeyPath);
   if (!existsSync(key)) return here.say(`skip ~/${proxyKeyPath}: this machine has none`);
   const connected = await coder.ssh(box, `umask 077 && ${remoteHedge("cli-proxy connect")}`, readFileSync(key, "utf8"));
-  if (connected.code !== 0) here.say(`${box} keeps its own sign-in: ${(connected.stderr || connected.stdout).trim()}`);
+  if (connected.code !== 0) return here.say(`${box} keeps its own sign-in: hedge cli-proxy connect exited ${connected.code} there. To see why and hand over the same key again, run on the hub: hedge box run ${box} -- hedge cli-proxy connect < ~/${proxyKeyPath}, then hedge box run ${box} -- hedge apply`);
+  const applied = await coder.ssh(box, remoteHedge("apply"));
+  if (applied.code !== 0) return here.say(`${box}: hedge apply exited ${applied.code} there. To see why, run on the hub: hedge box run ${box} -- hedge apply`);
+  const lines = applied.stdout.split("\n");
+  for (const { check, model, name, args } of proxyChecks) {
+    const found = hubPack.checks.find((item) => item.id === check);
+    if (lines.includes(`To do: ${found?.todo}`)) here.say(`${box}: the proxy lists no ${model} model yet, so ${name} there keeps its own sign-in until the proxy serves it.`);
+    else if (lines.includes(`Fix: ${found?.say}`)) here.say(`${box}: ${name} there keeps its own sign-in, because it cannot reach your own-account proxy or the proxy is not safe to use. To see why, run on the hub: hedge box run ${box} -- hedge cli-proxy check${args}`);
+  }
 }
+
+const proxyChecks = [{ check: "cli-proxy-client", model: "Claude", name: "Claude Code", args: "" }, { check: "cli-proxy-codex", model: "Codex", name: "Codex", args: " codex" }];
 
 export async function handOver(coder: Pick<Coder, "ssh">, here: Machine, box: string): Promise<boolean> {
   const gateway = await handOverGateway(coder, here, box);

@@ -1,19 +1,17 @@
 # Setup note: incident.io
 
-Read this when the person picks the incident.io pack, in step 6 with Mac
-only or in step 9 with a hub.
+Read this when the person picks the incident.io pack in step 6.
 
 An agent that watches a change they name pages them, and only them, through
 their own incident.io alert source, with `hedge page`. The alert route on
 that source decides who is paged, so most of the setup is in incident.io.
-With Mac only, the token lives on the Mac. With a hub, it lives on the hub,
-and every other machine pages through it.
+The token lives on the hub, and every node pages through it.
 
 [Page you through incident.io](https://github.com/PostHog/hedge/blob/main/docs/incident-io.md)
 explains how it works and its risks. Tell them the risks before step 3.
 
-1. The workflow starts off. Add `--workflows page-owner=on` to the setup
-   command.
+1. The workflow starts on with the pack. To leave it off, add
+   `--workflows page-owner=off` to the setup command.
 2. **Check the prerequisites.** Ask with your question tool whether they
    have all three. incident.io can page only a user with an **On-call**
    seat.
@@ -45,19 +43,16 @@ explains how it works and its risks. Tell them the risks before step 3.
      source posts to a Slack channel.
 5. **Save the source.** Ask for the token with the secret prompt,
    delivered as a file, never in the chat. They can give the URL in the
-   chat: it cannot page without the token. Then run, on any machine of
-   theirs:
+   chat: it cannot page without the token. Then run, on the hub:
 
    ```sh
-   hedge page setup '<source URL>' < <token file>
+   ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge page setup "<source URL>"' < <token file>
    rm -f <token file>
-   hedge page --key setup-check --title "Setup check" --dry-run
+   ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge page --key setup-check --title "Setup check" --dry-run'
    ```
 
-   With a hub, run it after the hub's `hedge update`. The command runs on
-   the hub, and the token travels on SSH standard input only. The dry run
-   checks the saved source, and from another machine the SSH hop to the
-   hub. It sends nothing.
+   The token travels on SSH standard input only. The dry run checks the
+   saved source. It sends nothing.
 
    `setup` refuses a URL that is not an incident.io alert events URL, and
    a token that is not one line. Ask for that value again.
@@ -72,6 +67,6 @@ explains how it works and its risks. Tell them the risks before step 3.
    When they ask for one, send it, and withdraw it once they confirm:
 
    ```sh
-   hedge page --key setup-check --title "Setup check" --description "A test page they asked for."
-   hedge page --key setup-check --resolve
+   ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge page --key setup-check --title "Setup check" --description "A test page they asked for."'
+   ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge page --key setup-check --resolve'
    ```
