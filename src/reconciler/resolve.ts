@@ -14,6 +14,7 @@ import type {
   PackSetting,
   Plan,
   Profile,
+  Provider,
   Owned,
   ResolvedPack,
   Scope,
@@ -21,6 +22,7 @@ import type {
   T3ProjectScript,
 } from "../pack/types.ts";
 import { signerSetting } from "../adapters/identity/signers.ts";
+import { hubOnlySetting, wholeRoutes } from "../adapters/provider-config/proxy-route.ts";
 import { engineSettings } from "../pack/manifest.ts";
 import { oldNameOnly, packAliases, packNamed, packsNamed, type PackAliases } from "../pack/aliases.ts";
 import { placedMachine } from "../profile/profile.ts";
@@ -99,6 +101,7 @@ export function resolve(profile: Profile, saved: MachineFile, sources: FetchedSo
 
   plan.catalog = serviceCatalog(order, profile, activeIds(settledWorkflows(profile, { ...machine, role: "hub" }, order, names, byOldName)), byOldName, machine.role === "hub" ? os : "linux");
   const packFiles: DesiredFile[] = [];
+  const unfit: Plan["config"] = [];
   for (const { manifest, dir } of order) {
     const pack = manifest.name;
     for (const entry of manifest.files ?? []) if (fits(pack, entry, `file ${entry.target}`)) packFiles.push({ target: entry.target, source: within(dir, entry.path, pack) });
@@ -126,7 +129,11 @@ export function resolve(profile: Profile, saved: MachineFile, sources: FetchedSo
       (plan.t3ProjectScripts ??= []).push({ ...script, pack });
     }
     for (const entry of manifest.config ?? []) {
-      if (!fits(pack, entry, `config ${entry.provider}:${entry.key}`)) continue;
+      refuseProxySetting(pack, entry);
+      if (!fits(pack, entry, `config ${entry.provider}:${entry.key}`)) {
+        unfit.push({ ...entry, pack });
+        continue;
+      }
       const owner = `${entry.provider}:${entry.key}`;
       if (plan.owners[owner]) throw new ResolveError(`${owner} is owned by both ${plan.owners[owner]} and ${pack}`);
       plan.owners[owner] = pack;
@@ -137,12 +144,16 @@ export function resolve(profile: Profile, saved: MachineFile, sources: FetchedSo
   if (plan.reachesHub || macOnHub(profile, machine, os)) plan.pullsFromHub = true;
   if (plan.reachesHub && plan.catalog.length) plan.jobs.push(hubForward(profile.hub!, plan.catalog));
   for (const entry of profile.overrides?.config ?? []) {
+    refuseProxySetting("profile", entry);
     if (!fits("profile", entry, `config ${entry.provider}:${entry.key}`)) continue;
     const owner = `${entry.provider}:${entry.key}`;
     plan.config = plan.config.filter((item) => `${item.provider}:${item.key}` !== owner);
     plan.owners[owner] = "profile";
     plan.config.push({ ...entry, pack: "profile" });
   }
+  const routes = wholeRoutes(plan.config, unfit);
+  plan.config = routes.config;
+  plan.dropped.push(...routes.dropped);
 
   const settings = machineDefaults(activeSettings(order, active), machine);
   plan.settings = settingValues(settings, answersOf(profile, settings));
@@ -225,6 +236,12 @@ function checkTargets(files: DesiredFile[]) {
     seen.add(target);
   }
   return files;
+}
+
+function refuseProxySetting(pack: string, entry: { provider: Provider; key: string; value?: unknown }) {
+  if (pack === "hub") return;
+  const setting = hubOnlySetting(entry.provider, entry.key, entry.value);
+  if (setting) throw new ResolveError(`${pack === "profile" ? "your profile" : `the ${pack} pack`} sets ${setting} in config ${entry.provider}:${entry.key}. Only the hub pack may set Hedge's proxy route. Remove that config entry.`);
 }
 
 function answersOf(profile: Profile, settings: PackSetting[]) {

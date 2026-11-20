@@ -302,12 +302,39 @@ and Hedge does not wrap it in a unit.
     pack owns only the probe, a check. The config items say `after: route`.
   - *Apply while the proxy does not answer:* the gate fails, the two items
     leave the plan, and the adapter removes its own values. Claude Code
-    uses its own sign-in. A key that holds exactly the pack's value also
-    goes when no apply recorded it, as after `hedge cli-proxy connect`,
-    and while a pack source cannot be fetched. The items that wait for
-    one check go together, so they all stay when one holds another value.
+    uses its own sign-in. The adapter removes only the keys that its
+    record names, also while a pack source cannot be fetched.
+    `hedge cli-proxy connect` writes neither key and runs nothing: it saves
+    the proxy key, and the next `hedge apply` writes the route, so every
+    route Hedge writes has a record. When the hub hands a box over, it runs
+    `hedge apply` on the box as its own SSH step after connect.
+  - *One route:* a provider's route is one unit. For Claude it is the
+    base URL and the key helper. For Codex it is `model_provider` and the
+    `hedge-proxy` table. When another pack or the profile sets a key over
+    any part of the unit, or the route check drops a part, the whole unit
+    leaves the plan. `wholeRoutes` applies this rule in resolve, after the
+    profile overrides, and in apply, after the checks, so `hedge apply`
+    and `hedge doctor` see the same plan. The adapter writes the route
+    keys of a provider together or not at all, and removes them together. Each time the route leaves,
+    for any reason, the settings beside it that only work through it leave
+    too: a Claude credential such as `ANTHROPIC_AUTH_TOKEN` beside Hedge's
+    proxy address, or a Codex `model_provider = "hedge-proxy"` beside
+    Hedge's table. Apply shows a `To do:` that names each one, never its
+    value, and says only what it removed. A credential stays
+    only while its value equals the value a pack sets for it now; a value
+    you edited leaves with the route. The route leaves when the file holds
+    Hedge's proxy value before apply and another value or none after it,
+    also when a profile gateway takes the place of Hedge's address. A gateway from your profile is not
+    Hedge's route: its keys leave one by one, as on the base.
+  - *One owner of the proxy values:* only the Hub pack may set
+    `model_provider = "hedge-proxy"`, the `hedge-proxy` table, Hedge's
+    proxy address as the Claude base URL, or Hedge's key helper as the
+    Claude `apiKeyHelper`. Resolve refuses a profile or
+    another pack that sets one, and names the pack and the setting.
   - *Until recovery:* each `hedge apply` and `hedge doctor` reports the
-    failed check. The first apply whose probe passes writes both keys
+    failed check. A node with no proxy key from the hub waits for the
+    person: its check exits 4, so apply shows the check's `To do:`, which
+    names the hub step that adds a subscription, and not a `Fix:`. The first apply whose probe passes writes both keys
     again. Between applies nothing changes the route.
   *Reason:* today the adapter writes the keys and then a step removes them
   (`route`, `packs/hub/lib/cli-proxy.ts:198-204`): two writers of one key.

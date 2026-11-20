@@ -117,6 +117,33 @@ describe("resolve", () => {
     expect(() => plan({ packs: ["rival"] }, mac, [engine, rival])).toThrow(new ResolveError("claude:permissions.defaultMode is owned by both base and rival"));
   });
 
+  test("refuses Hedge's proxy values from a profile or any pack but the hub pack, and names who set which one", () => {
+    const codex = (key: string, value: unknown) => ({ provider: "codex" as const, key, value });
+    const fromProfile = (entry: { provider: "claude" | "codex"; key: string; value: unknown }) => () => plan({ overrides: { config: [entry] } });
+    expect(fromProfile(codex("model_provider", "hedge-proxy"))).toThrow(new ResolveError(`your profile sets model_provider = "hedge-proxy" in config codex:model_provider. Only the hub pack may set Hedge's proxy route. Remove that config entry.`));
+    expect(fromProfile({ ...codex("model_provider", "hedge-proxy"), workflow: "off" } as never)).toThrow('sets model_provider = "hedge-proxy"');
+    expect(fromProfile(codex("model_providers.hedge-proxy.base_url", "http://127.0.0.1:8317/v1"))).toThrow("sets the hedge-proxy provider table in config codex:model_providers.hedge-proxy.base_url");
+    expect(fromProfile({ provider: "claude", key: "env", value: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" } })).toThrow("your profile sets env.ANTHROPIC_BASE_URL = http://127.0.0.1:8317 in config claude:env");
+    const rival = withPack({ schema: 1, name: "rival", summary: "Rival.", config: [{ provider: "codex", key: "model_providers", value: { "hedge-proxy": { name: "Mine" } } }] });
+    expect(() => plan({ packs: ["rival"] }, mac, [engine, rival])).toThrow(new ResolveError("the rival pack sets the hedge-proxy provider table in config codex:model_providers. Only the hub pack may set Hedge's proxy route. Remove that config entry."));
+    expect(plan({ overrides: { config: [codex("model_provider", "my-proxy"), codex("model_providers.my-proxy", { base_url: "http://127.0.0.1:8317/v1" }), { provider: "claude", key: "env.ANTHROPIC_BASE_URL", value: "https://gateway.example.com" }] } }).owners["codex:model_provider"]).toBe("profile");
+    expect(plan({ packs: ["hub"] }, devbox).owners["claude:env.ANTHROPIC_BASE_URL"]).toBe("hub");
+  });
+
+  test("refuses Hedge's own Claude key helper from a profile and names the pack and the setting", () => {
+    const helper = 'cat "$HOME/.config/hedge/cli-proxy.key"';
+    expect(() => plan({ overrides: { config: [{ provider: "claude", key: "apiKeyHelper", value: helper }] } })).toThrow(new ResolveError(`your profile sets apiKeyHelper = ${helper} in config claude:apiKeyHelper. Only the hub pack may set Hedge's proxy route. Remove that config entry.`));
+    const rival = withPack({ schema: 1, name: "rival", summary: "Rival.", config: [{ provider: "claude", key: "apiKeyHelper", value: helper }] });
+    expect(() => plan({ packs: ["rival"] }, mac, [engine, rival])).toThrow(`the rival pack sets apiKeyHelper = ${helper} in config claude:apiKeyHelper.`);
+    expect(plan({ overrides: { config: [{ provider: "claude", key: "apiKeyHelper", value: "my-helper" }] } }).owners["claude:apiKeyHelper"]).toBe("profile");
+  });
+
+  test("takes a T3 key with an empty dotted part as one literal key", () => {
+    const result = plan({ overrides: { config: [{ provider: "t3", key: "extension..option", value: true }] } });
+    expect(result.owners["t3:extension..option"]).toBe("profile");
+    expect(result.config).toContainEqual({ provider: "t3", key: "extension..option", value: true, pack: "profile" });
+  });
+
   test("lets the profile override a pack's config key", () => {
     const result = plan({ overrides: { config: [{ provider: "claude", key: "permissions.defaultMode", value: "plan" }] } });
     expect(result.owners["claude:permissions.defaultMode"]).toBe("profile");

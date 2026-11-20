@@ -3,8 +3,8 @@ import { createHash } from "node:crypto";
 import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, symlinkSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join, relative } from "node:path";
-import { cliFixtures, repoRoot } from "./testing/cli.ts";
 import { main } from "./cli.ts";
+import { cliFixtures, repoRoot } from "./testing/cli.ts";
 import { spawnGit, tempDirs } from "./testing/git.ts";
 
 const temp = tempDirs();
@@ -29,6 +29,28 @@ function snapshot(root: string): Record<string, string> {
 }
 
 describe("hedge apply", () => {
+  test("a check that waits for the person prints a To do, and neither apply nor doctor fails", async () => {
+    const engine = temp.make("engine-");
+    cpSync(join(repoRoot, "packs/base"), join(engine, "packs/base"), { recursive: true });
+    mkdirSync(join(engine, "packs/pool"), { recursive: true });
+    writeFileSync(join(engine, "packs/pool/pack.json"), JSON.stringify({ schema: 1, name: "pool", summary: "A pool of accounts.", checks: [{ id: "pool", run: ["pool-check"], say: "Hedge cannot read the pool.", todo: "Add an account to the pool." }] }));
+    const home = temp.make("home-");
+    const profile = profileDir(["pool"]);
+    const run = async (command: string[]) => (command.at(-1) === "pool-check" ? 4 : 0);
+    const typed = async (args: string[]) => {
+      const lines: string[] = [];
+      const code = await main(args, { home, engineRoot: engine, platform: "linux", env: {}, print: (line) => lines.push(line), run });
+      return { code, lines };
+    };
+    const applied = await typed(["apply", "--profile", profile]);
+    expect(applied.code).toBe(0);
+    expect(applied.lines).toContain("To do: Add an account to the pool.");
+    expect(applied.lines.at(-1)).toStartWith("Applied ");
+    const doctor = await typed(["doctor", "--profile", profile]);
+    expect(doctor.code).toBe(0);
+    expect(doctor.lines.slice(-2)).toEqual(["To do: Add an account to the pool.", "Everything Hedge sets matches your profile. The To do lines above wait for you."]);
+  });
+
   test("puts the base pack's rules on a fresh machine and remembers the profile", async () => {
     const home = temp.make("home-");
     const profile = profileDir();
@@ -99,19 +121,17 @@ describe("hedge apply", () => {
     });
   });
 
-  test("removes a stale proxy URL from Claude Code's settings, and doctor sees it first", async () => {
+  test("keeps a proxy URL in Claude Code's settings that Hedge has no record of, and doctor asks for no change to it", async () => {
     const home = temp.make("home-");
     mkdirSync(join(home, ".claude"), { recursive: true });
-    writeFileSync(join(home, ".claude/settings.json"), JSON.stringify({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317", ANTHROPIC_AUTH_TOKEN: "proxy-key" }, model: "opus" }));
+    const mine = { env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317", ANTHROPIC_AUTH_TOKEN: "proxy-key" }, model: "opus" };
+    writeFileSync(join(home, ".claude/settings.json"), JSON.stringify(mine));
     const profile = profileDir();
-    await hedge(["apply", "--profile", profile, "--dry-run"], home);
     const doctor = await hedge(["doctor", "--profile", profile], home);
-    expect(doctor.output).toMatch(/Fix: \.claude\/settings\.json needs an update: .*remove env\.ANTHROPIC_BASE_URL, env\.ANTHROPIC_AUTH_TOKEN\./);
+    expect(doctor.output).not.toContain("env.ANTHROPIC");
     const result = await hedge(["apply", "--profile", profile], home);
-    expect(result.output).toContain("replace .claude/settings.json");
-    const settings = JSON.parse(readFileSync(join(home, ".claude/settings.json"), "utf8"));
-    expect(settings.env).toBeUndefined();
-    expect(settings.model).toBe("opus");
+    expect(result.output).not.toContain("env.ANTHROPIC");
+    expect(JSON.parse(readFileSync(join(home, ".claude/settings.json"), "utf8"))).toMatchObject(mine);
   });
 
   test("keeps an unmanaged file and a local edit, and says so", async () => {

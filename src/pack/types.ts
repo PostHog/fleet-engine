@@ -170,7 +170,9 @@ export type PackManifest = {
   subcommands?: Record<string, string[]>;
 };
 
-export type PackCheck = Scope & { id: string; run: string[]; say: string };
+export const waitsForPerson = 4;
+
+export type PackCheck = Scope & { id: string; run: string[]; say: string; todo?: string };
 
 export const handlerSeams = ["review-bot", "heavy-route", "pr-command", "slack-capture", "secret-rows", "secret-providers", "proof-receipt"] as const;
 export type HandlerSeam = (typeof handlerSeams)[number];
@@ -261,9 +263,9 @@ export type Plan = {
   settings: Record<string, SettingValue>;
   unanswered: PackSetting[];
   ask: PackSetting[];
-  dropped: Array<{ pack: string; item: string; reason: string; check?: string; value?: unknown }>;
+  dropped: Array<{ pack: string; item: string; reason: string; check?: string }>;
 };
 
-export type Finding = { id: string; pack: string; say: string; repair?: "apply" | "human" };
+export type Finding = { id: string; pack: string; say: string; repair?: "apply" | "human"; todo?: true };
 
 export type Report = { ok: boolean; actions: Action[]; findings: Finding[]; humanLeft: Array<Owned<HumanStep>> };

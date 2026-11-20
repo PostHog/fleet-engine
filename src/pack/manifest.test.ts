@@ -209,13 +209,20 @@ describe("loadPacks", () => {
     await expect(loadPacks(sourceWith({ base: { ...base, human, jobs: [{ ...job, roles: ["hub", "solo", "devbox"] }] } }))).rejects.toThrow("jobs listen: runs where its human step token does not; give it the same roles");
   });
 
-  test("lets a config entry wait for a check of its pack, but only where that check runs", async () => {
+  test("lets a Claude or Codex config entry wait for a check of its pack, but only where that check runs, and a T3 setting only for a human step", async () => {
     const checks = [{ id: "proxy-up", run: ["proxy-check"], say: "The proxy is down.", roles: ["devbox"] }];
     const entry = { provider: "claude", key: "env.ANTHROPIC_BASE_URL", value: "http://127.0.0.1:8317", after: "proxy-up", roles: ["devbox"] };
     await expect(loadPacks(sourceWith({ base: { ...base, checks, config: [entry] } }))).resolves.toHaveLength(1);
     await expect(loadPacks(sourceWith({ base: { ...base, checks, config: [{ ...entry, after: "proxy-gone" }] } }))).rejects.toThrow("config env.ANTHROPIC_BASE_URL: after must name a human step or a check of this pack");
     await expect(loadPacks(sourceWith({ base: { ...base, checks, config: [{ ...entry, roles: ["devbox", "hub"] }] } }))).rejects.toThrow("config env.ANTHROPIC_BASE_URL: runs where its check proxy-up does not; give it the same roles");
+    await expect(loadPacks(sourceWith({ base: { ...base, checks, config: [{ ...entry, provider: "t3", key: "sidebarAutoSettleAfterDays", value: 3 }] } }))).rejects.toThrow("config sidebarAutoSettleAfterDays: after must name a human step of this pack");
     await expect(loadPacks(sourceWith({ base: { ...base, checks, steps: [{ id: "start", run: ["start"], after: "proxy-up", roles: ["devbox"] }] } }))).rejects.toThrow("steps start: after must name a human step of this pack");
+  });
+
+  test("takes a check's todo only as a sentence that says what the person does", async () => {
+    const check = { id: "pool", run: ["pool-check"], say: "Hedge cannot read the pool." };
+    await expect(loadPacks(sourceWith({ base: { ...base, checks: [{ ...check, todo: "Add an account to the pool." }] } }))).resolves.toHaveLength(1);
+    for (const todo of ["", " ", 4]) await expect(loadPacks(sourceWith({ base: { ...base, checks: [{ ...check, todo }] } }))).rejects.toThrow("checks pool: todo must say what the person does");
   });
 
   test("rejects malformed nested items with a clear error", async () => {

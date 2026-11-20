@@ -19,6 +19,12 @@ Every machine keeps working when the hub is down.
    both on when the person wants threads to go on after a usage limit. Proxy
    panel needs own-account balancing too; turn it on only when the person asks
    for the proxy's web panel. Dream moved to the Memory pack.
+   With own-account balancing on, the hub installs and runs the proxy even
+   while it holds none of their subscriptions, and setup goes on. Each
+   machine keeps its own sign-in until the proxy serves the agent. Until the
+   proxy holds `hub.proxyAccounts` of their subscriptions (2 by default),
+   `hedge doctor` on the hub shows a `To do:` line with the login command.
+   Relay that line; it does not fail setup.
 4. Each node joins when `hedge devbox add` adds it. The hub takes the new
    node at its next `hedge update`, or at once when it answers.
 
@@ -34,8 +40,11 @@ provider recovery never knows that a provider has capacity, and continues nothin
 
 1. Add `provider-recovery=on,own-account-balancing=on` to `--workflows` of
    the command in item 2 of step 9.
-2. Once item 2 of step 9 has turned it on, the proxy needs at least two of their
-   own subscriptions. This prints the sign-in command that adds one:
+2. Once item 2 of step 9 has turned it on, provider recovery needs at least
+   one of their own subscriptions in the proxy, and the proxy should hold
+   two. Setup does not wait for them: until the proxy holds them,
+   `hedge doctor` shows a `To do:` line with the sign-in command, and nothing
+   fails. This prints the sign-in command that adds one:
 
    ```sh
    ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge cli-proxy plan'
@@ -62,7 +71,10 @@ provider recovery never knows that a provider has capacity, and continues nothin
    ```
 3. After step 9 adds the node, connect it to the proxy. On the hub,
    `hedge cli-proxy doctor` prints one `Connect <node>:` command per node.
-   Each one reads the hub's proxy key, so it runs on the hub:
+   Each one reads the hub's proxy key, so it runs on the hub. It saves the
+   key on the node, then runs `hedge apply` on that node. Connect alone
+   only saves the key: the node uses the proxy only after `hedge apply`
+   runs there.
 
    ```sh
    ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge cli-proxy doctor'
@@ -77,3 +89,7 @@ provider recovery never knows that a provider has capacity, and continues nothin
    <the command after Connect <node>:>
    SCRIPT
    ```
+
+   Read the `To do:` and `Fix:` lines that `hedge apply` prints for the
+   node. If connect fails, it runs no `hedge apply` and changes nothing:
+   fix what it prints, then run the same command again.
