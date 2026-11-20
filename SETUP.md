@@ -421,7 +421,7 @@ command only once step 7 has named the hub.
 | Pack | What it does | Offer it | Setup note |
 | --- | --- | --- | --- |
 | `pull-requests` | Every change passes proof, a second-model review and a QA swarm before it merges, and a nightly loop you turn on improves one area. | Always | None |
-| `orchestration` | Big work becomes a map of tickets that a conductor thread works through, and side work gets its own thread. | Always | `packs/orchestration/SETUP.md` |
+| `orchestration` | Type /build and say what you want: small work goes straight to a pull request, big work becomes a map that a conductor thread works through, and side work gets its own thread. | Always | `packs/orchestration/SETUP.md` |
 | `communication` | Agents write in your voice, give short updates, and share plans and previews as links. | Always | None |
 | `integrations` | Claude Code and Codex get the official GitHub, Context7, and Convex plugins, and Claude can hand work to Codex. | Always | None |
 | `memory` | One private repo holds what your agents learn and what you save, and every box reads it. | Always | `packs/memory/SETUP.md` |
@@ -855,8 +855,9 @@ Then give them these habits, one line each:
 - Hedge keeps itself up to date: each box runs `hedge update` every night.
 - **Side fix.** When an agent finds an unrelated problem, it hands the fix to
   a new thread with its own pull request, and stays on its task.
-- **Conductor.** For big work, one thread writes a map of tickets and starts
-  one worker thread per ticket.
+- **Build.** Type `/build` and say what you want. The agent sizes the work:
+  a small change goes to a pull request, and big work becomes a map of
+  tickets with one worker thread per ticket.
 
 Leave out a habit whose pack they did not pick: the last two need the
 Orchestration pack.

@@ -27,9 +27,9 @@ describe("the Orchestration pack", () => {
     expect(result.packs.find((pack) => pack.name === "orchestration")).toMatchObject({ available: false, reason: "requires pull-requests" });
   });
 
-  test("links the wayfinder skills, and the wayfinder foundation from the pinned third-party source", () => {
+  test("links the build entry skill, the wayfinder skills, and the wayfinder foundation from the pinned third-party source", () => {
     const links = withPack().files.filter((file) => "source" in file && file.target.startsWith(".claude/skills/")).map((file) => file.target.split("/").pop());
-    expect(links).toEqual(expect.arrayContaining(["orchestration-wayfinder", "architecture", "impact", "lessons", "quality-loop", "signal-loop", "t3-kickoff", "usage-brief"]));
+    expect(links).toEqual(expect.arrayContaining(["build", "orchestration-wayfinder", "architecture", "impact", "lessons", "quality-loop", "signal-loop", "t3-kickoff", "usage-brief"]));
     expect(links).toEqual(expect.arrayContaining(["wayfinder", "grilling", "research", "prototype", "domain-modeling", "setup-matt-pocock-skills", "codebase-design"]));
   });
 
