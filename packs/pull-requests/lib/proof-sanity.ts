@@ -1,6 +1,7 @@
 import { mkdir, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { readPullRequest, type PullRequest, type Run } from "./pr-ci.ts";
+import { bloatSentence, scoreBloat, type BloatJudge } from "./proof-bloat.ts";
 import { remotesOf } from "./proof-checkout.ts";
 import { isCommitSha, measureGrowth } from "./proof-end-table.ts";
 import { guardField } from "./proof-receipt.ts";
@@ -44,7 +45,7 @@ export async function recordSanity(home: string, head: ProofIdentity, run: Run, 
   return pass;
 }
 
-export async function requireSanity(home: string, head: ProofIdentity, run: Run) {
+export async function requireSanity(home: string, head: ProofIdentity, run: Run, judge: () => Promise<BloatJudge>) {
   const { growth, missing } = await growthAtHead(home, head, run);
   const [first, final] = [growth.first?.production, growth.final?.production];
   if (first === 0) return;
@@ -57,5 +58,6 @@ export async function requireSanity(home: string, head: ProofIdentity, run: Run)
   }
   if (final <= 2 * first) return;
   if ((last?.production ?? -1) >= final) return;
-  throw new Error(`Production lines grew from ${first} at round 1 to ${final} at HEAD, past twice the first. Before another round, cut the PR back to base behaviour, or justify the growth: hedge proof sanity --verdict cut|justified --reason '<why>'`);
+  const score = await scoreBloat(home, head, run, growth.first!, growth.final!, judge);
+  throw new Error(`Production lines grew from ${first} at round 1 to ${final} at HEAD, past twice the first. ${bloatSentence(score)}`);
 }

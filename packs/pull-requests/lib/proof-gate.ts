@@ -13,6 +13,7 @@ import { quietCommitIn } from "./proof-delta.ts";
 import { isCommitSha, measureGrowth, type Growth } from "./proof-end-table.ts";
 import { autonomyOf } from "./proof-autonomy.ts";
 import { readSanity } from "./proof-sanity.ts";
+import { readBloat } from "./proof-bloat.ts";
 import { judge, readCriticalPaths, type JudgeInput } from "./proof-judge.ts";
 import { askModel, familyOf, modelLabel, readRiskRubric, readRubric, reviewerRow, skillReferences } from "./proof-models.ts";
 
@@ -88,8 +89,8 @@ function unmeasured(head: ProofIdentity, run: Run, pull: PullRequest | undefined
 
 async function grownBy(home: string, head: ProofIdentity, run: Run, baseSha: string | undefined): Promise<Growth> {
   const growth = await measureGrowth(home, head, run, baseSha);
-  const sanity = (await readSanity(home, head)).at(-1);
-  return sanity ? { ...growth, sanity } : growth;
+  const [sanity, bloat] = [(await readSanity(home, head)).at(-1), await readBloat(home, head)];
+  return { ...growth, ...sanity ? { sanity } : {}, ...bloat ? { bloat } : {} };
 }
 
 const pushedHeadOf = (head: ProofIdentity, run: Run, seen: (pull: PullRequest) => void = () => {}) => (): PushedHead => {

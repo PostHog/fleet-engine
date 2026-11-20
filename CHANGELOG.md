@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### A fresh judge scores the growth
+
+- When the production lines at HEAD pass twice the lines at round 1, a fresh
+  bloat judge reads the Problem section of the pull request, the round-1 diff
+  and the HEAD diff. It has no part in the review loop. It returns the share
+  of HEAD's production lines that the problem does not need, and the hunks it
+  would cut. `hedge proof review` prints both with the sanity pass it asks
+  for: cut those hunks or justify each. The judge runs once per HEAD, with the
+  model of the model table's reviewer row, and `HEDGE_PROOF_BLOAT_JUDGE`
+  replaces it.
+- The Sanity pass cell of the end table shows the growth ratio and the
+  cuttable share, such as `×2.4, 30% cuttable`, before the latest pass.
+
 ### Decide alone, and show one table at the end
 
 - The setting `pull-requests.autonomy` sets how often an agent asks about a

@@ -66,7 +66,7 @@ const videoExtensions = new Set([".mp4", ".webm", ".mov", ".mkv"]);
 const evidenceCap = 20_000;
 
 const named = (text: string) => text.replace(/[^\p{L}\p{N} ._@+/:,'()[\]-]/gu, "_");
-const untrusted = (source: string, text: string) => `<untrusted source="${named(source)}">\n${text.trim().replace(/<\/?untrusted/gi, (tag) => "&lt;" + tag.slice(1))}\n</untrusted>`;
+export const untrusted = (source: string, text: string) => `<untrusted source="${named(source)}">\n${text.trim().replace(/<\/?untrusted/gi, (tag) => "&lt;" + tag.slice(1))}\n</untrusted>`;
 
 async function evidenceSection(evidence: JudgeInput["evidence"]) {
   const images: string[] = [];

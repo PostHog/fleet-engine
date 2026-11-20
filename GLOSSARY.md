@@ -149,8 +149,12 @@ A review round runs after another review only when the latest finished review, a
 _Avoid_: Round limit, cutoff
 
 **Sanity pass**:
-A check that a pull request needs when its production lines at HEAD are more than twice the lines at its first reviewed commit. Before the next round, the agent cuts the pull request back to base behaviour or justifies the growth, and records the verdict with `hedge proof sanity --verdict cut|justified --reason '<why>'`. The latest pass covers the production lines it saw, so a head that grows again needs a new pass. A round the user's `--override` runs waits for the pass too. The reason must not hold figures. A first review that saw no production lines needs none.
+A check that a pull request needs when its production lines at HEAD are more than twice the lines at its first reviewed commit. Before the next round, the agent cuts the pull request back to base behaviour or justifies the growth, and records the verdict with `hedge proof sanity --verdict cut|justified --reason '<why>'`. The latest pass covers the production lines it saw, so a head that grows again needs a new pass. A round the user's `--override` runs waits for the pass too. The reason must not hold figures. A first review that saw no production lines needs none. Before it asks for the pass, the bloat judge scores the growth.
 _Avoid_: Bloat check
+
+**Bloat judge**:
+A fresh model with no part in the review loop. When a pull request needs a sanity pass, it reads the Problem section, the diff at the first review round and the diff at HEAD, and returns the cuttable share: the share of HEAD's production lines that the problem does not need, with the hunks it would cut. The sanity pass cuts those hunks or justifies each. The end table shows the growth ratio and the cuttable share in the Sanity pass cell.
+_Avoid_: Bloat score, bloat reviewer
 
 ## Secrets
 

@@ -121,7 +121,7 @@ printf '{"number":42,"url":"https://github.com/example/product/pull/42","baseRef
   const env: Record<string, string | undefined> = {
     ...gitEnv, PATH: `${bin}:${process.env.PATH}`,
     CLAUDE_CODE_SESSION_ID: "session-under-test", CODEX_THREAD_ID: undefined, HEDGE_SETTINGS: JSON.stringify(settings), HEDGE_MODELS: JSON.stringify(models),
-    HEDGE_PROOF_JUDGE: `cat >/dev/null; echo '${verdict()}'`, HEDGE_PROOF_JUDGE_MODEL: "judge-under-test", T3CODE_THREAD_ID: "thread-1", HEDGE_PROOF_RETRY_DELAY_MS: "0",
+    HEDGE_PROOF_JUDGE: `cat >/dev/null; echo '${verdict()}'`, HEDGE_PROOF_JUDGE_MODEL: "judge-under-test", HEDGE_PROOF_BLOAT_JUDGE: `cat >/dev/null; echo '{"cuttable":0,"hunks":[]}'`, HEDGE_PROOF_BLOAT_JUDGE_MODEL: "bloat-judge-under-test", T3CODE_THREAD_ID: "thread-1", HEDGE_PROOF_RETRY_DELAY_MS: "0",
   };
   const git = async (...args: string[]) => {
     const result = await spawnAsync(["git", ...args], { cwd: repository, env });
@@ -321,7 +321,7 @@ export function verdict(changes: { proof?: Question; owed?: Question; review?: Q
   });
 }
 
-export function fakeModel(pr: Checkout, role: "REVIEWER" | "JUDGE", answer: string) {
+export function fakeModel(pr: Checkout, role: "REVIEWER" | "JUDGE" | "BLOAT_JUDGE", answer: string) {
   const prompts = join(pr.home, `${role.toLowerCase()}-prompts`);
   mkdirSync(prompts, { recursive: true });
   const reply = join(pr.home, `${role.toLowerCase()}-answer`);

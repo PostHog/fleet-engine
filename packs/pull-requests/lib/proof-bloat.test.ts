@@ -1,0 +1,91 @@
+import { afterEach, expect, test } from "bun:test";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { checkout, cleanFixtures, fakeModel, graded, type Checkout } from "./proof-testing.ts";
+
+afterEach(cleanFixtures);
+
+const lines = (count: number, word: string) => Array.from({ length: count }, (_, index) => `${word} ${index}`).join("\n") + "\n";
+const problem = "## Problem\n\nThe greeting drops the last name.\n\n";
+
+async function grownPastTwice(pr: Checkout, body: string) {
+  await pr.commit("feature.ts", lines(10, "greet"));
+  pr.pullRequestState({ body: body + graded("non-critical") });
+  expect((await pr.hedge("review-start", "--scope", "full")).code).toBe(0);
+  writeFileSync(join(pr.repository, "findings.md"), "- major | feature.ts:2 | the greeting drops the last name | anchor: greet 1\n");
+  expect((await pr.hedge("review-finish", "--round", "1", "--reviewer", "gpt-6.1-sol", "findings.md")).code).toBe(0);
+  writeFileSync(join(pr.repository, "responses.md"), "1. fixed: the greeting keeps it\n");
+  expect((await pr.hedge("respond", "--round", "1", "responses.md")).code).toBe(0);
+  const reviewed = await pr.git("rev-parse", "HEAD");
+  await pr.commit("retry.ts", lines(11, "retry"));
+  return reviewed;
+}
+
+test("past twice the first lines, a fresh judge scores the cuttable share once per HEAD, and the sanity pass and end table carry it", async () => {
+  const pr = await checkout();
+  const judge = fakeModel(pr, "BLOAT_JUDGE", JSON.stringify({ cuttable: 52, hunks: [{ citation: "retry.ts:1-11", reason: "the problem never retries" }] }));
+  const reviewed = await grownPastTwice(pr, problem);
+
+  const refusal = "Production lines grew from 10 at round 1 to 21 at HEAD, past twice the first. A fresh judge, bloat-judge-under-test, reads 52% of HEAD's production lines as more than the problem needs: retry.ts:1-11 (the problem never retries). Before another round, cut those hunks back to base behaviour, or justify each: hedge proof sanity --verdict cut|justified --reason '<why>'";
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(refusal);
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(refusal);
+  const prompts = judge.prompts();
+  expect(prompts).toHaveLength(1);
+  expect(prompts[0]).toContain("The greeting drops the last name.");
+  expect(prompts[0]).toContain("+greet 9");
+  expect(prompts[0]).toContain("+retry 10");
+  expect(prompts[0]).not.toContain("the greeting keeps it");
+
+  expect((await pr.hedge("sanity", "--verdict", "justified", "--reason", "Retries are the fix")).code).toBe(0);
+  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).code).toBe(0);
+  writeFileSync(join(pr.repository, "findings.md"), "No findings.\n");
+  expect((await pr.hedge("review-finish", "--round", "2", "--reviewer", "gpt-6.1-sol", "findings.md")).code).toBe(0);
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  await pr.hedge("gate");
+  const report = (await pr.decide("report", "--pr", "example/product#42")).output.split("\n");
+  expect(report.find((line) => /^\| example\/product#42 \| \d+ rounds? \|/.test(line))).toBe(
+    "| example/product#42 | 2 rounds | 10 → 21 (×2.1) | ×2.1, 52% cuttable; justified at HEAD: Retries are the fix | none |");
+});
+
+test("a judge that gives no score leaves the growth to be read by hand and is asked again at the next start", async () => {
+  const pr = await checkout();
+  const judge = fakeModel(pr, "BLOAT_JUDGE", "I would cut the retries.");
+  const reviewed = await grownPastTwice(pr, "");
+
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(
+    "past twice the first. Read the growth by hand: the bloat judge bloat-judge-under-test gave no score: its answer is not the JSON asked for. Before another round");
+  judge.answer(JSON.stringify({ cuttable: 101, hunks: [] }));
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow("Read the growth by hand");
+  judge.answer(JSON.stringify({ cuttable: 0, hunks: [] }));
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(
+    "A fresh judge, bloat-judge-under-test, reads 0% of HEAD's production lines as more than the problem needs and names no hunk.");
+  const prompts = judge.prompts();
+  expect(prompts).toHaveLength(3);
+  expect(prompts[0]).toContain("The PR description has no Problem section.");
+});
+
+test("a later HEAD gets its own score, and the end table shows the latest", async () => {
+  const pr = await checkout();
+  const judge = fakeModel(pr, "BLOAT_JUDGE", JSON.stringify({ cuttable: 52, hunks: [] }));
+  const reviewed = await grownPastTwice(pr, problem);
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow("reads 52%");
+  await pr.commit("retry.ts", lines(13, "retry"));
+  judge.answer(JSON.stringify({ cuttable: 56, hunks: [] }));
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow("from 10 at round 1 to 23 at HEAD, past twice the first. A fresh judge, bloat-judge-under-test, reads 56%");
+  expect(judge.prompts()).toHaveLength(2);
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  await pr.hedge("gate");
+  const report = (await pr.decide("report", "--pr", "example/product#42")).output.split("\n");
+  expect(report.find((line) => /^\| example\/product#42 \| \d+ rounds? \|/.test(line))).toBe("| example/product#42 | 1 round | 10 → 23 (×2.3) | ×2.3, 56% cuttable; not run | none |");
+});
+
+test("with no reviewer row in the model table, the growth is read by hand and the round still waits for the sanity pass", async () => {
+  const pr = await checkout();
+  const reviewed = await grownPastTwice(pr, problem);
+  pr.env.HEDGE_PROOF_BLOAT_JUDGE = undefined;
+  pr.env.HEDGE_MODELS = JSON.stringify([{ role: "lookup", work: "Find files", provider: "claude", model: "lookup-model", effort: "medium" }]);
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(
+    "past twice the first. Read the growth by hand: the bloat judge has no model: the model table of your AI plan has no review row. Before another round, cut the PR back to base behaviour, or justify the growth");
+  expect((await pr.hedge("sanity", "--verdict", "cut", "--reason", "Dropped the retries")).code).toBe(0);
+  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).code).toBe(0);
+});

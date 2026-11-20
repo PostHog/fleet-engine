@@ -27,6 +27,7 @@ import { arbiterOf, finalGate, reviewLimit, type FinalGate } from "./proof-gate.
 import { anchorCheck } from "./finding-anchors.ts";
 import { reviewRules } from "./review-rules.ts";
 import { recordSanity, requireSanity } from "./proof-sanity.ts";
+import type { BloatJudge } from "./proof-bloat.ts";
 import type { ThreadWords } from "./proof-answers.ts";
 import { modelFor } from "../../base/lib/models.ts";
 import { numberSetting } from "../../base/lib/settings.ts";
@@ -386,9 +387,10 @@ command instead, unless the PR is a one-way door or its tier keeps the gap the u
   sanity: {
     usage: "sanity --verdict cut|justified --reason <why>",
     summary: `Record the sanity pass at HEAD. Once the production lines pass twice the lines of the first review round, hedge
-proof review starts no other round until a sanity pass covers them. Read the diff against the first reviewed commit, cut
-what the problem does not need back to base behaviour, and record --verdict cut, or record --verdict justified with
-the reason the growth is needed. A pass covers the production lines it saw: a later head that grows past them needs a
+proof review starts no other round until a sanity pass covers them. A fresh bloat judge reads the Problem section and
+the diffs at round 1 and at HEAD, and hedge proof review prints the share of the lines it would cut and its hunks. Cut
+those hunks back to base behaviour and record --verdict cut, or record --verdict justified with the reason the growth
+is needed. A pass covers the production lines it saw: a later head that grows past them needs a
 new pass. The end table of the receipt and of hedge decision report shows the last pass.`,
     examples: ["hedge proof sanity --verdict cut --reason 'Dropped the retry layer; the base never retried'"],
     options: ["--verdict", "--reason"],
@@ -638,6 +640,14 @@ async function reserveHedgeReview(options: Map<string, string>, head: ProofIdent
   return reserveRound(options, head, context, "hedge", panel);
 }
 
+async function bloatJudge(head: ProofIdentity, context: CommandContext): Promise<BloatJudge> {
+  const row = reviewerRow(await authorOf(context.home, head).catch(() => sessionFamily(context.env) ?? "claude"), context.env);
+  return {
+    model: modelLabel("bloat-judge", row, context.env), cwd: topLevel(context.run) ?? context.cwd, now: context.now ?? (() => new Date()),
+    ask: (request) => askModel("bloat-judge", row, request, context.env, reviewLimit(context.env)),
+  };
+}
+
 async function reserveRound(options: Map<string, string>, head: ProofIdentity, context: CommandContext, capturedBy: CapturedBy, panel = false) {
   await settleStrandedRounds(head, context);
   const scope = options.get("--scope") ?? "full";
@@ -650,7 +660,7 @@ async function reserveRound(options: Map<string, string>, head: ProofIdentity, c
   if (tier.name === "read" && capturedBy === "hedge" && !panel && !decision && !await panelCommit(context.home, head)) throw new Error("A PR of the Read tier gets one read, and it is the panel: run hedge proof review, which runs its combined lens");
   const firstPanel = panel && !await panelCommit(context.home, head);
   const limits = firstPanel ? permit.limits : { ...permit.limits, ceiling: tierCeiling(tier, permit.limits.ceiling) };
-  const reserved = await startReview(context.home, head, { opening: async () => panel && !await panelCommit(context.home, head), sanity: () => requireSanity(context.home, head, context.run), scope, base, from, ...isCommitSha(pull?.baseSha) ? { forkBase: pull.baseSha } : {}, ...permit, limits, decision, phase: options.get("--phase"), cleanBaseMerge: cleanBaseMerge(head, context.run), quietCommit: quietCommitIn(context.run, () => baseRefs(head, context.run)), capturedBy, lock: async (directory) => lockNewRound(directory, await context.lock()), lockBudget: async (reviews, step) => withRoundLock(reviews, await context.lock(), step), now: context.now ?? (() => new Date()) });
+  const reserved = await startReview(context.home, head, { opening: async () => panel && !await panelCommit(context.home, head), sanity: () => requireSanity(context.home, head, context.run, () => bloatJudge(head, context)), scope, base, from, ...isCommitSha(pull?.baseSha) ? { forkBase: pull.baseSha } : {}, ...permit, limits, decision, phase: options.get("--phase"), cleanBaseMerge: cleanBaseMerge(head, context.run), quietCommit: quietCommitIn(context.run, () => baseRefs(head, context.run)), capturedBy, lock: async (directory) => lockNewRound(directory, await context.lock()), lockBudget: async (reviews, step) => withRoundLock(reviews, await context.lock(), step), now: context.now ?? (() => new Date()) });
   return { ...reserved, scope, base, from, phase: options.get("--phase") };
 }
 
