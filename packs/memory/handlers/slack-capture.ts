@@ -4,7 +4,8 @@ import { capture, captureAgent, type Agent } from "../lib/library/capture.ts";
 import { canvasId, hubSources, type Sources } from "../lib/library/source.ts";
 import { librarySettings, writePointer } from "../lib/library/config.ts";
 import { runGit, type Git } from "../lib/library/git.ts";
-import { routerAgent, share, t3ShareDeps, type Route, type ShareDeps } from "../lib/library/share.ts";
+import { routerAgent, runtimeShareDeps, share, type Route, type ShareDeps } from "../lib/library/share.ts";
+import { activeRuntime } from "../../../src/runtime/active.ts";
 
 type Env = Record<string, string | undefined>;
 export type SlackCaptureDeps = { env: Env; home: string; git: Git; agent: () => Agent; sources: Sources; today: () => string; share: (owner: string) => ShareDeps };
@@ -39,7 +40,7 @@ export async function slackCapture(request: string, deps: SlackCaptureDeps): Pro
 if (import.meta.main) {
   const { code, output } = await slackCapture(await Bun.stdin.text(), {
     env: Bun.env, home: Bun.env.HOME ?? homedir(), git: runGit, agent: () => captureAgent(modelFor("survey"), Bun.env.HOME ?? homedir()), sources: hubSources(Bun.env.HOME ?? homedir()), today: () => new Date().toISOString().slice(0, 10),
-    share: (owner) => t3ShareDeps({ owner, host: hostname(), route: routerAgent(modelFor("survey")) }),
+    share: (owner) => runtimeShareDeps({ owner, host: hostname(), route: routerAgent(modelFor("survey")), threads: async () => (await activeRuntime()).threads }),
   });
   console.log(output);
   process.exit(code);

@@ -118,6 +118,7 @@ export type DoneSummary = {
   runsByItself: string[];
   /** Seconds from the start of setup until the user could start a first thread, when the timings reached it. */
   usableSeconds?: number;
+  runtime?: string;
 };
 
 const machineNames: Record<MachineRole, string> = { mac: "This Mac", linux: "This machine", devbox: "This devbox", hub: "This hub" };
@@ -129,7 +130,7 @@ export function doneScreen(summary: DoneSummary): string[] {
     "✓ Hedge is set up.",
     "",
     row(machineNames[summary.role], `${summary.packs.length ? summary.packs.join(", ") : "Base only"}. hedge doctor passes.`),
-    ...summary.devboxes.map((host) => row("Devbox", `${host}: the same profile, signed in, linked with T3 Code here, and it makes signed commits.`)),
+    ...summary.devboxes.map((host) => row("Devbox", `${host}: the same profile, signed in, linked with ${summary.runtime ? `${summary.runtime} here` : "this machine"}, and it makes signed commits.`)),
     ...(summary.devboxes.length ? [] : [row("Devbox", "none. Add one with hedge devbox add <ssh host>.")]),
     row("Profile", `${summary.profileRepo}, private. Change it with hedge packs and hedge set.`),
     row("Runs by itself", summary.runsByItself.length ? summary.runsByItself[0]! : "nothing yet"),
@@ -137,7 +138,7 @@ export function doneScreen(summary: DoneSummary): string[] {
     ...(summary.usableSeconds === undefined ? [] : [row("Ready after", duration(summary.usableSeconds))]),
     row("Report", "hedge triage sends a report of this setup to the Hedge maintainer."),
     "",
-    "Paste this into a new thread in T3 Code to start:",
+    `Paste this into a new thread${summary.runtime ? ` in ${summary.runtime}` : ""} to start:`,
     "",
     `  ${firstPrompt}`,
   ];

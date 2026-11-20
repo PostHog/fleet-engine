@@ -1,6 +1,6 @@
 import { chmodSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { readProviderInstances, settingsScopes, upsertProviderInstance, withT3Session, type ProviderInstance, type T3SessionOptions } from "../../../base/lib/t3/index.ts";
+import { readProviderInstances, settingsScopes, upsertProviderInstance, withT3Session, type ProviderInstance, type T3SessionOptions } from "../../../t3/lib/client/index.ts";
 
 export type ClaudeWrapperContext = { home: string; print: (line: string) => void; session?: T3SessionOptions };
 

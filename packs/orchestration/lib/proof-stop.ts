@@ -1,5 +1,5 @@
 import { realpath } from "node:fs/promises";
-import { matchThread, type PullRequestWatch, type ShellThread } from "../../base/lib/t3/index.ts";
+import { matchThread, type PullRequestWatch, type ShellThread } from "../../t3/lib/client/index.ts";
 import { ownedPullRequests, subagentParent } from "../../pull-requests/lib/pr-owners.ts";
 import { lastGateRun } from "../../pull-requests/lib/proof.ts";
 import { closesOn, closingSettings } from "./closing-marks.ts";

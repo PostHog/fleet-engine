@@ -1,9 +1,12 @@
+import { join } from "node:path";
 import type { MachineFile, Plan } from "../pack/types.ts";
 import { saveMachine, validHost } from "../profile/profile.ts";
+import { defaultRuntime, engineRuntime, planRuntime } from "../runtime/load.ts";
+import type { AgentRuntime } from "../sdk/runtime.ts";
 import type { Machine } from "../setup/commands.ts";
 import { balanceThreads } from "../setup/devbox-balance.ts";
 import { removeDevbox } from "../setup/devbox-remove.ts";
-import { addressHere, devboxSteps, type LeftStep, linkFromHub, listInProfile, nameBox, overSsh, printLeftForYou, profileForBox, tellHub } from "../setup/devbox.ts";
+import { devboxSteps, type LeftStep, linkFromHub, listInProfile, nameBox, overSsh, printLeftForYou, profileForBox, tellHub } from "../setup/devbox.ts";
 import { FlagError, refuseUnusableDevbox } from "../setup/flags.ts";
 import { runSteps } from "../setup/runner.ts";
 import { Stopped, type Terminal } from "../setup/terminal.ts";
@@ -23,7 +26,8 @@ export async function devboxCommand(args: string[], context: DevboxCommandContex
   }
   const [action, host, ...rest] = args;
   if ((action !== "add" && action !== "remove") || !host || rest.length || !validHost(host)) throw new FlagError(usage);
-  if (action === "remove") return await removeDevbox(host, context), 0;
+  const runtime = await planRuntime(context.plan).catch(() => undefined);
+  if (action === "remove") return await removeDevbox(host, { ...context, runtime }), 0;
   refuseUnusableDevbox(host);
   await nameBox(overSsh(context.machine, host), host);
   const remember = () => saveMachine(context.home, machineFile);
@@ -35,7 +39,7 @@ export async function devboxCommand(args: string[], context: DevboxCommandContex
   const hub = listedHub && listedHub !== host ? listedHub : undefined;
   const hubTook = hub !== undefined && (await tellHub(context, hub, host));
   let left: LeftStep[] = [];
-  const steps = () => devboxSteps(host, { terminal, machine: context.machine, nonInteractive: false, plan: context.plan.ai, models: context.plan.models, profile: () => profileForBox(context.machine, machineFile.profileDir), rerun: `hedge devbox add ${host}`, leftForYou: (steps) => (left = [...left, ...steps]), ...(context.plan.engineRoot ? { engineRoot: context.plan.engineRoot } : {}) });
+  const steps = () => devboxSteps(host, { terminal, machine: context.machine, nonInteractive: false, plan: context.plan.ai, models: context.plan.models, profile: () => profileForBox(context.machine, machineFile.profileDir), rerun: `hedge devbox add ${host}`, runtime, leftForYou: (steps) => (left = [...left, ...steps]), ...(context.plan.engineRoot ? { engineRoot: context.plan.engineRoot } : {}) });
   try {
     await runSteps(steps, {
       terminal,
@@ -46,9 +50,9 @@ export async function devboxCommand(args: string[], context: DevboxCommandContex
       },
     });
     terminal.print("");
-    terminal.print(`${host} is your devbox now. It runs your profile, and T3 Code here and there can reach each other.`);
-    if (hub) await linkFromHub({ ...context, ...(machineFile.name ? { self: machineFile.name } : {}) }, hub, host, hubTook);
-    await balanceThreads(context);
+    terminal.print(`${host} is your devbox now. It runs your profile${runtime?.onboarding ? `, and ${runtime.title} here and there can reach each other` : ""}.`);
+    if (hub) await linkFromHub({ ...context, runtime, ...(machineFile.name ? { self: machineFile.name } : {}) }, hub, host, hubTook);
+    await balanceThreads({ ...context, runtime });
     return 0;
   } catch (error) {
     if (!(error instanceof Stopped)) throw error;
@@ -62,10 +66,12 @@ export async function devboxCommand(args: string[], context: DevboxCommandContex
 
 export const asksAddress = (args: string[]) => args.length === 1 && args[0] === "address";
 
-export async function printAddress({ machine, terminal }: Pick<DevboxCommandContext, "machine" | "terminal">) {
-  const here = await addressHere(machine, "hedge devbox address");
-  if (!here.on) throw new Error("T3 Connect is off on this machine. Turn it on with t3 up --connect.");
-  if (!here.address) throw new Error("T3 Connect is on here, but T3 Code gives no tunnel address for this machine yet.");
-  terminal.print(here.address);
+export async function printAddress({ machine, terminal, runtime }: Pick<DevboxCommandContext, "machine" | "terminal"> & { runtime?: AgentRuntime }) {
+  const chosen = runtime ?? (await engineRuntime(engineRoot, defaultRuntime));
+  const address = chosen?.onboarding?.().address;
+  if (!address) throw new Error(`${chosen?.title ?? "The runtime"} gives other machines no address for this one.`);
+  terminal.print(await address(machine));
   return 0;
 }
+
+const engineRoot = join(import.meta.dir, "../..");

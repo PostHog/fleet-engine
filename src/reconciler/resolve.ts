@@ -19,7 +19,7 @@ import type {
   ResolvedPack,
   Scope,
   SettingValue,
-  T3ProjectScript,
+  ProjectScript,
 } from "../pack/types.ts";
 import { signerSetting } from "../adapters/identity/signers.ts";
 import { hubOnlySetting, wholeRoutes } from "../adapters/provider-config/proxy-route.ts";
@@ -28,6 +28,7 @@ import { oldNameOnly, packAliases, packNamed, packsNamed, type PackAliases } fro
 import { placedMachine } from "../profile/profile.ts";
 import { forwardId, hubForward } from "../hub/ssh.ts";
 import { asHedgeLine } from "./engine-command.ts";
+import { defaultRuntime, runtimeSetting } from "../runtime/load.ts";
 
 export class ResolveError extends Error {}
 
@@ -69,6 +70,8 @@ export function resolve(profile: Profile, saved: MachineFile, sources: FetchedSo
     checks: [],
     commands: {},
     handlers: {},
+    runtimes: {},
+    runtime: runtimeName(profile),
     models: modelTable(order, profile),
     settings: {},
     unanswered: [],
@@ -122,11 +125,18 @@ export function resolve(profile: Profile, saved: MachineFile, sources: FetchedSo
       if (!existsSync(path) || !statSync(path).isFile()) throw new ResolveError(`${pack}: the ${handler.seam} handler ${handler.path} is not a file`);
       plan.handlers[handler.seam] = handler.subcommands ? { pack, path, subcommands: handler.subcommands } : { pack, path };
     }
-    for (const script of manifest.t3ProjectScripts ?? []) {
+    if (manifest.runtime) {
+      const other = plan.runtimes![manifest.runtime.name];
+      if (other) throw new ResolveError(`the ${manifest.runtime.name} runtime is brought by both ${other.pack} and ${pack}`);
+      const path = within(dir, manifest.runtime.path, pack);
+      if (!existsSync(path) || !statSync(path).isFile()) throw new ResolveError(`${pack}: the ${manifest.runtime.name} runtime ${manifest.runtime.path} is not a file`);
+      plan.runtimes![manifest.runtime.name] = { pack, path };
+    }
+    for (const script of manifest.projectScripts ?? []) {
       if (!fits(pack, script, `t3 project script ${script.id}`)) continue;
-      const twin = plan.t3ProjectScripts?.find((item) => `${item.pack}-${item.id}` === `${pack}-${script.id}`);
+      const twin = plan.projectScripts?.find((item) => `${item.pack}-${item.id}` === `${pack}-${script.id}`);
       if (twin) throw new ResolveError(`t3 project script ${script.id} of ${pack} and ${twin.id} of ${twin.pack} both get the id hedge-${pack}-${script.id}`);
-      (plan.t3ProjectScripts ??= []).push({ ...script, pack });
+      (plan.projectScripts ??= []).push({ ...script, pack });
     }
     for (const entry of manifest.config ?? []) {
       refuseProxySetting(pack, entry);
@@ -151,6 +161,9 @@ export function resolve(profile: Profile, saved: MachineFile, sources: FetchedSo
     plan.owners[owner] = "profile";
     plan.config.push({ ...entry, pack: "profile" });
   }
+  const runtimeless = plan.config.filter((entry) => !isAgentProvider(entry.provider) && !plan.runtimes![entry.provider]);
+  plan.config = plan.config.filter((entry) => !runtimeless.includes(entry));
+  for (const entry of runtimeless) plan.dropped.push({ pack: entry.pack, item: `config ${entry.provider}:${entry.key}`, reason: `no pack on this machine brings the ${entry.provider} runtime` });
   const routes = wholeRoutes(plan.config, unfit);
   plan.config = routes.config;
   plan.dropped.push(...routes.dropped);
@@ -162,7 +175,7 @@ export function resolve(profile: Profile, saved: MachineFile, sources: FetchedSo
   for (const job of plan.models.length ? plan.jobs : []) {
     if (job.task && !plan.models.some((row) => row.role === job.task!.modelRole)) throw new ResolveError(`job ${job.id} asks for model role ${job.task.modelRole}, which the model table lacks`);
   }
-  plan.t3ProjectScripts = plan.t3ProjectScripts?.map((script) => withProjectSetting(script, plan.settings));
+  plan.projectScripts = plan.projectScripts?.map((script) => withProjectSetting(script, plan.settings));
   plan.jobs = plan.jobs.map((job) => {
     const project = job.task && plan.settings[job.task.projectSetting];
     return job.task && project !== undefined ? { ...job, task: { ...job.task, project: String(project) } } : job;
@@ -289,7 +302,8 @@ function choosePacks(profile: Profile, sources: FetchedSource[]) {
     order.push(candidate);
     return true;
   };
-  for (const name of ["base", ...listed.filter((name) => name !== "base"), ...carriedPacks(profile, listed)]) visit(name);
+  const runtimePack = [...byName.values()].find((candidate) => candidate.manifest.runtime?.name === runtimeName(profile))?.manifest.name;
+  for (const name of ["base", ...(runtimePack ? [runtimePack] : []), ...listed.filter((name) => name !== "base"), ...carriedPacks(profile, listed)]) visit(name);
   const base = packs.find((pack) => pack.name === "base");
   if (!base?.available) throw new ResolveError(`the base pack is not available: ${base?.reason ?? "missing"}`);
   return { order, packs, aliases, byOldName: oldNameOnly(aliases, profile.packs) };
@@ -304,6 +318,10 @@ function namedAliases(manifests: PackManifest[]): PackAliases {
 }
 
 export const listedPack = (plan: Pick<Plan, "aliases">, name: string) => (plan.aliases && Object.hasOwn(plan.aliases, name) ? plan.aliases[name]! : name);
+
+export const runtimeName = (profile: Pick<Profile, "settings">) => String(profile.settings[runtimeSetting] ?? defaultRuntime);
+
+const isAgentProvider = (provider: string) => provider === "claude" || provider === "codex";
 
 /** The MCP gateway left the Hub pack for its own pack. A profile that lists the Hub pack keeps the gateway until it turns the old mcp-gateway workflow off. */
 function carriedPacks(profile: Profile, listed: string[]) {
@@ -353,6 +371,7 @@ function workflowStates(profile: Profile, machine: MachineFile, order: Candidate
     hub: names.has("hub"),
     coder: names.has("posthog"),
     "posthog-org": names.has("posthog"),
+    t3: names.has("t3"),
   };
   const workflows = order.flatMap(({ manifest }) => (manifest.workflows ?? []).map((workflow) => ({ workflow, pack: manifest.name })));
   const own = workflows.map(({ workflow, pack }) => {
@@ -412,12 +431,12 @@ function activeSettings(order: Candidate[], active: Set<string>): Array<PackSett
 
 /** Keeps the last declaration of a setting, so a later pack sets the default of one the engine reads. Base's signer default is coder in a Coder workspace. */
 /** The project a script's setting names, when its value is an absolute path or starts with ~/. The T3 adapter reports any other value. */
-export function settingProject(script: T3ProjectScript, settings: Record<string, SettingValue>): string | undefined {
+export function settingProject(script: ProjectScript, settings: Record<string, SettingValue>): string | undefined {
   const value = script.projectSetting === undefined ? undefined : settings[script.projectSetting];
   return typeof value === "string" && (value.startsWith("/") || value.startsWith("~/")) ? value : undefined;
 }
 
-function withProjectSetting(script: Owned<T3ProjectScript>, settings: Record<string, SettingValue>): Owned<T3ProjectScript> {
+function withProjectSetting(script: Owned<ProjectScript>, settings: Record<string, SettingValue>): Owned<ProjectScript> {
   const value = settingProject(script, settings);
   if (value === undefined) return script;
   return script.projects.includes(value) ? script : { ...script, projects: [...script.projects, value] };

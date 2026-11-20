@@ -1,10 +1,8 @@
 import { homedir } from "node:os";
 import { modelSessionEnv, type ModelRow } from "../../../base/lib/models.ts";
-import { sendLinkedMessage, t3Threads, threadUrl, withT3Session, type T3HttpClient, type T3SessionOptions } from "../../../base/lib/t3/index.ts";
-import { readLinkedOpenWork, readOpenWork, type OpenWork } from "../../../orchestration/lib/activity.ts";
-import { readEachMachine, readMachines, type MachineReport } from "../../../orchestration/lib/machines.ts";
+import type { RuntimeMachine, RuntimeThread, RuntimeThreads } from "../../../../src/sdk/runtime.ts";
 
-export type Candidate = { host: string; id: string; title: string; status: string; branch: string | null; pullRequests: string[]; environmentId?: string; link?: string };
+export type Candidate = { host: string; id: string; title: string; status: string; branch: string | null; pullRequests: string[]; machine?: string; link?: string };
 export type Route = { host: string; id: string; title: string; message: string };
 export type SharedNote = { title: string; url: string; text: string };
 export type Shared = { sent: (Route & { link?: string })[]; failed: { route: Route; error: string }[] };
@@ -14,24 +12,19 @@ export type ShareDeps = {
   route: (prompt: string) => Promise<string>;
   send: (thread: Candidate, text: string) => Promise<void>;
 };
-export type OpenReport = MachineReport<{ work: OpenWork[]; environmentId?: string; localEnvironmentId?: string }>;
+export type OpenReport = { host: string; machine?: string; threads?: RuntimeThread[]; error?: string };
 
 export const maxRecipients = 8;
 const maxMessage = 2500;
-const sendScopes = ["orchestration:read", "orchestration:operate", "access:read"];
-
 export function candidatesFrom(reports: OpenReport[], skip: string[] = []): Candidate[] {
-  return reports.flatMap((report) => report.error !== undefined ? [] : report.work
-    .filter((work) => work.status !== "cancelled" && !skip.includes(work.id))
-    .map((work): Candidate => {
-      const environment = report.environmentId ?? report.localEnvironmentId;
-      return {
-        host: report.host, id: work.id, title: work.title, status: work.status, branch: work.branch,
-        pullRequests: work.pullRequests.map((pr) => pr.url),
-        ...(report.environmentId ? { environmentId: report.environmentId } : {}),
-        ...(environment ? { link: threadUrl(environment, work.id) } : {}),
-      };
-    }));
+  return reports.flatMap((report) => report.error !== undefined ? [] : (report.threads ?? [])
+    .filter((thread) => !thread.closed && !thread.parentId && thread.state !== "error" && !skip.includes(thread.id))
+    .map((thread): Candidate => ({
+      host: report.host, id: thread.id, title: thread.title, status: thread.state, branch: thread.branch ?? null,
+      pullRequests: (thread.pullRequests ?? []).map((pr) => pr.url),
+      ...(report.machine ? { machine: report.machine } : {}),
+      ...(thread.url ? { link: thread.url } : {}),
+    })));
 }
 
 const possessive = (owner: string) => (owner ? `${owner}'s` : "the");
@@ -121,29 +114,29 @@ export function routerAgent(row: ModelRow, command = "claude"): ShareDeps["route
   };
 }
 
-async function localEnvironment(client: T3HttpClient): Promise<string | undefined> {
-  const answer = await client.get<{ environmentId?: unknown }>("/.well-known/t3/environment").catch(() => undefined);
-  return typeof answer?.environmentId === "string" ? answer.environmentId : undefined;
+export type ShareSetup = { owner: string; host: string; route: ShareDeps["route"]; skip?: string[] | Promise<string[]>; threads: () => Promise<RuntimeThreads> };
+
+export async function openReports(threads: RuntimeThreads, host: string): Promise<OpenReport[]> {
+  const machines: RuntimeMachine[] = await threads.machines().catch(() => [{ name: host, id: "local", self: true }]);
+  return Promise.all(machines.map(async (machine): Promise<OpenReport> => {
+    const where = machine.self ? {} : { machine: machine.name };
+    const label = machine.self ? host : machine.name;
+    if (machine.problem) return { host: label, ...where, error: machine.problem };
+    try {
+      return { host: label, ...where, threads: await threads.list(where) };
+    } catch (error) {
+      return { host: label, ...where, error: (error as Error).message };
+    }
+  }));
 }
 
-export type ShareSetup = { owner: string; host: string; route: ShareDeps["route"]; skip?: string[]; session?: T3SessionOptions };
-
-export function t3ShareDeps({ owner, host, route, skip = [], session = {} }: ShareSetup): ShareDeps {
-  const threads = t3Threads([], session);
+export function runtimeShareDeps({ owner, host, route, skip = [], threads }: ShareSetup): ShareDeps {
   return {
     owner,
     route,
-    openThreads: async () => candidatesFrom(await withT3Session(async (client) => readEachMachine<{ work: OpenWork[]; environmentId?: string; localEnvironmentId?: string }>(
-      await readMachines(client, host),
-      async () => ({ work: await readOpenWork(client), localEnvironmentId: await localEnvironment(client) }),
-      async (environmentId) => ({ work: await readLinkedOpenWork(client, environmentId), environmentId }),
-    ), session), skip),
+    openThreads: async () => candidatesFrom(await openReports(await threads(), host), await skip),
     send: async (thread, text) => {
-      if (thread.environmentId) {
-        await withT3Session((client) => sendLinkedMessage(client, thread.environmentId!, thread.id, text), { ...session, scopes: sendScopes });
-        return;
-      }
-      if (!(await threads.send({ id: thread.id, text }))) throw new Error(`thread ${thread.id} is gone or archived`);
+      if (!(await (await threads()).send({ id: thread.id, text, ...(thread.machine ? { machine: thread.machine } : {}) }))) throw new Error(`thread ${thread.id} is gone or archived`);
     },
   };
 }

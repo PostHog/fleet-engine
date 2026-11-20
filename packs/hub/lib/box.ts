@@ -9,7 +9,7 @@ import type { Box } from "./coder.ts";
 import { quote, remoteHedge, type Machine } from "./machine.ts";
 import { writePrivateFile } from "../../mcp-gateway/lib/client.ts";
 import { readT3Threads, threadsOwningPrs } from "../../pull-requests/lib/pr-owners.ts";
-import type { ShellThread } from "../../base/lib/t3/index.ts";
+import type { ShellThread } from "../../t3/lib/client/index.ts";
 import * as registry from "./pool.ts";
 
 export type BoxHooks = { stopping?(box: string): void | Promise<void> };

@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
-import { chmodSync, closeSync, constants, openSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, constants, openSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tempDirs } from "../../../src/testing/git.ts";
-import { spawnText, threadModel, threadScript, underLock, type JobContext } from "./hub-job.ts";
+import { hedgeLauncher, spawnText, threadCommand, underLock, type JobContext } from "./hub-job.ts";
 
 const temp = tempDirs();
 const heldFifos: string[] = [];
@@ -11,34 +11,10 @@ afterEach(() => {
   temp.cleanup();
 });
 
-const row = (provider: string, model: string) => JSON.stringify([{ role: "implementation", work: "Implementation", provider, model, effort: "high" }]);
-
-function stubT3(dir: string, threadExit = 0) {
-  writeFileSync(join(dir, "t3"), `#!/bin/sh\necho "$*" >> "${dir}/calls"\nif [ "$1" = thread ]; then\n  for arg; do printf '%s\\n' "$arg"; done > "${dir}/argv"\n  cat > "${dir}/stdin"\n  exit ${threadExit}\nfi\n`);
-  chmodSync(join(dir, "t3"), 0o755);
-}
-
-test("a thread starts with the T3 provider and the model of its HEDGE_MODELS row, passed together, and its text only on standard input", () => {
-  const dir = temp.make("thread-");
-  stubT3(dir);
-  const choice = threadModel("implementation", "fallback-model", { HEDGE_MODELS: row("codex", "gpt-model") });
-  const run = Bun.spawnSync(["sh", "-c", threadScript(dir, "Disk alert box-1", choice)], { stdin: Buffer.from("the task"), env: { PATH: `${dir}:/usr/bin:/bin`, HOME: dir } });
-  expect(run.exitCode).toBe(0);
-  expect(readFileSync(join(dir, "argv"), "utf8").split("\n")).toEqual(["thread", "start", "--title", "Disk alert box-1", "--provider", "codex", "--model", "gpt-model", dir, "-", ""]);
-  expect(readFileSync(join(dir, "stdin"), "utf8")).toBe("the task");
-  expect(threadModel("implementation", "fallback-model", { HEDGE_MODELS: row("claude", "big-model") })).toEqual({ provider: "claudeAgent", model: "big-model" });
-  expect(threadModel("implementation", "fallback-model", {})).toEqual({ provider: "claudeAgent", model: "fallback-model" });
-});
-
-test("the folder is registered as a project first, and a thread start that creates the thread but exits 1 is never tried again", () => {
-  const dir = temp.make("thread-");
-  stubT3(dir, 1);
-  const run = Bun.spawnSync(["sh", "-c", threadScript(dir, "Disk alert box-1", { provider: "claudeAgent", model: "big-model" })], { stdin: Buffer.from("the task"), env: { PATH: `${dir}:/usr/bin:/bin`, HOME: dir } });
-  expect(run.exitCode).toBe(1);
-  expect(readFileSync(join(dir, "calls"), "utf8").trim().split("\n")).toEqual([
-    `project add ${dir}`,
-    `thread start --title Disk alert box-1 --provider claudeAgent --model big-model ${dir} -`,
-  ]);
+test("a hub job starts its thread through this engine's hedge threads start, in whatever runtime the machine runs, with a key a retry reuses", () => {
+  const launcher = hedgeLauncher({ HEDGE_ENGINE_DIR: "/opt/engine" }, "/home/u");
+  expect(threadCommand(launcher, "disk-watch:box-1", "Disk alert box-1", "lookup")).toEqual(["sh", "/opt/engine/hedge", "threads", "start", "--key", "disk-watch:box-1", "--title", "Disk alert box-1", "--role", "lookup"]);
+  expect(hedgeLauncher({}, "/home/u")).toBe(join("/home/u", ".local/share/hedge/engine", "hedge"));
 });
 
 function release(fifo: string) {

@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { jobsAdapter, type HedgeTask, type T3Tasks } from "../../src/adapters/jobs/adapter.ts";
+import { jobsAdapter, type AgentTasks, type ScheduledTask } from "../../src/adapters/jobs/adapter.ts";
 import type { AvailableSource } from "../../src/pack/types.ts";
 import { tempDirs } from "../../src/testing/git.ts";
 import { devbox, skillSources, engineSource, fileContent, mac, resolveEngine } from "../../src/testing/packs.ts";
@@ -73,8 +73,8 @@ describe("the Orchestration pack", () => {
     const result = withPack({ workflows, settings: { "orchestration.loopProject": "my-repo", "orchestration.qualityArea": "src", "orchestration.ledgerRepo": "me/ledger" } }, devbox);
     const jobs = result.jobs.filter((job) => loops.includes(job.id));
     expect(jobs.map((job) => [job.id, job.runner, job.task?.project, job.task?.modelRole])).toEqual([
-      ["quality-loop", "t3", "my-repo", "implementation"],
-      ["pr-digest", "t3", "my-repo", "lookup"],
+      ["quality-loop", "agent", "my-repo", "implementation"],
+      ["pr-digest", "agent", "my-repo", "lookup"],
     ]);
     expect(result.models.map((row) => row.role)).toEqual(expect.arrayContaining(jobs.map((job) => job.task!.modelRole)));
   });
@@ -88,9 +88,9 @@ describe("the Orchestration pack", () => {
   test("sends T3 each loop's task with a prompt that keeps every lane a draft and never waits on a question", async () => {
     const settings = { "orchestration.loopProject": temp.make("repo-"), "orchestration.qualityArea": "src", "orchestration.ledgerRepo": "me/ledger" };
     const result = withPack({ workflows: { "quality-loop": true, "signal-loop": true }, settings }, devbox);
-    const sent: HedgeTask[] = [];
-    const client: T3Tasks = { list: async () => [], upsert: async (task) => void sent.push(task), setEnabled: async () => {} };
-    const adapter = jobsAdapter({ run: async () => ({ code: 0, stdout: "" }), engineRoot: join(import.meta.dir, "../.."), t3: async () => client });
+    const sent: ScheduledTask[] = [];
+    const client: AgentTasks = { list: async () => [], upsert: async (task) => void sent.push(task), setEnabled: async () => {} };
+    const adapter = jobsAdapter({ run: async () => ({ code: 0, stdout: "" }), engineRoot: join(import.meta.dir, "../.."), tasks: async () => ({ name: "t3", title: "T3 Code", scheduler: true, tasks: client }) });
     await adapter.apply({ ...result, jobs: result.jobs.filter((job) => job.task) }, { home: temp.make("home-"), dryRun: false, adopt: [] });
     for (const id of ["quality-loop", "signal-loop"]) {
       const prompt = sent.find((task) => task.id === `hedge:${id}`)!.prompt;

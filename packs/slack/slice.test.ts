@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { jobsAdapter } from "../../src/adapters/jobs/adapter.ts";
 import { main, type CliOptions } from "../../src/cli.ts";
-import { startT3Stub } from "../../src/integrations/t3/testing.ts";
+import { startT3Stub } from "../t3/lib/client/testing.ts";
 import { filesAdapter } from "../../src/reconciler/apply.ts";
 import { secretStore } from "../../src/runner/context.ts";
 import { spawnGit, tempDirs } from "../../src/testing/git.ts";
@@ -126,7 +126,7 @@ test("setup installs the trigger, an owner's message starts one thread, and afte
   await slack.connected();
   slack.send({ type: "message", user: ownerId, channel: "C1", ts: "100.1", text: "the build is red :t3code:" });
   await slack.until(() => replies().length === 1);
-  expect(replies()).toEqual(["Could not start a T3 thread. Hedge retries every minute for a day."]);
+  expect(replies()).toEqual(["Could not start a thread. Hedge retries every minute for a day."]);
   expect(t3.threads.map((thread) => thread.title)).toEqual(["Slack: the build is red"]);
 
   liveApps.add(secondApp);

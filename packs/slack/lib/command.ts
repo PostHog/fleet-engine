@@ -169,7 +169,7 @@ async function walkThrough(owner: Owner, deps: SlackCommandDeps, read: ReadSecre
   const base = deps.slackBase ?? slackApiBase;
   const say = deps.print;
   const entered: string[] = [];
-  say(`Hedge starts a T3 thread when you, ${owner.slackUserId}, write to your own Slack app. Make that app in four steps.`);
+  say(`Hedge starts a thread when you, ${owner.slackUserId}, write to your own Slack app. Make that app in four steps.`);
   say("");
   say(`1. Open this link, pick your workspace, and create the app: ${manifestLink(owner.name)}`);
   say("2. Under Basic Information, App-Level Tokens, generate a token with the connections:write scope.");

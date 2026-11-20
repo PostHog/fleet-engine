@@ -1,7 +1,7 @@
-import type { LinkedEnvironment, LinkedThread, LinkedTimelineItem, ShellThread } from "../../base/lib/t3/index.ts";
+import type { LinkedEnvironment, LinkedThread, LinkedTimelineItem, ShellThread } from "../../t3/lib/client/index.ts";
 import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { ToolRefusal, type ToolHandler } from "../../base/lib/t3/testing.ts";
+import { ToolRefusal, type ToolHandler } from "../../t3/lib/client/testing.ts";
 import { cachedCheckout, spawnGit } from "../../../src/testing/git.ts";
 import { engineSource, skillSources } from "../../../src/testing/packs.ts";
 import type { Discussion, FetchDiscussion, FetchIssue, IssueNode } from "./wayfinder.ts";

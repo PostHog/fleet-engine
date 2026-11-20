@@ -1,8 +1,5 @@
-import {
-  isWaiting, lastActivityAt, listLinkedThreads, matchThread, readLinkedItemText, readLinkedThread, readSnapshots, readTurnItems, T3ToolError, withT3Session,
-  type LinkedReadQuery, type LinkedTimelineItem, type LinkedThread, type LinkedThreadDetail, type ShellThread, type T3HttpClient, type T3SessionOptions,
-} from "../../base/lib/t3/index.ts";
-import { liveStatuses, readEachMachine, readMachines } from "./machines.ts";
+import type { RuntimeThread, RuntimeThreads, ThreadRead, Where } from "../../../src/sdk/runtime.ts";
+import { readEachMachine, readMachines } from "./machines.ts";
 import {
   descendants, fetchDiscussionFromGitHub, fetchIssueFromGitHub, mapRef, parked, splitRepository, ticketType,
   type Comment, type FetchDiscussion, type FetchIssue, type MapRef, type Ticket,
@@ -13,99 +10,52 @@ export type BoxReport = { host: string; threads?: LaneThread[]; error?: string }
 export type ReadBoxes = (threadIds: string[]) => Promise<BoxReport[]>;
 export type LaneAttention = { attention: boolean; text: string };
 export type LanesIo = {
-  home: string; host: string; now: Date; print(line: string): void;
-  fetchIssue?: FetchIssue; fetchDiscussion?: FetchDiscussion; session?: T3SessionOptions;
+  host: string; now: Date; print(line: string): void; threads(): Promise<RuntimeThreads>;
+  fetchIssue?: FetchIssue; fetchDiscussion?: FetchDiscussion;
 };
 
 type Lane = { ticket: Ticket; threadId: string };
-type TurnMessage = { type?: string; text?: string | null };
 
 const usage = "Usage: hedge lanes <map URL | owner/repo#number> [--stall minutes]";
 const dispatchMarker = "<!-- orchestration-wayfinder-dispatch -->";
-const settledStatuses = ["completed", "idle"];
+const settledStates = ["done", "idle"];
+const liveStates = new Set(["working", "waiting"]);
 const defaultStallMinutes = 30;
 const tailItems = 50;
 export const needsHumanMarker = "NEEDS_HUMAN:";
 
-export async function readLaneThreads(client: T3HttpClient, threadIds: string[]): Promise<LaneThread[]> {
-  const threads = (await readSnapshots(client)).flatMap((snapshot) => snapshot.threads).filter((thread) => !thread.deletedAt);
-  const children = Map.groupBy(threads, (thread) => thread.lineage?.parentThreadId ?? "");
-  const family = (thread: ShellThread): ShellThread[] => [thread, ...(children.get(thread.id) ?? []).flatMap(family)];
+const matchId = (threads: RuntimeThread[], id: string) => threads.find((thread) => thread.id === id) ?? threads.find((thread) => thread.id.endsWith(`:${id}`) || thread.id.endsWith(`/${id}`));
+
+export async function readLaneThreads(threads: RuntimeThreads, where: Where, threadIds: string[]): Promise<LaneThread[]> {
+  const all = (await threads.list({ ...where, includeClosed: true })).filter((thread) => thread.closed !== "deleted");
+  const children = Map.groupBy(all, (thread) => thread.parentId ?? "");
+  const family = (thread: RuntimeThread): RuntimeThread[] => [thread, ...(children.get(thread.id) ?? []).flatMap(family)];
   const lanes = threadIds.flatMap((id) => {
-    const lane = matchThread(threads, id, (thread) => thread.id);
+    const lane = matchId(all, id);
     return lane ? [{ id, lane, members: family(lane) }] : [];
   });
   return Promise.all(lanes.map(async ({ id, lane, members }) => {
-    const live = members.filter(isLive);
-    const turnDates = await Promise.all(live.map((thread) => lastTurnItemAt(client, thread.id)));
+    const gone = lane.closed === "archived";
+    const live = gone ? [] : members.filter((thread) => liveStates.has(thread.state));
     return {
-      id, status: lane.activityRunStatus ?? lane.status, live: live.length > 0,
-      updatedAt: [...members.map(lastActivityAt), ...turnDates].sort().at(-1) ?? "", gone: Boolean(lane.archivedAt),
-      waitingIn: members.find((thread) => thread.pendingRuntimeRequest)?.id ?? null,
-      needsHuman: live.length ? null : needsHuman(finalAssistantMessage((await visibleTurnItems(client, lane.id)).map(({ item }) => item))?.text ?? ""),
+      id, status: lane.state, live: live.length > 0,
+      updatedAt: members.map((thread) => thread.updatedAt ?? "").sort().at(-1) ?? "", gone,
+      waitingIn: members.find((thread) => thread.blocked)?.id ?? null,
+      needsHuman: live.length || gone ? null : needsHuman(finalText(await threads.read(lane.id, { ...where, tail: tailItems }).catch(() => ({ messages: [] })))),
     };
   }));
 }
 
-export async function readLinkedLaneThreads(client: T3HttpClient, environmentId: string, threadIds: string[]): Promise<LaneThread[]> {
-  const threads = await listLinkedThreads(client, environmentId, { allProjects: true, includeSubagents: true });
-  const children = Map.groupBy(threads, (thread) => thread.parentThreadId ?? "");
-  const family = (thread: LinkedThread): LinkedThread[] => [thread, ...(children.get(thread.threadId) ?? []).flatMap(family)];
-  const read = (query: LinkedReadQuery) => readLinkedThread(client, environmentId, query);
-  const detail = async (threadId: string) => (await read({ threadId, view: "activity", limit: 1 })).thread;
-  const lanes = await Promise.all(threadIds.map(async (id): Promise<LaneThread | undefined> => {
-    const listed = matchThread(threads, id, (thread) => thread.threadId);
-    const lane = await detail(listed?.threadId ?? id).catch(unlessNotFound);
-    if (!lane) return undefined;
-    const members = listed ? family(listed) : [lane];
-    const live = lane.archived ? [] : members.filter((thread) => liveStatuses.includes(thread.status));
-    const waitingChildren = await Promise.all(members.slice(1).filter((thread) => thread.status === "waiting").map((thread) => detail(thread.threadId)));
-    return {
-      id, status: lane.status, live: live.length > 0,
-      updatedAt: [lane.updatedAt, ...members.map((thread) => thread.updatedAt)].sort().at(-1) ?? "", gone: lane.archived,
-      waitingIn: [lane, ...waitingChildren].find((thread) => thread.pendingRequestCount > 0)?.threadId ?? null,
-      needsHuman: live.length || lane.archived ? null : needsHuman(await linkedFinalText(client, environmentId, read, lane)),
-    };
-  }));
-  return lanes.filter((lane): lane is LaneThread => Boolean(lane));
+function finalText(read: ThreadRead): string {
+  if ("screen" in read) return read.screen.split("\n").map((line) => line.replace(/[`*│]/g, "").trim()).filter((line) => line.startsWith(needsHumanMarker)).at(-1) ?? "";
+  const last = read.messages.filter((message) => message.role === "user" || message.text).at(-1);
+  return last?.role === "assistant" ? last.text : "";
 }
 
-function unlessNotFound(error: unknown): undefined {
-  if (error instanceof T3ToolError && error.code === "thread_not_found") return undefined;
-  throw error;
-}
-
-async function linkedFinalText(
-  client: T3HttpClient, environmentId: string, read: (query: LinkedReadQuery) => Promise<{ items: LinkedTimelineItem[] }>, lane: LinkedThreadDetail,
-): Promise<string> {
-  const afterPosition = lane.itemCount - tailItems - 1;
-  const tail = await read({ threadId: lane.threadId, view: "activity", ...(afterPosition >= 0 ? { afterPosition } : {}), limit: tailItems, maxCharsPerItem: 50_000 });
-  const final = finalAssistantMessage(tail.items);
-  return final ? await readLinkedItemText(client, environmentId, lane.threadId, final) ?? "" : "";
-}
-
-async function lastTurnItemAt(client: T3HttpClient, threadId: string): Promise<string> {
-  return (await visibleTurnItems(client, threadId))
-    .flatMap(({ item }) => [item.startedAt, item.completedAt, item.updatedAt])
-    .filter((date): date is string => Boolean(date)).sort().at(-1) ?? "";
-}
-
-function finalAssistantMessage<T extends TurnMessage>(items: T[]): T | undefined {
-  const last = items.filter((item) => item.type === "user_message" || (item.type === "assistant_message" && item.text)).at(-1);
-  return last?.type === "assistant_message" ? last : undefined;
-}
-
-function visibleTurnItems(client: T3HttpClient, threadId: string) {
-  return readTurnItems(client, threadId, () => false).catch(() => []);
-}
 
 export function needsHuman(message: string): string | null {
   const last = message.trim().split("\n").at(-1)?.replace(/[`*]/g, "").trim() ?? "";
   return last.startsWith(needsHumanMarker) ? last.slice(needsHumanMarker.length).trim() || "no ask given" : null;
-}
-
-function isLive(thread: ShellThread): boolean {
-  return Boolean(thread.activeRunId) || liveStatuses.includes(thread.activityRunStatus ?? thread.status) || isWaiting(thread, { childTasks: false });
 }
 
 export async function readLaneAttention(
@@ -158,7 +108,7 @@ function attentionFor(lane: Lane, boxes: BoxReport[], now: Date, stallMinutes: n
       : undefined;
   }
   if (ticketType(lane.ticket) === "grilling") return undefined;
-  const status = settledStatuses.includes(thread.status) ? "" : ` T3 shows ${thread.status}; the ticket decides.`;
+  const status = settledStates.includes(thread.status) ? "" : ` Its runtime shows ${thread.status}; the ticket decides.`;
   return `finished: ended its turn with the ticket open. Read its result and act on it.${status} ${where}`;
 }
 
@@ -166,11 +116,10 @@ export async function runLanes(args: string[], io: LanesIo): Promise<number> {
   const [map, flag, minutes, ...rest] = args;
   if (!map || rest.length || (flag && (flag !== "--stall" || !/^\d+$/.test(minutes ?? "")))) throw new Error(usage);
   const ref = mapRef(map, usage);
-  const readBoxes: ReadBoxes = (threadIds) => withT3Session(async (client) => readEachMachine(
-    await readMachines(client, io.host),
-    async () => ({ threads: await readLaneThreads(client, threadIds) }),
-    async (environmentId) => ({ threads: await readLinkedLaneThreads(client, environmentId, threadIds) }),
-  ), { home: io.home, ...io.session });
+  const readBoxes: ReadBoxes = async (threadIds) => {
+    const threads = await io.threads();
+    return readEachMachine(await readMachines(threads, io.host), async (where) => ({ threads: await readLaneThreads(threads, where, threadIds) }));
+  };
   const report = await readLaneAttention(ref, io.fetchIssue ?? fetchIssueFromGitHub, io.fetchDiscussion ?? fetchDiscussionFromGitHub, readBoxes, io.now, Number(minutes ?? defaultStallMinutes));
   io.print(report.text);
   return report.attention ? 1 : 0;

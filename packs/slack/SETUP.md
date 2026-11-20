@@ -4,7 +4,7 @@ Read this when the person picks the Slack pack in step 6.
 
 Their own Slack message or reaction with their trigger emoji (default
 `:t3code:`, set by `slack.emoji`), or a mention of their Slack app, starts a
-T3 thread. It needs their own Slack app. With the context library of the Memory pack on,
+thread in the runtime that base.runtime names. It needs their own Slack app. With the context library of the Memory pack on,
 their own `:brain:` reaction (set by `slack.captureEmoji`) saves the message's
 thread, its canvases, and the Wispr Flow meeting held with it to their context
 library, and sends its context to the open threads that need it.

@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Runtimes: T3 Code becomes a pack, and Herdr is the second runtime
+
+- The engine no longer knows T3 Code. The new **T3 Code runtime** pack holds
+  T3's settings, service, tasks, linked machines, and client. Every profile
+  gets it while `base.runtime` is `t3`, the default, so nothing changes for
+  you.
+- The new **Herdr** pack is a second runtime. With `hedge set
+  base.runtime=herdr`, threads that Hedge starts, such as Slack threads,
+  run as herdr-core terminals in the Hedge space, and the Herdr app on your
+  Mac and your phone shows them. Scheduled agent prompts run as timed jobs
+  that start a thread. `hedge apply` writes one herdr-core template for
+  each row of the model table, such as `hedge-implementation`.
+- `hedge devbox add` links a new node through the runtime: T3 Connect for
+  T3 Code, `hc machine add` for Herdr.
+- The new `hedge threads` command lists, reads, starts, and sends to threads
+  under any runtime. Orchestration's `hedge thread`, `hedge lanes`, and
+  `hedge activity`, the context library, and the review wait use it too.
+- Workflows that read T3 Code's own records turn off without T3 Code, and
+  say why: question guard, parking, PR owners, boxes, linked hub, provider
+  recovery, OOM survival, and worktree cleanup. A 👤 answer in the decision
+  ledger still needs T3 Code, because only T3 records who answered.
+- `hub.threadFolder` is gone: hub alerts start their threads through
+  `hedge threads start`, in the runtime's own folder.
+- Packs in other repos keep loading: `runner: "t3"` now means
+  `runner: "agent"`, and `t3ProjectScripts` means `projectScripts`.
+
 ### The Security pack reads Wiz
 
 - The new **Security** pack has one workflow, `wiz`, off by default. Agents

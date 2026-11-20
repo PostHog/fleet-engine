@@ -2,7 +2,7 @@ import { homedir, hostname } from "node:os";
 import { runCommand } from "../../base/lib/command.ts";
 import { modelFor } from "../../base/lib/models.ts";
 import { optionalStringSetting, stringSetting } from "../../base/lib/settings.ts";
-import { launchScratchThread, withT3Session } from "../../base/lib/t3/index.ts";
+import { activeRuntime } from "../../../src/runtime/active.ts";
 import { capture, Coder } from "../../hub/lib/coder.ts";
 import { devboxesOf, quote, shellLimitMs } from "../../hub/lib/machine.ts";
 import { modelAnalyst, modelAsk } from "../lib/dream/analyze.ts";
@@ -34,5 +34,5 @@ await runCommand(() => dreamCommand(Bun.argv.slice(2), {
   git: (args) => capture(["git", ...args], { timeoutMs: shellLimitMs }),
   analyst: () => modelAnalyst(modelFor("lookup", env), home, env, boundedSpawn()),
   checker: () => modelAsk<Verdict>(modelFor("survey", env), home, env, boundedSpawn(), checkerPrompt, checkerSchema),
-  launch: (title, prompt) => withT3Session((client) => launchScratchThread(client, { title, prompt, row: modelFor("implementation", env) }), { home, scopes: ["orchestration:read", "orchestration:operate"] }),
+  launch: async (title, prompt) => (await (await activeRuntime(env, home)).threads.start({ key: `memory:${title}`, title, prompt, modelRole: "implementation" })).id,
 }), "hedge dream");

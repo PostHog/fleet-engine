@@ -156,10 +156,10 @@ async function hubHere(devboxes: Record<string, [number, number]>) {
   }
   writeHome(home, { ".config/hedge/machine.json": JSON.stringify({ schema: 1, role: "hub", devboxes: Object.keys(devboxes) }) });
   const engine = join(home, "engine");
-  writeHome(home, { "engine/hedge": `echo "local $*" >> "${bin}/calls.log"` });
+  writeHome(home, { "engine/hedge": `echo "local $*" >> "${bin}/calls.log"\n[ "$1 $2" = "threads start" ] && cat > "${bin}/prompt.txt"\nexit 0` });
   const env = {
     PATH: `${bin}:/usr/bin:/bin`, HOME: home, HEDGE_ENGINE_DIR: engine,
-    HEDGE_SETTINGS: JSON.stringify({ "hub.alias": "my-hub", "hub.diskSweepGigabytes": 15, "hub.diskAlertGigabytes": 10, "hub.threadFolder": "~/notes" }),
+    HEDGE_SETTINGS: JSON.stringify({ "hub.alias": "my-hub", "hub.diskSweepGigabytes": 15, "hub.diskAlertGigabytes": 10 }),
     HEDGE_MODELS: JSON.stringify([{ role: "lookup", work: "Lookups", provider: "claude", model: "small-model", effort: "medium" }]),
   };
   const lines: string[] = [];
@@ -168,18 +168,18 @@ async function hubHere(devboxes: Record<string, [number, number]>) {
   return { home, bin, context, lines, calls };
 }
 
-test("on the hub, hedge disk-watch reads each devbox over SSH, sweeps it with the engine launcher, and starts a T3 thread for the one still low", async () => {
+test("on the hub, hedge disk-watch reads each devbox over SSH, sweeps it with the engine launcher, and starts a thread for the one still low", async () => {
   const hub = await hubHere({ "box-1": [12, 30], "box-2": [12, 4] });
   expect(await diskWatchCommand([], hub.context)).toBe(0);
   const calls = hub.calls();
   expect(calls).toContain(`ssh -o BatchMode=yes -o ConnectTimeout=10 box-1 bash -lc ${quote(remoteHedge("disk-sweep --floor 15 --alert-floor 10"))} 2>&1`);
-  expect(calls.filter((call) => call.startsWith("t3 "))).toEqual([`t3 project add ${join(hub.home, "notes")}`, "t3 thread start --title box-2: 4.0G free, 99% of inodes free --provider claudeAgent --model small-model /tmp/notes -".replace("/tmp/notes", join(hub.home, "notes"))]);
+  expect(calls.filter((call) => call.startsWith("local threads "))).toEqual([`local threads start --key disk-watch:box-2:${new Date(start).toISOString().slice(0, 13)} --title box-2: 4.0G free, 99% of inodes free --role lookup`]);
   const prompt = readFileSync(join(hub.bin, "prompt.txt"), "utf8");
   expect(prompt).toContain("box-2 has 4.0G free, 99% of inodes free, below 10G");
   expect(prompt).toContain("swept box-2\n30.0G /home/box-2/.cache");
   expect(prompt).toContain("the largest folders the report names");
   expect(prompt).toContain(`ssh box-2 ${quote(`bash -lc ${quote(`df -h ~; df -i ~; ${remoteHedge("prune --dry-run --no-fetch --min-idle-hours 1")}`)}`)}`);
-  expect(calls.some((call) => call.startsWith("local"))).toBe(false);
+  expect(calls.filter((call) => call.startsWith("local") && !call.startsWith("local threads "))).toEqual([]);
 });
 
 test("a devbox sweep runs in a login shell, so the engine launcher finds the Bun that only the login profile puts on PATH", async () => {

@@ -1,6 +1,6 @@
 import { onHost } from "../../../src/hub/ssh.ts";
-import { threadUrl, UnansweredLaunch } from "../../../src/integrations/t3/index.ts";
-import type { Threads } from "../../../src/sdk/index.ts";
+import { threadUrl } from "../../t3/lib/client/start.ts";
+import { isMaybeStarted, type RuntimeThreads } from "../../../src/sdk/runtime.ts";
 import type { DiskStatus } from "../../base/lib/disk.ts";
 import type { Started } from "./trigger.ts";
 
@@ -38,7 +38,7 @@ export const spawnRun = spawnRunner();
 const lastLine = (text: string) => text.trim().split("\n").at(-1)?.trim() ?? "";
 const why = (result: { code: number; stderr: string; stdout: string }) => lastLine(result.stderr) || lastLine(result.stdout) || `exit ${result.code}`;
 
-export function launchHere(threads: Threads, room: () => DiskStatus): Launch {
+export function launchHere(threads: Pick<RuntimeThreads, "start">, room: () => DiskStatus): Launch {
   return async ({ title, prompt, commandId, replay, modelRole = "implementation" }) => {
     const disk = replay ? undefined : room();
     if (disk?.critical) return { failed: disk.message.replaceAll("\n", " "), noRoom: true };
@@ -46,7 +46,7 @@ export function launchHere(threads: Threads, room: () => DiskStatus): Launch {
       const { id, url } = await threads.start({ key: commandId, title, prompt, modelRole });
       return { threadId: id, url, where: "this machine" };
     } catch (error) {
-      return error instanceof UnansweredLaunch ? { failed: error.message, reachedT3: true } : { failed: (error as Error).message };
+      return isMaybeStarted(error) ? { failed: error.message, reachedT3: true } : { failed: (error as Error).message };
     }
   };
 }
@@ -63,7 +63,7 @@ export function launchOnBox(hedge: string, run: Run): Launch {
     }
     const ran = await run([hedge, "box", "run", claim.box, "--", "hedge", "slack-trigger", "launch"], JSON.stringify(request));
     const answer = answerOf(lastLine(ran.stdout));
-    if (ran.code === 0 && answer.threadId) return { threadId: answer.threadId, url: claim.environmentId ? threadUrl(claim.environmentId, answer.threadId) : undefined, where: claim.box };
+    if (ran.code === 0 && answer.threadId) return { threadId: answer.threadId, url: answer.url ?? (claim.environmentId ? threadUrl(claim.environmentId, answer.threadId) : undefined), where: claim.box };
     const failed = `hedge slack-trigger launch on ${claim.box}: ${answer.failed ?? why(ran)}`;
     return answer.reachedT3 ? { failed, claim, reachedT3: true } : { failed, claim };
   };

@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ShellThread } from "../../base/lib/t3/index.ts";
+import type { ShellThread } from "../../t3/lib/client/index.ts";
 import { tempDirs } from "../../../src/testing/git.ts";
 import { parkStop, settleWhenRunEnds, snoozeTime, stillParks, type ParkOptions, type SettleClock } from "./closing-line.ts";
 import { closingPark, closingSettings, defaultMarks } from "./closing-marks.ts";

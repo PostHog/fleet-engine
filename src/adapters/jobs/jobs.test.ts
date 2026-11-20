@@ -6,7 +6,7 @@ import { apply, check } from "../../reconciler/apply.ts";
 import { tempDirs } from "../../testing/git.ts";
 import { spawnAsync } from "../../testing/spawn.ts";
 import type { CommandRunner } from "../run.ts";
-import { jobsAdapter, type HedgeTask, type T3Tasks } from "./adapter.ts";
+import { jobsAdapter, type AgentTasks, type JobsOptions, type ScheduledTask } from "./adapter.ts";
 
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
@@ -40,7 +40,7 @@ function plan(os: "darwin" | "linux", jobs: Array<PackJob & { pack?: string }>):
 const prune: PackJob = { id: "prune", command: ["hedge", "prune", "--auto"], schedule: { every: "1d", at: "03:17" } };
 const pull: PackJob = { id: "skills-pull", command: ["git", "-C", "/home/u/skills", "pull"], schedule: { every: "5m" } };
 
-function crontab(initial: string | undefined) {
+function crontab(initial: string | undefined, options: Partial<JobsOptions> = {}) {
   const state = { text: initial, writes: 0 };
   const run: CommandRunner = async (command, options) => {
     if (command.join(" ") === "crontab -l") return state.text === undefined ? { code: 1, stdout: "", stderr: "no crontab for user\n" } : { code: 0, stdout: state.text };
@@ -51,7 +51,7 @@ function crontab(initial: string | undefined) {
     }
     return { code: 127, stdout: "" };
   };
-  return { state, adapter: jobsAdapter({ run, engineRoot: engine }) };
+  return { state, adapter: jobsAdapter({ run, engineRoot: engine, ...options }) };
 }
 
 const checkFails = { reason: "check base-ready does not pass", check: "base-ready" };
@@ -439,31 +439,32 @@ describe("T3 scheduled tasks", () => {
     id: "quality-loop",
     command: [],
     schedule: { every: "1d", at: "02:30" },
-    runner: "t3",
+    runner: "agent",
     workflow: "quality-loop",
     task: { prompt: "Run the quality-loop skill.", projectSetting: "orchestration.loopProject", modelRole: "implementation", workspaceStrategy: "worktree", runtimeMode: "full-access", project: "/home/u/app" },
   };
-  const wanted: HedgeTask = {
+  const selected = (tasks: AgentTasks | undefined) => ({ name: "t3", title: "T3 Code", scheduler: true, tasks });
+  const wanted: ScheduledTask = {
     id: "hedge:quality-loop",
     title: "Hedge: quality-loop",
     prompt: "Run the quality-loop skill.",
     enabled: true,
-    schedule: { type: "fixed_time", timeOfDay: "02:30" },
+    schedule: { every: "1d", at: "02:30" },
     project: "/home/u/app",
     modelRole: "implementation",
     workspaceStrategy: "worktree",
     runtimeMode: "full-access",
   };
 
-  function server(initial: HedgeTask[] = []) {
+  function server(initial: ScheduledTask[] = []) {
     const tasks = new Map(initial.map((task) => [task.id, task]));
     const calls: string[] = [];
-    const client: T3Tasks = {
+    const client: AgentTasks = {
       list: async () => [...tasks.values()],
       upsert: async (task) => void (calls.push(`upsert ${task.id}`), tasks.set(task.id, task)),
       setEnabled: async (id, enabled) => void (calls.push(`enable ${id} ${enabled}`), tasks.set(id, { ...tasks.get(id)!, enabled })),
     };
-    return { tasks, calls, adapter: jobsAdapter({ run: async () => ({ code: 0, stdout: "" }), engineRoot: engine, t3: async () => client }) };
+    return { tasks, calls, adapter: jobsAdapter({ run: async () => ({ code: 0, stdout: "" }), engineRoot: engine, tasks: async () => selected(client) }) };
   }
 
   test("creates the task once through the T3 server", async () => {
@@ -508,7 +509,7 @@ describe("T3 scheduled tasks", () => {
     const refusing = jobsAdapter({
       run: async () => ({ code: 0, stdout: "" }),
       engineRoot: engine,
-      t3: async () => ({
+      tasks: async () => selected({
         list: async () => [...t3.tasks.values()],
         upsert: async (task) => {
           if (task.id === "hedge:quality-loop") throw new Error("T3 Code has no project at /home/u/app");
@@ -538,18 +539,28 @@ describe("T3 scheduled tasks", () => {
     const adapter = jobsAdapter({
       run: async () => ({ code: 0, stdout: "" }),
       engineRoot: engine,
-      t3: async () => ({ list: async () => Promise.reject(new Error("T3 Code closed the connection")), upsert: async () => {}, setEnabled: async () => {} }),
+      tasks: async () => selected({ list: async () => Promise.reject(new Error("T3 Code closed the connection")), upsert: async () => {}, setEnabled: async () => {} }),
     });
     const report = await apply(plan("linux", [loop]), { home, adapters: [adapter] });
     expect(report.ok).toBe(false);
-    expect(report.findings).toContainEqual({ id: "tasks:t3", pack: "engine", say: "Could not read T3 Code's scheduled tasks: T3 Code closed the connection. Run hedge apply again.", repair: "apply" });
+    expect(report.findings).toContainEqual({ id: "tasks:runtime", pack: "engine", say: "Could not read the scheduled tasks of T3 Code: T3 Code closed the connection. Run hedge apply again.", repair: "apply" });
   });
 
   test("reports tasks as pending when no T3 server answers", async () => {
     const home = temp.make("home-");
-    const adapter = jobsAdapter({ run: async () => ({ code: 0, stdout: "" }), engineRoot: engine, t3: async () => undefined });
+    const adapter = jobsAdapter({ run: async () => ({ code: 0, stdout: "" }), engineRoot: engine, tasks: async () => selected(undefined) });
     const report = await check(plan("linux", [loop]), { home, adapters: [adapter] });
-    expect(report.findings).toContainEqual({ id: "task:quality-loop", pack: "base", say: "The quality-loop task waits for T3 Code to run. The next hedge apply after T3 Code starts adds it.", repair: "apply" });
+    expect(report.findings).toContainEqual({ id: "task:quality-loop", pack: "base", say: "The quality-loop task waits for T3 Code to run. The next hedge apply after it runs adds the task.", repair: "apply" });
+  });
+
+  test("a runtime without a scheduler gets each task as a timed job that starts a thread with a key for each run", async () => {
+    const home = temp.make("home-");
+    const cron = crontab("", { tasks: async () => ({ name: "herdr", title: "Herdr", scheduler: false, tasks: undefined }) });
+    const report = await apply(plan("linux", [loop]), { home, adapters: [cron.adapter] });
+    expect(report.findings.filter((finding) => finding.id.startsWith("task"))).toEqual([]);
+    expect(cron.state.text).toBe(`30 2 * * * /bin/sh '${home}/.local/state/hedge/jobs/quality-loop.sh' # hedge:quality-loop\n`);
+    const launcher = readFileSync(join(home, ".local/state/hedge/jobs/quality-loop.sh"), "utf8");
+    expect(launcher).toContain("'threads' 'start' '--key' 'hedge:quality-loop' '--each-run' '--title' 'Hedge: quality-loop' '--role' 'implementation' '--cwd' '/home/u/app' '--prompt' 'Run the quality-loop skill.'");
   });
 });
 

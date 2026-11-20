@@ -1,23 +1,9 @@
-import { afterEach, expect, test } from "bun:test";
-import { chmod, mkdir, writeFile } from "node:fs/promises";
-import { hostname } from "node:os";
-import { join } from "node:path";
-import { startT3Stub, ToolRefusal, type T3Fixture, type T3Stub } from "../../base/lib/t3/testing.ts";
-import { linkedEnvironment, linkedItem, linkedThread, linkedTools, minutesAgo, now, shellThread } from "./testing.ts";
+import { expect, test } from "bun:test";
+import type { RuntimeMessage } from "../../../src/sdk/runtime.ts";
+import { fakeRuntime, thread, type FakeMachine } from "../../../src/testing/runtime.ts";
+import { minutesAgo, now } from "./testing.ts";
 import { needsHuman, runLanes } from "./lanes.ts";
 import type { Discussion, IssueNode } from "./wayfinder.ts";
-
-const command = join(import.meta.dir, "..", "commands", "lanes.ts");
-const cleanups: (() => unknown)[] = [];
-afterEach(async () => {
-  for (const cleanup of cleanups.splice(0)) await cleanup();
-});
-
-async function stub(fixture: T3Fixture): Promise<T3Stub> {
-  const started = await startT3Stub(fixture);
-  cleanups.push(() => started.stop());
-  return started;
-}
 
 type Ticket = { number: number; thread?: string; state?: string; labels?: string[]; assignees?: string[] };
 
@@ -41,135 +27,74 @@ function issue(ticket: Ticket): IssueNode {
   };
 }
 
-function discussion(ticket: Ticket): Discussion {
-  const body = `<!-- orchestration-wayfinder-dispatch -->\nDispatched.\nThread: \`${ticket.thread}\``;
-  return { body: "", comments: ticket.thread ? [{ author: "someone", body, url: `https://github.com/acme/maps/issues/${ticket.number}#c`, createdAt: minutesAgo(500) }] : [] };
+function discussion(ticket: Ticket | undefined): Discussion {
+  const body = `<!-- orchestration-wayfinder-dispatch -->\nDispatched.\nThread: \`${ticket?.thread}\``;
+  return { body: "", comments: ticket?.thread ? [{ author: "someone", body, url: `https://github.com/acme/maps/issues/${ticket.number}#c`, createdAt: minutesAgo(500) }] : [] };
 }
 
-const map: IssueNode = { ...issue({ number: 1, labels: ["wayfinder:map"] }), childCount: tickets.length, children: tickets.map(issue) };
+const said = (role: RuntimeMessage["role"], text: string): RuntimeMessage => ({ id: text, role, text, at: minutesAgo(20) });
 
-const fixture: T3Fixture = {
-  shell: {
-    projects: [],
-    threads: [
-      shellThread("mcp:local-lane", { status: "completed", latestRunCompletedAt: minutesAgo(20) }),
-      shellThread("mcp:local-grilling", { status: "completed", latestRunCompletedAt: minutesAgo(20) }),
-    ],
-  },
-  turnItems: {
-    "mcp:local-lane": [
-      { item: { type: "user_message", text: "Go", startedAt: minutesAgo(60) } },
-      { item: { type: "assistant_message", text: "I stopped here.\n**NEEDS_HUMAN: pick a name**", startedAt: minutesAgo(20) } },
-    ],
-  },
-  links: [linkedEnvironment],
-  tools: linkedTools([
-    linkedThread("mcp:linked-stalled", { status: "running", updatedAt: minutesAgo(45) }),
-    linkedThread("mcp:linked-waiting", { status: "waiting", updatedAt: minutesAgo(1), pendingRequestCount: 1 }),
-    linkedThread("mcp:linked-archived", { archived: true }),
-    linkedThread("mcp:linked-finished", { status: "completed", items: [linkedItem("user_message", "Go"), linkedItem("assistant_message", "All done.\nNEEDS_HUMAN: is a quote here, not at the end\nDone.")] }),
-    linkedThread("mcp:linked-busy", { status: "completed", updatedAt: minutesAgo(200) }),
-    linkedThread("mcp:linked-busy-child", { status: "running", parentThreadId: "mcp:linked-busy", updatedAt: minutesAgo(3) }),
-  ]),
+const here: FakeMachine = {
+  threads: [thread("mcp:local-lane", { state: "done", updatedAt: minutesAgo(20) }), thread("mcp:local-grilling", { state: "done", updatedAt: minutesAgo(20) })],
+  reads: { "mcp:local-lane": { messages: [said("user", "Go"), said("assistant", "I stopped here.\n**NEEDS_HUMAN: pick a name**")] }, "mcp:local-grilling": { messages: [] } },
 };
 
-const expected = (host: string) => [
-  "Lanes of acme/maps#1 that need attention:",
-  `  #2 task needs the human: pick a name. Ask them with the question tool, then send the answer to its thread. Thread mcp:local-lane on ${host}.`,
-  "  #3 task stalled: running with no activity for 45m. Read its thread, and stop it when it is past its cap. Thread mcp:linked-stalled on devbox-2.",
-  "  #4 task blocked: waits on an approval or an answer nobody sees in thread mcp:linked-waiting. Thread mcp:linked-waiting on devbox-2.",
-  "  #5 task gone: its thread is archived or deleted. Reconcile the ticket as an orphaned lane. Thread mcp:linked-archived on devbox-2.",
-  "  #6 task finished: ended its turn with the ticket open. Read its result and act on it. Thread linked-finished on devbox-2.",
-  "  #7 task gone: no box has its thread mcp:nowhere. Reconcile the ticket as an orphaned lane.",
-];
+const box: FakeMachine = {
+  threads: [
+    thread("mcp:linked-stalled", { state: "working", updatedAt: minutesAgo(45) }),
+    thread("mcp:linked-waiting", { state: "blocked", blocked: { kind: "question", key: "q" }, updatedAt: minutesAgo(1) }),
+    thread("mcp:linked-archived", { closed: "archived" }),
+    thread("mcp:linked-finished", { state: "done" }),
+    thread("mcp:linked-busy", { state: "done", updatedAt: minutesAgo(200) }),
+    thread("mcp:linked-busy-child", { state: "working", parentId: "mcp:linked-busy", updatedAt: minutesAgo(3) }),
+  ],
+  reads: { "mcp:linked-finished": { messages: [said("user", "Go"), said("assistant", "All done.\nNEEDS_HUMAN: is a quote here, not at the end\nDone.")] } },
+};
 
-test("hedge lanes finds each lane on this machine or a linked environment and names the ones that need the conductor", async () => {
-  const t3 = await stub(fixture);
+async function lanes(machines: Record<string, FakeMachine>, chosen: Ticket[] = tickets, args = ["https://github.com/acme/maps/issues/1"]) {
+  const runtime = fakeRuntime(machines);
   const lines: string[] = [];
-  const fetchIssue = async (_owner: string, _repo: string, number: number) => (number === 1 ? map : issue(tickets.find((ticket) => ticket.number === number)!));
-  const fetchDiscussion = async (_owner: string, _repo: string, number: number) => discussion(tickets.find((ticket) => ticket.number === number)!);
-
-  const code = await runLanes(["https://github.com/acme/maps/issues/1"], { home: t3.home, host: "this-box", now, fetchIssue, fetchDiscussion, print: (line) => lines.push(line) });
-
-  expect(lines.join("\n")).toBe(expected("this-box").join("\n"));
-  expect(code).toBe(1);
-  expect(t3.toolCalls.every(({ args }) => args.environmentId === "env-linked")).toBe(true);
-});
-
-test("hedge lanes runs as a pack command against GitHub through gh and the local T3 server", async () => {
-  const t3 = await stub({ ...fixture, tools: linkedTools([linkedThread("mcp:linked-finished", { status: "completed", items: [linkedItem("assistant_message", "Done.")] })]) });
-  const bin = join(t3.home, "bin");
-  await mkdir(bin);
-  const graph = (value: unknown) => JSON.stringify({ data: { repository: { issue: value } } });
-  const graphIssue = (node: IssueNode): Record<string, unknown> => ({
-    number: node.number, title: node.title, state: node.state, repository: { nameWithOwner: node.repository },
-    assignees: { nodes: node.assignees.map((login) => ({ login })) }, labels: { nodes: node.labels.map((name) => ({ name })) },
-    blockedBy: { nodes: [] }, subIssuesSummary: { total: node.childCount }, subIssues: { nodes: node.children.map(graphIssue) },
+  const map: IssueNode = { ...issue({ number: 1, labels: ["wayfinder:map"] }), childCount: chosen.length, children: chosen.map(issue) };
+  const code = await runLanes(args, {
+    host: "this-box", now, print: (line) => lines.push(line), threads: async () => runtime.threads,
+    fetchIssue: async (_owner, _repo, number) => (number === 1 ? map : issue(chosen.find((ticket) => ticket.number === number)!)),
+    fetchDiscussion: async (_owner, _repo, number) => discussion(chosen.find((ticket) => ticket.number === number)),
   });
-  const graphDiscussion = (value: Discussion) => ({ body: value.body, comments: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: value.comments.map(({ author, ...rest }) => ({ author: { login: author }, ...rest })) } });
-  const shown = [{ number: 2, thread: "mcp:local-lane" }, { number: 6, thread: "linked-finished" }];
-  await writeFile(join(bin, "issue-1.json"), graph(graphIssue({ ...map, childCount: 2, children: shown.map(issue) })));
-  for (const ticket of shown) await writeFile(join(bin, `discussion-${ticket.number}.json`), graph(graphDiscussion(discussion(ticket))));
-  await writeFile(join(bin, "gh"), `#!/bin/sh
-for arg; do case "$arg" in number=*) number=\${arg#number=} ;; *subIssues*) kind=issue ;; esac; done
-cat "$(dirname "$0")/\${kind:-discussion}-$number.json"
-`);
-  await chmod(join(bin, "gh"), 0o755);
-
-  const child = Bun.spawn(["bun", command, "acme/maps#1", "--stall", "60"], { env: { ...Bun.env, HOME: t3.home, PATH: `${bin}:${Bun.env.PATH}`, HEDGE_SETTINGS: "{}" }, stdout: "pipe", stderr: "pipe" });
-  const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
-
-  expect(stderr).toBe("");
-  expect(stdout).toBe(`${[expected(hostname())[0], expected(hostname())[1], expected(hostname())[5]].join("\n")}\n`);
-  expect(code).toBe(1);
-});
-
-async function laneReport(fixture: T3Fixture, laneTickets: Ticket[]) {
-  const t3 = await stub(fixture);
-  const lines: string[] = [];
-  const laneMap = { ...map, childCount: laneTickets.length, children: laneTickets.map(issue) };
-  const code = await runLanes(["acme/maps#1"], {
-    home: t3.home, host: "this-box", now, print: (line) => lines.push(line),
-    fetchIssue: async (_owner, _repo, number) => (number === 1 ? laneMap : issue(laneTickets.find((ticket) => ticket.number === number)!)),
-    fetchDiscussion: async (_owner, _repo, number) => discussion(laneTickets.find((ticket) => ticket.number === number)!),
-  });
-  return { code, output: lines.join("\n"), t3 };
+  return { code, output: lines.join("\n") };
 }
 
-test("a linked environment that fails to read a lane is named as not answering, and the lane is not called gone", async () => {
-  const tools = linkedTools([linkedThread("mcp:linked-flaky", { status: "completed" })]);
-  const { code, output } = await laneReport({ shell: { projects: [], threads: [] }, links: [linkedEnvironment], tools(name, args) {
-    if (name === "t3_thread_read") throw new ToolRefusal("orchestration_error", "The linked environment answered HTTP 503.");
-    return tools(name, args);
-  } }, [{ number: 2, thread: "mcp:linked-flaky" }]);
+test("hedge lanes finds each lane on this machine or another and names the ones that need the conductor", async () => {
+  const { code, output } = await lanes({ "": here, "devbox-2": box });
+  expect(output).toBe([
+    "Lanes of acme/maps#1 that need attention:",
+    "  #2 task needs the human: pick a name. Ask them with the question tool, then send the answer to its thread. Thread mcp:local-lane on this-box.",
+    "  #3 task stalled: running with no activity for 45m. Read its thread, and stop it when it is past its cap. Thread mcp:linked-stalled on devbox-2.",
+    "  #4 task blocked: waits on an approval or an answer nobody sees in thread mcp:linked-waiting. Thread mcp:linked-waiting on devbox-2.",
+    "  #5 task gone: its thread is archived or deleted. Reconcile the ticket as an orphaned lane. Thread mcp:linked-archived on devbox-2.",
+    "  #6 task finished: ended its turn with the ticket open. Read its result and act on it. Thread linked-finished on devbox-2.",
+    "  #7 task gone: no box has its thread mcp:nowhere. Reconcile the ticket as an orphaned lane.",
+  ].join("\n"));
+  expect(code).toBe(1);
+});
 
+test("a machine that fails to read its lanes is named as not answering, and its lanes are not called gone", async () => {
+  const { code, output } = await lanes({ "": { threads: [] }, "devbox-2": { fails: "The linked environment answered HTTP 503." } }, [{ number: 2, thread: "mcp:linked-flaky" }]);
   expect(output).toBe("devbox-2 did not answer: The linked environment answered HTTP 503.");
   expect(code).toBe(1);
 });
 
-test("a lane's final message longer than one read still shows the ask on its last line", async () => {
-  const long = `${"x".repeat(60_000)}\nNEEDS_HUMAN: pick a region`;
-  const { output, t3 } = await laneReport({ shell: { projects: [], threads: [] }, links: [linkedEnvironment], tools: linkedTools([
-    linkedThread("mcp:linked-long", { status: "completed", itemCount: 60, items: [
-      ...Array.from({ length: 58 }, (_, index) => linkedItem("tool_call", `step ${index}`, { itemId: `step-${index}` })),
-      linkedItem("user_message", "Go", { itemId: "ask" }), linkedItem("assistant_message", long, { itemId: "final" }),
-    ] }),
-  ]) }, [{ number: 2, thread: "mcp:linked-long" }]);
-
-  expect(output).toBe("Lanes of acme/maps#1 that need attention:\n  #2 task needs the human: pick a region. Ask them with the question tool, then send the answer to its thread. Thread mcp:linked-long on devbox-2.");
-  expect(t3.toolCalls.filter(({ name, args }) => name === "t3_thread_read" && args.itemId).map(({ args }) => [args.itemId, args.textOffset])).toEqual([["final", 50_000]]);
+test("a runtime that shows a lane as its screen still shows the ask that the lane printed last", async () => {
+  const screen = { screen: "● Done.\n  NEEDS_HUMAN: pick a region\n\n╭────╮\n│ >  │\n╰────╯" };
+  const { output } = await lanes({ "": { threads: [thread("t7", { state: "idle" })], reads: { t7: screen } } }, [{ number: 2, thread: "t7" }]);
+  expect(output).toBe("Lanes of acme/maps#1 that need attention:\n  #2 task needs the human: pick a region. Ask them with the question tool, then send the answer to its thread. Thread t7 on this-box.");
 });
 
 test("hedge lanes refuses a bad map or stall, and says when no lane needs attention", async () => {
-  const t3 = await stub({ shell: { projects: [], threads: [] } });
-  const io = { home: t3.home, host: "this-box", now, print: () => {}, fetchIssue: async () => ({ ...map, children: [] }), fetchDiscussion: async () => ({ body: "", comments: [] }) };
   const usage = "Usage: hedge lanes <map URL | owner/repo#number> [--stall minutes]";
-  await expect(runLanes([], io)).rejects.toThrow(usage);
-  await expect(runLanes(["acme/maps#1", "--stall", "soon"], io)).rejects.toThrow(usage);
-  await expect(runLanes(["not a map"], io)).rejects.toThrow(usage);
-  const lines: string[] = [];
-  expect(await runLanes(["acme/maps#1"], { ...io, print: (line) => lines.push(line) })).toBe(0);
-  expect(lines).toEqual(["No lane of acme/maps#1 needs attention."]);
+  await expect(lanes({ "": {} }, [], [])).rejects.toThrow(usage);
+  await expect(lanes({ "": {} }, [], ["acme/maps#1", "--stall", "soon"])).rejects.toThrow(usage);
+  await expect(lanes({ "": {} }, [], ["not a map"])).rejects.toThrow(usage);
+  expect(await lanes({ "": { threads: [] } }, [], ["acme/maps#1"])).toEqual({ code: 0, output: "No lane of acme/maps#1 needs attention." });
 });
 
 test("only the last line of a lane's final message asks for the human", () => {

@@ -1,15 +1,15 @@
-import { Database } from "bun:sqlite";
 import { lstatSync, readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { Finding } from "../../pack/types.ts";
 import type { Adapter } from "../../reconciler/apply.ts";
 import { customFleetEngine, fleetEngineInstalled, inLegacyEngine, oldJob, underLegacyPath } from "../../legacy.ts";
 import { skipOtherHome, spawnRunner, type CommandRunner } from "../run.ts";
-import { localT3Server } from "../t3/session.ts";
-import type { T3Server } from "../t3/port.ts";
+import { loadPacks } from "../../pack/manifest.ts";
+import { importRuntime } from "../../runtime/load.ts";
+import type { FleetTasks } from "../../sdk/runtime.ts";
 
 export type FleetPiece = { kind: "launchd" | "systemd" | "container" | "t3" | "cron" | "process"; name: string; pid?: number };
-export type OldTasks = { list(): Promise<Array<{ id: string; enabled: boolean }>>; setEnabled(id: string, enabled: boolean): Promise<void>; saved?: true };
+export type OldTasks = FleetTasks;
 export type Running = { pid: number; ppid: number; argv: string[]; fleetEngine?: string; cwd?: string };
 export type FleetOptions = { run?: CommandRunner; accountHome?: () => Promise<string | undefined>; uid?: number; tasks?: (home: string) => Promise<OldTasks | undefined>; sleep?: (ms: number) => Promise<void>; processes?: () => Promise<Running[]> };
 export type Retirement = { retired: string[]; left: string[]; notes: string[] };
@@ -120,31 +120,16 @@ const why = (output: { code: number; stderr?: string }) => (output.stderr ?? "")
 const listedNothing = (output: { code: number; stdout: string; stderr?: string }) => output.code === 1 && !output.stdout.trim() && !(output.stderr ?? "").trim();
 export const describe = (piece: FleetPiece) => ({ launchd: `launchd agent ${piece.name}`, systemd: `systemd unit ${piece.name}`, container: `Docker container ${piece.name}`, t3: `T3 Code task ${piece.name}`, cron: `cron job ${piece.name}`, process: `running command ${piece.name}` })[piece.kind];
 
-export function scheduledTasks(server: T3Server = localT3Server) {
-  return async (home: string): Promise<OldTasks | undefined> => {
-    if (!(await server.answering(home))) return savedTasks(join(home, ".t3/userdata/statev2.sqlite"));
-    return {
-      list: () => server.session(home, async (rpc) => (await rpc.first<{ tasks: Array<{ id: string; enabled: boolean }> }>("scheduledTasks.subscribe", {})).tasks),
-      setEnabled: (id, enabled) => server.session(home, async (rpc) => void (await rpc.call("scheduledTasks.setEnabled", { id, enabled }))),
-    };
-  };
-}
+const engineRoot = join(import.meta.dir, "../../..");
 
-function savedTasks(store: string): OldTasks | undefined {
-  if (!present(store)) return undefined;
-  return {
-    saved: true,
-    async list() {
-      const db = new Database(store, { readonly: true });
-      try {
-        if (!db.query("select 1 from sqlite_master where type = 'table' and name = 'scheduled_tasks'").get()) return [];
-        return db.query<{ id: string; enabled: number }, []>("select task_id as id, enabled from scheduled_tasks").all().map((row) => ({ id: row.id, enabled: row.enabled !== 0 }));
-      } finally {
-        db.close();
-      }
-    },
-    setEnabled: async () => Promise.reject(new Error("T3 Code is stopped")),
-  };
+async function runtimeTasks(home: string): Promise<OldTasks | undefined> {
+  for (const { manifest, dir } of await loadPacks(engineRoot)) {
+    if (!manifest.runtime) continue;
+    const runtime = await importRuntime(join(dir, manifest.runtime.path)).catch(() => undefined);
+    const tasks = await runtime?.onboarding?.().fleetTasks?.(home);
+    if (tasks) return tasks;
+  }
+  return undefined;
 }
 
 type Found = { pieces: FleetPiece[]; unclear: string[]; notes: string[] };
@@ -152,7 +137,7 @@ type Found = { pieces: FleetPiece[]; unclear: string[]; notes: string[] };
 export function fleetAdapter(options: FleetOptions = {}): FleetAdapter {
   const run = options.run ?? spawnRunner;
   const uid = options.uid ?? process.getuid?.() ?? 0;
-  const tasksOf = options.tasks ?? scheduledTasks();
+  const tasksOf = options.tasks ?? runtimeTasks;
   const launchdTarget = (label: string) => `gui/${uid}/${label}`;
   const crontab = async () => {
     const listed = await run(["crontab", "-l"]);

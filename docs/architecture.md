@@ -600,6 +600,31 @@ as today's human step, with `hedge run <pack>/<id>` as its probe.
   *Reason:* the vision asks for a unified API. A capability name costs
   nothing now, and a pack does not change when a second provider comes. A
   generic interface for providers is a guess until the second one exists.
+  *D25 replaces the provider part of D21:* the second provider exists.
+- **D25. An agent runtime is a pack, and the engine names none.** A runtime
+  is the app where agent threads live: T3 Code, Herdr, and later cmux. A
+  runtime pack declares `"runtime": { "name", "path" }`, and the module at
+  `path` exports an `AgentRuntime` (`src/sdk/runtime.ts`). It gives
+  threads (`start`, `send`, `list`, `find`, `read`, `machines`), its
+  capabilities, the environment variable that names an agent's thread, and
+  optionally an adapter, scheduled tasks, and onboarding.
+  - The profile setting `base.runtime` (default `t3`) chooses the runtime
+    that starts threads and runs scheduled agent prompts. Resolve turns its
+    pack on. Other runtime packs may stay on, so a pack that reads T3's own
+    records keeps working while Herdr starts threads.
+  - `ctx.threads` and `hedge threads` reach the chosen runtime. A pack
+    command or a hook reads it from `HEDGE_RUNTIME` or the record that apply
+    saves at `~/.local/state/hedge/runtime.json`.
+  - A config entry with a runtime's name as `provider` goes to that
+    runtime's adapter. A job with `runner: "agent"` is a scheduled agent
+    prompt; a runtime without a scheduler gets it as a timed job that runs
+    `hedge threads start`.
+  - A workflow that reads T3's own records says `needs: ["t3"]`: question
+    guard, parking, PR owners, boxes, linked hub, provider recovery, OOM
+    survival, and worktree cleanup.
+  *Reasons:* Herdr is the second provider, and cmux comes next. A runtime
+  that is a pack plugs in like any other pack, also from another repo. Old
+  spellings keep loading: `runner: "t3"` and `t3ProjectScripts`.
 - **A thread start is idempotent.** `threads.start` takes the caller's
   `key` and passes it to T3 as the launch's command id, as the launcher
   does today (`packs/base/lib/t3/launch.ts:14`). T3 keeps a receipt for

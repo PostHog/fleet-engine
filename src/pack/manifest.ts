@@ -55,10 +55,11 @@ export function parseManifest(raw: unknown, where: string): PackManifest {
   };
   if (!isRecord(raw)) return fail("not a JSON object");
   if (raw.schema !== 1) return fail(`unknown schema ${String(raw.schema)}`);
+  withCurrentNames(raw);
   if (typeof raw.name !== "string" || !packName.test(raw.name)) return fail("name must be lowercase words joined by dashes");
   if (raw.title !== undefined && !filled(raw.title)) return fail("title must be the name people read");
   if (typeof raw.summary !== "string" || raw.summary === "") return fail("summary must be one plain sentence");
-  for (const field of ["aliases", "settingPrefixes", "requires", "guides", "skills", "config", "settings", "workflows", "jobs", "human", "steps", "checks", "files", "codexRules", "t3ProjectScripts", "handlers", "served"]) {
+  for (const field of ["aliases", "settingPrefixes", "requires", "guides", "skills", "config", "settings", "workflows", "jobs", "human", "steps", "checks", "files", "codexRules", "projectScripts", "handlers", "served"]) {
     if (raw[field] !== undefined && !Array.isArray(raw[field])) fail(`${field} must be a list`);
   }
   checkShapes(raw, fail);
@@ -72,7 +73,7 @@ const oses = ["darwin", "linux"];
 const roles = ["mac", "devbox", "linux", "hub", "solo"];
 const intervals = ["5m", "15m", "1h", "1d", "always"];
 const runtimeModes = ["full-access", "auto", "approval-required"];
-const providers = ["claude", "codex", "t3"];
+const agentProviders = ["claude", "codex"];
 const plans = ["claude", "codex", "both"];
 const efforts = ["low", "medium", "high", "xhigh", "max"];
 
@@ -88,13 +89,11 @@ function scopeProblem(item: Record<string, unknown>) {
 }
 
 /** What is wrong with a config entry from a pack or a profile's overrides, or undefined when it is sound. */
-const t3ProjectKeys = ["projectSettingsOverrides", "projectScriptOverrides"];
 const filled = (value: unknown) => typeof value === "string" && value.trim().length > 0;
 
 export function configEntryProblem(item: unknown) {
   if (!isRecord(item)) return "must be an object";
-  if (!providers.includes(item.provider as string) || typeof item.key !== "string") return "needs a provider and a key";
-  if (item.provider === "t3" && t3ProjectKeys.includes(item.key)) return "T3 project settings hold Hedge's worktree scripts, so set those with t3ProjectScripts";
+  if (typeof item.provider !== "string" || !(agentProviders.includes(item.provider) || packName.test(item.provider)) || typeof item.key !== "string") return "needs a provider, claude, codex, or a runtime's name, and a key";
   if (item.provider === "claude" && item.key === "mcpServers") return "a Claude MCP server key names one server, such as mcpServers.<name>";
   if (item.provider === "claude" && item.key.startsWith("mcpServers.") && !isRecord(item.value)) return 'a Claude MCP server must be an object, such as { "type": "stdio", "command": ... }';
   return scopeProblem(item);
@@ -146,7 +145,7 @@ function checkShapes(raw: Record<string, unknown>, fail: (message: string) => ne
   each("config", (item, label) => {
     const problem = configEntryProblem(item);
     if (problem) fail(`${label}: ${problem}`);
-    waitsWithin(item, label, item.provider !== "t3");
+    waitsWithin(item, label, agentProviders.includes(item.provider as string));
   });
   each("served", (item, label) => {
     need(typeof item.id === "string" && Number.isInteger(item.port) && typeof item.health === "string", `${label}: needs an id, a port, and a health path`);
@@ -176,12 +175,12 @@ function checkShapes(raw: Record<string, unknown>, fail: (message: string) => ne
   });
   each("jobs", (item, label) => {
     need(typeof item.id === "string" && isStrings(item.command), `${label}: needs an id and a command list`);
-    need(item.runner === undefined || item.runner === "os" || item.runner === "t3", `${label}: runner must be os or t3`);
+    need(item.runner === undefined || item.runner === "os" || item.runner === "agent", `${label}: runner must be os or agent`);
     const schedule = isRecord(item.schedule) ? item.schedule : undefined;
     need(intervals.includes(schedule?.every as string), `${label}: schedule.every must be 5m, 15m, 1h, 1d, or always`);
     need(schedule?.at === undefined || /^([01]\d|2[0-3]):[0-5]\d$/.test(String(schedule.at)), `${label}: schedule.at must be HH:MM`);
     need(schedule?.every !== "always" || schedule.at === undefined, `${label}: a job that runs always has no schedule.at`);
-    need(schedule?.every !== "always" || (item.runner !== "t3" && item.task === undefined), `${label}: a job that runs always runs on the machine, not on t3`);
+    need(schedule?.every !== "always" || (item.runner !== "agent" && item.task === undefined), `${label}: a job that runs always runs on the machine, not as an agent task`);
     waitsWithin(item, label);
     filters(item, label);
     if (item.task === undefined) return;
@@ -224,7 +223,12 @@ function checkShapes(raw: Record<string, unknown>, fail: (message: string) => ne
     waitsWithin(item, label);
     filters(item, label);
   });
-  each("t3ProjectScripts", (item, label) => {
+  if (raw.runtime !== undefined) {
+    const runtime = isRecord(raw.runtime) ? raw.runtime : fail("runtime must be an object");
+    need(typeof runtime.name === "string" && packName.test(runtime.name), "runtime.name must be lowercase words joined by dashes");
+    need(filled(runtime.path), "runtime.path must be the path of the runtime's module");
+  }
+  each("projectScripts", (item, label) => {
     need(item.projectSetting === undefined || filled(item.projectSetting), `${label}: projectSetting must name a setting`);
     need(typeof item.id === "string" && filled(item.name) && filled(item.command) && isStrings(item.projects) && (item.projects.length > 0 || item.projectSetting !== undefined), `${label}: needs an id, a name, a command, and projects or a projectSetting`);
     need(packName.test(item.id as string), `${label}: id must be lowercase words joined by dashes`);
@@ -292,7 +296,7 @@ function checkWorkflows(manifest: PackManifest, fail: (message: string) => never
     const unknown = alias.workflows.find((id) => !ids.has(id));
     if (unknown) fail(`alias ${alias.name} names unknown workflow ${unknown}`);
   }
-  const tied = { jobs: manifest.jobs, human: manifest.human, steps: manifest.steps, checks: manifest.checks, config: manifest.config, files: manifest.files, codexRules: manifest.codexRules, t3ProjectScripts: manifest.t3ProjectScripts, handlers: manifest.handlers, served: manifest.served };
+  const tied = { jobs: manifest.jobs, human: manifest.human, steps: manifest.steps, checks: manifest.checks, config: manifest.config, files: manifest.files, codexRules: manifest.codexRules, projectScripts: manifest.projectScripts, handlers: manifest.handlers, served: manifest.served };
   for (const [field, items] of Object.entries(tied)) {
     for (const item of items ?? []) {
       const label = "id" in item ? item.id : "key" in item ? item.key : "seam" in item ? item.seam : "target" in item ? item.target : item.path;
@@ -300,7 +304,7 @@ function checkWorkflows(manifest: PackManifest, fail: (message: string) => never
     }
   }
   for (const job of manifest.jobs ?? []) {
-    if (job.runner === "t3" && !job.task) fail(`job ${job.id} runs on t3 but has no task`);
+    if (job.runner === "agent" && !job.task) fail(`job ${job.id} runs as an agent task but has no task`);
   }
   const seams = manifest.handlers?.map((handler) => handler.seam) ?? [];
   const twice = seams.find((seam, index) => seams.indexOf(seam) !== index);
@@ -351,4 +355,10 @@ function isListOf(value: unknown, allowed: string[]) {
 
 function isValue(value: unknown) {
   return ["string", "number", "boolean"].includes(typeof value);
+}
+
+function withCurrentNames(raw: Record<string, unknown>) {
+  if (raw.t3ProjectScripts !== undefined && raw.projectScripts === undefined) raw.projectScripts = raw.t3ProjectScripts;
+  delete raw.t3ProjectScripts;
+  for (const job of Array.isArray(raw.jobs) ? raw.jobs : []) if (isRecord(job) && job.runner === "t3") job.runner = "agent";
 }

@@ -74,28 +74,28 @@
       "key": "orchestration.waitMark",
       "question": "Which mark starts a closing line that waits on someone else, so the thread snoozes?",
       "type": "string",
-      "default": "⏳",
+      "default": "\u23f3",
       "ask": "never"
     },
     {
       "key": "orchestration.snoozeMark",
       "question": "Which mark starts a closing line that snoozes the thread until the time on the line?",
       "type": "string",
-      "default": "💤",
+      "default": "\ud83d\udca4",
       "ask": "never"
     },
     {
       "key": "orchestration.checkMark",
       "question": "Which mark starts a closing line that settles the thread until its own scheduled check?",
       "type": "string",
-      "default": "🔕",
+      "default": "\ud83d\udd15",
       "ask": "never"
     },
     {
       "key": "orchestration.doneMark",
       "question": "Which mark starts a closing line that says the work is done and you may settle the thread?",
       "type": "string",
-      "default": "➡️",
+      "default": "\u27a1\ufe0f",
       "ask": "never"
     },
     {
@@ -137,7 +137,10 @@
       "id": "question-guard",
       "name": "Question guard",
       "default": true,
-      "sentence": "A top-level T3 thread that ends its turn with a decision for you in prose is stopped once and told to ask with the question tool, so the decision reaches you even while the thread waits on a watch. An agent message that would interrupt a thread waiting on your answer is turned back once and told to queue, so the question stays open. A T3 thread that owns an open pull request and ends its turn while the proof gate has not passed at the pushed head is sent back once, with the step still owed."
+      "sentence": "A top-level T3 thread that ends its turn with a decision for you in prose is stopped once and told to ask with the question tool, so the decision reaches you even while the thread waits on a watch. An agent message that would interrupt a thread waiting on your answer is turned back once and told to queue, so the question stays open. A T3 thread that owns an open pull request and ends its turn while the proof gate has not passed at the pushed head is sent back once, with the step still owed.",
+      "needs": [
+        "t3"
+      ]
     },
     {
       "id": "parking",
@@ -154,7 +157,10 @@
         "orchestration.waitSnoozeDays",
         "orchestration.timeZone"
       ],
-      "sentence": "A top-level T3 thread parks itself by the mark its last line starts with. A wait on someone else snoozes it for a few days, a snooze line snoozes it until its time, and a line that names its own scheduled check settles it once the turn ends. A thread you pinned stays in view, and a thread that settles while it alone links an open pull request is sent back once."
+      "sentence": "A top-level T3 thread parks itself by the mark its last line starts with. A wait on someone else snoozes it for a few days, a snooze line snoozes it until its time, and a line that names its own scheduled check settles it once the turn ends. A thread you pinned stays in view, and a thread that settles while it alone links an open pull request is sent back once.",
+      "needs": [
+        "t3"
+      ]
     }
   ],
   "files": [

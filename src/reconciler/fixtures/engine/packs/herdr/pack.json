@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "name": "herdr",
+  "summary": "A second runtime that starts threads.",
+  "runtime": { "name": "herdr", "path": "runtime.ts" },
+  "config": [{ "provider": "herdr", "key": "theme", "value": "dark" }]
+}

@@ -13,7 +13,7 @@ age() {
 }
 
 describe_job() {
-  printf 'pid=%s\nstart=%s\nthread=%s\ndir=%s\ncommand=%s\n' "$$" "$(date +%s)" "${T3CODE_THREAD_ID:-}" "$PWD" "$(printf '%s' "$*" | tr '\n' ' ' | cut -c1-200)"
+  printf 'pid=%s\nstart=%s\nthread=%s\ndir=%s\ncommand=%s\n' "$$" "$(date +%s)" "${HEDGE_THREAD_ID:-${T3CODE_THREAD_ID:-}}" "$PWD" "$(printf '%s' "$*" | tr '\n' ' ' | cut -c1-200)"
 }
 
 show_job() {

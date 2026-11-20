@@ -14,7 +14,7 @@ const engineRoot = join(import.meta.dir, "..");
 const artDir = join(engineRoot, "page/art");
 const videoDir = join(engineRoot, "page/video");
 
-export const needPacks: Partial<Record<Need, string>> = { hub: "hub", coder: "posthog", "posthog-org": "posthog" };
+export const needPacks: Partial<Record<Need, string>> = { hub: "hub", coder: "posthog", "posthog-org": "posthog", t3: "t3" };
 
 const needLabels: Record<Need, string> = {
   gh: "GitHub",
@@ -23,6 +23,7 @@ const needLabels: Record<Need, string> = {
   hub: "the Hub pack",
   coder: "Coder",
   "posthog-org": "your team's GitHub org",
+  t3: "T3 Code",
 };
 
 export type PageOptions = { audience: Audience; team?: LoadedPack[] };

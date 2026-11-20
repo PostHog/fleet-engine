@@ -1,23 +1,17 @@
-import {
-  listLinkedThreads, readLinkedThread, readLinkedThreadWords, readSnapshots, readThread, readThreadWords, sendLinkedMessage, sendMessage, T3ToolError, withT3Session,
-  type ShellThread, type T3HttpClient, type T3SessionOptions,
-} from "../../base/lib/t3/index.ts";
+import type { RuntimeThread, RuntimeThreads, Where } from "../../../src/sdk/runtime.ts";
 import { runActivity } from "./activity.ts";
 import { pickMachine, readEachMachine, readMachines } from "./machines.ts";
 
-export type ThreadIo = { home: string; host: string; print(line: string): void; readStdin(): Promise<string>; session?: T3SessionOptions };
-
-type Place = { local: ShellThread } | { environmentId: string; threadId: string };
+export type ThreadIo = { host: string; print(line: string): void; readStdin(): Promise<string>; threads(): Promise<RuntimeThreads> };
 
 const usage = `Usage: hedge thread list [host] [--limit count] [--json]
        hedge thread find <id>
        hedge thread read [--host host] <id> [--words]
        hedge thread send [--host host] <id> [message]
 Without --host, Hedge finds the machine that has the thread. find names that machine and reads nothing of the thread.
---words prints only the messages a person typed; on a linked machine it leaves out answers to question tools.
+--words prints only the messages a person typed, where the runtime can tell who typed them.
 The message comes from stdin when you leave it out.`;
-const threadIdPattern = /^[a-zA-Z0-9][a-zA-Z0-9:._%-]{0,511}$/;
-const sendScopes = ["orchestration:read", "orchestration:operate", "access:read"];
+const threadIdPattern = /^[a-zA-Z0-9][a-zA-Z0-9:/._%-]{0,511}$/;
 
 export async function runThread(args: string[], io: ThreadIo): Promise<number> {
   const [action, ...rest] = args;
@@ -25,19 +19,21 @@ export async function runThread(args: string[], io: ThreadIo): Promise<number> {
   if (action !== "find" && action !== "read" && action !== "send") throw new Error(usage);
   const { host, threadId, words, typed } = parseTarget(rest, action);
   const text = action === "send" ? await readMessage(words, io) : "";
-  const result = await withT3Session(async (client) => {
-    const { machine, place } = await placeThread(client, io.host, threadId, host, action);
-    if (action === "find") return { host: machine, threadId: "local" in place ? place.local.id : place.threadId };
-    if (action === "read" && typed) {
-      return { host: machine, words: "local" in place ? await readThreadWords(client, place.local.id) : await readLinkedThreadWords(client, place.environmentId, place.threadId) };
-    }
-    if (action === "read") {
-      return { host: machine, thread: "local" in place ? await readThread(client, place.local.id) : await readLinkedThread(client, place.environmentId, { threadId: place.threadId }) };
-    }
-    return { host: machine, ...("local" in place ? await sendMessage(client, place.local, text) : await sendLinkedMessage(client, place.environmentId, place.threadId, text)) };
-  }, { home: io.home, ...io.session, ...(action === "send" ? { scopes: sendScopes } : {}) });
+  const threads = await io.threads();
+  const { machine, where, thread } = await placeThread(threads, io.host, threadId, host, action);
+  const result = action === "find"
+    ? { host: machine, threadId: thread.id }
+    : action === "read"
+      ? { host: machine, ...(typed ? { words: await personWords(threads, thread.id, where) } : { thread, read: await threads.read(thread.id, where) }) }
+      : { host: machine, threadId: thread.id, sent: await threads.send({ id: thread.id, text, ...where }) };
   io.print(JSON.stringify(result, null, 2));
   return 0;
+}
+
+async function personWords(threads: RuntimeThreads, id: string, where: Where) {
+  const read = await threads.read(id, where);
+  if ("screen" in read) throw new Error("This runtime shows a thread as its screen, so it cannot tell which words a person typed. Read the thread without --words.");
+  return read.messages.filter((message) => message.role === "user" && message.from === "person");
 }
 
 function parseTarget(args: string[], action: "find" | "read" | "send") {
@@ -61,31 +57,11 @@ async function readMessage(words: string[], io: ThreadIo): Promise<string> {
   return text;
 }
 
-async function placeThread(client: T3HttpClient, thisHost: string, value: string, host: string | undefined, action: "find" | "read" | "send"): Promise<{ machine: string; place: Place }> {
-  const machines = await readMachines(client, thisHost);
-  const reports = await readEachMachine<{ ids: string[]; locals?: ShellThread[]; environmentId?: string }>(
-    host ? [pickMachine(machines, host)] : machines,
-    async () => {
-      const locals = (await readSnapshots(client)).flatMap((snapshot) => snapshot.threads).filter((thread) => !thread.deletedAt);
-      return { ids: locals.map((thread) => thread.id), locals };
-    },
-    async (environmentId) => {
-      const ids = (await listLinkedThreads(client, environmentId, { allProjects: true, includeSubagents: true })).map((thread) => thread.threadId);
-      if (ids.includes(value)) return { ids, environmentId };
-      const exact = await readLinkedThread(client, environmentId, { threadId: value, limit: 1 }).catch((error: unknown) => {
-        if (error instanceof T3ToolError && error.code === "thread_not_found") return undefined;
-        throw error;
-      });
-      return { ids: exact ? [exact.thread.threadId] : ids, environmentId };
-    },
-  );
-  const found = reports.flatMap((report) => {
-    if (report.error !== undefined) return [];
-    const id = pickId(report.ids, value, report.host);
-    if (!id) return [];
-    const place: Place = report.environmentId ? { environmentId: report.environmentId, threadId: id } : { local: report.locals!.find((thread) => thread.id === id)! };
-    return [{ machine: report.host, place }];
-  });
+async function placeThread(threads: RuntimeThreads, thisHost: string, value: string, host: string | undefined, action: "find" | "read" | "send"): Promise<{ machine: string; where: Where; thread: RuntimeThread }> {
+  const machines = await readMachines(threads, thisHost);
+  const chosen = host ? [pickMachine(machines, host)] : machines;
+  const reports = await readEachMachine(chosen, async (where) => ({ where, thread: await findOne(threads, value, where) }));
+  const found = reports.flatMap((report) => (report.error === undefined && report.thread ? [{ machine: report.host, where: report.where, thread: report.thread }] : []));
   const silent = reports.flatMap((report) => (report.error === undefined ? [] : [`${report.host} could not be checked (${report.error})`]));
   if (found.length > 1) throw new Error(`Thread ${value} is on ${found.map((each) => each.machine).join(", ")}. Choose one with --host.`);
   if (found.length === 1 && action === "send" && !host && silent.length) {
@@ -95,9 +71,10 @@ async function placeThread(client: T3HttpClient, thisHost: string, value: string
   throw new Error([`No machine has thread ${value}.`, ...reports.flatMap((report) => (report.error === undefined ? [] : [`${report.host}: ${report.error}`]))].join("\n"));
 }
 
-function pickId(ids: string[], value: string, machine: string): string | undefined {
-  if (ids.includes(value)) return value;
-  const fits = ids.filter((id) => id.endsWith(`:${value}`));
-  if (fits.length > 1) throw new Error(`On ${machine}, ${value} fits ${fits.join(", ")}. Give the full id.`);
+async function findOne(threads: RuntimeThreads, value: string, where: Where): Promise<RuntimeThread | undefined> {
+  const exact = await threads.find(value, where);
+  if (exact) return exact;
+  const fits = (await threads.list({ ...where, includeClosed: true })).filter((thread) => thread.closed !== "deleted" && (thread.id.endsWith(`:${value}`) || thread.id.endsWith(`/${value}`)));
+  if (fits.length > 1) throw new Error(`${value} fits ${fits.map((thread) => thread.id).join(", ")}. Give the full id.`);
   return fits[0];
 }

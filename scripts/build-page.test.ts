@@ -56,7 +56,7 @@ function localTargets(path: string, html: string) {
 describe("the site build", () => {
   test("writes one page for the landing, one for the packs, and one for every pack", () => {
     expect(pagesOf(files).map(([path]) => path)).toEqual(["index.html", "packs/index.html", ...data.packs.map((pack) => `packs/${pack.name}/index.html`)]);
-    expect(data.packs.map((pack) => pack.name)).toEqual(["base", "hub", "pull-requests", "orchestration", "communication", "guards", "memory", "slack", "incident-io", "mcp-gateway", "security"]);
+    expect(data.packs.map((pack) => pack.name)).toEqual(["base", "hub", "pull-requests", "orchestration", "communication", "guards", "memory", "slack", "incident-io", "mcp-gateway", "security", "t3", "herdr"]);
   });
 
   test("every link and asset on every page leads to a file of the site, from any folder the site is served under", () => {
@@ -111,14 +111,14 @@ describe("the site build", () => {
     const html = page("index.html");
     const boxed = [...data.startPacks, ...data.hubStartPacks];
     const others = data.packs.filter((pack) => !boxed.includes(pack.name));
-    expect(others.map((pack) => pack.title)).toEqual(["Base", "Guards", "Slack", "Paging (incident.io)", "MCP gateway", "Security"]);
+    expect(others.map((pack) => pack.title)).toEqual(["Base", "Guards", "Slack", "Paging (incident.io)", "MCP gateway", "Security", "T3 Code runtime", "Herdr"]);
     const text = visibleText(html);
     expect(others.filter((pack) => new RegExp(`\\b${pack.title}\\b`).test(text)).map((pack) => pack.title)).toEqual([]);
     expect(localTargets("index.html", html).filter((target) => target.startsWith("packs/"))).toEqual(expect.arrayContaining(["packs/index.html"]));
     expect(localTargets("index.html", html).filter((target) => /^packs\/.+\//.test(target))).toEqual([]);
   });
 
-  test("the packs page shows Base and Hub in every Hedge without a switch, then the picks in three groups, leaves Integrations off the site, and lets a visitor add Hub from its page", async () => {
+  test("the packs page shows Base and Hub in every Hedge without a switch, then the picks in four groups, leaves Integrations off the site, and lets a visitor add Hub from its page", async () => {
     const groupsOf = (html: string) =>
       [...html.matchAll(/<section[^>]*aria-labelledby="(group-\d+)"[^>]*>([\s\S]*?)<\/section>/g)].map(([, id, body]) => [
         visibleText(body!.match(new RegExp(`<h2[^>]*id="${id}"[^>]*>([\\s\\S]*?)</h2>`))![1]!).trim(),
@@ -129,6 +129,7 @@ describe("the site build", () => {
       ["How your agents work", ["Quality gates (switch)", "Orchestration (switch)", "Communication (switch)", "Guards (switch)"]],
       ["What your agents know", ["Memory (switch)"]],
       ["What your agents reach", ["Slack (switch)", "Paging (incident.io) (switch)", "MCP gateway (switch)", "Security (switch)"]],
+      ["Where your threads run", ["T3 Code runtime (switch)", "Herdr (switch)"]],
     ]);
     const hub = page("packs/hub/index.html");
     expect([visibleText(hub).includes("You add nothing"), visibleText(hub).includes("Add to your Hedge")]).toEqual([false, true]);
@@ -163,6 +164,8 @@ describe("the site build", () => {
       "incident-io": "hedge packs --add incident-io",
       "mcp-gateway": "hedge packs --add mcp-gateway",
       security: "hedge packs --add mcp-gateway --add security",
+      t3: "hedge packs --add t3",
+      herdr: "hedge packs --add herdr",
     };
     expect(data.packs.filter((pack) => pack.name !== "base").map((pack) => pack.name)).toEqual(Object.keys(commands));
     for (const [name, command] of Object.entries(commands)) {
@@ -231,7 +234,7 @@ describe("the site build", () => {
 
   test("the credits name the source of every picture in the art folder, and the folder holds no picture that no build shows but the ones kept for a later page", async () => {
     const artDir = join(root, "page/art");
-    const keptUnshown = ["desk-hog.png", "hospital-hog.png", "laptop-hog-02.png"];
+    const keptUnshown = ["hospital-hog.png"];
     const held = readdirSync(artDir).filter((name) => !name.endsWith(".md") && name !== "LICENSE");
     const credits = readFileSync(join(artDir, "README.md"), "utf8");
     expect(held.filter((name) => !new RegExp(`^\\| \`${name}\` \\| \`[^\`]+/${name}\` \\| \`[0-9a-f]{40}\` \\|$`, "m").test(credits))).toEqual([]);

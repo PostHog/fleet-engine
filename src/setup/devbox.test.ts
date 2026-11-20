@@ -4,9 +4,11 @@ import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { git, isolateGit, tempDirs } from "../testing/git.ts";
 import { getShHarness, onLinuxHost } from "../testing/get-sh.ts";
-import { overSsh, pairing, profileForBox, sshHosts } from "./devbox.ts";
+import { pairing } from "../../packs/t3/lib/onboarding/connect.ts";
+import type { AgentRuntime } from "../sdk/runtime.ts";
+import { devboxSteps, overSsh, profileForBox, sshHosts } from "./devbox.ts";
 import { claudeProbeTimeoutMs } from "./signins.ts";
-import { boxHome, deadEnvironmentToken, fakeMachine, hedgeSetup, machineFile, onBox, remote } from "./testing.ts";
+import { boxHome, deadEnvironmentToken, fakeMachine, hedgeSetup, machineFile, onBox, remote, scripted } from "./testing.ts";
 
 isolateGit();
 const temp = tempDirs();
@@ -33,6 +35,17 @@ describe("the devbox over SSH", () => {
       command: ["ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "node-1", `PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH"; d=$(mktemp -d) && cd "$d" && codex exec 'it'\\''s ok'; s=$?; cd / && rm -rf "$d"; exit $s`],
       timeoutMs: 20000,
     });
+  });
+
+  test("under a runtime that does not link machines, the devbox steps skip linking and say that the runtime links them itself", async () => {
+    const box = fakeMachine(temp.make("home-"));
+    const io = scripted([]);
+    const runtime: AgentRuntime = { name: "plain", title: "Plain", capabilities: { machines: false, prLinks: false, transcript: false }, threads: () => ({}) as never, threadVariable: "PLAIN_THREAD" };
+    const steps = devboxSteps("node-1", { terminal: io.terminal, machine: box.machine, nonInteractive: true, plan: "claude", models: [], profile: async () => ({ url: "", engineRef: "main" }), runtime });
+    expect(steps.map((step) => step.id)).not.toContain("devbox:node-1:t3");
+    await steps.find((step) => step.id === "devbox:node-1:link")!.run();
+    expect(io.output()).toBe("▶ Link node-1 with this machine\n  · Plain links your machines itself, so Hedge does not link them.");
+    expect(box.calls).toEqual([]);
   });
 
   test("reads the origin and the code from t3 pair", () => {

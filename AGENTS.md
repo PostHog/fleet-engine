@@ -22,3 +22,6 @@ The public Hedge engine: the `hedge` CLI, `get.sh`, and the public packs.
   The `privacy` CI job enforces this with gitleaks and a deny-list that lives
   outside this repo.
 - Write documentation in simplified technical English.
+- Reach threads through the runtime seam (`ctx.threads`, `activeRuntime`,
+  `hedge threads`), never through one runtime's client. Code that needs
+  T3 Code's own records lives behind a workflow with `needs: ["t3"]`.

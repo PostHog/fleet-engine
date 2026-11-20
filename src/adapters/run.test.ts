@@ -8,7 +8,7 @@ import { tempDirs } from "../testing/git.ts";
 import { identityAdapter } from "./identity/adapter.ts";
 import { jobsAdapter } from "./jobs/adapter.ts";
 import { accountHome, directoryHome, passwdHome, spawnRunner, type CommandRunner } from "./run.ts";
-import { t3Adapter } from "./t3/adapter.ts";
+import { t3Adapter } from "../../packs/t3/lib/adapter/adapter.ts";
 
 const temp = tempDirs();
 const leftoverGroups: number[] = [];

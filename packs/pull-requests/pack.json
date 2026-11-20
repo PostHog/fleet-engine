@@ -209,7 +209,10 @@
       "id": "pr-owners",
       "name": "PR owners",
       "default": true,
-      "sentence": "A thread that still owns an open pull request cannot settle or archive itself until it hands the pull request over, and a box with such a thread is not released. A thread you pinned cannot be settled or snoozed by an agent. A settle, snooze or archive of a thread on a Hedge peer asks that machine's Hedge first, over SSH. When that Hedge does not answer, or is older, the guard reads the thread through T3."
+      "sentence": "A thread that still owns an open pull request cannot settle or archive itself until it hands the pull request over, and a box with such a thread is not released. A thread you pinned cannot be settled or snoozed by an agent. A settle, snooze or archive of a thread on a Hedge peer asks that machine's Hedge first, over SSH. When that Hedge does not answer, or is older, the guard reads the thread through T3.",
+      "needs": [
+        "t3"
+      ]
     },
     {
       "id": "quality-loop",
@@ -307,7 +310,7 @@
     {
       "id": "quality-loop",
       "command": [],
-      "runner": "t3",
+      "runner": "agent",
       "schedule": {
         "every": "1d",
         "at": "01:00"
@@ -329,7 +332,7 @@
     {
       "id": "signal-loop",
       "command": [],
-      "runner": "t3",
+      "runner": "agent",
       "schedule": {
         "every": "1d",
         "at": "02:00"
@@ -351,7 +354,7 @@
     {
       "id": "pr-digest",
       "command": [],
-      "runner": "t3",
+      "runner": "agent",
       "schedule": {
         "every": "1d",
         "at": "08:00"

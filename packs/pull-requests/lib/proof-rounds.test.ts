@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { startT3Stub } from "../../base/lib/t3/testing.ts";
+import { startT3Stub } from "../../t3/lib/client/testing.ts";
 import { cleanFixtures, settings, lookup, checkout, fakeModel, reviewHead, finishRound, recordingModel, stalledOnQuota, blanks, ledgerDecisions, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);

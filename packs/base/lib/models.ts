@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, isAbsolute } from "node:path";
+import { bundledThreadVariables, readRuntimeRecord } from "../../../src/runtime/active.ts";
 
 type Env = Record<string, string | undefined>;
 
@@ -28,8 +29,8 @@ function isRow(value: unknown): value is ModelRow {
 }
 
 export function modelSessionEnv(env: Record<string, string | undefined>) {
-  const { T3CODE_THREAD_ID: _lane, ...rest } = env;
-  return rest;
+  const lane = readRuntimeRecord(env)?.threadVariables ?? bundledThreadVariables();
+  return Object.fromEntries(Object.entries(env).filter(([name]) => !lane.includes(name)));
 }
 
 export function leanClaudeEnv(home: string, env: Env): Env {

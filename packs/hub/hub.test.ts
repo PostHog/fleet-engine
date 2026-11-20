@@ -170,7 +170,6 @@ describe("the Hub pack", () => {
     expect(items(hub, { "disk-watch": false })).toEqual([]);
     expect(items(devbox)).toEqual([]);
     expect(items(mac)).toEqual([]);
-    expect(plan({ packs: ["hub"], workflows: { "mcp-gateway": false, "linked-hub": false } }).settings).toMatchObject({ "hub.threadFolder": "~" });
   });
 
   test("the Boxes workflow's settings reach its commands, the relay port for a box's hub forward included", () => {

@@ -30,9 +30,3 @@ export function launchdTimer(schedule: Schedule): LaunchdTimer {
   return { StartInterval: minutes[schedule.every] * 60 };
 }
 
-export type T3Schedule = { type: "interval"; everyMs: number } | { type: "fixed_time"; timeOfDay: string };
-
-export function t3Schedule(schedule: Schedule): T3Schedule {
-  if (schedule.every === "1d") return { type: "fixed_time", timeOfDay: schedule.at ?? defaultTime };
-  return { type: "interval", everyMs: minutes[schedule.every] * 60_000 };
-}

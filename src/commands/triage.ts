@@ -4,6 +4,9 @@ import { join, resolve } from "node:path";
 import type { CommandRunner } from "../adapters/run.ts";
 import type { MachineFile, Profile } from "../pack/types.ts";
 import { loadMachine, loadProfile } from "../profile/profile.ts";
+import { runtimeName } from "../reconciler/resolve.ts";
+import { defaultRuntime } from "../runtime/load.ts";
+import { engineRuntime } from "../runtime/load.ts";
 import { defaultSources, engineRepo } from "../setup/defaults.ts";
 import { FlagError } from "../setup/flags.ts";
 import { Stopped, type Terminal } from "../setup/terminal.ts";
@@ -117,8 +120,10 @@ const cell = (text: string) => text.replace(/\|/g, "\\|").replace(/\n/g, " ");
 
 async function versionLines(context: TriageContext, profile: Profile | undefined) {
   const os = context.platform === "darwin" ? ["sw_vers", "-productVersion"] : ["sh", "-c", '. /etc/os-release 2>/dev/null && echo "$PRETTY_NAME"'];
+  const runtime = await engineRuntime(context.engineRoot, profile ? runtimeName(profile) : defaultRuntime);
+  const tool = runtime?.onboarding?.().tool;
   const tools: Array<[string, string[]]> = [
-    ["T3 Code", ["t3", "--version"]],
+    ...(runtime && tool ? [[runtime.title, [tool, "--version"]] as [string, string[]]] : []),
     ["Claude Code", ["claude", "--version"]],
     ["Codex", ["codex", "--version"]],
     ["gh", ["gh", "--version"]],

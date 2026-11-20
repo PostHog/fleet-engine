@@ -1,9 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { t3Threads } from "../../src/integrations/t3/index.ts";
-import { startT3Stub, type LaunchedThread } from "../../src/integrations/t3/testing.ts";
-import type { ShellThread } from "../../src/integrations/t3/threads.ts";
+import { t3Threads } from "../t3/lib/client/index.ts";
+import { startT3Stub, type LaunchedThread } from "../t3/lib/client/testing.ts";
+import type { ShellThread } from "../t3/lib/client/threads.ts";
 import type { ModelRow } from "../../src/pack/types.ts";
 import { tempDirs } from "../../src/testing/git.ts";
 import { checkMail, defaultQuery, type MailWatch } from "./lib/mail-watch.ts";

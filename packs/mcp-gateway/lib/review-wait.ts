@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import type { Threads } from "../../../src/sdk/index.ts";
-import { sendLinkedMessage, withT3Session, type T3SessionOptions } from "../../base/lib/t3/index.ts";
-import { readLinkedOpenWork, readLinkedParkedThreads, readOpenWork, readParkedThreads, type OpenWork, type ParkedThread, type ParkedThreads } from "../../orchestration/lib/activity.ts";
+import type { RuntimeThreads, Where } from "../../../src/sdk/runtime.ts";
+import { withT3Session, type T3SessionOptions } from "../../t3/lib/client/index.ts";
+import { readLinkedParkedThreads, readParkedThreads, type ParkedThread, type ParkedThreads } from "../../t3/lib/parked.ts";
+import { readOpenWork } from "../../orchestration/lib/activity.ts";
 import { asksForDecision } from "../../orchestration/lib/prose-question.ts";
 import { readEachMachine, readMachines } from "../../orchestration/lib/machines.ts";
 import type { Gh } from "../../pull-requests/lib/gh.ts";
@@ -22,7 +23,6 @@ const graphQuery = `query($q: String!, $after: String) { search(query: $q, type:
   reviews(last: 100) { nodes { author { __typename login } submittedAt } }
   reviewRequests(first: 20) { nodes { requestedReviewer { ... on Team { slug } ... on User { login } } } }
 } } } }`;
-const sendScopes = ["orchestration:read", "orchestration:operate", "access:read"];
 const quotaWaitMs = 50 * 60_000;
 const afterResetMs = 30_000;
 const parkedGraceMs = 30 * 60_000;
@@ -39,13 +39,15 @@ type SearchNode = {
   reviewRequests?: { nodes: { requestedReviewer: { slug?: string; login?: string } | null }[] };
 };
 type WaitingPr = { key: string; repo: string; number: number; url: string; title: string; readyAt: string; requested: string[] };
-type Owner = { host: string; id: string; title: string; environmentId?: string };
+type Owner = { host: string; id: string; title: string; where: Where };
 
 export type ReviewWait = {
   gh: Gh;
   qualifiers: string;
   slack: RouteReach & { filter: string };
-  threads: Threads;
+  threads: RuntimeThreads;
+  /** The selected runtime's name. Parked questions are a T3 Code inbox, so only the t3 runtime sweeps them. */
+  runtime: string | undefined;
   session: T3SessionOptions;
   host: string;
   statePath: string;
@@ -220,17 +222,13 @@ async function slackAsks(wait: ReviewWait, since: number): Promise<Set<string>> 
 }
 
 async function openOwners(wait: ReviewWait): Promise<{ owners: Map<string, Owner[]>; unreachable: string[] }> {
-  const reports = await withT3Session(async (client) => readEachMachine<{ work: OpenWork[]; environmentId?: string }>(
-    await readMachines(client, wait.host),
-    async () => ({ work: await readOpenWork(client) }),
-    async (environmentId) => ({ work: await readLinkedOpenWork(client, environmentId), environmentId }),
-  ), wait.session);
+  const reports = await readEachMachine(await readMachines(wait.threads, wait.host), async (where) => ({ where, work: await readOpenWork(wait.threads, where) }));
   const owners = new Map<string, Owner[]>();
   for (const report of reports) {
     if (report.error !== undefined) continue;
     for (const thread of report.work) for (const { url } of thread.pullRequests) {
       const key = url.toLowerCase();
-      owners.set(key, [...owners.get(key) ?? [], { host: report.host, id: thread.id, title: thread.title, environmentId: report.environmentId }]);
+      owners.set(key, [...owners.get(key) ?? [], { host: report.host, id: thread.id, title: thread.title, where: report.where }]);
     }
   }
   return { owners, unreachable: reports.flatMap((report) => (report.error === undefined ? [] : [report.host])) };
@@ -238,19 +236,18 @@ async function openOwners(wait: ReviewWait): Promise<{ owners: Map<string, Owner
 
 async function send(wait: ReviewWait, owner: Owner, text: string): Promise<boolean> {
   try {
-    if (!owner.environmentId) return await wait.threads.send({ id: owner.id, text });
-    await withT3Session((client) => sendLinkedMessage(client, owner.environmentId!, owner.id, text), { ...wait.session, scopes: sendScopes });
-    return true;
+    return await wait.threads.send({ id: owner.id, text, ...owner.where });
   } catch {
     return false;
   }
 }
 
 async function sweepParked(wait: ReviewWait, dryRun: boolean): Promise<boolean> {
-  const reports = await withT3Session(async (client) => readEachMachine<ParkedThreads & { environmentId?: string }>(
-    await readMachines(client, wait.host),
-    async () => readParkedThreads(client),
-    async (environmentId) => ({ ...await readLinkedParkedThreads(client, environmentId), environmentId }),
+  if (wait.runtime !== "t3") return true;
+  const machines = await wait.threads.machines();
+  const reports = await withT3Session(async (client) => readEachMachine<ParkedThreads & { where: Where }>(
+    await readMachines(wait.threads, wait.host),
+    async (where) => (where.machine ? { ...await readLinkedParkedThreads(client, machines.find((machine) => machine.name === where.machine)!.id), where } : { ...await readParkedThreads(client), where }),
   ), wait.session);
   const now = wait.now();
   const unseen = reports.flatMap((report) => (report.error !== undefined ? [`${report.host} `]
@@ -259,7 +256,7 @@ async function sweepParked(wait: ReviewWait, dryRun: boolean): Promise<boolean> 
   const parked = reports.flatMap((report) => (report.error !== undefined ? [] : report.threads.flatMap((thread) => {
     if (snoozedByPerson(thread, now)) return [];
     if (!(now - Date.parse(thread.message.at) >= parkedGraceMs) || !asksForDecision(thread.message.text)) return [];
-    const owner: Owner = { host: report.host, id: thread.id, title: thread.title, environmentId: report.environmentId };
+    const owner: Owner = { host: report.host, id: thread.id, title: thread.title, where: report.where };
     return [{ owner, at: thread.message.at, key: `${report.host} ${thread.id} ${thread.message.at}` }];
   })));
   const previous = new Set(readList(wait.parkedPath));

@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { join } from "node:path";
 import { numberSetting, optionalStringSetting, stringSetting } from "../../base/lib/settings.ts";
-import { withT3Session } from "../../base/lib/t3/index.ts";
+import { withT3Session } from "../../t3/lib/client/index.ts";
 import { capture, type Capture, type Env, type Result } from "./coder.ts";
 import { isKeptForBoxes, isNodeName } from "../../../src/hub/names.ts";
 import type { Clock } from "./pool.ts";
