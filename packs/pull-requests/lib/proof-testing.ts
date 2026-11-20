@@ -333,12 +333,25 @@ export function fakeModel(pr: Checkout, role: "REVIEWER" | "JUDGE", answer: stri
   };
 }
 
-export async function reviewHead(pr: Checkout) {
+export async function reviewHead(pr: Checkout, findings = "No findings.\n") {
   expect((await pr.hedge("review-start", "--scope", "full")).code).toBe(0);
-  writeFileSync(join(pr.repository, "findings.md"), "No findings.\n");
+  writeFileSync(join(pr.repository, "findings.md"), findings);
   expect((await pr.hedge("review-finish", "--round", "1", "--reviewer", "gpt-6.1-sol", "findings.md")).code).toBe(0);
   markPanel(pr, "1");
   return pr.git("rev-parse", "HEAD");
+}
+
+export const productionMajor = (location: string, anchor: string) => `- major | ${location} | the change drops a case | anchor: ${anchor}\n`;
+
+export async function answerFixed(pr: Checkout, round: string, findings = 1) {
+  writeFileSync(join(pr.repository, "responses.md"), Array.from({ length: findings }, (_, index) => `${index + 1}. fixed: the change keeps the case\n`).join(""));
+  expect((await pr.hedge("respond", "--round", round, "responses.md")).code).toBe(0);
+}
+
+export async function reviewHeadFixed(pr: Checkout, location: string, anchor: string) {
+  const head = await reviewHead(pr, productionMajor(location, anchor));
+  await answerFixed(pr, "1");
+  return head;
 }
 
 export function markPanel(pr: Checkout, round: string) {
@@ -388,7 +401,7 @@ export const acceptGap = (pr: Checkout, kind: string, ...more: string[]) => pr.d
 export const graded = (tier: string, grade = "low") => `## Merge risk\n\n<!-- merge-risk -->\n> [!NOTE]\n> 🔵 **Merge risk: ${grade}** · two-way door\n> - **Tier:** ${tier}\n<!-- /merge-risk -->\n`;
 
 export async function finishRound(pr: Checkout, round: string) {
-  writeFileSync(join(pr.repository, "findings.md"), `Findings of ${round}.\n`);
+  writeFileSync(join(pr.repository, "findings.md"), `- major | Findings of ${round}.\n`);
   await pr.hedge("review-finish", "--round", round, "--reviewer", "gpt-6.1-sol", "findings.md");
 }
 

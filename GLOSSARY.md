@@ -133,12 +133,20 @@ The Markdown that `hedge decision report` prints when a lane ends: what is still
 _Avoid_: Summary, wrap-up
 
 **End table**:
-One row per pull request: its review rounds and final reads, its production lines at the first reviewed commit and at HEAD with the growth between them, and each skipped proof with its reason and who accepted it. The proof receipt in the pull request and the end-of-run report print the same table. The gate measures the lines at HEAD, so the table holds a pull request only once a gate ran at its HEAD.
+One row per pull request: its review rounds and final reads, its production lines at the first reviewed commit and at HEAD with the growth between them, its latest sanity pass, and each skipped proof with its reason and who accepted it. The proof receipt in the pull request and the end-of-run report print the same table. The gate measures the lines at HEAD, so the table holds a pull request only once a gate ran at its HEAD.
 _Avoid_: Summary table, scorecard
 
 **Production lines**:
 The lines a pull request adds and deletes against the commit where it branched from its base, without tests, docs, lock files and generated files. Tests and docs are counted apart.
 _Avoid_: Diff size, LOC
+
+**Stop rule**:
+A review round runs after another review only when the latest finished review, a round or a final read, found a bug in production code that the pull request introduced. Such a finding states its severity as blocker or major, and its location field names a production file or no file. It is not a TESTS item, none of its fields starts with `[base]`, and it is not answered rejected or known. Without one, `hedge proof review` refuses the round and prints the question that asks the user, and only the user's `--override` runs it. The first panel of a pull request still runs, since the gate needs it. Fixes since the last round get a final read.
+_Avoid_: Round limit, cutoff
+
+**Sanity pass**:
+A check that a pull request needs when its production lines at HEAD are more than twice the lines at its first reviewed commit. Before the next round, the agent cuts the pull request back to base behaviour or justifies the growth, and records the verdict with `hedge proof sanity --verdict cut|justified --reason '<why>'`. The latest pass covers the production lines it saw, so a head that grows again needs a new pass. A round the user's `--override` runs waits for the pass too. The reason must not hold figures. A first review that saw no production lines needs none.
+_Avoid_: Bloat check
 
 ## Secrets
 

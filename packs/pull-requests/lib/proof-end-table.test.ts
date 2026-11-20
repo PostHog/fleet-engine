@@ -10,8 +10,14 @@ afterEach(cleanFixtures);
 
 const lines = (count: number, word: string) => Array.from({ length: count }, (_, index) => `${word} ${index}`).join("\n") + "\n";
 const block = (body: string) => /<!-- hedge-proof-receipt[\s\S]*?<!-- \/hedge-proof-receipt -->/.exec(body)?.[0] ?? "";
-const rendered = (row: string) => [...Bun.markdown.html(`| a | b | c | d |\n| --- | --- | --- | --- |\n${row}\n`).matchAll(/<td>([\s\S]*?)<\/td>/g)].map((match) => match[1]!);
-const tableIn = (text: string) => text.split("\n").filter((line) => line.startsWith("| PR | Review rounds") || line.startsWith("| example/product#42 | ") && line.split(" | ").length === 4);
+function tableIn(text: string) {
+  const lines = text.split("\n");
+  const start = lines.findIndex((line) => line.startsWith("| PR | Review rounds"));
+  if (start < 0) return [];
+  const end = lines.findIndex((line, index) => index > start && !line.startsWith("|"));
+  return [lines[start]!, ...lines.slice(start + 2, end < 0 ? undefined : end)];
+}
+const rendered = (row: string) => [...Bun.markdown.html(`| a | b | c | d | e |\n| --- | --- | --- | --- | --- |\n${row}\n`).matchAll(/<td>([\s\S]*?)<\/td>/g)].map((match) => match[1]!);
 
 async function reviewHead(pr: Checkout) {
   expect((await pr.hedge("review-start", "--scope", "full")).code).toBe(0);
@@ -19,15 +25,24 @@ async function reviewHead(pr: Checkout) {
   expect((await pr.hedge("review-finish", "--round", "1", "--reviewer", "gpt-6.1-sol", "findings.md")).code).toBe(0);
 }
 
+async function reviewFixed(pr: Checkout) {
+  expect((await pr.hedge("review-start", "--scope", "full")).code).toBe(0);
+  writeFileSync(join(pr.repository, "findings.md"), "- major | feature.ts:2 | the greeting drops the last name | anchor: greet 1\n");
+  expect((await pr.hedge("review-finish", "--round", "1", "--reviewer", "gpt-6.1-sol", "findings.md")).code).toBe(0);
+  writeFileSync(join(pr.repository, "responses.md"), "1. fixed: the greeting keeps it\n");
+  expect((await pr.hedge("respond", "--round", "1", "responses.md")).code).toBe(0);
+}
+
 async function grownPr() {
   const pr = await checkout();
   const first = await pr.commit("feature.ts", lines(10, "greet"));
   pr.pullRequestState({ body: `## Testing\n\nThe greeting.\n\n${graded("non-critical")}` });
-  await reviewHead(pr);
+  await reviewFixed(pr);
   writeFileSync(join(pr.repository, "feature.test.ts"), lines(4, "check"));
   writeFileSync(join(pr.repository, "README.md"), lines(2, "explain"));
   await pr.git("add", "feature.test.ts", "README.md");
   await pr.commit("feature.ts", lines(25, "greet"));
+  expect((await pr.hedge("sanity", "--verdict", "justified", "--reason", "The greeting needs every form")).code).toBe(0);
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", first)).code).toBe(0);
   writeFileSync(join(pr.repository, "findings.md"), "No findings.\n");
   expect((await pr.hedge("review-finish", "--round", "2", "--reviewer", "gpt-6.1-sol", "findings.md")).code).toBe(0);
@@ -48,8 +63,8 @@ test("the receipt and the end-of-run report show one table: the review rounds, p
   await pr.hedge("gate");
 
   const table = [
-    "| PR | Review rounds | Production lines | Skipped proofs |",
-    `| example/product#42 | 2 rounds | 10 → 25 (×2.5); tests 0 → 4; docs 0 → 2 | ui-walk: The greeting has no page (🤖 agent ${id}) |`,
+    "| PR | Review rounds | Production lines | Sanity pass | Skipped proofs |",
+    `| example/product#42 | 2 rounds | 10 → 25 (×2.5); tests 0 → 4; docs 0 → 2 | justified at HEAD: The greeting needs every form | ui-walk: The greeting has no page (🤖 agent ${id}) |`,
   ];
   expect((await pr.hedge("receipt")).code).toBe(0);
   expect(tableIn(block(pr.githubBody()))).toEqual(table);
@@ -78,7 +93,7 @@ test("the table holds a PR once a gate ran at its HEAD", async () => {
   await reviewHead(pr);
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | not run | none |");
 });
 
 test("round 1 counts from where it was reviewed, so a lower PR that merged into the base later does not count", async () => {
@@ -97,7 +112,7 @@ test("round 1 counts from where it was reviewed, so a lower PR that merged into 
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 20 (×2.0) | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 20 (×2.0) | not run | none |");
 });
 
 test("a renamed file counts its changed lines, not its whole content twice", async () => {
@@ -112,7 +127,7 @@ test("a renamed file counts its changed lines, not its whole content twice", asy
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | not run | none |");
 });
 
 test("a second remote of the same repository with a stale base does not count the base's later work as the PR's", async () => {
@@ -127,7 +142,7 @@ test("a second remote of the same repository with a stale base does not count th
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | 3 at HEAD | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | 3 at HEAD | not run | none |");
 });
 
 test("a stale base ref counts from the base commit GitHub reports, so the base's later work is not the PR's", async () => {
@@ -142,7 +157,7 @@ test("a stale base ref counts from the base commit GitHub reports, so the base's
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | 3 at HEAD | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | 3 at HEAD | not run | none |");
 });
 
 test("a second remote whose base holds commits GitHub's base does not leaves the fork point where GitHub puts it", async () => {
@@ -155,7 +170,7 @@ test("a second remote whose base holds commits GitHub's base does not leaves the
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | 3 at HEAD | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | 3 at HEAD | not run | none |");
 });
 
 test("a checkout without the base commit GitHub reports counts unknown, not from a stale base ref", async () => {
@@ -169,7 +184,7 @@ test("a checkout without the base commit GitHub reports counts unknown, not from
   await pr.hedge("require", "--none", "--reason", "Docs only");
   expect((await pr.hedge("gate")).output).toContain("growth: unknown at HEAD, since the base commit 0123456 that GitHub reports is not in this checkout. Run git fetch origin 0123456789abcdef0123456789abcdef01234567, then hedge proof gate again");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | unknown at HEAD | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | unknown at HEAD | not run | none |");
 });
 
 test("a reason with pipes and a run of spaces inside code renders in one cell, with who accepted it", async () => {
@@ -184,8 +199,8 @@ test("a reason with pipes and a run of spaces inside code renders in one cell, w
 
   const row = tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]!;
   const cells = rendered(row);
-  expect(cells).toHaveLength(4);
-  expect(cells[3]).toStartWith("ui-walk: <code>a|b</code> is not <code>a|b</code>, and <code>printf 'a  b'</code> keeps its spaces (🤖 agent ");
+  expect(cells).toHaveLength(5);
+  expect(cells[4]).toStartWith("ui-walk: <code>a|b</code> is not <code>a|b</code>, and <code>printf 'a  b'</code> keeps its spaces (🤖 agent ");
 });
 
 test("a count where git warns, as when it skips rename detection, reads unknown, not as whole files added and removed", async () => {
@@ -203,7 +218,7 @@ test("a count where git warns, as when it skips rename detection, reads unknown,
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | unknown at HEAD | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | unknown at HEAD | not run | none |");
 });
 
 test("a reason with a carriage return or an escaped pipe stays in its cell", async () => {
@@ -235,7 +250,7 @@ test("a rename counts its deleted lines on the old path and its added lines on t
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 20 (×2.0) | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 20 (×2.0) | not run | none |");
 });
 
 test("a PR gated before any review shows its lines at HEAD, tests and docs apart", async () => {
@@ -247,7 +262,7 @@ test("a PR gated before any review shows its lines at HEAD, tests and docs apart
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | 0 at HEAD; tests 4; docs 2 | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | 0 at HEAD; tests 4; docs 2 | not run | none |");
 });
 
 test("the receipt keeps the escapes its guard adds to a reason, so emphasis and links stay literal", async () => {
@@ -262,9 +277,9 @@ test("the receipt keeps the escapes its guard adds to a reason, so emphasis and 
   expect((await pr.hedge("receipt")).code).toBe(0);
 
   const cells = rendered(tableIn(block(pr.githubBody()))[1]!);
-  expect(cells[3]).toStartWith("ui-walk: Walk it *later* with [the plan](https://plan.example) (🤖 agent ");
-  expect(cells[3]).not.toContain("<a ");
-  expect(cells[3]).not.toContain("<em>");
+  expect(cells[4]).toStartWith("ui-walk: Walk it *later* with [the plan](https://plan.example) (🤖 agent ");
+  expect(cells[4]).not.toContain("<a ");
+  expect(cells[4]).not.toContain("<em>");
 });
 
 test("the receipt guard reads a reason the way the table prints it, so a line break cannot split a figure past it", async () => {
@@ -305,7 +320,7 @@ test("a gate after the PR merged counts from the base commit GitHub reports for 
   await mergeIntoMain(pr);
   await pr.hedge("gate", "--landed");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | not run | none |");
 });
 
 test("a gate after the PR merged into another base reads unknown when that base holds HEAD", async () => {
@@ -318,7 +333,7 @@ test("a gate after the PR merged into another base reads unknown when that base 
   pr.pullRequestState({ base: "parent", baseSha: await pr.git("rev-parse", "HEAD"), merged: true });
   await pr.hedge("gate", "--landed");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | unknown at HEAD | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | unknown at HEAD | not run | none |");
 });
 
 test("a gate after the PR merged counts the review that finished after the last gate before it", async () => {
@@ -331,7 +346,7 @@ test("a gate after the PR merged counts the review that finished after the last 
   await mergeIntoMain(pr);
   await pr.hedge("gate", "--landed");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | not run | none |");
 });
 
 async function mergeIntoMain(pr: Checkout) {
@@ -382,7 +397,7 @@ test("a saved count with a field that is not a number reads unknown, and the rep
   record.gate.summary.growth.final.production = null;
   writeFileSync(saved, JSON.stringify(record));
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | unknown at HEAD | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | unknown at HEAD | not run | none |");
 });
 
 test("a saved final figure that is not a number shows no ratio beside the first count", async () => {
@@ -397,7 +412,7 @@ test("a saved final figure that is not a number shows no ratio beside the first 
   record.gate.summary.growth.final.production = null;
   writeFileSync(saved, JSON.stringify(record));
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → unknown | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → unknown | not run | none |");
 });
 
 test("a landed gate without GitHub's base commit names the landed gate to run again", async () => {
@@ -427,7 +442,7 @@ test("a base commit from GitHub that is not a full SHA counts unknown, not from 
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | unknown at HEAD | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | unknown at HEAD | not run | none |");
 });
 
 test("a gate saved by an engine without the end table shows no row until the gate runs again", async () => {
@@ -447,7 +462,7 @@ test("a gate saved by an engine without the end table shows no row until the gat
   expect((await pr.hedge("receipt")).code).toBe(0);
   expect(block(pr.githubBody())).toContain("**End table:** no gate at HEAD yet. Run hedge proof gate, then hedge proof receipt.");
   await pr.hedge("gate");
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | not run | none |");
 });
 
 test("a base commit from GitHub that is not a string counts unknown, and the gate still saves its verdict", async () => {
@@ -458,7 +473,7 @@ test("a base commit from GitHub that is not a string counts unknown, and the gat
   const gate = await pr.hedge("gate");
 
   expect(gate.output).not.toContain("TypeError");
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | unknown at HEAD | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | unknown at HEAD | not run | none |");
 });
 
 test("counting lines in a partial clone reads unknown and fetches no missing file", () => {
@@ -496,7 +511,7 @@ test("a round 1 that read an empty range shows zero lines at round 1, not unknow
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 0 → 30 | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 0 → 30 | not run | none |");
 });
 
 test("after GitHub moves the PR to another base, the report shows no saved growth until the gate runs again", async () => {
@@ -528,7 +543,7 @@ test("round 1 counts from its fork point with GitHub's base, so base changes it 
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | not run | none |");
 });
 
 test("round 1 keeps the count of the base GitHub reported when it started, after the PR moves to another base", async () => {
@@ -541,5 +556,5 @@ test("round 1 keeps the count of the base GitHub reported when it started, after
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 15 (×1.5) | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 15 (×1.5) | not run | none |");
 });

@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### The review loop stops on its own
+
+- A review round runs after another review only when the latest review found
+  a blocker or major in production code that the pull request introduced.
+  Otherwise `hedge proof review` refuses the round, and only the user's
+  `--override` runs it. Give the fixes a final read instead. The first panel
+  of a pull request still runs.
+- The reviewer reads that behaviour the base has too is not a blocker or a
+  major. Such a finding is a minor that starts with `[base]` and cites the
+  base line.
+- When the production lines at HEAD are more than twice the lines at round 1,
+  the next round waits for a sanity pass: cut the pull request back to base
+  behaviour, or justify the growth with
+  `hedge proof sanity --verdict cut|justified --reason '<why>'`. The end
+  table shows the latest pass.
+
 ### One end table for the review and the skipped proofs
 
 - The proof receipt and `hedge decision report` print one table: the review

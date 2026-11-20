@@ -56,6 +56,7 @@ const lockFile = /(^|\/)([^/]+\.lockb?|package-lock\.json|pnpm-lock\.yaml|go\.su
 const generatedFile = /(^|\/)(__generated__|generated)\/|\.(generated|gen|min)\.[a-z]+$|\.pb\.go$|_pb2\.pyi?$/;
 const readLines = 50;
 const authored = (path: string) => !isTestFile(path) && ![docsFile, lockFile, generatedFile].some((pattern) => pattern.test(path));
+export const isProductionFile = authored;
 
 export type TierName = "read" | "pair" | "panel";
 export type ReviewTier = { name: TierName; why: string };

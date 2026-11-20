@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { acceptGap, checkout, cleanFixtures, fakeModel, graded, hubAt, reviewHead, verdict, type Checkout } from "./proof-testing.ts";
+import { acceptGap, answerFixed, checkout, cleanFixtures, fakeModel, graded, hubAt, productionMajor, reviewHead, reviewHeadFixed, verdict, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
 
@@ -50,11 +50,13 @@ async function provedPr(review: (pr: Checkout) => Promise<unknown> = reviewHead)
 
 const short = (commit: string) => commit.slice(0, 7);
 
-async function reviewAgain(pr: Checkout, round: number, reviewer = "gpt-6.1-sol") {
+async function reviewAgain(pr: Checkout, round: number, reviewer = "gpt-6.1-sol", findings = "No findings.\n") {
   expect((await pr.hedge("review-start", "--scope", "full", "--agent", "the test reviews each new head")).code).toBe(0);
-  writeFileSync(join(pr.repository, "findings.md"), "No findings.\n");
+  writeFileSync(join(pr.repository, "findings.md"), findings);
   expect((await pr.hedge("review-finish", "--round", String(round), "--reviewer", reviewer, "findings.md")).code).toBe(0);
 }
+
+const reviewFixed = (pr: Checkout) => reviewHeadFixed(pr, "feature.txt:1", "greet new members by name");
 
 function installRiskSkill(pr: Checkout) {
   mkdirSync(join(pr.home, ".agents/skills/merge-risk"), { recursive: true });
@@ -81,9 +83,9 @@ test("the body section shows each owed proof, the review and the judge in the te
     `| Review | 1-lens panel (gpt-6.1-sol), round 1 | 0 findings: 0 fixed, 0 rejected, 0 other | \`${short(head)}\` |`,
     `| Proof judge | an independent model reads the evidence against the diff | ✅ passed at \`${short(head)}\` | |`,
     "",
-    "| PR | Review rounds | Production lines | Skipped proofs |",
-    "| --- | --- | --- | --- |",
-    expect.stringMatching(/^\| example\/product#42 \| 1 round \| 1 → 1 \(×1\.0\) \| cross-version: The old client is retired \(👤 the user d-[0-9a-f]+\) \|$/),
+    "| PR | Review rounds | Production lines | Sanity pass | Skipped proofs |",
+    "| --- | --- | --- | --- | --- |",
+    expect.stringMatching(/^\| example\/product#42 \| 1 round \| 1 → 1 \(×1\.0\) \| not run \| cross-version: The old client is retired \(👤 the user d-[0-9a-f]+\) \|$/),
     "",
     "**Not checked:** Safari; the mobile layout",
   ]);
@@ -95,7 +97,9 @@ test("the body section shows each owed proof, the review and the judge in the te
   expect(patches(pr)).toBe(1);
 
   const next = await pr.commit("feature.txt", "greet new members by first name\n");
-  await reviewAgain(pr, 2);
+  expect((await pr.hedge("review-start", "--scope", "final", "--base", head)).code).toBe(0);
+  writeFileSync(join(pr.repository, "findings.md"), "No findings.\n");
+  expect((await pr.hedge("review-finish", "--round", "final-1", "--reviewer", "gpt-6.1-sol", "findings.md")).code).toBe(0);
   await pr.hedge("save", "--kind", "live-run", "--reuse-from", head, "--reason", "Same send path");
   await pr.hedge("save", "--kind", "prod-shape", "--reuse-from", head, "--reason", "Same reads");
   await pr.hedge("save", "--kind", "ui-walk", "--reuse-from", older, "--reason", "Only the greeting text changed since");
@@ -268,7 +272,7 @@ test("a field shows in the body as written, so markup and the body's link defini
 });
 
 test("a dated model id of a reviewer passes the guard", async () => {
-  const { pr } = await provedPr();
+  const { pr } = await provedPr(reviewFixed);
   await pr.commit("feature.txt", "greet new members by first name\n");
   await reviewAgain(pr, 2, "claude-sonnet-4-5-20250929");
   expect((await pr.hedge("receipt")).code).toBe(0);
@@ -331,7 +335,7 @@ test("an unreachable hub ledger exits 3 and writes nothing", async () => {
 });
 
 test("the gate names a receipt of an older head on the terminal only", async () => {
-  const { pr, head } = await provedPr();
+  const { pr, head } = await provedPr(reviewFixed);
   expect((await pr.hedge("receipt")).code).toBe(0);
   await pr.commit("feature.txt", "greet new members by first name\n");
   await reviewAgain(pr, 2);
@@ -540,7 +544,8 @@ test("commits are listed in the order they were proved or reviewed, HEAD last", 
   const reviewed: string[] = [];
   for (const [round, text] of ["greet", "greet them", "greet them all", "greet them all by name"].entries()) {
     reviewed.push(await pr.commit("feature.txt", `${text}\n`));
-    if (round === 0) await reviewHead(pr); else await reviewAgain(pr, round + 1);
+    if (round === 0) await reviewHead(pr, productionMajor("feature.txt:1", text)); else await reviewAgain(pr, round + 1, "gpt-6.1-sol", productionMajor("feature.txt:1", text));
+    await answerFixed(pr, String(round + 1));
   }
   const head = await pr.commit("feature.txt", "greet them all by first name\n");
   await pr.hedge("require", "--kinds", "live-run");
@@ -555,7 +560,7 @@ test("a commit with only reused evidence is listed by when the reuse was recorde
   const pr = await checkout();
   pr.pullRequestState({ body: template });
   const ran = await pr.commit("feature.txt", "greet\n");
-  await reviewHead(pr);
+  await reviewHeadFixed(pr, "feature.txt:1", "greet");
   await pr.hedge("require", "--kinds", "live-run");
   writeFileSync(join(pr.repository, "run.log"), "delivered\n");
   await pr.hedge("save", "--kind", "live-run", "--ran", "Sent a test email", "--result", "Delivered", "run.log");

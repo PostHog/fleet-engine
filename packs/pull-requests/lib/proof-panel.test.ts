@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { cleanFixtures, settings, checkout, clean, verdict, fakeModel, recordingModel, fixture, stalledOnQuota, panelGuide, acceptGap, hubAt, exitedPid, reviewHead, models, type Checkout } from "./proof-testing.ts";
+import { cleanFixtures, settings, checkout, clean, verdict, fakeModel, recordingModel, fixture, stalledOnQuota, panelGuide, acceptGap, answerFixed, hubAt, exitedPid, productionMajor, reviewHead, reviewHeadFixed, models, type Checkout } from "./proof-testing.ts";
 import { askModel } from "./proof-models.ts";
 import { processStart, readPlan, withSlot, type PanelIO } from "./proof-panel.ts";
 
@@ -418,9 +418,9 @@ test("a reviewer stops when hedge cannot record it in its slot", async () => {
   expect(() => process.kill(reviewer, 0)).toThrow();
 });
 
-async function authorRound(pr: Checkout, ...args: string[]) {
+async function authorRound(pr: Checkout, findings: string, ...args: string[]) {
   const reserved = JSON.parse((await pr.hedge("review-start", ...args)).output) as { id: string };
-  writeFileSync(join(pr.repository, "findings.md"), "No findings.\n");
+  writeFileSync(join(pr.repository, "findings.md"), findings);
   expect((await pr.hedge("review-finish", "--round", reserved.id, "--reviewer", "gpt-6.1-sol", "findings.md")).code).toBe(0);
 }
 
@@ -428,7 +428,8 @@ test("the gate needs a finished --lens panel round: a single reviewer never cove
   const single = await checkout();
   await single.commit("feature.txt", "greet\n");
   await single.hedge("require", "--none", "--reason", "docs only");
-  await authorRound(single, "--scope", "full");
+  await authorRound(single, productionMajor("feature.txt:1", "greet"), "--scope", "full");
+  await answerFixed(single, "1");
   const refused = await single.hedge("gate");
   expect(refused.code).toBe(1);
   expect(refused.output).toContain("review: no finished panel round on the PR; 1 single-reviewer review(s) do not count. Run hedge proof review, which runs the lenses of the PR's review tier");
@@ -447,7 +448,7 @@ test("the gate needs a finished --lens panel round: a single reviewer never cove
   expect((await pr.hedge("review", "--wait")).code).toBe(0);
   expect((await pr.hedge("gate")).code).toBe(0);
   await pr.commit("feature.txt", "greet the member\n");
-  await authorRound(pr, "--scope", "final", "--base", reviewed);
+  await authorRound(pr, "No findings.\n", "--scope", "final", "--base", reviewed);
   const after = await pr.hedge("gate");
   expect(after.code).toBe(0);
   expect(after.output).toContain("review: HEAD reviewed in final read 1 by gpt-6.1-sol");
@@ -520,9 +521,11 @@ test("after a valid panel, a later panel round whose findings the author saved n
   const pr = await checkout();
   const reviewed = await pr.commit("feature.txt", "greet\n");
   await pr.hedge("require", "--none", "--reason", "docs only");
-  fakeModel(pr, "REVIEWER", clean);
+  const reviewer = fakeModel(pr, "REVIEWER", lensMajor("greet"));
   await pr.hedge("review", "--lens", "correctness");
   expect((await pr.hedge("review", "--wait")).code).toBe(0);
+  await answerFixed(pr, "1", 3);
+  reviewer.answer(clean);
   await pr.commit("feature.txt", "greet the member\n");
   await pr.hedge("review", "--lens", "correctness", "--scope", "fixes", "--base", reviewed);
   expect((await pr.hedge("review", "--wait")).code).toBe(0);
@@ -544,7 +547,7 @@ test("a panel gap holds the gate until the user accepts it, and still needs a re
   expect((await pr.hedge("gate")).output).toContain(`review: HEAD not reviewed; panel gap from`);
   expect((await pr.hedge("gate")).code).toBe(1);
 
-  await authorRound(pr, "--scope", "full");
+  await authorRound(pr, "No findings.\n", "--scope", "full");
   const unaccepted = await pr.hedge("gate");
   expect(unaccepted.code).toBe(3);
   expect(unaccepted.output).toMatch(new RegExp(`review: HEAD reviewed in round 1 by gpt-6\\.1-sol; panel gap from \\w{7}, not accepted: ${reason}`));
@@ -554,13 +557,17 @@ test("a panel gap holds the gate until the user accepts it, and still needs a re
   expect((await pr.hedge("gate")).code).toBe(0);
 });
 
+const lensMajor = (anchor: string) => `FINDINGS:\n- feature.txt:1 | major | Correctness | the greeting names no member | name the member | anchor: ${anchor}\nCOVERED: feature.txt\n`;
+
 test("a round after the PR merged its base reads and demands only the files the PR changes", async () => {
   const pr = await checkout();
   const reviewed = await pr.commit("feature.txt", "greet\n");
   await pr.hedge("require", "--none", "--reason", "docs only");
-  const reviewer = fakeModel(pr, "REVIEWER", clean);
+  const reviewer = fakeModel(pr, "REVIEWER", lensMajor("greet"));
   await pr.hedge("review", "--lens", "correctness");
   expect((await pr.hedge("review", "--wait")).code).toBe(0);
+  await answerFixed(pr, "1", 3);
+  reviewer.answer(clean);
   await pr.advanceBase("base.md", "the base moves on\n");
   await pr.git("merge", "-q", "--no-edit", "main");
   const fixed = await pr.commit("feature.txt", "greet the member\n");
@@ -589,9 +596,10 @@ test("after a base merge, a round keeps the PR's renames and non-ASCII file name
   const greeting = "greet\nwelcome\nshow the rules\npoint to the help page\n";
   const reviewed = await pr.commit("feature.txt", greeting);
   await pr.hedge("require", "--none", "--reason", "docs only");
-  const reviewer = fakeModel(pr, "REVIEWER", clean);
+  const reviewer = fakeModel(pr, "REVIEWER", lensMajor("greet"));
   await pr.hedge("review", "--lens", "correctness");
   expect((await pr.hedge("review", "--wait")).code).toBe(0);
+  await answerFixed(pr, "1", 3);
   await pr.advanceBase("base.md", "the base moves on\n");
   await pr.git("merge", "-q", "--no-edit", "main");
   await pr.git("mv", "feature.txt", "grüße.txt");
@@ -831,7 +839,7 @@ test("a review at a newer commit leaves alone the panel round that a command at 
   const pr = await checkout();
   await pr.commit("feature.txt", "greet\n");
   await pr.hedge("require", "--none", "--reason", "docs only");
-  const reviewed = await reviewHead(pr);
+  const reviewed = await reviewHeadFixed(pr, "feature.txt:1", "greet");
   const older = await pr.commit("feature.txt", "greet the member\n");
   const reviewer = fakeModel(pr, "REVIEWER", clean);
   const hub = hubAt(pr, "stalls after it lands an append");

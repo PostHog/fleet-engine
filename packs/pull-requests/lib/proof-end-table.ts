@@ -2,11 +2,12 @@ import { refText, type PrRef } from "./decision-ledger.ts";
 import type { Run } from "./pr-ci.ts";
 import { diffSize, forkPoint, type DiffSize } from "./proof-checkout.ts";
 import { finishedReviews, summaryGaps, type GapProof, type ProofIdentity, type ProofSummary } from "./proof.ts";
+import type { SanityPass } from "./proof-sanity.ts";
 
 export const isCommitSha = (value: unknown): value is string => typeof value === "string" && /^[0-9a-f]{40}$/.test(value);
 
 type Sized = DiffSize & { commit: string };
-export type Growth = { rounds: number; finalReads: number; first?: Sized; final?: Sized };
+export type Growth = { rounds: number; finalReads: number; first?: Sized; final?: Sized; sanity?: SanityPass };
 export type EndRow = { ref: PrRef; summary: ProofSummary; reason: (kind: string, reason: string) => string };
 
 const isRound = (name: string) => /^\d+$/.test(name);
@@ -45,6 +46,12 @@ function linesCell(growth: Growth | undefined) {
   return [`${span(first?.production, final?.production)}${ratio}`, ...parts.map((part) => `${part} ${span(first?.[part], final?.[part])}`)].join("; ");
 }
 
+function sanityCell({ summary, reason }: EndRow) {
+  const pass = summary.growth?.sanity;
+  if (!pass) return "not run";
+  return `${pass.verdict} at ${pass.commit === summary.commit ? "HEAD" : pass.commit.slice(0, 7)}: ${reason("sanity", pass.reason)}`;
+}
+
 function acceptor(gap: GapProof) {
   const by = gap.accepted;
   if (!by) return "not accepted";
@@ -60,7 +67,7 @@ const cell = (text: string) => oneLine(text.replace(/(?<!\\)(\\*)\|/g, (pipe, sl
 
 export function endTable(rows: EndRow[]) {
   return [
-    "| PR | Review rounds | Production lines | Skipped proofs |", "| --- | --- | --- | --- |",
-    ...rows.map((row) => `| ${[refText(row.ref), roundsCell(row.summary.growth), linesCell(row.summary.growth), skipped(row).join("; ") || "none"].map(cell).join(" | ")} |`),
+    "| PR | Review rounds | Production lines | Sanity pass | Skipped proofs |", "| --- | --- | --- | --- | --- |",
+    ...rows.map((row) => `| ${[refText(row.ref), roundsCell(row.summary.growth), linesCell(row.summary.growth), sanityCell(row), skipped(row).join("; ") || "none"].map(cell).join(" | ")} |`),
   ];
 }

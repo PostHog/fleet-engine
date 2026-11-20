@@ -5,6 +5,7 @@ import { normalized, type HeardAnswer } from "./proof-answers.ts";
 import { agentRefusal, agentsAcceptance, covers, fold, keptOwed, panelRefusal, tierOf, usersAcceptance, type Decision, type DecisionState, type Ledger, type Mark, type PrRef, type Tier } from "./decision-ledger.ts";
 import type { Family, Usage } from "./proof-models.ts";
 import { quietReason, type DeltaKind, type QuietStep } from "./proof-delta.ts";
+import { isProductionFile } from "./proof-checkout.ts";
 import { panelOutcome } from "./proof-panel.ts";
 import { anchorHeading } from "./finding-anchors.ts";
 import type { Growth } from "./proof-end-table.ts";
@@ -254,7 +255,7 @@ function askUser(identity: ProofIdentity, stop: string) {
 
 export type CapturedBy = "hedge" | "author";
 export type DecisionMark = Pick<Decision, "mark" | "id">;
-export type ReviewRequest = { scope: string; base?: string; from?: string; forkBase?: string; decision?: Decision; phase?: string; arbiter: Arbiter; limits: ReviewLimits; cleanBaseMerge?: CleanBaseMerge; quietCommit?: QuietCommit; capturedBy?: CapturedBy; lock?: LockRound; lockBudget: LockBudget; now: () => Date };
+export type ReviewRequest = { opening?: () => Promise<boolean>; sanity?: () => Promise<void>; scope: string; base?: string; from?: string; forkBase?: string; decision?: Decision; phase?: string; arbiter: Arbiter; limits: ReviewLimits; cleanBaseMerge?: CleanBaseMerge; quietCommit?: QuietCommit; capturedBy?: CapturedBy; lock?: LockRound; lockBudget: LockBudget; now: () => Date };
 export type Reserved = { round: number | "final"; id: string; directory: string };
 type Permit = { arbiter: Arbiter; limits: ReviewLimits };
 
@@ -305,17 +306,21 @@ export async function startReview(home: string, identity: ProofIdentity, request
   const reviews = join(pullRequestDirectory(home, identity), "reviews");
   await mkdir(reviews, { recursive: true, mode: 0o700 });
   if (scope === "final") return startFinalRead(home, identity, base, decision, finalReadPhase(phase ?? "review"), permit, cleanBaseMerge, quietCommit, capturedBy, from, { lock, lockBudget, now });
-  return startRound(home, identity, reviews, { scope, base, from, forkBase: request.forkBase, decision, permit, cleanBaseMerge, capturedBy, reserving: { lock, lockBudget, now } });
+  return startRound(home, identity, reviews, { scope, base, from, forkBase: request.forkBase, decision, permit, cleanBaseMerge, capturedBy, opening: request.opening ?? (async () => false), sanity: request.sanity ?? (async () => {}), reserving: { lock, lockBudget, now } });
 }
 
-type RoundStart = { scope: string; base?: string; from?: string; forkBase?: string; decision: Decision | undefined; permit: Permit; cleanBaseMerge: CleanBaseMerge; capturedBy: CapturedBy; reserving: Reserving };
+type RoundStart = { scope: string; base?: string; from?: string; forkBase?: string; decision: Decision | undefined; permit: Permit; cleanBaseMerge: CleanBaseMerge; capturedBy: CapturedBy; opening: () => Promise<boolean>; sanity: () => Promise<void>; reserving: Reserving };
 
-async function startRound(home: string, identity: ProofIdentity, reviews: string, { scope, base, from, forkBase, decision, permit, cleanBaseMerge, capturedBy, reserving: { lockBudget, ...stamping } }: RoundStart): Promise<Reserved> {
+async function startRound(home: string, identity: ProofIdentity, reviews: string, { scope, base, from, forkBase, decision, permit, cleanBaseMerge, capturedBy, opening, sanity, reserving: { lockBudget, ...stamping } }: RoundStart): Promise<Reserved> {
   const { free, ceiling } = permit.limits;
   const snapshot = async () => ({ ...await reviewsSpent(reviews, "review", "unfinished spends"), round: await nextRound(reviews) });
   const permitRound = async ({ round, spent }: Awaited<ReturnType<typeof snapshot>>) => {
     if (round === 1 && scope !== "full") throw new Error("Round 1 is --scope full: it reviews the whole PR diff. Drop --base");
-    if (round > 1) await checkLaterRound(reviews, round, scope, base, decision, cleanBaseMerge);
+    if (round > 1) await requireFinished(reviews, round);
+    const opened = round > 1 && scope === "full" && await opening();
+    if (round > 1 && decision?.mark !== "👤" && !opened) await requireBoughtRound(home, identity);
+    if (round > 1 && !opened) await checkLaterRound(reviews, round, scope, base, decision, cleanBaseMerge);
+    if (round > 1) await sanity();
     return permitReview(home, identity, spent >= free, spent >= ceiling ? budgetSpent(permit.limits) : undefined, decision, permit);
   };
   return reserveWeighed(reviews, lockBudget, snapshot, permitRound, async ({ round }, verdict) => {
@@ -338,13 +343,56 @@ async function nextRound(reviews: string) {
 type Claim = { repository: string; pr: number };
 const claimPath = (home: string, answer: HeardAnswer) => join(ledgerRoot(home), "claims", `${createHash("sha256").update(`${answer.thread}/${answer.message}`).digest("hex")}.json`);
 
-async function checkLaterRound(reviews: string, round: number, scope: string, base: string | undefined, decision: DecisionMark | undefined, cleanBaseMerge: CleanBaseMerge) {
+async function requireFinished(reviews: string, round: number) {
   try { await access(join(reviews, String(round - 1), "findings.md")); }
   catch { throw new Error("Previous review round is unfinished. Reuse its reservation before starting another panel."); }
+}
+
+async function checkLaterRound(reviews: string, round: number, scope: string, base: string | undefined, decision: DecisionMark | undefined, cleanBaseMerge: CleanBaseMerge) {
   if (scope === "full" && decision) return;
   const previous = JSON.parse(await readFile(join(reviews, String(round - 1), "round.json"), "utf8")) as ProofIdentity;
   if (scope !== "fixes" || !base) throw new Error(`Round ${round} needs --scope fixes --base ${previous.commit}, the commit of round ${round - 1}. With --agent '<your reason>', or the user's --override, --scope full reviews the whole PR diff again`);
   if (!coversReview(base, previous.commit, cleanBaseMerge)) throw new Error(`Round ${round} needs --base ${previous.commit}, the commit of round ${round - 1}`);
+}
+
+async function requireBoughtRound(home: string, identity: ProofIdentity) {
+  const last = (await finishedReviews(home, identity)).at(-1);
+  if (!last) return;
+  const directory = join(pullRequestDirectory(home, identity), "reviews", last.name);
+  const findings = await readFile(join(directory, "findings.md"), "utf8");
+  const responses = await readFile(join(directory, "responses.md"), "utf8").catch(() => "");
+  if (answeredFindings(findings, responses).findings.some(buysRound)) return;
+  const label = reviewLabel(last.name);
+  const stop = `${label[0]!.toUpperCase()}${label.slice(1)} found no bug in production code that the PR introduced, so the review loop stops.`;
+  throw new Error(`${stop} Reject a finding the base has too with its base lines, and list it under Known issues. When fixes since ${label} changed production code, give them a final read with --scope final. Do not ask the user for another round. Only the user's --override runs one: when the user asks for it, confirm it with your question tool. Question: "${roundQuestion} ${identity.repository}#${identity.pr}: ${stop}" Options: "${runOption}", "${stopOption}". When they choose "${runOption}", run this command again with --override '<date> "${runOption}"'`);
+}
+
+type AnsweredFinding = ReturnType<typeof answeredFindings>["findings"][number];
+
+function unbold(text: string) {
+  let [start, end] = [0, text.length];
+  while (text[start] === "*") start++;
+  while (end > start && text[end - 1] === "*") end--;
+  return text.slice(start, end).trim();
+}
+
+function locationOf(field: string) {
+  const bare = unbold(field.trim());
+  const plain = (bare.startsWith("[") && bare.endsWith(")") ? /^\[([^\]]*)\]\(/.exec(bare)?.[1] ?? bare : bare).replace(/[`*]/g, "").trim();
+  const colon = plain.lastIndexOf(":");
+  return colon > 0 && /^\d+(?:-\d+)?$/.test(plain.slice(colon + 1)) ? plain.slice(0, colon).trim() : undefined;
+}
+const tailField = /^(?:anchor|sites):/i;
+
+function buysRound({ text, note, test, answer }: AnsweredFinding) {
+  if (note || test || answer?.verdict === "rejected" || answer?.verdict === "known") return false;
+  const fields = fieldsOutsideCode(text);
+  const severity = fields && statedSeverity(fields);
+  if (!fields || (severity !== "blocker" && severity !== "major")) return false;
+  const tail = fields.findIndex((field) => tailField.test(field));
+  if (fields.slice(0, tail < 0 ? undefined : tail).some((field) => /^[*_]*\[base\]/i.test(field))) return false;
+  const site = fields.slice(0, 2).map(locationOf).find(Boolean);
+  return site === undefined || isProductionFile(site);
 }
 
 function claimedOn(text: string) {
@@ -520,12 +568,44 @@ const listItem = /^\s*(?:[-*]|\d+[.)])\s+(.*)/;
 const severityField = /^\**(blocker|major|minor|nit)\**$/i;
 const severityShorthand = /^\**(?:minor|nit)(?:[,:]\**|\**[,:])\s/i;
 
+function closingRun(line: string, size: number, from: number) {
+  let at = from;
+  for (;;) {
+    at = line.indexOf("`".repeat(size), at);
+    if (at < 0 || (line[at - 1] !== "`" && line[at + size] !== "`")) return at;
+    while (line[at] === "`") at++;
+  }
+}
+
+function splitOutsideCode(line: string) {
+  const fields: string[] = [];
+  let start = 0, at = 0;
+  while (at < line.length) {
+    if (line[at] === "\\") { at += 2; continue; }
+    if (line[at] === "|") { fields.push(line.slice(start, at)); start = ++at; continue; }
+    if (line[at] !== "`") { at++; continue; }
+    let end = at;
+    while (line[end] === "`") end++;
+    const close = closingRun(line, end - at, end);
+    at = close < 0 ? end : close + end - at;
+  }
+  return [...fields, line.slice(start)].map((field) => field.trim());
+}
+
+const fieldsOutsideCode = (text: string) => {
+  const item = listItem.exec(text.split("\n").map((line) => line.trim()).join(" "))?.[1];
+  return item === undefined ? undefined : splitOutsideCode(item);
+};
+
+const itemFields = (text: string) => listItem.exec(text.split("\n")[0]!)?.[1]?.split("|").map((field) => field.trim());
+
+const statedSeverity = (fields: string[]) => fields.slice(0, Math.min(2, fields.length - 1)).map((field) => severityField.exec(field)?.[1]?.toLowerCase()).find(Boolean);
+
 function flooredItem(text: string) {
-  const item = listItem.exec(text.split("\n")[0]!)?.[1];
-  if (item === undefined) return false;
-  const fields = item.split("|");
-  const stated = fields.slice(0, Math.min(2, fields.length - 1)).map((field) => severityField.exec(field.trim())?.[1]?.toLowerCase()).find(Boolean);
-  return stated ? stated === "minor" || stated === "nit" : severityShorthand.test(item);
+  const fields = itemFields(text);
+  if (fields === undefined) return false;
+  const stated = statedSeverity(fields);
+  return stated ? stated === "minor" || stated === "nit" : severityShorthand.test(fields.join("|"));
 }
 
 const anchorIntro = /^(?:fleet|hedge) compared each finding's anchor with the diff and with earlier reviews of this PR\.$/;

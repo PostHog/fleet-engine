@@ -11,6 +11,7 @@ import { receiptMarker } from "./proof-receipt.ts";
 import { baseRefs, cleanBaseMerge, devPullOf, diffOf, mergeBase, pullRequestDetails, remotesOf, topLevel } from "./proof-checkout.ts";
 import { quietCommitIn } from "./proof-delta.ts";
 import { isCommitSha, measureGrowth, type Growth } from "./proof-end-table.ts";
+import { readSanity } from "./proof-sanity.ts";
 import { judge, readCriticalPaths, type JudgeInput } from "./proof-judge.ts";
 import { askModel, familyOf, modelLabel, readRiskRubric, readRubric, reviewerRow, skillReferences } from "./proof-models.ts";
 
@@ -65,7 +66,7 @@ export async function finalGate(head: ProofIdentity, context: GateContext, { lan
   const judged: Judged = checked.code === 0 ? await judgeHead(head, checked, context) : { code: checked.code, lines: [], covered: "", judge: { state: "skipped", lines: [] }, reason: checked.failure };
   const shown = pull === undefined ? undefined : receiptMarker((pull as PullRequest).body);
   const stale = shown && shown.head !== head.commit ? [`receipt: the PR body shows the receipt of ${shown.head.slice(0, 7)}, not HEAD ${head.commit.slice(0, 7)}. Refresh it with hedge proof receipt`] : [];
-  const growth = await measureGrowth(home, head, run, pull?.baseSha);
+  const growth = await grownBy(home, head, run, pull?.baseSha);
   const gate = {
     code: judged.code,
     reason: judged.code === 0 ? "pass" : judged.reason ?? `exit ${judged.code}`,
@@ -82,6 +83,12 @@ function unmeasured(head: ProofIdentity, run: Run, pull: PullRequest | undefined
   if (growth.final || !isCommitSha(pull?.baseSha) || run(["env", "GIT_NO_LAZY_FETCH=1", "git", "cat-file", "-e", `${pull.baseSha}^{commit}`]).code === 0) return [];
   const remote = remotesOf(head.repository, run)[0] ?? `<a remote of ${head.repository}>`;
   return [`growth: unknown at HEAD, since the base commit ${pull.baseSha.slice(0, 7)} that GitHub reports is not in this checkout. Run git fetch ${remote} ${pull.baseSha}, then hedge proof gate${landed ? " --landed" : ""} again`];
+}
+
+async function grownBy(home: string, head: ProofIdentity, run: Run, baseSha: string | undefined): Promise<Growth> {
+  const growth = await measureGrowth(home, head, run, baseSha);
+  const sanity = (await readSanity(home, head)).at(-1);
+  return sanity ? { ...growth, sanity } : growth;
 }
 
 const pushedHeadOf = (head: ProofIdentity, run: Run, seen: (pull: PullRequest) => void = () => {}) => (): PushedHead => {
