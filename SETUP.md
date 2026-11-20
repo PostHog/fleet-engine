@@ -430,6 +430,7 @@ command only once step 7 has named the hub.
 | `incident-io` | An agent that watches a risky change pages you, and only you, through incident.io when it goes wrong. | Always | `packs/incident-io/SETUP.md` |
 | `hub` | The hub links your boxes, cleans their disks, and keeps your pack secrets. Turn on recovery, and threads go on after a usage limit. | Step 9 | `packs/hub/SETUP.md` |
 | `mcp-gateway` | The hub signs in to your MCP servers once, and agents on every machine reach them through it. | Step 9 | `packs/mcp-gateway/SETUP.md` |
+| `security` | Agents on every machine read your Wiz findings, threats and inventory through the hub, and cannot change them. | Step 9 | `packs/security/SETUP.md` |
 
 ## 7. Set up Hedge on the hub
 
@@ -708,6 +709,8 @@ creates no node ends at step 8 (see step 1).
      `packs/hub/SETUP.md`
    - **MCP gateway**: the hub signs in to their MCP servers once.
      `packs/mcp-gateway/SETUP.md`
+   - **Security**: agents read their Wiz findings through the MCP gateway,
+     read-only. `packs/security/SETUP.md`
 
    Start from this command, add `--add <pack>` for each other pack they
    picked, and change or add the flags their notes name. With picks from the

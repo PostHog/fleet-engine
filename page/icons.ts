@@ -15,6 +15,7 @@ export const packIcons: Record<string, string> = {
   memory: drawn(`<path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5v-15Z"/><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19"/><path d="M10 3v7l2.5-2 2.5 2V3"/>`),
   guards: drawn(`<path d="M12 3 5 5.5v5.8c0 4.3 2.9 7.9 7 9.7 4.1-1.8 7-5.4 7-9.7V5.5L12 3Z"/><path d="m9 11.8 2.2 2.2 3.8-4.2"/>`),
   hub: drawn(`<circle cx="12" cy="12.4" r="2.7" fill="currentColor"/><rect x="9.25" y="2" width="5.5" height="4.6" rx="1.3"/><rect x="1.75" y="16.6" width="5.5" height="4.6" rx="1.3"/><rect x="16.75" y="16.6" width="5.5" height="4.6" rx="1.3"/><path d="M12 6.6v3.1"/><path d="m9.8 14.2-3 2.4"/><path d="m14.2 14.2 3 2.4"/>`),
+  security: drawn(`<path d="M12 3 5 6v5c0 4.5 3 8.5 7 10 4-1.5 7-5.5 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/>`),
   "mcp-gateway": drawn(`<path d="M9 3v5"/><path d="M15 3v5"/><path d="M6.5 8h11v3.5a5.5 5.5 0 0 1-11 0V8Z"/><path d="M12 17v4"/>`),
   slack: slackLogo,
   "incident-io": drawn(`<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15L6 16Z"/><path d="M10 20.5a2 2 0 0 0 4 0"/><path d="M12 3v2"/>`),

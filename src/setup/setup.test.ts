@@ -92,13 +92,13 @@ describe("hedge setup questions", () => {
 
   test("picks packs one by one", async () => {
     const home = temp.make("home-");
-    const result = await hedgeSetup(home, [], ["4", "y", "n", "", "y", "n", "n", "n", "n", "n", "n", "", ""]);
+    const result = await hedgeSetup(home, [], ["4", "y", "n", "", "y", "n", "n", "n", "n", "n", "n", "n", "", ""]);
     expect(result.code).toBe(0);
     expect(savedAnswers(home).packs).toEqual(["pull-requests", "communication", "memory"]);
     expect(result.output).toContain("The hub links your boxes");
 
     const needs = temp.make("home-");
-    const picked = await hedgeSetup(needs, [], ["4", "n", "y", "n", "n", "n", "n", "n", "n", "n", "n", "", ""]);
+    const picked = await hedgeSetup(needs, [], ["4", "n", "y", "n", "n", "n", "n", "n", "n", "n", "n", "n", "", ""]);
     expect(picked.output).toContain("  Orchestration needs Quality gates, so it is on too.");
     expect(savedAnswers(needs).packs).toEqual(["orchestration", "pull-requests"]);
   });

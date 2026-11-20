@@ -56,7 +56,7 @@ function localTargets(path: string, html: string) {
 describe("the site build", () => {
   test("writes one page for the landing, one for the packs, and one for every pack", () => {
     expect(pagesOf(files).map(([path]) => path)).toEqual(["index.html", "packs/index.html", ...data.packs.map((pack) => `packs/${pack.name}/index.html`)]);
-    expect(data.packs.map((pack) => pack.name)).toEqual(["base", "hub", "pull-requests", "orchestration", "communication", "guards", "memory", "slack", "incident-io", "mcp-gateway"]);
+    expect(data.packs.map((pack) => pack.name)).toEqual(["base", "hub", "pull-requests", "orchestration", "communication", "guards", "memory", "slack", "incident-io", "mcp-gateway", "security"]);
   });
 
   test("every link and asset on every page leads to a file of the site, from any folder the site is served under", () => {
@@ -111,7 +111,7 @@ describe("the site build", () => {
     const html = page("index.html");
     const boxed = [...data.startPacks, ...data.hubStartPacks];
     const others = data.packs.filter((pack) => !boxed.includes(pack.name));
-    expect(others.map((pack) => pack.title)).toEqual(["Base", "Guards", "Slack", "Paging (incident.io)", "MCP gateway"]);
+    expect(others.map((pack) => pack.title)).toEqual(["Base", "Guards", "Slack", "Paging (incident.io)", "MCP gateway", "Security"]);
     const text = visibleText(html);
     expect(others.filter((pack) => new RegExp(`\\b${pack.title}\\b`).test(text)).map((pack) => pack.title)).toEqual([]);
     expect(localTargets("index.html", html).filter((target) => target.startsWith("packs/"))).toEqual(expect.arrayContaining(["packs/index.html"]));
@@ -128,7 +128,7 @@ describe("the site build", () => {
       ["In every Hedge", ["Base", "Hub"]],
       ["How your agents work", ["Quality gates (switch)", "Orchestration (switch)", "Communication (switch)", "Guards (switch)"]],
       ["What your agents know", ["Memory (switch)"]],
-      ["What your agents reach", ["Slack (switch)", "Paging (incident.io) (switch)", "MCP gateway (switch)"]],
+      ["What your agents reach", ["Slack (switch)", "Paging (incident.io) (switch)", "MCP gateway (switch)", "Security (switch)"]],
     ]);
     const hub = page("packs/hub/index.html");
     expect([visibleText(hub).includes("You add nothing"), visibleText(hub).includes("Add to your Hedge")]).toEqual([false, true]);
@@ -162,6 +162,7 @@ describe("the site build", () => {
       slack: "hedge packs --add slack",
       "incident-io": "hedge packs --add incident-io",
       "mcp-gateway": "hedge packs --add mcp-gateway",
+      security: "hedge packs --add mcp-gateway --add security",
     };
     expect(data.packs.filter((pack) => pack.name !== "base").map((pack) => pack.name)).toEqual(Object.keys(commands));
     for (const [name, command] of Object.entries(commands)) {

@@ -1,0 +1,8 @@
+{
+  "kind": "oauth",
+  "name": "wiz",
+  "title": "Wiz",
+  "url": "https://mcp.app.wiz.io/",
+  "loopback": true,
+  "scopes": ["read:all", "offline_access"]
+}

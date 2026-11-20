@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### The Security pack reads Wiz
+
+- The new **Security** pack has one workflow, `wiz`, off by default. Agents
+  on every box read Wiz issues, threats, vulnerabilities and cloud inventory
+  through the hub's MCP gateway. The hub signs in to Wiz once, with
+  `hedge mcp-gateway sign-in wiz`, and asks for read access only.
+
 ### Setup never waits for proxy subscriptions
 
 - On a hub with own-account balancing, `hedge apply` and `hedge setup` no

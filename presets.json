@@ -18,9 +18,9 @@
   {
     "id": "everything",
     "name": "Everything",
-    "blurb": "You get every pack: Everyday, coding integrations, guards, Slack threads, incident.io paging, the nightly loops, and on the hub the MCP gateway.",
+    "blurb": "You get every pack: Everyday, coding integrations, guards, Slack threads, incident.io paging, the nightly loops, and on the hub the MCP gateway and Wiz security reads.",
     "packs": ["pull-requests", "orchestration", "communication", "integrations", "memory", "guards", "slack", "incident-io"],
-    "hubPacks": ["hub", "mcp-gateway"],
+    "hubPacks": ["hub", "mcp-gateway", "security"],
     "workflows": { "quality-loop": true, "signal-loop": true, "pr-digest": true }
   }
 ]

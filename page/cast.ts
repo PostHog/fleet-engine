@@ -17,6 +17,7 @@ export const packCast: Record<string, Role> = {
   "incident-io": { art: hog("warning-hog"), tone: "red", line: "An agent that watches a risky change rings your phone." },
   hub: { art: hog("space-hog"), tone: "sky", line: "The hub links your boxes and keeps your pack secrets. Turn on recovery, and it continues threads after a usage limit." },
   "mcp-gateway": { art: hog("hog-welder"), tone: "mint", line: "Sign in once on the hub. Every box reaches Slack, Gmail, and your MCP servers." },
+  security: { art: hog("x-ray-hog"), tone: "blue", line: "Agents read your Wiz findings, and change nothing." },
 };
 
 export type Video = { file: string; poster: string; seconds: number };
@@ -36,7 +37,7 @@ export const videoFiles = () => Object.values(packVideos).flatMap((video) => [vi
 export const packGroups: Array<{ title: string; packs: string[] }> = [
   { title: "How your agents work", packs: ["pull-requests", "orchestration", "communication", "guards"] },
   { title: "What your agents know", packs: ["memory"] },
-  { title: "What your agents reach", packs: ["slack", "incident-io", "mcp-gateway"] },
+  { title: "What your agents reach", packs: ["slack", "incident-io", "mcp-gateway", "security"] },
 ];
 
 export const teamRole = (line: string): Role => ({ art: hog("heart-hog"), tone: "yellow", line });
