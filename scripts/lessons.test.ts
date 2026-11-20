@@ -36,12 +36,13 @@ describe("lessons", () => {
   test("the check fails a lesson that names a hedge command, a skill, a pack, or a next lesson that does not exist", () => {
     const known = withText("Run `hedge doctor`, then `hedge help`. Say `/qa-swarm`. Turn on the Slack pack and the Quality gates pack. The Memory pack keeps notes.");
     expect(lessonProblems(known, names)).toEqual([]);
-    const unknown: Lesson = { ...withText("Run `hedge teleport`. Say `/fly`. Turn on the Rocket pack. The Quality gaets pack checks."), next: "gone" };
+    const unknown: Lesson = { ...withText("Run `hedge teleport`. Say `/fly`. Turn on the Rocket pack. The Quality gaets pack checks. Use the Made Up Rocket Science pack."), next: "gone" };
     expect(lessonProblems(unknown, names)).toEqual([
       "lessons/probe.md: names hedge teleport, which no command ships",
       "lessons/probe.md: names /fly, which no pack's skill ships",
       "lessons/probe.md: names the Rocket pack, which does not exist",
       "lessons/probe.md: names the Quality gaets pack, which does not exist",
+      "lessons/probe.md: names the Made Up Rocket Science pack, which does not exist",
       "lessons/probe.md: next names lesson gone, which does not exist",
     ]);
   });
@@ -66,6 +67,8 @@ describe("lessons", () => {
     expect(lessonProblems({ ...built, cut: { ...built.cut, captions: [[0, 4], [9, 5], [10, 14], [15, 19]] } }, names)).toEqual(problem);
     expect(lessonProblems({ ...built, cut: { ...built.cut, chapters: [0, 151] } }, names)).toEqual(problem);
     expect(lessonProblems({ ...built, cut: { ...built.cut, chapters: [65, 0] } }, names)).toEqual(problem);
+    expect(lessonProblems({ ...built, cut: { ...built.cut, captions: [[0, 4], [5] as unknown as [number, number], [10, 14], [15, 19]] } }, names)).toEqual(problem);
+    expect(lessonProblems({ ...built, cut: { ...built.cut, captions: [[0, 4], [4, 9], [9, 14], [15, 19]] } }, names)).toEqual([]);
   });
 
   test("a lesson source needs its front matter, a known shelf, and chapters with narration", () => {
