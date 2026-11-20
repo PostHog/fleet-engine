@@ -363,7 +363,7 @@ describe("the Own-account balancing workflow", () => {
     writeFileSync(join(machine.home, ".codex/config.toml"), stringify({ model: "gpt-6.1-sol", model_provider: "hedge-proxy", model_providers: { "hedge-proxy": codexProviderTable } }));
     const off = await applyOff();
     expect(codex()).toEqual({ model: "gpt-6.1-sol" });
-    expect(off.stdout).toContain("To do: Took Hedge's proxy route out of .codex/config.toml, and with it your model_provider, which only worked through that route. Codex now uses its own sign-in: sign in there if it asks.");
+    expect(off.stdout).toContain("To do: Took Hedge's proxy route out of .codex/config.toml, and with it your model_provider, which only worked through that route.");
   });
 
   test("hedge apply after connect beside a hedge-proxy Codex table of your own with another name selects nothing, and turning balancing off leaves your table", async () => {
@@ -390,7 +390,7 @@ describe("the Own-account balancing workflow", () => {
     expect(claude()).toEqual({ model: "opus", env: { ANTHROPIC_AUTH_TOKEN: "my-token", ANTHROPIC_BASE_URL: proxyUrl }, apiKeyHelper: helper });
     const off = await applyOff();
     expect(claude()).toEqual({ model: "opus" });
-    expect(off.stdout).toContain("To do: Took Hedge's proxy route out of .claude/settings.json, and with it your env.ANTHROPIC_AUTH_TOKEN, which only worked through that route. Claude Code now uses its own sign-in: sign in there if it asks.");
+    expect(off.stdout).toContain("To do: Took Hedge's proxy route out of .claude/settings.json, and with it your env.ANTHROPIC_AUTH_TOKEN, which only worked through that route.");
     expect(off.stdout).not.toContain("my-token");
   });
 
@@ -405,6 +405,19 @@ describe("the Own-account balancing workflow", () => {
     expect(waits).toEqual({ "claude:env.ANTHROPIC_BASE_URL": "cli-proxy-client", "claude:apiKeyHelper": "cli-proxy-client", "codex:model_provider": "cli-proxy-codex", "codex:model_providers.hedge-proxy": "cli-proxy-codex" });
     const checks = plan({ ...balancing, plan: "both" }, devbox).checks.filter((check) => check.workflow === "own-account-balancing");
     expect(checks.map((check) => check.run.join(" "))).toEqual(["hedge cli-proxy check", "hedge cli-proxy check codex"]);
+  });
+
+  test("a profile key over one part of a provider's proxy route takes that provider's whole route out of the plan and says why", () => {
+    const overrides = { config: [{ provider: "claude" as const, key: "env.ANTHROPIC_BASE_URL", value: "https://gateway.example.com" }, { provider: "codex" as const, key: "model_providers", value: { work: { name: "Work" } } }] };
+    const result = plan({ ...balancing, plan: "both", overrides }, devbox);
+    const onRoute = (entry: { provider: string; key: string }) => ["claude:env.ANTHROPIC_BASE_URL", "claude:apiKeyHelper", "codex:model_provider", "codex:model_providers.hedge-proxy", "codex:model_providers"].includes(`${entry.provider}:${entry.key}`);
+    expect(result.config.filter(onRoute).map((entry) => [`${entry.provider}:${entry.key}`, entry.pack])).toEqual([["claude:env.ANTHROPIC_BASE_URL", "profile"], ["codex:model_providers", "profile"]]);
+    expect(result.dropped.filter((entry) => entry.reason.endsWith("leaves as one unit"))).toEqual([
+      { pack: "hub", item: "config claude:apiKeyHelper", reason: "your profile sets claude:env.ANTHROPIC_BASE_URL, so Hedge's Claude Code proxy route leaves as one unit" },
+      { pack: "hub", item: "config codex:model_provider", reason: "your profile sets codex:model_providers, so Hedge's Codex proxy route leaves as one unit" },
+      { pack: "hub", item: "config codex:model_providers.hedge-proxy", reason: "your profile sets codex:model_providers, so Hedge's Codex proxy route leaves as one unit" },
+    ]);
+    expect(plan({ ...balancing, plan: "both" }, devbox).config.filter(onRoute)).toHaveLength(4);
   });
 
   describe("apply while the proxy is down", () => {
@@ -482,6 +495,19 @@ describe("the Own-account balancing workflow", () => {
       expect(codex.model_providers).toEqual(mine.model_providers);
       expect(codex.model_provider).toBe("hedge-proxy");
       expect(reports.slice(1).map((report) => report.actions)).toEqual([[], [], []]);
+    });
+
+    test("a profile gateway in place of one part of Hedge's proxy route takes that provider's whole route out of the plan, so apply writes no Hedge key helper or proxy table beside it", async () => {
+      const gateway = "https://gateway.example.com";
+      const overrides = { config: [{ provider: "claude" as const, key: "env.ANTHROPIC_BASE_URL", value: gateway }, { provider: "codex" as const, key: "model_provider", value: "work" }] };
+      const resolved = plan({ ...balancing, plan: "both", overrides }, devbox);
+      const shaped: Plan = { ...resolved, config: resolved.config.filter((entry) => entry.workflow === "own-account-balancing" || entry.pack === "profile"), checks: resolved.checks.filter((item) => item.pack === "hub"), steps: [], jobs: [], human: [] };
+      const home = homeWith();
+      const report = await apply(shaped, { home, adapters: [providerConfigAdapter()], run: realCheck(home, both) });
+      expect(report.ok).toBe(true);
+      expect(JSON.parse(readFileSync(join(home, ".claude/settings.json"), "utf8"))).toEqual({ env: { ANTHROPIC_BASE_URL: gateway } });
+      expect(parse(readFileSync(join(home, ".codex/config.toml"), "utf8"))).toEqual({ model_provider: "work" });
+      expect((await check(shaped, { home, adapters: [providerConfigAdapter()], run: realCheck(home, both) })).ok).toBe(true);
     });
 
     test("a proxy that answers routes both", async () => {
@@ -625,7 +651,7 @@ describe("the Own-account balancing workflow", () => {
       expect(JSON.parse(readFileSync(settings, "utf8"))).toEqual({});
       expect(failed.ok).toBe(false);
       const todo = failed.findings.find((finding) => finding.id === "route:.claude/settings.json");
-      expect(todo).toEqual({ id: "route:.claude/settings.json", pack: "engine", say: "Took Hedge's proxy route out of .claude/settings.json, and with it your env.ANTHROPIC_AUTH_TOKEN, which only worked through that route. Claude Code now uses its own sign-in: sign in there if it asks.", todo: true });
+      expect(todo).toEqual({ id: "route:.claude/settings.json", pack: "engine", say: "Took Hedge's proxy route out of .claude/settings.json, and with it your env.ANTHROPIC_AUTH_TOKEN, which only worked through that route.", todo: true });
       expect(JSON.stringify(failed.findings)).not.toContain("my-token");
     });
 
@@ -652,7 +678,7 @@ describe("the Own-account balancing workflow", () => {
       expect(route()).toBeUndefined();
       expect(JSON.parse(readFileSync(settings, "utf8"))).toEqual({});
       expect(failure).toStartWith("job id bad id of the hub pack may hold only");
-      expect(failure.split("\n")).toContain("To do: Took Hedge's proxy route out of .claude/settings.json, and with it your env.ANTHROPIC_AUTH_TOKEN, which only worked through that route. Claude Code now uses its own sign-in: sign in there if it asks.");
+      expect(failure.split("\n")).toContain("To do: Took Hedge's proxy route out of .claude/settings.json, and with it your env.ANTHROPIC_AUTH_TOKEN, which only worked through that route.");
       expect(failure).not.toContain("my-token");
     });
 
@@ -718,7 +744,7 @@ describe("the Own-account balancing workflow", () => {
       expect(emptied.ok).toBe(true);
       expect(parse(readFileSync(config, "utf8"))).toEqual({ model: "gpt-6.1-sol" });
       expect(emptied.findings.map((finding) => [finding.id, finding.todo])).toEqual([["check:cli-proxy-codex-accounts", true], ["check:cli-proxy-codex", true], ["route:.codex/config.toml", true]]);
-      expect(emptied.findings.at(-1)!.say).toBe("Took Hedge's proxy route out of .codex/config.toml, and with it your model_provider, which only worked through that route. Codex now uses its own sign-in: sign in there if it asks.");
+      expect(emptied.findings.at(-1)!.say).toBe("Took Hedge's proxy route out of .codex/config.toml, and with it your model_provider, which only worked through that route.");
     });
 
     test("takes Claude Code off the proxy once its pool empties, and lists the To do", async () => {

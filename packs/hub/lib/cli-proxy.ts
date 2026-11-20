@@ -405,14 +405,16 @@ export type Agent = "claude" | "codex";
 const applyWaits = (name: string) => `hedge apply keeps ${name} on its own sign-in until the proxy serves it.`;
 
 async function check(machine: ProxyMachine, agent: Agent): Promise<number> {
-  const danger = readRole(machine.home) === "hub" ? await unsafe(machine, layout(machine.home)) : undefined;
+  const hub = readRole(machine.home) === "hub";
+  const danger = hub ? await unsafe(machine, layout(machine.home)) : undefined;
   const key = await savedKey(machine.home);
-  const models = key ? await listModels(machine.fetch, key) : `This machine has no proxy key at ${keyPath(machine.home)}. On the hub, hedge cli-proxy doctor prints the connect command.`;
+  const noKey = `This machine has no proxy key at ${keyPath(machine.home)}. On the hub, hedge cli-proxy doctor prints the connect command.`;
+  const models = key ? await listModels(machine.fetch, key) : noKey;
   const reason = danger ?? (agent === "claude" ? unserved(models, "claude") : await codexUnserved(machine.home, models));
   const name = agent === "claude" ? "Claude Code" : "Codex";
   machine.print(reason ? `${reason} ${applyWaits(name)}` : `${name} reaches your own-account proxy at ${proxyUrl}.`);
   if (!reason) return 0;
-  return reason === missingModel[agent] ? waitsForPerson : 1;
+  return reason === missingModel[agent] || (reason === noKey && !hub) ? waitsForPerson : 1;
 }
 
 async function codexUnserved(home: string, models: string[] | string): Promise<string | undefined> {

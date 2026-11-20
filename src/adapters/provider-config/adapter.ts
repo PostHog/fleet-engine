@@ -114,13 +114,13 @@ function owned(plan: Plan, target: Target): Field[] {
 
 function merge(target: Target, text: string | undefined, previous: Field[], wanted: Field[], adopt: boolean, options: { outage: boolean; gated: (path: string[]) => boolean; configPath: string }): Merged {
   const current: Document = text === undefined ? {} : target.format.decode(text);
-  const onDisk: Document = text === undefined ? {} : target.format.decode(text);
   const original = target.format.encode(current);
   const record: Field[] = [];
   const kept: string[] = [];
   const changed: string[] = [];
   const removed: string[] = [];
   const route = proxyRoute[target.provider];
+  const routeOnDisk = (route?.fields ?? []).filter((item) => same(get(current, item.path), item.value));
   const onRoute = (field: Field) => route?.fields.some((item) => samePath(item.path, field.path) && same(item.value, field.value)) ?? false;
   const oldOf = (field: Field) => previous.find((item) => samePath(item.path, field.path));
   const keeps = (field: Field) => {
@@ -169,7 +169,7 @@ function merge(target: Target, text: string | undefined, previous: Field[], want
       removed.push(field.path.join("."));
     }
   }
-  const routeLeft = (route?.fields ?? []).filter((item) => same(get(onDisk, item.path), item.value) && !same(get(current, item.path), item.value)).map((item) => item.path);
+  const routeLeft = routeOnDisk.filter((item) => !same(get(current, item.path), item.value)).map((item) => item.path);
   const setByPack = (path: string[]) => wanted.some((field) => overlaps(field.path, path) && same(get(current, path), get({ value: field.value }, ["value", ...path.slice(field.path.length)])));
   const beside = (route?.beside(current, routeLeft) ?? []).filter((path) => !setByPack(path));
   for (const path of beside) {
@@ -178,7 +178,7 @@ function merge(target: Target, text: string | undefined, previous: Field[], want
   }
   const reason = [changed.length ? `set ${changed.join(", ")}` : "", removed.length ? `remove ${removed.join(", ")}` : ""].filter(Boolean).join("; ");
   const after = target.format.encode(current);
-  const todo = beside.length ? `Took Hedge's proxy route out of ${target.path}, and with it your ${beside.map((path) => path.join(".")).join(", ")}, which only worked through that route. ${route!.agent} now uses its own sign-in: sign in there if it asks.` : undefined;
+  const todo = beside.length ? `Took Hedge's proxy route out of ${target.path}, and with it your ${beside.map((path) => path.join(".")).join(", ")}, which only worked through that route.` : undefined;
   return { record: record.filter((field) => !beside.some((path) => overlaps(path, field.path))), kept: kept.filter((path) => !beside.some((item) => item.join(".") === path)), reason, after: after === original ? undefined : after, document: current, ...(todo ? { todo } : {}) };
 }
 

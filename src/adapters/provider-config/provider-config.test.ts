@@ -94,7 +94,7 @@ describe("provider config", () => {
 
     expect(read(home, claude)).toEqual({ model: "opus", env: { MY_FLAG: "1" } });
     expect(taken.actions).toContainEqual({ target: claude, operation: "replace", reason: "remove env.ANTHROPIC_BASE_URL, apiKeyHelper, env.ANTHROPIC_AUTH_TOKEN" });
-    expect(taken.findings).toContainEqual({ id: `route:${claude}`, pack: "engine", say: `Took Hedge's proxy route out of ${claude}, and with it your env.ANTHROPIC_AUTH_TOKEN, which only worked through that route. Claude Code now uses its own sign-in: sign in there if it asks.`, todo: true });
+    expect(taken.findings).toContainEqual({ id: `route:${claude}`, pack: "engine", say: `Took Hedge's proxy route out of ${claude}, and with it your env.ANTHROPIC_AUTH_TOKEN, which only worked through that route.`, todo: true });
     expect(JSON.stringify(taken.findings)).not.toContain("my-token");
     expect((await apply(plan(), { home, adapters: adapters() })).actions).toEqual([]);
   });
@@ -122,7 +122,7 @@ describe("provider config", () => {
 
     expect(read(edited, claude)).toEqual({});
     expect(taken.findings.map((finding) => finding.say)).not.toContain(`Kept your apiKeyHelper in ${claude}. Run hedge apply --adopt ${claude} to take Hedge's value.`);
-    expect(taken.findings).toContainEqual({ id: `route:${claude}`, pack: "engine", say: `Took Hedge's proxy route out of ${claude}, and with it your apiKeyHelper, env.ANTHROPIC_AUTH_TOKEN, which only worked through that route. Claude Code now uses its own sign-in: sign in there if it asks.`, todo: true });
+    expect(taken.findings).toContainEqual({ id: `route:${claude}`, pack: "engine", say: `Took Hedge's proxy route out of ${claude}, and with it your apiKeyHelper, env.ANTHROPIC_AUTH_TOKEN, which only worked through that route.`, todo: true });
     expect(JSON.stringify(taken.findings)).not.toContain("my-helper");
     await apply(plan(helper), { home: edited, adapters: adapters() });
     expect(read(edited, claude)).toEqual({ apiKeyHelper: "team-helper" });
@@ -138,7 +138,7 @@ describe("provider config", () => {
     const switched = await apply(plan(gateway), { home, adapters: adapters() });
 
     expect(read(home, claude)).toEqual({ env: { ANTHROPIC_BASE_URL: "https://gateway.example.com" } });
-    expect(switched.findings).toContainEqual({ id: `route:${claude}`, pack: "engine", say: `Took Hedge's proxy route out of ${claude}, and with it your env.ANTHROPIC_AUTH_TOKEN, which only worked through that route. Claude Code now uses its own sign-in: sign in there if it asks.`, todo: true });
+    expect(switched.findings).toContainEqual({ id: `route:${claude}`, pack: "engine", say: `Took Hedge's proxy route out of ${claude}, and with it your env.ANTHROPIC_AUTH_TOKEN, which only worked through that route.`, todo: true });
     expect(JSON.stringify(switched.findings)).not.toContain("proxy-token");
     expect((await apply(plan(gateway), { home, adapters: adapters() })).actions).toEqual([]);
   });
@@ -153,7 +153,7 @@ describe("provider config", () => {
     const taken = await apply(plan(token), { home, adapters: adapters() });
 
     expect(read(home, claude)).toEqual({});
-    expect(taken.findings).toContainEqual({ id: `route:${claude}`, pack: "engine", say: `Took Hedge's proxy route out of ${claude}, and with it your env.ANTHROPIC_AUTH_TOKEN, which only worked through that route. Claude Code now uses its own sign-in: sign in there if it asks.`, todo: true });
+    expect(taken.findings).toContainEqual({ id: `route:${claude}`, pack: "engine", say: `Took Hedge's proxy route out of ${claude}, and with it your env.ANTHROPIC_AUTH_TOKEN, which only worked through that route.`, todo: true });
     expect(taken.findings.map((finding) => finding.say).join("\n")).not.toContain("Kept your");
     expect(JSON.stringify(taken.findings)).not.toContain("proxy-token");
     await apply(plan(token), { home, adapters: adapters() });
@@ -169,7 +169,7 @@ describe("provider config", () => {
     const taken = await apply(plan(), { home, adapters: adapters() });
 
     expect(read(home, claude)).toEqual({});
-    expect(taken.findings).toContainEqual({ id: `route:${claude}`, pack: "engine", say: `Took Hedge's proxy route out of ${claude}, and with it your apiKeyHelper, env.ANTHROPIC_API_KEY, which only worked through that route. Claude Code now uses its own sign-in: sign in there if it asks.`, todo: true });
+    expect(taken.findings).toContainEqual({ id: `route:${claude}`, pack: "engine", say: `Took Hedge's proxy route out of ${claude}, and with it your apiKeyHelper, env.ANTHROPIC_API_KEY, which only worked through that route.`, todo: true });
     expect(JSON.stringify(taken.findings)).not.toContain("my-key");
     expect(JSON.stringify(taken.findings)).not.toContain("--secret");
     expect((await apply(plan(), { home, adapters: adapters() })).actions).toEqual([]);

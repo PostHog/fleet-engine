@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { Plan } from "../pack/types.ts";
 import { tempDirs } from "../testing/git.ts";
 import { providerConfigAdapter, type CommandRunner } from "../adapters/provider-config/adapter.ts";
+import { keyHelper } from "../adapters/provider-config/proxy-route.ts";
 import { apply, check, filesAdapter, type Adapter } from "./apply.ts";
 
 const temp = tempDirs();
@@ -233,7 +234,7 @@ describe("a config entry that waits for a pack check", () => {
   const checks = [{ id: "proxy-up", run: ["proxy-check"], say: "The proxy is down.", pack: "base" }];
   const config = [
     { provider: "claude" as const, key: "env.ANTHROPIC_BASE_URL", value: "http://127.0.0.1:8317", after: "proxy-up", pack: "base" },
-    { provider: "claude" as const, key: "apiKeyHelper", value: "cat key", after: "proxy-up", pack: "base" },
+    { provider: "claude" as const, key: "apiKeyHelper", value: keyHelper, after: "proxy-up", pack: "base" },
   ];
   const proxy = (up: () => boolean) => async (command: string[]) => (command.join(" ") === "proxy-check" ? (up() ? 0 : 1) : 0);
   const settings = (home: string) => (existsSync(join(home, ".claude/settings.json")) ? JSON.parse(readFileSync(join(home, ".claude/settings.json"), "utf8")) : undefined);
@@ -246,7 +247,7 @@ describe("a config entry that waits for a pack check", () => {
     let up = true;
     const options = { home, adapters: [providerConfigAdapter()], run: proxy(() => up) };
     expect((await apply(plan({ files: [], checks, config }), options)).findings).toEqual([]);
-    expect(settings(home)).toEqual({ model: "opus", env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: "cat key" });
+    expect(settings(home)).toEqual({ model: "opus", env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: keyHelper });
     up = false;
     const failed = await apply(plan({ files: [], checks, config }), options);
     expect(failed.ok).toBe(true);
@@ -255,7 +256,19 @@ describe("a config entry that waits for a pack check", () => {
     expect((await apply(plan({ files: [], checks, config }), options)).actions).toEqual([]);
     up = true;
     await apply(plan({ files: [], checks, config }), options);
-    expect(settings(home)).toEqual({ model: "opus", env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: "cat key" });
+    expect(settings(home)).toEqual({ model: "opus", env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: keyHelper });
+  });
+
+  test("that is one part of Hedge's proxy route takes the other part out with it when its own check fails, in apply and in doctor", async () => {
+    const home = temp.make("home-");
+    const split = [config[0]!, { ...config[1]!, after: "helper-up" }];
+    const both = [...checks, { id: "helper-up", run: ["helper-check"], say: "The helper is down.", pack: "base" }];
+    const options = { home, adapters: [providerConfigAdapter()], run: async (command: string[]) => (command.join(" ") === "helper-check" ? 1 : 0) };
+    const applied = await apply(plan({ files: [], checks: both, config: split }), options);
+    expect(applied.findings.map((finding) => finding.id)).toEqual(["check:helper-up"]);
+    expect(settings(home)).toBeUndefined();
+    const doctor = await check(plan({ files: [], checks: both, config: split }), options);
+    expect(doctor.findings.map((finding) => finding.id)).toEqual(["check:helper-up"]);
   });
 
   const stepping = (codes: { before: number; after: number }) => {
@@ -278,7 +291,7 @@ describe("a config entry that waits for a pack check", () => {
     const { run } = stepping({ before: 4, after: 0 });
     const applied = await apply(plan({ files: [], checks, config, steps }), { home, adapters: [providerConfigAdapter()], run: run(home) });
     expect(applied).toMatchObject({ ok: true, findings: [] });
-    expect(settings(home)).toEqual({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: "cat key" });
+    expect(settings(home)).toEqual({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: keyHelper });
   });
 
   test("with a todo, that exits 4 before a step and passes after it puts its config in within the same apply, and leaves no To do", async () => {
@@ -289,7 +302,7 @@ describe("a config entry that waits for a pack check", () => {
     expect((await check(waiting, options)).findings).toEqual([{ id: "check:proxy-up", pack: "base", say: "Add an account to the proxy.", todo: true }]);
     const applied = await apply(waiting, options);
     expect(applied).toMatchObject({ ok: true, findings: [] });
-    expect(settings(home)).toEqual({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: "cat key" });
+    expect(settings(home)).toEqual({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: keyHelper });
     expect(await check(waiting, options)).toMatchObject({ ok: true, findings: [] });
   });
 
@@ -309,7 +322,7 @@ describe("a config entry that waits for a pack check", () => {
     const applied = await apply(plan({ files: [], checks, config, steps }), { home, adapters: [providerConfigAdapter()], run: run(home) });
     expect(seen).toEqual(["http://127.0.0.1:8317"]);
     expect(applied).toMatchObject({ ok: true, actions: [], findings: [] });
-    expect(settings(home)).toEqual({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: "cat key" });
+    expect(settings(home)).toEqual({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: keyHelper });
   });
 
   test("doctor changes nothing, reports the failed check once, and fails", async () => {
@@ -320,7 +333,7 @@ describe("a config entry that waits for a pack check", () => {
     const report = await check(plan({ files: [], checks, config }), { home, adapters: [providerConfigAdapter()], run: flaky });
     expect(report.ok).toBe(false);
     expect(report.findings.filter((finding) => finding.id === down.id)).toEqual([down]);
-    expect(settings(home)).toEqual({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: "cat key" });
+    expect(settings(home)).toEqual({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: keyHelper });
   });
 });
 

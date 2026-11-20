@@ -15,7 +15,7 @@ async function balancingDevbox() {
   return home;
 }
 
-test("through hedge, the hub-only modes and the balancer refuse on a devbox, and the checks without a key fail and change nothing", async () => {
+test("through hedge, the hub-only modes and the balancer refuse on a devbox, and the checks without a key wait for the person and change nothing", async () => {
   const home = await balancingDevbox();
   const install = await runHedge(["cli-proxy", "install"], { HOME: home });
   expect([install.code, install.stderr]).toEqual([1, "hedge cli-proxy: hedge cli-proxy install runs only on the hub. This machine's role is linux. Run hedge hub here on the hub, or run this there.\n"]);
@@ -26,11 +26,11 @@ test("through hedge, the hub-only modes and the balancer refuse on a devbox, and
   mkdirSync(join(home, ".claude"), { recursive: true });
   writeFileSync(join(home, ".claude/settings.json"), JSON.stringify({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: 'cat "$HOME/.config/hedge/cli-proxy.key"' }));
   const check = await runHedge(["cli-proxy", "check"], { HOME: home });
-  expect(check.code).toBe(1);
+  expect(check.code).toBe(4);
   expect(check.stdout).toContain("hedge apply keeps Claude Code on its own sign-in until the proxy serves it.");
   expect(JSON.parse(readFileSync(join(home, ".claude/settings.json"), "utf8")).apiKeyHelper).toBe('cat "$HOME/.config/hedge/cli-proxy.key"');
   const codex = await runHedge(["cli-proxy", "check", "codex"], { HOME: home });
-  expect([codex.code, codex.stdout]).toEqual([1, expect.stringContaining("hedge apply keeps Codex on its own sign-in until the proxy serves it.")]);
+  expect([codex.code, codex.stdout]).toEqual([4, expect.stringContaining("hedge apply keeps Codex on its own sign-in until the proxy serves it.")]);
   for (const args of [["check", "claude"], ["route"]]) expect((await runHedge(["cli-proxy", ...args], { HOME: home })).code).toBe(2);
 });
 

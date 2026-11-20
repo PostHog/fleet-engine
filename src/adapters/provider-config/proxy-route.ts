@@ -1,5 +1,5 @@
-import type { Provider } from "../../pack/types.ts";
-import { get, keyPath, same, samePath, type Document } from "./fields.ts";
+import type { Plan, Provider } from "../../pack/types.ts";
+import { get, keyPath, overlaps, same, samePath, type Document } from "./fields.ts";
 
 export const proxyUrl = "http://127.0.0.1:8317";
 export const keyHelper = 'cat "$HOME/.config/hedge/cli-proxy.key"';
@@ -25,6 +25,21 @@ export const proxyRoute: Partial<Record<Provider, Route>> = {
     beside: (document, leaving) => (leaves(leaving, codexTable) && get(document, ["model_provider"]) === codexProvider ? [["model_provider"]] : []),
   },
 };
+
+type Entry = Plan["config"][number];
+
+export function wholeRoutes(config: Entry[], dropped: Entry[]): Pick<Plan, "config" | "dropped"> {
+  const leaving = Object.entries(proxyRoute).flatMap(([provider, route]) => {
+    const onRoute = (entry: Entry) => entry.provider === provider && route.fields.some((item) => samePath(item.path, keyPath(entry.key)) && same(item.value, entry.value));
+    const parts = config.filter(onRoute);
+    const other = config.find((entry) => entry.provider === provider && !onRoute(entry) && route.fields.some((item) => overlaps(item.path, keyPath(entry.key))));
+    const gone = dropped.find(onRoute);
+    if (!parts.length || (!other && !gone)) return [];
+    const reason = other ? `${other.pack === "profile" ? "your profile" : `the ${other.pack} pack`} sets ${provider}:${other.key}, so Hedge's ${route.agent} proxy route leaves as one unit` : `${provider}:${gone!.key} left the plan, so Hedge's ${route.agent} proxy route leaves as one unit`;
+    return parts.map((entry) => ({ entry, reason }));
+  });
+  return { config: config.filter((entry) => !leaving.some((item) => item.entry === entry)), dropped: leaving.map(({ entry, reason }) => ({ pack: entry.pack, item: `config ${entry.provider}:${entry.key}`, reason })) };
+}
 
 const hubOnly: Partial<Record<Provider, Array<{ path: string[]; value?: unknown; name: string }>>> = {
   claude: [

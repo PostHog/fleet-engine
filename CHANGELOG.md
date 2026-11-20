@@ -14,6 +14,12 @@
 - Each machine keeps Claude Code and Codex on their own sign-ins until the
   proxy serves them. While the proxy answers but holds none of an agent's
   subscriptions, its route check is a `To do:` line, not a failure.
+  A node that holds no proxy key from the hub yet, such as one that
+  `hedge devbox add` set up, also shows one `To do:` line, not a `Fix:`.
+  It names the hub step that adds a subscription, and says that
+  `hedge cli-proxy doctor` on the hub prints the command that hands the
+  node its key. The route stays out of the node's provider files until
+  then. On the hub, a missing key is still a failure.
   `hedge cli-proxy connect` saves the key on a node in that case, so the
   first `hedge apply` after the proxy serves an agent sends it there.
   When the hub hands a box over while the proxy serves none of its agents,
@@ -66,15 +72,20 @@
 - The route to the proxy is one unit: the Claude proxy address and key
   helper, or the Codex `hedge-proxy` selector and table. Apply writes all
   of it or none of it, so it selects no `hedge-proxy` table of your own.
-  It removes it together too.
+  It removes it together too. When your profile or another pack sets a
+  key over any part of the unit, or the route check drops a part, the
+  whole unit leaves the plan, for `hedge apply` and `hedge doctor` alike.
+  So a profile that sets only its own `env.ANTHROPIC_BASE_URL` gets no
+  Hedge key helper beside its gateway, and the gateway never receives
+  the hub's proxy key.
 - Hedge's route leaves with the settings that only work through it. Each
   time apply removes it, because balancing is off, its check fails, or
   the pool is empty, it also removes a Claude credential beside Hedge's
   proxy address, such as your own `ANTHROPIC_AUTH_TOKEN`, and a Codex
   `model_provider = "hedge-proxy"` beside Hedge's table. So no key goes
   to Anthropic, and Codex selects no table that is gone. A `To do:` line
-  names each removed setting, never its value, and says the agent now
-  uses its own sign-in. The backup in `~/.local/state/hedge/backups`
+  names each removed setting, never its value, and says only what apply
+  removed. The backup in `~/.local/state/hedge/backups`
   holds the file as it was. Only Hedge's own proxy values form the
   route. The route leaves when a file holds Hedge's proxy value before
   apply and another value or none after it, so a gateway from your

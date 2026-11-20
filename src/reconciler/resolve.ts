@@ -22,7 +22,7 @@ import type {
   T3ProjectScript,
 } from "../pack/types.ts";
 import { signerSetting } from "../adapters/identity/signers.ts";
-import { hubOnlySetting } from "../adapters/provider-config/proxy-route.ts";
+import { hubOnlySetting, wholeRoutes } from "../adapters/provider-config/proxy-route.ts";
 import { engineSettings } from "../pack/manifest.ts";
 import { placedMachine } from "../profile/profile.ts";
 import { forwardId, hubForward } from "../hub/ssh.ts";
@@ -98,6 +98,7 @@ export function resolve(profile: Profile, saved: MachineFile, sources: FetchedSo
 
   plan.catalog = serviceCatalog(order, profile, activeIds(workflowStates(profile, { ...machine, role: "hub" }, order, names)), machine.role === "hub" ? os : "linux");
   const packFiles: DesiredFile[] = [];
+  const unfit: Plan["config"] = [];
   for (const { manifest, dir } of order) {
     const pack = manifest.name;
     for (const entry of manifest.files ?? []) if (fits(pack, entry, `file ${entry.target}`)) packFiles.push({ target: entry.target, source: within(dir, entry.path, pack) });
@@ -126,7 +127,10 @@ export function resolve(profile: Profile, saved: MachineFile, sources: FetchedSo
     }
     for (const entry of manifest.config ?? []) {
       refuseProxySetting(pack, entry);
-      if (!fits(pack, entry, `config ${entry.provider}:${entry.key}`)) continue;
+      if (!fits(pack, entry, `config ${entry.provider}:${entry.key}`)) {
+        unfit.push({ ...entry, pack });
+        continue;
+      }
       const owner = `${entry.provider}:${entry.key}`;
       if (plan.owners[owner]) throw new ResolveError(`${owner} is owned by both ${plan.owners[owner]} and ${pack}`);
       plan.owners[owner] = pack;
@@ -144,6 +148,9 @@ export function resolve(profile: Profile, saved: MachineFile, sources: FetchedSo
     plan.owners[owner] = "profile";
     plan.config.push({ ...entry, pack: "profile" });
   }
+  const routes = wholeRoutes(plan.config, unfit);
+  plan.config = routes.config;
+  plan.dropped.push(...routes.dropped);
 
   const settings = machineDefaults(activeSettings(order, active), machine);
   plan.settings = settingValues(settings, profile.hub && settings.some((setting) => setting.key === hubAlias) ? { ...profile.settings, [hubAlias]: profile.hub } : profile.settings);

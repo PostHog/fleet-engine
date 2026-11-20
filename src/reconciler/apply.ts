@@ -7,6 +7,7 @@ import type { Action, CatalogEntry, Finding, HumanStep, Owned, PackCheck, Plan, 
 import { engineCommand } from "./engine-command.ts";
 import { changeLedger, ledgerKey, readLedger, undoVariable, type Ledger, type LedgerStep } from "./ledger.ts";
 import { hublessReason } from "./resolve.ts";
+import { wholeRoutes } from "../adapters/provider-config/proxy-route.ts";
 import { withLegacyNames } from "../legacy.ts";
 
 export type AdapterContext = { home: string; dryRun: boolean; adopt: string[]; adoptFrom?: string[] };
@@ -117,7 +118,9 @@ async function reconcile(plan: Plan, options: ApplyOptions): Promise<{ report: R
     report.findings.push(...checks.filter(([, code]) => code !== 0).map(([item, code]) => checkFinding(item, code)));
     const passing = (entry: Plan["config"][number]) => checks.some(([item, code]) => item.pack === entry.pack && item.id === entry.after && code === 0);
     const waiting = plan.config.filter((entry) => waitsForCheck(plan, entry));
-    const configured = { ...gated.plan, config: plan.config.filter((entry) => (waiting.includes(entry) ? passing(entry) : gated.plan.config.includes(entry))), dropped: [...gated.plan.dropped, ...waiting.filter((entry) => !passing(entry)).map(droppedConfig)] };
+    const kept = plan.config.filter((entry) => (waiting.includes(entry) ? passing(entry) : gated.plan.config.includes(entry)));
+    const routes = wholeRoutes(kept, plan.config.filter((entry) => !kept.includes(entry)));
+    const configured = { ...gated.plan, config: routes.config, dropped: [...gated.plan.dropped, ...waiting.filter((entry) => !passing(entry)).map(droppedConfig), ...routes.dropped] };
     for (const adapter of afterSteps) {
       const result = await adapter.apply(configured, context);
       report.actions.push(...result.actions);

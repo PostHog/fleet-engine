@@ -45,8 +45,8 @@ const connecting = (fields: Partial<ProxyMachine> = {}, proxy: Proxy = {}) => {
   return { ...box, apply, connectAndApply };
 };
 const saved = (agents: string) => `Saved the proxy key. Run hedge apply now: it sends ${agents} to your own-account proxy at ${proxyUrl}, or says why it cannot yet. Then restart open ${agents} sessions.`;
-const noClaude = "To do: Claude Code keeps its own sign-in, because the own-account proxy on the hub lists no Claude model yet.";
-const noCodex = "To do: Codex keeps its own sign-in, because the own-account proxy on the hub lists no Codex model yet.";
+const noClaude = "To do: Claude Code keeps its own sign-in, because the own-account proxy on the hub lists no Claude model yet, or this machine has no proxy key from the hub yet.";
+const noCodex = "To do: Codex keeps its own sign-in, because the own-account proxy on the hub lists no Codex model yet, or this machine has no proxy key from the hub yet.";
 
 function connected(home: string, settings: Record<string, unknown> = {}) {
   mkdirSync(join(home, ".config/hedge"), { recursive: true });
@@ -496,11 +496,26 @@ test("the check reports an unreachable proxy and changes no file: apply sends Cl
   expect(existsSync(keyFile(home))).toBe(true);
 });
 
-test("the check fails without a saved key, waits for the person while the proxy serves no Claude model, and writes nothing", async () => {
+test("hedge apply on a node that holds no proxy key from the hub prints one To do that names the hub step to add an account, never a Fix, and keeps the route out of its provider files", async () => {
+  for (const [plan, agent] of [["claude", "claude"], ["codex", "codex"]] as const) {
+    const node = connecting({ plan }, { models: [] });
+    const applied = await node.apply();
+    expect(applied.code).toBe(0);
+    const lines = applied.stdout.trimEnd().split("\n");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toStartWith("To do: ");
+    expect(lines[0]).toContain("this machine has no proxy key from the hub yet");
+    expect(lines[0]).toEndWith(`on the hub with: ~/.local/share/hedge-cli-proxy/cli-proxy-api -config ~/.local/share/hedge-cli-proxy/config.yaml -${agent}-login -no-browser`);
+    expect(existsSync(settingsFile(node.home))).toBe(false);
+    expect(existsSync(codexFile(node.home))).toBe(false);
+  }
+});
+
+test("the check on a node waits for the person without a saved key and while the proxy serves no Claude model, fails on a hub without one, and writes nothing", async () => {
   const missing = client();
   connected(missing.home);
   writeFileSync(keyFile(missing.home), "");
-  expect(await cliProxy("check", missing.machine)).toBe(1);
+  expect(await cliProxy("check", missing.machine)).toBe(4);
   expect(readJson(settingsFile(missing.home)).apiKeyHelper).toBe(keyHelper);
   expect(missing.printed.join("\n")).toContain("no proxy key");
 
@@ -510,8 +525,12 @@ test("the check fails without a saved key, waits for the person while the proxy 
   expect(refused.printed.join("\n")).toContain("lists no Claude model");
 
   const fresh = client({}, { down: true });
-  expect(await cliProxy("check", fresh.machine)).toBe(1);
+  expect(await cliProxy("check", fresh.machine)).toBe(4);
   expect(existsSync(settingsFile(fresh.home))).toBe(false);
+
+  const hub = hubMachine();
+  expect(await cliProxy("check", hub.machine)).toBe(1);
+  expect(existsSync(settingsFile(hub.home))).toBe(false);
 });
 
 test("disconnect takes off the key helper and the Codex provider that fleet cli-proxy connect wrote, and keeps your own, while connect leaves them to hedge apply --adopt", async () => {
@@ -697,10 +716,10 @@ test("a proxy that lists no Codex model holds back only the Codex check, which w
   expect(printed.join("\n")).toContain(`The proxy at ${proxyUrl} lists no Codex model.`);
 });
 
-test("without a saved key, the Codex check fails", async () => {
+test("without a saved key, the Codex check on a node waits for the person", async () => {
   const { machine, home, printed } = client({}, { models: ["gpt-6.1-sol"] });
   codexRouted(home);
-  expect(await cliProxy("check", machine, "codex")).toBe(1);
+  expect(await cliProxy("check", machine, "codex")).toBe(4);
   expect(printed.join("\n")).toContain("no proxy key");
 });
 
