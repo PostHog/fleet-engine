@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { askGap, authorOf, readDecisions, finishReview, startGateRun, ledgerRoot, listStanding, panelCommit, proofDirectory, readJson, readOwed, recordGap, recordGapCommand, recordStanding, requireChoice, requireNone, devPr, requireProofs, requireReservation, respondToReview, reuseProof, reviewDirectory, reviewOfCommit, reviewRecords, roundId, roundQuestion, runOption, saveProof, startReview, stopOption, storeCapturedFindings, unfinishedReview, writeJson, markRecorded, readReservation, recordReceipt, roundDirectories, unrecordedElsewhere, type Arbiter, type Reservation, type CapturedBy, type ProofIdentity } from "./proof.ts";
 import { AnswerTaken, appendOnce, decideAlone, hearUser, ledgerHolds, ledgerOf } from "./decision-cli.ts";
-import { HubUnreachable, keptOwed, refText, thisMachine, type Decision, type Ssh } from "./decision-ledger.ts";
+import { HubUnreachable, keptOwed, refText, usersAcceptance, thisMachine, type Decision, type Ssh } from "./decision-ledger.ts";
 import { autonomyOf, gradeOf, type Autonomy, type Grade } from "./proof-autonomy.ts";
 import { readComment, readPullRequest, runIn } from "./pr-ci.ts";
 import { isCommitSha } from "./proof-end-table.ts";
@@ -378,7 +378,9 @@ command instead, unless the PR is a one-way door or its tier keeps the gap the u
       const autonomy = autonomyOf(context.env, () => gradeAt(identity(), context), "proof-gap", [kind]);
       const decisions = autonomy === "end" ? await readDecisions(ledgerOf(context)) : [];
       const afterGap = Array.isArray(decisions) ? decisions.filter((decision) => kind !== "judge" || decision.at >= gap.recordedAt) : undefined;
-      context.print(askGap(identity(), kind, reason, afterGap && !keptOwed(afterGap, identity(), kind) ? autonomy : "ask"));
+      const kept = afterGap && keptOwed(afterGap, identity(), kind);
+      const lifted = kept && afterGap.indexOf(usersAcceptance(afterGap, identity(), kind)!) > afterGap.indexOf(kept);
+      context.print(askGap(identity(), kind, reason, afterGap && (!kept || lifted) ? autonomy : "ask"));
       return 0;
     },
   },
