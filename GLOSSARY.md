@@ -80,6 +80,14 @@ _Avoid_: Worker box
 The one cloud box that the profile's `hub` names, with `hedge hub here`. Setup starts on it. It runs the items placed on the hub, keeps the pack secrets, such as the Slack, incident.io, and MCP gateway sign-ins, adds the nodes with `hedge devbox add`, and manages them.
 _Avoid_: Controller, master box
 
+**Boxes**:
+The engine module that owns every box: the pool, the claims, the box lock, the idle sweep, and pairing. It is the only caller of a Box backend.
+_Avoid_: Box pool, box manager
+
+**Box backend**:
+The seam that creates, starts, stops, and runs commands on boxes for one provider, such as Coder or a plain SSH host. Each adapter is a pack with a `box-backend` handler.
+_Avoid_: Provider, driver, Coder client
+
 ## Threads
 
 **Question card**:
