@@ -58,7 +58,7 @@ describe("hedge devbox add", () => {
 
     const box = fakeMachine(home);
     expect(await main(["devbox", "add", "node-2"], { ...options, setup: { machine: box.machine } })).toBe(0);
-    expect(io.output()).toEndWith("node-2 is your devbox now. It runs your profile, and T3 Code here and there can reach each other.");
+    expect(io.output()).toEndWith("node-2 is your devbox now. It runs your profile, and T3 Code here and there can reach each other.\nWhen ssh node-2 shows a Coder startup log with a ✘, that log is from when node-2 started, before Hedge set it up. It clears when node-2 restarts.");
     expect(machineFile(home).devboxes).toEqual(["node-2"]);
     expect(machineFile(home).setup.done).toContain("devbox:node-2:link");
 

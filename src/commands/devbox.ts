@@ -47,6 +47,7 @@ export async function devboxCommand(args: string[], context: DevboxCommandContex
     });
     terminal.print("");
     terminal.print(`${host} is your devbox now. It runs your profile, and T3 Code here and there can reach each other.`);
+    terminal.print(`When ssh ${host} shows a Coder startup log with a ✘, that log is from when ${host} started, before Hedge set it up. It clears when ${host} restarts.`);
     if (hub) await linkFromHub({ ...context, ...(machineFile.name ? { self: machineFile.name } : {}) }, hub, host, hubTook);
     await balanceThreads(context);
     return 0;
