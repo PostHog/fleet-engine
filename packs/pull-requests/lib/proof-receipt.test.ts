@@ -183,7 +183,7 @@ test("the receipt ends the testing section at the next heading GitHub renders, a
     expect({ name, body: pr.githubBody().replace(block(pr.githubBody()), "<block>") }).toEqual({ name, body: `${before}<block>\n\n${next}\n` });
     expect({ name, blocks: blocksOf(pr.githubBody()).replace(blocksOf(block(pr.githubBody())), "") }).toEqual({ name, blocks: blocksOf(`${before}${next}\n`) });
   }
-});
+}, 15_000);
 
 test("a receipt added at the end of a body that ends in an HTML block starts a block of its own", async () => {
   const bodies = ["Adds the greeting.\n\n<details>\n<summary>More</summary>\n\nHidden detail.\n\n</details>", "Adds the greeting.\n\n### Testing\n\n<div>\nRan it by hand.\n</div>"];

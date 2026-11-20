@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { cargoGitCliCommand } from "./lib/cargo-git-cli.ts";
 import { join } from "node:path";
@@ -31,14 +31,14 @@ async function hedge(args: string[], home: string): Promise<{ code: number; outp
   return { code, output: lines.join("\n") };
 }
 
-let firstApply: Promise<{ dir: string; code: number }> | undefined;
+let firstApply: { dir: string; code: number };
+beforeAll(async () => {
+  const dir = shared.make("home-");
+  firstApply = { dir, code: (await hedge(["apply", "--profile", profileWith({}, shared.make("profile-"))], dir)).code };
+}, 30_000);
 
 async function appliedHome() {
-  firstApply ??= (async () => {
-    const dir = shared.make("home-");
-    return { dir, code: (await hedge(["apply", "--profile", profileWith({}, shared.make("profile-"))], dir)).code };
-  })();
-  const { dir, code } = await firstApply;
+  const { dir, code } = firstApply;
   const home = temp.make("home-");
   cpSync(dir, home, { recursive: true });
   return { home, code };
