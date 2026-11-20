@@ -177,7 +177,8 @@
 - Setup takes the profile's new commits when it starts, before it reads
   your answers, so a rerun keeps what another machine pushed before it. When
   it cannot reach the profile's origin, it says so and goes on with the copy
-  on the machine, as it did before this fetch. When
+  on the machine, as it did before this fetch. The Git error that it prints
+  leaves out a user name and password in the origin's address. When
   another machine pushes first, setup stops and keeps its commit. It says to
   commit or discard the changes in the checkout that are not committed, to
   bring it up to date with `git -C <profile> pull --rebase`, or to drop its

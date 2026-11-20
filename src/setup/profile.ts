@@ -7,6 +7,7 @@ import type { Machine } from "./commands.ts";
 import { defaultSources, engineRepo } from "./defaults.ts";
 import { profileFile } from "../legacy.ts";
 import { knowGitHub } from "./known-hosts.ts";
+import { withoutCredentials } from "../credentials.ts";
 import { releaseIn, releaseRefsAtHead } from "../update.ts";
 import type { Draft } from "./questions.ts";
 import type { Step } from "./runner.ts";
@@ -232,7 +233,7 @@ export async function takeFetched(machine: Machine, dir: string) {
   const fetched = await machine.exec(["git", "-C", dir, "rev-parse", "@{upstream}"]);
   if (fetched.code !== 0) {
     if ((await machine.exec(["git", "-C", dir, "rev-parse", "--verify", "-q", "HEAD"])).code !== 0) return undefined;
-    throw new Error(`could not find ${merge} of origin in ${dir} after fetching origin: ${(fetched.output.split("\n").find((line) => line.startsWith("fatal:")) ?? lastLine(fetched.output)).replace(/\.$/, "")}. Run git -C ${dir} pull, then run hedge setup again.`);
+    throw new Error(`could not find ${merge} of origin in ${dir} after fetching origin: ${withoutCredentials(fetched.output.split("\n").find((line) => line.startsWith("fatal:")) ?? lastLine(fetched.output)).replace(/\.$/, "")}. Run git -C ${dir} pull, then run hedge setup again.`);
   }
   const merged = await machine.exec(["git", "-C", dir, "merge", "-q", "--ff-only", fetched.output.trim()]);
   return merged.code === 0 ? undefined : merged;
@@ -332,7 +333,7 @@ async function git(machine: Machine, dir: string, ...args: string[]) {
   if (result.code !== 0) throw new Error(`git ${args[0]} in ${dir} failed: ${lastLine(result.output)}`);
 }
 
-const lastLine = (text: string) => text.trim().split("\n").at(-1) ?? "";
+const lastLine = (text: string) => withoutCredentials(text.trim().split("\n").at(-1) ?? "");
 
 export function profileGuide(packs: PackManifest[], sharedWith?: string) {
   const sections = packs
