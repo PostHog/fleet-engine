@@ -51,23 +51,23 @@ export function launchHere(threads: Threads, room: () => DiskStatus): Launch {
   };
 }
 
-export function launchOnBox(fleet: string, run: Run): Launch {
+export function launchOnBox(hedge: string, run: Run): Launch {
   const launch: Launch = async ({ claim: held, ...request }) => {
     let claim = held;
     if (!claim) {
-      const spawned = await run([fleet, "box", "spawn"]);
-      if (spawned.code !== 0) return { failed: `fleet box spawn: ${why(spawned)}` };
+      const spawned = await run([hedge, "box", "spawn"]);
+      if (spawned.code !== 0) return { failed: `hedge box spawn: ${why(spawned)}` };
       const [box, environmentId] = lastLine(spawned.stdout).split(/\s+/);
-      if (!box) return { failed: "fleet box spawn printed no box" };
+      if (!box) return { failed: "hedge box spawn printed no box" };
       claim = { box, environmentId };
     }
-    const ran = await run([fleet, "box", "run", claim.box, "--", "fleet", "slack-trigger", "launch"], JSON.stringify(request));
+    const ran = await run([hedge, "box", "run", claim.box, "--", "hedge", "slack-trigger", "launch"], JSON.stringify(request));
     const answer = answerOf(lastLine(ran.stdout));
     if (ran.code === 0 && answer.threadId) return { threadId: answer.threadId, url: claim.environmentId ? threadUrl(claim.environmentId, answer.threadId) : undefined, where: claim.box };
-    const failed = `fleet slack-trigger launch on ${claim.box}: ${answer.failed ?? why(ran)}`;
+    const failed = `hedge slack-trigger launch on ${claim.box}: ${answer.failed ?? why(ran)}`;
     return answer.reachedT3 ? { failed, claim, reachedT3: true } : { failed, claim };
   };
-  launch.release = async (claim) => void (await run([fleet, "box", "release", claim.box]));
+  launch.release = async (claim) => void (await run([hedge, "box", "release", claim.box]));
   return launch;
 }
 
@@ -88,7 +88,7 @@ export function launchOnNodes(nodes: string[], run: Run, turn: () => number): La
     const ran = await run(onHost(node, ["slack-trigger", "launch"], keepAlive), JSON.stringify(held ? request : { ...request, replay: undefined }), { timeoutMs: nodeLaunchLimitMs });
     const answer = answerOf(lastLine(ran.stdout));
     if (ran.code === 0 && answer.threadId) return { threadId: answer.threadId, url: answer.url, where: node };
-    const failed = `fleet slack-trigger launch on ${node}: ${answer.failed ?? why(ran)}`;
+    const failed = `hedge slack-trigger launch on ${node}: ${answer.failed ?? why(ran)}`;
     const replaying = held !== undefined && request.replay === true;
     if (!replaying && (answer.noRoom || (answer.failed === undefined && notConnected.test(ran.stderr)))) return { failed };
     return { failed, claim: { box: node }, ...(answer.reachedT3 || answer.failed === undefined ? { reachedT3: true as const } : {}) };

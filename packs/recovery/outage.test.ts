@@ -53,7 +53,7 @@ async function machine(threads: Record<string, unknown>[], answers: Parameters<t
   const lines: string[] = [];
   const settings = JSON.stringify({ "hub.threadFolder": "~/notes" });
   const run = async (now: number, proxy = fakeProxy(answers)) => recoverCommand([], {
-    home, env: { FLEET_MODELS: JSON.stringify(modelRows), FLEET_SETTINGS: settings, PATH: t3.path, HOME: home },
+    home, env: { HEDGE_MODELS: JSON.stringify(modelRows), HEDGE_SETTINGS: settings, PATH: t3.path, HOME: home },
     fetch: proxy.fetch, now: () => now, print: (line) => lines.push(line), session: { home: stub.home },
   });
   return { run, lines, inbox, t3, home, setThreads: (next: Record<string, unknown>[]) => void ((shell as unknown as { threads: unknown[] }).threads = next) };
@@ -154,7 +154,7 @@ test("counts a retry that ran and failed again as a spent try", async () => {
 test("keeps the tries in a private state file", async () => {
   const box = await machine([outageThread("e")], { "claude-test-1": 200 });
   await box.run(at("20:00"));
-  const path = join(box.home, ".local/state/fleet/outage-resume.json");
+  const path = join(box.home, ".local/state/hedge/outage-resume.json");
   expect(existsSync(path)).toBe(true);
   expect(statSync(path).mode & 0o777).toBe(0o600);
 });
@@ -167,7 +167,7 @@ test("spends no try on a continue message that T3 did not take", async () => {
   stubs.push(stub);
   const home = recoveryHome(temp.make("home-"));
   const run = (time: string) => recoverCommand([], {
-    home, env: { FLEET_MODELS: JSON.stringify(modelRows), FLEET_SETTINGS: "{}" }, fetch: fakeProxy({ "claude-test-1": 200 }).fetch,
+    home, env: { HEDGE_MODELS: JSON.stringify(modelRows), HEDGE_SETTINGS: "{}" }, fetch: fakeProxy({ "claude-test-1": 200 }).fetch,
     now: () => at(time), print: () => {}, session: { home: stub.home },
   });
   for (const time of ["20:00", "20:10", "20:30", "21:10", "22:30"]) expect(await run(time)).toBe(1);
@@ -184,7 +184,7 @@ test("one failed send does not stop the others, and the sweep says so", async ()
   const home = recoveryHome(temp.make("home-"));
   const lines: string[] = [];
   const code = await recoverCommand([], {
-    home, env: { FLEET_MODELS: JSON.stringify(modelRows), FLEET_SETTINGS: "{}" }, fetch: fakeProxy({ "claude-test-1": 200 }).fetch,
+    home, env: { HEDGE_MODELS: JSON.stringify(modelRows), HEDGE_SETTINGS: "{}" }, fetch: fakeProxy({ "claude-test-1": 200 }).fetch,
     now: () => at("20:00") + minute, print: (line) => lines.push(line), session: { home: stub.home },
   });
   expect(code).toBe(1);

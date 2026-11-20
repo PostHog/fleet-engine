@@ -34,7 +34,7 @@ function mountedNoexec(path: string, mounts: string) {
 
 function ownRoot(memory: string) {
   const uid = process.getuid!();
-  const root = join(memory, `fleet-test-${uid}`);
+  const root = join(memory, `hedge-test-${uid}`);
   try {
     mkdirSync(root, { mode: 0o700 });
   } catch (error) {

@@ -6,9 +6,9 @@ export type Sleep = (ms: number) => Promise<void>;
 export const slackApiBase = "https://slack.com/api";
 
 export function slackApp(saved: string | undefined): Tokens {
-  if (saved === undefined) throw new Error("no Slack app is saved. Run fleet slack-trigger setup");
+  if (saved === undefined) throw new Error("no Slack app is saved. Run hedge slack-trigger setup");
   const tokens = JSON.parse(saved) as Partial<Tokens>;
-  if (!tokens.appToken?.startsWith("xapp-") || !tokens.userToken?.startsWith("xoxp-")) throw new Error("the saved Slack app needs appToken (xapp-…) and userToken (xoxp-…). Run fleet slack-trigger setup");
+  if (!tokens.appToken?.startsWith("xapp-") || !tokens.userToken?.startsWith("xoxp-")) throw new Error("the saved Slack app needs appToken (xapp-…) and userToken (xoxp-…). Run hedge slack-trigger setup");
   return tokens as Tokens;
 }
 

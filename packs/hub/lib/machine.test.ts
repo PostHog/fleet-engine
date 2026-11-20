@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tempDirs } from "../../../src/testing/git.ts";
-import { hubCallLimitMs, peerMachine, peerSsh, peersOf, profileDevboxes, quote, readBoxSettings, remoteFleet, requireHub, shellLimitMs, shellsWith, thisMachine } from "./machine.ts";
+import { hubCallLimitMs, peerMachine, peerSsh, peersOf, profileDevboxes, quote, readBoxSettings, remoteHedge, requireHub, shellLimitMs, shellsWith, thisMachine } from "./machine.ts";
 import { captureWith, type Capture, type Timer } from "./coder.ts";
 import { appeared } from "./testing.ts";
 import { fakeSsh, type Host } from "../../../src/testing/ssh.ts";
@@ -13,18 +13,18 @@ const temp = tempDirs();
 afterEach(() => temp.cleanup());
 
 function homeWithMachine(machine?: Record<string, unknown>) {
-  const home = temp.make("fleet-hub-");
+  const home = temp.make("hedge-hub-");
   if (machine) {
-    mkdirSync(join(home, ".config/fleet"), { recursive: true });
-    writeFileSync(join(home, ".config/fleet/machine.json"), JSON.stringify(machine));
+    mkdirSync(join(home, ".config/hedge"), { recursive: true });
+    writeFileSync(join(home, ".config/hedge/machine.json"), JSON.stringify(machine));
   }
   return home;
 }
 
 test("box settings come from the hub.* settings, with the kept folders split on spaces and no warm command when unset", () => {
-  const settings = readBoxSettings({ FLEET_SETTINGS: JSON.stringify(boxSettings) });
+  const settings = readBoxSettings({ HEDGE_SETTINGS: JSON.stringify(boxSettings) });
   expect(settings).toEqual({ alias: "my-hub", coderUrl: "https://coder.example.com", template: "linux-box", diskGigabytes: 120, poolSize: 4, idleHours: 4, reapDays: 3, keepDirs: ["notes", "tools"], relayPort: 60001 });
-  expect(readBoxSettings({ FLEET_SETTINGS: JSON.stringify({ ...boxSettings, "hub.boxWarmCommand": "make warm" }) }).warmCommand).toBe("make warm");
+  expect(readBoxSettings({ HEDGE_SETTINGS: JSON.stringify({ ...boxSettings, "hub.boxWarmCommand": "make warm" }) }).warmCommand).toBe("make warm");
 });
 
 test("every peer is the hub plus the profile's devboxes, without this machine and without repeats", () => {
@@ -33,39 +33,39 @@ test("every peer is the hub plus the profile's devboxes, without this machine an
 });
 
 test("a hub-only command refuses on a machine that is not the hub and says how to fix it", () => {
-  expect(() => requireHub(homeWithMachine({ schema: 1, role: "devbox" }), "sweep")).toThrow("fleet box sweep runs only on the hub. This machine's role is devbox. Run fleet hub here on the hub");
+  expect(() => requireHub(homeWithMachine({ schema: 1, role: "devbox" }), "sweep")).toThrow("hedge box sweep runs only on the hub. This machine's role is devbox. Run hedge hub here on the hub");
   expect(() => requireHub(homeWithMachine({ schema: 1, role: "hub" }), "sweep")).not.toThrow();
 });
 
-test("peers and nightly grants cover the devboxes in the profile and those fleet devbox add saved in machine.json, once each", () => {
+test("peers and nightly grants cover the devboxes in the profile and those hedge devbox add saved in machine.json, once each", () => {
   const home = homeWithMachine({ schema: 1, role: "hub", devboxes: ["devbox-3", "devbox-2"] });
-  const profile = temp.make("fleet-profile-");
-  writeFileSync(join(profile, "fleet.json"), JSON.stringify({ devboxes: ["devbox-2"] }));
-  const machine = thisMachine({ FLEET_SETTINGS: JSON.stringify(boxSettings), FLEET_PROFILE_DIR: profile }, home);
+  const profile = temp.make("hedge-profile-");
+  writeFileSync(join(profile, "hedge.json"), JSON.stringify({ devboxes: ["devbox-2"] }));
+  const machine = thisMachine({ HEDGE_SETTINGS: JSON.stringify(boxSettings), HEDGE_PROFILE_DIR: profile }, home);
   expect(machine.devboxes).toEqual(["devbox-2", "devbox-3"]);
   expect(machine.peers).toEqual(["devbox-2", "devbox-3"]);
-  const withoutProfile = thisMachine({ FLEET_SETTINGS: JSON.stringify(boxSettings) }, home);
+  const withoutProfile = thisMachine({ HEDGE_SETTINGS: JSON.stringify(boxSettings) }, home);
   expect(withoutProfile.devboxes).toEqual(["devbox-3", "devbox-2"]);
 });
 
 test("a profile devbox dials the hub itself only while the profile names a hub, and a box never does", () => {
-  const profile = temp.make("fleet-profile-");
-  writeFileSync(join(profile, "fleet.json"), JSON.stringify({ hub: "my-hub", devboxes: ["devbox-2", "box-lane", "my-hub"] }));
-  expect(profileDevboxes({ FLEET_PROFILE_DIR: profile })).toEqual(["devbox-2"]);
+  const profile = temp.make("hedge-profile-");
+  writeFileSync(join(profile, "hedge.json"), JSON.stringify({ hub: "my-hub", devboxes: ["devbox-2", "box-lane", "my-hub"] }));
+  expect(profileDevboxes({ HEDGE_PROFILE_DIR: profile })).toEqual(["devbox-2"]);
 });
 
 test("a profile that names no hub has no devbox that dials the hub, so the hub's tunnels keep the gateway port", () => {
-  const profile = temp.make("fleet-profile-");
-  writeFileSync(join(profile, "fleet.json"), JSON.stringify({ devboxes: ["devbox-2"] }));
-  expect(profileDevboxes({ FLEET_PROFILE_DIR: profile })).toEqual([]);
+  const profile = temp.make("hedge-profile-");
+  writeFileSync(join(profile, "hedge.json"), JSON.stringify({ devboxes: ["devbox-2"] }));
+  expect(profileDevboxes({ HEDGE_PROFILE_DIR: profile })).toEqual([]);
   expect(profileDevboxes({})).toEqual([]);
 });
 
 test("the peer list needs only hub.alias, so Hub links works without the Boxes settings", () => {
   const home = homeWithMachine({ schema: 1, role: "devbox", devboxes: ["devbox-3", "devbox-2"] });
-  const profile = temp.make("fleet-profile-");
-  writeFileSync(join(profile, "fleet.json"), JSON.stringify({ devboxes: ["devbox-2", "devbox-4"] }));
-  const here = peerMachine({ FLEET_SETTINGS: JSON.stringify({ "hub.alias": "my-hub" }), FLEET_PROFILE_DIR: profile }, home, "devbox-4");
+  const profile = temp.make("hedge-profile-");
+  writeFileSync(join(profile, "hedge.json"), JSON.stringify({ devboxes: ["devbox-2", "devbox-4"] }));
+  const here = peerMachine({ HEDGE_SETTINGS: JSON.stringify({ "hub.alias": "my-hub" }), HEDGE_PROFILE_DIR: profile }, home, "devbox-4");
   expect(here.devboxes).toEqual(["devbox-2", "devbox-4", "devbox-3"]);
   expect(here.peers).toEqual(["my-hub", "devbox-2", "devbox-3"]);
   expect(here.self).toBe("devbox-4");
@@ -73,9 +73,9 @@ test("the peer list needs only hub.alias, so Hub links works without the Boxes s
 
 test("a box in the devbox list is never a peer, whether the profile or the machine file names it", () => {
   const home = homeWithMachine({ schema: 1, role: "devbox", devboxes: ["box-saved"] });
-  const profile = temp.make("fleet-profile-");
-  writeFileSync(join(profile, "fleet.json"), JSON.stringify({ devboxes: ["devbox-2", "box-lane"] }));
-  const here = peerMachine({ FLEET_SETTINGS: JSON.stringify({ "hub.alias": "my-hub" }), FLEET_PROFILE_DIR: profile }, home, "devbox-4");
+  const profile = temp.make("hedge-profile-");
+  writeFileSync(join(profile, "hedge.json"), JSON.stringify({ devboxes: ["devbox-2", "box-lane"] }));
+  const here = peerMachine({ HEDGE_SETTINGS: JSON.stringify({ "hub.alias": "my-hub" }), HEDGE_PROFILE_DIR: profile }, home, "devbox-4");
   expect(here.devboxes).toEqual(["devbox-2", "box-lane", "box-saved"]);
   expect(here.peers).toEqual(["my-hub", "devbox-2"]);
 });
@@ -85,7 +85,7 @@ test("every SSH command to a peer turns agent forwarding off, whatever the perso
 });
 
 test("the hub never lists itself as a peer when its SSH alias differs from its host name, and a devbox leaves out the name its machine file records", () => {
-  const settings = { FLEET_SETTINGS: JSON.stringify({ "hub.alias": "my-hub" }) };
+  const settings = { HEDGE_SETTINGS: JSON.stringify({ "hub.alias": "my-hub" }) };
   const hubHome = homeWithMachine({ schema: 1, role: "hub", devboxes: ["devbox-2"] });
   expect(peerMachine(settings, hubHome, "hub-host").peers).toEqual(["devbox-2"]);
   const devboxHome = homeWithMachine({ schema: 1, role: "devbox", name: "devbox-4", devboxes: ["devbox-4", "devbox-2"] });
@@ -98,10 +98,10 @@ test("every call to a peer over SSH and every local command gets an operation ti
   const asked: Array<{ argv: string[]; timeoutMs: number; stdin?: string }> = [];
   const capture: Capture = async (argv, options) => (asked.push({ argv, timeoutMs: options.timeoutMs, ...(options.stdin === undefined ? {} : { stdin: options.stdin }) }), { code: 0, stdout: "", stderr: "" });
   const { onPeer, run } = shellsWith(capture, "my-hub");
-  await onPeer("my-hub", "fleet box pool list", "input");
+  await onPeer("my-hub", "hedge box pool list", "input");
   await run(["systemctl", "--user", "is-active", "unit"]);
   expect(asked).toEqual([
-    { argv: ["ssh", "-o", "BatchMode=yes", "-o", "ForwardAgent=no", "-o", "ConnectTimeout=10", "my-hub", "bash -lc 'fleet box pool list'"], timeoutMs: shellLimitMs, stdin: "input" },
+    { argv: ["ssh", "-o", "BatchMode=yes", "-o", "ForwardAgent=no", "-o", "ConnectTimeout=10", "my-hub", "bash -lc 'hedge box pool list'"], timeoutMs: shellLimitMs, stdin: "input" },
     { argv: ["systemctl", "--user", "is-active", "unit"], timeoutMs: shellLimitMs },
   ]);
   expect(shellLimitMs).toBeGreaterThan(0);
@@ -113,7 +113,7 @@ test("a devbox hands a box operation to the hub in one batch SSH call, with each
   for (const shell of loginShells) {
     const heard: string[][] = [];
     const hub: Host = async (args) => (heard.push(args), { code: 3, stdout: "", stderr: "" });
-    const { toHub } = shellsWith(fakeSsh(temp.make("fleet-remote-"), { "my-hub": hub }, shell) as Capture, "my-hub");
+    const { toHub } = shellsWith(fakeSsh(temp.make("hedge-remote-"), { "my-hub": hub }, shell) as Capture, "my-hub");
     const words = ["box", "spawn", "Lane 7; rm -rf ~", "=printf", "--for", "devbox-1"];
     expect(await toHub(words)).toBe(3);
     expect(heard).toEqual([words]);
@@ -121,8 +121,8 @@ test("a devbox hands a box operation to the hub in one batch SSH call, with each
 });
 
 test("a hub call runs until the hub deadline, which is longer than a shell call's, and then stops with a timeout", async () => {
-  const bin = temp.make("fleet-bin-");
-  const ready = join(temp.make("fleet-ready-"), "ready");
+  const bin = temp.make("hedge-bin-");
+  const ready = join(temp.make("hedge-ready-"), "ready");
   writeFileSync(join(bin, "ssh"), `#!/bin/sh\necho $$ > ${ready}.tmp && /bin/mv ${ready}.tmp ${ready}\nexec /bin/sleep 30\n`, { mode: 0o755 });
   const pending: Array<{ ms: number; fire(): void }> = [];
   const timer: Timer = (ms, fire) => (pending.push({ ms, fire }), () => void pending.splice(pending.findIndex((entry) => entry.fire === fire), 1));
@@ -138,7 +138,7 @@ test("a hub call runs until the hub deadline, which is longer than a shell call'
 test("a devbox asks the hub for a box by the SSH name its machine file saves, which the hub knows it by, not by its host name", async () => {
   const home = homeWithMachine({ schema: 1, role: "devbox", name: "coder.worker-1" });
   const heard: string[][] = [];
-  const machine = { ...thisMachine({ FLEET_SETTINGS: JSON.stringify(boxSettings) }, home), toHub: async (args: string[]) => (heard.push(args), 0) };
+  const machine = { ...thisMachine({ HEDGE_SETTINGS: JSON.stringify(boxSettings) }, home), toHub: async (args: string[]) => (heard.push(args), 0) };
   const deps = { machine: () => machine, coder: () => { throw new Error("no coder on a devbox"); }, readStdin: async () => "", hooks: {} } as unknown as Parameters<typeof boxCommand>[1];
   expect(await boxCommand(["spawn", "lane"], deps)).toBe(0);
   expect(heard).toEqual([["box", "spawn", "lane", "--for", "coder.worker-1"]]);

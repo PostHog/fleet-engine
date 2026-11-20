@@ -14,20 +14,20 @@ const hash = (text: string) => new Bun.CryptoHasher("sha256").update(text).diges
 const asset = (version: string, url: string, body: string) => ({ version, url, sha256: hash(body) });
 const bodies: Record<string, string> = { "https://example.com/proxy.tar.gz": "proxy archive", "https://example.com/management.html": "<html>panel</html>", "https://example.com/quota-ledger.so": "ledger plugin" };
 const release = asset("9.9.9", "https://example.com/proxy.tar.gz", "proxy archive");
-const panel: Panel = { page: asset("1.2.3-fleet.1", "https://example.com/management.html", "<html>panel</html>"), plugin: asset("0.1.0", "https://example.com/quota-ledger.so", "ledger plugin"), historyDays: 35 };
-const dataDir = (home: string) => join(home, ".local/share/fleet-cli-proxy");
+const panel: Panel = { page: asset("1.2.3-hedge.1", "https://example.com/management.html", "<html>panel</html>"), plugin: asset("0.1.0", "https://example.com/quota-ledger.so", "ledger plugin"), historyDays: 35 };
+const dataDir = (home: string) => join(home, ".local/share/hedge-cli-proxy");
 const files = (home: string) => ({
-  config: join(dataDir(home), "config.yaml"), unit: join(home, ".config/systemd/user/fleet-cli-proxy.service"), page: join(dataDir(home), "static/management.html"),
+  config: join(dataDir(home), "config.yaml"), unit: join(home, ".config/systemd/user/hedge-cli-proxy.service"), page: join(dataDir(home), "static/management.html"),
   plugin: join(dataDir(home), "plugins/quota-ledger.so"), ledger: join(dataDir(home), "quota-ledger/samples.jsonl"), management: join(dataDir(home), "management.env"),
 });
 
 type Proxy = { page?: number; ledger?: number };
 
 function hub(fields: Partial<ProxyMachine> = {}, proxy: Proxy = {}, tampered?: string) {
-  const home = fields.home ?? roleHome(temp.make("fleet-cli-proxy-panel-"), "hub");
+  const home = fields.home ?? roleHome(temp.make("hedge-cli-proxy-panel-"), "hub");
   const atRestart: Array<{ panelOff: boolean; page: boolean; plugin: boolean }> = [];
   const fake = fakeRun((command) => {
-    if (command.join(" ") === "systemctl --user restart fleet-cli-proxy.service") {
+    if (command.join(" ") === "systemctl --user restart hedge-cli-proxy.service") {
       atRestart.push({ panelOff: readFileSync(files(home).config, "utf8").includes("disable-control-panel: true"), page: existsSync(files(home).page), plugin: existsSync(files(home).plugin) });
     }
     if (command[0] === "curl") writeFileSync(command[command.indexOf("-o") + 1]!, command[2] === tampered ? "tampered" : bodies[command[2]!]!);
@@ -87,7 +87,7 @@ test("the doctor fails a proxy that serves its panel while the Proxy panel workf
 test("with the Proxy panel on, install fetches and checks the pinned page and plugin, and turns the panel on with quota history, still on loopback only", async () => {
   const { machine, home, calls, printed } = hub({ panel });
   expect(await cliProxy("plan", machine)).toBe(0);
-  expect(printed).toContain(`  Serve the management panel 1.2.3-fleet.1 at ${panelUrl}, loopback only, with 35 days of quota history from the quota-ledger plugin 0.1.0.`);
+  expect(printed).toContain(`  Serve the management panel 1.2.3-hedge.1 at ${panelUrl}, loopback only, with 35 days of quota history from the quota-ledger plugin 0.1.0.`);
   expect(await cliProxy("install", machine)).toBe(0);
   const config = yaml(home);
   expect([config.host, config.port, config["remote-management"]]).toEqual(["127.0.0.1", 8317, { "allow-remote": false, "secret-key": "", "disable-control-panel": false, "disable-auto-update-panel": true }]);
@@ -96,7 +96,7 @@ test("with the Proxy panel on, install fetches and checks the pinned page and pl
   expect([readFileSync(files(home).page, "utf8"), readFileSync(files(home).plugin, "utf8")]).toEqual(["<html>panel</html>", "ledger plugin"]);
   for (const path of [files(home).page, files(home).plugin]) expect([path, modeOf(statSync(path))]).toEqual([path, "600"]);
   for (const url of [panel.page.url, panel.plugin.url]) expect(calls.some((call) => call.startsWith(`curl -fsSL ${url} -o `))).toBe(true);
-  expect(calls).toContain("systemctl --user restart fleet-cli-proxy.service");
+  expect(calls).toContain("systemctl --user restart hedge-cli-proxy.service");
   expect(calls.join("\n")).not.toContain(managementKey);
 
   const again = hub({ home, panel });
@@ -118,11 +118,11 @@ test("a new plugin restarts the proxy, which loads plugins only at start, and a 
   writeFileSync(files(home).page, "old page");
   const page = hub({ home, panel });
   await cliProxy("install", page.machine);
-  expect([readFileSync(files(home).page, "utf8"), page.calls.includes("systemctl --user restart fleet-cli-proxy.service")]).toEqual(["<html>panel</html>", false]);
+  expect([readFileSync(files(home).page, "utf8"), page.calls.includes("systemctl --user restart hedge-cli-proxy.service")]).toEqual(["<html>panel</html>", false]);
   writeFileSync(files(home).plugin, "old plugin");
   const plugin = hub({ home, panel });
   await cliProxy("install", plugin.machine);
-  expect([readFileSync(files(home).plugin, "utf8"), plugin.calls.includes("systemctl --user restart fleet-cli-proxy.service")]).toEqual(["ledger plugin", true]);
+  expect([readFileSync(files(home).plugin, "utf8"), plugin.calls.includes("systemctl --user restart hedge-cli-proxy.service")]).toEqual(["ledger plugin", true]);
 });
 
 test("with the panel on, the doctor wants the pinned files, a page that loads and a ledger that answers, and names where to sign in without the key", async () => {
@@ -137,9 +137,9 @@ test("with the panel on, the doctor wants the pinned files, a page that loads an
   await expect(cliProxy("doctor", hub({ home, panel }, { page: 200, ledger: 404 }).machine)).rejects.toThrow("The quota-ledger plugin does not answer");
   await expect(cliProxy("doctor", hub({ home }, { page: 200 }).machine)).rejects.toThrow("differ from what install writes now");
   writeFileSync(files(home).page, "a page CLIProxyAPI fetched itself");
-  await expect(cliProxy("doctor", hub({ home, panel }, { page: 200 }).machine)).rejects.toThrow(`${files(home).page} does not match the pinned management panel 1.2.3-fleet.1. It may have come from an unpinned source, such as CLIProxyAPI's own panel download. Run fleet cli-proxy install.`);
+  await expect(cliProxy("doctor", hub({ home, panel }, { page: 200 }).machine)).rejects.toThrow(`${files(home).page} does not match the pinned management panel 1.2.3-hedge.1. It may have come from an unpinned source, such as CLIProxyAPI's own panel download. Run hedge cli-proxy install.`);
   rmSync(files(home).page);
-  await expect(cliProxy("doctor", hub({ home, panel }, { page: 200 }).machine)).rejects.toThrow(`${files(home).page} is missing. Run fleet cli-proxy install.`);
+  await expect(cliProxy("doctor", hub({ home, panel }, { page: 200 }).machine)).rejects.toThrow(`${files(home).page} is missing. Run hedge cli-proxy install.`);
 });
 
 test("turning the panel off again removes its page and plugin, keeps the quota history, disables the control panel, and restarts the proxy", async () => {
@@ -153,7 +153,7 @@ test("turning the panel off again removes its page and plugin, keeps the quota h
   expect([existsSync(files(home).page), existsSync(files(home).plugin), readFileSync(files(home).ledger, "utf8")]).toEqual([false, false, "{}\n"]);
   expect(yaml(home)["remote-management"]).toEqual(expect.objectContaining({ "disable-control-panel": true }));
   expect(yaml(home).plugins).toBeUndefined();
-  expect(off.calls).toContain("systemctl --user restart fleet-cli-proxy.service");
+  expect(off.calls).toContain("systemctl --user restart hedge-cli-proxy.service");
 });
 
 test("a history length that is not a whole number of days stops install before it changes anything", async () => {
@@ -164,7 +164,7 @@ test("a history length that is not a whole number of days stops install before i
   }
 });
 
-test("the doctor fails on any plugin in the plugins folder that Fleet did not pin, with the panel on or off", async () => {
+test("the doctor fails on any plugin in the plugins folder that Hedge did not pin, with the panel on or off", async () => {
   const { machine, home } = hub({ panel });
   await cliProxy("install", machine);
   const plugins = join(dataDir(home), "plugins");
@@ -172,16 +172,16 @@ test("the doctor fails on any plugin in the plugins folder that Fleet did not pi
   const loose = join(plugins, "Extra.SO");
   mkdirSync(join(store, ".."), { recursive: true });
   for (const path of [store, loose]) writeFileSync(path, "someone else's plugin");
-  await expect(cliProxy("doctor", hub({ home, panel }, { page: 200 }).machine)).rejects.toThrow(`Remove the plugins Fleet did not install: ${loose}, ${store}.`);
+  await expect(cliProxy("doctor", hub({ home, panel }, { page: 200 }).machine)).rejects.toThrow(`Remove the plugins Hedge did not install: ${loose}, ${store}.`);
   await expect(cliProxy("doctor", hub({ home, panel }, { page: 200 }).machine)).rejects.toThrow("anyone with the management key can install plugins from CLIProxyAPI's plugin store");
   const off = hub({ home });
   await cliProxy("install", off.machine);
-  await expect(cliProxy("doctor", hub({ home }).machine)).rejects.toThrow(`Remove the plugins Fleet did not install: ${loose}, ${store}.`);
+  await expect(cliProxy("doctor", hub({ home }).machine)).rejects.toThrow(`Remove the plugins Hedge did not install: ${loose}, ${store}.`);
   for (const path of [store, loose]) rmSync(path);
   expect(await cliProxy("doctor", hub({ home }).machine)).toBe(0);
 });
 
-test("turning the panel off removes only the pinned plugin and names the plugins Fleet did not install", async () => {
+test("turning the panel off removes only the pinned plugin and names the plugins Hedge did not install", async () => {
   const { machine, home } = hub({ panel });
   await cliProxy("install", machine);
   const other = join(dataDir(home), "plugins/other.so");
@@ -189,5 +189,5 @@ test("turning the panel off removes only the pinned plugin and names the plugins
   const off = hub({ home });
   expect(await cliProxy("install", off.machine)).toBe(0);
   expect([existsSync(files(home).plugin), readFileSync(other, "utf8")]).toEqual([false, "someone else's plugin"]);
-  expect(off.printed).toContain(`Kept plugins Fleet did not install: ${other}. Remove them: fleet cli-proxy doctor fails while they are there.`);
+  expect(off.printed).toContain(`Kept plugins Hedge did not install: ${other}. Remove them: hedge cli-proxy doctor fails while they are there.`);
 });

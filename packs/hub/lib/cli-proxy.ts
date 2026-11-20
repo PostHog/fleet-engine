@@ -6,7 +6,7 @@ import { basename, dirname, join } from "node:path";
 import { parse, stringify } from "smol-toml";
 import { codexCatalogPath, loginExpired, modelRegistryPath, management, managementFile, managementPattern, proxyDir, proxyUrl, readManagementKey, shortId } from "./cli-proxy-balance.ts";
 import { requireHubRole } from "./hub-job.ts";
-import { quote, readRole, remoteFleet } from "./machine.ts";
+import { quote, readRole } from "./machine.ts";
 import { changedFiles, ownedFiles, readIfThere, removeUnits, requireInstalled, writeFiles, type Managed } from "./managed.ts";
 import { refuseLinks, writePrivateFile, type Fetch } from "../../mcp-gateway/lib/client.ts";
 import type { Run } from "../../mcp-gateway/lib/hub.ts";
@@ -24,12 +24,14 @@ export type ProxyMachine = {
   now(): number; sleep(ms: number): Promise<void>; readStdin(): Promise<string>; randomKey(): string; print(line: string): void;
 };
 
-export const keyPath = (home: string) => join(home, ".config/fleet/cli-proxy.key");
-export const keyHelper = 'cat "$HOME/.config/fleet/cli-proxy.key"';
+export const keyPath = (home: string) => join(home, ".config/hedge/cli-proxy.key");
+export const keyHelper = 'cat "$HOME/.config/hedge/cli-proxy.key"';
+const fleetKeyHelper = 'cat "$HOME/.config/fleet/cli-proxy.key"';
+const ownHelper = (helper: unknown) => helper === keyHelper || helper === fleetKeyHelper;
 export const panelUrl = `${proxyUrl}/management.html`;
-const marker = "# Managed by Fleet CLI proxy.";
+const marker = "# Managed by Hedge CLI proxy.";
 const what = "CLI proxy";
-const service = "fleet-cli-proxy.service";
+const service = "hedge-cli-proxy.service";
 const keyPattern = /^([0-9a-f]{64})\n?$/;
 const address = `127.0.0.1:${proxyPort}`;
 const answerTries = 20;
@@ -66,7 +68,7 @@ function wanted(paths: Layout, key: string, panel: Panel | undefined): Managed[]
     "claude-header-defaults:", `  user-agent: "claude-cli/${claudeCodeVersion} (external, cli)"`, "models:", `  codex-catalog: "${paths.catalog}"`, `  catalog: "${paths.registry}"`, ...shown.plugins, "",
   ].join("\n");
   const unit = [
-    marker, "[Unit]", "Description=Fleet CLI proxy for your own subscriptions", "After=network-online.target", "Wants=network-online.target", "", "[Service]",
+    marker, "[Unit]", "Description=Hedge CLI proxy for your own subscriptions", "After=network-online.target", "Wants=network-online.target", "", "[Service]",
     `EnvironmentFile=${paths.management}`, ...shown.unit, `ExecStart=${paths.binary} -config ${paths.config}`, `WorkingDirectory=${paths.dir}`, "UMask=0077", "Restart=on-failure", "RestartSec=5", "NoNewPrivileges=true",
     "", "[Install]", "WantedBy=default.target", "",
   ].join("\n");
@@ -96,7 +98,7 @@ async function binaryReady(machine: ProxyMachine, paths: Layout): Promise<boolea
 const sha256 = async (path: string) => new Bun.CryptoHasher("sha256").update(await readFile(path)).digest("hex");
 
 async function download(machine: ProxyMachine, release: Release, place: (file: string, folder: string) => Promise<void>): Promise<void> {
-  const folder = await mkdtemp(join(tmpdir(), "fleet-cli-proxy-"));
+  const folder = await mkdtemp(join(tmpdir(), "hedge-cli-proxy-"));
   try {
     const file = join(folder, "download");
     await must(machine.run, ["curl", "-fsSL", release.url, "-o", file]);
@@ -144,7 +146,7 @@ async function ensurePanel(machine: ProxyMachine, paths: Layout, panel: Panel): 
 async function closePanel(machine: ProxyMachine, paths: Layout): Promise<void> {
   for (const path of [paths.page, paths.plugin]) await rm(path, { force: true });
   const others = await foreignPlugins(paths);
-  if (others.length) machine.print(`Kept plugins Fleet did not install: ${others.join(", ")}. Remove them: fleet cli-proxy doctor fails while they are there.`);
+  if (others.length) machine.print(`Kept plugins Hedge did not install: ${others.join(", ")}. Remove them: hedge cli-proxy doctor fails while they are there.`);
 }
 
 async function foreignPlugins(paths: Layout): Promise<string[]> {
@@ -190,8 +192,8 @@ async function install(machine: ProxyMachine, paths: Layout): Promise<void> {
 
 async function writeCatalog(machine: ProxyMachine, paths: Layout, force: boolean): Promise<void> {
   await refreshCodexCatalog({ path: paths.catalog, registryPath: paths.registry, fetch: machine.fetch, now: machine.now, log: machine.print, force });
-  if (!existsSync(paths.catalog)) machine.print(`CLI proxy: Warning: Fleet could not write ${paths.catalog}, so Codex does not offer the ultrafast tier. fleet cli-proxy-balance tries again every 5 minutes.`);
-  if (!existsSync(paths.registry)) machine.print(`CLI proxy: Warning: Fleet could not write ${paths.registry}, so the proxy does not route the models upstream does not list yet. fleet cli-proxy-balance tries again every 5 minutes.`);
+  if (!existsSync(paths.catalog)) machine.print(`CLI proxy: Warning: Hedge could not write ${paths.catalog}, so Codex does not offer the ultrafast tier. hedge cli-proxy-balance tries again every 5 minutes.`);
+  if (!existsSync(paths.registry)) machine.print(`CLI proxy: Warning: Hedge could not write ${paths.registry}, so the proxy does not route the models upstream does not list yet. hedge cli-proxy-balance tries again every 5 minutes.`);
 }
 
 async function catalog(machine: ProxyMachine, paths: Layout): Promise<number> {
@@ -203,20 +205,20 @@ async function catalog(machine: ProxyMachine, paths: Layout): Promise<number> {
 async function doctor(machine: ProxyMachine, paths: Layout): Promise<void> {
   await refuseLinkedLayout(machine.home, paths);
   const key = await readSecret(machine.home, paths.key, keyPattern);
-  if (!key) throw new Error(`${paths.key} holds no proxy key. Run fleet cli-proxy install.`);
+  if (!key) throw new Error(`${paths.key} holds no proxy key. Run hedge cli-proxy install.`);
   const managementKey = await readManagementKey(machine.home);
-  await requireInstalled(machine.home, wanted(paths, key, machine.panel), marker, what, "fleet cli-proxy install");
-  if (!(await binaryReady(machine, paths))) throw new Error(`CLIProxyAPI ${machine.release.version} is not installed. Run fleet cli-proxy install.`);
+  await requireInstalled(machine.home, wanted(paths, key, machine.panel), marker, what, "hedge cli-proxy install");
+  if (!(await binaryReady(machine, paths))) throw new Error(`CLIProxyAPI ${machine.release.version} is not installed. Run hedge cli-proxy install.`);
   for (const check of ["is-enabled", "is-active"]) await must(machine.run, ["systemctl", "--user", check, "--quiet", service]);
   const listeners = async () => (await must(machine.run, ["ss", "-H", "-ltn", `sport = :${proxyPort}`])).trim().split("\n").filter(Boolean).map((line) => line.split(/\s+/)[3]);
   for (let attempt = 0; attempt < 50 && !(await listeners()).includes(address); attempt++) await machine.sleep(100);
   const bound = await listeners();
   if (!bound.includes(address) || bound.some((local) => local !== address)) throw new Error(`The CLI proxy must listen on loopback only, at ${address}.`);
   const others = await foreignPlugins(paths);
-  if (others.length) throw new Error(`Remove the plugins Fleet did not install: ${others.join(", ")}. While the Proxy panel is on, anyone with the management key can install plugins from CLIProxyAPI's plugin store, and the proxy runs them on the hub.`);
+  if (others.length) throw new Error(`Remove the plugins Hedge did not install: ${others.join(", ")}. While the Proxy panel is on, anyone with the management key can install plugins from CLIProxyAPI's plugin store, and the proxy runs them on the hub.`);
   await panelDoctor(machine, paths, managementKey);
   const strategy = ((await management(machine.fetch, managementKey, "routing/strategy")) as { strategy?: string }).strategy;
-  if (strategy !== "fill-first") throw new Error(`The proxy routes with ${strategy ?? "no strategy"}, not fill-first. Run fleet cli-proxy-balance to restore it.`);
+  if (strategy !== "fill-first") throw new Error(`The proxy routes with ${strategy ?? "no strategy"}, not fill-first. Run hedge cli-proxy-balance to restore it.`);
   const { files } = (await management(machine.fetch, managementKey, "auth-files")) as { files: AuthFile[] };
   const expired = files.filter((file) => (file.provider === "claude" || file.provider === "codex") && !file.disabled && loginExpired(file));
   const enabled = (agent: Agent) => files.filter((file) => file.provider === agent && !file.disabled && !expired.includes(file)).length;
@@ -234,26 +236,26 @@ async function doctor(machine: ProxyMachine, paths: Layout): Promise<void> {
     const provider = file.provider as Agent;
     machine.print(`CLI proxy: Warning: the ${subscription[provider]} subscription ${shortId(file)} cannot refresh its login, so the proxy cannot use it and the balancer cannot read its usage. Sign it in again with: ${loginCommand(paths, provider)}. Or disable it in the management panel.`);
   }
-  if (!existsSync(paths.catalog)) machine.print(`CLI proxy: Warning: ${paths.catalog} is missing, so Codex does not offer the ultrafast tier. Run fleet cli-proxy catalog.`);
-  if (!existsSync(paths.registry)) machine.print(`CLI proxy: Warning: ${paths.registry} is missing, so the proxy does not route the models upstream does not list yet. Run fleet cli-proxy catalog.`);
+  if (!existsSync(paths.catalog)) machine.print(`CLI proxy: Warning: ${paths.catalog} is missing, so Codex does not offer the ultrafast tier. Run hedge cli-proxy catalog.`);
+  if (!existsSync(paths.registry)) machine.print(`CLI proxy: Warning: ${paths.registry} is missing, so the proxy does not route the models upstream does not list yet. Run hedge cli-proxy catalog.`);
   if (machine.panel) machine.print(`Open the management panel at ${panelUrl} on the hub, or on a devbox through its tunnel, and sign in with the MANAGEMENT_PASSWORD in ${paths.management}.`);
-  for (const devbox of machine.devboxes.filter((name) => !isKeptForBoxes(name))) machine.print(`Connect ${devbox}: ssh ${devbox} ${quote(remoteFleet("cli-proxy connect"))} < ~/.config/fleet/cli-proxy.key`);
+  for (const devbox of machine.devboxes.filter((name) => !isKeptForBoxes(name))) machine.print(`Connect ${devbox}: ssh ${devbox} ${quote('sh "$HOME/.local/share/hedge/engine/hedge" cli-proxy connect')} < ~/.config/hedge/cli-proxy.key`);
 }
 
 async function panelDoctor(machine: ProxyMachine, paths: Layout, managementKey: string): Promise<void> {
   const page = await machine.fetch(panelUrl, { signal: AbortSignal.timeout(5000) }).catch(() => undefined);
   await page?.body?.cancel();
   if (!machine.panel) {
-    if (page?.ok) throw new Error(`The management panel answers at ${panelUrl}, but the Proxy panel workflow is off. Run fleet cli-proxy install.`);
+    if (page?.ok) throw new Error(`The management panel answers at ${panelUrl}, but the Proxy panel workflow is off. Run hedge cli-proxy install.`);
     return;
   }
   for (const [path, release, name] of [[paths.page, machine.panel.page, "management panel"], [paths.plugin, machine.panel.plugin, "quota-ledger plugin"]] as const) {
-    if (!existsSync(path)) throw new Error(`${path} is missing. Run fleet cli-proxy install.`);
-    if (!(await assetReady(path, release))) throw new Error(`${path} does not match the pinned ${name} ${release.version}. It may have come from an unpinned source, such as CLIProxyAPI's own panel download. Run fleet cli-proxy install.`);
+    if (!existsSync(path)) throw new Error(`${path} is missing. Run hedge cli-proxy install.`);
+    if (!(await assetReady(path, release))) throw new Error(`${path} does not match the pinned ${name} ${release.version}. It may have come from an unpinned source, such as CLIProxyAPI's own panel download. Run hedge cli-proxy install.`);
   }
-  if (!page?.ok) throw new Error(`The management panel does not load at ${panelUrl}. Run fleet cli-proxy install.`);
+  if (!page?.ok) throw new Error(`The management panel does not load at ${panelUrl}. Run hedge cli-proxy install.`);
   await management(machine.fetch, managementKey, `quota-ledger/samples?since=${machine.now()}`).catch(() => {
-    throw new Error("The quota-ledger plugin does not answer, so the panel has no quota history. Run fleet cli-proxy install.");
+    throw new Error("The quota-ledger plugin does not answer, so the panel has no quota history. Run hedge cli-proxy install.");
   });
 }
 
@@ -270,7 +272,7 @@ async function listModels(fetch: Fetch, key: string): Promise<string[] | string>
 
 const servedModel = { claude: (id: string) => id.includes("claude"), codex: (id: string) => id.startsWith("gpt-") };
 const missingModel = {
-  claude: `The proxy at ${proxyUrl} lists no Claude model. On the hub, run fleet cli-proxy doctor.`,
+  claude: `The proxy at ${proxyUrl} lists no Claude model. On the hub, run hedge cli-proxy doctor.`,
   codex: `The proxy at ${proxyUrl} lists no Codex model. Add one of your own Codex subscriptions to the hub's proxy.`,
 };
 
@@ -303,15 +305,15 @@ export async function claudeRoute(home: string, on: boolean): Promise<(() => Pro
   const before = JSON.stringify(settings);
   const env = settings.env ?? {};
   if (on) {
-    for (const [name, current, value] of [["env.ANTHROPIC_BASE_URL", env.ANTHROPIC_BASE_URL, proxyUrl], ["apiKeyHelper", settings.apiKeyHelper, keyHelper]]) {
-      if (current !== undefined && current !== value) throw new Error(`Keep your Claude setting ${name} in ${path}: Fleet did not set it. Remove it to use the proxy.`);
+    for (const [name, current, value] of [["env.ANTHROPIC_BASE_URL", env.ANTHROPIC_BASE_URL, proxyUrl], ["apiKeyHelper", ownHelper(settings.apiKeyHelper) ? keyHelper : settings.apiKeyHelper, keyHelper]]) {
+      if (current !== undefined && current !== value) throw new Error(`Keep your Claude setting ${name} in ${path}: Hedge did not set it. Remove it to use the proxy.`);
     }
     settings.env = { ...env, ANTHROPIC_BASE_URL: proxyUrl };
     settings.apiKeyHelper = keyHelper;
   } else {
     if (env.ANTHROPIC_BASE_URL === proxyUrl) delete env.ANTHROPIC_BASE_URL;
     if (settings.env && !Object.keys(env).length) delete settings.env;
-    if (settings.apiKeyHelper === keyHelper) delete settings.apiKeyHelper;
+    if (ownHelper(settings.apiKeyHelper)) delete settings.apiKeyHelper;
   }
   if (JSON.stringify(settings) === before) return async () => {};
   return () => replaceUnchanged(path, text, `${JSON.stringify(settings, null, 2)}\n`);
@@ -322,7 +324,7 @@ async function replaceUnchanged(path: string, before: string | undefined, after:
   const partial = `${path}.${randomUUID()}.partial`;
   await writeFile(partial, after, { mode: 0o600, flag: "wx" });
   try {
-    if ((existsSync(path) ? readFileSync(path, "utf8") : undefined) !== before) throw new Error(`${path} changed while Fleet wrote it. Run this again.`);
+    if ((existsSync(path) ? readFileSync(path, "utf8") : undefined) !== before) throw new Error(`${path} changed while Hedge wrote it. Run this again.`);
     renameSync(partial, path);
   } finally {
     rmSync(partial, { force: true });
@@ -331,9 +333,21 @@ async function replaceUnchanged(path: string, before: string | undefined, after:
 
 const sendClaude = async (home: string, on: boolean) => (await claudeRoute(home, on))?.();
 
-export const codexProvider = "fleet-proxy";
+export const codexProvider = "hedge-proxy";
 const codexUrl = `${proxyUrl}/v1`;
-export const codexProviderTable = { name: "Fleet CLI proxy", base_url: codexUrl, wire_api: "responses", auth: { command: "/bin/sh", args: ["-c", keyHelper] } };
+export const codexProviderTable = { name: "Hedge CLI proxy", base_url: codexUrl, wire_api: "responses", auth: { command: "/bin/sh", args: ["-c", keyHelper] } };
+const fleetProvider = "fleet-proxy";
+const fleetProviderTable = { name: "Fleet CLI proxy", base_url: codexUrl, wire_api: "responses", auth: { command: "/bin/sh", args: ["-c", fleetKeyHelper] } };
+
+function withoutFleetProvider(config: Record<string, unknown>): boolean {
+  const providers = config.model_providers as Record<string, unknown> | undefined;
+  if (!Bun.deepEquals(providers?.[fleetProvider], fleetProviderTable)) return false;
+  delete providers![fleetProvider];
+  if (!Object.keys(providers!).length) delete config.model_providers;
+  if (config.model_provider !== fleetProvider) return false;
+  delete config.model_provider;
+  return true;
+}
 
 async function readCodex(home: string) {
   const path = join(home, ".codex/config.toml");
@@ -343,11 +357,12 @@ async function readCodex(home: string) {
   try { if (text !== undefined) config = parse(text); }
   catch { config = undefined; }
   if (!isObject(config) || (config.model_providers !== undefined && !isObject(config.model_providers))) throw new Error(`${path} is not a Codex config. Fix it, then run this again.`);
+  const fleetRouted = withoutFleetProvider(config);
   const providers = config.model_providers as Record<string, unknown> | undefined;
   const table = providers?.[codexProvider];
   const url = isObject(table) ? table.base_url : undefined;
   const routed = config.model_provider === codexProvider && (url === undefined || url === codexUrl);
-  return { path, text, config, providers, routed, untouched: Bun.deepEquals(table, codexProviderTable) };
+  return { path, text, config, providers, routed: routed || fleetRouted, untouched: Bun.deepEquals(table, codexProviderTable) };
 }
 
 const readableCodex = (home: string) => readCodex(home).catch(() => undefined);
@@ -356,7 +371,7 @@ async function sendCodexHome(home: string): Promise<boolean> {
   const read = await readableCodex(home);
   if (!read) return false;
   const { path, text, config, providers, routed, untouched } = read;
-  if (routed) delete config.model_provider;
+  if (routed && config.model_provider === codexProvider) delete config.model_provider;
   if (untouched) delete providers![codexProvider];
   if (providers && !Object.keys(providers).length) delete config.model_providers;
   if (routed || untouched) await replaceUnchanged(path, text, Object.keys(config).length ? `${stringify(config)}\n` : "");
@@ -367,10 +382,10 @@ export type Agent = "claude" | "codex";
 
 async function check(machine: ProxyMachine, agent: Agent): Promise<boolean> {
   const key = await savedKey(machine.home);
-  const models = key ? await listModels(machine.fetch, key) : `This machine has no proxy key at ${keyPath(machine.home)}. On the hub, fleet cli-proxy doctor prints the connect command.`;
+  const models = key ? await listModels(machine.fetch, key) : `This machine has no proxy key at ${keyPath(machine.home)}. On the hub, hedge cli-proxy doctor prints the connect command.`;
   const reason = agent === "claude" ? unserved(models, "claude") : await codexUnserved(machine.home, models);
   const name = agent === "claude" ? "Claude Code" : "Codex";
-  machine.print(reason ? `${reason} fleet apply keeps ${name} on its own sign-in until the proxy serves it.` : `${name} reaches your own-account proxy at ${proxyUrl}.`);
+  machine.print(reason ? `${reason} hedge apply keeps ${name} on its own sign-in until the proxy serves it.` : `${name} reaches your own-account proxy at ${proxyUrl}.`);
   return !reason;
 }
 
@@ -386,10 +401,10 @@ const ownTable = (path: string) => `${path} has its own ${codexProvider} provide
 
 async function codexRoute(home: string): Promise<string | (() => Promise<void>)> {
   const read = await readableCodex(home);
-  if (!read) return "Fleet cannot read ~/.codex/config.toml, or it is a link, so Fleet leaves it alone.";
+  if (!read) return "Hedge cannot read ~/.codex/config.toml, or it is a link, so Hedge leaves it alone.";
   const { path, text, config, providers } = read;
   const table = providers?.[codexProvider];
-  if (config.model_provider !== undefined && config.model_provider !== codexProvider) return `Keep your Codex setting model_provider in ${path}: Fleet did not set it. Remove it to use the proxy.`;
+  if (config.model_provider !== undefined && config.model_provider !== codexProvider) return `Keep your Codex setting model_provider in ${path}: Hedge did not set it. Remove it to use the proxy.`;
   if (table !== undefined && !reachesProxy(table)) return ownTable(path);
   config.model_provider = codexProvider;
   config.model_providers = { ...providers, [codexProvider]: table ?? codexProviderTable };
@@ -408,7 +423,7 @@ async function sendCodex(home: string, besideClaude: boolean): Promise<string | 
 }
 
 async function connect(machine: ProxyMachine): Promise<void> {
-  if (readRole(machine.home) === "hub") throw new Error("The hub has its own key. Run fleet cli-proxy install there.");
+  if (readRole(machine.home) === "hub") throw new Error("The hub has its own key. Run hedge cli-proxy install there.");
   const key = (await machine.readStdin()).trim();
   if (!keyPattern.test(key)) throw new Error("Pass the proxy key from the hub on standard input: 64 hexadecimal characters.");
   const agent = pooled(machine.plan);
@@ -432,21 +447,21 @@ async function connect(machine: ProxyMachine): Promise<void> {
 }
 
 async function disconnect(machine: ProxyMachine): Promise<void> {
-  if (readRole(machine.home) === "hub") throw new Error("On the hub, turn the workflow off instead: fleet packs --workflows own-account-balancing=off");
+  if (readRole(machine.home) === "hub") throw new Error("On the hub, turn the workflow off instead: hedge packs --workflows own-account-balancing=off");
   await sendClaude(machine.home, false);
   const codex = await sendCodexHome(machine.home);
   await refuseLinks(machine.home, keyPath(machine.home), `${what} path`);
   await rm(keyPath(machine.home), { force: true });
   machine.print("Claude Code no longer uses the proxy. To sign in again, run claude and enter /login, then restart open Claude Code sessions.");
   if (codex) machine.print("Codex no longer uses the proxy. To sign in again, run codex login, then restart open Codex sessions.");
-  machine.print("fleet apply keeps this machine on its own sign-in while it has no proxy key.");
+  machine.print("hedge apply keeps this machine on its own sign-in while it has no proxy key.");
 }
 
 async function plan(machine: ProxyMachine, paths: Layout): Promise<void> {
   if (readRole(machine.home) !== "hub") {
     const key = await savedKey(machine.home);
     const agents = machine.plan === "codex" ? "Codex uses" : machine.plan === "both" ? "Claude Code and Codex use" : "Claude Code uses";
-    return machine.print(key ? `CLI proxy plan (no changes): this machine has a proxy key, and ${agents} the proxy at ${proxyUrl} through the hub's tunnel while the proxy serves them.` : "CLI proxy plan (no changes): this machine has no proxy key. On the hub, fleet cli-proxy doctor prints the connect command.");
+    return machine.print(key ? `CLI proxy plan (no changes): this machine has a proxy key, and ${agents} the proxy at ${proxyUrl} through the hub's tunnel while the proxy serves them.` : "CLI proxy plan (no changes): this machine has no proxy key. On the hub, hedge cli-proxy doctor prints the connect command.");
   }
   machine.print("CLI proxy plan (no changes):");
   if (!(await binaryReady(machine, paths))) machine.print(`  Install CLIProxyAPI ${machine.release.version} at ${paths.binary}.`);
@@ -458,12 +473,12 @@ async function plan(machine: ProxyMachine, paths: Layout): Promise<void> {
     ? `  Serve the management panel ${machine.panel.page.version} at ${panelUrl}, loopback only, with ${machine.panel.historyDays} days of quota history from the quota-ledger plugin ${machine.panel.plugin.version}.`
     : "  Keep the management panel off. Turn on the Proxy panel workflow to serve it.");
   const agent = pooled(machine.plan);
-  machine.print(agent === "claude" ? "  Every 5 minutes, fleet cli-proxy-balance puts the subscription whose weekly quota resets first on top." : "  Every 5 minutes, fleet cli-proxy-balance frees each subscription whose quota cooldown its live usage disproves.");
+  machine.print(agent === "claude" ? "  Every 5 minutes, hedge cli-proxy-balance puts the subscription whose weekly quota resets first on top." : "  Every 5 minutes, hedge cli-proxy-balance frees each subscription whose quota cooldown its live usage disproves.");
   machine.print(`  Add at least ${machine.accounts ?? 2} of your own ${subscription[agent]} subscriptions with: ${loginCommand(paths, agent)}`);
 }
 
 export async function cliProxy(mode: ProxyMode, machine: ProxyMachine, agent: Agent = "claude"): Promise<number> {
-  if (machine.uid === 0) throw new Error("Run fleet cli-proxy as the person who runs Claude Code, not root.");
+  if (machine.uid === 0) throw new Error("Run hedge cli-proxy as the person who runs Claude Code, not root.");
   const paths = layout(machine.home);
   if (mode === "install" || mode === "doctor" || mode === "catalog") requireHubRole(machine.home, `cli-proxy ${mode}`);
   if (mode === "catalog") return catalog(machine, paths);

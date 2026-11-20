@@ -2,7 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { builtInApps, parseUpstream, type Upstream } from "./apps.ts";
 
-export const upstreamsDir = (home: string) => join(home, ".config/fleet/mcp-gateway/upstreams");
+export const upstreamsDir = (home: string) => join(home, ".config/hedge/mcp-gateway/upstreams");
 
 const accountOf = (app: { name: string; account?: string }) => app.account ?? app.name;
 

@@ -47,8 +47,8 @@ type Task = { thread_id: string | null; enabled: number; next_run_at: string | n
 function homeWith(tasks: Task[] = [], settings: Record<string, unknown> = parkingOn) {
   const home = temp.make("closing-line-");
   mkdirSync(join(home, ".t3/userdata"), { recursive: true });
-  mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
-  writeFileSync(join(home, ".local/state/fleet/settings.json"), JSON.stringify(settings));
+  mkdirSync(join(home, ".local/state/hedge"), { recursive: true });
+  writeFileSync(join(home, ".local/state/hedge/settings.json"), JSON.stringify(settings));
   const db = new Database(join(home, ".t3/userdata/statev2.sqlite"));
   db.run("create table scheduled_tasks (task_id text primary key, title text not null, thread_id text, enabled integer not null, next_run_at text)");
   tasks.forEach((task, index) => db.query("insert into scheduled_tasks values (?, 'post-deploy check', ?, ?, ?)").run(`task-${index}`, task.thread_id, task.enabled, task.next_run_at));
@@ -116,7 +116,7 @@ describe("closing-line parking", () => {
     expect(snoozeTime("💤 until 15th Nov 9:05", now, "America/New_York")?.toISOString()).toBe("2026-11-15T14:05:00.000Z");
   });
 
-  test("a snooze closing line without a future time Fleet can read is sent back once to snooze by hand", async () => {
+  test("a snooze closing line without a future time Hedge can read is sent back once to snooze by hand", async () => {
     for (const closing of ["💤 This thread **snoozes until Monday morning**", "💤 This thread **snoozes until 14th Nov 11:00**"]) {
       const server = t3Server();
       const answer = await stop(closing, server);
@@ -191,12 +191,12 @@ describe("closing-line parking", () => {
 
   test("the settle leaves a thread alone once parking is turned off or the hook's kill switch is on, before its run ends", async () => {
     const off = await settleWith({}, (target, _poll, home) => {
-      writeFileSync(join(home, ".local/state/fleet/settings.json"), JSON.stringify({ "guards.person": "Robin" }));
+      writeFileSync(join(home, ".local/state/hedge/settings.json"), JSON.stringify({ "guards.person": "Robin" }));
       target.endRun();
     });
     const killed = await settleWith({}, (target, _poll, home) => {
-      mkdirSync(join(home, ".config/fleet"), { recursive: true });
-      writeFileSync(join(home, ".config/fleet/ask-guard.off"), "");
+      mkdirSync(join(home, ".config/hedge"), { recursive: true });
+      writeFileSync(join(home, ".config/hedge/ask-guard.off"), "");
       target.endRun();
     });
     expect([off.settledAt, killed.settledAt]).toEqual([null, null]);
@@ -342,7 +342,7 @@ describe("closing-line parking", () => {
   test("a handover counts only while the thread it names stays open and links the PR", async () => {
     const link = { repository: "acme/app", number: 1, url: "https://github.com/acme/app/pull/1", snapshot: { state: "open" } };
     const home = homeWith();
-    writeFileSync(join(home, ".local/state/fleet/pr-handovers.jsonl"), `${JSON.stringify({ pr: "https://github.com/acme/app/pull/1", from: threadId, to: "mcp:heir", at: "" })}\n`);
+    writeFileSync(join(home, ".local/state/hedge/pr-handovers.jsonl"), `${JSON.stringify({ pr: "https://github.com/acme/app/pull/1", from: threadId, to: "mcp:heir", at: "" })}\n`);
     const unlinked = t3Server({ pullRequests: [link] });
     unlinked.threads.push({ id: "mcp:heir", title: "Heir", projectId: "p", status: "idle" });
     expect((await stop("➡️ You can **settle** this thread", unlinked, { home }))?.reason).toContain("pull/1,");
@@ -381,8 +381,8 @@ describe("closing-line parking", () => {
     const stalled = { shell: () => new Promise<never>(() => {}), dispatch: async () => {} };
     expect(await stop("⏳ **Waiting on** CI", t3Server(), { t3: stalled, deadline: async () => {} })).toBeUndefined();
     const noState = temp.make("closing-line-");
-    mkdirSync(join(noState, ".local/state/fleet"), { recursive: true });
-    writeFileSync(join(noState, ".local/state/fleet/settings.json"), JSON.stringify(parkingOn));
+    mkdirSync(join(noState, ".local/state/hedge"), { recursive: true });
+    writeFileSync(join(noState, ".local/state/hedge/settings.json"), JSON.stringify(parkingOn));
     expect(await stop("🔕 This thread **settles until its check at 15th Nov 11:35**", t3Server(), { home: noState })).toBeUndefined();
     expect(await stop("⏳ **Waiting on** CI", t3Server(), { processes: { pid: 900, table: async () => { throw new Error("ps exited 1"); } } })).toBeUndefined();
   });

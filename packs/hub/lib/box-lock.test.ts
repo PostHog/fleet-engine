@@ -32,11 +32,11 @@ await withBoxLock(${JSON.stringify(home)}, ${JSON.stringify(box)}, { waitMs: 0 }
 }
 
 test("an operation that holds a box's lock in one process makes an operation in another process skip the box, or wait for it", async () => {
-  const home = temp.make("fleet-lock-");
+  const home = temp.make("hedge-lock-");
   const holder = holderIn(home, "box-a");
   await holder.ready;
   const ran: string[] = [];
-  await expect(withBoxLock(home, "box-a", { waitMs: 0 }, async () => void ran.push("skipped one ran"))).rejects.toThrow(new LockBusy("box-a is busy: another fleet box operation on it still runs. Try again in a few minutes."));
+  await expect(withBoxLock(home, "box-a", { waitMs: 0 }, async () => void ran.push("skipped one ran"))).rejects.toThrow(new LockBusy("box-a is busy: another hedge box operation on it still runs. Try again in a few minutes."));
   expect(await withBoxLock(home, "box-b", { waitMs: 0 }, async () => "another box is free")).toBe("another box is free");
   const waited = withBoxLock(home, "box-a", {
     waitMs: 60_000,
@@ -53,7 +53,7 @@ test("an operation that holds a box's lock in one process makes an operation in 
 });
 
 test("a crashed operation lets go of its lock by dying, so the next operation on the box runs", async () => {
-  const home = temp.make("fleet-lock-");
+  const home = temp.make("hedge-lock-");
   const holder = holderIn(home, "box-a");
   await holder.ready;
   await expect(withBoxLock(home, "box-a", { waitMs: 0 }, async () => 1)).rejects.toBeInstanceOf(LockBusy);
@@ -77,8 +77,8 @@ const alive = (pid: number) => {
 };
 
 test("round 5, finding 2: the box lock outlives a crashed operation until the command it ran ends, and a forward it started never holds it", async () => {
-  const home = temp.make("fleet-lock-");
-  const dir = temp.make("fleet-children-");
+  const home = temp.make("hedge-lock-");
+  const dir = temp.make("hedge-children-");
   const announce = (file: string, what: string) => `echo ${what} > ${dir}/${file}.tmp && /bin/mv ${dir}/${file}.tmp ${dir}/${file}`;
   const forward = stub(dir, "forward", `tail -f /dev/null < /dev/null > /dev/null 2>&1 &\n${announce("forward.pid", "$!")}`);
   const act = stub(dir, "act", `${announce("act.pid", "$$")}\nexec tail -f /dev/null`);
@@ -109,15 +109,15 @@ await withBoxLock(${JSON.stringify(home)}, "box-a", { waitMs: 0 }, async () => {
 });
 
 test("under a box lock a command gets the same input, output and exit code, and no descriptor of the lock", async () => {
-  const home = temp.make("fleet-lock-");
-  const dir = temp.make("fleet-children-");
+  const home = temp.make("hedge-lock-");
+  const dir = temp.make("hedge-children-");
   const probe = stub(dir, "probe", "read line; echo \"got $line\"; if [ -e /dev/fd/3 ]; then echo has-lock >&2; else echo no-lock >&2; fi; exit 3");
   const result = await withBoxLock(home, "box-a", { waitMs: 0 }, () => capture([probe], { stdin: "hello\n", timeoutMs: 600_000 }));
   expect(result).toEqual({ code: 3, stdout: "got hello\n", stderr: "no-lock\n" });
 });
 
 test("two operations in one process exclude each other too, and a step that throws lets go of the lock", async () => {
-  const home = temp.make("fleet-lock-");
+  const home = temp.make("hedge-lock-");
   const order: string[] = [];
   await withBoxLock(home, "box-a", { waitMs: 0 }, async () => {
     order.push("first");
@@ -130,24 +130,24 @@ test("two operations in one process exclude each other too, and a step that thro
 });
 
 test("the lock folder is private, and a symlinked folder or lock file is refused before anything is locked", async () => {
-  const home = temp.make("fleet-lock-");
+  const home = temp.make("hedge-lock-");
   await withBoxLock(home, "box-a", { waitMs: 0 }, async () => undefined);
   expect(statSync(boxLocks(home)).mode & 0o777).toBe(0o700);
   expect(statSync(join(boxLocks(home), "box-a.lock")).mode & 0o777).toBe(0o600);
 
-  const elsewhere = temp.make("fleet-elsewhere-");
+  const elsewhere = temp.make("hedge-elsewhere-");
   writeFileSync(join(elsewhere, "target"), "keep\n");
   symlinkSync(join(elsewhere, "target"), join(boxLocks(home), "box-b.lock"));
   await expect(withBoxLock(home, "box-b", { waitMs: 0 }, async () => "ran")).rejects.toThrow("symlink");
   expect(readFileSync(join(elsewhere, "target"), "utf8")).toBe("keep\n");
 
-  const linked = temp.make("fleet-lock-");
-  mkdirSync(join(linked, ".local/state/fleet"), { recursive: true });
+  const linked = temp.make("hedge-lock-");
+  mkdirSync(join(linked, ".local/state/hedge"), { recursive: true });
   symlinkSync(elsewhere, boxLocks(linked));
   await expect(withBoxLock(linked, "box-a", { waitMs: 0 }, async () => "ran")).rejects.toThrow("symlink");
   expect(lstatSync(join(elsewhere, "target")).isFile()).toBe(true);
 
-  const loose = temp.make("fleet-lock-");
+  const loose = temp.make("hedge-lock-");
   mkdirSync(boxLocks(loose), { recursive: true });
   chmodSync(boxLocks(loose), 0o755);
   await withBoxLock(loose, "box-a", { waitMs: 0 }, async () => undefined);
@@ -155,6 +155,6 @@ test("the lock folder is private, and a symlinked folder or lock file is refused
 });
 
 test("a box lock refuses a name that is not a box", async () => {
-  const home = temp.make("fleet-lock-");
+  const home = temp.make("hedge-lock-");
   for (const name of ["../box-a", "box-a/../../x", "devbox-1", "box-", "box-a.b", "box--x"]) await expect(withBoxLock(home, name, { waitMs: 0 }, async () => 1)).rejects.toThrow("not a box");
 });

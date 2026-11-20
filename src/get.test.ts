@@ -20,7 +20,7 @@ describe("get.sh", () => {
     expect(existsSync(join(box.home, ".local/bin/gh"))).toBe(true);
     expect(result.calls).toContain("t3 installer channel=nightly");
     expect(result.calls).not.toContain("brew");
-    expect(git(join(box.home, ".local/share/fleet/engine"), "describe", "--tags")).toBe("v0.1.0");
+    expect(git(join(box.home, ".local/share/hedge/engine"), "describe", "--tags")).toBe("v0.1.0");
     expect(readFileSync(join(box.home, ".agents/AGENTS.md"), "utf8")).toStartWith("# Agent rules\n");
   });
 
@@ -28,16 +28,16 @@ describe("get.sh", () => {
     const box = sandbox("Linux");
     const result = getSh(box, ["--ref", "v0.1.0", "--install-only"]);
     expect(result.code).toBe(0);
-    expect(result.output).toEndWith("Fleet: Engine ready at v0.1.0 in " + join(box.home, ".local/share/fleet/engine") + ".\n");
+    expect(result.output).toEndWith("Hedge: Engine ready at v0.1.0 in " + join(box.home, ".local/share/hedge/engine") + ".\nHedge: this machine has no Fleet engine install, so there is nothing from before the rename to stop.\n");
     expect(existsSync(join(box.home, ".local/bin/gh"))).toBe(true);
-    expect(existsSync(join(box.home, ".config/fleet/machine.json"))).toBe(false);
+    expect(existsSync(join(box.home, ".config/hedge/machine.json"))).toBe(false);
   });
 
-  test("logs when the install started and when each phase ended, for fleet setup's timings", () => {
+  test("logs when the install started and when each phase ended, for hedge setup's timings", () => {
     const box = sandbox("Linux");
     const result = getSh(box, ["--ref", "v0.1.0", "--install-only"]);
     expect(result.code).toBe(0);
-    const lines = readFileSync(join(box.home, ".local/state/fleet/logs/install-timings"), "utf8").trim().split("\n").map((line) => line.split(" "));
+    const lines = readFileSync(join(box.home, ".local/state/hedge/logs/install-timings"), "utf8").trim().split("\n").map((line) => line.split(" "));
     expect(lines.map((words) => words[0])).toEqual(["start", "tools", "t3", "engine", "packages"]);
     const times = lines.map((words) => Number(words[1]));
     expect(times.every((time, index) => time >= (times[index - 1] ?? 0) && Math.abs(time * 1000 - Date.now()) < 600_000)).toBe(true);
@@ -48,7 +48,7 @@ describe("get.sh", () => {
     const box = sandbox("Linux");
     const result = getSh(box, ["--ref", "v0.1.0", "--install-only"]);
     expect(result.code).toBe(0);
-    const engineDir = join(box.home, ".local/share/fleet/engine");
+    const engineDir = join(box.home, ".local/share/hedge/engine");
     const calls = result.calls.split("\n");
     expect(calls).toContain("bun install --frozen-lockfile --production");
     expect(calls).toContain(`bun install ran in ${engineDir}`);
@@ -61,17 +61,17 @@ describe("get.sh", () => {
     const result = getSh(box, ["--ref", "v0.1.0", "--install-only"]);
     expect(result.code).toBe(1);
     expect(result.output).toContain("lockfile is out of date");
-    expect(result.output).toContain("Fleet: could not install the engine's packages in " + join(box.home, ".local/share/fleet/engine") + ".");
-    expect(result.output).not.toContain("fleet triage");
+    expect(result.output).toContain("Hedge: could not install the engine's packages in " + join(box.home, ".local/share/hedge/engine") + ".");
+    expect(result.output).not.toContain("hedge triage");
   });
 
-  test("a failure after fleet is installed says to run fleet triage", () => {
+  test("a failure after hedge is installed says to run hedge triage", () => {
     const box = sandbox("Linux");
     expect(getSh(box, ["--ref", "v0.1.0", "--install-only"]).code).toBe(0);
     box.stub("bun", `[ "$1" = install ] || exec "${process.execPath}" "$@"\necho "lockfile is out of date" >&2\nexit 1`);
     const result = getSh(box, ["--ref", "v0.1.0", "--install-only"]);
     expect(result.code).toBe(1);
-    expect(result.output).toEndWith("Fleet: Stuck? Run fleet triage. It shows a report of this setup that you can send to the Fleet maintainer.\n");
+    expect(result.output).toEndWith("Hedge: Stuck? Run hedge triage. It shows a report of this setup that you can send to the Hedge maintainer.\n");
   });
 
   test("a second run changes nothing", () => {
@@ -83,10 +83,10 @@ describe("get.sh", () => {
     expect(again.output).toContain("Applied 0 changes.");
   });
 
-  test("passes flags after -- to fleet and rejects others", () => {
+  test("passes flags after -- to hedge and rejects others", () => {
     const box = sandbox("Linux");
-    expect(getSh(box, ["--preset", "everyday"])).toMatchObject({ code: 1, output: expect.stringContaining("unknown option --preset. Put flags for fleet after --.") });
+    expect(getSh(box, ["--preset", "everyday"])).toMatchObject({ code: 1, output: expect.stringContaining("unknown option --preset. Put flags for hedge after --.") });
     const result = getSh(box, ["--ref", "v0.1.0", "--", "--preset", "nope"]);
-    expect(result).toMatchObject({ code: 2, output: expect.stringContaining("fleet setup: --preset nope: choose starter, everyday, everything") });
+    expect(result).toMatchObject({ code: 2, output: expect.stringContaining("hedge setup: --preset nope: choose starter, everyday, everything") });
   });
 });

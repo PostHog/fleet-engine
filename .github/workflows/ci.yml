@@ -19,7 +19,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run test
       - run: bun run typecheck
-      - run: shellcheck get.sh fleet templates/profile/install.sh scripts/*.sh packs/*/hooks/*.sh packs/*/lib/*.sh packs/*/sync/*.sh proof/*.sh
+      - run: shellcheck get.sh hedge fleet templates/profile/install.sh scripts/*.sh packs/*/hooks/*.sh packs/*/lib/*.sh packs/*/sync/*.sh proof/*.sh
   install-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -27,8 +27,8 @@ jobs:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
       - name: Move the runner's gh aside, so get.sh has to install it
         run: sudo mv "$(command -v gh)" /usr/local/share/gh-runner
-      - name: A new Linux user runs get.sh, fleet setup, and fleet doctor from this tree
-        run: sudo FLEET_PROOF_ENGINE="$GITHUB_WORKSPACE" sh proof/fresh-linux.sh
+      - name: A new Linux user runs get.sh, hedge setup, and hedge doctor from this tree
+        run: sudo HEDGE_PROOF_ENGINE="$GITHUB_WORKSPACE" sh proof/fresh-linux.sh
   gitleaks-install:
     strategy:
       matrix:

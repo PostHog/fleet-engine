@@ -13,17 +13,17 @@ const clientKey = "c1".repeat(32);
 const otherKey = "d2".repeat(32);
 const archive = "fake release archive";
 const release = { version: "9.9.9", url: "https://example.com/proxy.tar.gz", sha256: new Bun.CryptoHasher("sha256").update(archive).digest("hex") };
-const dataDir = (home: string) => join(home, ".local/share/fleet-cli-proxy");
-const keyFile = (home: string) => join(home, ".config/fleet/cli-proxy.key");
+const dataDir = (home: string) => join(home, ".local/share/hedge-cli-proxy");
+const keyFile = (home: string) => join(home, ".config/hedge/cli-proxy.key");
 const settingsFile = (home: string) => join(home, ".claude/settings.json");
-const unitFile = (home: string) => join(home, ".config/systemd/user/fleet-cli-proxy.service");
+const unitFile = (home: string) => join(home, ".config/systemd/user/hedge-cli-proxy.service");
 const readJson = (path: string) => JSON.parse(readFileSync(path, "utf8"));
 const codexFile = (home: string) => join(home, ".codex/config.toml");
 const readCodex = (home: string) => parse(readFileSync(codexFile(home), "utf8"));
-const fleetProxy = { name: "Fleet CLI proxy", base_url: `${proxyUrl}/v1`, wire_api: "responses", auth: { command: "/bin/sh", args: ["-c", 'cat "$HOME/.config/fleet/cli-proxy.key"'] } };
+const hedgeProxy = { name: "Hedge CLI proxy", base_url: `${proxyUrl}/v1`, wire_api: "responses", auth: { command: "/bin/sh", args: ["-c", 'cat "$HOME/.config/hedge/cli-proxy.key"'] } };
 const mine = { model: "gpt-6.1-sol", model_providers: { work: { name: "Work gateway", base_url: "https://gateway.example.com/v1" } } };
 
-function codexRouted(home: string, config: Record<string, unknown> = { ...mine, model_provider: "fleet-proxy", model_providers: { ...mine.model_providers, "fleet-proxy": fleetProxy } }) {
+function codexRouted(home: string, config: Record<string, unknown> = { ...mine, model_provider: "hedge-proxy", model_providers: { ...mine.model_providers, "hedge-proxy": hedgeProxy } }) {
   mkdirSync(join(home, ".codex"), { recursive: true });
   writeFileSync(codexFile(home), stringify(config));
 }
@@ -48,7 +48,7 @@ function fakeProxy(proxy: Proxy = {}) {
 }
 
 function hubMachine(fields: Partial<ProxyMachine> = {}, proxy: Proxy = {}, options: { role?: string; checksum?: string } = {}) {
-  const home = fields.home ?? roleHome(temp.make("fleet-cli-proxy-"), options.role ?? "hub");
+  const home = fields.home ?? roleHome(temp.make("hedge-cli-proxy-"), options.role ?? "hub");
   const fake = fakeRun((command) => {
     if (command[0] === "curl") writeFileSync(command[command.indexOf("-o") + 1]!, options.checksum ?? archive);
     if (command[0] === "install") writeFileSync(command.at(-1)!, "binary");
@@ -70,7 +70,7 @@ function hubMachine(fields: Partial<ProxyMachine> = {}, proxy: Proxy = {}, optio
 const client = (fields: Partial<ProxyMachine> = {}, proxy: Proxy = {}) => hubMachine(fields, proxy, { role: "devbox" });
 
 function connected(home: string, settings: Record<string, unknown> = {}) {
-  mkdirSync(join(home, ".config/fleet"), { recursive: true });
+  mkdirSync(join(home, ".config/hedge"), { recursive: true });
   mkdirSync(join(home, ".claude"), { recursive: true });
   writeFileSync(keyFile(home), `${clientKey}\n`, { mode: 0o600 });
   writeFileSync(settingsFile(home), JSON.stringify({ model: "opus", ...settings, env: { MY_FLAG: "1", ANTHROPIC_BASE_URL: proxyUrl, ...(settings.env as object) }, apiKeyHelper: keyHelper }));
@@ -91,7 +91,7 @@ test("install on the hub downloads the pinned release, checks it, and writes a l
   expect(calls).toContain(`curl -fsSL ${release.url} -o ${calls.find((call) => call.startsWith("curl"))!.split(" -o ")[1]}`);
   expect(calls.some((call) => call.startsWith("install -m 0755 ") && call.endsWith(join(dataDir(home), "cli-proxy-api")))).toBe(true);
   const config = readFileSync(join(dataDir(home), "config.yaml"), "utf8");
-  expect(config.split("\n")[0]).toBe("# Managed by Fleet CLI proxy.");
+  expect(config.split("\n")[0]).toBe("# Managed by Hedge CLI proxy.");
   for (const line of ['host: "127.0.0.1"', "port: 8317", "  allow-remote: false", "  disable-control-panel: true", `  - "${clientKey}"`, '  strategy: "fill-first"', "  session-affinity: true", `auth-dir: "${join(dataDir(home), "auth")}"`]) expect(config).toContain(`${line}\n`);
   const unit = readFileSync(unitFile(home), "utf8");
   expect(unit).toContain(`ExecStart=${join(dataDir(home), "cli-proxy-api")} -config ${join(dataDir(home), "config.yaml")}`);
@@ -101,8 +101,8 @@ test("install on the hub downloads the pinned release, checks it, and writes a l
   for (const path of [keyFile(home), join(dataDir(home), "management.env"), join(dataDir(home), "config.yaml"), unitFile(home)]) expect([path, modeOf(statSync(path))]).toEqual([path, "600"]);
   for (const path of [dataDir(home), join(dataDir(home), "auth")]) expect(modeOf(statSync(path))).toBe("700");
   expect(calls).toContain("sudo -n loginctl enable-linger me");
-  expect(calls).toContain("systemctl --user restart fleet-cli-proxy.service");
-  expect(calls).toContain("systemctl --user enable --now fleet-cli-proxy.service");
+  expect(calls).toContain("systemctl --user restart hedge-cli-proxy.service");
+  expect(calls).toContain("systemctl --user enable --now hedge-cli-proxy.service");
   expect(calls.join("\n")).not.toContain(clientKey);
   expect(calls.join("\n")).not.toContain(otherKey);
 
@@ -123,7 +123,7 @@ test("install presents a current Claude Code version upstream, so new Claude mod
   const older = hubMachine({ home });
   expect(await cliProxy("install", older.machine)).toBe(0);
   expect(readFileSync(configPath, "utf8")).toContain(header);
-  expect(older.calls).toContain("systemctl --user restart fleet-cli-proxy.service");
+  expect(older.calls).toContain("systemctl --user restart hedge-cli-proxy.service");
 });
 
 test("install points the proxy at its own Codex catalog with the ultrafast tier and at its routing registry, and moves a hub on the earlier config to them", async () => {
@@ -144,7 +144,7 @@ test("install points the proxy at its own Codex catalog with the ultrafast tier 
   const earlier = hubMachine({ home }, { down: true });
   expect(await cliProxy("install", earlier.machine)).toBe(0);
   expect(readFileSync(configPath, "utf8")).toContain(block);
-  expect(earlier.calls).toContain("systemctl --user restart fleet-cli-proxy.service");
+  expect(earlier.calls).toContain("systemctl --user restart hedge-cli-proxy.service");
   expect(readJson(catalogPath).models[1].slug).toBe("gpt-6.1-sol");
 });
 
@@ -154,7 +154,7 @@ test("install stops at a release whose checksum differs, before it writes a unit
   expect(existsSync(unitFile(home))).toBe(false);
 });
 
-test("install keeps files Fleet did not write, and refuses linked paths", async () => {
+test("install keeps files Hedge did not write, and refuses linked paths", async () => {
   const unmanaged = hubMachine();
   mkdirSync(dataDir(unmanaged.home), { recursive: true });
   writeFileSync(join(dataDir(unmanaged.home), "config.yaml"), "port: 9999\n");
@@ -162,7 +162,7 @@ test("install keeps files Fleet did not write, and refuses linked paths", async 
   expect(readFileSync(join(dataDir(unmanaged.home), "config.yaml"), "utf8")).toBe("port: 9999\n");
 
   const foreignKey = hubMachine();
-  mkdirSync(join(foreignKey.home, ".config/fleet"), { recursive: true });
+  mkdirSync(join(foreignKey.home, ".config/hedge"), { recursive: true });
   writeFileSync(keyFile(foreignKey.home), "not a key\n");
   await expect(cliProxy("install", foreignKey.machine)).rejects.toThrow("Keep unmanaged CLI proxy file");
 
@@ -173,7 +173,7 @@ test("install keeps files Fleet did not write, and refuses linked paths", async 
 });
 
 test("install and doctor run only on the hub and never as root", async () => {
-  await expect(cliProxy("install", client().machine)).rejects.toThrow("fleet cli-proxy install runs only on the hub");
+  await expect(cliProxy("install", client().machine)).rejects.toThrow("hedge cli-proxy install runs only on the hub");
   await expect(cliProxy("install", hubMachine({ uid: 0 }).machine)).rejects.toThrow("not root");
 });
 
@@ -182,9 +182,9 @@ test("the doctor passes with enough of your own subscriptions, and prints how to
   await cliProxy("install", machine);
   const doctor = hubMachine({ home });
   expect(await cliProxy("doctor", doctor.machine)).toBe(0);
-  expect(doctor.calls).toContain("systemctl --user is-active --quiet fleet-cli-proxy.service");
+  expect(doctor.calls).toContain("systemctl --user is-active --quiet hedge-cli-proxy.service");
   expect(doctor.requests.filter((request) => request.path.startsWith("/v0/management")).every((request) => request.auth === `Bearer ${otherKey}`)).toBe(true);
-  expect(doctor.printed.join("\n")).toContain(`ssh devbox-1 'sh "$HOME/.local/share/fleet/engine/fleet" cli-proxy connect' < ~/.config/fleet/cli-proxy.key`);
+  expect(doctor.printed.join("\n")).toContain(`ssh devbox-1 'sh "$HOME/.local/share/hedge/engine/hedge" cli-proxy connect' < ~/.config/hedge/cli-proxy.key`);
   expect(doctor.printed.join("\n")).not.toContain("box-lane");
   expect(doctor.printed.join("\n")).not.toContain(clientKey);
 });
@@ -195,7 +195,7 @@ test("the doctor names the login command while the proxy holds too few subscript
   const few = hubMachine({ home }, { credentials: [{ provider: "claude" }, { provider: "claude", disabled: true }, { provider: "codex" }] });
   await expect(cliProxy("doctor", few.machine)).rejects.toThrow(`Add at least 2 of your own Claude subscriptions that work; found 1. Run: ${join(dataDir(home), "cli-proxy-api")} -config ${join(dataDir(home), "config.yaml")} -claude-login -no-browser`);
   const spread = hubMachine({ home }, { strategy: "round-robin" });
-  await expect(cliProxy("doctor", spread.machine)).rejects.toThrow("fleet cli-proxy-balance");
+  await expect(cliProxy("doctor", spread.machine)).rejects.toThrow("hedge cli-proxy-balance");
 });
 
 test("the doctor passes but warns about each subscription whose login expired, by a short id and never its email, and names the sign-in command for its provider", async () => {
@@ -262,7 +262,7 @@ test("connect on a Codex plan checks the proxy for a Codex model, sends Codex to
   codexRouted(home, mine);
   expect(await cliProxy("connect", machine)).toBe(0);
   expect(readFileSync(keyFile(home), "utf8")).toBe(`${clientKey}\n`);
-  expect(readCodex(home)).toEqual({ ...mine, model_provider: "fleet-proxy", model_providers: { ...mine.model_providers, "fleet-proxy": fleetProxy } });
+  expect(readCodex(home)).toEqual({ ...mine, model_provider: "hedge-proxy", model_providers: { ...mine.model_providers, "hedge-proxy": hedgeProxy } });
   expect(existsSync(settingsFile(home))).toBe(false);
   expect(printed).toEqual([`Codex uses your own-account proxy at ${proxyUrl} now. Restart open Codex sessions.`]);
   expect(await cliProxy("check", machine, "codex")).toBe(0);
@@ -283,7 +283,7 @@ test("connect on the both plan sends Claude Code to the proxy, and Codex too whi
   const served = client({ plan: "both" }, { models: ["claude-sonnet-5-5", "gpt-6.1-sol"] });
   expect(await cliProxy("connect", served.machine)).toBe(0);
   expect(readJson(settingsFile(served.home)).apiKeyHelper).toBe(keyHelper);
-  expect(readCodex(served.home)).toEqual({ model_provider: "fleet-proxy", model_providers: { "fleet-proxy": fleetProxy } });
+  expect(readCodex(served.home)).toEqual({ model_provider: "hedge-proxy", model_providers: { "hedge-proxy": hedgeProxy } });
 
   const claudeOnly = client({ plan: "both" });
   expect(await cliProxy("connect", claudeOnly.machine)).toBe(0);
@@ -292,9 +292,9 @@ test("connect on the both plan sends Claude Code to the proxy, and Codex too whi
   expect(claudeOnly.printed.join("\n")).toContain("lists no Codex model. Add one of your own Codex subscriptions to the hub's proxy. Codex keeps its own sign-in.");
 });
 
-test("connect never selects a fleet-proxy table that cannot reach the proxy with this machine's key", async () => {
-  const { auth: _auth, ...keyless } = fleetProxy;
-  const config = { model_providers: { "fleet-proxy": keyless } };
+test("connect never selects a hedge-proxy table that cannot reach the proxy with this machine's key", async () => {
+  const { auth: _auth, ...keyless } = hedgeProxy;
+  const config = { model_providers: { "hedge-proxy": keyless } };
   const codexOnly = client({ plan: "codex" }, { models: ["gpt-6.1-sol"] });
   codexRouted(codexOnly.home, config);
   await expect(cliProxy("connect", codexOnly.machine)).rejects.toThrow("which does not reach the proxy with this machine's key. Nothing changed.");
@@ -354,7 +354,7 @@ test("the doctor finds a changed unit and a proxy that listens beyond loopback",
   const { machine, home } = hubMachine();
   await cliProxy("install", machine);
   writeFileSync(unitFile(home), `${readFileSync(unitFile(home), "utf8")}# edited\n`);
-  await expect(cliProxy("doctor", hubMachine({ home }).machine)).rejects.toThrow("fleet cli-proxy install");
+  await expect(cliProxy("doctor", hubMachine({ home }).machine)).rejects.toThrow("hedge cli-proxy install");
   await cliProxy("install", hubMachine({ home }).machine);
   const open = hubMachine({ home, run: fakeRun((command) => (command[0] === "ss" ? { stdout: "LISTEN 0 4096 0.0.0.0:8317 0.0.0.0:*\n" } : command[0]!.endsWith("cli-proxy-api") ? { stdout: `CLIProxyAPI Version: ${release.version}\n` } : undefined)).run });
   await expect(cliProxy("doctor", open.machine)).rejects.toThrow("loopback only");
@@ -403,7 +403,7 @@ test("the check reports an unreachable proxy and changes no file: apply sends Cl
   const before = readFileSync(settingsFile(home), "utf8");
   expect(await cliProxy("check", machine)).toBe(1);
   expect(readFileSync(settingsFile(home), "utf8")).toBe(before);
-  expect(printed).toEqual([`The proxy at ${proxyUrl} does not answer. fleet apply keeps Claude Code on its own sign-in until the proxy serves it.`]);
+  expect(printed).toEqual([`The proxy at ${proxyUrl} does not answer. hedge apply keeps Claude Code on its own sign-in until the proxy serves it.`]);
   expect(existsSync(keyFile(home))).toBe(true);
 });
 
@@ -425,7 +425,33 @@ test("the check fails without a saved key, or when the proxy serves no Claude mo
   expect(existsSync(settingsFile(fresh.home))).toBe(false);
 });
 
-test("disconnect removes only Fleet's own values: a base URL or key helper you set stays", async () => {
+test("connect and disconnect take over the key helper and the Codex provider that fleet cli-proxy connect wrote, and keep your own", async () => {
+  const fleetHelper = 'cat "$HOME/.config/fleet/cli-proxy.key"';
+  const fleetProxy = { name: "Fleet CLI proxy", base_url: `${proxyUrl}/v1`, wire_api: "responses", auth: { command: "/bin/sh", args: ["-c", fleetHelper] } };
+  const fleetCodex = { ...mine, model_provider: "fleet-proxy", model_providers: { ...mine.model_providers, "fleet-proxy": fleetProxy } };
+  const both = client({ plan: "both" }, { models: ["claude-sonnet-5-5", "gpt-6.1-sol"] });
+  mkdirSync(join(both.home, ".claude"), { recursive: true });
+  writeFileSync(settingsFile(both.home), JSON.stringify({ model: "opus", env: { ANTHROPIC_BASE_URL: proxyUrl }, apiKeyHelper: fleetHelper }));
+  codexRouted(both.home, fleetCodex);
+
+  expect(await cliProxy("connect", both.machine)).toBe(0);
+
+  expect(readJson(settingsFile(both.home))).toEqual({ model: "opus", env: { ANTHROPIC_BASE_URL: proxyUrl }, apiKeyHelper: keyHelper });
+  expect(readCodex(both.home)).toEqual({ ...mine, model_provider: "hedge-proxy", model_providers: { ...mine.model_providers, "hedge-proxy": hedgeProxy } });
+
+  const left = client({ plan: "both" });
+  mkdirSync(join(left.home, ".claude"), { recursive: true });
+  writeFileSync(settingsFile(left.home), JSON.stringify({ model: "opus", env: { ANTHROPIC_BASE_URL: proxyUrl }, apiKeyHelper: fleetHelper }));
+  codexRouted(left.home, fleetCodex);
+  writeFileSync(keyFile(left.home), `${clientKey}\n`, { mode: 0o600 });
+
+  expect(await cliProxy("disconnect", left.machine)).toBe(0);
+
+  expect(readJson(settingsFile(left.home))).toEqual({ model: "opus" });
+  expect(readCodex(left.home)).toEqual(mine);
+});
+
+test("disconnect removes only Hedge's own values: a base URL or key helper you set stays", async () => {
   const { machine, home } = client();
   connected(home);
   writeFileSync(settingsFile(home), JSON.stringify({ env: { ANTHROPIC_BASE_URL: "https://gateway.example.com" }, apiKeyHelper: "my-helper" }));
@@ -433,7 +459,7 @@ test("disconnect removes only Fleet's own values: a base URL or key helper you s
   expect(readJson(settingsFile(home))).toEqual({ env: { ANTHROPIC_BASE_URL: "https://gateway.example.com" }, apiKeyHelper: "my-helper" });
 });
 
-test("disconnect removes Fleet's Claude settings and the key, and says how to sign in again; the hub keeps its key", async () => {
+test("disconnect removes Hedge's Claude settings and the key, and says how to sign in again; the hub keeps its key", async () => {
   const { machine, home, printed } = client();
   connected(home);
   expect(await cliProxy("disconnect", machine)).toBe(0);
@@ -480,10 +506,10 @@ test("install that fails after it writes a new management key restarts the proxy
   expect(existsSync(join(dataDir(home), "management.env"))).toBe(true);
   calls.length = 0;
   expect(await cliProxy("install", machine)).toBe(0);
-  expect(calls).toContain("systemctl --user restart fleet-cli-proxy.service");
+  expect(calls).toContain("systemctl --user restart hedge-cli-proxy.service");
   calls.length = 0;
   expect(await cliProxy("install", machine)).toBe(0);
-  expect(calls).not.toContain("systemctl --user restart fleet-cli-proxy.service");
+  expect(calls).not.toContain("systemctl --user restart hedge-cli-proxy.service");
 });
 
 test("connect keeps Claude settings that change while it checks the proxy", async () => {
@@ -521,12 +547,12 @@ test("connect waits for a forward that is still coming up, and gives up after a 
 });
 
 test("the Claude switch stops and keeps your edit when settings change between its read and its write", async () => {
-  const home = roleHome(temp.make("fleet-cli-proxy-"), "devbox");
+  const home = roleHome(temp.make("hedge-cli-proxy-"), "devbox");
   mkdirSync(join(home, ".claude"), { recursive: true });
   writeFileSync(settingsFile(home), JSON.stringify({ model: "opus" }));
   const write = (await claudeRoute(home, true))!;
   writeFileSync(settingsFile(home), JSON.stringify({ model: "opus", permissions: { deny: ["Bash(rm:*)"] } }));
-  await expect(write()).rejects.toThrow("changed while Fleet wrote it");
+  await expect(write()).rejects.toThrow("changed while Hedge wrote it");
   expect(readJson(settingsFile(home))).toEqual({ model: "opus", permissions: { deny: ["Bash(rm:*)"] } });
   expect(readdirSync(join(home, ".claude"))).toEqual(["settings.json"]);
 });
@@ -550,7 +576,7 @@ test("an install that stops after it replaced the binary restarts the proxy on t
   await expect(cliProxy("install", machine)).rejects.toThrow();
   calls.length = 0;
   expect(await cliProxy("install", machine)).toBe(0);
-  expect(calls).toContain("systemctl --user restart fleet-cli-proxy.service");
+  expect(calls).toContain("systemctl --user restart hedge-cli-proxy.service");
 });
 
 test("the Codex check keeps Codex on the proxy while the proxy lists a Codex model, and says so", async () => {
@@ -558,11 +584,11 @@ test("the Codex check keeps Codex on the proxy while the proxy lists a Codex mod
   connected(home);
   codexRouted(home);
   expect(await cliProxy("check", machine, "codex")).toBe(0);
-  expect(readCodex(home)).toMatchObject({ model_provider: "fleet-proxy", model_providers: { "fleet-proxy": fleetProxy } });
+  expect(readCodex(home)).toMatchObject({ model_provider: "hedge-proxy", model_providers: { "hedge-proxy": hedgeProxy } });
   expect(printed).toEqual([`Codex reaches your own-account proxy at ${proxyUrl}.`]);
 });
 
-test("the Codex check judges the proxy before Fleet routes Codex, so apply can wait for it", async () => {
+test("the Codex check judges the proxy before Hedge routes Codex, so apply can wait for it", async () => {
   const served = client({}, { models: ["gpt-6.1-sol"] });
   connected(served.home);
   expect(await cliProxy("check", served.machine, "codex")).toBe(0);
@@ -580,7 +606,7 @@ test("the Codex check reports an unreachable proxy and changes no file", async (
   const before = readFileSync(codexFile(home), "utf8");
   expect(await cliProxy("check", machine, "codex")).toBe(1);
   expect(readFileSync(codexFile(home), "utf8")).toBe(before);
-  expect(printed.join("\n")).toContain("fleet apply keeps Codex on its own sign-in until the proxy serves it.");
+  expect(printed.join("\n")).toContain("hedge apply keeps Codex on its own sign-in until the proxy serves it.");
 });
 
 test("a proxy that lists no Codex model fails only the Codex check", async () => {
@@ -599,7 +625,7 @@ test("without a saved key, the Codex check fails", async () => {
   expect(printed.join("\n")).toContain("no proxy key");
 });
 
-test("Codex that does not use Fleet's proxy is left alone by both checks", async () => {
+test("Codex that does not use Hedge's proxy is left alone by both checks", async () => {
   const own = client({}, { down: true });
   connected(own.home);
   codexRouted(own.home, { ...mine, model_provider: "work" });
@@ -608,10 +634,10 @@ test("Codex that does not use Fleet's proxy is left alone by both checks", async
 
   const edited = client({}, { down: true });
   connected(edited.home);
-  codexRouted(edited.home, { model_provider: "fleet-proxy", model_providers: { "fleet-proxy": { ...fleetProxy, base_url: "https://gateway.example.com/v1" } } });
+  codexRouted(edited.home, { model_provider: "hedge-proxy", model_providers: { "hedge-proxy": { ...hedgeProxy, base_url: "https://gateway.example.com/v1" } } });
   expect(await cliProxy("check", edited.machine)).toBe(1);
   expect(await cliProxy("check", edited.machine, "codex")).toBe(1);
-  expect(readCodex(edited.home)).toEqual({ model_provider: "fleet-proxy", model_providers: { "fleet-proxy": { ...fleetProxy, base_url: "https://gateway.example.com/v1" } } });
+  expect(readCodex(edited.home)).toEqual({ model_provider: "hedge-proxy", model_providers: { "hedge-proxy": { ...hedgeProxy, base_url: "https://gateway.example.com/v1" } } });
 });
 
 test("disconnect sends Codex back to its own sign-in too, and says how to sign in again", async () => {
@@ -628,12 +654,12 @@ test("a linked or unreadable Codex config is left alone and never breaks the Cla
   connected(linked.home);
   mkdirSync(join(linked.home, ".codex"), { recursive: true });
   const real = join(temp.make("real-"), "config.toml");
-  writeFileSync(real, stringify({ model_provider: "fleet-proxy", model_providers: { "fleet-proxy": fleetProxy } }));
+  writeFileSync(real, stringify({ model_provider: "hedge-proxy", model_providers: { "hedge-proxy": hedgeProxy } }));
   symlinkSync(real, codexFile(linked.home));
   expect(await cliProxy("check", linked.machine)).toBe(0);
   expect(await cliProxy("check", linked.machine, "codex")).toBe(1);
   expect(await cliProxy("disconnect", linked.machine)).toBe(0);
-  expect(parse(readFileSync(real, "utf8"))).toEqual({ model_provider: "fleet-proxy", model_providers: { "fleet-proxy": fleetProxy } });
+  expect(parse(readFileSync(real, "utf8"))).toEqual({ model_provider: "hedge-proxy", model_providers: { "hedge-proxy": hedgeProxy } });
 
   const broken = client();
   connected(broken.home);
@@ -645,30 +671,30 @@ test("a linked or unreadable Codex config is left alone and never breaks the Cla
   expect(readFileSync(codexFile(broken.home), "utf8")).toBe("model = [");
 });
 
-test("disconnect keeps a Fleet provider table you edited, and removes only Fleet's selection", async () => {
+test("disconnect keeps a Hedge provider table you edited, and removes only Hedge's selection", async () => {
   const { machine, home } = client();
   connected(home);
-  const edited = { ...fleetProxy, http_headers: { "X-Team": "mine" } };
-  codexRouted(home, { model_provider: "fleet-proxy", model_providers: { "fleet-proxy": edited } });
+  const edited = { ...hedgeProxy, http_headers: { "X-Team": "mine" } };
+  codexRouted(home, { model_provider: "hedge-proxy", model_providers: { "hedge-proxy": edited } });
   expect(await cliProxy("disconnect", machine)).toBe(0);
-  expect(readCodex(home)).toEqual({ model_providers: { "fleet-proxy": edited } });
+  expect(readCodex(home)).toEqual({ model_providers: { "hedge-proxy": edited } });
 });
 
-test("a fleet-proxy table that does not reach the proxy with this machine's key fails the Codex check, whether or not Codex selects it", async () => {
+test("a hedge-proxy table that does not reach the proxy with this machine's key fails the Codex check, whether or not Codex selects it", async () => {
   const served = { models: ["claude-sonnet-5-5", "gpt-6.1-sol"] };
-  const { auth: _auth, ...keyless } = fleetProxy;
-  const configs: Array<Record<string, unknown>> = [{ model_provider: "fleet-proxy", model_providers: { "fleet-proxy": { name: "Mine" } } }, { model_providers: { "fleet-proxy": { name: "Mine" } } }, { model_providers: { "fleet-proxy": { ...fleetProxy, base_url: "https://gateway.example.com/v1" } } }, { model_providers: { "fleet-proxy": keyless } }, { model_providers: { "fleet-proxy": { ...fleetProxy, wire_api: "chat" } } }];
+  const { auth: _auth, ...keyless } = hedgeProxy;
+  const configs: Array<Record<string, unknown>> = [{ model_provider: "hedge-proxy", model_providers: { "hedge-proxy": { name: "Mine" } } }, { model_providers: { "hedge-proxy": { name: "Mine" } } }, { model_providers: { "hedge-proxy": { ...hedgeProxy, base_url: "https://gateway.example.com/v1" } } }, { model_providers: { "hedge-proxy": keyless } }, { model_providers: { "hedge-proxy": { ...hedgeProxy, wire_api: "chat" } } }];
   for (const config of configs) {
     const { machine, home, printed } = client({}, served);
     connected(home);
     codexRouted(home, config);
     expect(await cliProxy("check", machine, "codex")).toBe(1);
     expect(readCodex(home) as Record<string, unknown>).toEqual(config);
-    expect(printed.join("\n")).toContain("has its own fleet-proxy provider table, which does not reach the proxy with this machine's key.");
+    expect(printed.join("\n")).toContain("has its own hedge-proxy provider table, which does not reach the proxy with this machine's key.");
   }
   const edited = client({}, served);
   connected(edited.home);
-  codexRouted(edited.home, { model_providers: { "fleet-proxy": { ...fleetProxy, http_headers: { "X-Team": "mine" } } } });
+  codexRouted(edited.home, { model_providers: { "hedge-proxy": { ...hedgeProxy, http_headers: { "X-Team": "mine" } } } });
   expect(await cliProxy("check", edited.machine, "codex")).toBe(0);
 });
 
@@ -678,7 +704,7 @@ test("remove stops and deletes the proxy's unit, keeps its keys, config and subs
   expect(await cliProxy("left", machine)).toBe(0);
   const removing = hubMachine({ home });
   expect(await cliProxy("remove", removing.machine)).toBe(0);
-  expect(removing.calls).toEqual(["systemctl --user disable --now fleet-cli-proxy.service", "systemctl --user daemon-reload"]);
+  expect(removing.calls).toEqual(["systemctl --user disable --now hedge-cli-proxy.service", "systemctl --user daemon-reload"]);
   expect(existsSync(unitFile(home))).toBe(false);
   for (const path of [keyFile(home), join(dataDir(home), "management.env"), join(dataDir(home), "config.yaml"), join(dataDir(home), "auth")]) expect([path, existsSync(path)]).toEqual([path, true]);
   expect(await cliProxy("left", removing.machine)).toBe(1);

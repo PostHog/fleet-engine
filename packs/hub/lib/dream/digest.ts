@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, wri
 import { join, relative, resolve } from "node:path";
 import type { BoxHooks } from "../box.ts";
 import type { Coder, Env } from "../coder.ts";
-import { remoteFleet } from "../machine.ts";
+import { remoteHedge } from "../machine.ts";
 import { notesShownByTrigger } from "../../../memory/lib/notes.ts";
 import { redactCredentials, redactValue } from "./redact.ts";
 
@@ -22,9 +22,9 @@ export const dreamSessionsKey = "hub.dreamSessions";
 export const sessionKeepDays = 30;
 export const dreamPromptStart = "Follow the dream skill";
 
-export const stateDir = (home: string, env: Env) => join(env.XDG_STATE_HOME || join(home, ".local/state"), "fleet/dream");
+export const stateDir = (home: string, env: Env) => join(env.XDG_STATE_HOME || join(home, ".local/state"), "hedge/dream");
 export const inboxDir = (home: string, env: Env) => join(stateDir(home, env), "inbox");
-export const memoryCheckout = (home: string, env: Env) => env.FLEET_MEMORY_DIR || join(home, ".agents/memory");
+export const memoryCheckout = (home: string, env: Env) => env.HEDGE_MEMORY_DIR || join(home, ".agents/memory");
 export const clip = (text: string, limit: number) => text.length <= limit ? text : `${text.slice(0, limit)} […${text.length - limit} more]`;
 const keep = (text: string, limit: number) => clip(redactCredentials(text), limit);
 const failure = (call: string | undefined, output: string) => clip(`${call ?? "tool"} → ${redactCredentials(output.trim())}`, errorLimit);
@@ -246,17 +246,17 @@ export function digestLines(home: string, machine: string, since: number, now: n
 
 export async function saveBoxDigests(coder: Pick<Coder, "ssh">, box: string, home: string, env: Env, now: () => number = Date.now): Promise<void> {
   try {
-    const answer = await coder.ssh(box, remoteFleet("dream digest --since 30d"), undefined, 90_000);
+    const answer = await coder.ssh(box, remoteHedge("dream digest --since 30d"), undefined, 90_000);
     if (answer.code !== 0 || !answer.stdout.trim()) return;
     mkdirSync(inboxDir(home, env), { recursive: true, mode: 0o700 });
     writeFileSync(join(inboxDir(home, env), `${box}-${now()}.jsonl`), answer.stdout, { mode: 0o600 });
   } catch (error) {
-    console.error(`Fleet dream: kept no sessions of ${box}: ${(error as Error).message}`);
+    console.error(`Hedge dream: kept no sessions of ${box}: ${(error as Error).message}`);
   }
 }
 
 export function dreamIsOn(env: Env): boolean {
-  return env.FLEET_SETTINGS ? dreamSessionsKey in (JSON.parse(env.FLEET_SETTINGS) as Record<string, unknown>) : false;
+  return env.HEDGE_SETTINGS ? dreamSessionsKey in (JSON.parse(env.HEDGE_SETTINGS) as Record<string, unknown>) : false;
 }
 
 export function dreamHooks(env: Env, home: string, coder: () => Pick<Coder, "ssh">): BoxHooks {

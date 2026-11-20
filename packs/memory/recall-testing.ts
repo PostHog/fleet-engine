@@ -13,12 +13,12 @@ import { hook as indexHook } from "./hooks/memory-index.ts";
 import { hook as recallHook } from "./hooks/memory-recall.ts";
 
 const engineRoot = join(import.meta.dir, "../..");
-const launcher = join(engineRoot, "fleet");
+const launcher = join(engineRoot, "hedge");
 export type Provider = "claude" | "codex";
 
-export async function fleet(args: string[], home: string) {
-  const runFleetStepsOnly = async (command: string[]) => (command[1] === launcher ? fleet(command.slice(2), home) : 0);
-  return main(args, { home, engineRoot, platform: "linux", env: {}, print: () => {}, run: runFleetStepsOnly });
+export async function hedge(args: string[], home: string) {
+  const runHedgeStepsOnly = async (command: string[]) => (command[1] === launcher ? hedge(command.slice(2), home) : 0);
+  return main(args, { home, engineRoot, platform: "linux", env: {}, print: () => {}, run: runHedgeStepsOnly });
 }
 
 export function recallHarness() {
@@ -44,10 +44,10 @@ async function applyMemoryPack(prepared: ReturnType<typeof tempDirs>, settings: 
   const home = prepared.make("home-");
   const profile = join(home, "profile");
   mkdirSync(profile);
-  writeFileSync(join(profile, "fleet.json"), JSON.stringify({ schema: 1, engine: { repo: "PostHog/fleet-engine", ref: "main", channel: "track" }, sources: [], packs: ["memory"], plan: "both", settings, workflows: {} }));
+  writeFileSync(join(profile, "hedge.json"), JSON.stringify({ schema: 1, engine: { repo: "PostHog/hedge", ref: "main", channel: "track" }, sources: [], packs: ["memory"], plan: "both", settings, workflows: {} }));
   mkdirSync(join(home, ".bun/bin"), { recursive: true });
   symlinkSync(process.execPath, join(home, ".bun/bin/bun"));
-  return { home, code: await fleet(["apply", "--profile", profile], home) };
+  return { home, code: await hedge(["apply", "--profile", profile], home) };
 }
 
 function copyHome(from: string, to: string) {
@@ -94,8 +94,8 @@ export async function fireInstalled(home: string, provider: Provider, event: str
 }
 
 export async function fire(home: string, provider: Provider, event: string, input: Record<string, unknown>) {
-  expect(installedHook(home, provider, event)).toBe(`sh "$HOME/.config/fleet/hooks/run.sh" ${provider} ${event}`);
-  return answerOf(await dispatch(join(home, ".config/fleet/hooks", event), provider, hookInput(event, input), inProcess(home)));
+  expect(installedHook(home, provider, event)).toBe(`sh "$HOME/.config/hedge/hooks/run.sh" ${provider} ${event}`);
+  return answerOf(await dispatch(join(home, ".config/hedge/hooks", event), provider, hookInput(event, input), inProcess(home)));
 }
 
 const hookInput = (event: string, input: Record<string, unknown>) => JSON.stringify({ hook_event_name: event, ...input });
@@ -133,9 +133,9 @@ async function runInstalledFile(path: string, provider: string, input: string, h
 }
 
 export const shownLog = (home: string, session: string) =>
-  readFileSync(join(home, ".local/state/fleet/memory/shown", `${session}.jsonl`), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  readFileSync(join(home, ".local/state/hedge/memory/shown", `${session}.jsonl`), "utf8").trim().split("\n").map((line) => JSON.parse(line));
 
-export const proofTraps = "---\nname: proof-traps\ntriggers: [fleet proof, \"gh search\"]\n---\n\nPass full SHAs to fleet proof.\n";
+export const proofTraps = "---\nname: proof-traps\ntriggers: [hedge proof, \"gh search\"]\n---\n\nPass full SHAs to hedge proof.\n";
 export const flakySync = "---\nname: flaky-sync\nmetadata:\n  triggers:\n    - sync-retry\n---\n\nRetry the sync test once.\n";
 export const notes = { "MEMORY.md": "# Memory index\n", "proof-traps.md": proofTraps, "projects/notes-app/flaky-sync.md": flakySync };
 export const bash = (command: string) => ({ tool_name: "Bash", tool_input: { command } });

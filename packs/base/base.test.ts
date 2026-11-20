@@ -1,6 +1,9 @@
 import { beforeAll, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadPacks } from "../../src/pack/manifest.ts";
+import { apply } from "../../src/reconciler/apply.ts";
 import type { AiPlan, AvailableSource, MachineFile, Plan, Profile } from "../../src/pack/types.ts";
 import { resolve } from "../../src/reconciler/resolve.ts";
 
@@ -11,11 +14,11 @@ let engine: AvailableSource;
 
 beforeAll(async () => {
   const dir = join(import.meta.dir, "../..");
-  engine = { ref: { name: "engine", repo: "PostHog/fleet-engine", ref: "main" }, dir, packs: await loadPacks(dir) };
+  engine = { ref: { name: "engine", repo: "PostHog/hedge", ref: "main" }, dir, packs: await loadPacks(dir) };
 });
 
 function plan(ai: AiPlan, machine = mac, settings: Profile["settings"] = {}, sources = [engine]): Plan {
-  const profile: Profile = { schema: 1, dir: "/profile", engine: { repo: "PostHog/fleet-engine", ref: "main", channel: "track" }, sources: [], packs: sources.slice(1).flatMap((source) => source.packs.map((pack) => pack.manifest.name)), plan: ai, settings, workflows: {} };
+  const profile: Profile = { schema: 1, dir: "/profile", engine: { repo: "PostHog/hedge", ref: "main", channel: "track" }, sources: [], packs: sources.slice(1).flatMap((source) => source.packs.map((pack) => pack.manifest.name)), plan: ai, settings, workflows: {} };
   return resolve(profile, machine, sources);
 }
 
@@ -71,7 +74,7 @@ describe("the Base pack", () => {
     const coder: MachineFile = { schema: 1, role: "devbox", coder: true };
     expect(plan("both", coder, {}, [engine, team]).settings["identity.signer"]).toBe("coder");
     expect(plan("both", coder, { "identity.signer": "ssh" }, [engine, team]).settings["identity.signer"]).toBe("ssh");
-    const on = resolve({ schema: 1, dir: "/profile", engine: { repo: "PostHog/fleet-engine", ref: "main", channel: "track" }, sources: [], packs: ["team"], plan: "both", settings: {}, workflows: { "team-signing": true } }, coder, [engine, team]);
+    const on = resolve({ schema: 1, dir: "/profile", engine: { repo: "PostHog/hedge", ref: "main", channel: "track" }, sources: [], packs: ["team"], plan: "both", settings: {}, workflows: { "team-signing": true } }, coder, [engine, team]);
     expect(on.settings["identity.signer"]).toBe("1password");
   });
 
@@ -88,22 +91,33 @@ describe("the Base pack", () => {
     expect(plan("both").steps.map((step) => step.id).filter(isAgentCli)).toEqual(["claude-cli", "codex-cli"]);
     expect(plan("claude").steps.map((step) => step.id).filter(isAgentCli)).toEqual(["claude-cli"]);
     expect(plan("codex").steps.map((step) => step.id).filter(isAgentCli)).toEqual(["codex-cli"]);
-    expect(plan("both").steps.find((step) => step.id === "codex-cli")).toMatchObject({ run: ["fleet", "install-codex"], check: ["codex", "--version"] });
+    expect(plan("both").steps.find((step) => step.id === "codex-cli")).toMatchObject({ run: ["hedge", "install-codex"] });
   });
 
-  test("installs Codex on Linux from its release package, which needs no Node", () => {
-    const step = plan("both", devbox).steps.find((item) => item.id === "codex-cli");
-    expect(step).toMatchObject({ run: ["fleet", "install-codex"], check: ["codex", "--version"] });
-    expect(step?.run).not.toContain("@openai/codex");
-    expect(plan("both", devbox).commands["install-codex"]?.path).toEndWith("packs/base/commands/install-codex.ts");
-  });
-
-  test("installs a pinned Node.js on Linux after the agent CLIs, so a skill runtime can start npx without a failed Node step holding back the rest of Base", () => {
-    for (const ai of plans) {
-      const steps = plan(ai, devbox).steps;
-      expect(steps.at(-1)).toMatchObject({ id: "node-runtime", run: ["fleet", "install-node"], check: ["npx", "--version"] });
-      expect(plan(ai, devbox).commands["install-node"]?.path).toEndWith("packs/base/commands/install-node.ts");
+  test.each(plans)("installs a pinned Node.js on Linux for plan %s, and a Node install that fails leaves the agent CLIs installed and passing their checks", async (ai) => {
+    const devboxPlan = plan(ai, devbox);
+    const installed = new Set<string>();
+    const launched = (command: string[]) => JSON.stringify(command[0] === "hedge" ? ["/bin/sh", join(engine.dir, "hedge"), ...command.slice(1)] : command);
+    const checks = new Map(devboxPlan.steps.flatMap((step) => (step.check ? [[launched(step.check), step.id] as const] : [])));
+    const runs = new Map(devboxPlan.steps.map((step) => [launched(step.run), step.id] as const));
+    const run = async (command: string[]) => {
+      const checked = checks.get(JSON.stringify(command));
+      if (checked) return installed.has(checked) ? 0 : 1;
+      const step = runs.get(JSON.stringify(command));
+      if (step === "node-runtime") return 1;
+      if (step) installed.add(step);
+      return 0;
+    };
+    const home = mkdtempSync(join(tmpdir(), "base-home-"));
+    try {
+      const report = await apply(devboxPlan, { home, run });
+      const agentClis = devboxPlan.steps.map((step) => step.id).filter(isAgentCli);
+      expect(agentClis.length).toBeGreaterThan(0);
+      expect(agentClis.filter((id) => installed.has(id))).toEqual(agentClis);
+      expect(report.findings.filter((finding) => finding.id.startsWith("step:")).map((finding) => finding.id)).toEqual(["step:node-runtime"]);
       expect(plan(ai).steps.map((step) => step.id)).not.toContain("node-runtime");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
     }
   });
 
@@ -116,15 +130,15 @@ describe("the Base pack", () => {
 
   test("links hooks everywhere and the heavy slice only on a devbox", () => {
     const linked = (result: Plan) => result.files.filter((item) => item.target.startsWith(".config/")).map((item) => item.target);
-    expect(linked(plan("both", devbox))).toContain(".config/systemd/user/fleet-heavy.slice");
-    expect(linked(plan("both"))).not.toContain(".config/systemd/user/fleet-heavy.slice");
-    expect(linked(plan("codex"))).not.toContain(".config/fleet/hooks/PreToolUse/name-a-model.ts");
-    for (const ai of plans) expect(linked(plan(ai))).toContain(".config/fleet/hooks/UserPromptSubmit/cast-the-reviewer.ts");
-    expect(linked(plan("claude"))).toEqual(expect.arrayContaining([".config/fleet/hooks/run.sh", ".config/fleet/hooks/PostToolUse/secret-guard.ts", ".config/fleet/hooks/PreToolUse/name-a-model.ts"]));
+    expect(linked(plan("both", devbox))).toContain(".config/systemd/user/hedge-heavy.slice");
+    expect(linked(plan("both"))).not.toContain(".config/systemd/user/hedge-heavy.slice");
+    expect(linked(plan("codex"))).not.toContain(".config/hedge/hooks/PreToolUse/name-a-model.ts");
+    for (const ai of plans) expect(linked(plan(ai))).toContain(".config/hedge/hooks/UserPromptSubmit/cast-the-reviewer.ts");
+    expect(linked(plan("claude"))).toEqual(expect.arrayContaining([".config/hedge/hooks/run.sh", ".config/hedge/hooks/PostToolUse/secret-guard.ts", ".config/hedge/hooks/PreToolUse/name-a-model.ts"]));
   });
 
   test("runs the update and prune jobs on every machine and keeps linked machines to devboxes", () => {
-    for (const machine of [mac, devbox]) expect(plan("both", machine).jobs.map((job) => job.id)).toEqual(["fleet-update", "agent-update", "source-refresh", "worktree-prune"]);
+    for (const machine of [mac, devbox]) expect(plan("both", machine).jobs.map((job) => job.id)).toEqual(["hedge-update", "agent-update", "source-refresh", "worktree-prune"]);
     expect(plan("both").workflows.find((workflow) => workflow.id === "linked-machines")).toMatchObject({ active: false, reason: "needs devbox" });
     expect(plan("both", devbox).config.some((entry) => entry.key === "linkedEnvironmentsEnabled")).toBe(true);
   });

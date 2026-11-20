@@ -13,12 +13,12 @@ export type PeerLink = Pick<LinkedEnvironment, "environmentId" | "label" | "urls
 export type PeerHere = Linker & Pick<PeerMachine, "peers" | "devboxes" | "onPeer" | "print">;
 
 const renewWithinMs = 7 * 86_400_000;
-const marker = "# Managed by Fleet peer access.";
-const usage = "Usage: fleet peers [plan|install|doctor]  Write or check the SSH config that names every peer\n       fleet peers remove|left            Remove the SSH config Fleet wrote, or say whether it is still here\n       fleet peers link [<alias>...]       Link every peer, or the named ones, to T3 here\n       fleet peers renew                   Link each missing peer, and renew each link that expires within 7 days\n       fleet peers restore                 Start each recorded peer forward that does not run";
-const peerLinks = (here: Pick<PeerHere, "home">) => join(here.home, ".config/fleet/peer-links");
+const marker = "# Managed by Hedge peer access.";
+const usage = "Usage: hedge peers [plan|install|doctor]  Write or check the SSH config that names every peer\n       hedge peers remove|left            Remove the SSH config Hedge wrote, or say whether it is still here\n       hedge peers link [<alias>...]       Link every peer, or the named ones, to T3 here\n       hedge peers renew                   Link each missing peer, and renew each link that expires within 7 days\n       hedge peers restore                 Start each recorded peer forward that does not run";
+const peerLinks = (here: Pick<PeerHere, "home">) => join(here.home, ".config/hedge/peer-links");
 const recordOf = (here: Pick<PeerHere, "home">, alias: string) => join(peerLinks(here), `${sshName(alias)}.json`);
 const guardPeerLinks = (here: Pick<PeerHere, "home">) => refuseLinks(here.home, peerLinks(here), "peer link folder");
-export const peerUnitOf = (alias: string) => `fleet-peer-${alias}-t3`;
+export const peerUnitOf = (alias: string) => `hedge-peer-${alias}-t3`;
 const isThisABox = (here: Pick<PeerHere, "home">) => !!lstatSync(join(here.home, boxMarkerPath), { throwIfNoEntry: false });
 
 function recordedAliases(here: Pick<PeerHere, "home">): string[] {
@@ -27,13 +27,13 @@ function recordedAliases(here: Pick<PeerHere, "home">): string[] {
 }
 
 function holding<T>(here: PeerHere, alias: string, step: () => Promise<T>): Promise<T> {
-  return withPeerLock(here.home, alias, { waitMs: userWaitMs, waiting: () => here.say(`${alias}: waiting for another fleet peers operation on it to end`) }, step);
+  return withPeerLock(here.home, alias, { waitMs: userWaitMs, waiting: () => here.say(`${alias}: waiting for another hedge peers operation on it to end`) }, step);
 }
 
 async function whenFree(here: PeerHere, alias: string, step: () => Promise<boolean>): Promise<boolean> {
   try {
     const unlock = await tryLockPeer(here.home, alias);
-    if (!unlock) return here.say(`${alias}: another fleet peers operation holds it; skipped`), true;
+    if (!unlock) return here.say(`${alias}: another hedge peers operation holds it; skipped`), true;
     try {
       return await unlock.during(step);
     } finally {
@@ -177,7 +177,7 @@ export function peerConfig(peers: string[]): string {
   return `${marker}\n${hosts}`;
 }
 
-const peerPaths = (home: string) => ({ peers: join(home, ".ssh/fleet-peers.conf"), config: join(home, ".ssh/config") });
+const peerPaths = (home: string) => ({ peers: join(home, ".ssh/hedge-peers.conf"), config: join(home, ".ssh/config") });
 const includeOf = (peersPath: string) => `Include "${peersPath}"`;
 
 export async function installPeerConfig(home: string, peers: string[], apply: boolean): Promise<string[]> {
@@ -193,7 +193,7 @@ export async function installPeerConfig(home: string, peers: string[], apply: bo
   return peers;
 }
 
-/** Whether Fleet's peer file or its Include line is still here, and with apply, takes both away and keeps the person's own lines. */
+/** Whether Hedge's peer file or its Include line is still here, and with apply, takes both away and keeps the person's own lines. */
 export async function removePeerConfig(home: string, apply: boolean): Promise<boolean> {
   const paths = peerPaths(home);
   await refuseLinks(home, paths.config, "SSH config path");
@@ -211,7 +211,7 @@ export async function peerDoctor(home: string, peers: string[]): Promise<boolean
   for (const path of [paths.peers, paths.config]) await refuseLinks(home, path, "SSH config path");
   const written = await readIfThere(paths.peers);
   const first = ((await readIfThere(paths.config)) ?? "").split("\n", 1)[0];
-  if (written !== peerConfig(peers) || first !== includeOf(paths.peers)) throw new Error("The SSH config does not name every peer. Run fleet peers install.");
+  if (written !== peerConfig(peers) || first !== includeOf(paths.peers)) throw new Error("The SSH config does not name every peer. Run hedge peers install.");
   return true;
 }
 
@@ -219,7 +219,7 @@ export async function peerDoctor(home: string, peers: string[]): Promise<boolean
 export function peerConfigCommand(args: string[], home: string, print: (line: string) => void): Promise<number> | undefined {
   if (args.length !== 1) return undefined;
   if (args[0] === "left") return removePeerConfig(home, false).then((left) => (left ? 0 : 1));
-  if (args[0] === "remove") return removePeerConfig(home, true).then(() => (print("Peer access: removed the SSH config Fleet wrote."), 0));
+  if (args[0] === "remove") return removePeerConfig(home, true).then(() => (print("Peer access: removed the SSH config Hedge wrote."), 0));
   return undefined;
 }
 
@@ -228,7 +228,7 @@ export async function peersCommand(args: string[], here: PeerHere): Promise<numb
   if (mode !== "link" && (rest.length || !["plan", "install", "doctor", "renew", "restore", "remove", "left"].includes(mode))) return here.print(usage), 2;
   const config = peerConfigCommand(args, here.home, here.print);
   if (config) return config;
-  if (isThisABox(here)) return here.print("This machine is a box. A box has no peers, so fleet peers has nothing to do."), 0;
+  if (isThisABox(here)) return here.print("This machine is a box. A box has no peers, so hedge peers has nothing to do."), 0;
   for (const box of here.devboxes.filter(isKeptForBoxes)) here.say(`${box}: skipped: a box is not a peer`);
   if (mode === "link") return linkPeers(here, rest);
   if (mode === "renew") return renewPeers(here);

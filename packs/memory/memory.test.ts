@@ -24,8 +24,8 @@ describe("the Memory pack", () => {
   test("points Claude's auto memory at the checkout, caps its index, and syncs every five minutes", () => {
     const result = withPack();
     expect(result.config).toContainEqual(expect.objectContaining({ provider: "claude", key: "autoMemoryDirectory", value: "~/.agents/memory" }));
-    expect(result.files.map((file) => file.target)).toContain(".config/fleet/hooks/PreToolUse/memory-cap.ts");
-    expect(result.jobs).toContainEqual(expect.objectContaining({ id: "memory-sync", command: ["fleet", "memory-sync"], schedule: { every: "5m" } }));
+    expect(result.files.map((file) => file.target)).toContain(".config/hedge/hooks/PreToolUse/memory-cap.ts");
+    expect(result.jobs).toContainEqual(expect.objectContaining({ id: "memory-sync", command: ["hedge", "memory-sync"], schedule: { every: "5m" } }));
     expect(fileContent(result, ".agents/guides/memory.md")).toContain("`~/.agents/memory`");
     expect(Object.keys(result.commands)).toContain("memory-sync");
   });
@@ -37,9 +37,9 @@ describe("the Memory pack", () => {
     expect(result.jobs.map((job) => job.id)).toContain("memory-sync");
   });
 
-  test("reads the memory repo from the settings fleet passes", async () => {
-    await expect(syncMemory({ FLEET_SETTINGS: JSON.stringify({ "memory.repo": "" }) })).rejects.toThrow("Set it with fleet set memory.repo=<owner>/<repo>.");
-    await expect(syncMemory({})).rejects.toThrow("run this command as fleet <command>");
+  test("reads the memory repo from the settings hedge passes", async () => {
+    await expect(syncMemory({ HEDGE_SETTINGS: JSON.stringify({ "memory.repo": "" }) })).rejects.toThrow("Set it with hedge set memory.repo=<owner>/<repo>.");
+    await expect(syncMemory({})).rejects.toThrow("run this command as hedge <command>");
   });
 
   test("turns a repo name into a GitHub URL and keeps a full URL", () => {

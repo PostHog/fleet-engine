@@ -59,7 +59,7 @@ describe("the service catalog", () => {
   });
 
   test("a workflow that needs a devbox counts as the hub sees it, so a node that is no devbox lists the same catalog", async () => {
-    const dir = engine({ boxed: packSource("boxed", `const boxes = fleet.workflow({ id: "boxed", name: "Boxed", sentence: "The hub serves boxes.", default: true, needs: ["devbox"] }); fleet.service({ on: "hub", id: "boxed-api", when: boxes, serve: { port: 4600, health: "/health", credential: async () => "x" } });`) });
+    const dir = engine({ boxed: packSource("boxed", `const boxes = hedge.workflow({ id: "boxed", name: "Boxed", sentence: "The hub serves boxes.", default: true, needs: ["devbox"] }); hedge.service({ on: "hub", id: "boxed-api", when: boxes, serve: { port: 4600, health: "/health", credential: async () => "x" } });`) });
     const plainNode: MachineFile = { schema: 1, role: "linux", name: "build-3" };
     const choices = { packs: ["boxed"], devboxes: [] };
     expect(catalog(await plan(dir, hub, choices))).toEqual(["boxed/boxed-api 4600 /health"]);
@@ -67,12 +67,12 @@ describe("the service catalog", () => {
   });
 
   test("two packs that claim one port fail at resolve time", async () => {
-    const dir = engine({ other: packSource("other", `fleet.service({ on: "hub", id: "other-api", serve: { port: 4555, health: "/health", credential: async () => "x" } });`) });
+    const dir = engine({ other: packSource("other", `hedge.service({ on: "hub", id: "other-api", serve: { port: 4555, health: "/health", credential: async () => "x" } });`) });
     await expect(plan(dir, node, { packs: ["served", "other"] })).rejects.toThrow("port 4555 is claimed by both served/served-api and other/other-api");
   });
 
   test("a pack.ts config key has one owner, like a pack.json one", async () => {
-    const dir = engine({ other: packSource("other", `fleet.config({ provider: "codex", key: "mcp_servers.served", value: {} });`) });
+    const dir = engine({ other: packSource("other", `hedge.config({ provider: "codex", key: "mcp_servers.served", value: {} });`) });
     await expect(plan(dir, node, { packs: ["served", "other"] })).rejects.toThrow("codex:mcp_servers.served is owned by both served and other");
   });
 });
@@ -80,22 +80,22 @@ describe("the service catalog", () => {
 describe("register refuses a service it cannot place", () => {
   const refused = async (body: string) => loadPacks(engine({ odd: packSource("odd", body) }));
   test("a served service off the hub, a service with neither a process nor serve, and a port out of range", async () => {
-    await expect(refused(`fleet.service({ id: "odd-api", serve: { port: 4600, health: "/health", credential: async () => "x" } });`)).rejects.toThrow('service odd-api: serve needs on: "hub"');
-    await expect(refused(`fleet.service({ id: "odd-api" } as never);`)).rejects.toThrow("service odd-api needs run, serve, or both");
-    await expect(refused(`fleet.service({ on: "hub", id: "odd_api", serve: { port: 4600, health: "/health", credential: async () => "x" } });`)).rejects.toThrow("service odd_api: a served service's id names its credential, so it is lowercase words joined by dashes or dots");
-    await expect(refused(`fleet.service({ on: "hub", id: "odd-api", serve: { port: 70000, health: "/health", credential: async () => "x" } });`)).rejects.toThrow("service odd-api: serve.port must be a port from 1 to 65535");
-    await expect(refused(`fleet.service({ on: "hub", id: "odd-api", serve: { port: 4600, health: "health", credential: async () => "x" } });`)).rejects.toThrow("service odd-api: serve.health must be a path that starts with /");
+    await expect(refused(`hedge.service({ id: "odd-api", serve: { port: 4600, health: "/health", credential: async () => "x" } });`)).rejects.toThrow('service odd-api: serve needs on: "hub"');
+    await expect(refused(`hedge.service({ id: "odd-api" } as never);`)).rejects.toThrow("service odd-api needs run, serve, or both");
+    await expect(refused(`hedge.service({ on: "hub", id: "odd_api", serve: { port: 4600, health: "/health", credential: async () => "x" } });`)).rejects.toThrow("service odd_api: a served service's id names its credential, so it is lowercase words joined by dashes or dots");
+    await expect(refused(`hedge.service({ on: "hub", id: "odd-api", serve: { port: 70000, health: "/health", credential: async () => "x" } });`)).rejects.toThrow("service odd-api: serve.port must be a port from 1 to 65535");
+    await expect(refused(`hedge.service({ on: "hub", id: "odd-api", serve: { port: 4600, health: "health", credential: async () => "x" } });`)).rejects.toThrow("service odd-api: serve.health must be a path that starts with /");
   });
 });
 
-describe("fleet.config", () => {
+describe("hedge.config", () => {
   function machine(saved: MachineFile) {
     const dir = engine();
     const home = temp.make("home-");
     const profile = temp.make("profile-");
-    writeFileSync(join(profile, "fleet.json"), JSON.stringify({ schema: 1, engine: { repo: "example/engine", ref: "main", channel: "track" }, sources: [], packs: ["served"], plan: "codex", settings: {}, workflows: {}, hub: "hub-1" }));
-    mkdirSync(join(home, ".config/fleet"), { recursive: true });
-    writeFileSync(join(home, ".config/fleet/machine.json"), JSON.stringify({ ...saved, profileDir: profile }));
+    writeFileSync(join(profile, "hedge.json"), JSON.stringify({ schema: 1, engine: { repo: "example/engine", ref: "main", channel: "track" }, sources: [], packs: ["served"], plan: "codex", settings: {}, workflows: {}, hub: "hub-1" }));
+    mkdirSync(join(home, ".config/hedge"), { recursive: true });
+    writeFileSync(join(home, ".config/hedge/machine.json"), JSON.stringify({ ...saved, profileDir: profile }));
     const options: CliOptions = {
       home,
       engineRoot: dir,
@@ -110,25 +110,25 @@ describe("fleet.config", () => {
       const path = join(home, ".codex/config.toml");
       return existsSync(path) ? readFileSync(path, "utf8") : "";
     };
-    return { fleet: (...args: string[]) => main(args, options), codex };
+    return { hedge: (...args: string[]) => main(args, options), codex };
   }
 
   test("a config item waits for its check and lands only where its scope places it", async () => {
     const onHub = machine(hub);
-    expect(await onHub.fleet("apply")).toBe(0);
+    expect(await onHub.hedge("apply")).toBe(0);
     expect(onHub.codex()).toContain("[mcp_servers.served]");
     expect(onHub.codex()).not.toContain("served-admin");
-    expect(await onHub.fleet("served", "install")).toBe(0);
+    expect(await onHub.hedge("served", "install")).toBe(0);
     expect(onHub.codex()).toContain("[mcp_servers.served-admin]");
 
     const onNode = machine(node);
-    expect(await onNode.fleet("apply")).toBe(0);
-    expect(await onNode.fleet("served", "install")).toBe(0);
+    expect(await onNode.hedge("apply")).toBe(0);
+    expect(await onNode.hedge("served", "install")).toBe(0);
     expect(onNode.codex()).toContain("[mcp_servers.served]");
     expect(onNode.codex()).not.toContain("served-admin");
   });
 });
 
 function packSource(name: string, body: string) {
-  return `export default { sdk: 1, name: "${name}", summary: "A test pack.", register(fleet) { ${body} } };\n`;
+  return `export default { sdk: 1, name: "${name}", summary: "A test pack.", register(hedge) { ${body} } };\n`;
 }

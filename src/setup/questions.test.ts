@@ -44,9 +44,9 @@ async function unattendedSetup(home: string, timeZone: string, { settings = [tea
 
 async function pushFromAnotherMachine(home: string, settings: Record<string, string>) {
   const other = temp.make("other-");
-  await spawnGit(other, "clone", "-q", githubRepo(home, "nora/fleet-profile"), ".");
-  const file = JSON.parse(readFileSync(join(other, "fleet.json"), "utf8"));
-  writeFileSync(join(other, "fleet.json"), JSON.stringify({ ...file, settings: { ...file.settings, ...settings } }, null, 2) + "\n");
+  await spawnGit(other, "clone", "-q", githubRepo(home, "nora/hedge-profile"), ".");
+  const file = JSON.parse(readFileSync(join(other, "hedge.json"), "utf8"));
+  writeFileSync(join(other, "hedge.json"), JSON.stringify({ ...file, settings: { ...file.settings, ...settings } }, null, 2) + "\n");
   await spawnGit(other, "commit", "-q", "-am", "Elsewhere");
   await spawnGit(other, "push", "-q");
 }
@@ -86,7 +86,7 @@ describe("a setting's time-zone default", () => {
   test("--non-interactive on another machine keeps the region the profile already has", async () => {
     const home = temp.make("home-");
     expect(await unattendedSetup(home, "America/New_York")).toBe(0);
-    rmSync(join(home, ".config/fleet"), { recursive: true });
+    rmSync(join(home, ".config/hedge"), { recursive: true });
     rmSync(profilePath(home), { recursive: true });
     expect(await unattendedSetup(home, "Europe/Lisbon")).toBe(0);
     expect((await pushedAnswers(home)).settings).toEqual({ "posthog.region": "us" });
@@ -110,7 +110,7 @@ describe("a setting's time-zone default", () => {
 describe("a time-zone default that setup saved before it stopped", () => {
   const teamName: PackSetting = { key: "posthog.team", question: "Which team are you on?", type: "string", ask: "setup" };
   const forget = (home: string) => {
-    rmSync(join(home, ".config/fleet"), { recursive: true });
+    rmSync(join(home, ".config/hedge"), { recursive: true });
     rmSync(profilePath(home), { recursive: true });
   };
 

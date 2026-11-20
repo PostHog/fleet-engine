@@ -10,13 +10,13 @@ const temp = tempDirs();
 afterEach(() => temp.cleanup());
 
 function subtreeHome(files: Record<string, string>) {
-  const home = temp.make("fleet-dream-budget-");
+  const home = temp.make("hedge-dream-budget-");
   hubWithSubtree(home, files);
   return home;
 }
 
 async function run(home: string, args: string[], extra: Record<string, string> = {}) {
-  const { io, printed } = quietIo(home, { env: { FLEET_SETTINGS: JSON.stringify({ ...dreamSettings, ...extra }) } });
+  const { io, printed } = quietIo(home, { env: { HEDGE_SETTINGS: JSON.stringify({ ...dreamSettings, ...extra }) } });
   const code = await dreamCommand(["budget", ...args], io);
   return { code, lines: printed.join("\n").split("\n") };
 }
@@ -27,9 +27,9 @@ test("budget checks the one memory root of the subtree layout: repo indexes, tri
   const repoIndexLines = Array.from({ length: 100 }, (_, index) => `- line ${index}`).join("\n");
   const home = subtreeHome({
     "MEMORY.md": "# Memory index\n- [Good](good.md) — fine\n- [Links](links.md) — wiki\n- [Short](short.md) — trigger\n- [Odd](odd.md) — status\n- [Old](old.md) — unconfirmed\n",
-    "good.md": note("good", { ...fresh, status: "confirmed", triggers: "[fleet proof]" }, "See [[links]]."),
+    "good.md": note("good", { ...fresh, status: "confirmed", triggers: "[hedge proof]" }, "See [[links]]."),
     "links.md": note("links", fresh, "See [[good]] and [[gone]]."),
-    "short.md": note("short", { ...fresh, triggers: "[gh, fleet apply]" }),
+    "short.md": note("short", { ...fresh, triggers: "[gh, hedge apply]" }),
     "odd.md": note("odd", { ...fresh, status: "maybe" }),
     "old.md": note("old", { modified: "2026-10-01", status: "unconfirmed" }),
     "projects/app/INDEX.md": `# app\n- [Paths](paths.md) — paths\n${repoIndexLines}\n`,
@@ -87,8 +87,8 @@ test("budget skips path checks for a repo the hub has no checkout of, and finds 
 
 test("budget given a dream worktree of the whole memory repo checks its memory.subtree folder", async () => {
   const home = subtreeHome({ "MEMORY.md": "# Memory index\n", "stray.md": note("stray", fresh) });
-  const worktree = join(home, ".local/state/fleet/dream/2026-11-05/memory");
-  writeHome(home, { ".local/state/fleet/dream/2026-11-05/memory/memory/MEMORY.md": "# Memory index\n- [Kept](kept.md) — kept\n", ".local/state/fleet/dream/2026-11-05/memory/memory/kept.md": note("kept", fresh), ".local/state/fleet/dream/2026-11-05/memory/memory/loose.md": note("loose", fresh) });
+  const worktree = join(home, ".local/state/hedge/dream/2026-11-05/memory");
+  writeHome(home, { ".local/state/hedge/dream/2026-11-05/memory/memory/MEMORY.md": "# Memory index\n- [Kept](kept.md) — kept\n", ".local/state/hedge/dream/2026-11-05/memory/memory/kept.md": note("kept", fresh), ".local/state/hedge/dream/2026-11-05/memory/memory/loose.md": note("loose", fresh) });
 
   expect(await run(home, [])).toEqual({ code: 1, lines: ["stray.md: no index links it"] });
   expect(await run(home, [worktree])).toEqual({ code: 1, lines: ["loose.md: no index links it"] });

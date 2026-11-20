@@ -2,7 +2,7 @@
 export const cannotTell = 3;
 
 /** Exits with the command's code, or prints its error and exits failed, which is 1 unless the command is a probe that then cannot tell. */
-export async function runCommand(command: () => number | Promise<number>, label = "fleet", failed = 1): Promise<never> {
+export async function runCommand(command: () => number | Promise<number>, label = "hedge", failed = 1): Promise<never> {
   try {
     process.exit(await command());
   } catch (error) {

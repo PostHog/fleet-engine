@@ -1,9 +1,9 @@
 import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-export const snapshotFile = (home: string) => join(home, ".local/state/fleet/settings.json");
+export const snapshotFile = (home: string) => join(home, ".local/state/hedge/settings.json");
 
-const usage = "usage: fleet settings-snapshot [--check]";
+const usage = "usage: hedge settings-snapshot [--check]";
 const privateMode = 0o600;
 
 export async function settingsSnapshotCommand(args: string[], home: string, settings: Record<string, unknown>): Promise<number> {

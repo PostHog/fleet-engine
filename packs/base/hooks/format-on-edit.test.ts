@@ -421,7 +421,7 @@ describe("the format-on-edit hook", () => {
   });
 
   test("is off by default, and once turned on installs for a Claude, a Codex or a both plan, with a PostToolUse timeout that fits its budget", () => {
-    const target = ".config/fleet/hooks/PostToolUse/format-on-edit.ts";
+    const target = ".config/hedge/hooks/PostToolUse/format-on-edit.ts";
     const resolved = (workflows: Record<string, boolean>, aiPlan: "claude" | "codex" | "both") => resolveEngine([engine, ...skillSources(temp.make("skills-"), engine)], { workflows, plan: aiPlan }, devbox);
     expect(resolved({}, "claude").files.map((file) => file.target)).not.toContain(target);
     for (const aiPlan of ["claude", "codex", "both"] as const) expect(resolved({ "format-on-edit": true }, aiPlan).files.map((file) => file.target)).toContain(target);

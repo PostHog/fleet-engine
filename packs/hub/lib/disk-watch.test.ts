@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tempDirs } from "../../../src/testing/git.ts";
 import { diskWatchCommand, diskWatchTargets, watchDisks, type DiskWatchOptions } from "./disk-watch.ts";
 import { underLock } from "./hub-job.ts";
-import { quote, remoteFleet } from "./machine.ts";
+import { quote, remoteHedge } from "./machine.ts";
 import { writeHome } from "./testing.ts";
 
 const temp = tempDirs();
@@ -105,7 +105,7 @@ test("a box that does not answer is logged, and a dry run sweeps, alerts, and sa
   expect(existsSync(run.options.statePath)).toBe(false);
 });
 
-test("each pass leaves the free space of every box that answered next to its state, for fleet disk --start", async () => {
+test("each pass leaves the free space of every box that answered next to its state, for hedge disk --start", async () => {
   const run = watch({ "box-1": [40], "box-2": [12, 30] });
   run.options.boxes = ["box-1", "box-2", "box-gone"];
   const read = run.options.read;
@@ -115,20 +115,20 @@ test("each pass leaves the free space of every box that answered next to its sta
   expect(map).toEqual({ checkedAt: new Date(start).toISOString(), boxes: { "box-1": 40 * gigabyte, "box-2": 30 * gigabyte }, hosts: {} });
 });
 
-test("the free map names the machine that answered under each alias, so fleet disk --start on it can tell the entry is its own", async () => {
+test("the free map names the machine that answered under each alias, so hedge disk --start on it can tell the entry is its own", async () => {
   const hub = await hubHere({ "compute-alias": [40, 40] });
   expect(await diskWatchCommand([], hub.context)).toBe(0);
-  const map = JSON.parse(readFileSync(join(hub.home, ".local/state/fleet/disk-free.json"), "utf8"));
+  const map = JSON.parse(readFileSync(join(hub.home, ".local/state/hedge/disk-free.json"), "utf8"));
   expect(map.hosts).toEqual({ "compute-alias": "machine-compute-alias", "my-hub": "hub-host" });
   expect(Object.keys(map.boxes)).toEqual(["compute-alias", "my-hub"]);
 });
 
 test("the targets are the hub here plus the devboxes of the profile and of machine.json, once each and without this machine", () => {
   const home = temp.make("disk-home-");
-  writeHome(home, { ".config/fleet/machine.json": JSON.stringify({ schema: 1, role: "hub", devboxes: ["box-3", "box-1", "my-hub"] }) });
+  writeHome(home, { ".config/hedge/machine.json": JSON.stringify({ schema: 1, role: "hub", devboxes: ["box-3", "box-1", "my-hub"] }) });
   const profile = temp.make("disk-profile-");
-  writeFileSync(join(profile, "fleet.json"), JSON.stringify({ devboxes: ["box-1", "box-2", "hub-host"] }));
-  expect(diskWatchTargets({ FLEET_PROFILE_DIR: profile }, home, "my-hub", "hub-host")).toEqual({ local: "my-hub", remote: ["box-1", "box-2", "box-3"] });
+  writeFileSync(join(profile, "hedge.json"), JSON.stringify({ devboxes: ["box-1", "box-2", "hub-host"] }));
+  expect(diskWatchTargets({ HEDGE_PROFILE_DIR: profile }, home, "my-hub", "hub-host")).toEqual({ local: "my-hub", remote: ["box-1", "box-2", "box-3"] });
 });
 
 function stubs(dir: string) {
@@ -154,13 +154,13 @@ async function hubHere(devboxes: Record<string, [number, number]>) {
     writeFileSync(join(bin, `free-${box}`), String(before * 1024 * 1024));
     writeFileSync(join(bin, `after-${box}`), String(after * 1024 * 1024));
   }
-  writeHome(home, { ".config/fleet/machine.json": JSON.stringify({ schema: 1, role: "hub", devboxes: Object.keys(devboxes) }) });
+  writeHome(home, { ".config/hedge/machine.json": JSON.stringify({ schema: 1, role: "hub", devboxes: Object.keys(devboxes) }) });
   const engine = join(home, "engine");
-  writeHome(home, { "engine/fleet": `echo "local $*" >> "${bin}/calls.log"` });
+  writeHome(home, { "engine/hedge": `echo "local $*" >> "${bin}/calls.log"` });
   const env = {
-    PATH: `${bin}:/usr/bin:/bin`, HOME: home, FLEET_ENGINE_DIR: engine,
-    FLEET_SETTINGS: JSON.stringify({ "hub.alias": "my-hub", "hub.diskSweepGigabytes": 15, "hub.diskAlertGigabytes": 10, "hub.threadFolder": "~/notes" }),
-    FLEET_MODELS: JSON.stringify([{ role: "lookup", work: "Lookups", provider: "claude", model: "small-model", effort: "medium" }]),
+    PATH: `${bin}:/usr/bin:/bin`, HOME: home, HEDGE_ENGINE_DIR: engine,
+    HEDGE_SETTINGS: JSON.stringify({ "hub.alias": "my-hub", "hub.diskSweepGigabytes": 15, "hub.diskAlertGigabytes": 10, "hub.threadFolder": "~/notes" }),
+    HEDGE_MODELS: JSON.stringify([{ role: "lookup", work: "Lookups", provider: "claude", model: "small-model", effort: "medium" }]),
   };
   const lines: string[] = [];
   const context = { home, env, self: "hub-host", now: () => start, log: (line: string) => lines.push(line), localFree: () => 40 * gigabyte, localInodes: () => 0.5 };
@@ -168,17 +168,17 @@ async function hubHere(devboxes: Record<string, [number, number]>) {
   return { home, bin, context, lines, calls };
 }
 
-test("on the hub, fleet disk-watch reads each devbox over SSH, sweeps it with the engine launcher, and starts a T3 thread for the one still low", async () => {
+test("on the hub, hedge disk-watch reads each devbox over SSH, sweeps it with the engine launcher, and starts a T3 thread for the one still low", async () => {
   const hub = await hubHere({ "box-1": [12, 30], "box-2": [12, 4] });
   expect(await diskWatchCommand([], hub.context)).toBe(0);
   const calls = hub.calls();
-  expect(calls).toContain(`ssh -o BatchMode=yes -o ConnectTimeout=10 box-1 bash -lc ${quote(remoteFleet("disk-sweep --floor 15 --alert-floor 10"))} 2>&1`);
+  expect(calls).toContain(`ssh -o BatchMode=yes -o ConnectTimeout=10 box-1 bash -lc ${quote(remoteHedge("disk-sweep --floor 15 --alert-floor 10"))} 2>&1`);
   expect(calls.filter((call) => call.startsWith("t3 "))).toEqual([`t3 project add ${join(hub.home, "notes")}`, "t3 thread start --title box-2: 4.0G free, 99% of inodes free --provider claudeAgent --model small-model /tmp/notes -".replace("/tmp/notes", join(hub.home, "notes"))]);
   const prompt = readFileSync(join(hub.bin, "prompt.txt"), "utf8");
   expect(prompt).toContain("box-2 has 4.0G free, 99% of inodes free, below 10G");
   expect(prompt).toContain("swept box-2\n30.0G /home/box-2/.cache");
   expect(prompt).toContain("the largest folders the report names");
-  expect(prompt).toContain(`ssh box-2 ${quote(`bash -lc ${quote(`df -h ~; df -i ~; ${remoteFleet("prune --dry-run --no-fetch --min-idle-hours 1")}`)}`)}`);
+  expect(prompt).toContain(`ssh box-2 ${quote(`bash -lc ${quote(`df -h ~; df -i ~; ${remoteHedge("prune --dry-run --no-fetch --min-idle-hours 1")}`)}`)}`);
   expect(calls.some((call) => call.startsWith("local"))).toBe(false);
 });
 
@@ -188,7 +188,7 @@ test("a devbox sweep runs in a login shell, so the engine launcher finds the Bun
   writeHome(remote, {
     ".profile": 'PATH="$HOME/.bun/bin:$PATH"\n',
     ".bun/bin/bun": `echo "bun $*" >> "${hub.bin}/calls.log"`,
-    ".local/share/fleet/engine/fleet": readFileSync(join(import.meta.dir, "../../../fleet"), "utf8"),
+    ".local/share/hedge/engine/hedge": readFileSync(join(import.meta.dir, "../../../hedge"), "utf8"),
   });
   chmodSync(join(remote, ".bun/bin/bun"), 0o755);
   writeFileSync(join(hub.bin, "ssh"), `#!/bin/sh
@@ -198,7 +198,7 @@ case "$6" in
 esac
 `);
   expect(await diskWatchCommand([], hub.context)).toBe(0);
-  expect(hub.calls()).toEqual([`bun ${join(remote, ".local/share/fleet/engine/src/cli.ts")} disk-sweep --floor 15 --alert-floor 10`]);
+  expect(hub.calls()).toEqual([`bun ${join(remote, ".local/share/hedge/engine/src/cli.ts")} disk-sweep --floor 15 --alert-floor 10`]);
   expect(hub.lines.join("\n")).not.toContain("failed");
 });
 
@@ -220,11 +220,11 @@ test("a second disk watch while one runs does nothing, so the same machine is no
   expect(hub.calls().filter((call) => call.startsWith("t3 thread")).length).toBe(1);
 });
 
-test("fleet disk-watch runs only on the hub and takes only --dry-run", async () => {
+test("hedge disk-watch runs only on the hub and takes only --dry-run", async () => {
   const hub = await hubHere({ "box-2": [4, 4] });
-  writeHome(hub.home, { ".config/fleet/machine.json": JSON.stringify({ schema: 1, role: "devbox" }) });
-  await expect(diskWatchCommand([], hub.context)).rejects.toThrow("fleet disk-watch runs only on the hub. This machine's role is devbox.");
-  await expect(diskWatchCommand(["--now"], hub.context)).rejects.toThrow("Usage: fleet disk-watch [--dry-run]");
+  writeHome(hub.home, { ".config/hedge/machine.json": JSON.stringify({ schema: 1, role: "devbox" }) });
+  await expect(diskWatchCommand([], hub.context)).rejects.toThrow("hedge disk-watch runs only on the hub. This machine's role is devbox.");
+  await expect(diskWatchCommand(["--now"], hub.context)).rejects.toThrow("Usage: hedge disk-watch [--dry-run]");
 });
 
 test("a devbox out of inodes with bytes to spare is swept, and alerts while it stays under 5% of free inodes", async () => {
@@ -232,7 +232,7 @@ test("a devbox out of inodes with bytes to spare is swept, and alerts while it s
   writeFileSync(join(hub.bin, "iused-box-7"), "1000");
   writeFileSync(join(hub.bin, "ifree-box-7"), "0");
   expect(await diskWatchCommand([], hub.context)).toBe(0);
-  expect(hub.calls()).toContain(`ssh -o BatchMode=yes -o ConnectTimeout=10 box-7 bash -lc ${quote(remoteFleet("disk-sweep --floor 15 --alert-floor 10"))} 2>&1`);
+  expect(hub.calls()).toContain(`ssh -o BatchMode=yes -o ConnectTimeout=10 box-7 bash -lc ${quote(remoteHedge("disk-sweep --floor 15 --alert-floor 10"))} 2>&1`);
   expect(hub.calls().filter((call) => call.startsWith("t3 thread"))).toHaveLength(1);
   expect(readFileSync(join(hub.bin, "prompt.txt"), "utf8")).toContain("box-7 has 14.0G free, 0% of inodes free, below 10G or 5% of inodes");
   expect(hub.lines).toContain("box-7: 14.0G free, 0% of inodes free; sweeping");

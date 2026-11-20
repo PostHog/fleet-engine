@@ -1,5 +1,169 @@
 # Changelog
 
+## Unreleased
+
+### Fleet is now Hedge
+
+- The product and its command are now Hedge and `hedge`. `get.sh` points
+  `fleet` at the same command, so the habit from before the rename keeps
+  working.
+- To upgrade, run
+  `curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh | sh`
+  once. It makes a fresh checkout of the engine in
+  `~/.local/share/hedge/engine`. It never reuses the old checkout. It ignores
+  a `FLEET_ENGINE_DIR` or `HEDGE_ENGINE_DIR` that leads into a Fleet path, by
+  its real path, or that is the Fleet checkout: its launcher is `fleet`, or
+  its remote is `fleet-engine`. It stops when a Hedge folder is a link into a
+  Fleet path.
+- Hedge moves only a Fleet engine in `~/.local/share/fleet/engine`. When
+  Fleet's `~/.local/bin/fleet` command, the one with the installer's
+  `# Fleet` line, runs an engine in another folder, or names a folder that
+  Hedge cannot read, such as one with an escaped apostrophe, `get.sh` stops
+  before it changes anything and names the folder. `hedge retire-fleet`, its
+  dry run, and `hedge apply` refuse on such a machine too. Stop Fleet's
+  services, cron jobs and `fleet:` tasks by hand and delete
+  `~/.local/bin/fleet`, or move the engine to `~/.local/share/fleet/engine`
+  and change the path in `~/.local/bin/fleet` to match, then run `get.sh`
+  again. A `~/.local/bin/fleet` without the `# Fleet` line is not Fleet's,
+  and Hedge ignores it. When `~/.local/share/fleet/engine` itself is a link,
+  `get.sh`, `hedge retire-fleet`, its dry run, and `hedge apply` refuse the
+  same way and name the link.
+  Stop Fleet by hand and delete the link, or move the engine into its place.
+- On the first run, `get.sh` first runs `hedge retire-fleet`, also with
+  `--install-only`. When it cannot show that each piece of Fleet stopped, it
+  copies and applies nothing and exits 1. Stop what it names by hand, or
+  start T3 Code for a task, then run `get.sh` again.
+- Once Fleet is stopped, `get.sh` copies the setup from before the rename: the
+  profile checkout, the machine file, `~/.config/fleet` with the secret store
+  and its event log, Slack's queued launches and the events it handled, the
+  SSH key, the step ledger, and the credential folders of the hub proxy,
+  the MCP hub, and the hub's HTTPS share. It points the machine file at the
+  profile copy only when the copy is the same repository at the same commit
+  and loads as a profile. Else it drops the profile and the setup progress
+  from the machine file, and setup starts again. It never copies the engine, locks, logs, run state,
+  caches, or `node_modules`. It copies each file on its own with its mode,
+  skips links, and stops when a link is on the way to a new path. It never
+  replaces a file. It copies each missing file into a `~/.config/hedge` that
+  was there before, such as the one `hedge devbox add` makes, and leaves any
+  other new folder that was there before as it is.
+  An import that stopped part way copies the rest on the next run.
+- Then `get.sh` runs `hedge apply`.
+  `hedge retire-fleet` finds the launchd agents `dev.fleet.*` and
+  `com.fleet.*`, the systemd user units `fleet-*`, the `fleet-mcphub`
+  container, the `# fleet:` crontab entries, the T3 tasks `fleet:*`, and the
+  commands of Fleet's jobs that still run, such as one that cron started. It
+  leaves the `fleet-heavy.slice` and any other slice alone, because a slice
+  runs nothing by itself. It stops and turns off each one, keeps its files, and checks each one again:
+  a launchd agent must be unloaded and disabled, the container stopped with
+  the restart policy `no`, and each `# fleet:` entry gone from the crontab.
+  It keeps the other crontab entries. It stops a running job command with
+  `SIGTERM` and waits up to 10 seconds for it to end. When systemd cannot
+  list its unit files, retire fails. While T3 Code is stopped, it reads the
+  tasks T3 Code saved, and a `fleet:` task that is on there fails it. A T3
+  Code store without a task table holds no tasks. When it cannot show that a
+  piece is stopped, it names it and exits 1.
+- `get.sh` with `-- --dry-run` is a preview: it neither copies nor stops the
+  setup from before the rename, and it names each piece of Fleet that still
+  runs. With `--profile`, it also previews the apply. Without `--profile`, it
+  runs no setup. `hedge retire-fleet --dry-run` names the same pieces. An
+  engine from before `retire-fleet` took `--dry-run` is never asked to list
+  them, so a preview at such a `--ref` stops nothing.
+- `hedge retire-fleet`, its dry run, and both checks in `hedge apply`, for
+  Fleet's jobs and for its `fleet:` T3 tasks, act only on a machine with a
+  Fleet engine install in `~/.local/share/fleet/engine`. `get.sh` points
+  `fleet` at Hedge only after retire, never in a preview. On any other
+  machine, such as
+  one that runs a private Fleet copy, retire stops nothing and says that the
+  machine has no Fleet engine install, and apply does not wait for that
+  copy's `fleet-*` units or `fleet:` tasks. They do not look up the
+  account's home folder there.
+- To go back to Fleet, follow "Go back to Fleet" in `SETUP.md`.
+- `hedge apply` starts nothing while a piece of Fleet still runs, or while it
+  cannot tell. It checks before it fetches a source or writes the machine
+  file. It names each piece and says to run `hedge retire-fleet`.
+  Right before it adds the `hedge:` T3 tasks, it checks T3 Code again, so a
+  `fleet:` task that T3 Code turned on as it started during this apply stops
+  it. There is no handoff and no rollback: Fleet stops first, then Hedge
+  starts.
+- `hedge apply` exits 1 when a service, timer, cron job or T3 task it starts
+  does not start, when a pack step fails in any pack, and when a check that
+  Hedge repairs still fails after the repair. It still runs the other parts.
+  `get.sh` keeps its retry marker until apply exits 0, so an identical retry
+  after a failed apply runs apply again.
+- `hedge doctor` names each piece of Fleet that still runs and fails.
+- `hedge devbox add` refuses a profile that pins an engine from before the
+  rename, and a box whose `~/.config/hedge` or its `machine.json` is a link.
+  Set `engine.ref` in the profile to a Hedge release, or move the link away.
+- `hedge update` keeps the engine's origin when the profile still names
+  `PostHog/fleet-engine`, so a Hedge checkout never looks like Fleet's.
+- `hedge update` refuses an engine ref whose commit has no `hedge` launcher
+  file before the checkout moves, and records nothing. Only a regular file
+  named `hedge` counts, not a folder or a link. It writes or removes its
+  update notice only after the new engine's packages installed, so a refused
+  or rolled-back update leaves the notice as it was. It writes the notice
+  only to a regular file in a real folder. Before the checkout moves, it
+  checks `~/.local/state/hedge`, where `hedge apply` keeps its state. When
+  that folder or a folder above it is a link, a file or anything else that is
+  not a real folder, `hedge update` names the path, moves nothing and exits 1.
+  It checks those folders again just before it writes the notice. When a
+  folder changed into a link in between, or only `update.json` is a link,
+  leads into Fleet's state folder or cannot be written, it skips the notice
+  with a warning and the update goes on. It never writes Fleet's state.
+- `hedge update` runs apply with the profile it pulled.
+- `hedge update` and `hedge refresh` use the Hedge copy of a profile that the
+  machine file still names in a Fleet path, or refuse, before they pull.
+- Hedge operations that change the machine take an `flock` lock on
+  `~/.local/state/hedge/hedge.lock`. The system lets go of it when the
+  process ends, so an import or apply stopped with Ctrl-C does not block the
+  next run.
+- An engine that runs from a Fleet path, such as `~/.local/share/fleet/engine`
+  after the old updater pulled this release, changes nothing. It prints
+  `Fleet is now Hedge. Run: curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh | sh`.
+  Its scheduled jobs exit 0, so they raise no alert. Its hook runner blocks
+  each `PreToolUse`, `PostToolUse` and `UserPromptSubmit` event with exit 2
+  and the notice, because the guard hooks behind it do not run, and lets
+  other events pass. Every other command exits 1. It checks the path as
+  written and with its links resolved.
+- Hedge never writes, owns, or removes a file under an old name. It never
+  uses or writes a profile in a Fleet path: `hedge apply --profile` uses the
+  Hedge copy or refuses, and `hedge set` writes only to the copy. `hedge
+  prune` never touches a worktree in a Fleet path, or one whose Git folder is
+  in a Fleet path. A Hedge copy of a profile counts only when it is a
+  checkout of the same repository, with the commit the old profile is at.
+  The profile and machine writers also refuse a file that links into a Fleet
+  path. Delete the old paths when you no longer need them.
+- Hedge still takes what Fleet wrote: the `fleet-management` key of MCPHub, the Claude key helper and the
+  `fleet-proxy` Codex provider of `fleet cli-proxy connect`, a T3 Claude
+  instance bound to `~/.config/fleet/recovery/claude`, a gateway upstream
+  marked "Added by Fleet", Node links in `~/.local/bin` that point into
+  `~/.local/share/fleet/node`, which Base's `node-runtime` step links to
+  Hedge's package, since its check `hedge install-node --check` fails while
+  they are there, a Codex
+  install under
+  `~/.local/share/fleet/codex` that Base and the nightly update move to
+  Hedge's own, a `fleet-proof-receipt`
+  block in a PR, and Git allowlist helpers that say "Fleet blocked Git
+  access". The exit-status guard also checks `fleet proof` and
+  `fleet heavy --`.
+- Crontab lines and T3 worktree scripts from before the rename are replaced
+  by the new ones.
+- Hedge never edits or removes a `# fleet-hub-tunnel` line in `/etc/hosts`.
+  Hedge's own line is `127.0.0.1 <host> # hedge-hub-tunnel <home>`, where
+  `<home>` is the `HOME` that installed it. `hedge ssh-tunnels install`,
+  `remove`, `left` and `doctor` act only on the line that ends with this
+  `HOME`. So a run with another `HOME` does not change the hosts file or call
+  `sudo`. Install keeps a Fleet line, or a line of another home, that maps the
+  host to `127.0.0.1`. When such a line maps the host to another address,
+  install stops, as it does for a line the person wrote.
+- A profile with `fleet.json` and no `hedge.json` still works. Each `FLEET_`
+  variable still works while its `HEDGE_` variable is unset. A `HEDGE_`
+  variable that is set, even to an empty string, wins. Setup reuses a
+  `fleet-profile` or `fleet-memory` repo.
+- The repository is now `PostHog/hedge`, and the site is
+  https://posthog.github.io/hedge/. GitHub sends the old repository address
+  to the new one, so git, `get.sh` links and profiles that name
+  `PostHog/fleet-engine` keep working. The old site address no longer works.
+
 ## v0.1.0
 
 The first public release. Fleet sets up T3 Code, Claude Code, Codex, and a set
@@ -87,13 +251,13 @@ Everything.
 
 ### The site
 
-[The Fleet site](https://posthog.github.io/fleet-engine/) says what Fleet is
+[The Fleet site](https://posthog.github.io/hedge/) says what Fleet is
 and offers two setups side by side: Mac only, and Mac plus a hub and a node.
 Each setup has a switch for Pull requests, Orchestration, and Communication.
 The Getting started prompt sits under the two setups and changes with each
 choice. Copy it, or open it in T3 Code.
 
-[The Packs page](https://posthog.github.io/fleet-engine/packs/) shows every
+[The Packs page](https://posthog.github.io/hedge/packs/) shows every
 pack, and each pack has its own page with its workflows, its cost, and its
 settings. For a Fleet that already runs, select packs, and the page builds an
 install prompt that adds them with `fleet packs --add`.

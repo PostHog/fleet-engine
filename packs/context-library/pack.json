@@ -57,13 +57,13 @@
         "context-library.url",
         "context-library.owner"
       ],
-      "sentence": "A prompt about a topic of your private notes repo gets links to its documents, fleet context searches and saves notes, and every machine pulls the repo every five minutes."
+      "sentence": "A prompt about a topic of your private notes repo gets links to its documents, hedge context searches and saves notes, and every machine pulls the repo every five minutes."
     }
   ],
   "files": [
     {
       "path": "hooks/context-recall.ts",
-      "target": ".config/fleet/hooks/UserPromptSubmit/context-recall.ts",
+      "target": ".config/hedge/hooks/UserPromptSubmit/context-recall.ts",
       "workflow": "context-library"
     }
   ],
@@ -71,7 +71,7 @@
     {
       "id": "context-sync",
       "command": [
-        "fleet",
+        "hedge",
         "context",
         "sync"
       ],
@@ -85,19 +85,19 @@
     {
       "id": "context-upstream",
       "run": [
-        "fleet",
+        "hedge",
         "context",
         "upstream",
         "install"
       ],
       "check": [
-        "fleet",
+        "hedge",
         "context",
         "upstream",
         "doctor"
       ],
       "undo": [
-        "fleet",
+        "hedge",
         "context",
         "upstream",
         "remove"

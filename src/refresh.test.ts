@@ -5,7 +5,7 @@ import { main } from "./cli.ts";
 import { filesAdapter } from "./reconciler/apply.ts";
 import { repoRoot } from "./testing/cli.ts";
 import { isolateGit, spawnGit, tempDirs } from "./testing/git.ts";
-import { tryLock } from "./lock.ts";
+import { stateLock, tryLock } from "./lock.ts";
 
 isolateGit();
 const temp = tempDirs();
@@ -38,18 +38,18 @@ async function machine(ref = "main") {
   const repo = await teamRepo();
   const home = temp.make("home-");
   const profile = temp.make("profile-");
-  writeFileSync(join(profile, "fleet.json"), JSON.stringify({ schema: 1, engine: { repo: "PostHog/fleet-engine", ref: "main", channel: "track" }, sources: [{ name: "team", repo, ref }], packs: ["team"], plan: "both", settings: {}, workflows: {} }));
+  writeFileSync(join(profile, "hedge.json"), JSON.stringify({ schema: 1, engine: { repo: "PostHog/hedge", ref: "main", channel: "track" }, sources: [{ name: "team", repo, ref }], packs: ["team"], plan: "both", settings: {}, workflows: {} }));
   const steps: string[][] = [];
   const lines: string[] = [];
   const clock = { at: Date.UTC(2026, 0, 1), naps: [] as number[], onSleep: () => {}, now: () => clock.at, sleep: async (ms: number) => (clock.naps.push(ms), clock.onSleep()) };
-  const fleet = (...args: string[]) => main(args, { home, engineRoot: repoRoot, platform: "linux", env: {}, print: (line) => lines.push(line), run: async (command) => (steps.push(command), 0), adapters: () => [filesAdapter], clock });
-  const code = await fleet("apply", "--profile", profile);
+  const hedge = (...args: string[]) => main(args, { home, engineRoot: repoRoot, platform: "linux", env: {}, print: (line) => lines.push(line), run: async (command) => (steps.push(command), 0), adapters: () => [filesAdapter], clock });
+  const code = await hedge("apply", "--profile", profile);
   if (code !== 0) throw new Error(lines.join("\n"));
   steps.length = 0;
   lines.length = 0;
   const read = (target: string) => readFileSync(join(home, target), "utf8");
-  const cache = join(home, ".local/share/fleet/sources");
-  return { repo, home, cache, clock, fleet, steps, lines, read };
+  const cache = join(home, ".local/share/hedge/sources");
+  return { repo, home, cache, clock, hedge, steps, lines, read };
 }
 
 const skill = ".agents/skills/review/SKILL.md";
@@ -61,7 +61,7 @@ async function forcePushOrphan(repo: string) {
   await spawnGit(repo, "checkout", "-q", "main");
 }
 
-describe("fleet refresh", () => {
+describe("hedge refresh", () => {
   test("brings a moved branch's guide, instructions, and skills, keeps local edits and unmanaged files, and runs no step", async () => {
     const box = await machine();
     writeFileSync(join(box.home, ".codex/AGENTS.md"), "My own edit.\n");
@@ -70,7 +70,7 @@ describe("fleet refresh", () => {
     writeFileSync(join(box.home, "notes.md"), "Mine.\n");
     await v2(box.repo);
 
-    expect(await box.fleet("refresh")).toBe(0);
+    expect(await box.hedge("refresh")).toBe(0);
 
     expect(box.read(guide)).toBe("Rules v2.\n");
     expect(box.read(".agents/AGENTS.md")).toContain("Team v2.");
@@ -86,7 +86,7 @@ describe("fleet refresh", () => {
     const box = await machine();
     rmSync(join(box.home, guide));
 
-    expect(await box.fleet("refresh")).toBe(0);
+    expect(await box.hedge("refresh")).toBe(0);
 
     expect(existsSync(join(box.home, guide))).toBe(false);
   });
@@ -96,22 +96,21 @@ describe("fleet refresh", () => {
     await v2(box.repo);
     await spawnGit(box.repo, "tag", "-f", "v1");
 
-    expect(await box.fleet("refresh")).toBe(0);
+    expect(await box.hedge("refresh")).toBe(0);
 
     expect(box.read(guide)).toBe("Rules v1.\n");
   });
 
-  test("waits for another Fleet operation's lock and applies at the next run, though nothing new arrives", async () => {
+  test("waits for another Hedge operation's lock and applies at the next run, though nothing new arrives", async () => {
     const box = await machine();
     await v2(box.repo);
-    const fleetLock = join(box.home, ".local/state/fleet/lock");
-    mkdirSync(fleetLock);
+    const held = tryLock(join(box.home, stateLock))!;
 
-    expect(await box.fleet("refresh")).toBe(1);
+    expect(await box.hedge("refresh")).toBe(1);
     expect(box.read(guide)).toBe("Rules v1.\n");
 
-    rmSync(fleetLock, { recursive: true });
-    expect(await box.fleet("refresh")).toBe(0);
+    held.release();
+    expect(await box.hedge("refresh")).toBe(0);
     expect(box.read(guide)).toBe("Rules v2.\n");
   });
 
@@ -119,7 +118,7 @@ describe("fleet refresh", () => {
     const box = await machine();
     writeFileSync(join(box.home, skill), "# my review\n");
 
-    expect(await box.fleet("refresh")).toBe(0);
+    expect(await box.hedge("refresh")).toBe(0);
 
     expect(box.read(skill)).toBe("# my review\n");
   });
@@ -129,7 +128,7 @@ describe("fleet refresh", () => {
     writeFileSync(join(box.home, skill), "# my review\n");
     await v2(box.repo);
 
-    expect(await box.fleet("refresh")).toBe(1);
+    expect(await box.hedge("refresh")).toBe(1);
 
     expect(box.read(skill)).toBe("# my review\n");
     expect(box.read(guide)).toBe("Rules v1.\n");
@@ -141,17 +140,17 @@ describe("fleet refresh", () => {
     writeFileSync(join(box.home, ".agents/skills/review/notes.md"), "Mine.\n");
     await commit(box.repo, "v2", { "packs/team/skills/review/notes.md": "Theirs.\n" });
 
-    expect(await box.fleet("refresh")).toBe(1);
+    expect(await box.hedge("refresh")).toBe(1);
 
     expect(box.read(".agents/skills/review/notes.md")).toBe("Mine.\n");
   });
 
-  test("fleet apply keeps an edit to a linked skill when the branch moved", async () => {
+  test("hedge apply keeps an edit to a linked skill when the branch moved", async () => {
     const box = await machine();
     writeFileSync(join(box.home, skill), "# my review\n");
     await v2(box.repo);
 
-    await box.fleet("apply");
+    await box.hedge("apply");
 
     expect(box.read(skill)).toBe("# my review\n");
     expect(box.lines.join("\n")).toContain("packs/team/skills/review/SKILL.md");
@@ -161,34 +160,34 @@ describe("fleet refresh", () => {
     const box = await machine();
     await forcePushOrphan(box.repo);
 
-    expect(await box.fleet("refresh")).toBe(1);
+    expect(await box.hedge("refresh")).toBe(1);
 
     expect(box.read(guide)).toBe("Rules v1.\n");
     expect(box.lines.join("\n")).toContain("does not build on");
   });
 
-  test("skips a source whose cache another Fleet run works in", async () => {
+  test("skips a source whose cache another Hedge run works in", async () => {
     const box = await machine();
     await v2(box.repo);
     const held = tryLock(join(box.cache, "team.lock"))!;
     try {
-      expect(await box.fleet("refresh")).toBe(0);
+      expect(await box.hedge("refresh")).toBe(0);
       expect(box.read(guide)).toBe("Rules v1.\n");
     } finally {
       held.release();
     }
 
-    expect(await box.fleet("refresh")).toBe(0);
+    expect(await box.hedge("refresh")).toBe(0);
     expect(box.read(guide)).toBe("Rules v2.\n");
   });
 
-  test("fleet apply waits for a source's cache lock", async () => {
+  test("hedge apply waits for a source's cache lock", async () => {
     const box = await machine();
     await v2(box.repo);
     const held = tryLock(join(box.cache, "team.lock"))!;
     box.clock.onSleep = () => held.release();
 
-    expect(await box.fleet("apply")).toBe(0);
+    expect(await box.hedge("apply")).toBe(0);
 
     expect(box.clock.naps.length).toBeGreaterThan(0);
     expect(box.read(guide)).toBe("Rules v2.\n");
@@ -198,7 +197,7 @@ describe("fleet refresh", () => {
     const box = await machine();
     renameSync(box.repo, `${box.repo}.away`);
 
-    expect(await box.fleet("refresh")).toBe(1);
+    expect(await box.hedge("refresh")).toBe(1);
     expect(box.lines.join("\n")).toContain("could not reach");
   });
 });

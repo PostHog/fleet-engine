@@ -41,7 +41,7 @@ const unescaped = (html: string) => html.replace(/&#(\d+);/g, (_, code) => Strin
 const visibleText = (html: string) => unescaped(html.replace(/<script[\s\S]*?<\/script>|<svg[\s\S]*?<\/svg>|<head>[\s\S]*?<\/head>/g, " ").replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ");
 const promptOn = (html: string, id: string) => unescaped(html.match(new RegExp(`<pre id="${id}-text"[^>]*>([\\s\\S]*?)</pre>`))![1]!.replace(/<[^>]+>/g, ""));
 const t3LinkOn = (html: string, id: string) => unescaped(html.match(new RegExp(`<a class="btn btn-ghost" id="${id}-t3" href="([^"]*)"`))![1]!);
-const carried = (html: string) => JSON.parse(html.match(/<script id="fleet-data" type="application\/json">([\s\S]*?)<\/script>/)![1]!) as PromptData;
+const carried = (html: string) => JSON.parse(html.match(/<script id="hedge-data" type="application\/json">([\s\S]*?)<\/script>/)![1]!) as PromptData;
 const boxOf = (html: string, where: string) => html.match(new RegExp(`<section class="box" data-where="${where}">[\\s\\S]*?</section>`))![0];
 
 function localTargets(path: string, html: string) {
@@ -105,7 +105,7 @@ describe("the site build", () => {
 
   test("the packs page lets a visitor select every pack but Base, and links each pack's own page", () => {
     const html = page("packs/index.html");
-    expect(html).toContain("<h1>Extend your <mark>Fleet</mark>.</h1>");
+    expect(html).toContain("<h1>Extend your <mark>Hedge</mark>.</h1>");
     expect([...html.matchAll(/<input class="sr" type="checkbox" name="pack" id="pick-[^"]+" value="([^"]+)">/g)].map((match) => match[1])).toEqual(data.packs.filter((pack) => !pack.always).map((pack) => pack.name));
     expect(localTargets("packs/index.html", html).filter((target) => /^packs\/.+\//.test(target))).toEqual(data.packs.map((pack) => `packs/${pack.name}/index.html`));
     const everyPack = data.packs.reduce((selected, pack) => (selected.includes(pack.name) ? selected : toggleSelected(data, selected, pack.name)), [] as string[]);
@@ -123,9 +123,9 @@ describe("the site build", () => {
       expect(html).toContain(`data-select="${pack.name}"`);
       expect(visibleText(html)).toContain(pack.summary);
     }
-    expect(promptOn(page("packs/orchestration/index.html"), "install")).toContain("fleet packs --add pull-requests --add orchestration");
+    expect(promptOn(page("packs/orchestration/index.html"), "install")).toContain("hedge packs --add pull-requests --add orchestration");
     const base = page("packs/base/index.html");
-    expect(base).toContain("Every Fleet has this pack. You add nothing.");
+    expect(base).toContain("Every Hedge has this pack. You add nothing.");
     expect(base).not.toContain('id="install-text"');
   });
 
@@ -205,13 +205,13 @@ describe("the site build", () => {
     }
   });
 
-  test("every page, its tab icon, and the README carry the same Fleet logo", () => {
+  test("every page, its tab icon, and the README carry the same Hedge logo", () => {
     for (const [path, html] of pagesOf(files)) {
       expect([path, html.includes(`<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,${encodeURIComponent(logoMark)}">`)]).toEqual([path, true]);
       expect([path, html.split(logoMark).length]).toEqual([path, 3]);
     }
-    expect(readFileSync(join(root, "docs", "fleet-logo.svg"), "utf8").trim()).toBe(logoMark);
-    expect(readFileSync(join(root, "README.md"), "utf8")).toContain('src="docs/fleet-logo.svg"');
+    expect(readFileSync(join(root, "docs", "hedge-logo.svg"), "utf8").trim()).toBe(logoMark);
+    expect(readFileSync(join(root, "README.md"), "utf8")).toContain('src="docs/hedge-logo.svg"');
   });
 
   test("the public build refuses a private pack source", async () => {
@@ -233,7 +233,7 @@ describe("the site build", () => {
       expect(boxOf(landing, where)).not.toContain(`name="${where}:posthog"`);
     }
     expect(visibleText(page("packs/posthog/index.html", site))).toContain("Team devbox");
-    expect(promptOn(page("packs/posthog/index.html", site), "install")).toContain("fleet packs --add posthog");
+    expect(promptOn(page("packs/posthog/index.html", site), "install")).toContain("hedge packs --add posthog");
     expect(teamData.packs.flatMap((pack) => pack.workflows).map((workflow) => workflow.id)).toContain("previews");
     for (const [path, html] of pagesOf(site)) expect([path, localTargets(path, html).filter((target) => !(target in site))]).toEqual([path, []]);
   });
@@ -264,7 +264,7 @@ describe("the site build", () => {
   });
 
   test("the README's overview picture says in its alt text what the picture's own description says", () => {
-    const description = readFileSync(join(root, "docs", "fleet.svg"), "utf8").match(/<desc[^>]*>([^<]+)<\/desc>/)![1]!;
+    const description = readFileSync(join(root, "docs", "hedge.svg"), "utf8").match(/<desc[^>]*>([^<]+)<\/desc>/)![1]!;
     expect(description.length).toBeGreaterThan(40);
     expect(readFileSync(join(root, "README.md"), "utf8")).toContain(`alt="${description}"`);
   });

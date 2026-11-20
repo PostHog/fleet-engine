@@ -24,6 +24,7 @@ import { signerSetting } from "../adapters/identity/signers.ts";
 import { engineSettings } from "../pack/manifest.ts";
 import { placedMachine } from "../profile/profile.ts";
 import { forwardId, hubForward } from "../hub/ssh.ts";
+import { asHedgeLine } from "./engine-command.ts";
 
 export class ResolveError extends Error {}
 
@@ -32,7 +33,7 @@ const hubAlias = "hub.alias";
 export const engineCommands = ["setup", "apply", "doctor", "update", "packs", "settings", "set", "devbox", "hub", "run", "credential"];
 
 /** Why a machine leaves out an item of the hub while a profile with devboxes names no hub. */
-export const hublessReason = "your profile names no hub. Run fleet hub here on the machine that should be the hub.";
+export const hublessReason = "your profile names no hub. Run hedge hub here on the machine that should be the hub.";
 
 /** Guide names the engine writes itself. */
 const engineGuides = ["skill-settings"];
@@ -80,10 +81,10 @@ export function resolve(profile: Profile, saved: MachineFile, sources: FetchedSo
   const fits = (pack: string, item: Scope, label: string) => {
     const unknown = declared && item.unless?.find((id) => !declared.has(id));
     if (unknown) throw new ResolveError(`${pack}: ${label} gives way to workflow ${unknown}, which no pack declares`);
-    const elected = item.oncePerFleet && onceRunner ? machine.name === onceRunner : undefined;
+    const elected = (item.oncePerHedge ?? item.oncePerFleet) && onceRunner ? machine.name === onceRunner : undefined;
     const reason =
       item.on && !item.on.includes(os) ? `not on ${os}`
-      : elected === false ? `runs once per fleet, on ${onceRunner}`
+      : elected === false ? `runs on one of your machines only, ${onceRunner}`
       : !elected && item.roles && !item.roles.includes(machine.role) && !(solo && item.roles.includes("solo")) ? (hubless && item.roles.includes("hub") ? hublessReason : `not on a ${machine.role}`)
       : item.plans && !item.plans.includes(profile.plan) ? `not for plan ${profile.plan}`
       : item.workflow && !active.has(item.workflow) ? `workflow ${item.workflow} is off`
@@ -99,9 +100,9 @@ export function resolve(profile: Profile, saved: MachineFile, sources: FetchedSo
     const pack = manifest.name;
     for (const entry of manifest.files ?? []) if (fits(pack, entry, `file ${entry.target}`)) packFiles.push({ target: entry.target, source: within(dir, entry.path, pack) });
     const rules = (manifest.codexRules ?? []).filter((entry) => fits(pack, { ...entry, plans: entry.plans ?? codexPlans }, `codex rules ${entry.path}`));
-    if (rules.length) packFiles.push({ target: `.codex/rules/fleet-${pack}.rules`, content: rules.map((entry) => readFileSync(within(dir, entry.path, pack), "utf8").replace(/\n?$/, "\n")).join("") });
+    if (rules.length) packFiles.push({ target: `.codex/rules/hedge-${pack}.rules`, content: rules.map((entry) => readFileSync(within(dir, entry.path, pack), "utf8").replace(/\n?$/, "\n")).join("") });
     for (const job of manifest.jobs ?? []) if (fits(pack, job, `job ${job.id}`)) plan.jobs.push({ ...job, pack });
-    for (const step of manifest.human ?? []) if (fits(pack, step, `human ${step.id}`)) plan.human.push({ ...step, pack });
+    for (const step of manifest.human ?? []) if (fits(pack, step, `human ${step.id}`)) plan.human.push({ ...step, ...(step.command ? { command: asHedgeLine(step.command) } : {}), pack });
     for (const step of manifest.steps ?? []) {
       if (fits(pack, step, `step ${step.id}`)) plan.steps.push({ ...step, pack });
       else if (step.undo && plan.dropped.at(-1)?.reason === `workflow ${step.workflow} is off`) (plan.undo ??= []).push({ ...step, pack, prerequisite: manifest.human?.find((human) => human.id === step.after)?.probe });
@@ -118,7 +119,7 @@ export function resolve(profile: Profile, saved: MachineFile, sources: FetchedSo
     for (const script of manifest.t3ProjectScripts ?? []) {
       if (!fits(pack, script, `t3 project script ${script.id}`)) continue;
       const twin = plan.t3ProjectScripts?.find((item) => `${item.pack}-${item.id}` === `${pack}-${script.id}`);
-      if (twin) throw new ResolveError(`t3 project script ${script.id} of ${pack} and ${twin.id} of ${twin.pack} both get the id fleet-${pack}-${script.id}`);
+      if (twin) throw new ResolveError(`t3 project script ${script.id} of ${pack} and ${twin.id} of ${twin.pack} both get the id hedge-${pack}-${script.id}`);
       (plan.t3ProjectScripts ??= []).push({ ...script, pack });
     }
     for (const entry of manifest.config ?? []) {
@@ -420,7 +421,7 @@ function instructionFiles(order: Candidate[], profile: Profile, models: ModelRow
   ]);
   if (profile.aboutMe?.trim()) fragments.push(`## About me\n\n${profile.aboutMe.trim()}\n`);
   const content = fragments.map((fragment) => fragment.trim()).join("\n\n") + "\n";
-  return [".agents/AGENTS.md", ".codex/AGENTS.md", ".claude/rules/fleet.md"].map((target) => ({ target, content }));
+  return [".agents/AGENTS.md", ".codex/AGENTS.md", ".claude/rules/hedge.md"].map((target) => ({ target, content }));
 }
 
 function guideFiles(order: Candidate[], settings: Array<PackSetting & { pack: string }>, values: Record<string, SettingValue>): DesiredFile[] {
@@ -449,7 +450,7 @@ function guideFiles(order: Candidate[], settings: Array<PackSetting & { pack: st
 }
 
 function skillSettings(settings: Array<PackSetting & { pack: string }>, values: Record<string, SettingValue>) {
-  const lines = ["# Skill settings", "", "Values that skills read. Fleet writes this file from your profile."];
+  const lines = ["# Skill settings", "", "Values that skills read. Hedge writes this file from your profile."];
   let pack = "";
   for (const setting of settings) {
     if (setting.pack !== pack) lines.push("", `## ${(pack = setting.pack)}`, "");

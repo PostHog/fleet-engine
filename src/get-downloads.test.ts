@@ -23,7 +23,7 @@ describe("get.sh downloads", () => {
     box.failDownloads("*gh_9.9.9_linux_amd64.tar.gz", 99);
     const result = getSh(box, ["--ref", "v0.1.0", "--install-only"]);
     expect(result.code).toBe(1);
-    expect(result.output).toContain("Fleet: could not download gh.");
+    expect(result.output).toContain("Hedge: could not download gh.");
     expect(curlCalls(result.calls).filter((call) => call.includes("gh_9.9.9_linux_amd64.tar.gz"))).toHaveLength(3);
   });
 
@@ -71,7 +71,7 @@ describe("get.sh downloads", () => {
     expect(failed.code).toBe(1);
     expect(readdirSync(tmp).filter((name) => existsSync(join(tmp, name, "curl")))).toEqual([]);
     expect(failed.output).toContain("returned HTTP 403");
-    expect(failed.output).toContain("Fleet: T3 Code did not install.");
+    expect(failed.output).toContain("Hedge: T3 Code did not install.");
     expect(failed.calls.split("\n").filter((call) => call.startsWith("t3 installer"))).toHaveLength(3);
   });
 });
@@ -79,42 +79,42 @@ describe("get.sh downloads", () => {
 describe("get.sh with an existing engine directory", () => {
   test("refuses a directory that is not an engine, and an engine with local changes", () => {
     const box = sandbox("Linux");
-    const engineDir = join(box.home, ".local/share/fleet/engine");
+    const engineDir = join(box.home, ".local/share/hedge/engine");
     mkdirSync(engineDir, { recursive: true });
     writeFileSync(join(engineDir, "notes.txt"), "mine\n");
-    expect(getSh(box, ["--ref", "v0.1.0", "--profile", profile()])).toMatchObject({ code: 1, output: expect.stringContaining("holds files that are not a Fleet engine") });
+    expect(getSh(box, ["--ref", "v0.1.0", "--profile", profile()])).toMatchObject({ code: 1, output: expect.stringContaining("holds files that are not a Hedge engine") });
     expect(readFileSync(join(engineDir, "notes.txt"), "utf8")).toBe("mine\n");
 
     const fresh = sandbox("Linux");
     expect(getSh(fresh, ["--ref", "v0.1.0", "--install-only"]).code).toBe(0);
-    const installed = join(fresh.home, ".local/share/fleet/engine");
-    writeFileSync(join(installed, "fleet"), "# my patch\n");
+    const installed = join(fresh.home, ".local/share/hedge/engine");
+    writeFileSync(join(installed, "hedge"), "# my patch\n");
     expect(getSh(fresh, ["--ref", "v0.1.0", "--profile", profile()])).toMatchObject({ code: 1, output: expect.stringContaining("has local changes") });
-    expect(readFileSync(join(installed, "fleet"), "utf8")).toBe("# my patch\n");
+    expect(readFileSync(join(installed, "hedge"), "utf8")).toBe("# my patch\n");
   });
 });
 
 describe("profile install.sh shim", () => {
-  function shim(fleetJson: string, curl: string) {
+  function shim(hedgeJson: string, curl: string) {
     const box = sandbox("Linux");
     const dir = temp.make("profile-");
-    writeFileSync(join(dir, "fleet.json"), fleetJson);
+    writeFileSync(join(dir, "hedge.json"), hedgeJson);
     cpSync(join(repoRoot, "templates/profile/install.sh"), join(dir, "install.sh"));
     writeFileSync(join(box.bin, "curl"), `#!/bin/sh\necho "curl $*" >> "${box.log}"\n${curl}\n`);
     const result = Bun.spawnSync(["sh", join(dir, "install.sh")], { cwd: box.home, env: { PATH: box.bin, HOME: box.home } });
     return { dir, code: result.exitCode, output: result.stderr.toString(), calls: existsSync(box.log) ? readFileSync(box.log, "utf8") : "" };
   }
   test("runs get.sh from the engine pin of compact JSON with the profile directory", () => {
-    const json = '{"engine":{"repo":"PostHog/fleet-engine","ref":"v0.1.0","channel":"release"},"sources":[{"name":"team","repo":"me/team","ref":"v9.0.0"}]}';
+    const json = '{"engine":{"repo":"PostHog/hedge","ref":"v0.1.0","channel":"release"},"sources":[{"name":"team","repo":"me/team","ref":"v9.0.0"}]}';
     const box = sandbox("Linux");
     const dir = temp.make("profile-");
-    writeFileSync(join(dir, "fleet.json"), json);
+    writeFileSync(join(dir, "hedge.json"), json);
     cpSync(join(repoRoot, "templates/profile/install.sh"), join(dir, "install.sh"));
     writeFileSync(join(box.bin, "curl"), `#!/bin/sh\necho "curl $*" >> "${box.log}"\nwhile [ $# -gt 1 ]; do [ "$1" = -o ] && out=$2; shift; done\necho 'echo "get.sh $*" >> "${box.log}"' > "$out"\n`);
     const result = Bun.spawnSync(["sh", join(dir, "install.sh")], { cwd: box.home, env: { PATH: box.bin, HOME: box.home } });
     expect(result.exitCode).toBe(0);
     const calls = readFileSync(box.log, "utf8");
-    expect(calls).toContain("curl -fsSL https://raw.githubusercontent.com/PostHog/fleet-engine/v0.1.0/get.sh -o ");
+    expect(calls).toContain("curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/v0.1.0/get.sh -o ");
     expect(calls).toContain(`get.sh --ref v0.1.0 --profile ${dir}`);
   });
 

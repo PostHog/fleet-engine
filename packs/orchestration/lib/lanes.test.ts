@@ -83,7 +83,7 @@ const expected = (host: string) => [
   "  #7 task gone: no box has its thread mcp:nowhere. Reconcile the ticket as an orphaned lane.",
 ];
 
-test("fleet lanes finds each lane on this machine or a linked environment and names the ones that need the conductor", async () => {
+test("hedge lanes finds each lane on this machine or a linked environment and names the ones that need the conductor", async () => {
   const t3 = await stub(fixture);
   const lines: string[] = [];
   const fetchIssue = async (_owner: string, _repo: string, number: number) => (number === 1 ? map : issue(tickets.find((ticket) => ticket.number === number)!));
@@ -96,7 +96,7 @@ test("fleet lanes finds each lane on this machine or a linked environment and na
   expect(t3.toolCalls.every(({ args }) => args.environmentId === "env-linked")).toBe(true);
 });
 
-test("fleet lanes runs as a pack command against GitHub through gh and the local T3 server", async () => {
+test("hedge lanes runs as a pack command against GitHub through gh and the local T3 server", async () => {
   const t3 = await stub({ ...fixture, tools: linkedTools([linkedThread("mcp:linked-finished", { status: "completed", items: [linkedItem("assistant_message", "Done.")] })]) });
   const bin = join(t3.home, "bin");
   await mkdir(bin);
@@ -116,7 +116,7 @@ cat "$(dirname "$0")/\${kind:-discussion}-$number.json"
 `);
   await chmod(join(bin, "gh"), 0o755);
 
-  const child = Bun.spawn(["bun", command, "acme/maps#1", "--stall", "60"], { env: { ...Bun.env, HOME: t3.home, PATH: `${bin}:${Bun.env.PATH}`, FLEET_SETTINGS: "{}" }, stdout: "pipe", stderr: "pipe" });
+  const child = Bun.spawn(["bun", command, "acme/maps#1", "--stall", "60"], { env: { ...Bun.env, HOME: t3.home, PATH: `${bin}:${Bun.env.PATH}`, HEDGE_SETTINGS: "{}" }, stdout: "pipe", stderr: "pipe" });
   const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
 
   expect(stderr).toBe("");
@@ -160,10 +160,10 @@ test("a lane's final message longer than one read still shows the ask on its las
   expect(t3.toolCalls.filter(({ name, args }) => name === "t3_thread_read" && args.itemId).map(({ args }) => [args.itemId, args.textOffset])).toEqual([["final", 50_000]]);
 });
 
-test("fleet lanes refuses a bad map or stall, and says when no lane needs attention", async () => {
+test("hedge lanes refuses a bad map or stall, and says when no lane needs attention", async () => {
   const t3 = await stub({ shell: { projects: [], threads: [] } });
   const io = { home: t3.home, host: "this-box", now, print: () => {}, fetchIssue: async () => ({ ...map, children: [] }), fetchDiscussion: async () => ({ body: "", comments: [] }) };
-  const usage = "Usage: fleet lanes <map URL | owner/repo#number> [--stall minutes]";
+  const usage = "Usage: hedge lanes <map URL | owner/repo#number> [--stall minutes]";
   await expect(runLanes([], io)).rejects.toThrow(usage);
   await expect(runLanes(["acme/maps#1", "--stall", "soon"], io)).rejects.toThrow(usage);
   await expect(runLanes(["not a map"], io)).rejects.toThrow(usage);

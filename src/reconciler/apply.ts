@@ -7,11 +7,12 @@ import type { Action, CatalogEntry, Finding, HumanStep, Owned, PackCheck, Plan, 
 import { engineCommand } from "./engine-command.ts";
 import { changeLedger, ledgerKey, readLedger, undoVariable, type Ledger, type LedgerStep } from "./ledger.ts";
 import { hublessReason } from "./resolve.ts";
+import { withLegacyNames } from "../legacy.ts";
 
 export type AdapterContext = { home: string; dryRun: boolean; adopt: string[]; adoptFrom?: string[] };
-export type AdapterResult = { actions: Action[]; findings: Finding[]; blocked?: boolean };
+export type AdapterResult = { actions: Action[]; findings: Finding[]; blocked?: boolean; failed?: boolean };
 export type Adapter = {
-  name: "files" | "config" | "jobs" | "identity" | "t3";
+  name: "files" | "config" | "jobs" | "identity" | "t3" | "fleet";
   /** The targets that --adopt may name for this adapter. */
   targets(plan: Plan): string[];
   apply(plan: Plan, context: AdapterContext): Promise<AdapterResult>;
@@ -20,7 +21,7 @@ export type Runner = (command: string[], env?: Record<string, string>) => Promis
 /** Fills this machine's credential for each served service: the hub issues its own, and a node pulls its own from the hub. Reports what failed. */
 export type Issuer = (entries: CatalogEntry[], node: string) => Promise<Finding[]>;
 
-export const filesGroup = "fleet";
+export const filesGroup = "hedge";
 
 /** Files the private Fleet wrote that a pack now replaces, which --adopt-from removes while they are unchanged. */
 const retiredTargets = [".codex/rules/fleet.rules"];
@@ -64,7 +65,7 @@ function keptFindings(kept: Action[]): Finding[] {
   return kept.map((action) => ({
       id: `kept:${action.target}`,
       pack: "engine",
-      say: `Kept your ${action.target} (${action.reason}). Run fleet apply --adopt ${action.target} to take Fleet's version.`,
+      say: `Kept your ${action.target} (${action.reason}). Run hedge apply --adopt ${action.target} to take Hedge's version.`,
   }));
 }
 
@@ -77,7 +78,7 @@ function claimFindings(claimed: Action[]): Finding[] {
   return [...owners].map(([owner, actions]) => ({
     id: `owner:${owner}`,
     pack: "engine",
-    say: `Another Fleet setup keeps ${actions.length} of the files your profile writes, such as ${actions[0]!.target}, under the name ${owner} in ~/.local/state/fleet/state.json. Run fleet apply --adopt-from ${owner} to take them over. Fleet backs up that state and each file or linked folder it replaces in ~/.local/state/fleet/backups. A linked folder moves whole, with everything in it.`,
+    say: `Another Hedge setup keeps ${actions.length} of the files your profile writes, such as ${actions[0]!.target}, under the name ${owner} in ~/.local/state/hedge/state.json. Run hedge apply --adopt-from ${owner} to take them over. Hedge backs up that state and each file or linked folder it replaces in ~/.local/state/hedge/backups. A linked folder moves whole, with everything in it.`,
     repair: "human",
   }));
 }
@@ -93,7 +94,7 @@ export async function apply(plan: Plan, options: { home: string; dryRun?: boolea
   report.findings.push(...packFindings(plan), ...hubFindings(plan));
   if (plan.unanswered.length) {
     report.ok = false;
-    report.findings.push(...plan.unanswered.map((setting) => ({ id: `unanswered:${setting.key}`, pack: setting.key.split(".")[0] ?? "", say: `${setting.question} Answer it with fleet set ${setting.key}=<value>.`, repair: "human" as const })));
+    report.findings.push(...plan.unanswered.map((setting) => ({ id: `unanswered:${setting.key}`, pack: setting.key.split(".")[0] ?? "", say: `${setting.question} Answer it with hedge set ${setting.key}=<value>.`, repair: "human" as const })));
     return report;
   }
   const run = viaEngine(plan, options.run ?? spawnRunner(options.home, plan.machine.profileDir));
@@ -101,10 +102,12 @@ export async function apply(plan: Plan, options: { home: string; dryRun?: boolea
   const issue = !context.dryRun && node && options.issue ? (ready: CatalogEntry[]) => options.issue!(ready, node) : undefined;
   const gated = await gate(plan, run, !context.dryRun, issue);
   report.findings.push(...gated.issued, ...gated.failed.map((step) => humanFinding(step, context.dryRun)), ...gated.failedChecks.map(checkFinding));
+  if (!context.dryRun && gated.failed.some(repairedByHedge)) report.ok = false;
   for (const adapter of adapters) {
     const result = await adapter.apply(gated.plan, context);
     report.actions.push(...result.actions);
     report.findings.push(...result.findings);
+    if (result.failed) report.ok = false;
     if (!result.blocked) continue;
     report.ok = false;
     if (!context.dryRun) return report;
@@ -130,7 +133,7 @@ export async function apply(plan: Plan, options: { home: string; dryRun?: boolea
       }
       const target = `step ${step.pack}/${step.id}`;
       if (context.dryRun) {
-        report.actions.push({ target, operation: "remove", reason: `fleet apply would undo it: ${because(step, cause)}` });
+        report.actions.push({ target, operation: "remove", reason: `hedge apply would undo it: ${because(step, cause)}` });
         continue;
       }
       if ((await undoing(step.undo)) === 0 && !heldCodes.includes(await undoing(step.check))) {
@@ -138,7 +141,7 @@ export async function apply(plan: Plan, options: { home: string; dryRun?: boolea
         report.actions.push({ target, operation: "remove", reason: because(step, cause) });
         continue;
       }
-      report.findings.push({ id: `undo:${step.id}`, pack: step.pack, say: `Fleet could not undo step ${step.id} of the ${step.pack} pack, ${whose(cause)}. The next fleet apply tries again.`, repair: "apply" });
+      report.findings.push({ id: `undo:${step.id}`, pack: step.pack, say: `Hedge could not undo step ${step.id} of the ${step.pack} pack, ${whose(cause)}. The next hedge apply tries again.`, repair: "apply" });
       if (step.pack === "base") report.ok = false;
     }
   };
@@ -163,7 +166,7 @@ export async function apply(plan: Plan, options: { home: string; dryRun?: boolea
     if (ran && (holds || !step.check)) continue;
     failed.add(step.pack);
     report.findings.push({ id: `step:${step.id}`, pack: step.pack, say: ran ? `Step ${step.id} of the ${step.pack} pack ran, but does not pass its check.` : `Step ${step.id} of the ${step.pack} pack failed.`, repair: "apply" });
-    if (step.pack === "base") report.ok = false;
+    report.ok = false;
   }
   for (const step of context.dryRun ? [] : plan.human) {
     if (step.undo && (gated.passed.includes(step) || (await run(step.probe)) === 0)) await changeLedger(options.home, "human", ledgerKey(step), { pack: step.pack, id: step.id, probe: step.left ?? step.probe, undo: step.undo });
@@ -189,7 +192,7 @@ export async function check(plan: Plan, options: { home: string; adapters?: Adap
   }
   const ledger = await readLedger(options.home);
   for (const { step, cause } of undoItems(plan, ledger.steps)) {
-    if (report.actions.some((action) => action.target === `step ${step.pack}/${step.id}`)) report.findings.push({ id: `undo:${step.id}`, pack: step.pack, say: `${stillHolds(step, cause)} Run fleet apply to undo it.`, repair: "apply" });
+    if (report.actions.some((action) => action.target === `step ${step.pack}/${step.id}`)) report.findings.push({ id: `undo:${step.id}`, pack: step.pack, say: `${stillHolds(step, cause)} Run hedge apply to undo it.`, repair: "apply" });
   }
   report.findings.push(...(await leftByHand(plan, ledger, run)), ...secretsLeft(plan, options.home));
   for (const step of plan.human) {
@@ -204,11 +207,13 @@ export async function check(plan: Plan, options: { home: string; adapters?: Adap
 
 const checkFinding = (item: Owned<PackCheck>): Finding => ({ id: `check:${item.id}`, pack: item.pack, say: item.say, repair: "apply" });
 
+const repairedByHedge = (step: HumanStep) => step.repair !== undefined && !step.command;
+
 function humanFinding(step: Owned<HumanStep>, repairStillToRun: boolean): Finding {
-  return { id: `human:${step.id}`, pack: step.pack, say: step.command ? `${step.say} Run: ${step.command}` : step.say, repair: repairStillToRun && step.repair && !step.command ? "apply" : "human" };
+  return { id: `human:${step.id}`, pack: step.pack, say: step.command ? `${step.say} Run: ${step.command}` : step.say, repair: repairStillToRun && repairedByHedge(step) ? "apply" : "human" };
 }
 
-/** Tests each check once, running a Fleet repair first when a human step's probe fails and repairs are on, then drops the items whose check fails. A config entry may also wait for a pack check, which has no repair. It tests the checks that served services wait for first, which only the hub can, and fills their credentials, so a repair that reads a credential sees it in the same apply. */
+/** Tests each check once, running a Hedge repair first when a human step's probe fails and repairs are on, then drops the items whose check fails. A config entry may also wait for a pack check, which has no repair. It tests the checks that served services wait for first, which only the hub can, and fills their credentials, so a repair that reads a credential sees it in the same apply. */
 async function gate(plan: Plan, run: Runner, repair: boolean, issue?: (ready: CatalogEntry[]) => Promise<Finding[]>): Promise<{ plan: Plan; failed: Array<Owned<HumanStep>>; passed: Array<Owned<HumanStep>>; failedChecks: Array<Owned<PackCheck>>; issued: Finding[] }> {
   const tested = new Map<Owned<HumanStep>, boolean>();
   const probe = async (step: Owned<HumanStep>) => {
@@ -304,12 +309,12 @@ async function leftByHand(plan: Plan, ledger: Ledger, run: Runner): Promise<Find
   return findings;
 }
 
-/** A note for each folder of pack secrets whose pack is off: Fleet keeps them, because a credential is costly to make again. */
+/** A note for each folder of pack secrets whose pack is off: Hedge keeps them, because a credential is costly to make again. */
 function secretsLeft(plan: Plan, home: string): Finding[] {
   const on = new Set(plan.packs.map((pack) => pack.name));
-  const folder = join(home, ".config/fleet/secrets");
+  const folder = join(home, ".config/hedge/secrets");
   const packs = existsSync(folder) ? readdirSync(folder, { withFileTypes: true }).filter((entry) => entry.isDirectory() && packName.test(entry.name) && !on.has(entry.name)).map((entry) => entry.name) : [];
-  return packs.sort().map((pack) => ({ id: `secrets:${pack}`, pack, say: `The ${pack} pack is off. Its secrets stay in ~/.config/fleet/secrets/${pack}. Delete that folder when you no longer need them.` }));
+  return packs.sort().map((pack) => ({ id: `secrets:${pack}`, pack, say: `The ${pack} pack is off. Its secrets stay in ~/.config/hedge/secrets/${pack}. Delete that folder when you no longer need them.` }));
 }
 
 async function undoHeld(step: LedgerStep, run: Runner): Promise<Held> {
@@ -322,8 +327,8 @@ async function undoHeld(step: LedgerStep, run: Runner): Promise<Held> {
 
 function undoFinding(step: LedgerStep, cause: Cause, held: Exclude<Held, "yes" | "no">): Finding {
   const id = `undo:${step.id}`;
-  if (held === "unknown") return { id, pack: step.pack, say: `Fleet cannot tell whether step ${step.id} of the ${step.pack} pack still holds what it set, though ${though(cause)}.`, repair: "apply" };
-  const say = `Step ${step.id} of the ${step.pack} pack waits for ${step.after} before Fleet can undo it.`;
+  if (held === "unknown") return { id, pack: step.pack, say: `Hedge cannot tell whether step ${step.id} of the ${step.pack} pack still holds what it set, though ${though(cause)}.`, repair: "apply" };
+  const say = `Step ${step.id} of the ${step.pack} pack waits for ${step.after} before Hedge can undo it.`;
   return held === "waits" ? { id, pack: step.pack, say, repair: "human" } : { id, pack: step.pack, say };
 }
 
@@ -358,21 +363,21 @@ function hubFindings(plan: Plan): Finding[] {
   const left = plan.dropped.filter((item) => item.reason === hublessReason).length;
   if (!left) return [];
   const items = left === 1 ? "1 item that runs" : `${left} items that run`;
-  return [{ id: "hubless", pack: "engine", say: `Your profile lists devboxes but names no hub, so this machine leaves out ${items} on the hub. Run fleet hub here on the machine that should be the hub.` }];
+  return [{ id: "hubless", pack: "engine", say: `Your profile lists devboxes but names no hub, so this machine leaves out ${items} on the hub. Run hedge hub here on the machine that should be the hub.` }];
 }
 
 function viaEngine(plan: Plan, run: Runner): Runner {
   return (command, env) => run(engineCommand(command, plan.engineRoot), env);
 }
 
-/** Names the step in FLEET_UNDO, so a nested fleet runs the command of a pack that is off, but only for this step's undo, check and prerequisite. */
+/** Names the step in HEDGE_UNDO, so a nested hedge runs the command of a pack that is off, but only for this step's undo, check and prerequisite. */
 const undoRunner = (run: Runner, step: LedgerStep): Runner => (command) => run(command, { [undoVariable]: ledgerKey(step) });
 
-/** Runs commands with the plan's home directory as HOME, so a step installs into the home it applies to, and with the plan's profile, so a nested fleet reads the profile this run applies or checks. */
+/** Runs commands with the plan's home directory as HOME, so a step installs into the home it applies to, and with the plan's profile, so a nested hedge reads the profile this run applies or checks. */
 function spawnRunner(home: string, profileDir: string | undefined): Runner {
   return async (command, env = {}) => {
     try {
-      return await Bun.spawn(command, { stdout: "ignore", stderr: "ignore", env: { ...Bun.env, HOME: home, ...(profileDir ? { FLEET_PROFILE_DIR: profileDir } : {}), ...env } }).exited;
+      return await Bun.spawn(command, { stdout: "ignore", stderr: "ignore", env: withLegacyNames({ ...Bun.env, HOME: home, ...(profileDir ? { HEDGE_PROFILE_DIR: profileDir } : {}), ...env }) }).exited;
     } catch {
       return 127;
     }

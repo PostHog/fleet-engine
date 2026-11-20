@@ -14,12 +14,12 @@ index 023064d..838f025 100644
 +  send(request: ElicitRequest, options?: RequestOptions): Promise<ElicitResult>;
 +};
 +type ForwardingOptions = NonNullable<Parameters<Client['callTool']>[1]> & {
-+  fleetElicitation?: ElicitationForwarder;
++  hedgeElicitation?: ElicitationForwarder;
 +};
 +
  /** Keep v1's single-page discovery and output validation while using SDK v2. */
  export class LegacyMcpClient extends Client {
-+  fleetRetiredConnection = false;
++  hedgeRetiredConnection = false;
 +  private toolQueue: Promise<void> = Promise.resolve();
 +  private readonly urlElicitations = new Map<string, ElicitationForwarder>();
 +  private elicitationForwarder?: ElicitationForwarder;
@@ -70,10 +70,10 @@ index 023064d..838f025 100644
 -      ...options,
 -      toolDefinition: options?.toolDefinition ?? this.listedTools.get(params.name),
 -    });
-+  async retireFleetConnection() {
-+    if (this.fleetRetiredConnection) return;
++  async retireHedgeConnection() {
++    if (this.hedgeRetiredConnection) return;
 +    this.urlElicitations.clear();
-+    this.fleetRetiredConnection = true;
++    this.hedgeRetiredConnection = true;
 +    this.onclose?.();
 +    await this.close().catch(() => {});
 +  }
@@ -84,19 +84,19 @@ index 023064d..838f025 100644
 +    this.toolQueue = new Promise<void>((resolve) => { release = resolve; });
 +    await previous;
 +    try {
-+      const { fleetElicitation, ...callOptions } = options ?? {};
-+      if (this.fleetRetiredConnection) throw Object.assign(new Error('Fleet upstream connection retired'), { code: 'FLEET_RETIRED_CONNECTION' });
-+      fleetElicitation?.signal.throwIfAborted();
-+      this.elicitationForwarder = fleetElicitation;
++      const { hedgeElicitation, ...callOptions } = options ?? {};
++      if (this.hedgeRetiredConnection) throw Object.assign(new Error('Hedge upstream connection retired'), { code: 'HEDGE_RETIRED_CONNECTION' });
++      hedgeElicitation?.signal.throwIfAborted();
++      this.elicitationForwarder = hedgeElicitation;
 +      return await super.callTool(params, {
 +        ...callOptions,
-+        ...(fleetElicitation ? { signal: callOptions.signal
-+          ? AbortSignal.any([callOptions.signal, fleetElicitation.signal])
-+          : fleetElicitation.signal } : {}),
++        ...(hedgeElicitation ? { signal: callOptions.signal
++          ? AbortSignal.any([callOptions.signal, hedgeElicitation.signal])
++          : hedgeElicitation.signal } : {}),
 +        toolDefinition: callOptions.toolDefinition ?? this.listedTools.get(params.name),
 +      });
 +    } catch (error) {
-+      await this.retireFleetConnection();
++      await this.retireHedgeConnection();
 +      throw error;
 +    } finally {
 +      this.elicitationForwarder = undefined;
@@ -133,15 +133,15 @@ index 3cdeb83..f8b77c3 100644
        checkAuthError(result);
        return result;
      } catch (error: any) {
-+      if (!isolated && attempt < maxRetries && client instanceof LegacyMcpClient && !options?.fleetElicitation?.signal.aborted && (error?.code === 'FLEET_RETIRED_CONNECTION' || isRecoverableHttp4xxError(error))) {
-+        await client.retireFleetConnection();
++      if (!isolated && attempt < maxRetries && client instanceof LegacyMcpClient && !options?.hedgeElicitation?.signal.aborted && (error?.code === 'HEDGE_RETIRED_CONNECTION' || isRecoverableHttp4xxError(error))) {
++        await client.retireHedgeConnection();
 +        if (serverInfo.client === client) serverInfo.status = 'disconnected';
 +        await ensureServerReady(serverInfo);
 +        client = serverInfo.client!;
 +        transport = serverInfo.transport;
 +        continue;
 +      }
-+      if (client instanceof LegacyMcpClient && client.fleetRetiredConnection) throw error;
++      if (client instanceof LegacyMcpClient && client.hedgeRetiredConnection) throw error;
        const isHttp40xError = isRecoverableHttp4xxError(error);
        // Only retry for StreamableHTTPClientTransport and SSE transports
        const isStreamableHttp = transport instanceof StreamableHTTPClientTransport;
@@ -150,7 +150,7 @@ index 3cdeb83..f8b77c3 100644
            arguments: finalArgs,
          },
 -        targetServerInfo.options || {},
-+        { ...targetServerInfo.options, fleetElicitation: extra.mcpReq },
++        { ...targetServerInfo.options, hedgeElicitation: extra.mcpReq },
          1,
          isolatedCtx,
        );
@@ -159,7 +159,7 @@ index 3cdeb83..f8b77c3 100644
        serverInfo,
        { ...request.params, name: cleanToolName },
 -      serverInfo.options || {},
-+      { ...serverInfo.options, fleetElicitation: extra.mcpReq },
++      { ...serverInfo.options, hedgeElicitation: extra.mcpReq },
        1,
        isolatedCtx,
      );

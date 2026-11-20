@@ -23,7 +23,7 @@ type CodexLimit = { allowed?: boolean; limit_reached?: boolean; primary_window?:
 type Call = (path: string, init?: RequestInit) => Promise<unknown>;
 
 export const proxyUrl = "http://127.0.0.1:8317";
-export const proxyDir = (home: string) => join(home, ".local/share/fleet-cli-proxy");
+export const proxyDir = (home: string) => join(home, ".local/share/hedge-cli-proxy");
 export const managementFile = (home: string) => join(proxyDir(home), "management.env");
 export const codexCatalogPath = (home: string) => join(proxyDir(home), "codex-catalog.json");
 export const modelRegistryPath = (home: string) => join(proxyDir(home), "models-catalog.json");
@@ -240,7 +240,7 @@ function usageWindow(raw: RawWindow): UsageWindow | undefined {
 
 function describe(credential: Credential, priority: number | undefined, now: number): string {
   const change = priority === undefined ? "paused" : credential.priority === priority ? `priority ${priority}` : `priority ${credential.priority} -> ${priority}`;
-  if (!credential.usage) return `${label(credential)}: ${change}, usage unreadable${credential.loginExpired ? ": its login expired. Sign it in again on the hub; fleet cli-proxy doctor names the command" : ""}`;
+  if (!credential.usage) return `${label(credential)}: ${change}, usage unreadable${credential.loginExpired ? ": its login expired. Sign it in again on the hub; hedge cli-proxy doctor names the command" : ""}`;
   const window = (span: string, value?: UsageWindow) => (value ? `${span} ${value.utilization}% resets in ${value.resetsAt === undefined ? "unknown" : duration(value.resetsAt - now)}` : `${span} unknown`);
   return `${label(credential)}: ${change}, ${window("7d", credential.usage.sevenDay)}, ${window("5h", credential.usage.fiveHour)}`;
 }
@@ -253,14 +253,14 @@ function duration(milliseconds: number): string {
 export async function readManagementKey(home: string): Promise<string> {
   const text = await readFile(managementFile(home), "utf8").catch(() => "");
   const key = managementPattern.exec(text)?.[1];
-  if (!key) throw new Error(`${managementFile(home)} holds no management key. Run fleet cli-proxy install.`);
+  if (!key) throw new Error(`${managementFile(home)} holds no management key. Run hedge cli-proxy install.`);
   return key;
 }
 
 export async function balanceCommand(args: string[], deps: BalanceDeps): Promise<number> {
   requireHubRole(deps.home, "cli-proxy-balance");
   const managementKey = await readManagementKey(deps.home);
-  if (args.some((arg) => arg !== "--dry-run")) throw new Error("Usage: fleet cli-proxy-balance [--dry-run]");
+  if (args.some((arg) => arg !== "--dry-run")) throw new Error("Usage: hedge cli-proxy-balance [--dry-run]");
   if (!args.includes("--dry-run")) await refreshCodexCatalog({ path: codexCatalogPath(deps.home), registryPath: modelRegistryPath(deps.home), fetch: deps.fetch, now: deps.now, log: deps.log }).catch((error) => deps.log(`Codex catalog: ${(error as Error).message}`));
   const pausedPath = join(stateDir(deps.home, deps.env ?? process.env), "cli-proxy-paused.json");
   await balance({ fetch: deps.fetch, managementKey, now: deps.now(), dryRun: args.includes("--dry-run"), ledger: deps.ledger, pausedPath, log: deps.log });

@@ -6,7 +6,8 @@ import { withT3Session } from "../../base/lib/t3/index.ts";
 import { capture, type Capture, type Env, type Result } from "./coder.ts";
 import { isKeptForBoxes, isNodeName } from "../../../src/hub/names.ts";
 import type { Clock } from "./pool.ts";
-import { onHub } from "../../../src/hub/ssh.ts";
+import { onHub, remoteLauncher } from "../../../src/hub/ssh.ts";
+import { profileFile } from "../../../src/legacy.ts";
 
 export type BoxSettings = {
   alias: string; coderUrl: string; template: string; diskGigabytes: number; poolSize: number;
@@ -35,17 +36,17 @@ export const shellLimitMs = 5 * 60_000;
 export const hubCallLimitMs = 3 * 3_600_000;
 export const quote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
 export const peerSsh = (alias: string, command: string) => ["ssh", "-o", "BatchMode=yes", "-o", "ForwardAgent=no", "-o", "ConnectTimeout=10", alias, `bash -lc ${quote(command)}`];
-export const remoteFleet = (args: string) => `sh "$HOME/.local/share/fleet/engine/fleet" ${args}`;
-const machinePath = (home: string) => join(home, ".config/fleet/machine.json");
+export const remoteHedge = (args: string) => `sh ${remoteLauncher} ${args}`;
+const machinePath = (home: string) => join(home, ".config/hedge/machine.json");
 
-export const proxyOn = (env: Env) => typeof (JSON.parse(env.FLEET_SETTINGS ?? "{}") as Record<string, unknown>)["hub.proxyAccounts"] === "number";
+export const proxyOn = (env: Env) => typeof (JSON.parse(env.HEDGE_SETTINGS ?? "{}") as Record<string, unknown>)["hub.proxyAccounts"] === "number";
 export function panelDays(env: Env): number | undefined {
-  const days = (JSON.parse(env.FLEET_SETTINGS ?? "{}") as Record<string, unknown>)["hub.proxyHistoryDays"];
+  const days = (JSON.parse(env.HEDGE_SETTINGS ?? "{}") as Record<string, unknown>)["hub.proxyHistoryDays"];
   return typeof days === "number" ? days : undefined;
 }
 
 export function readBoxSettings(env: Env): BoxSettings {
-  if (optionalStringSetting("hub.boxTemplate", env) === undefined) throw new Error(boxesTurnedOn(env) ? "Boxes is on, but not ready here. It needs a team pack that brings Coder, and its settings answered: fleet apply names each unanswered setting." : "Boxes is off. To use boxes, or to release boxes that still run, turn it on with fleet packs --workflows boxes=on, then run fleet apply.");
+  if (optionalStringSetting("hub.boxTemplate", env) === undefined) throw new Error(boxesTurnedOn(env) ? "Boxes is on, but not ready here. It needs a team pack that brings Coder, and its settings answered: hedge apply names each unanswered setting." : "Boxes is off. To use boxes, or to release boxes that still run, turn it on with hedge packs --workflows boxes=on, then run hedge apply.");
   const warmCommand = optionalStringSetting("hub.boxWarmCommand", env);
   const httpsHost = optionalStringSetting("hub.httpsHost", env);
   return {
@@ -81,17 +82,17 @@ export function readRole(home: string): string | undefined {
 export function requireHub(home: string, command: string): void {
   const role = readRole(home);
   if (role === "hub") return;
-  throw new Error(`fleet box ${command} runs only on the hub. This machine's role is ${role ?? "not set"}. Run fleet hub here on the hub, or run this there.`);
+  throw new Error(`hedge box ${command} runs only on the hub. This machine's role is ${role ?? "not set"}. Run hedge hub here on the hub, or run this there.`);
 }
 
 function boxesTurnedOn(env: Env): boolean {
-  const path = env.FLEET_PROFILE_DIR ? join(env.FLEET_PROFILE_DIR, "fleet.json") : undefined;
+  const path = env.HEDGE_PROFILE_DIR ? profileFile(env.HEDGE_PROFILE_DIR) : undefined;
   if (!path || !existsSync(path)) return false;
   return (JSON.parse(readFileSync(path, "utf8")) as { workflows?: Record<string, boolean> }).workflows?.boxes === true;
 }
 
 function readProfile(env: Env): { devboxes: string[]; plan?: string; hub?: string } {
-  const path = env.FLEET_PROFILE_DIR ? join(env.FLEET_PROFILE_DIR, "fleet.json") : undefined;
+  const path = env.HEDGE_PROFILE_DIR ? profileFile(env.HEDGE_PROFILE_DIR) : undefined;
   if (!path || !existsSync(path)) return { devboxes: [] };
   const profile = JSON.parse(readFileSync(path, "utf8")) as { devboxes?: string[]; plan?: string; hub?: string };
   return { devboxes: profile.devboxes ?? [], ...(profile.plan ? { plan: profile.plan } : {}), ...(typeof profile.hub === "string" ? { hub: profile.hub } : {}) };
@@ -143,7 +144,7 @@ export function shellsWith(run: Capture, hub: string): Pick<Machine, "onPeer" | 
   };
 }
 
-export function peerMachine(env: Env = Bun.env, home = homedir(), self = savedName(home) ?? hostname(), label = "Fleet box"): PeerMachine {
+export function peerMachine(env: Env = Bun.env, home = homedir(), self = savedName(home) ?? hostname(), label = "Hedge box"): PeerMachine {
   const devboxes = devboxesOf(env, home);
   const hub = stringSetting("hub.alias", env);
   const ownNames = namesOfThisMachine(home, hub);

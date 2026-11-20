@@ -137,7 +137,7 @@ export function modelAsk<T>(row: ModelRow, home: string, env: Env, spawn: Spawn,
         return parsed.is_error ? undefined : parsed.structured_output;
       });
     }
-    const scratch = mkdtempSync(join(tmpdir(), "fleet-dream-analyst-"));
+    const scratch = mkdtempSync(join(tmpdir(), "hedge-dream-analyst-"));
     try {
       writeFileSync(join(scratch, "schema.json"), JSON.stringify(schema));
       const answer = await spawn(analystCommand(row, scratch, prompt, schema), { cwd: scratch, env, stdin: `${prompt}\n\n${input}`, timeoutMs: analystTimeoutMs });
@@ -199,7 +199,7 @@ export async function analyze(run: string, io: AnalyzeIo): Promise<string> {
   recordRuns(state);
   writeFileSync(join(run, "findings.md"), report(run, all, all.length - io.limit, failed));
   if (chosen.length && failed.length === chosen.length) throw new Error(`every analyst failed, the first on ${failed[0]}. Findings: ${join(run, "findings.md")}`);
-  io.say(`Fleet dream: analyzed ${chosen.length - failed.length} of ${all.length} sessions${failed.length ? `, ${failed.length} failed: ${failed.join("; ")}` : ""}. Findings: ${join(run, "findings.md")}`);
+  io.say(`Hedge dream: analyzed ${chosen.length - failed.length} of ${all.length} sessions${failed.length ? `, ${failed.length} failed: ${failed.join("; ")}` : ""}. Findings: ${join(run, "findings.md")}`);
   return run;
 }
 

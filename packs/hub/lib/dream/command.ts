@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Env, Result } from "../coder.ts";
-import { quote, readRole, remoteFleet } from "../machine.ts";
+import { quote, readRole, remoteHedge } from "../machine.ts";
 import { analyze, render, type Analyst } from "./analyze.ts";
 import { audit, type Checker } from "./audit.ts";
 import { budget, homeCheckouts, memoryRootIn } from "./budget.ts";
@@ -26,29 +26,29 @@ export type DreamIo = {
 };
 
 const usage = `Usage:
-  fleet dream digest [--since <2d | 36h | ISO time>]   Print this machine's condensed sessions as JSON lines
-  fleet dream collect [--since 2d]                      On the hub: gather the digests of every machine and running box
-  fleet dream analyze [<run>] [--limit n] [--jobs 6]    Ask one analyst per collected session for findings
-  fleet dream audit [<run>] [--limit 40]                Check each note the sync wrote since the last audit against its session
-  fleet dream prepare [--since 2d]                      collect, analyze, then audit; prints the run directory
-  fleet dream run                                       On the hub: prepare, then start the T3 thread that follows the dream skill
-  fleet dream budget [<memory checkout>] [--json]       Check the memory size limits; exit 1 when one fails
-  fleet dream scorecard [<memory checkout>]             On the hub: print the memory scorecard
-  fleet dream logs [--since 7d]                         Print this machine's Dream sessions, for the deep dream
-  fleet dream publish <worktree>                        Push a Dream worktree's commits to main, with the memory sync's guards
-  fleet dream search <word>...
+  hedge dream digest [--since <2d | 36h | ISO time>]   Print this machine's condensed sessions as JSON lines
+  hedge dream collect [--since 2d]                      On the hub: gather the digests of every machine and running box
+  hedge dream analyze [<run>] [--limit n] [--jobs 6]    Ask one analyst per collected session for findings
+  hedge dream audit [<run>] [--limit 40]                Check each note the sync wrote since the last audit against its session
+  hedge dream prepare [--since 2d]                      collect, analyze, then audit; prints the run directory
+  hedge dream run                                       On the hub: prepare, then start the T3 thread that follows the dream skill
+  hedge dream budget [<memory checkout>] [--json]       Check the memory size limits; exit 1 when one fails
+  hedge dream scorecard [<memory checkout>]             On the hub: print the memory scorecard
+  hedge dream logs [--since 7d]                         Print this machine's Dream sessions, for the deep dream
+  hedge dream publish <worktree>                        Push a Dream worktree's commits to main, with the memory sync's guards
+  hedge dream search <word>...
                                                         Find the sessions of the last 30 days that name every word`;
-const searchUsage = "Usage: fleet dream search <word>...";
-const publishUsage = "Usage: fleet dream publish <worktree>";
+const searchUsage = "Usage: hedge dream search <word>...";
+const publishUsage = "Usage: hedge dream publish <worktree>";
 
-const memoryRefusal = "Dream needs the Memory pack: turn it on, then run fleet apply";
-const dreamOff = "Dream is off: turn it on with fleet packs --workflows dream=on, then run fleet apply";
+const memoryRefusal = "Dream needs the Memory pack: turn it on, then run hedge apply";
+const dreamOff = "Dream is off: turn it on with hedge packs --workflows dream=on, then run hedge apply";
 const hubOnly = ["collect", "prepare", "run"];
 const spending = ["analyze", "audit", "prepare", "run"];
 
 const option = (args: string[], flag: string) => (args.includes(flag) ? args[args.indexOf(flag) + 1] : undefined);
 const positional = (args: string[]) => (args[0] && !args[0].startsWith("--") ? resolve(args[0]) : undefined);
-const settingsOf = (env: Env): Record<string, unknown> => JSON.parse(env.FLEET_SETTINGS ?? "{}");
+const settingsOf = (env: Env): Record<string, unknown> => JSON.parse(env.HEDGE_SETTINGS ?? "{}");
 
 function collectNow(args: string[], io: DreamIo): Promise<string> {
   return collect(option(args, "--since") ?? "2d", { ...io, peers: io.peers() });
@@ -68,7 +68,7 @@ async function prepareRun(args: string[], io: DreamIo): Promise<string> {
   try {
     await auditRun(run, [], io);
   } catch (error) {
-    io.say(`Fleet dream: audit failed: ${(error as Error).message}`);
+    io.say(`Hedge dream: audit failed: ${(error as Error).message}`);
   }
   rmSync(collectedDir(run), { recursive: true, force: true });
   return run;
@@ -88,10 +88,10 @@ async function search(args: string[], io: DreamIo): Promise<number> {
     return 0;
   }
   const hub = settingsOf(io.env)["hub.alias"];
-  if (typeof hub !== "string" || !hub) return io.say("Fleet dream: search reads the sessions on the hub, and hub.alias is not set"), 1;
-  const answer = await io.onPeer(hub, remoteFleet(`dream search ${args.map(quote).join(" ")}`));
+  if (typeof hub !== "string" || !hub) return io.say("Hedge dream: search reads the sessions on the hub, and hub.alias is not set"), 1;
+  const answer = await io.onPeer(hub, remoteHedge(`dream search ${args.map(quote).join(" ")}`));
   io.print(answer.stdout);
-  if (answer.code !== 0) io.say(answer.stderr.trim() || `Fleet dream: ${hub} did not answer.`);
+  if (answer.code !== 0) io.say(answer.stderr.trim() || `Hedge dream: ${hub} did not answer.`);
   return answer.code;
 }
 
@@ -100,7 +100,7 @@ async function publishWorktree(args: string[], io: DreamIo): Promise<number> {
   if (!worktree) return io.say(publishUsage), 2;
   const subtree = settingsOf(io.env)["memory.subtree"];
   const answer = await publish(worktree, typeof subtree === "string" ? subtree.replace(/^\/+|\/+$/g, "") : "", memoryCheckout(io.home, io.env), io.git);
-  (answer.code ? io.say : io.print)(`Fleet dream: ${answer.message}`);
+  (answer.code ? io.say : io.print)(`Hedge dream: ${answer.message}`);
   return answer.code;
 }
 
@@ -109,7 +109,7 @@ async function nightly(args: string[], io: DreamIo): Promise<number> {
   try {
     run = await prepareRun(args, io);
   } catch (error) {
-    io.say(`Fleet dream: prepare failed: ${(error as Error).message}`);
+    io.say(`Hedge dream: prepare failed: ${(error as Error).message}`);
     return 1;
   }
   try {
@@ -117,7 +117,7 @@ async function nightly(args: string[], io: DreamIo): Promise<number> {
     io.print(`Started the dream thread ${thread} for ${run}`);
     return 0;
   } catch (error) {
-    io.say(`Fleet dream: cannot start the dream thread: ${(error as Error).message}`);
+    io.say(`Hedge dream: cannot start the dream thread: ${(error as Error).message}`);
     return 1;
   }
 }
@@ -127,14 +127,14 @@ async function printRun(command: string, work: () => Promise<string>, io: DreamI
     io.print(await work());
     return 0;
   } catch (error) {
-    io.say(`Fleet dream: ${command} failed: ${(error as Error).message}`);
+    io.say(`Hedge dream: ${command} failed: ${(error as Error).message}`);
     return 1;
   }
 }
 
 function requireHub(io: DreamIo, command: string) {
   const role = readRole(io.home);
-  if (role !== "hub") throw new Error(`fleet dream ${command} runs only on the hub. This machine's role is ${role ?? "not set"}.`);
+  if (role !== "hub") throw new Error(`hedge dream ${command} runs only on the hub. This machine's role is ${role ?? "not set"}.`);
 }
 
 export async function dreamCommand(args: string[], io: DreamIo): Promise<number> {
@@ -152,7 +152,7 @@ export async function dreamCommand(args: string[], io: DreamIo): Promise<number>
   if (spending.includes(command) && !dreamIsOn(io.env)) return io.say(dreamOff), 1;
   const state = stateDir(io.home, io.env);
   if (command === "run") {
-    try { requireHub(io, command); } catch (error) { return io.say(`Fleet dream: ${(error as Error).message}`), 1; }
+    try { requireHub(io, command); } catch (error) { return io.say(`Hedge dream: ${(error as Error).message}`), 1; }
     return nightly(rest, io);
   }
   if (hubOnly.includes(command)) requireHub(io, command);

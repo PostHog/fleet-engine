@@ -83,7 +83,7 @@ async function layersOf(threads: ShellThread[], threadId: string, git: GitIn): P
   return layers;
 }
 
-const gateAt = ({ repository, number }: Layer, commit: string) => `fleet proof gate --repo ${repository} --pr ${number} --commit ${commit}`;
+const gateAt = ({ repository, number }: Layer, commit: string) => `hedge proof gate --repo ${repository} --pr ${number} --commit ${commit}`;
 const nameOf = ({ repository, number }: Layer) => `${repository}#${number}`;
 
 async function owedStep(layer: Layer, git: GitIn, checkedOut: string | undefined, home: string): Promise<string | undefined> {
@@ -103,7 +103,7 @@ async function owedStep(layer: Layer, git: GitIn, checkedOut: string | undefined
   if (!record) return `${name} has no gate run at its pushed head ${head.slice(0, 7)}. Run ${gateAt(layer, head)}`;
   if (record.code === 0) return undefined;
   const next = record.code === 3
-    ? ` Decide each gap by tier with fleet decision record --mark 🤖, or ask ${personName(home)} with the question tool, naming the PR, and record the answer with fleet decision record --mark 👤 --class proof-gap --kind <kind> --pr ${name}; then run ${gateAt(layer, head)} again`
+    ? ` Decide each gap by tier with hedge decision record --mark 🤖, or ask ${personName(home)} with the question tool, naming the PR, and record the answer with hedge decision record --mark 👤 --class proof-gap --kind <kind> --pr ${name}; then run ${gateAt(layer, head)} again`
     : ` Fix it, then run ${gateAt(layer, head)} again`;
   return `${name}: the last gate run at its pushed head ${head.slice(0, 7)} exited ${record.code}: ${record.reason}.${next}`;
 }
@@ -192,7 +192,7 @@ async function check(event: ProofStopEvent, options: ProofStopOptions, signal: A
   const others = rest.length ? ` Also owed: ${rest.map((item) => item.pr).join(", ")}.` : "";
   return {
     decision: "block",
-    reason: `Fleet blocked this stop: your PR is not proven. ${first.step}.${others} If you are parking for ${person}, ask with the question tool or end with a \`NEEDS_HUMAN:\` line. If ${person} parked the PR, end on ${marks.snooze} with the park date. `
+    reason: `Hedge blocked this stop: your PR is not proven. ${first.step}.${others} If you are parking for ${person}, ask with the question tool or end with a \`NEEDS_HUMAN:\` line. If ${person} parked the PR, end on ${marks.snooze} with the park date. `
       + `If this turn only answered ${person} and the work is not finished, say what is still owed and end the turn again.`,
   };
 }

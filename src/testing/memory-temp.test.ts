@@ -7,7 +7,7 @@ import { memoryTemp } from "./memory-temp.ts";
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
 
-const rootOf = (memory: string) => join(memory, `fleet-test-${process.getuid!()}`);
+const rootOf = (memory: string) => join(memory, `hedge-test-${process.getuid!()}`);
 
 const mountsWith = (memory: string, ...mounted: string[]) => {
   const mounts = join(temp.make("mounts-"), "mounts");

@@ -13,7 +13,7 @@ export type RanOut = { name: string; error: string };
 type Env = Record<string, string | undefined>;
 
 const alertTimeoutMs = 600_000;
-const statePath = (home: string) => join(home, ".local/state/fleet/outage-resume.json");
+const statePath = (home: string) => join(home, ".local/state/hedge/outage-resume.json");
 
 export function readOutageState(home: string): OutageState {
   try {
@@ -35,7 +35,7 @@ export async function saveOutageState(home: string, state: OutageState): Promise
 export async function alertOutages(threads: RanOut[], env: Env): Promise<boolean> {
   const count = threads.length === 1 ? "1 thread keeps" : `${threads.length} threads keep`;
   const list = threads.map((thread) => `- ${thread.name}: ${thread.error.slice(0, 200)}`).join("\n");
-  const prompt = `Fleet continued these T3 threads after provider errors, four times each. Each try failed again, and Fleet stopped retrying them:
+  const prompt = `Hedge continued these T3 threads after provider errors, four times each. Each try failed again, and Hedge stopped retrying them:
 ${list}
 
 Run no commands and resume nothing. Reply in at most 10 lines: list the threads and their errors, and tell your user to resume them in T3 on this machine once the provider works.`;

@@ -29,7 +29,7 @@ async function sweep(threads: Record<string, unknown>[], answers: Parameters<typ
   const codes: number[] = [];
   for (let run = 0; run < runs; run++) {
     codes.push(await recoverCommand([], {
-      home, env: { FLEET_MODELS: JSON.stringify(modelRows) }, fetch: proxy.fetch, now: () => start + run * 5 * 60_000,
+      home, env: { HEDGE_MODELS: JSON.stringify(modelRows) }, fetch: proxy.fetch, now: () => start + run * 5 * 60_000,
       print: (line) => lines.push(line), session: { home: stub.home },
     }));
   }
@@ -43,7 +43,7 @@ describe("the provider-recovery workflow", () => {
     const alone = resolveEngine(sources(), { packs: ["recovery"], workflows: { "provider-recovery": true } }, devbox);
     expect(alone.workflows.find((workflow) => workflow.id === "provider-recovery")).toMatchObject({ active: false, reason: "needs hub" });
     const on = resolveEngine(sources(), { packs: ["hub", "recovery"], workflows: { "provider-recovery": true } }, devbox);
-    expect(on.jobs).toContainEqual(expect.objectContaining({ id: "recover", command: ["fleet", "recover"], schedule: { every: "5m" } }));
+    expect(on.jobs).toContainEqual(expect.objectContaining({ id: "recover", command: ["hedge", "recover"], schedule: { every: "5m" } }));
   });
 });
 

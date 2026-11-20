@@ -9,7 +9,7 @@ type Env = Record<string, string | undefined>;
 export const hostSetting = "base.usageHost";
 export const projectKeySetting = "base.usageProjectKey";
 
-const stateDir = (home: string) => join(home, ".local/state/fleet");
+const stateDir = (home: string) => join(home, ".local/state/hedge");
 export const spoolPath = (home: string) => join(stateDir(home), "usage.jsonl");
 export const sendingPath = (home: string) => join(stateDir(home), "usage.sending.jsonl");
 export const arrivingPath = (home: string) => `${sendingPath(home)}.new`;
@@ -17,7 +17,7 @@ const snapshotPath = (home: string) => join(stateDir(home), "settings.json");
 export const spoolLimit = 5_000_000;
 const plainName = /^[A-Za-z0-9._-]{1,64}$/;
 
-/** off: the settings name no destination host, because the workflow is off. unknown: Fleet cannot read the settings. */
+/** off: the settings name no destination host, because the workflow is off. unknown: Hedge cannot read the settings. */
 function usageState(home: string): "on" | "off" | "unknown" {
   let settings: Record<string, unknown>;
   try {
@@ -56,12 +56,13 @@ export function track(home: string, event: string, properties: UsageProperties =
   }
 }
 
-/** Set on a fleet call that Fleet forwards to the hub, so the hub does not count the command a second time. */
-export const forwardedMark = "FLEET_FORWARDED";
+/** Set on a hedge call that Hedge forwards to the hub, so the hub does not count the command a second time. */
+export const forwardedMark = "HEDGE_FORWARDED";
+export const legacyForwardedMark = "FLEET_FORWARDED";
 
 /** subcommands: the command's own first words. Any other first argument, such as a host, stays on the machine. */
 export function trackCommand(home: string, command: string, args: string[], subcommands: readonly string[], env: Env = Bun.env, interactive?: boolean): void {
-  if (env.FLEET_PROFILE_DIR || env[forwardedMark]) return;
+  if (env.HEDGE_PROFILE_DIR || env[forwardedMark]) return;
   const first = args[0] ?? "";
-  track(home, "fleet command", { command, subcommand: subcommands.includes(first) ? first : "" }, env, interactive);
+  track(home, "hedge command", { command, subcommand: subcommands.includes(first) ? first : "" }, env, interactive);
 }

@@ -5,17 +5,18 @@ import { failedExit, runCommand } from "../../base/lib/command.ts";
 import { numberSetting, optionalStringSetting, stringSetting } from "../../base/lib/settings.ts";
 import { gatewayOn, hubTunnel, type MacTunnelMode } from "../lib/hub-tunnel.ts";
 import { run } from "../lib/run.ts";
+import { profileFile } from "../../../src/legacy.ts";
 
 const modes = ["plan", "install", "doctor", "remove", "left"];
 
 await runCommand(() => {
   const [mode = "plan", ...rest] = Bun.argv.slice(2);
-  if (rest.length || !modes.includes(mode)) return console.error("Usage: fleet hub-tunnel [plan|install|doctor|remove|left]"), 2;
+  if (rest.length || !modes.includes(mode)) return console.error("Usage: hedge hub-tunnel [plan|install|doctor|remove|left]"), 2;
   const quiet = { home: homedir(), platform: process.platform, uid: process.getuid?.() ?? 0, alias: "", relayPort: 0, gateway: false, run, fetch, sleep: (ms: number) => Bun.sleep(ms), print: (line: string) => console.log(line) };
   if (mode === "remove" || mode === "left") return hubTunnel(mode, quiet);
   const relayPort = numberSetting("hub.relayPort");
   const coder = Bun.which("coder") ?? undefined;
-  const profile = Bun.env.FLEET_PROFILE_DIR ? join(Bun.env.FLEET_PROFILE_DIR, "fleet.json") : undefined;
+  const profile = Bun.env.HEDGE_PROFILE_DIR ? profileFile(Bun.env.HEDGE_PROFILE_DIR) : undefined;
   const gateway = Boolean(profile && existsSync(profile) && gatewayOn(JSON.parse(readFileSync(profile, "utf8"))));
   const httpsHost = optionalStringSetting("hub.httpsHost") || undefined;
   return hubTunnel(mode as MacTunnelMode, {
@@ -23,4 +24,4 @@ await runCommand(() => {
     ...(httpsHost ? { httpsHost } : {}), ...(coder ? { coder } : {}),
     run, fetch, sleep: (ms) => Bun.sleep(ms), print: (line) => console.log(line),
   });
-}, "fleet hub-tunnel", failedExit(Bun.argv[2]));
+}, "hedge hub-tunnel", failedExit(Bun.argv[2]));

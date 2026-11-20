@@ -25,8 +25,8 @@ const loneLane = { pid: 30, table: async () => "1 0 t3\n20 1 claude\n30 20 bun\n
 async function lane() {
   const checkout = temp.make("lane-");
   const home = temp.make("home-");
-  mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
-  writeFileSync(join(home, ".local/state/fleet/settings.json"), JSON.stringify({ "guards.person": "Robin" }));
+  mkdirSync(join(home, ".local/state/hedge"), { recursive: true });
+  writeFileSync(join(home, ".local/state/hedge/settings.json"), JSON.stringify({ "guards.person": "Robin" }));
   const git =(...args: string[]) => spawnGit(checkout, ...args);
   await git("init", "-q", "-b", "main");
   await git("remote", "add", "origin", `git@github.com:${repository}.git`);
@@ -63,7 +63,7 @@ describe("the Stop proof check blocks a lane that owns an open PR", () => {
     const answer = await check();
     expect(answer?.decision).toBe("block");
     expect(answer?.reason).toContain(`${repository}#7 has no gate run at its pushed head ${head.slice(0, 7)}`);
-    expect(answer?.reason).toContain(`fleet proof gate --repo ${repository} --pr 7 --commit ${head}`);
+    expect(answer?.reason).toContain(`hedge proof gate --repo ${repository} --pr 7 --commit ${head}`);
     expect(answer?.reason).toContain("ask with the question tool or end with a `NEEDS_HUMAN:` line");
   });
 
@@ -72,7 +72,7 @@ describe("the Stop proof check blocks a lane that owns an open PR", () => {
     await gate(head, 0);
     const local = await commit("three\n");
     const reason = await reasonOf(check());
-    expect(reason).toContain(`${repository}#7 has 1 local commit(s) on feat past its pushed head. Run git push origin feat, then fleet proof gate --repo ${repository} --pr 7 --commit ${local}`);
+    expect(reason).toContain(`${repository}#7 has 1 local commit(s) on feat past its pushed head. Run git push origin feat, then hedge proof gate --repo ${repository} --pr 7 --commit ${local}`);
   });
 
   test("when a tracked file has uncommitted changes, but not for an untracked file", async () => {
@@ -91,7 +91,7 @@ describe("the Stop proof check blocks a lane that owns an open PR", () => {
     const detached = await commit("three\n");
     const reason = await reasonOf(check());
     expect(reason).toContain(`this worktree has a detached HEAD ${detached.slice(0, 7)} past its pushed head`);
-    expect(reason).toContain(`git push origin HEAD:refs/heads/feat, then run fleet proof gate --repo ${repository} --pr 7 --commit ${detached}`);
+    expect(reason).toContain(`git push origin HEAD:refs/heads/feat, then run hedge proof gate --repo ${repository} --pr 7 --commit ${detached}`);
   });
 
   test("when tracked files changed at a detached HEAD on the PR's pushed head", async () => {
@@ -112,7 +112,7 @@ describe("the Stop proof check blocks a lane that owns an open PR", () => {
     const { head, gate, check } = await lane();
     await gate(head, 1, "ci: red, required failing: test");
     const reason = await reasonOf(check());
-    expect(reason).toContain(`the last gate run at its pushed head ${head.slice(0, 7)} exited 1: ci: red, required failing: test. Fix it, then run fleet proof gate --repo ${repository} --pr 7 --commit ${head} again`);
+    expect(reason).toContain(`the last gate run at its pushed head ${head.slice(0, 7)} exited 1: ci: red, required failing: test. Fix it, then run hedge proof gate --repo ${repository} --pr 7 --commit ${head} again`);
   });
 
   test("when the last gate run left only gaps, naming the agent's tier decision and the question tool", async () => {
@@ -120,7 +120,7 @@ describe("the Stop proof check blocks a lane that owns an open PR", () => {
     await gate(head, 3, "ci: gap recorded");
     const reason = await reasonOf(check());
     expect(reason).toContain("exited 3: ci: gap recorded");
-    expect(reason).toContain("fleet decision record --mark 🤖");
+    expect(reason).toContain("hedge decision record --mark 🤖");
     expect(reason).toContain("ask Robin with the question tool");
   });
 
@@ -134,7 +134,7 @@ describe("the Stop proof check blocks a lane that owns an open PR", () => {
     await git("branch", "feat-3");
     await push("feat-3");
     const reason = await reasonOf(check(stack));
-    expect(reason).toContain(`fleet proof gate --repo ${repository} --pr 7 --commit ${head}`);
+    expect(reason).toContain(`hedge proof gate --repo ${repository} --pr 7 --commit ${head}`);
     expect(reason).toContain(`Also owed: ${repository}#9.`);
     expect(reason).not.toContain(`#8`);
   });
@@ -149,7 +149,7 @@ describe("the Stop proof check blocks a lane that owns an open PR", () => {
     await git("checkout", "-q", "--detach");
     const detached = await commit("past upper\n");
     const reason = await reasonOf(check([thread({ pullRequests: [pr(8, "feat-2"), pr(7, "feat")] })]));
-    expect(reason).toContain(`git push origin HEAD:refs/heads/feat-2, then run fleet proof gate --repo ${repository} --pr 8 --commit ${detached}`);
+    expect(reason).toContain(`git push origin HEAD:refs/heads/feat-2, then run hedge proof gate --repo ${repository} --pr 8 --commit ${detached}`);
   });
 
   test("a fork owns its PRs, unlike a subagent", async () => {
@@ -279,12 +279,12 @@ describe("the installed Stop hook", () => {
     writeFileSync(transcript, `${JSON.stringify({ type: "user", message: { role: "user", content: "Ship it" } })}\n`);
     const stopOn = async (message: string) => JSON.parse((await routed("claude", async () => JSON.stringify({ transcript_path: transcript, cwd: checkout, last_assistant_message: message }), home)).stdout).reason as string;
     expect(await stopOn("Both layers are green. Should I merge the bottom layer first?")).toContain("asks Robin a decision in prose");
-    expect(await stopOn("Pushed the fix.")).toContain("Fleet blocked this stop: your PR is not proven.");
+    expect(await stopOn("Pushed the fix.")).toContain("Hedge blocked this stop: your PR is not proven.");
   });
 
   test("lets an unproven stop pass while the kill switch exists, and still runs the prose guard", async () => {
     const { home, checkout, thread } = await lane();
-    mkdirSync(join(home, ".config/fleet"), { recursive: true });
+    mkdirSync(join(home, ".config/hedge"), { recursive: true });
     writeFileSync(join(home, killSwitch), "");
     const routed = hookWith(() => async () => ({ threads: [thread()] }), { threadId: "lane", hidden: async () => true, git: gitWithTestConfig, processes: loneLane });
     const transcript = join(temp.make("transcript-"), "session.jsonl");

@@ -15,27 +15,27 @@ const commitOptionalLetters = "Su";
 const commitValued = new Set(["--message", "--file", "--author", "--date", "--template", "--reuse-message", "--reedit-message", "--fixup", "--squash", "--trailer", "--cleanup", "--pathspec-from-file"]);
 const pushValued = new Set(["--repo", "-o", "--push-option", "--receive-pack", "--exec"]);
 
-const hooksReason = (person: string) => "Fleet blocked this command: it skips the Git hooks, which run the repository's checks. "
+const hooksReason = (person: string) => "Hedge blocked this command: it skips the Git hooks, which run the repository's checks. "
   + `Let them run: fix what they report, then commit or push with hooks on. If a hook is broken, stop and ask ${person}.`;
 
-const mainReason = (target: string, slug: string, upstream: boolean, person: string) => `Fleet blocked this command: it pushes to \`${target}\` of ${slug}`
+const mainReason = (target: string, slug: string, upstream: boolean, person: string) => `Hedge blocked this command: it pushes to \`${target}\` of ${slug}`
   + (upstream ? `, because the branch tracks \`${target}\` and push.default is upstream,` : "")
   + " and that repository takes changes through pull requests. Push to your own branch: `git push -u origin HEAD:refs/heads/<branch>`. "
   + `If this repository takes pushes to ${target}, stop and ask ${person} to add ${slug} to guards.main-push-repos.`;
 
-const forceReason = (person: string) => "Fleet blocked this command: it force-pushes without a lease, which can drop commits someone else pushed. "
+const forceReason = (person: string) => "Hedge blocked this command: it force-pushes without a lease, which can drop commits someone else pushed. "
   + "Use `git push --force-with-lease=<branch>:<expected sha> origin <branch>`, without a `+` on the refspec. "
   + `If you need to overwrite the branch anyway, stop and ask ${person}.`;
 
-const burstReason = (count: number, person: string) => `Fleet blocked this command: it force-pushes ${count} branches at once, `
+const burstReason = (count: number, person: string) => `Hedge blocked this command: it force-pushes ${count} branches at once, `
   + "and bursts like that make GitHub fail many CI runs at startup. "
   + `Push in batches of at most ${largestForcePush} branches, about a minute apart. If that does not fit, stop and ask ${person}.`;
 
-const aliasReason = (person: string) => "Fleet blocked this command: it makes or runs an alias or a wrapper command, such as `gh stack alias`, "
+const aliasReason = (person: string) => "Hedge blocked this command: it makes or runs an alias or a wrapper command, such as `gh stack alias`, "
   + "`gh alias set sp 'stack push'`, a shell alias, or `gh alias import`, or runs gh through `xargs`, which can hide gh stack "
   + `pushes from this guard. Run \`gh stack\` itself. If you need the alias, stop and ask ${person}.`;
 
-const configReason = (person: string) => "Fleet blocked this command: it runs gh while it sets or names GH_CONFIG_DIR, XDG_CONFIG_HOME or HOME, "
+const configReason = (person: string) => "Hedge blocked this command: it runs gh while it sets or names GH_CONFIG_DIR, XDG_CONFIG_HOME or HOME, "
   + "or uses sudo, doas, env or exec, so this guard cannot tell which gh aliases run. "
   + "Run gh without them, and pass text that names these variables in a file, such as with --body-file. Reading `$HOME` is fine. "
   + `If you need it, stop and ask ${person}.`;
@@ -176,6 +176,24 @@ const configVariable = /\b(?:GH_CONFIG_DIR|XDG_CONFIG_HOME|HOME)\b/;
 const configRead = /\$(?:\{(?:GH_CONFIG_DIR|XDG_CONFIG_HOME|HOME)\}|(?:GH_CONFIG_DIR|XDG_CONFIG_HOME|HOME)\b)/g;
 /** `sudo` and `doas` switch the user, and `env` can clear or unset the environment, with options a redirection can separate. */
 const environmentWrapper = /(?:^|[^\w.-])(?:sudo|doas|env)(?![\w.-])/;
+const commandBreak = /[;&|()`{}\n]/;
+const beforeCommand = /^(?:[A-Za-z_]\w*=\S*|\d*[<>]\S*|if|then|else|elif|do|while|until|!)$/;
+const refLike = /^\+?[\w-][\w.-]*(?:[/:][\w.-]+)+$/;
+const gitDataCommands = new Set(["add", "branch", "checkout", "cherry-pick", "commit", "diff", "fetch", "log", "merge", "pull", "push", "reset", "restore", "revert", "show", "status", "switch", "tag", "worktree"]);
+const runsProgram = /^--(?:upload-pack|receive-pack|exec)(?:=|$)/;
+const wrapperWordsAreData = ([command = "", ...args]: string[]) => {
+  if (basename(command) === "gh") return true;
+  if (basename(command) !== "git") return false;
+  let at = 0;
+  while (args[at] === "-C") at += 2;
+  return gitDataCommands.has(args[at] ?? "") && args.every((arg) => !runsProgram.test(arg) && (!environmentWrapper.test(arg) || refLike.test(arg)));
+};
+const runsWrapper = (words: string) => words.split(commandBreak).some((part) => {
+  if (!environmentWrapper.test(part)) return false;
+  const tokens = part.trim().split(/\s+/);
+  const at = tokens.findIndex((token) => !beforeCommand.test(token));
+  return at < 0 || tokens.slice(0, at).some((token) => environmentWrapper.test(token)) || !wrapperWordsAreData(tokens.slice(at));
+});
 /** The shell's `exec` can clear the environment too; `gh extension exec` also spells the word. */
 const execWord = /(?:^|[^\w.-])exec(?![\w.-])/g;
 
@@ -192,7 +210,7 @@ const unquoted = (command: string) => command.replace(/\\\r?\n/g, "").replace(/\
  */
 function movesGhConfig(command: string, extensionExecs: number): boolean {
   const words = unquoted(command);
-  return escapedLetters.test(command) || configVariable.test(words.replace(configRead, "")) || environmentWrapper.test(words)
+  return escapedLetters.test(command) || configVariable.test(words.replace(configRead, "")) || runsWrapper(words)
     || (words.match(execWord)?.length ?? 0) > extensionExecs;
 }
 

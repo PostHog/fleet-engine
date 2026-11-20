@@ -28,7 +28,7 @@ export function captureCommand(row: ModelRow, command = "claude"): string[] {
 const lastLines = (text: string) => text.trim().split("\n").slice(-3).join(" ");
 
 export function captureAgent(row: ModelRow, home: string, command = "claude"): Agent {
-  if (row.provider !== "claude") throw new Error(`fleet context add runs a Claude agent without tools, and the survey row of your model table names ${row.model}. Give the survey row a Claude model.`);
+  if (row.provider !== "claude") throw new Error(`hedge context add runs a Claude agent without tools, and the survey row of your model table names ${row.model}. Give the survey row a Claude model.`);
   return async (prompt) => {
     const parent = join(stateDir(home), "capture-agent");
     mkdirSync(parent, { recursive: true, mode: 0o700 });
@@ -82,7 +82,7 @@ ${input.startedAt ? `${wisprStep(input.startedAt, meetings)}\n` : ""}2. Reuse th
    ---
    \`\`\`
 
-   Keep \`source\` exactly as given: Fleet finds the document again by it.
+   Keep \`source\` exactly as given: Hedge finds the document again by it.
 4. Write the body condensed, never as a copy: decisions and their reasons, the problems named, action items with their owners and dates, open questions, and the links that matter. Use simple technical English. Leave out passwords, tokens, and keys.
 5. Answer with the document: \`path\` is its path, and \`text\` is the whole file.${input.startedAt ? " Set `wispr` as step 1b says." : ""}
 

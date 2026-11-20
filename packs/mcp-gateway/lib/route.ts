@@ -13,8 +13,8 @@ export async function openRoute({ gateway, fetch }: RouteReach, route: string, c
   const send = async (method: string, body?: Record<string, unknown>) => {
     const init = { method, headers: { ...base, ...session, ...(body && { "content-type": "application/json" }) }, ...(body && { body: JSON.stringify({ jsonrpc: "2.0", ...body }) }), signal: AbortSignal.timeout(120_000) };
     const response = await fetch(endpoint, init)
-      .catch((error: Error) => { throw new Error(`Cannot reach the MCP gateway at ${gateway.url}: ${error.message}. On the hub, run: fleet mcp-gateway doctor`); });
-    if (response.status === 401 || response.status === 403) throw new Error("The MCP gateway refused the hub's key. Run fleet apply on the hub.");
+      .catch((error: Error) => { throw new Error(`Cannot reach the MCP gateway at ${gateway.url}: ${error.message}. On the hub, run: hedge mcp-gateway doctor`); });
+    if (response.status === 401 || response.status === 403) throw new Error("The MCP gateway refused the hub's key. Run hedge apply on the hub.");
     if (!response.ok) throw new Error(`The MCP gateway answered ${body?.method ?? method} with HTTP ${response.status}.`);
     return response;
   };

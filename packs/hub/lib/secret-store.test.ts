@@ -5,16 +5,17 @@ import type { ThreadWord } from "../../pull-requests/lib/proof-answers.ts";
 import { heldLimit, lineRedactor, secretCommand, type SecretContext } from "./secret-cli.ts";
 import { providersSeam, rowsSeam } from "./secret-rows.ts";
 import { eventLogPath, secretFilesDir, type CheckResult } from "./secret-store.ts";
-import { text, made, sendKey, otherKey, euKey, foreignKey, loginEmail, loginPassword, values, testRows, newHome, fleet, run, login, removeHomes } from "./secret-testing.ts";
+import { text, made, sendKey, otherKey, euKey, foreignKey, loginEmail, loginPassword, values, testRows, newHome, hedge, run, login, removeHomes } from "./secret-testing.ts";
+import { remoteLauncher } from "../../../src/hub/ssh.ts";
 
 afterEach(removeHomes);
 
 test("a devbox puts a key through the hub over SSH stdin and runs a command with it, and no value lands in output, events, argv or the devbox", async () => {
-  const machine = fleet();
+  const machine = hedge();
   const file = machine.secretFile(machine.devHome, `${sendKey}\n`);
   expect(await machine.dev("put", "send-us", "--file", file)).toBe(0);
   expect(existsSync(file)).toBe(false);
-  expect(machine.commands[0]).toContain("fleet\" secret hub");
+  expect(machine.commands[0]).toContain(`${remoteLauncher} secret hub`);
 
   const result = await run(machine.dev, machine.printed, ["send-us"], `[ "$EXAMPLE_API_KEY" = "${sendKey}" ] && echo delivered`);
   expect(result.code).toBe(0);
@@ -24,7 +25,7 @@ test("a devbox puts a key through the hub over SSH stdin and runs a command with
 });
 
 test("run redacts each field of a two-field secret on its own, on stdout and stderr, and in an unterminated last line", async () => {
-  const machine = fleet();
+  const machine = hedge();
   expect(await machine.dev("put", "sandbox-login", "--file", machine.secretFile(machine.devHome, login()))).toBe(0);
   const script = [
     `echo "user $LOGIN_EMAIL"`,
@@ -107,7 +108,7 @@ test("a value longer than the streamed piece is held until it is complete, never
 });
 
 test("a value with a line break is refused, and the request_secret file is gone after a refused put", async () => {
-  const machine = fleet();
+  const machine = hedge();
   const file = machine.secretFile(machine.devHome, `${sendKey}\n${otherKey}\n`);
   expect(await machine.dev("put", "send-us", "--file", file)).toBe(1);
   expect(existsSync(file)).toBe(false);
@@ -116,7 +117,7 @@ test("a value with a line break is refused, and the request_secret file is gone 
 });
 
 test("put deletes the request_secret file when the hub cannot be reached or its other arguments are wrong, and prints nothing of it", async () => {
-  const machine = fleet();
+  const machine = hedge();
   machine.reach.hub = false;
   const file = machine.secretFile(machine.devHome, `${sendKey}\n`);
   expect(await machine.dev("put", "send-us", "--file", file)).toBe(1);
@@ -130,7 +131,7 @@ test("put deletes the request_secret file when the hub cannot be reached or its 
 });
 
 test("put takes only a file in T3's secret-file directory, and leaves any other file alone", async () => {
-  const machine = fleet();
+  const machine = hedge();
   const elsewhere = join(machine.devHome, "notes.txt");
   writeFileSync(elsewhere, `${sendKey}\n`);
   expect(await machine.dev("put", "send-us", "--file", elsewhere)).toBe(2);
@@ -140,7 +141,7 @@ test("put takes only a file in T3's secret-file directory, and leaves any other 
 });
 
 test("a failed check keeps the old value delivered, and a personal key is refused for a project-key row", async () => {
-  const machine = fleet();
+  const machine = hedge();
   expect(await machine.dev("put", "send-us", "--file", machine.secretFile(machine.devHome, sendKey))).toBe(0);
   const file = machine.secretFile(machine.devHome, foreignKey);
   expect(await machine.dev("put", "send-us", "--file", file)).toBe(1);
@@ -154,7 +155,7 @@ test("a failed check keeps the old value delivered, and a personal key is refuse
 });
 
 test("a crash between the value file's rename and the event's append leaves the old value delivered", async () => {
-  const machine = fleet();
+  const machine = hedge();
   expect(await machine.hub("put", "send-us", "--file", machine.secretFile(machine.hubHome, sendKey))).toBe(0);
   chmodSync(eventLogPath(machine.hubHome), 0o400);
   expect(await machine.hub("put", "send-us", "--file", machine.secretFile(machine.hubHome, otherKey))).toBe(1);
@@ -164,7 +165,7 @@ test("a crash between the value file's rename and the event's append leaves the 
 });
 
 test("puts of two different names both survive, and two secrets that set one variable are refused together", async () => {
-  const machine = fleet();
+  const machine = hedge();
   expect(await machine.dev("put", "send-us", "--file", machine.secretFile(machine.devHome, sendKey))).toBe(0);
   expect(await machine.dev("put", "sandbox-login", "--file", machine.secretFile(machine.devHome, login()))).toBe(0);
   expect((await run(machine.dev, machine.printed, ["send-us", "sandbox-login"], `[ "$EXAMPLE_API_KEY" = "${sendKey}" ] && [ "$LOGIN_PASSWORD" = "${loginPassword}" ] && echo both`)).text).toContain("both");
@@ -179,7 +180,7 @@ test("puts of two different names both survive, and two secrets that set one var
 const answer = (id: string, text: string, at: string, source: ThreadWord["source"] = "question"): ThreadWord => ({ thread: "users-thread", id, text, answered: "Turn the secret store back on?", at, source });
 
 test("after off, run refuses on and off the hub, and only the user's answer given after it turns the store on", async () => {
-  const machine = fleet({ words: [answer("m-before", "Yes, turn it on", "2026-11-13T09:00:00Z"), answer("m-typed", "Turn it on now", "2026-11-13T11:00:00Z", "typed"), answer("m-after", "Yes", "2026-11-13T11:00:00Z")] });
+  const machine = hedge({ words: [answer("m-before", "Yes, turn it on", "2026-11-13T09:00:00Z"), answer("m-typed", "Turn it on now", "2026-11-13T11:00:00Z", "typed"), answer("m-after", "Yes", "2026-11-13T11:00:00Z")] });
   expect(await machine.dev("put", "send-us", "--file", machine.secretFile(machine.devHome, sendKey))).toBe(0);
   expect(await machine.dev("off", "suspected leak in a transcript")).toBe(0);
   machine.clock.now = new Date("2026-11-13T12:00:00Z");
@@ -209,7 +210,7 @@ test("after off, run refuses on and off the hub, and only the user's answer give
 });
 
 test("an off that lands between the hub's read of the switch and its on event leaves the store off", async () => {
-  const machine = fleet({ words: [answer("m-after", "Yes", "2026-11-13T11:00:00Z")] });
+  const machine = hedge({ words: [answer("m-after", "Yes", "2026-11-13T11:00:00Z")] });
   expect(await machine.dev("put", "send-us", "--file", machine.secretFile(machine.devHome, sendKey))).toBe(0);
   expect(await machine.dev("off", "first leak")).toBe(0);
   machine.clock.now = new Date("2026-11-13T12:00:00Z");
@@ -223,13 +224,13 @@ test("an off that lands between the hub's read of the switch and its on event le
 });
 
 test("off --help prints the usage, an off reason that starts with a flag is refused, and the store stays on", async () => {
-  const machine = fleet();
+  const machine = hedge();
   expect(await machine.dev("put", "send-us", "--file", machine.secretFile(machine.devHome, sendKey))).toBe(0);
   for (const where of [machine.dev, machine.hub]) {
     for (const help of ["--help", "-h"]) {
       const before = machine.printed.length;
       expect(await where("off", help)).toBe(0);
-      expect(machine.since(before)).toContain("fleet secret off <reason>");
+      expect(machine.since(before)).toContain("hedge secret off <reason>");
     }
     expect(await where("off", "--reason", "suspected leak")).toBe(2);
     expect(await where("off", " -x leak")).toBe(2);
@@ -239,7 +240,7 @@ test("off --help prints the usage, an off reason that starts with a flag is refu
 });
 
 test("an off appended after a torn last line of the log still stops every read", async () => {
-  const machine = fleet();
+  const machine = hedge();
   expect(await machine.dev("put", "send-us", "--file", machine.secretFile(machine.devHome, sendKey))).toBe(0);
   appendFileSync(eventLogPath(machine.hubHome), '{"type":"read","name":"send-us","at":"2026-11-');
   expect(await machine.dev("off", "suspected leak")).toBe(0);
@@ -249,7 +250,7 @@ test("an off appended after a torn last line of the log still stops every read",
 });
 
 test("an on whose off was followed by a newer off while the user's words were read leaves the store off", async () => {
-  const machine = fleet({ words: [answer("m-after", "Yes", "2026-11-13T11:00:00Z")] });
+  const machine = hedge({ words: [answer("m-after", "Yes", "2026-11-13T11:00:00Z")] });
   expect(await machine.dev("put", "send-us", "--file", machine.secretFile(machine.devHome, sendKey))).toBe(0);
   expect(await machine.dev("off", "first leak")).toBe(0);
   machine.clock.now = new Date("2026-11-13T12:00:00Z");
@@ -261,7 +262,7 @@ test("an on whose off was followed by a newer off while the user's words were re
 });
 
 test("a standing secret is refused past its 90-day store expiry, and a put past or beyond 90 days is refused", async () => {
-  const machine = fleet();
+  const machine = hedge();
   expect(await machine.dev("put", "send-us", "--file", machine.secretFile(machine.devHome, sendKey), "--expires", "2026-11-12")).toBe(1);
   expect(await machine.dev("put", "send-us", "--file", machine.secretFile(machine.devHome, sendKey), "--expires", "2027-03-01")).toBe(1);
   expect(await machine.dev("put", "send-us", "--file", machine.secretFile(machine.devHome, sendKey))).toBe(0);
@@ -274,7 +275,7 @@ test("a standing secret is refused past its 90-day store expiry, and a put past 
 });
 
 test("list shows each secret's kind, check note and state, and never a value", async () => {
-  const machine = fleet();
+  const machine = hedge();
   expect(await machine.dev("put", "send-us", "--file", machine.secretFile(machine.devHome, sendKey))).toBe(0);
   const before = machine.printed.length;
   expect(await machine.dev("list")).toBe(0);
@@ -286,7 +287,7 @@ test("list shows each secret's kind, check note and state, and never a value", a
 });
 
 async function loginOutput(email: string, password: string, script: string) {
-  const machine = fleet();
+  const machine = hedge();
   expect(await machine.dev("put", "sandbox-login", "--file", machine.secretFile(machine.devHome, login(email, password)))).toBe(0);
   return run(machine.dev, machine.printed, ["sandbox-login"], script);
 }
@@ -310,7 +311,7 @@ test("a value that its own label would spell is redacted with a plain label, and
 });
 
 test("a value shorter than 8 characters is refused at put, and a value that starts with a byte order mark is still redacted", async () => {
-  const machine = fleet();
+  const machine = hedge();
   const file = machine.secretFile(machine.devHome, login(loginEmail, "dact"));
   expect(await machine.dev("put", "sandbox-login", "--file", file)).toBe(1);
   expect(existsSync(file)).toBe(false);
@@ -322,7 +323,7 @@ test("a value shorter than 8 characters is refused at put, and a value that star
 test("a put whose own record or list line would show the value is refused: a note's text or a field name", async () => {
   for (const password of ["the example service", "unchecked", "storeExpiresAt"]) {
     const rows = testRows().map((row) => row.name !== "sandbox-login" ? row : { ...row, provider: { name: "example-login", check: async () => ({ ok: true as const, unchecked: "the example service asked for a second factor" }) } });
-    const machine = fleet({ rows });
+    const machine = hedge({ rows });
     expect(await machine.dev("put", "sandbox-login", "--file", machine.secretFile(machine.devHome, login(loginEmail, password)))).toBe(1);
     expect(machine.printed.join("")).toContain("Refused, and the reason would show part of the value. Nothing was stored");
     expect(await machine.dev("list")).toBe(0);
@@ -340,8 +341,8 @@ function hubFile(home: string, path: string, text: string, mode = 0o600) {
 }
 
 test("a secret the hub already holds in its own file is delivered under its variables, redacted, and stopped by off", async () => {
-  const machine = fleet();
-  hubFile(machine.hubHome, ".config/fleet/chat-app.json", JSON.stringify(chatTokens));
+  const machine = hedge();
+  hubFile(machine.hubHome, ".config/hedge/chat-app.json", JSON.stringify(chatTokens));
   const shown = await run(machine.dev, machine.printed, ["chat-app"], `[ "$CHAT_BOT_TOKEN" = "${chatTokens.botToken}" ] && echo "bot $CHAT_BOT_TOKEN app $CHAT_APP_TOKEN"`);
   expect(shown.code).toBe(0);
   expect(shown.text).toBe("bot [redacted chat-app] app [redacted chat-app]\n");
@@ -351,8 +352,8 @@ test("a secret the hub already holds in its own file is delivered under its vari
 });
 
 test("an existing secret file that others can read is refused, and a put over an existing secret's name is refused", async () => {
-  const machine = fleet();
-  hubFile(machine.hubHome, ".config/fleet/chat-app.json", JSON.stringify(chatTokens), 0o644);
+  const machine = hedge();
+  hubFile(machine.hubHome, ".config/hedge/chat-app.json", JSON.stringify(chatTokens), 0o644);
   const result = await run(machine.dev, machine.printed, ["chat-app"], "echo child-ran");
   expect(result.code).toBe(1);
   expect(result.text).toContain("readable only by its owner");
@@ -364,11 +365,11 @@ test("an existing secret file that others can read is refused, and a put over an
 test("a value with a null character is refused on put, in an existing file, and from the hub, and no part of it is printed", async () => {
   const tail = made("after-null-");
   const withNull = `${made("key_")}\u0000${tail}`;
-  const machine = fleet();
+  const machine = hedge();
   expect(await machine.dev("put", "send-us", "--file", machine.secretFile(machine.devHome, withNull))).toBe(1);
   expect(machine.printed.join("")).toContain("holds a null character");
   expect((await run(machine.dev, machine.printed, ["send-us"], "echo child-ran")).text).toContain("send-us: missing");
-  hubFile(machine.hubHome, ".config/fleet/chat-app.json", JSON.stringify({ ...chatTokens, botToken: withNull }));
+  hubFile(machine.hubHome, ".config/hedge/chat-app.json", JSON.stringify({ ...chatTokens, botToken: withNull }));
   const existing = await run(machine.dev, machine.printed, ["chat-app"], "echo child-ran");
   expect(existing.code).toBe(1);
   expect(existing.text).toContain("holds a null character, so run could not pass it");
@@ -380,18 +381,18 @@ test("a value with a null character is refused on put, in an existing file, and 
   machine.expectNoLeak([tail, ...Object.values(chatTokens)]);
 });
 
-test("the fleet secret command prints a fixed message for an error that escapes it, never the error's text", async () => {
+test("the hedge secret command prints a fixed message for an error that escapes it, never the error's text", async () => {
   const inSettings = made("key_");
   const entry = join(import.meta.dir, "../commands/secret.ts");
-  const child = Bun.spawn([process.execPath, entry, "list"], { env: { ...process.env, HOME: newHome(), FLEET_SETTINGS: `{"hub": {"alias": "${inSettings}"`, FLEET_DEBUG: "1" }, stdout: "pipe", stderr: "pipe" });
+  const child = Bun.spawn([process.execPath, entry, "list"], { env: { ...process.env, HOME: newHome(), HEDGE_SETTINGS: `{"hub": {"alias": "${inSettings}"`, HEDGE_DEBUG: "1" }, stdout: "pipe", stderr: "pipe" });
   const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
   expect(code).toBe(1);
-  expect(stderr).toBe("fleet secret: The store failed; its message is not shown, as it could hold a value\n");
+  expect(stderr).toBe("hedge secret: The store failed; its message is not shown, as it could hold a value\n");
   expect(stdout + stderr).not.toContain(inSettings);
 });
 
 test("a disk that writes one byte at a time still stores the whole value and a whole off, and one that writes nothing stores nothing", async () => {
-  const slow = fleet();
+  const slow = hedge();
   slow.hooks.write = (file, bytes, offset) => writeSync(file, bytes, offset, 1);
   expect(await slow.dev("put", "send-us", "--file", slow.secretFile(slow.devHome, sendKey))).toBe(0);
   expect((await run(slow.dev, slow.printed, ["send-us"], `[ "$EXAMPLE_API_KEY" = "${sendKey}" ] && echo whole-value`)).text).toContain("whole-value");
@@ -399,7 +400,7 @@ test("a disk that writes one byte at a time still stores the whole value and a w
   const refused = await run(slow.dev, slow.printed, ["send-us"], "echo child-ran");
   expect(refused.text).toContain("(a slow disk)");
   expect(refused.text).not.toContain("child-ran");
-  const stuck = fleet();
+  const stuck = hedge();
   stuck.hooks.write = () => 0;
   expect(await stuck.dev("put", "send-us", "--file", stuck.secretFile(stuck.devHome, sendKey))).toBe(1);
   expect(stuck.printed.join("")).toContain("The store failed; its message is not shown");
@@ -410,21 +411,21 @@ test("a disk that writes one byte at a time still stores the whole value and a w
 });
 
 test("an off that lands between the pieces of a read or put event keeps the value from the reader, and the put reports nothing stored", async () => {
-  const offMidway = (machine: ReturnType<typeof fleet>, kind: string) => {
+  const offMidway = (machine: ReturnType<typeof hedge>, kind: string) => {
     let split = false;
     machine.hooks.write = (file, bytes, offset) => {
       if (!split && offset === 12 && Buffer.from(bytes).includes(`"type":"${kind}"`)) { split = true; machine.offElsewhere(`leak seen mid ${kind}`)(); }
       return writeSync(file, bytes, offset, 1);
     };
   };
-  const reader = fleet();
+  const reader = hedge();
   expect(await reader.dev("put", "send-us", "--file", reader.secretFile(reader.devHome, sendKey))).toBe(0);
   offMidway(reader, "read");
   const result = await run(reader.dev, reader.printed, ["send-us"], "echo child-ran");
   expect(result.code).toBe(1);
   expect(result.text).toContain("did not land whole in the event log");
   expect(result.text).not.toContain("child-ran");
-  const putter = fleet();
+  const putter = hedge();
   offMidway(putter, "put");
   expect(await putter.dev("put", "send-us", "--file", putter.secretFile(putter.devHome, sendKey))).toBe(1);
   expect(putter.printed.join("")).toContain("did not land whole in the event log, so it was not stored");
@@ -434,16 +435,16 @@ test("an off that lands between the pieces of a read or put event keeps the valu
 
 test("list --need prints the card for each missing or failing secret, nothing for one that is held and passes, and logs each check's read", async () => {
   const rows = testRows().map((row) => row.name !== "chat-app" ? row : { ...row, provider: { name: "chat-app", check: async () => ({ ok: false as const, reason: "the chat service answered invalid_auth" }) } });
-  const machine = fleet({ rows });
+  const machine = hedge({ rows });
   expect(await machine.dev("put", "send-us", "--file", machine.secretFile(machine.devHome, sendKey))).toBe(0);
-  hubFile(machine.hubHome, ".config/fleet/chat-app.json", JSON.stringify(chatTokens));
+  hubFile(machine.hubHome, ".config/hedge/chat-app.json", JSON.stringify(chatTokens));
   const before = machine.printed.length;
   expect(await machine.dev("list", "--need", "send-us", "sandbox-login", "chat-app")).toBe(0);
   const text = machine.since(before);
   expect(text).not.toContain("send-us");
   expect(text).toContain("sandbox-login: missing. Ask the user with one request_secret card");
   expect(text).toContain("one line per variable: LOGIN_EMAIL=…, LOGIN_PASSWORD=…");
-  expect(text).toContain("fleet secret put sandbox-login --file <the saved file>");
+  expect(text).toContain("hedge secret put sandbox-login --file <the saved file>");
   expect(text).toContain("chat-app: failing its check (the chat service answered invalid_auth).");
   expect(text).toContain("Then store it with: the steps in the chat pack's setup");
   const reads = readFileSync(eventLogPath(machine.hubHome), "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)).filter((event) => event.type === "read");
@@ -461,18 +462,18 @@ test("list --need prints the card for each missing or failing secret, nothing fo
 });
 
 test("list --need guards a check's reason that would show a value, and stops at an off that lands during a check", async () => {
-  let machine: ReturnType<typeof fleet>;
+  let machine: ReturnType<typeof hedge>;
   const rows = testRows().map((row) => row.name !== "chat-app" ? row : { ...row, provider: { name: "chat-app", check: async (fields: Record<string, string>) => ({ ok: false as const, reason: `token ${fields.CHAT_BOT_TOKEN} revoked` }) } });
   const offing = testRows().map((row) => row.name !== "chat-app" ? row : { ...row, provider: { name: "chat-app", check: async () => { await machine.hub("off", "leak seen mid-check"); return { ok: true as const }; } } });
-  machine = fleet({ rows });
-  hubFile(machine.hubHome, ".config/fleet/chat-app.json", JSON.stringify(chatTokens));
+  machine = hedge({ rows });
+  hubFile(machine.hubHome, ".config/hedge/chat-app.json", JSON.stringify(chatTokens));
   expect(await machine.dev("list", "--need", "chat-app")).toBe(0);
   expect(machine.printed.join("")).toContain("chat-app: failing its check (its reason would show part of the value).");
   machine.expectNoLeak(Object.values(chatTokens));
 
-  machine = fleet({ rows: offing });
+  machine = hedge({ rows: offing });
   expect(await machine.dev("put", "send-us", "--file", machine.secretFile(machine.devHome, sendKey))).toBe(0);
-  hubFile(machine.hubHome, ".config/fleet/chat-app.json", JSON.stringify(chatTokens));
+  hubFile(machine.hubHome, ".config/hedge/chat-app.json", JSON.stringify(chatTokens));
   expect(await machine.dev("list", "--need", "chat-app", "send-us")).toBe(1);
   expect(machine.printed.join("")).toContain("leak seen mid-check");
   const reads = readFileSync(eventLogPath(machine.hubHome), "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)).filter((event) => event.type === "read");
@@ -480,17 +481,17 @@ test("list --need guards a check's reason that would show a value, and stops at 
 });
 
 test("list and list --due read an existing secret's file metadata only, so they work while the store is off and on a broken file", async () => {
-  const machine = fleet();
-  hubFile(machine.hubHome, ".config/fleet/chat-app.json", "null", 0o200);
-  hubFile(machine.hubHome, ".config/fleet/speech.env", `SPEECH_API_KEY=${crypto.randomUUID()}\n`, 0o644);
+  const machine = hedge();
+  hubFile(machine.hubHome, ".config/hedge/chat-app.json", "null", 0o200);
+  hubFile(machine.hubHome, ".config/hedge/speech.env", `SPEECH_API_KEY=${crypto.randomUUID()}\n`, 0o644);
   expect(await machine.dev("off", "suspected leak")).toBe(0);
   let before = machine.printed.length;
   expect(await machine.dev("list")).toBe(0);
   let text = machine.since(before);
   expect(text).toContain("Store: off since 2026-11-13T10:00Z (suspected leak)");
-  expect(text).toContain("chat-app: existing, chat-app, scope the chat app's tokens, own file ~/.config/fleet/chat-app.json;");
-  expect(text).toContain("speech: existing, speech, scope text to speech, own file ~/.config/fleet/speech.env, readable by others (chmod 600);");
-  expect(text).toContain("pager: existing, pager, scope one alert source, own file ~/.config/fleet/pager.env, missing;");
+  expect(text).toContain("chat-app: existing, chat-app, scope the chat app's tokens, own file ~/.config/hedge/chat-app.json;");
+  expect(text).toContain("speech: existing, speech, scope text to speech, own file ~/.config/hedge/speech.env, readable by others (chmod 600);");
+  expect(text).toContain("pager: existing, pager, scope one alert source, own file ~/.config/hedge/pager.env, missing;");
   before = machine.printed.length;
   expect(await machine.dev("list", "--due")).toBe(0);
   text = machine.since(before);
@@ -499,9 +500,9 @@ test("list and list --due read an existing secret's file metadata only, so they 
 });
 
 test("an existing file's reasons never show a value it holds, down to a bare mark, and a value shorter than 8 characters is refused", async () => {
-  for (const [other, reason] of [[chatTokens.botToken, "~/.config/fleet/chat-app.json is unusable, and the reason would show part of a value it holds"], ["is unusable", "unusable"], ["unusable", "✗"]] as const) {
-    const machine = fleet();
-    hubFile(machine.hubHome, ".config/fleet/chat-app.json", JSON.stringify({ appToken: "botToken", other }));
+  for (const [other, reason] of [[chatTokens.botToken, "~/.config/hedge/chat-app.json is unusable, and the reason would show part of a value it holds"], ["is unusable", "unusable"], ["unusable", "✗"]] as const) {
+    const machine = hedge();
+    hubFile(machine.hubHome, ".config/hedge/chat-app.json", JSON.stringify({ appToken: "botToken", other }));
     expect(await machine.dev("list", "--need", "chat-app")).toBe(0);
     expect((await run(machine.dev, machine.printed, ["chat-app"], "echo child-ran")).code).toBe(1);
     const printed = machine.printed.join("");
@@ -510,14 +511,14 @@ test("an existing file's reasons never show a value it holds, down to a bare mar
     for (const shown of [printed, log]) expect(shown).not.toContain(chatTokens.botToken);
     expect(log.split("\n").filter(Boolean).map((line) => JSON.parse(line).refused)).toEqual([reason, reason]);
   }
-  const machine = fleet();
-  hubFile(machine.hubHome, ".config/fleet/speech.env", "SPEECH_API_KEY=k3y9\n");
+  const machine = hedge();
+  hubFile(machine.hubHome, ".config/hedge/speech.env", "SPEECH_API_KEY=k3y9\n");
   expect(await machine.dev("list", "--need", "speech")).toBe(0);
-  expect(machine.printed.join("")).toContain("speech: SPEECH_API_KEY in ~/.config/fleet/speech.env is shorter than 8 characters, so run could not redact it.");
+  expect(machine.printed.join("")).toContain("speech: SPEECH_API_KEY in ~/.config/hedge/speech.env is shorter than 8 characters, so run could not redact it.");
 });
 
 test("list --due names a standing secret within 7 days of its expiry, one past it, and one missing", async () => {
-  const machine = fleet();
+  const machine = hedge();
   expect(await machine.dev("put", "send-us", "--file", machine.secretFile(machine.devHome, sendKey), "--expires", "2026-11-18")).toBe(0);
   machine.clock.now = new Date("2026-11-14T10:00:00Z");
   expect(await machine.dev("put", "send-eu", "--file", machine.secretFile(machine.devHome, euKey))).toBe(0);
@@ -541,7 +542,7 @@ test("rows and providers come from the packs' handlers, and a row whose provider
   { name: "send-us", provider: provider("prefix-key", { prefix: "key_" }), scope: "email:write", settings: "https://example.com", env: ["EXAMPLE_API_KEY"] },
   { name: "orphan-key", provider: provider("absent-provider"), scope: "nothing", settings: "https://example.com", env: ["ORPHAN_KEY"] },
 ];\n`);
-  const machine = fleet({ rows: "injected", handlers: { [rowsSeam]: rows, [providersSeam]: providers } });
+  const machine = hedge({ rows: "injected", handlers: { [rowsSeam]: rows, [providersSeam]: providers } });
   expect(await machine.dev("put", "send-us", "--file", machine.secretFile(machine.devHome, made("wrong_")))).toBe(1);
   expect(machine.printed.join("")).toContain("the key has the wrong prefix");
   expect(await machine.dev("put", "send-us", "--file", machine.secretFile(machine.devHome, sendKey))).toBe(0);
@@ -553,33 +554,33 @@ test("rows and providers come from the packs' handlers, and a row whose provider
   machine.expectNoLeak();
 });
 
-test("without a hub alias the store lives on this machine, and only the hub serves fleet secret hub", async () => {
+test("without a hub alias the store lives on this machine, and only the hub serves hedge secret hub", async () => {
   const home = newHome();
   const printed: string[] = [];
-  const context: SecretContext = { home, env: { FLEET_SETTINGS: "{}" }, rows: testRows(), out: (shown) => printed.push(text(shown)), err: (shown) => printed.push(text(shown)), now: () => new Date("2026-11-13T10:00:00Z") };
+  const context: SecretContext = { home, env: { HEDGE_SETTINGS: "{}" }, rows: testRows(), out: (shown) => printed.push(text(shown)), err: (shown) => printed.push(text(shown)), now: () => new Date("2026-11-13T10:00:00Z") };
   const dir = secretFilesDir(home);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "card"), sendKey);
   expect(await secretCommand(["put", "send-us", "--file", join(dir, "card")], context)).toBe(0);
   expect(existsSync(join(eventLogPath(home)))).toBe(true);
-  const machine = fleet();
+  const machine = hedge();
   expect(await machine.dev("hub")).toBe(2);
-  expect(machine.printed.join("")).toContain("fleet secret hub runs only on the hub");
+  expect(machine.printed.join("")).toContain("hedge secret hub runs only on the hub");
 });
 
 const echoing = (name: string, check: (values: Record<string, string>) => Promise<CheckResult>) => testRows().map((row) => row.name !== name ? row : { ...row, provider: { name: row.provider.name, check } });
 
 test("a provider that throws with a value, or a hub that fails with one on stderr, prints a fixed failure and no value", async () => {
   const throwing = async (values: Record<string, string>): Promise<CheckResult> => { throw new Error(`provider failed: ${Object.values(values).join(" ")}`); };
-  let machine = fleet({ rows: echoing("send-us", throwing) });
+  let machine = hedge({ rows: echoing("send-us", throwing) });
   expect(await machine.dev("put", "send-us", "--file", machine.secretFile(machine.devHome, sendKey))).toBe(1);
   expect(machine.printed.join("")).toContain("the check failed with an error it does not show");
-  machine = fleet({ rows: echoing("chat-app", throwing) });
-  hubFile(machine.hubHome, ".config/fleet/chat-app.json", JSON.stringify(chatTokens));
+  machine = hedge({ rows: echoing("chat-app", throwing) });
+  hubFile(machine.hubHome, ".config/hedge/chat-app.json", JSON.stringify(chatTokens));
   expect(await machine.dev("list", "--need", "chat-app")).toBe(0);
   expect(machine.printed.join("")).toContain("chat-app: failing its check (the check failed with an error it does not show).");
   machine.expectNoLeak(Object.values(chatTokens));
-  machine = fleet();
+  machine = hedge();
   for (const code of [1, 255]) {
     machine.reach.answer = { code, stdout: "", stderr: `Error: provider failed: ${sendKey}\n` };
     expect(await machine.dev("put", "send-us", "--file", machine.secretFile(machine.devHome, sendKey))).toBe(1);
@@ -589,8 +590,8 @@ test("a provider that throws with a value, or a hub that fails with one on stder
 });
 
 test("a refusal whose fixed fallback or printed prefix would spell the value falls back to a bare refusal", async () => {
-  for (const spelled of ["Nothing was stored", "Fleet secret"]) {
-    const machine = fleet({ rows: echoing("send-us", async ({ EXAMPLE_API_KEY: key = "" }) => ({ ok: false, reason: `the service rejected ${key}` })) });
+  for (const spelled of ["Nothing was stored", "Hedge secret"]) {
+    const machine = hedge({ rows: echoing("send-us", async ({ EXAMPLE_API_KEY: key = "" }) => ({ ok: false, reason: `the service rejected ${key}` })) });
     expect(await machine.dev("put", "send-us", "--file", machine.secretFile(machine.devHome, spelled))).toBe(1);
     expect(machine.printed.join("")).not.toContain(spelled);
     expect(machine.printed.join("")).toContain("efused");
@@ -599,7 +600,7 @@ test("a refusal whose fixed fallback or printed prefix would spell the value fal
 
 test("a torn off line, or an off line without its fields, keeps the store off until the user's yes turns it on", async () => {
   for (const damaged of ['{"type":"off","id":"o-1","rea', '{"type":"off","id":"o-1"}']) {
-    const machine = fleet({ words: [answer("m-after", "Yes, turn it on", "2026-11-13T11:00:00Z")] });
+    const machine = hedge({ words: [answer("m-after", "Yes, turn it on", "2026-11-13T11:00:00Z")] });
     expect(await machine.dev("put", "send-us", "--file", machine.secretFile(machine.devHome, sendKey))).toBe(0);
     appendFileSync(eventLogPath(machine.hubHome), `\n${damaged}`);
     let result = await run(machine.dev, machine.printed, ["send-us"], "echo child-ran");
@@ -613,7 +614,7 @@ test("a torn off line, or an off line without its fields, keeps the store off un
 });
 
 test("one message id turns the store on once per thread", async () => {
-  const machine = fleet({ words: [answer("m-1", "Yes, turn it on", "2026-11-13T11:00:00Z"), { ...answer("m-1", "Yes", "2026-11-13T11:00:00Z"), thread: "other-thread" }] });
+  const machine = hedge({ words: [answer("m-1", "Yes, turn it on", "2026-11-13T11:00:00Z"), { ...answer("m-1", "Yes", "2026-11-13T11:00:00Z"), thread: "other-thread" }] });
   for (const [thread, words] of [["users-thread", "Yes, turn it on"], ["other-thread", "Yes"]]) {
     machine.clock.now = new Date("2026-11-13T10:30:00Z");
     expect(await machine.dev("off", "suspected leak")).toBe(0);
@@ -623,7 +624,7 @@ test("one message id turns the store on once per thread", async () => {
 });
 
 test("on refuses a no, a yes to another question, and a yes to a question that only holds the enable question", async () => {
-  const machine = fleet({ words: [answer("m-no", "No, keep it off", "2026-11-13T11:00:00Z"), { ...answer("m-other", "Yes, ship it", "2026-11-13T11:00:00Z"), answered: "Merge the pull request?" }, { ...answer("m-negated", "Yes", "2026-11-13T11:00:00Z"), answered: "Do not turn the secret store back on?" }, answer("m-yes-off", "Yes, keep it off", "2026-11-13T11:00:00Z")] });
+  const machine = hedge({ words: [answer("m-no", "No, keep it off", "2026-11-13T11:00:00Z"), { ...answer("m-other", "Yes, ship it", "2026-11-13T11:00:00Z"), answered: "Merge the pull request?" }, { ...answer("m-negated", "Yes", "2026-11-13T11:00:00Z"), answered: "Do not turn the secret store back on?" }, answer("m-yes-off", "Yes, keep it off", "2026-11-13T11:00:00Z")] });
   expect(await machine.dev("put", "send-us", "--file", machine.secretFile(machine.devHome, sendKey))).toBe(0);
   expect(await machine.dev("off", "suspected leak")).toBe(0);
   machine.clock.now = new Date("2026-11-13T12:00:00Z");
@@ -638,8 +639,8 @@ test("on refuses a no, a yes to another question, and a yes to a question that o
 
 test("rows whose file fields set a variable they do not declare are refused before any value is read", async () => {
   const rows = testRows().filter((row) => row.file).map((row) => ({ ...row, file: { ...row.file!, fields: Object.fromEntries(Object.keys(row.file!.fields ?? { [row.env[0]!]: "" }).map((key) => [key, "SHARED_KEY"])) } }));
-  const machine = fleet({ rows });
-  hubFile(machine.hubHome, ".config/fleet/chat-app.json", JSON.stringify(chatTokens));
+  const machine = hedge({ rows });
+  hubFile(machine.hubHome, ".config/hedge/chat-app.json", JSON.stringify(chatTokens));
   const result = await run(machine.dev, machine.printed, ["chat-app", "speech"], "echo child-ran");
   expect(result.code).toBe(1);
   expect(result.text).toContain("which must be its variables CHAT_APP_TOKEN, CHAT_BOT_TOKEN, each once");
@@ -654,14 +655,14 @@ test("rows whose file fields set a variable they do not declare are refused befo
 test("rows that repeat a variable, or map two file fields to one variable, are refused", async () => {
   const [send, , , chat] = testRows();
   for (const row of [{ ...send!, env: ["EXAMPLE_API_KEY", "EXAMPLE_API_KEY"] }, { ...chat!, file: { ...chat!.file!, fields: { appToken: "CHAT_APP_TOKEN", botToken: "CHAT_APP_TOKEN" } } }]) {
-    const machine = fleet({ rows: [row] });
+    const machine = hedge({ rows: [row] });
     expect(await machine.dev("list")).toBe(1);
     expect(machine.printed.join("")).toContain(`The secret row "${row.name}"`);
   }
 });
 
 test("--expires refuses an impossible calendar date and a time without its zone", async () => {
-  const machine = fleet();
+  const machine = hedge();
   for (const expires of ["2026-11-31", "2026-12-00", "2026-12-01T10:00", "2026-12-01T24:00Z"]) {
     expect(await machine.dev("put", "send-us", "--file", machine.secretFile(machine.devHome, sendKey), "--expires", expires)).toBe(1);
   }
@@ -671,16 +672,16 @@ test("--expires refuses an impossible calendar date and a time without its zone"
 });
 
 test("an off that lands during the last check withholds the answers", async () => {
-  let machine: ReturnType<typeof fleet>;
-  machine = fleet({ rows: echoing("chat-app", async () => { await machine.hub("off", "leak seen mid-check"); return { ok: true }; }) });
-  hubFile(machine.hubHome, ".config/fleet/chat-app.json", JSON.stringify(chatTokens));
+  let machine: ReturnType<typeof hedge>;
+  machine = hedge({ rows: echoing("chat-app", async () => { await machine.hub("off", "leak seen mid-check"); return { ok: true }; }) });
+  hubFile(machine.hubHome, ".config/hedge/chat-app.json", JSON.stringify(chatTokens));
   expect(await machine.dev("list", "--need", "chat-app")).toBe(1);
   expect(machine.printed.join("")).toContain("(leak seen mid-check) during the checks, so their answers are withheld");
   expect(machine.printed.join("")).not.toContain("Nothing to ask");
 });
 
 test("put with two --file options deletes both request_secret files and stores nothing", async () => {
-  const machine = fleet();
+  const machine = hedge();
   const first = machine.secretFile(machine.devHome, sendKey);
   const second = machine.secretFile(machine.devHome, otherKey);
   expect(await machine.dev("put", "send-us", "--file", first, "--file", second)).toBe(2);
@@ -690,7 +691,7 @@ test("put with two --file options deletes both request_secret files and stores n
 });
 
 test("a damaged line found after an earlier off needs a yes given after it was found", async () => {
-  const machine = fleet({ words: [answer("m-old", "Yes", "2026-11-13T11:00:00Z"), answer("m-new", "Yes, turn it on", "2026-11-13T13:30:00Z")] });
+  const machine = hedge({ words: [answer("m-old", "Yes", "2026-11-13T11:00:00Z"), answer("m-new", "Yes, turn it on", "2026-11-13T13:30:00Z")] });
   expect(await machine.dev("put", "send-us", "--file", machine.secretFile(machine.devHome, sendKey))).toBe(0);
   machine.clock.now = new Date("2026-11-13T10:30:00Z");
   expect(await machine.dev("off", "earlier incident")).toBe(0);
@@ -706,7 +707,7 @@ test("a damaged line found after an earlier off needs a yes given after it was f
 });
 
 test("an off that lands while the hub reads a value withholds the value, and logs the read as refused", async () => {
-  const machine = fleet();
+  const machine = hedge();
   expect(await machine.dev("put", "send-us", "--file", machine.secretFile(machine.devHome, sendKey))).toBe(0);
   machine.hooks.beforeAppend = machine.offElsewhere("leak seen mid-read");
   const result = await run(machine.dev, machine.printed, ["send-us"], "echo child-ran");
@@ -723,7 +724,7 @@ test("off and on work while the rows fail to load, and a rows module that fails 
   const rows = join(dir, "rows.ts");
   const inError = made("token=");
   writeFileSync(rows, `export const rows = () => { throw new Error("cannot reach https://user:${inError}@example.com"); };\n`);
-  const machine = fleet({ rows: "injected", handlers: { [rowsSeam]: rows }, words: [answer("m-yes", "Yes, turn it on", "2026-11-13T11:00:00Z")] });
+  const machine = hedge({ rows: "injected", handlers: { [rowsSeam]: rows }, words: [answer("m-yes", "Yes, turn it on", "2026-11-13T11:00:00Z")] });
   expect(await machine.dev("off", "suspected leak")).toBe(0);
   machine.clock.now = new Date("2026-11-13T12:00:00Z");
   expect(await machine.dev("on", "--words", '2026-11-13 "Yes, turn it on"', "--thread", "users-thread")).toBe(0);
@@ -741,8 +742,8 @@ test("an off that lands before list --need logs its read keeps the value from th
     return response.ok ? { ok: true as const } : { ok: false as const, reason: "the example service refused" };
   };
   try {
-    const machine = fleet({ rows: echoing("chat-app", check) });
-    hubFile(machine.hubHome, ".config/fleet/chat-app.json", JSON.stringify(chatTokens));
+    const machine = hedge({ rows: echoing("chat-app", check) });
+    hubFile(machine.hubHome, ".config/hedge/chat-app.json", JSON.stringify(chatTokens));
     expect(await machine.dev("list", "--need", "chat-app")).toBe(0);
     expect(heard).toEqual([`Bearer ${chatTokens.botToken}`]);
     heard.length = 0;
@@ -758,7 +759,7 @@ test("an off that lands before list --need logs its read keeps the value from th
 
 test("a stored value whose row now sets other variables is refused until it is put again", async () => {
   const rows = testRows();
-  const machine = fleet({ rows });
+  const machine = hedge({ rows });
   expect(await machine.dev("put", "sandbox-login", "--file", machine.secretFile(machine.devHome, login()))).toBe(0);
   rows[2] = { ...rows[2]!, env: ["LOGIN_EMAIL", "LOGIN_PASSWORD", "LOGIN_CODE"] };
   const result = await run(machine.dev, machine.printed, ["sandbox-login"], "echo child-ran");
@@ -768,19 +769,19 @@ test("a stored value whose row now sets other variables is refused until it is p
 });
 
 test("a put through a provider without a check is stored with a note that it went unchecked", async () => {
-  const machine = fleet();
+  const machine = hedge();
   expect(await machine.dev("put", "sandbox-login", "--file", machine.secretFile(machine.devHome, login()))).toBe(0);
   const before = machine.printed.length;
   expect(await machine.dev("list")).toBe(0);
   expect(machine.since(before)).toContain("sandbox-login: standing, example-login, project Sandbox, scope the sandbox project only (unchecked: its provider has no check), stored");
 });
 
-test("an on request from a machine whose fleet secret predates the answer check asks for an update there", async () => {
-  const machine = fleet();
+test("an on request from a machine whose hedge secret predates the answer check asks for an update there", async () => {
+  const machine = hedge();
   expect(await machine.dev("off", "suspected leak")).toBe(0);
   const printed: string[] = [];
-  const code = await secretCommand(["hub"], { home: machine.hubHome, env: { FLEET_SETTINGS: "{}" }, rows: testRows(), out: (shown) => printed.push(text(shown)), err: (shown) => printed.push(text(shown)), stdin: async () => JSON.stringify({ op: "on", words: '2026-11-13 "Yes, turn it on"', thread: "users-thread" }) });
+  const code = await secretCommand(["hub"], { home: machine.hubHome, env: { HEDGE_SETTINGS: "{}" }, rows: testRows(), out: (shown) => printed.push(text(shown)), err: (shown) => printed.push(text(shown)), stdin: async () => JSON.stringify({ op: "on", words: '2026-11-13 "Yes, turn it on"', thread: "users-thread" }) });
   expect(code).toBe(0);
-  expect(JSON.parse(printed.join(""))).toEqual({ ok: false, error: "The calling machine's fleet secret sends no answer to check. Run fleet update there, then fleet secret on again" });
+  expect(JSON.parse(printed.join(""))).toEqual({ ok: false, error: "The calling machine's hedge secret sends no answer to check. Run hedge update there, then hedge secret on again" });
   expect((await run(machine.dev, machine.printed, ["send-us"], "echo child-ran")).code).toBe(1);
 });

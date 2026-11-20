@@ -18,7 +18,7 @@ type Message = { id?: number | string; method?: string; params?: Record<string, 
 const node = Bun.which("node");
 let bundled = "";
 beforeAll(async () => {
-  bundled = join(mkdtempSync(join(tmpdir(), "bridge-bundle-")), "fleet-app-bridge.mjs");
+  bundled = join(mkdtempSync(join(tmpdir(), "bridge-bundle-")), "hedge-app-bridge.mjs");
   writeFileSync(bundled, await bridgeBundle(join(import.meta.dir, "..")));
 });
 afterAll(() => rmSync(join(bundled, ".."), { recursive: true, force: true }));
@@ -33,7 +33,7 @@ function upstream(config = "", backendEnv: Record<string, string> = {}) {
   chmodSync(codex, 0o755);
   const log = join(home, "codex.log");
   const child = Bun.spawn(launch(), {
-    env: { PATH: process.env.PATH, CODEX_HOME: home, FLEET_CODEX_BIN: codex, FAKE_CODEX_LOG: log, ...backendEnv },
+    env: { PATH: process.env.PATH, CODEX_HOME: home, HEDGE_CODEX_BIN: codex, FAKE_CODEX_LOG: log, ...backendEnv },
     stdin: "pipe", stdout: "pipe", stderr: "pipe",
   });
   running.push(child);
@@ -82,7 +82,7 @@ for (const [runtime, command] of Object.entries(runtimes)) describe.skipIf(!node
     expect(draft.result).toEqual({ content: [{ type: "text", text: "slack.slack_send_message_draft done" }] });
     for (const name of ["slack_send_message", "slack_add_reaction", "slack_delete_message"]) {
       const refused = await bridge.request("tools/call", { name, arguments: { channel_id: "C1", message: "hi" } });
-      expect(refused.result).toEqual({ isError: true, content: [{ type: "text", text: "Fleet's Slack bridge only reads Slack, leaves unsent drafts, and writes canvases. Use slack_send_message_draft and let the person send it." }] });
+      expect(refused.result).toEqual({ isError: true, content: [{ type: "text", text: "Hedge's Slack bridge only reads Slack, leaves unsent drafts, and writes canvases. Use slack_send_message_draft and let the person send it." }] });
     }
     expect(bridge.called()).toEqual(["slack.slack_send_message_draft"]);
     expect(bridge.backend().find((entry) => entry.method === "mcpServer/tool/call")!.params).toEqual({ threadId: "thread-1", server: "codex_apps", tool: "slack.slack_send_message_draft", arguments: { channel_id: "C1", message: "hi" } });
@@ -113,12 +113,12 @@ for (const [runtime, command] of Object.entries(runtimes)) describe.skipIf(!node
   });
 
   test("the Codex backend serves only the Slack app: every MCP server and every other plugin stays off, and it uses its own OpenAI sign-in", async () => {
-    const bridge = upstream('[mcp_servers.fleet-hub]\ncommand = "sh"\n[mcp_servers.other]\ncommand = "x"\n[plugins."slack@openai-curated-remote"]\nenabled = false\n[plugins."gmail@openai-curated-remote"]\nenabled = true\n');
+    const bridge = upstream('[mcp_servers.hedge-hub]\ncommand = "sh"\n[mcp_servers.other]\ncommand = "x"\n[plugins."slack@openai-curated-remote"]\nenabled = false\n[plugins."gmail@openai-curated-remote"]\nenabled = true\n');
     await bridge.initialize();
     await bridge.request("tools/list");
     expect(bridge.backend()[0]!.argv).toEqual([
       "-c", "features.apps=true", "-c", "apps.asdk_app_69a1d78e929881919bba0dbda1f6436d.enabled=true", "-c", 'model_provider="openai"',
-      "-c", "mcp_servers.fleet-hub.enabled=false", "-c", "mcp_servers.other.enabled=false",
+      "-c", "mcp_servers.hedge-hub.enabled=false", "-c", "mcp_servers.other.enabled=false",
       "-c", 'plugins."slack@openai-curated-remote".enabled=true', "-c", 'plugins."gmail@openai-curated-remote".enabled=false',
       "app-server", "--stdio",
     ]);
@@ -134,7 +134,7 @@ for (const [runtime, command] of Object.entries(runtimes)) describe.skipIf(!node
 
   test("an app that its definition names serves only the tools of its allowlist, and refuses the rest with its own sentence", async () => {
     const mail = { kind: "codex-app", name: "mail", title: "Mail", app: "connector_mail", plugin: "gmail@openai-curated-remote", prefix: "gmail.", tools: ["read_*"], refusal: "Mail is read-only here." };
-    const bridge = upstream("", { FLEET_APP: JSON.stringify(mail) });
+    const bridge = upstream("", { HEDGE_APP: JSON.stringify(mail) });
     await bridge.initialize();
     expect(((await bridge.request("tools/list")).result.tools as Array<{ name: string }>).map((tool) => tool.name)).toEqual(["read_email"]);
     expect((await bridge.request("tools/call", { name: "send_email", arguments: {} })).result).toEqual({ isError: true, content: [{ type: "text", text: "Mail is read-only here." }] });

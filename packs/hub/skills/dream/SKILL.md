@@ -20,7 +20,7 @@ the person reviews change by change and merges.
   command below:
 
   ```sh
-  echo "${FLEET_MEMORY_DIR:-$HOME/.agents/memory}"
+  echo "${HEDGE_MEMORY_DIR:-$HOME/.agents/memory}"
   ```
 
   In the dream's worktree, `<notes>` is `<run>/memory/<memory.subtree>`, or `<run>/memory` when `memory.subtree` is empty.
@@ -36,7 +36,7 @@ the person reviews change by change and merges.
 ## Steps
 
 1. **Prepare.** When the prompt names a run directory, the hub already
-   prepared it; use it as `<run>`. Otherwise run `fleet dream prepare`. It
+   prepared it; use it as `<run>`. Otherwise run `hedge dream prepare`. It
    reads the hub, the devboxes, and the running boxes, runs one analyst per
    new session, checks each note the sessions wrote against the session that
    wrote it, and prints the run directory. Read `<run>/findings.md` and
@@ -88,7 +88,7 @@ the person reviews change by change and merges.
    change, part of the report, or counted as dismissed.
 
 5. **Prune.** Do this every night, with or without findings. Run
-   `fleet dream budget <run>/memory` and fix every line it prints:
+   `hedge dream budget <run>/memory` and fix every line it prints:
    - Condense a long memory to its fact, why, and how to apply it. Link
      detail that a repository holds.
    - Merge memories that overlap.
@@ -108,7 +108,7 @@ the person reviews change by change and merges.
    show which memories earn their place. Done when the budget prints
    `Memory is within budget.`
 
-   On Mondays, also run `fleet dream scorecard` and act on its **Paid off
+   On Mondays, also run `hedge dream scorecard` and act on its **Paid off
    least** list: rewrite a memory that recurs although read, or propose a
    check in **Fix** when wording cannot stop it; sharpen the index line of one
    that recurs unopened; delete one that nobody read.

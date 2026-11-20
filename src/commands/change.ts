@@ -2,7 +2,7 @@ import type { LoadedPack, Plan, ProfileFile } from "../pack/types.ts";
 import { saveAnswers } from "../profile/profile.ts";
 import type { Machine } from "../setup/commands.ts";
 
-/** What fleet packs, fleet settings and fleet set work on: the profile on this machine and every pack its sources offer. */
+/** What hedge packs, hedge settings and hedge set work on: the profile on this machine and every pack its sources offer. */
 export type ChangeContext = {
   profileDir: string;
   profile: ProfileFile;
@@ -20,8 +20,8 @@ export async function saveAndApply(context: ChangeContext, answers: Partial<Prof
   await saveAnswers(context.profileDir, answers, { push: true });
   context.print(`✓ Saved ${what} in your profile and pushed it.`);
   const code = await context.apply();
-  if (code !== 0) return context.print("The change is saved. Fix what it says above, then run fleet apply."), code;
-  context.print("This machine has it now. Your other machines pick it up at their next fleet update.");
+  if (code !== 0) return context.print("The change is saved. Fix what it says above, then run hedge apply."), code;
+  context.print("This machine has it now. Your other machines pick it up at their next hedge update.");
   return 0;
 }
 

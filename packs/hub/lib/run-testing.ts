@@ -14,8 +14,8 @@ export function fakeRun(answer: (command: string[], input?: string) => Partial<R
 }
 
 export function roleHome(home: string, role: string) {
-  mkdirSync(join(home, ".config/fleet"), { recursive: true });
-  writeFileSync(join(home, ".config/fleet/machine.json"), JSON.stringify({ schema: 1, role }));
+  mkdirSync(join(home, ".config/hedge"), { recursive: true });
+  writeFileSync(join(home, ".config/hedge/machine.json"), JSON.stringify({ schema: 1, role }));
   return home;
 }
 

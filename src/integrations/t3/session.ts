@@ -33,7 +33,7 @@ type IssuedSession = { sessionId: string; token: string };
 type PendingCall = { resolve(value: unknown): void; reject(error: Error): void };
 
 const defaultTimeoutMs = 30_000;
-const sessionLabel = "fleet";
+const sessionLabel = "hedge";
 
 export async function readT3Settings<T>(client: Pick<T3Client, "call">): Promise<T> {
   return (await client.call<{ settings: T }>("server.getConfig", {})).settings;

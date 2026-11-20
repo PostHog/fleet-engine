@@ -1,10 +1,10 @@
 import { parse } from "smol-toml";
 
-/** An MCP server that the gateway signs in to with OAuth. tools, when set, is the only tools the Fleet group serves. */
+/** An MCP server that the gateway signs in to with OAuth. tools, when set, is the only tools the Hedge group serves. */
 export type OauthUpstream = { kind: "oauth"; name: string; title: string; url: string; tools?: string[]; loopback?: true; scopes?: string[] };
 
 /**
- * A ChatGPT app that Fleet's app bridge serves through the Codex sign-in of its account. The bridge offers only the
+ * A ChatGPT app that Hedge's app bridge serves through the Codex sign-in of its account. The bridge offers only the
  * tools its allowlist names, where a name may end in * for any rest, and refuses every other call with refusal.
  */
 export type CodexApp = {
@@ -37,7 +37,7 @@ export const slack: CodexApp = {
   plugin: "slack@openai-curated-remote",
   prefix: "slack.",
   tools: ["slack_send_message_draft", "slack_create_canvas", "slack_update_canvas", "slack_get_reactions", "slack_read_*", "slack_search_*", "slack_list_*"],
-  refusal: "Fleet's Slack bridge only reads Slack, leaves unsent drafts, and writes canvases. Use slack_send_message_draft and let the person send it.",
+  refusal: "Hedge's Slack bridge only reads Slack, leaves unsent drafts, and writes canvases. Use slack_send_message_draft and let the person send it.",
   renames: { slack_send_message: "slack_send_message_draft" },
   skinTones: true,
 };
@@ -50,7 +50,7 @@ export const gmail: CodexApp = {
   plugin: "gmail@openai-curated-remote",
   prefix: "gmail.",
   tools: ["search_emails", "search_email_ids", "read_email", "read_email_thread", "batch_read_email", "batch_read_email_threads", "read_attachment", "list_drafts", "list_labels", "get_profile", "create_draft", "update_draft"],
-  refusal: "Fleet's Gmail route only reads mail and writes drafts. Use create_draft and let the person send it.",
+  refusal: "Hedge's Gmail route only reads mail and writes drafts. Use create_draft and let the person send it.",
   account: "google",
 };
 
@@ -62,7 +62,7 @@ export const googleCalendar: CodexApp = {
   plugin: "google-calendar@openai-curated-remote",
   prefix: "google_calendar.",
   tools: ["search", "fetch", "search_events", "read_event", "batch_read_event", "list_calendars", "get_availability", "get_colors", "list_event_labels", "get_profile"],
-  refusal: "Fleet's Google Calendar route is read-only.",
+  refusal: "Hedge's Google Calendar route is read-only.",
   account: "google",
 };
 
@@ -74,7 +74,7 @@ export const googleDrive: CodexApp = {
   plugin: "google-drive@openai-curated-remote",
   prefix: "google_drive.",
   tools: ["search", "fetch", "recent_documents", "list_folder", "list_drives", "get_profile", "get_file_metadata", "export_file", "list_file_revisions", "fetch_file_revision", "get_file_comments", "get_document", "get_document_text", "get_document_tables", "get_document_comments", "get_document_paragraph_range", "find_document_text_range", "get_spreadsheet_metadata", "get_spreadsheet_range", "get_spreadsheet_cells", "get_spreadsheet_comments", "search_spreadsheet_rows", "get_presentation", "get_presentation_text", "get_presentation_outline", "get_presentation_tables", "get_presentation_comments", "get_slide", "get_slide_thumbnail"],
-  refusal: "Fleet's Google Drive route is read-only.",
+  refusal: "Hedge's Google Drive route is read-only.",
   account: "google",
 };
 
@@ -136,13 +136,13 @@ export function parseUpstream(value: unknown): Upstream {
   return value as Upstream;
 }
 
-export const localTarget = /^\/fleet-[a-z0-9][a-z0-9-]*$/;
-const reservedTargets = ["/fleet-local"];
+export const localTarget = /^\/hedge-[a-z0-9][a-z0-9-]*$/;
+const reservedTargets = ["/hedge-local"];
 
 function localProblem(value: Field): string | undefined {
   const mounts = value.mounts ?? [];
   if (!Array.isArray(mounts) || !mounts.every((mount: Field) => typeof mount?.source === "string" && mount.source.startsWith("/") && typeof mount.target === "string" && localTarget.test(mount.target) && !reservedTargets.includes(mount.target))) {
-    return "mounts must give each folder an absolute source and a target such as /fleet-notes";
+    return "mounts must give each folder an absolute source and a target such as /hedge-notes";
   }
   if (new Set(mounts.map((mount: Field) => mount.target)).size !== mounts.length) return "mounts must not share a target";
 }

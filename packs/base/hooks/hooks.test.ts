@@ -264,7 +264,7 @@ describe("secret guard", () => {
 
   test("withholds a prompt or tool output the guard cannot check", () => {
     const structuredContent = Array.from({ length: 200_000 }).reduce<unknown>((inner) => [inner], githubToken);
-    expect(guard("claude", toolEvent({ structuredContent }))?.hookSpecificOutput).toMatchObject({ updatedToolOutput: "[withheld: Fleet's secret guard could not check this output]" });
+    expect(guard("claude", toolEvent({ structuredContent }))?.hookSpecificOutput).toMatchObject({ updatedToolOutput: "[withheld: Hedge's secret guard could not check this output]" });
     expect(guard("codex", toolEvent({ structuredContent }))?.decision).toBe("block");
     expect(guard("claude", { hook_event_name: "UserPromptSubmit", prompt: structuredContent as string })?.decision).toBe("block");
   });
@@ -310,12 +310,12 @@ describe("secret guard", () => {
     expect(output).not.toContain(coderToken);
   });
 
-  test.each(["claude", "codex"] as const)("%s guard messages point at request_secret file delivery and fleet secret put --file", (provider) => {
+  test.each(["claude", "codex"] as const)("%s guard messages point at request_secret file delivery and hedge secret put --file", (provider) => {
     const decision = guard(provider, toolEvent({ stdout: githubToken }))!;
     for (const reason of [guard(provider, promptEvent(`key: ${githubToken}`))!.reason, decision.reason ?? (decision.hookSpecificOutput as { additionalContext: string }).additionalContext]) {
       expect(reason).toContain("`request_secret`");
       expect(reason).toContain("file delivery");
-      expect(reason).toContain("`fleet secret put --file");
+      expect(reason).toContain("`hedge secret put --file");
     }
   });
 
@@ -416,7 +416,7 @@ describe("secret guard", () => {
     symlinkSync(Bun.which("sh")!, join(bin, "sh"));
     const child = Bun.spawn([join(bin, "sh"), join(import.meta.dir, "run.sh"), "claude", "UserPromptSubmit"], { env: { HOME: home, PATH: bin }, stdin: new Blob(["{}"]), stderr: "pipe" });
     expect(await child.exited).toBe(2);
-    expect(await new Response(child.stderr).text()).toContain("Fleet hooks need Bun");
+    expect(await new Response(child.stderr).text()).toContain("Hedge hooks need Bun");
   });
 
   test("the secret guard names its usage for an unknown agent without waiting for its input", async () => {
@@ -432,7 +432,7 @@ describe("secret guard", () => {
 
   test("the hook runner blocks a secret and ignores Bun configuration in the session's working directory", async () => {
     const home = temp.make("home-");
-    const hooks = join(home, ".config/fleet/hooks");
+    const hooks = join(home, ".config/hedge/hooks");
     mkdirSync(join(hooks, "UserPromptSubmit"), { recursive: true });
     for (const file of ["run.sh", "run.ts"]) symlinkSync(join(import.meta.dir, file), join(hooks, file));
     symlinkSync(join(import.meta.dir, "secret-guard.ts"), join(hooks, "UserPromptSubmit/secret-guard.ts"));
@@ -489,7 +489,7 @@ describe("hook runner", () => {
 
   test("keeps the first decision when a later hook fails, and reports the failure", async () => {
     const run = scripted({ "a.ts": { code: 1, stdout: "", stderr: "boom" }, "b.ts": ok('{"decision":"block"}'), "c.ts": ok('{"other":true}') });
-    expect(await dispatch(dirWith("a.ts", "b.ts", "c.ts"), "codex", "{}", run)).toEqual({ code: 0, stdout: '{"decision":"block"}\n', stderr: "fleet hook a.ts: boom\n" });
+    expect(await dispatch(dirWith("a.ts", "b.ts", "c.ts"), "codex", "{}", run)).toEqual({ code: 0, stdout: '{"decision":"block"}\n', stderr: "hedge hook a.ts: boom\n" });
   });
 
   const hooksPrinting = (answers: Record<string, unknown>) => {
@@ -503,14 +503,14 @@ describe("hook runner", () => {
     const dir = hooksPrinting({
       "a-recall.ts": preToolUse({ additionalContext: "A note about this command." }),
       "b-allow.ts": preToolUse({ permissionDecision: "allow", permissionDecisionReason: "fine" }),
-      "c-guard.ts": preToolUse({ permissionDecision: "deny", permissionDecisionReason: "Fleet blocked this command." }),
+      "c-guard.ts": preToolUse({ permissionDecision: "deny", permissionDecisionReason: "Hedge blocked this command." }),
       "d-recall.ts": preToolUse({ additionalContext: "Another note." }),
     });
     const answer = JSON.parse((await dispatch(dir, "claude", "{}")).stdout);
     expect(answer.hookSpecificOutput).toEqual({
       hookEventName: "PreToolUse",
       permissionDecision: "deny",
-      permissionDecisionReason: "Fleet blocked this command.",
+      permissionDecisionReason: "Hedge blocked this command.",
       additionalContext: "A note about this command.\n\nAnother note.",
     });
   });
@@ -541,11 +541,11 @@ describe("hook runner", () => {
     }
   });
 
-  test("a block without a reason keeps another hook's deny reason, or says that a Fleet hook blocked the call", async () => {
-    const withDeny = hooksPrinting({ "a-block.ts": { decision: "block", hookSpecificOutput: { hookEventName: "PreToolUse" } }, "b-guard.ts": preToolUse({ permissionDecision: "deny", permissionDecisionReason: "Fleet blocked this command." }) });
-    expect(JSON.parse((await dispatch(withDeny, "codex", "{}")).stdout).hookSpecificOutput.permissionDecisionReason).toBe("Fleet blocked this command.");
+  test("a block without a reason keeps another hook's deny reason, or says that a Hedge hook blocked the call", async () => {
+    const withDeny = hooksPrinting({ "a-block.ts": { decision: "block", hookSpecificOutput: { hookEventName: "PreToolUse" } }, "b-guard.ts": preToolUse({ permissionDecision: "deny", permissionDecisionReason: "Hedge blocked this command." }) });
+    expect(JSON.parse((await dispatch(withDeny, "codex", "{}")).stdout).hookSpecificOutput.permissionDecisionReason).toBe("Hedge blocked this command.");
     const alone = hooksPrinting({ "a-block.ts": { decision: "block", reason: " ", hookSpecificOutput: { hookEventName: "PreToolUse" } } });
-    expect(JSON.parse((await dispatch(alone, "codex", "{}")).stdout).hookSpecificOutput.permissionDecisionReason).toBe("A Fleet hook blocked this tool call.");
+    expect(JSON.parse((await dispatch(alone, "codex", "{}")).stdout).hookSpecificOutput.permissionDecisionReason).toBe("A Hedge hook blocked this tool call.");
   });
 
   test("no hook's context can carry a secret back to the agent", async () => {
@@ -562,10 +562,10 @@ describe("hook runner", () => {
 
   test("a deny drops another hook's rewritten input, so the original call does not run", async () => {
     const dir = hooksPrinting({
-      "a-guard.ts": preToolUse({ permissionDecision: "deny", permissionDecisionReason: "Fleet blocked this command." }),
+      "a-guard.ts": preToolUse({ permissionDecision: "deny", permissionDecisionReason: "Hedge blocked this command." }),
       "b-rewrite.ts": { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", updatedInput: { command: "echo rewritten" } } },
     });
-    expect(JSON.parse((await dispatch(dir, "codex", "{}")).stdout).hookSpecificOutput).toEqual({ hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: "Fleet blocked this command." });
+    expect(JSON.parse((await dispatch(dir, "codex", "{}")).stdout).hookSpecificOutput).toEqual({ hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: "Hedge blocked this command." });
   });
 
   test("a plain block of a tool call wins over another hook's allow and rewrite", async () => {
@@ -586,6 +586,6 @@ describe("hook runner", () => {
 
   test("fails without a decision when a hook fails", async () => {
     const run = scripted({ "a.ts": { code: 1, stdout: "", stderr: "" } });
-    expect(await dispatch(dirWith("a.ts"), "codex", "{}", run)).toEqual({ code: 1, stdout: "", stderr: "fleet hook a.ts: exit 1\n" });
+    expect(await dispatch(dirWith("a.ts"), "codex", "{}", run)).toEqual({ code: 1, stdout: "", stderr: "hedge hook a.ts: exit 1\n" });
   });
 });

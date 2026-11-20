@@ -13,7 +13,7 @@ afterEach(async () => {
 });
 
 async function temporaryHome(): Promise<string> {
-  const home = await mkdtemp(join(tmpdir(), "fleet-lessons-"));
+  const home = await mkdtemp(join(tmpdir(), "hedge-lessons-"));
   cleanups.push(home);
   return home;
 }
@@ -83,7 +83,7 @@ function io(home: string, lines: string[], rolloutLog = "", warnings: string[] =
   return { ...fixtureFetchers(fixture), home, host: "this-box", tracker: () => "", rolloutLog: () => rolloutLog, print: (line) => lines.push(line), warn: (line) => warnings.push(line) };
 }
 
-test("fleet lessons tables the map's ❌ lines and its stack PRs' review and rollout trouble", async () => {
+test("hedge lessons tables the map's ❌ lines and its stack PRs' review and rollout trouble", async () => {
   const home = await temporaryHome();
   const log = await writeLedger(home);
   const lines: string[] = [];
@@ -94,7 +94,7 @@ test("fleet lessons tables the map's ❌ lines and its stack PRs' review and rol
   expect(code).toBe(0);
 });
 
-test("fleet lessons takes the rollout log from --rollouts, and says when the log is missing or unset", async () => {
+test("hedge lessons takes the rollout log from --rollouts, and says when the log is missing or unset", async () => {
   const home = await temporaryHome();
   const log = await writeLedger(home);
   const run = async (args: string[], setting: string) => {
@@ -108,7 +108,7 @@ test("fleet lessons takes the rollout log from --rollouts, and says when the log
   expect(await run(["acme/maps#1"], "")).toBe("PR signals from the proof ledger on this-box and no rollout log (orchestration.rolloutLog is empty, so holds and rollbacks are unknown):");
 });
 
-test("fleet lessons says when nothing went wrong and when the map has no stack PRs", async () => {
+test("hedge lessons says when nothing went wrong and when the map has no stack PRs", async () => {
   const home = await temporaryHome();
   await mkdir(join(ledgerRoot(home), "acme/app/10/reviews/1"), { recursive: true });
   await writeFile(join(ledgerRoot(home), "acme/app/10/reviews/1/findings.md"), "Findings.");
@@ -131,18 +131,18 @@ test("fleet lessons says when nothing went wrong and when the map has no stack P
   expect(await run("No board.")).toBe("No ❌ lines on the map or its tickets.\n\nNo stack PRs on the map's Stacks board.");
 });
 
-test("fleet lessons runs as a pack command with the tracker and rollout log from the settings", async () => {
+test("hedge lessons runs as a pack command with the tracker and rollout log from the settings", async () => {
   const home = await temporaryHome();
   const log = await writeLedger(home);
   const bin = await fakeGitHub(home, fixture);
   const settings = { "orchestration.tracker": repository, "orchestration.rolloutLog": "~/rollouts.jsonl" };
 
-  const result = await runPackCommand("lessons", ["#1"], { HOME: home, PATH: `${bin}:${Bun.env.PATH}`, FLEET_SETTINGS: JSON.stringify(settings) });
+  const result = await runPackCommand("lessons", ["#1"], { HOME: home, PATH: `${bin}:${Bun.env.PATH}`, HEDGE_SETTINGS: JSON.stringify(settings) });
 
   expect(result).toEqual({ stdout: `${[...failures, "", ...signals(hostname(), log)].join("\n")}\n`, stderr: "", code: 0 });
 });
 
-test("fleet lessons skips malformed rollout rows with a warning that names the file and line, and still reports", async () => {
+test("hedge lessons skips malformed rollout rows with a warning that names the file and line, and still reports", async () => {
   const home = await temporaryHome();
   const log = await writeLedger(home);
   await writeFile(log, [
@@ -171,11 +171,11 @@ test("fleet lessons skips malformed rollout rows with a warning that names the f
 
   const bin = await fakeGitHub(home, fixture);
   const settings = { "orchestration.tracker": repository, "orchestration.rolloutLog": log };
-  const command = await runPackCommand("lessons", ["#1"], { HOME: home, PATH: `${bin}:${Bun.env.PATH}`, FLEET_SETTINGS: JSON.stringify(settings) });
+  const command = await runPackCommand("lessons", ["#1"], { HOME: home, PATH: `${bin}:${Bun.env.PATH}`, HEDGE_SETTINGS: JSON.stringify(settings) });
   expect(command).toEqual({ stdout: `${[...failures, "", ...signals(hostname(), log)].join("\n")}\n`, stderr: `${warnings.join("\n")}\n`, code: 0 });
 });
 
-test("fleet lessons skips malformed miss ledger entries with a warning, and still reports the valid ones", async () => {
+test("hedge lessons skips malformed miss ledger entries with a warning, and still reports the valid ones", async () => {
   const home = await temporaryHome();
   const log = await writeLedger(home);
   const ledger = missesPath(home);
@@ -200,7 +200,7 @@ test("fleet lessons skips malformed miss ledger entries with a warning, and stil
   ]);
 });
 
-test("fleet lessons caps the warnings for one file, and reads no ledger for a map without stack PRs", async () => {
+test("hedge lessons caps the warnings for one file, and reads no ledger for a map without stack PRs", async () => {
   const home = await temporaryHome();
   const log = await writeLedger(home);
   await writeFile(missesPath(home), Array.from({ length: 2000 }, () => "null").join("\n"));
@@ -223,9 +223,9 @@ test("fleet lessons caps the warnings for one file, and reads no ledger for a ma
   expect(quiet).toEqual([]);
 });
 
-test("fleet lessons refuses bad arguments", async () => {
+test("hedge lessons refuses bad arguments", async () => {
   const home = await temporaryHome();
-  const usage = "Usage: fleet lessons <map URL | owner/repo#number | number> [--rollouts <file>]";
+  const usage = "Usage: hedge lessons <map URL | owner/repo#number | number> [--rollouts <file>]";
   for (const args of [[], ["acme/maps#1", "--rollouts"], ["acme/maps#1", "--other", "x"], ["acme/maps#1", "--rollouts", "x", "y"], ["--local", "--prs", "acme/app#1"]]) {
     await expect(runLessons(args, io(home, []))).rejects.toThrow(usage);
   }

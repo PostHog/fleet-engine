@@ -6,7 +6,7 @@ type Env = Record<string, string | undefined>;
 
 export type Library = { path: string; repo: string; url: string; owner: string };
 
-export const stateDir = (home: string) => join(home, ".local/state/fleet/context-library");
+export const stateDir = (home: string) => join(home, ".local/state/hedge/context-library");
 export const pointerFile = (home: string) => join(stateDir(home), "library.json");
 export const cacheFile = (home: string) => join(stateDir(home), "catalog-cache.json");
 
@@ -23,7 +23,7 @@ export function githubSlug(repo: string) {
 
 export function librarySettings(env: Env, home: string): Library {
   const repo = stringSetting("context-library.repo", env).trim();
-  if (!repo) throw new Error("context-library.repo is empty. Set it with fleet set context-library.repo=<owner>/<repo>.");
+  if (!repo) throw new Error("context-library.repo is empty. Set it with hedge set context-library.repo=<owner>/<repo>.");
   const path = expand(stringSetting("context-library.path", env).trim(), home);
   if (!isAbsolute(path)) throw new Error(`context-library.path is ${JSON.stringify(path)}. Give a folder under ~/ or an absolute path.`);
   const slug = githubSlug(repo);

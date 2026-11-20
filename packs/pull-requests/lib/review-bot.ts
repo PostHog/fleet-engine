@@ -2,7 +2,7 @@ type Env = Record<string, string | undefined>;
 export type ReviewBotAction = "review" | "stamp" | "forecast";
 export type ReviewBotRequest = { action: ReviewBotAction; repo: string; pr?: number; branch?: string; paths?: string; minutes: number; deep: boolean; request: boolean };
 
-const usage = "Usage: fleet pr review|stamp --repo <owner/repo> --pr <number> [--deep] [--minutes <n>], or fleet pr forecast --repo <owner/repo> (--pr <number> [--request] | --branch <name> | --paths <file>)";
+const usage = "Usage: hedge pr review|stamp --repo <owner/repo> --pr <number> [--deep] [--minutes <n>], or hedge pr forecast --repo <owner/repo> (--pr <number> [--request] | --branch <name> | --paths <file>)";
 const fallbackSetting: Record<ReviewBotAction, string> = { review: "pull-requests.reviewFallback", stamp: "pull-requests.stampFallback", forecast: "pull-requests.reviewFallback" };
 const defaultFallback: Record<ReviewBotAction, string> = {
   review: "Ask for a review the way the repo's docs say.",
@@ -43,7 +43,7 @@ export function handlerArgs(request: ReviewBotRequest): string[] {
 }
 
 export async function askReviewBot(request: ReviewBotRequest, env: Env = Bun.env): Promise<number> {
-  const handler = (JSON.parse(env.FLEET_HANDLERS || "{}") as Record<string, string>)["review-bot"];
+  const handler = (JSON.parse(env.HEDGE_HANDLERS || "{}") as Record<string, string>)["review-bot"];
   if (handler) return runHandler(["bun", handler, ...handlerArgs(request)], env);
   const fallback = fallbackText(request.action, env);
   console.log(`${noBot[request.action]} ${fallback.replaceAll("{repo}", request.repo).replaceAll("{pr}", String(request.pr ?? request.branch ?? request.paths))}`);
@@ -59,6 +59,6 @@ export async function runHandler(command: string[], env: Env): Promise<number> {
 }
 
 function fallbackText(action: ReviewBotAction, env: Env): string {
-  const value = (JSON.parse(env.FLEET_SETTINGS || "{}") as Record<string, unknown>)[fallbackSetting[action]];
+  const value = (JSON.parse(env.HEDGE_SETTINGS || "{}") as Record<string, unknown>)[fallbackSetting[action]];
   return typeof value === "string" && value.trim() ? value : defaultFallback[action];
 }

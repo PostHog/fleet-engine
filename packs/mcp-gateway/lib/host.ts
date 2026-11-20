@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { credentialName } from "../../../src/runner/context.ts";
 import type { Context } from "../../../src/sdk/index.ts";
 import type { Hub, Run } from "./hub.ts";
+import { profileFile } from "../../../src/legacy.ts";
 
 export const gatewayKey = credentialName("mcp-gateway");
 
@@ -15,16 +16,16 @@ const run: Run = async (command, options = {}) => {
 };
 
 async function savedName(home: string) {
-  try { return (JSON.parse(await readFile(join(home, ".config/fleet/machine.json"), "utf8")) as { name?: string }).name; }
+  try { return (JSON.parse(await readFile(join(home, ".config/hedge/machine.json"), "utf8")) as { name?: string }).name; }
   catch { return undefined; }
 }
 
 /** The gateway's view of this machine: its home, the profile's hub, and the tools it runs. The hub is the machine the profile names, or this machine when the profile names none. */
 export async function gateway(ctx: Context): Promise<Hub> {
   const home = process.env.HOME!;
-  const profileDir = process.env.FLEET_PROFILE_DIR;
-  if (!profileDir) throw new Error("run this command through fleet, so it finds your profile");
-  const profile = JSON.parse(await readFile(join(profileDir, "fleet.json"), "utf8")) as ProfileFacts;
+  const profileDir = process.env.HEDGE_PROFILE_DIR;
+  if (!profileDir) throw new Error("run this command through hedge, so it finds your profile");
+  const profile = JSON.parse(await readFile(profileFile(profileDir), "utf8")) as ProfileFacts;
   const hubName = profile.hub ?? (await savedName(home));
   return {
     home,
@@ -33,7 +34,7 @@ export async function gateway(ctx: Context): Promise<Hub> {
     uid: process.getuid?.() ?? 0,
     gid: process.getgid?.() ?? 0,
     hubName: () => {
-      if (!hubName) throw new Error("your profile names no hub. Run fleet hub here on the machine that should be the hub.");
+      if (!hubName) throw new Error("your profile names no hub. Run hedge hub here on the machine that should be the hub.");
       return hubName;
     },
     gateway: {},

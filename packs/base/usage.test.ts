@@ -11,13 +11,13 @@ import { flush } from "./lib/usage-flush.ts";
 
 isolateGit();
 const engineRoot = join(import.meta.dir, "../..");
-const launcher = join(engineRoot, "fleet");
+const launcher = join(engineRoot, "hedge");
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
 
 const secret = () => ["sk", "ant", "api03", crypto.randomUUID().replaceAll("-", "")].join("-");
 const projectKey = () => ["phc", "test", crypto.randomUUID().replaceAll("-", "")].join("_");
-const spool = (home: string) => join(home, ".local/state/fleet/usage.jsonl");
+const spool = (home: string) => join(home, ".local/state/hedge/usage.jsonl");
 const spooled = (home: string) => (existsSync(spool(home)) ? readFileSync(spool(home), "utf8").trim().split("\n").map((line) => JSON.parse(line)) : []);
 
 type Received = { path: string; body: { api_key: string; batch: Array<{ event: string; properties: Record<string, unknown> }> } };
@@ -33,10 +33,10 @@ beforeAll(() => {
 afterAll(() => server.stop(true));
 afterEach(() => void (received.length = 0, answers = []));
 
-async function fleet(args: string[], home: string, env: Record<string, string> = {}, interactive = false) {
-  const runFleetSteps = async (command: string[], stepEnv: Record<string, string> = {}) => (command[1] === launcher ? (await fleet(command.slice(2), home, { FLEET_PROFILE_DIR: join(home, "profile"), ...stepEnv })).code : 0);
+async function hedge(args: string[], home: string, env: Record<string, string> = {}, interactive = false) {
+  const runHedgeSteps = async (command: string[], stepEnv: Record<string, string> = {}) => (command[1] === launcher ? (await hedge(command.slice(2), home, { HEDGE_PROFILE_DIR: join(home, "profile"), ...stepEnv })).code : 0);
   const lines: string[] = [];
-  const code = await main(args, { home, engineRoot, platform: "linux", env: { ...env }, print: (line) => lines.push(line), fail: (line) => lines.push(line), run: runFleetSteps, interactive });
+  const code = await main(args, { home, engineRoot, platform: "linux", env: { ...env }, print: (line) => lines.push(line), fail: (line) => lines.push(line), run: runHedgeSteps, interactive });
   return { code, output: lines.join("\n") };
 }
 
@@ -44,10 +44,10 @@ async function machine(packs: string[], settings: Record<string, string>, workfl
   const home = temp.make("home-");
   const profile = join(home, "profile");
   mkdirSync(profile);
-  writeFileSync(join(profile, "fleet.json"), JSON.stringify({ schema: 1, engine: { repo: "PostHog/fleet-engine", ref: "main", channel: "track" }, sources: [], packs, plan: "both", settings, workflows }));
+  writeFileSync(join(profile, "hedge.json"), JSON.stringify({ schema: 1, engine: { repo: "PostHog/hedge", ref: "main", channel: "track" }, sources: [], packs, plan: "both", settings, workflows }));
   mkdirSync(join(home, ".bun/bin"), { recursive: true });
   symlinkSync(process.execPath, join(home, ".bun/bin/bun"));
-  const applied = await fleet(["apply", "--profile", profile], home);
+  const applied = await hedge(["apply", "--profile", profile], home);
   expect(applied.code).toBe(0);
   return home;
 }
@@ -62,7 +62,7 @@ describe("the Usage events workflow", () => {
     expect(off.jobs.map((job) => job.id)).not.toContain("usage-flush");
     expect(Object.keys(off.settings).filter((key) => key.startsWith("base.usage"))).toEqual([]);
     const on = resolveEngine(sources, { workflows: { "usage-events": true } }, devbox);
-    expect(on.jobs).toContainEqual(expect.objectContaining({ id: "usage-flush", command: ["fleet", "usage", "flush"], schedule: { every: "5m" } }));
+    expect(on.jobs).toContainEqual(expect.objectContaining({ id: "usage-flush", command: ["hedge", "usage", "flush"], schedule: { every: "5m" } }));
     expect(on.unanswered.map((setting) => setting.key)).toEqual(["base.usageHost", "base.usageProjectKey"]);
   });
 
@@ -77,20 +77,20 @@ describe("the Usage events workflow", () => {
 
   test("turning the workflow off deletes the spooled events and the batch that waits to be sent", async () => {
     const home = await machine([], destination());
-    await fleet(["settings"], home);
-    writeFileSync(join(home, ".local/state/fleet/usage.sending.jsonl"), "{}\n");
-    writeFileSync(join(home, ".local/state/fleet/usage.sending.jsonl.new"), "{}\n");
-    writeFileSync(join(home, "profile/fleet.json"), JSON.stringify({ ...JSON.parse(readFileSync(join(home, "profile/fleet.json"), "utf8")), workflows: {} }));
-    expect((await fleet(["apply", "--profile", join(home, "profile")], home)).code).toBe(0);
-    await fleet(["settings"], home);
-    for (const file of ["usage.jsonl", "usage.sending.jsonl", "usage.sending.jsonl.new"]) expect(existsSync(join(home, ".local/state/fleet", file))).toBe(false);
+    await hedge(["settings"], home);
+    writeFileSync(join(home, ".local/state/hedge/usage.sending.jsonl"), "{}\n");
+    writeFileSync(join(home, ".local/state/hedge/usage.sending.jsonl.new"), "{}\n");
+    writeFileSync(join(home, "profile/hedge.json"), JSON.stringify({ ...JSON.parse(readFileSync(join(home, "profile/hedge.json"), "utf8")), workflows: {} }));
+    expect((await hedge(["apply", "--profile", join(home, "profile")], home)).code).toBe(0);
+    await hedge(["settings"], home);
+    for (const file of ["usage.jsonl", "usage.sending.jsonl", "usage.sending.jsonl.new"]) expect(existsSync(join(home, ".local/state/hedge", file))).toBe(false);
   });
 
   test("a machine with the workflow off spools nothing, though the profile names a destination", async () => {
     const home = await machine(["memory"], { "memory.repo": "me/notes", ...destination() }, {});
-    await fleet(["settings"], home);
+    await hedge(["settings"], home);
     expect(existsSync(spool(home))).toBe(false);
-    expect((await fleet(["usage", "flush"], home)).code).toBe(1);
+    expect((await hedge(["usage", "flush"], home)).code).toBe(1);
     expect(received).toEqual([]);
   });
 });
@@ -105,89 +105,89 @@ describe("usage events", () => {
     }
     const token = secret();
     const prompt = `Please read /home/someone/customer-notes.md and use ${token}`;
-    await fleet(["settings", token], home, { CLAUDECODE: "1" });
-    await fleet(["run", "/home/someone/customer-notes.md"], home, {}, true);
-    await fleet(["packs", "--add", prompt], home);
-    await fleet([token], home);
-    await fleet(["hub", "box4817"], home);
-    await fleet(["hub", "status"], home);
-    await fleet(["devbox", "list"], home);
-    await fleet(["settings-snapshot", "box4817"], home);
-    await fleet(["settings-snapshot", "--check"], home);
-    const recalled = await fire(home, "claude", "PreToolUse", { session_id: "s1", tool_name: "Bash", tool_input: { command: `fleet proof ${token} # ${prompt}` } });
+    await hedge(["settings", token], home, { CLAUDECODE: "1" });
+    await hedge(["run", "/home/someone/customer-notes.md"], home, {}, true);
+    await hedge(["packs", "--add", prompt], home);
+    await hedge([token], home);
+    await hedge(["hub", "box4817"], home);
+    await hedge(["hub", "status"], home);
+    await hedge(["devbox", "list"], home);
+    await hedge(["settings-snapshot", "box4817"], home);
+    await hedge(["settings-snapshot", "--check"], home);
+    const recalled = await fire(home, "claude", "PreToolUse", { session_id: "s1", tool_name: "Bash", tool_input: { command: `hedge proof ${token} # ${prompt}` } });
     expect(recalled.context).toContain("Pass full SHAs");
 
     const events = spooled(home).map(({ event, properties }) => ({ event, ...properties }));
     expect(events.map(({ event, command, subcommand, notes: count, caller }) => ({ event, command, subcommand, notes: count, caller }))).toEqual([
-      { event: "fleet command", command: "settings", subcommand: "", notes: undefined, caller: "agent" },
-      { event: "fleet command", command: "run", subcommand: "", notes: undefined, caller: "person" },
-      { event: "fleet command", command: "packs", subcommand: "", notes: undefined, caller: "job" },
-      { event: "fleet command", command: "hub", subcommand: "", notes: undefined, caller: "job" },
-      { event: "fleet command", command: "hub", subcommand: "status", notes: undefined, caller: "job" },
-      { event: "fleet command", command: "devbox", subcommand: "", notes: undefined, caller: "job" },
-      { event: "fleet command", command: "settings-snapshot", subcommand: "", notes: undefined, caller: "job" },
-      { event: "fleet command", command: "settings-snapshot", subcommand: "", notes: undefined, caller: "job" },
+      { event: "hedge command", command: "settings", subcommand: "", notes: undefined, caller: "agent" },
+      { event: "hedge command", command: "run", subcommand: "", notes: undefined, caller: "person" },
+      { event: "hedge command", command: "packs", subcommand: "", notes: undefined, caller: "job" },
+      { event: "hedge command", command: "hub", subcommand: "", notes: undefined, caller: "job" },
+      { event: "hedge command", command: "hub", subcommand: "status", notes: undefined, caller: "job" },
+      { event: "hedge command", command: "devbox", subcommand: "", notes: undefined, caller: "job" },
+      { event: "hedge command", command: "settings-snapshot", subcommand: "", notes: undefined, caller: "job" },
+      { event: "hedge command", command: "settings-snapshot", subcommand: "", notes: undefined, caller: "job" },
       { event: "memory recalled", command: undefined, subcommand: undefined, notes: 1, caller: expect.any(String) },
     ]);
 
-    expect((await fleet(["usage", "flush"], home)).code).toBe(0);
+    expect((await hedge(["usage", "flush"], home)).code).toBe(0);
     const sent = JSON.stringify(received);
     for (const leak of [token, "customer", "Please read", "Pass full SHAs", "4817"]) expect(sent).not.toContain(leak);
     expect(received.map((request) => [request.path, request.body.api_key, request.body.batch.length])).toEqual([["/batch/", key, 9]]);
-    expect(received[0]!.body.batch[0]!.properties).toMatchObject({ distinct_id: expect.stringMatching(/^fleet-/), $process_person_profile: false });
+    expect(received[0]!.body.batch[0]!.properties).toMatchObject({ distinct_id: expect.stringMatching(/^hedge-/), $process_person_profile: false });
     expect(existsSync(spool(home))).toBe(false);
   });
 
   test("a flush sends each event once", async () => {
     const home = await machine([], destination());
-    await fleet(["settings"], home);
-    await fleet(["usage", "flush"], home);
-    await fleet(["usage", "flush"], home);
-    expect(received.map((request) => request.body.batch.map((event) => [event.event, event.properties.distinct_id]))).toEqual([[["fleet command", expect.stringMatching(/^fleet-/)]]]);
+    await hedge(["settings"], home);
+    await hedge(["usage", "flush"], home);
+    await hedge(["usage", "flush"], home);
+    expect(received.map((request) => request.body.batch.map((event) => [event.event, event.properties.distinct_id]))).toEqual([[["hedge command", expect.stringMatching(/^hedge-/)]]]);
   });
 
   test("a machine that cannot send keeps at most 5 MB of events", async () => {
     const home = await machine([], destination());
-    writeFileSync(join(home, ".local/state/fleet/usage.sending.jsonl"), "x".repeat(4_999_990));
-    await fleet(["settings"], home);
-    await fleet(["packs"], home);
+    writeFileSync(join(home, ".local/state/hedge/usage.sending.jsonl"), "x".repeat(4_999_990));
+    await hedge(["settings"], home);
+    await hedge(["packs"], home);
     expect(spooled(home).map((line) => line.properties.command)).toEqual(["settings"]);
   });
 });
 
 describe("a command a node forwards to the hub", () => {
-  test("counts once: the hub does not record the call Fleet forwarded to it", async () => {
+  test("counts once: the hub does not record the call Hedge forwarded to it", async () => {
     const hub = await machine([], destination());
-    const engine = join(hub, ".local/share/fleet/engine");
+    const engine = join(hub, ".local/share/hedge/engine");
     mkdirSync(engine, { recursive: true });
-    writeFileSync(join(engine, "fleet"), `exec "${process.execPath}" "${join(engineRoot, "src/cli.ts")}" "$@"\n`);
+    writeFileSync(join(engine, "hedge"), `exec "${process.execPath}" "${join(engineRoot, "src/cli.ts")}" "$@"\n`);
     const forwarded = onHub("hub-1", ["settings"]).at(-1)!;
     const ran = await spawnAsync(["sh", "-c", forwarded], { env: { HOME: hub, PATH: "/usr/bin:/bin", BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" } });
     expect(ran.exitCode).toBe(0);
     expect(spooled(hub)).toEqual([]);
-    await fleet(["settings"], hub);
+    await hedge(["settings"], hub);
     expect(spooled(hub)).toHaveLength(1);
   });
 });
 
-describe("fleet usage flush", () => {
+describe("hedge usage flush", () => {
   const to = () => ({ host: `http://127.0.0.1:${server.port}`, projectKey: projectKey() });
   const io = () => ({ send: fetch });
 
   test("keeps the events when the send fails, and sends them with the next events on the next flush", async () => {
     const home = await machine([], destination());
-    await fleet(["settings"], home);
+    await hedge(["settings"], home);
     answers = [500];
     await expect(flush(home, to(), io())).rejects.toThrow("answered 500. The events stay in the spool for the next flush.");
-    await fleet(["packs"], home);
+    await hedge(["packs"], home);
     received.length = 0;
     expect(await flush(home, to(), io())).toBe(2);
     expect(received[0]!.body.batch.map((event) => event.properties.command).sort()).toEqual(["packs", "settings"]);
   });
 
   test("sends a batch that a flush left between its two steps once, whichever step it stopped at", async () => {
-    const event = (command: string) => `${JSON.stringify({ event: "fleet command", properties: { command, machine: "m" }, timestamp: "2026-11-12T00:00:00.000Z" })}\n`;
-    const state = (home: string) => join(home, ".local/state/fleet");
+    const event = (command: string) => `${JSON.stringify({ event: "hedge command", properties: { command, machine: "m" }, timestamp: "2026-11-12T00:00:00.000Z" })}\n`;
+    const state = (home: string) => join(home, ".local/state/hedge");
     for (const stoppedAfterAppend of [false, true]) {
       const home = await machine([], destination());
       writeFileSync(join(state(home), "usage.sending.jsonl"), event("waiting") + (stoppedAfterAppend ? event("arrived") : ""));
@@ -202,8 +202,8 @@ describe("fleet usage flush", () => {
 
   test("refuses a host that would send the project key in the clear", async () => {
     const home = await machine([], { ...destination(), "base.usageHost": "http://analytics.example.test" });
-    await fleet(["settings"], home);
-    expect((await fleet(["usage", "flush"], home)).code).toBe(1);
+    await hedge(["settings"], home);
+    expect((await hedge(["usage", "flush"], home)).code).toBe(1);
     expect(received).toEqual([]);
     expect(spooled(home)).toHaveLength(1);
   });

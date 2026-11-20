@@ -1,17 +1,17 @@
 import { commandsIn } from "./shell-words.ts";
 
-const keyReason = (person: string) => `Fleet blocked this command: it changes the SSH or GPG keys on ${person}'s GitHub account, which gives lasting access. If you need it, stop and ask ${person}.`;
-const tokenReason = (person: string) => "Fleet blocked this command: it signs in to GitHub, or prints or widens the GitHub token. "
+const keyReason = (person: string) => `Hedge blocked this command: it changes the SSH or GPG keys on ${person}'s GitHub account, which gives lasting access. If you need it, stop and ask ${person}.`;
+const tokenReason = (person: string) => "Hedge blocked this command: it signs in to GitHub, or prints or widens the GitHub token. "
   + `Use \`gh\` or \`gh auth git-credential\`, which use the token without showing it. If you need a new sign-in or scope, stop and ask ${person} to run it.`;
-const extensionReason = (person: string) => "Fleet blocked this command: a gh extension is code from a GitHub repository that runs with the GitHub token. "
+const extensionReason = (person: string) => "Hedge blocked this command: a gh extension is code from a GitHub repository that runs with the GitHub token. "
   + `For gh stack, ask ${person} to turn on the gh-stack workflow, which installs a pinned version with a checked digest. For any other extension, stop and ask ${person}.`;
-const exposureReason = (person: string) => `Fleet blocked this command: it deletes a repository or makes code public. If you need it, stop and ask ${person}.`;
-const ownerReason = (owner: string, person: string) => `Fleet blocked this command: \`${owner}\` is not one of the GitHub owners agents may use on this machine. `
+const exposureReason = (person: string) => `Hedge blocked this command: it deletes a repository or makes code public. If you need it, stop and ask ${person}.`;
+const ownerReason = (owner: string, person: string) => `Hedge blocked this command: \`${owner}\` is not one of the GitHub owners agents may use on this machine. `
   + `Use a repository of an allowed owner, or stop and ask ${person} to add \`${owner}\` to guards.owners.`;
-const spellOutReason = (owner: string) => `Fleet blocked this command: the repository owner \`${owner}\` is not spelled out, so the owner check cannot read it. `
+const spellOutReason = (owner: string) => `Hedge blocked this command: the repository owner \`${owner}\` is not spelled out, so the owner check cannot read it. `
   + "A shell variable, substitution, or pattern can name any owner. Write the owner as plain text, such as `gh api repos/<owner>/<repo>/...` or `--repo <owner>/<repo>`.";
 
-const commandReason = (word: string) => `Fleet blocked this command: the gh command word \`${word}\` is not spelled out, so the guard cannot tell what it runs. `
+const commandReason = (word: string) => `Hedge blocked this command: the gh command word \`${word}\` is not spelled out, so the guard cannot tell what it runs. `
   + "A shell variable, substitution, or pattern can stand for any command. Write gh, its command group, and its action as plain text.";
 
 export type Gh = { group: string; action: string; operands: string[]; flags: Map<string, string[]> };
@@ -305,12 +305,12 @@ function onlyPostsTrunkCommand(args: string[]): boolean {
   return targets === 1 && bodies === 1;
 }
 
-const reviewerReason = "Fleet blocked this command: it matches an allow rule for review requests, which skips the auto-mode "
+const reviewerReason = "Hedge blocked this command: it matches an allow rule for review requests, which skips the auto-mode "
   + "review, but it does more than request reviewers. Run the review request alone, in one of these shapes, and the rest "
   + "as its own call: `gh pr edit <number> [--repo <owner>/<repo>] --add-reviewer <login>[,<login>]` or "
   + "`gh api -X POST repos/<owner>/<repo>/pulls/<number>/requested_reviewers -f 'reviewers[]=<login>'` "
   + "(`team_reviewers[]=<slug>` for a team).";
-const trunkReason = (person: string) => "Fleet blocked this command: it matches an allow rule for Trunk merge-queue commands, which skips the "
+const trunkReason = (person: string) => "Hedge blocked this command: it matches an allow rule for Trunk merge-queue commands, which skips the "
   + "auto-mode review, but it does more than post one bare Trunk command on one PR. Post it alone, in one of these shapes, "
   + "and run the rest as its own call: `gh pr comment <number> [--repo <owner>/<repo>] --body '/trunk merge'` or "
   + "`gh api repos/<owner>/<repo>/issues/<number>/comments -f body='/trunk merge'` (`/trunk cancel` to leave the queue). "

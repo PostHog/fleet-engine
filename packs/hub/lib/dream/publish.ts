@@ -70,7 +70,7 @@ export async function publish(worktree: string, subtree: string, memory: string,
   for (let attempt = 1; attempt <= attempts; attempt++) {
     if ((await g("fetch", "--quiet", "origin", "main")).code !== 0) {
       const remote = await g("ls-remote", "--heads", "origin", "main");
-      return { code: 1, message: remote.code === 0 && !remote.stdout.trim() ? "the memory repo has no main yet. Run fleet memory-sync to create it, then publish again." : "cannot fetch origin main." };
+      return { code: 1, message: remote.code === 0 && !remote.stdout.trim() ? "the memory repo has no main yet. Run hedge memory-sync to create it, then publish again." : "cannot fetch origin main." };
     }
     const merges = Number((await g("rev-list", "--merges", "--count", "origin/main..HEAD")).stdout.trim()) > 0;
     const current = (await g("merge-base", "--is-ancestor", "origin/main", "HEAD")).code === 0;

@@ -55,15 +55,15 @@ function hasScheduledCheck(home: string, threadId: string, now: Date): boolean {
   }
 }
 
-export const noCheckReason = (marks: Marks) => "Fleet blocked this stop: your closing line says this thread settles until its check, but no check is scheduled: "
+export const noCheckReason = (marks: Marks) => "Hedge blocked this stop: your closing line says this thread settles until its check, but no check is scheduled: "
   + "no enabled scheduled task bound to this thread has a next run. Schedule it with schedule_task bound to this thread, then end the turn again. "
   + `If the thread waits on someone else instead, end on a line that starts with ${marks.wait}.`;
 
-export const snoozeTimeReason = (zone: string) => "Fleet blocked this stop: your closing line says this thread snoozes, but it is not snoozed, "
-  + `and Fleet read no future time in ${zone}, such as "14th Nov 22:00", from the line. `
+export const snoozeTimeReason = (zone: string) => "Hedge blocked this stop: your closing line says this thread snoozes, but it is not snoozed, "
+  + `and Hedge read no future time in ${zone}, such as "14th Nov 22:00", from the line. `
   + "Snooze it with t3_thread_organize (action snooze, snoozedUntil the wake time in ISO form), then end the turn again.";
 
-export const ownsOpenReason = (urls: string[], person: string, marks: Marks) => `Fleet blocked this stop: your closing line settles this thread, or asks ${person} to, `
+export const ownsOpenReason = (urls: string[], person: string, marks: Marks) => `Hedge blocked this stop: your closing line settles this thread, or asks ${person} to, `
   + `but it owns open PR(s) ${urls.join(", ")}, and no other open thread links them. A settled thread drops out of ${person}'s view, and its PRs lose their owner. `
   + `If ${person} parked them, end on ${marks.snooze} with the park date. If they wait on someone else, end on ${marks.wait}. `
   + handOverFirst;
@@ -71,7 +71,7 @@ export const ownsOpenReason = (urls: string[], person: string, marks: Marks) => 
 const isSnoozed = (thread: ShellThread, now: Date) => Boolean(thread.snoozedUntil && Date.parse(thread.snoozedUntil) > now.getTime());
 
 const snoozeCommand = (threadId: string, until: Date) =>
-  ({ type: "thread.snooze", commandId: `fleet:closing-line:${crypto.randomUUID()}`, threadId, snoozedUntil: until.toISOString() });
+  ({ type: "thread.snooze", commandId: `hedge:closing-line:${crypto.randomUUID()}`, threadId, snoozedUntil: until.toISOString() });
 
 const ownedHere = async (home: string, threads: ShellThread[], id: string) => unhandedLinks(threads, id, await readHandovers(home));
 
@@ -148,7 +148,7 @@ export async function settleWhenRunEnds(t3: ParkT3, { threadId, runId, since, st
     const ended = thread.activeRunId !== runId && thread.status === "completed";
     if (ended && !parks(threads, thread)) return false;
     if (ended && confirmed) {
-      await t3.dispatch({ type: "thread.settle", commandId: `fleet:closing-line:settle:${runId}`, threadId, expectedLatestRunId: runId });
+      await t3.dispatch({ type: "thread.settle", commandId: `hedge:closing-line:settle:${runId}`, threadId, expectedLatestRunId: runId });
       return true;
     }
     confirmed = ended;

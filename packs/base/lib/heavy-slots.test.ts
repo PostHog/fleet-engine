@@ -7,7 +7,7 @@ import { heavy, machine, roomy, stubs, temp } from "./heavy-testing.ts";
 afterEach(() => temp.cleanup());
 const onLinux = test.skipIf(process.platform !== "linux");
 
-const host = () => `Fleet heavy slots on ${hostname()}:\n`;
+const host = () => `Hedge heavy slots on ${hostname()}:\n`;
 const age = "\\d+s";
 const holdSlot = ["--", "sh", "-c", "echo ready; exec tail -f /dev/null"];
 
@@ -28,7 +28,7 @@ onLinux("frees the slot when a stop reaches the job's process group, with every 
 
 const recordsStop = `tail -f /dev/null 9>&- & tail=$!; trap 'kill $tail; echo TERM >> "$0"; exit 143' TERM; echo $$; wait $tail`;
 
-onLinux("runs the job as the fleet heavy process itself, so a stop sent only to that process reaches the job and frees the slot", async () => {
+onLinux("runs the job as the hedge heavy process itself, so a stop sent only to that process reaches the job and frees the slot", async () => {
   const box = machine();
   const stops = join(box.home, "stops");
   try {
@@ -46,7 +46,7 @@ onLinux("runs the job as the fleet heavy process itself, so a stop sent only to 
   }
 });
 
-onLinux("lets a writer in the job end on a closed pipe, as it does outside fleet heavy", async () => {
+onLinux("lets a writer in the job end on a closed pipe, as it does outside hedge heavy", async () => {
   const box = machine();
   const job = box.start(["--", "sh", "-c", "(yes; echo $? >&2) | head -n 1"]);
   expect(await job.child.exited).toBe(0);
@@ -59,8 +59,8 @@ onLinux("runs the job on a Bun that cannot replace its own process, as before", 
   const older = join(bin, "older-bun.ts");
   writeFileSync(older, "delete (process as { execve?: unknown }).execve;\n");
   const home = temp.make("home-");
-  const { FLEET_HEAVY_SLOTS: _, ...inherited } = Bun.env;
-  const env = { ...inherited, HOME: home, XDG_RUNTIME_DIR: home, PATH: `${bin}:${Bun.env.PATH}`, FLEET_SETTINGS: JSON.stringify(roomy) };
+  const { HEDGE_HEAVY_SLOTS: _, ...inherited } = Bun.env;
+  const env = { ...inherited, HOME: home, XDG_RUNTIME_DIR: home, PATH: `${bin}:${Bun.env.PATH}`, HEDGE_SETTINGS: JSON.stringify(roomy) };
   const child = Bun.spawn([process.execPath, "--preload", older, join(import.meta.dir, "../commands/heavy.ts"), "--", "sh", "-c", "echo built"], { env, stdout: "pipe", stderr: "pipe" });
   const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()]);
   expect({ code: await child.exited, stdout }).toEqual({ code: 0, stdout: "built\n" });
@@ -69,13 +69,13 @@ onLinux("runs the job on a Bun that cannot replace its own process, as before", 
 
 onLinux("finds sh where the caller has no PATH, as a spawned command does", async () => {
   const { PATH: _, ...withoutPath } = Bun.env;
-  const child = Bun.spawn([process.execPath, join(import.meta.dir, "../commands/heavy.ts"), "--help"], { env: { ...withoutPath, FLEET_SETTINGS: JSON.stringify(roomy) }, stdout: "pipe", stderr: "pipe" });
+  const child = Bun.spawn([process.execPath, join(import.meta.dir, "../commands/heavy.ts"), "--help"], { env: { ...withoutPath, HEDGE_SETTINGS: JSON.stringify(roomy) }, stdout: "pipe", stderr: "pipe" });
   const [stdout] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()]);
   expect(await child.exited).toBe(0);
-  expect(stdout).toStartWith("Usage: fleet heavy");
+  expect(stdout).toStartWith("Usage: hedge heavy");
 });
 
-onLinux("takes a waiting job off the queue when a stop is sent only to its fleet heavy process", async () => {
+onLinux("takes a waiting job off the queue when a stop is sent only to its hedge heavy process", async () => {
   const box = machine();
   try {
     const first = box.start(holdSlot);
@@ -151,7 +151,7 @@ onLinux("forgets a waiting job that died without cleaning up, so the next job ta
 
 onLinux("keeps its job records where only this user can read them, also without a runtime folder", async () => {
   const box = machine();
-  const records = join(box.tmp, `fleet-heavy-${process.getuid!()}`);
+  const records = join(box.tmp, `hedge-heavy-${process.getuid!()}`);
   mkdirSync(records, { mode: 0o777 });
   chmodSync(records, 0o777);
   const job = box.start(["--", "sh", "-c", "echo done"], { XDG_RUNTIME_DIR: "" });
@@ -160,21 +160,21 @@ onLinux("keeps its job records where only this user can read them, also without 
   expect(statSync(records).mode & 0o777).toBe(0o700);
   const other = box.start(["--", "sh", "-c", "echo done"]);
   expect(await other.child.exited).toBe(0);
-  expect(statSync(join(box.home, "fleet-heavy")).mode & 0o777).toBe(0o700);
+  expect(statSync(join(box.home, "hedge-heavy")).mode & 0o777).toBe(0o700);
 });
 
 onLinux("refuses a records folder that is a link, and runs nothing", async () => {
   const box = machine();
   const elsewhere = temp.make("elsewhere-");
-  symlinkSync(elsewhere, join(box.home, "fleet-heavy"));
+  symlinkSync(elsewhere, join(box.home, "hedge-heavy"));
   const job = box.start(["--", "sh", "-c", "echo ran"]);
   expect(await job.child.exited).toBe(1);
   expect(job.out.text()).toBe("");
-  expect(job.err.text()).toBe(`Fleet heavy: ${join(box.home, "fleet-heavy")} is not a private folder of this user, so it cannot keep job records there.\n`);
+  expect(job.err.text()).toBe(`Hedge heavy: ${join(box.home, "hedge-heavy")} is not a private folder of this user, so it cannot keep job records there.\n`);
   expect(readdirSync(elsewhere)).toEqual([]);
 });
 
 onLinux("says so when no heavy job ran here yet", async () => {
   const box = machine();
-  expect(await box.holders()).toBe("Fleet heavy: no job has run here yet.\n");
+  expect(await box.holders()).toBe("Hedge heavy: no job has run here yet.\n");
 });

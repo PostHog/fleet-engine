@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+launched_from=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -L)
+hedge_root=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
+in_fleet_path() {
+  for home in "$HOME" "$(CDPATH='' cd -- "$HOME" && pwd -P)"; do
+    for old in .config/fleet .local/state/fleet .local/share/fleet .local/share/fleet-cli-proxy .local/share/fleet-hub-https .local/share/fleet-mcphub; do
+      case "$1/" in "$home/$old/"*) return 0 ;; esac
+    done
+  done
+  return 1
+}
+if in_fleet_path "$launched_from" || in_fleet_path "$hedge_root"; then export HEDGE_INERT=1; else unset HEDGE_INERT; fi
+exec bun "$hedge_root/src/cli.ts" "$@"

@@ -2,10 +2,10 @@ import { randomUUID } from "node:crypto";
 import { lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { inside } from "../../files/install.ts";
+import { holdLock, stateLock } from "../../lock.ts";
 
 export type Write = { target: string; before?: string; after: string };
 
-const lockTarget = ".local/state/fleet/lock";
 
 export async function optional(path: string) {
   try {
@@ -35,25 +35,18 @@ export async function readState(home: string, target: string) {
 }
 
 export async function withLock<T>(home: string, work: () => Promise<T>): Promise<T> {
-  await requireRealPath(home, lockTarget);
-  const lock = inside(home, lockTarget);
-  await mkdir(dirname(lock), { recursive: true, mode: 0o700 });
-  try {
-    await mkdir(lock);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error(`Another Fleet operation holds ${lock}. Remove it only if that operation has stopped.`);
-    throw error;
-  }
+  await requireRealPath(home, stateLock);
+  const held = holdLock(inside(home, stateLock));
   try {
     return await work();
   } finally {
-    await rm(lock, { recursive: true, force: true });
+    held.release();
   }
 }
 
 /** Writes each file after a backup of its old content. A file that changed since it was read stops the run, and earlier writes roll back. */
 export async function writeWithBackups(home: string, writes: Write[]) {
-  const backupRoot = `.local/state/fleet/backups/${new Date().toISOString().replaceAll(":", "-")}-${randomUUID()}`;
+  const backupRoot = `.local/state/hedge/backups/${new Date().toISOString().replaceAll(":", "-")}-${randomUUID()}`;
   const done: Write[] = [];
   try {
     for (const write of writes) {
@@ -71,7 +64,7 @@ export async function writeWithBackups(home: string, writes: Write[]) {
       await writeFile(temporary, write.after, { mode: 0o600, flag: "wx" });
       try {
         await requireRealPath(home, write.target);
-        if ((await optional(path)) !== write.before) throw new Error(`${write.target} changed while Fleet was applying. Run fleet apply again.`);
+        if ((await optional(path)) !== write.before) throw new Error(`${write.target} changed while Hedge was applying. Run hedge apply again.`);
         await rename(temporary, path);
       } catch (error) {
         await rm(temporary, { force: true });
@@ -87,7 +80,7 @@ export async function writeWithBackups(home: string, writes: Write[]) {
 
 async function requireRealPath(home: string, target: string) {
   const link = await linkOnPath(home, target);
-  if (link) throw new Error(`${link} is a link or not a directory; Fleet writes only through real directories`);
+  if (link) throw new Error(`${link} is a link or not a directory; Hedge writes only through real directories`);
 }
 
 async function restore(home: string, write: Write) {

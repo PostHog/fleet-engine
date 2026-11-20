@@ -2,12 +2,20 @@
 set -eu
 
 fail() {
-  printf 'fleet install-node: %s\n' "$1" >&2
+  printf 'hedge install-node: %s\n' "$1" >&2
   exit 1
 }
 
 PATH="$HOME/.local/bin:$PATH"
-if node --version >/dev/null 2>&1 && npx --version >/dev/null 2>&1; then exit 0; fi
+fleets="$HOME/.local/share/fleet/node"
+from_fleet() {
+  for tool in node npm npx; do
+    case "$(readlink "$HOME/.local/bin/$tool" 2>/dev/null || true)" in "$fleets"/*) return 0 ;; esac
+  done
+  return 1
+}
+if ! from_fleet && node --version >/dev/null 2>&1 && npx --version >/dev/null 2>&1; then exit 0; fi
+[ "${1:-}" != --check ] || exit 1
 
 release="$(dirname "$0")/node.release"
 pin() {
@@ -27,9 +35,9 @@ for tool in curl sha256sum tar; do
 done
 
 name="node-v$version-$target"
-share="$HOME/.local/share/fleet/node"
-mkdir -p "$HOME/.local/share/fleet" "$HOME/.local/bin" || fail "could not create $HOME/.local/share/fleet."
-work=$(mktemp -d "$HOME/.local/share/fleet/node-new.XXXXXX")
+share="$HOME/.local/share/hedge/node"
+mkdir -p "$HOME/.local/share/hedge" "$HOME/.local/bin" || fail "could not create $HOME/.local/share/hedge."
+work=$(mktemp -d "$HOME/.local/share/hedge/node-new.XXXXXX")
 trap 'rm -rf "$work"; rm -f "$HOME/.local/bin/"*.new.$$' EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
@@ -44,7 +52,7 @@ fi
 
 point() {
   case "$(readlink "$1" 2>/dev/null || true)" in
-    "$share"/*) ;;
+    "$share"/*|"$fleets"/*) ;;
     *) { [ -e "$1" ] || [ -L "$1" ]; } && return 0 ;;
   esac
   rm -f "$1.new.$$"
@@ -55,6 +63,6 @@ for tool in node npm npx; do
   point "$HOME/.local/bin/$tool" "$share/$name/bin/$tool"
 done
 for tool in node npx; do
-  "$HOME/.local/bin/$tool" --version >/dev/null 2>&1 || fail "$HOME/.local/bin/$tool does not run. If Fleet did not put it there, fix it or move it away, then run fleet apply."
+  "$HOME/.local/bin/$tool" --version >/dev/null 2>&1 || fail "$HOME/.local/bin/$tool does not run. If Hedge did not put it there, fix it or move it away, then run hedge apply."
 done
 echo "Node.js: $version in $share/$name."

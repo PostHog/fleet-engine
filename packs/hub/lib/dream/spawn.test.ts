@@ -21,7 +21,7 @@ function blockingAnalyst(dir: string) {
 }
 
 test("an analyst that outlives its limit is stopped with its whole process group", async () => {
-  const dir = temp.make("fleet-dream-spawn-");
+  const dir = temp.make("hedge-dream-spawn-");
   const { script, ready } = blockingAnalyst(dir);
   let fire = () => {};
   const limits: number[] = [];
@@ -35,7 +35,7 @@ test("an analyst that outlives its limit is stopped with its whole process group
 }, 2000);
 
 test("an analyst that finishes in time returns its exit code and output, and clears its limit", async () => {
-  const dir = temp.make("fleet-dream-spawn-");
+  const dir = temp.make("hedge-dream-spawn-");
   let cleared = 0;
   const spawn = boundedSpawn(() => () => void cleared++);
   expect(await spawn(["/bin/cat"], { cwd: dir, env: { PATH: "/usr/bin:/bin" }, stdin: "hello", timeoutMs: 1000 })).toEqual({ code: 0, stdout: "hello", timedOut: false });

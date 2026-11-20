@@ -23,7 +23,7 @@ async function git(cwd: string, env: Record<string, string>, ...args: string[]) 
 }
 
 async function fixture() {
-  const base = mkdtempSync(join(tmpdir(), "fleet-proof-run-"));
+  const base = mkdtempSync(join(tmpdir(), "hedge-proof-run-"));
   fixtures.push(base);
   const [home, repo, spool] = ["home", "repo", "tmp"].map((name) => join(base, name));
   for (const directory of [home, repo, spool]) mkdirSync(directory);
@@ -39,7 +39,7 @@ async function fixture() {
   const printed: string[] = [];
   const terminal = { stdout: [] as string[], stderr: [] as string[] };
   let io: RunIO = { stdout: (chunk) => { terminal.stdout.push(Buffer.from(chunk).toString()); }, stderr: (chunk) => { terminal.stderr.push(Buffer.from(chunk).toString()); } };
-  const prDirectory = join(home, ".local/state/fleet/proof", pr.repository, String(pr.pr));
+  const prDirectory = join(home, ".local/state/hedge/proof", pr.repository, String(pr.pr));
   return {
     base, home, repo, spool, env, printed, terminal, prDirectory,
     head: () => git(repo, env, "rev-parse", "HEAD"),
@@ -72,7 +72,7 @@ test("the proof CLI splits at the first --: the tail is the command, unchanged, 
   await expect(run.run("--kind", "live-run", "--commit", head, "--", "true")).rejects.toThrow("--commit");
   run.printed.length = 0;
   expect(await run.run("--help", "--", "x")).toBe(0);
-  expect(run.printed.join("\n")).toStartWith("Usage: fleet proof run --kind <kind> -- <command> [argument...] [--repo owner/name] [--pr number]\n");
+  expect(run.printed.join("\n")).toStartWith("Usage: hedge proof run --kind <kind> -- <command> [argument...] [--repo owner/name] [--pr number]\n");
   await expect(run.run("--kind", "live-run", "echo", "hi")).rejects.toThrow("Pass the command after --");
   await expect(run.run("--kind", "live-run", "--")).rejects.toThrow("Pass the command after --");
   await expect(run.run("--kind", "ui-walk", "--", "echo", "hi")).rejects.toThrow("A UI walk keeps only screenshots of the running app");
@@ -104,9 +104,9 @@ test("a run that fails, is killed, cannot start, prints nothing or prints a null
   const cases: [string[], number, string][] = [
     [["sh", "-c", "echo partial; exit 3"], 3, "exit 3"],
     [["sh", "-c", "echo partial; kill -TERM $$"], 143, "SIGTERM"],
-    [["fleet-no-such-command-here"], 127, "cannot start"],
+    [["hedge-no-such-command-here"], 127, "cannot start"],
     [["true"], 1, "no output to save"],
-    [["printf", "a\\0b"], 1, "binary output: save the file with `fleet proof save`"],
+    [["printf", "a\\0b"], 1, "binary output: save the file with `hedge proof save`"],
   ];
   for (const [command, code, message] of cases) {
     run.printed.length = 0;
@@ -213,7 +213,7 @@ const judgeInput = (cwd: string, evidence: JudgeInput["evidence"]): JudgeInput =
   cwd, from: "a".repeat(40), commit: "b".repeat(40), diff: "", crossFamily: true, ci: { state: "green", detail: "all checks passed" },
   owed: { kinds: ["live-run"] }, ledger: [], evidence, reviews: [], rubric: "", references: [],
 });
-const mark = (commit: string) => `captured by the Fleet runner, exit 0, at \`${commit.slice(0, 7)}\`, clean at both checks`;
+const mark = (commit: string) => `captured by the Hedge runner, exit 0, at \`${commit.slice(0, 7)}\`, clean at both checks`;
 
 test("identical output at two commits writes a record under each, and the judge marks each with its own commit", async () => {
   const run = await fixture();
@@ -279,7 +279,7 @@ test("an author file, a tampered runner file and a malformed record read exactly
   mkdirSync(join(run.prDirectory, "runs", head, "live-run"), { recursive: true });
   writeFileSync(join(run.prDirectory, "runs", head, "live-run", authorName.replace(".log", ".json")), "{\"command\": \"not a list\"");
   const tampered = await section();
-  expect(tampered).not.toContain("Fleet runner");
+  expect(tampered).not.toContain("Hedge runner");
   expect(tampered).toContain(today.slice(today.indexOf("<untrusted")));
 });
 

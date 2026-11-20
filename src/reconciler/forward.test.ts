@@ -28,17 +28,17 @@ function machine(saved: MachineFile, extra: Record<string, string> = {}) {
   const home = temp.make("home-");
   const profile = temp.make("profile-");
   const writeProfile = (fields: { packs?: string[]; workflows?: Record<string, boolean>; devboxes?: string[] } = {}) =>
-    writeFileSync(join(profile, "fleet.json"), JSON.stringify({ schema: 1, engine: { repo: "example/engine", ref: "main", channel: "track" }, sources: [], packs: fields.packs ?? ["served", ...Object.keys(extra)], plan: "claude", settings: {}, workflows: fields.workflows ?? {}, hub: "hub-1", devboxes: fields.devboxes ?? ["node-2"] }));
+    writeFileSync(join(profile, "hedge.json"), JSON.stringify({ schema: 1, engine: { repo: "example/engine", ref: "main", channel: "track" }, sources: [], packs: fields.packs ?? ["served", ...Object.keys(extra)], plan: "claude", settings: {}, workflows: fields.workflows ?? {}, hub: "hub-1", devboxes: fields.devboxes ?? ["node-2"] }));
   writeProfile();
-  mkdirSync(join(home, ".config/fleet"), { recursive: true });
-  writeFileSync(join(home, ".config/fleet/machine.json"), JSON.stringify({ ...saved, profileDir: profile }));
+  mkdirSync(join(home, ".config/hedge"), { recursive: true });
+  writeFileSync(join(home, ".config/hedge/machine.json"), JSON.stringify({ ...saved, profileDir: profile }));
   const systemd = fakeSystemd();
-  const unit = join(home, ".config/systemd/user/fleet-hub-forward.service");
-  const log = join(home, ".local/state/fleet/jobs/hub-forward.log");
+  const unit = join(home, ".config/systemd/user/hedge-hub-forward.service");
+  const log = join(home, ".local/state/hedge/jobs/hub-forward.log");
   let started: string[] | undefined;
   const run: typeof systemd.run = async (command, options) => {
     const answer = await systemd.run(command, options);
-    if (command.join(" ") !== "systemctl --user restart fleet-hub-forward.service") return answer;
+    if (command.join(" ") !== "systemctl --user restart hedge-hub-forward.service") return answer;
     const execStart = readFileSync(unit, "utf8").match(/^ExecStart=(.+)$/m)![1]!;
     writeFileSync(log, "");
     await spawnAsync(["/bin/sh", "-c", execStart], { env: { HOME: home } });
@@ -73,25 +73,25 @@ function machine(saved: MachineFile, extra: Record<string, string> = {}) {
 }
 
 test("a node's apply starts one forward to the hub with the catalog's ports", async () => {
-  const fleet = machine(node);
-  expect((await fleet.apply()).code).toBe(0);
-  expect(fleet.forward()).toEqual({ to: "hub-1", batch: true, ports: ["127.0.0.1:4555:127.0.0.1:4555"] });
+  const hedge = machine(node);
+  expect((await hedge.apply()).code).toBe(0);
+  expect(hedge.forward()).toEqual({ to: "hub-1", batch: true, ports: ["127.0.0.1:4555:127.0.0.1:4555"] });
 });
 
 test("a catalog change restarts the forward with the new ports", async () => {
-  const fleet = machine(node);
-  await fleet.apply();
-  fleet.writeProfile({ workflows: { "served-extra": true } });
-  expect((await fleet.apply()).code).toBe(0);
-  expect(fleet.forward()).toEqual({ to: "hub-1", batch: true, ports: ["127.0.0.1:4555:127.0.0.1:4555", "127.0.0.1:4556:127.0.0.1:4556"] });
+  const hedge = machine(node);
+  await hedge.apply();
+  hedge.writeProfile({ workflows: { "served-extra": true } });
+  expect((await hedge.apply()).code).toBe(0);
+  expect(hedge.forward()).toEqual({ to: "hub-1", batch: true, ports: ["127.0.0.1:4555:127.0.0.1:4555", "127.0.0.1:4556:127.0.0.1:4556"] });
 });
 
 test("an empty catalog removes the forward", async () => {
-  const fleet = machine(node);
-  await fleet.apply();
-  fleet.writeProfile({ packs: [] });
-  expect((await fleet.apply()).code).toBe(0);
-  expect(fleet.forward()).toBe("gone");
+  const hedge = machine(node);
+  await hedge.apply();
+  hedge.writeProfile({ packs: [] });
+  expect((await hedge.apply()).code).toBe(0);
+  expect(hedge.forward()).toBe("gone");
 });
 
 test("the hub renders no forward", async () => {
@@ -114,8 +114,8 @@ test("a box renders no forward even when the profile names it, because its box f
 });
 
 test("a pack cannot take the forward's job id", async () => {
-  const fleet = machine(node, { taker: `export default { sdk: 1, name: "taker", summary: "A test pack.", register(fleet) { fleet.service({ id: "hub-forward", run: async () => {} }); } };\n` });
-  const applied = await fleet.apply();
+  const hedge = machine(node, { taker: `export default { sdk: 1, name: "taker", summary: "A test pack.", register(hedge) { hedge.service({ id: "hub-forward", run: async () => {} }); } };\n` });
+  const applied = await hedge.apply();
   expect(applied.code).toBe(1);
   expect(applied.output).toContain("job hub-forward is reserved by the engine");
 });

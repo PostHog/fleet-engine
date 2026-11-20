@@ -29,7 +29,7 @@ git_ssh_key() {
 
 with_private_key() {
   umask 077
-  key_file=$(mktemp "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/fleet-coder-git.XXXXXX")
+  key_file=$(mktemp "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/hedge-coder-git.XXXXXX")
   trap 'rm -f "$key_file"' EXIT
   trap 'exit 129' HUP
   trap 'exit 130' INT

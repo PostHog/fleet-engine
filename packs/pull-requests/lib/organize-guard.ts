@@ -3,6 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type ShellThread, t3UserData } from "../../base/lib/t3/index.ts";
 import { closingSettings } from "../../orchestration/lib/closing-marks.ts";
+import { remoteLauncher } from "../../../src/hub/ssh.ts";
 import { runGh } from "./gh.ts";
 import { fullIdHint, guardedActions, isOrganize, listedThread, pinnedReason, prState, readHandovers, readT3Threads, settleRefusal, settleTarget } from "./pr-owners.ts";
 
@@ -14,7 +15,7 @@ const aliasPattern = /^[a-z0-9][a-z0-9.-]*$/;
 const threadPattern = /^[a-zA-Z0-9][a-zA-Z0-9:._%-]{0,511}$/;
 const sshLimitMs = 10_000;
 
-export const settleCheckUsage = "Usage: fleet pr settle-check --action <settle|snooze|archive> --thread <thread id>";
+export const settleCheckUsage = "Usage: hedge pr settle-check --action <settle|snooze|archive> --thread <thread id>";
 
 const realSsh: Ssh = async (alias, command) => {
   const child = Bun.spawn(["ssh", "-o", "BatchMode=yes", "-o", "ForwardAgent=no", "-o", "ConnectTimeout=5", alias, command], { stdin: "ignore", stdout: "pipe", stderr: "ignore", timeout: sshLimitMs });
@@ -27,7 +28,7 @@ async function thisEnvironment(home: string): Promise<string> {
 }
 
 export async function peerOf(home: string, environmentId: string): Promise<string | undefined> {
-  const links = join(home, ".config/fleet/peer-links");
+  const links = join(home, ".config/hedge/peer-links");
   if (!existsSync(links)) return undefined;
   for (const name of (await readdir(links)).filter((file) => file.endsWith(".json")).sort()) {
     const alias = name.slice(0, -".json".length);
@@ -41,15 +42,15 @@ export const settleCheckOver = (ssh: Ssh = realSsh): SettleCheck => async (home,
   if (environmentId === (await thisEnvironment(home))) return undefined;
   const alias = await peerOf(home, environmentId);
   if (!alias) return undefined;
-  if (!threadPattern.test(threadId) || !["settle", "snooze", "archive"].includes(action)) throw new Error("the thread id or action has a form Fleet does not send");
-  const answer = await ssh(alias, `PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH" sh "$HOME/.local/share/fleet/engine/fleet" pr settle-check --action ${action} --thread ${threadId}`);
-  if (answer.code !== 0) throw new Error(`${alias} did not answer: fleet pr settle-check exited ${answer.code}`);
+  if (!threadPattern.test(threadId) || !["settle", "snooze", "archive"].includes(action)) throw new Error("the thread id or action has a form Hedge does not send");
+  const answer = await ssh(alias, `PATH="$HOME/.local/bin:$HOME/.bun/bin:$PATH" sh ${remoteLauncher} pr settle-check --action ${action} --thread ${threadId}`);
+  if (answer.code !== 0) throw new Error(`${alias} did not answer: hedge pr settle-check exited ${answer.code}`);
   const parsed = (() => { try { return JSON.parse(answer.stdout.trim().split("\n").at(-1) ?? "") as unknown; } catch { return undefined; } })();
   if (typeof parsed !== "object" || parsed === null || !("refusal" in parsed)) throw new Error(`${alias} sent no settle-check answer`);
   const { refusal } = parsed as { refusal: unknown };
   if (refusal === null) return {};
   if (typeof refusal === "string" && refusal.trim()) return { refusal };
-  throw new Error(`${alias} sent a settle-check answer Fleet cannot read`);
+  throw new Error(`${alias} sent a settle-check answer Hedge cannot read`);
 };
 
 export function parseSettleCheck(args: string[]): { action: string; threadId: string } {
@@ -66,15 +67,15 @@ export type SettleDeps = {
 };
 
 const fallbackPerson = "the person who runs this machine";
-const noAnswer = (action: string) => `Fleet blocked this ${action}: T3 did not answer; retry, or ${action} in the T3 UI.`;
-const unlisted = (action: string, id: string, full: string | undefined) => `Fleet blocked this ${action}: T3 did not list thread ${id}, so Fleet cannot check its pin or its PRs. `
+const noAnswer = (action: string) => `Hedge blocked this ${action}: T3 did not answer; retry, or ${action} in the T3 UI.`;
+const unlisted = (action: string, id: string, full: string | undefined) => `Hedge blocked this ${action}: T3 did not list thread ${id}, so Hedge cannot check its pin or its PRs. `
   + `T3 takes only a full thread id: pass ${full ?? "the id t3_thread_list shows, with environmentId for a thread on another machine"}, or ${action} in the T3 UI.`;
-const unnamed = (action: string) => `Fleet blocked this ${action}: the call names no thread, and T3CODE_THREAD_ID is unset, so Fleet cannot tell which thread it ${action}s. Pass threadId, or ${action} in the T3 UI.`;
+const unnamed = (action: string) => `Hedge blocked this ${action}: the call names no thread, and T3CODE_THREAD_ID is unset, so Hedge cannot tell which thread it ${action}s. Pass threadId, or ${action} in the T3 UI.`;
 const deny = (reason: string) => ({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: reason } });
 
 export function personName(home: string): string {
   try {
-    const file = join(home, ".local/state/fleet/settings.json");
+    const file = join(home, ".local/state/hedge/settings.json");
     const person = existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>)["guards.person"] : undefined;
     return typeof person === "string" && person.trim() ? person.trim() : fallbackPerson;
   } catch {

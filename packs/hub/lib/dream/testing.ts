@@ -14,7 +14,7 @@ export function note(name: string, fields: Record<string, string> = {}, body = "
 
 export function hubWithSubtree(home: string, files: Record<string, string> = {}) {
   const prefixed = Object.fromEntries(Object.entries(files).map(([path, text]) => [`.agents/memory-repo/memory/${path}`, text]));
-  writeHome(home, { ".config/fleet/machine.json": JSON.stringify({ schema: 1, role: "hub" }), ".agents/memory-repo/README.md": "# Notes\n", ...prefixed });
+  writeHome(home, { ".config/hedge/machine.json": JSON.stringify({ schema: 1, role: "hub" }), ".agents/memory-repo/README.md": "# Notes\n", ...prefixed });
   symlinkSync(join(home, ".agents/memory-repo/memory"), join(home, ".agents/memory"));
 }
 
@@ -29,7 +29,7 @@ export function quietIo(home: string, fields: Partial<DreamIo> = {}) {
   const said: string[] = [];
   const offline = () => { throw new Error("this command reaches no other machine and asks no model"); };
   const io: DreamIo = {
-    home, env: { FLEET_SETTINGS: JSON.stringify(dreamSettings) }, self: "hub-host", now: () => dreamNow,
+    home, env: { HEDGE_SETTINGS: JSON.stringify(dreamSettings) }, self: "hub-host", now: () => dreamNow,
     print: (text) => void printed.push(text), say: (text) => void said.push(text),
     peers: () => [], onPeer: offline, boxes: () => undefined, git: offline, analyst: offline, checker: offline, launch: offline,
     ...fields,

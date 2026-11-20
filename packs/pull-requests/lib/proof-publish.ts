@@ -31,7 +31,7 @@ export async function publishProof(home: string, identity: ProofIdentity, source
   if (typeof receipt?.url === "string") return receipt.url;
   const { login } = await github("user") as { login: string };
   if (!/^[A-Za-z0-9-]+$/.test(login)) throw new Error("Cannot identify GitHub account");
-  const capabilityPath = join(home, ".local/state/fleet/proof-publish", login, `${repository.replace("/", "_")}.json`);
+  const capabilityPath = join(home, ".local/state/hedge/proof-publish", login, `${repository.replace("/", "_")}.json`);
   let capability = recheck ? undefined : await cached(capabilityPath);
   if (capability?.policyVersion !== 1 || capability.permitted !== false) capability = undefined;
   if (!capability) {
@@ -48,7 +48,7 @@ export async function publishProof(home: string, identity: ProofIdentity, source
     }
   }
   if (!capability.permitted) throw new Error("Asset destination denied. Choose your writable fork, or use --recheck after access changes.");
-  const branch = "fleet-proof";
+  const branch = "hedge-proof";
   try { await github(`repos/${repository}/git/ref/heads/${branch}`); }
   catch (error) {
     if ((error as { status?: number }).status !== 404) throw error;

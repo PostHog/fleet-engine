@@ -52,14 +52,14 @@ async function activity(t3: T3Stub, ...args: string[]) {
   return { code, output: lines.join("\n") };
 }
 
-test("fleet activity lists this machine and each linked environment from the local T3 server, with no peers.json", async () => {
+test("hedge activity lists this machine and each linked environment from the local T3 server, with no peers.json", async () => {
   const t3 = await stub(fixture());
-  const child = Bun.spawn(["bun", command], { env: { ...Bun.env, HOME: t3.home, FLEET_SETTINGS: "{}" }, stdout: "pipe", stderr: "pipe" });
+  const child = Bun.spawn(["bun", command], { env: { ...Bun.env, HOME: t3.home, HEDGE_SETTINGS: "{}" }, stdout: "pipe", stderr: "pipe" });
   const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
 
   expect(stderr).toBe("");
   expect(code).toBe(0);
-  expect(existsSync(join(t3.home, ".config", "fleet", "peers.json"))).toBe(false);
+  expect(existsSync(join(t3.home, ".config", "hedge", "peers.json"))).toBe(false);
   expect(stdout).toBe([
     hostname(),
     `  * running ${minutesAgo(2)} Local project: Thread mcp:local-busy`,
@@ -145,15 +145,15 @@ test("a linked environment that cannot answer is named with its reason, and the 
   expect(output).toContain("devbox-2: its link expired. Link it again in T3 Code's Settings → Connections.");
 });
 
-test("without a running T3 server, fleet activity says so and exits 1 at once", async () => {
-  const home = mkdtempSync(join(tmpdir(), "fleet-no-t3-"));
+test("without a running T3 server, hedge activity says so and exits 1 at once", async () => {
+  const home = mkdtempSync(join(tmpdir(), "hedge-no-t3-"));
   cleanups.push(() => rmSync(home, { recursive: true, force: true }));
-  const child = Bun.spawn(["bun", command], { env: { ...Bun.env, HOME: home, FLEET_SETTINGS: "{}" }, stdout: "pipe", stderr: "pipe" });
+  const child = Bun.spawn(["bun", command], { env: { ...Bun.env, HOME: home, HEDGE_SETTINGS: "{}" }, stdout: "pipe", stderr: "pipe" });
   const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
 
   expect(code).toBe(1);
   expect(stdout).toBe("");
-  expect(stderr).toBe(`fleet: T3 is not running on this machine: no server-runtime.json in ${join(home, ".t3", "userdata")}. Start T3 Code, then try again.\n`);
+  expect(stderr).toBe(`hedge: T3 is not running on this machine: no server-runtime.json in ${join(home, ".t3", "userdata")}. Start T3 Code, then try again.\n`);
 });
 
 test("a thread that awaits a shell command or waits on another thread is busy, and one with a plain background command is not", async () => {

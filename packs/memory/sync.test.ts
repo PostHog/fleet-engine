@@ -65,7 +65,7 @@ async function crashMidRebase() {
   git(laptop.checkout, "commit", "-q", "-m", "local");
   git(laptop.checkout, "fetch", "-q", "origin", "main");
   expect(() => git(laptop.checkout, "rebase", "origin/main")).toThrow();
-  writeFileSync(join(laptop.checkout, ".git/fleet-sync-rebase"), "");
+  writeFileSync(join(laptop.checkout, ".git/hedge-sync-rebase"), "");
   writeFileSync(join(laptop.checkout, "later.md"), "written after the crash\n");
   return { root, remote, checkout: laptop.checkout };
 }
@@ -92,7 +92,7 @@ test("puts a file still in conflict back to this machine's version, and keeps th
   expect([result.code, result.out]).toEqual([0, expect.stringContaining("the copies from the crash are in")]);
   expect(readFileSync(join(checkout, "notes.md"), "utf8")).toBe("laptop version\n");
   expect(readFileSync(join(checkout, "later.md"), "utf8")).toBe("written after the crash\n");
-  expect(existsSync(join(checkout, ".git/fleet-sync-files.tar"))).toBe(true);
+  expect(existsSync(join(checkout, ".git/hedge-sync-files.tar"))).toBe(true);
 });
 
 test("takes over a lock that a stopped sync left behind", async () => {
@@ -129,7 +129,7 @@ test("starts main in an empty repo", async () => {
 
 test("moves a checkout of another repo aside and carries its unsynced notes to the one in memory.repo", async () => {
   const { root, remote } = setup();
-  const env = { FLEET_MEMORY_SUBTREE: "memory" };
+  const env = { HEDGE_MEMORY_SUBTREE: "memory" };
   commitAll(join(root, "seed-main"), "notes", { "memory/MEMORY.md": "# Memory\n- shared\n", "memory/old.md": "old\n" });
   const laptop = await sync(root, remote, "laptop", env);
   const moved = join(root, "moved.git");

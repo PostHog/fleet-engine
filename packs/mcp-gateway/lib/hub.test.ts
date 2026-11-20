@@ -12,19 +12,19 @@ const secureUrl = "https://hub.internal.example.com:60001/mcphub";
 const secure = { httpsHost: "hub.internal.example.com", relayPort: 60001 };
 
 function hubHome(settings?: Record<string, unknown>) {
-  const home = temp.make("fleet-mcphub-hub-");
+  const home = temp.make("hedge-mcphub-hub-");
   writeMachineFile(home, "hub");
   writeMcpHubSettings(home, settings);
   return home;
 }
 
 test("preparing the hub twice keeps its upstream grants and its service secrets", async () => {
-  const home = temp.make("fleet-mcphub-");
+  const home = temp.make("hedge-mcphub-");
   const first = await prepareMcpHub(home, secureUrl, secure);
   const settings = JSON.parse(readFileSync(first.settings, "utf8"));
   expect(settings.mcpServers).toEqual({});
   expect(settings.systemConfig).toEqual({ install: { baseUrl: secureUrl }, routing: { enableBearerAuth: true, skipAuth: false }, oauthServer: { enabled: false } });
-  expect(settings.bearerKeys).toEqual([expect.objectContaining({ id: "fleet-management", kind: "system", accessType: "all" })]);
+  expect(settings.bearerKeys).toEqual([expect.objectContaining({ id: "hedge-management", kind: "system", accessType: "all" })]);
   settings.mcpServers.notes = { type: "streamable-http", url: "https://notes.example.com/mcp", oauth: { refreshToken: "existing-grant" } };
   writeFileSync(first.settings, JSON.stringify(settings));
   const environment = readFileSync(first.environment, "utf8");
@@ -39,20 +39,20 @@ test("preparing the hub twice keeps its upstream grants and its service secrets"
 });
 
 test("preparation refuses a linked data folder without touching its target", async () => {
-  const home = temp.make("fleet-mcphub-");
+  const home = temp.make("hedge-mcphub-");
   const outside = join(home, "outside");
   mkdirSync(join(home, ".local/share"), { recursive: true });
   mkdirSync(outside);
   const permissions = statSync(outside).mode & 0o777;
   writeFileSync(join(outside, "unmanaged"), "keep");
-  symlinkSync(outside, join(home, ".local/share/fleet-mcphub"));
+  symlinkSync(outside, join(home, ".local/share/hedge-mcphub"));
   await expect(prepareMcpHub(home, secureUrl, secure)).rejects.toThrow("linked");
   expect(readFileSync(join(outside, "unmanaged"), "utf8")).toBe("keep");
   expect(statSync(outside).mode & 0o777).toBe(permissions);
 });
 
 test("preparation accepts only the hub's HTTPS address or the loopback address as its callback origin", async () => {
-  const home = temp.make("fleet-mcphub-");
+  const home = temp.make("hedge-mcphub-");
   for (const url of ["http://hub:60001/mcphub", "https://user:secret@hub.internal.example.com:60001/mcphub", `${secureUrl}?secret=x`, `${secureUrl}\nADMIN_PASSWORD=injected`, "https://hub.internal.example.com:60001/other"]) {
     await expect(prepareMcpHub(home, url, secure)).rejects.toThrow("The MCPHub address must be the hub's HTTPS address or http://127.0.0.1:3317/mcphub");
   }
@@ -60,30 +60,37 @@ test("preparation accepts only the hub's HTTPS address or the loopback address a
 });
 
 test("a key comes only from an installed gateway", async () => {
-  await expect(issueKey("box-1", fakeHub(temp.make("fleet-mcphub-")))).rejects.toThrow("MCPHub is not installed. Run: fleet apply");
+  await expect(issueKey("box-1", fakeHub(temp.make("hedge-mcphub-")))).rejects.toThrow("MCPHub is not installed. Run: hedge apply");
 });
 
-test("a new key is scoped to the fleet group, which holds every server", async () => {
+test("a new key is scoped to the hedge group, which holds every server", async () => {
   const api = fakeMcpHub();
   expect(await issueKey("my-hub", fakeHub(hubHome(), { fetch: mcphubFetch(api) }))).toBe("mcphub_new-machine-token");
-  expect(api.groups).toEqual([{ id: "group-1", name: "fleet", servers: ["tickets", "calendar"] }]);
-  expect(api.calls.find((call) => call.path === "auth/keys")?.body).toEqual({ name: "Fleet my-hub", kind: "system", accessType: "groups", allowedGroups: ["fleet"] });
+  expect(api.groups).toEqual([{ id: "group-1", name: "hedge", servers: ["tickets", "calendar"] }]);
+  expect(api.calls.find((call) => call.path === "auth/keys")?.body).toEqual({ name: "Hedge my-hub", kind: "system", accessType: "groups", allowedGroups: ["hedge"] });
 });
 
-test("a machine keeps its key, an old server-scoped key moves to the fleet group, and the group syncs", async () => {
-  const oldKey = { id: "key-old", name: "Fleet box-2", token: "mcphub_old-token", enabled: true, kind: "system", accessType: "servers", allowedServers: ["tickets"] };
-  const home = hubHome({ bearerKeys: [{ id: "fleet-management", token: managementToken, enabled: true, kind: "system", accessType: "all" }, oldKey] });
-  const api = fakeMcpHub({ servers: ["tickets", "calendar", "notes"], groups: [{ id: "group-9", name: "fleet", servers: ["tickets"] }] });
+test("a machine keeps its key, an old server-scoped key moves to the hedge group, and the group syncs", async () => {
+  const oldKey = { id: "key-old", name: "Hedge box-2", token: "mcphub_old-token", enabled: true, kind: "system", accessType: "servers", allowedServers: ["tickets"] };
+  const home = hubHome({ bearerKeys: [{ id: "hedge-management", token: managementToken, enabled: true, kind: "system", accessType: "all" }, oldKey] });
+  const api = fakeMcpHub({ servers: ["tickets", "calendar", "notes"], groups: [{ id: "group-9", name: "hedge", servers: ["tickets"] }] });
   expect(await issueKey("box-2", fakeHub(home, { fetch: mcphubFetch(api) }))).toBe("mcphub_old-token");
-  expect(api.groups).toEqual([{ id: "group-9", name: "fleet", servers: ["tickets", "calendar", "notes"] }]);
+  expect(api.groups).toEqual([{ id: "group-9", name: "hedge", servers: ["tickets", "calendar", "notes"] }]);
   expect(api.calls.filter((call) => call.method !== "GET")).toEqual([
     { method: "PUT", path: "groups/group-9", body: { servers: ["tickets", "calendar", "notes"] } },
-    { method: "PUT", path: "auth/keys/key-old", body: { accessType: "groups", allowedGroups: ["fleet"], allowedServers: [] } },
+    { method: "PUT", path: "auth/keys/key-old", body: { accessType: "groups", allowedGroups: ["hedge"], allowedServers: [] } },
   ]);
 });
 
-test("doctor passes a healthy gateway that refuses calls without a key and serves every server to the fleet group", async () => {
-  const api = fakeMcpHub({ groups: [{ id: "group-1", name: "fleet", servers: ["tickets", "calendar"] }] });
+test("a hub whose MCPHub settings Fleet wrote still signs in with the fleet-management key and issues a key", async () => {
+  const home = hubHome({ bearerKeys: [{ id: "fleet-management", name: "Fleet local management", token: managementToken, enabled: true, kind: "system", accessType: "all" }] });
+  const api = fakeMcpHub({ groups: [{ id: "group-1", name: "hedge", servers: ["tickets", "calendar"] }] });
+  expect(await issueKey("box-2", fakeHub(home, { fetch: mcphubFetch(api) }))).toStartWith("mcphub_");
+  expect(api.calls.find((call) => call.path === "auth/keys" && call.method === "POST")?.body).toEqual({ name: "Hedge box-2", kind: "system", accessType: "groups", allowedGroups: ["hedge"] });
+});
+
+test("doctor passes a healthy gateway that refuses calls without a key and serves every server to the hedge group", async () => {
+  const api = fakeMcpHub({ groups: [{ id: "group-1", name: "hedge", servers: ["tickets", "calendar"] }] });
   const hub = fakeHub(hubHome(), { fetch: mcphubFetch(api) });
   expect(await doctor(hub)).toBe(true);
   expect(hub.printed).toEqual(["MCPHub dashboard: http://127.0.0.1:3317/mcphub/", "tickets: connected, 2 tools", "calendar: connected, 2 tools"]);
@@ -100,7 +107,7 @@ test("doctor shows a stdio server that starts on demand and sleeps between calls
     tickets: { status: "disconnected", tools: 2, config: { type: "stdio", command: "node" } },
   };
   const names = Object.keys(servers);
-  const gateway = mcphubFetch(fakeMcpHub({ servers: names, groups: [{ id: "g", name: "fleet", servers: names }] }));
+  const gateway = mcphubFetch(fakeMcpHub({ servers: names, groups: [{ id: "g", name: "hedge", servers: names }] }));
   const fetch = async (input: string | URL | Request, init?: RequestInit) => {
     if (!String(input).endsWith("/api/servers")) return gateway(input, init);
     return Response.json({ success: true, data: Object.entries(servers).map(([name, { config, tools, ...server }]) => ({ name, ...server, tools: Array.from({ length: tools }, () => ({})) })) });
@@ -118,15 +125,15 @@ test("doctor shows a stdio server that starts on demand and sleeps between calls
   ]);
 });
 
-test("doctor fails, saying what to run, when MCPHub is missing, down, open, or its fleet group lacks a server", async () => {
-  const missing = fakeHub(temp.make("fleet-mcphub-"));
+test("doctor fails, saying what to run, when MCPHub is missing, down, open, or its hedge group lacks a server", async () => {
+  const missing = fakeHub(temp.make("hedge-mcphub-"));
   writeMachineFile(missing.home, "hub");
   expect(await doctor(missing)).toBe(false);
-  expect(missing.printed).toEqual(["MCPHub is not installed. Run: fleet apply"]);
+  expect(missing.printed).toEqual(["MCPHub is not installed. Run: hedge apply"]);
   const cases = [
-    [fakeMcpHub({ healthy: false }), "MCPHub does not answer on 127.0.0.1:3317. Run: fleet mcp-gateway restart"],
-    [fakeMcpHub({ openWithoutKey: true, groups: [{ id: "g", name: "fleet", servers: ["tickets", "calendar"] }] }), "MCPHub accepts calls without a key. Check routing.skipAuth in its settings."],
-    [fakeMcpHub({ groups: [{ id: "g", name: "fleet", servers: ["tickets"] }] }), "The fleet group lacks calendar. Run: fleet apply"],
+    [fakeMcpHub({ healthy: false }), "MCPHub does not answer on 127.0.0.1:3317. Run: hedge mcp-gateway restart"],
+    [fakeMcpHub({ openWithoutKey: true, groups: [{ id: "g", name: "hedge", servers: ["tickets", "calendar"] }] }), "MCPHub accepts calls without a key. Check routing.skipAuth in its settings."],
+    [fakeMcpHub({ groups: [{ id: "g", name: "hedge", servers: ["tickets"] }] }), "The hedge group lacks calendar. Run: hedge apply"],
   ] as const;
   for (const [api, line] of cases) {
     const hub = fakeHub(hubHome(), { fetch: mcphubFetch(api) });
@@ -141,7 +148,7 @@ test("reconnect reloads only a configured upstream", async () => {
   await expect(reconnect("unknown", hub)).rejects.toThrow("Name a configured upstream server: tickets, calendar.");
   await reconnect("tickets", hub);
   expect(api.calls).toEqual([{ method: "POST", path: "servers/tickets/reload" }]);
-  expect(hub.printed).toEqual(["MCPHub reconnected tickets. If it needs a sign-in, run: fleet mcp-gateway sign-in"]);
+  expect(hub.printed).toEqual(["MCPHub reconnected tickets. If it needs a sign-in, run: hedge mcp-gateway sign-in"]);
 });
 
 test("sign-in prints the forward for your computer and each pending authorization address, and no page", async () => {
@@ -150,7 +157,7 @@ test("sign-in prints the forward for your computer and each pending authorizatio
   const hub = fakeHub(home);
   await signIn(hub);
   expect(hub.printed).toEqual(["On your computer, keep this running while you sign in: coder port-forward my-hub --tcp 3317", "tickets: https://auth.example.com/authorize?state=<x>"]);
-  expect(existsSync(join(home, ".local/share/fleet-mcphub/signin"))).toBe(false);
+  expect(existsSync(join(home, ".local/share/hedge-mcphub/signin"))).toBe(false);
   const quiet = fakeHub(hubHome());
   await signIn(quiet);
   expect(quiet.printed).toEqual(["No upstream server waits for a sign-in."]);
@@ -163,18 +170,18 @@ test("sign-in forwards from the hub's Coder workspace when the profile names the
   expect(hub.printed[0]).toBe("On your computer, keep this running while you sign in: coder port-forward my-hub --tcp 3317");
 });
 
-const ownContainer = (call: { command: string[] }) => call.command[1] === "container" ? { stdout: JSON.stringify([{ Config: { Labels: { "org.fleet.service": "mcphub" } } }]) } : {};
+const ownContainer = (call: { command: string[] }) => call.command[1] === "container" ? { stdout: JSON.stringify([{ Config: { Labels: { "org.hedge.service": "mcphub" } } }]) } : {};
 
 test("restart restarts the container and keeps the grants on disk", async () => {
   const { calls, run } = fakeRun(ownContainer);
   const hub = fakeHub(hubHome(), { run });
   await restart(hub);
-  expect(calls.map((call) => call.command)).toEqual([["docker", "container", "inspect", "fleet-mcphub"], ["docker", "restart", "fleet-mcphub"]]);
+  expect(calls.map((call) => call.command)).toEqual([["docker", "container", "inspect", "hedge-mcphub"], ["docker", "restart", "hedge-mcphub"]]);
   expect(hub.printed).toEqual(["MCPHub restarted. Upstream sign-ins stay on disk."]);
 });
 
-test("restart keeps a container named fleet-mcphub that Fleet did not make", async () => {
+test("restart keeps a container named hedge-mcphub that Hedge did not make", async () => {
   const { calls, run } = fakeRun((call) => call.command[1] === "container" ? { stdout: JSON.stringify([{ Config: { Labels: {} } }]) } : {});
-  await expect(restart(fakeHub(hubHome(), { run }))).rejects.toThrow("Keep unmanaged Docker container fleet-mcphub. Review it before installation.");
+  await expect(restart(fakeHub(hubHome(), { run }))).rejects.toThrow("Keep unmanaged Docker container hedge-mcphub. Review it before installation.");
   expect(calls.map((call) => call.command[1])).toEqual(["container"]);
 });

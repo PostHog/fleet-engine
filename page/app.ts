@@ -2,8 +2,8 @@
 import { installPrompt, startPrompt, toggleSelected, toggleStart, whereLabels, type PromptData, type Start, type Where } from "./model.ts";
 import { promptHtml, t3Link } from "./prompt.ts";
 
-const selectionKey = "fleet-packs";
-const dataNode = document.getElementById("fleet-data");
+const selectionKey = "hedge-packs";
+const dataNode = document.getElementById("hedge-data");
 const data: PromptData | undefined = dataNode ? JSON.parse(dataNode.textContent!) : undefined;
 
 function storedSelection(): string[] {

@@ -20,7 +20,7 @@ type Line = { type?: string; isMeta?: boolean; message?: { role?: string; conten
 type Block = { type?: string; text?: string; name?: string };
 type Step = { text: string } | { asked: true };
 
-export const questionToolReason = (person: string) => `Fleet blocked this stop: your last message asks ${person} a decision in prose, `
+export const questionToolReason = (person: string) => `Hedge blocked this stop: your last message asks ${person} a decision in prose, `
   + "and this thread stays out of their inbox after the turn: it is snoozed, waits on a task, Monitor or thread wait, watches PR checks, or closes on a line that parks it. "
   + "Ask it now with the question tool (AskUserQuestion in Claude, request_user_input in Codex): restate the decision in full, with options. "
   + `A pending question brings the thread back to ${person}. `
@@ -116,7 +116,7 @@ export type SendDenial = { hookSpecificOutput: { hookEventName: "PreToolUse"; pe
 export type ReadShell = () => Promise<{ threads: ShellThread[] }>;
 export type SendGuardOptions = { home: string; shell: ReadShell };
 
-export const pendingCardReason = (threadId: string, person: string) => `Fleet blocked this send: thread ${threadId} waits on a pending question card. `
+export const pendingCardReason = (threadId: string, person: string) => `Hedge blocked this send: thread ${threadId} waits on a pending question card. `
   + `A send in mode auto, steer or restart interrupts its turn, and T3 cancels the card, so its lane asks ${person} again or the card is lost. `
   + `Send again with mode: "queue": the lane reads your message once ${person} answers. `
   + "Only when your message changes what the card asks, send the same message to the same thread once more to replace the card. A different message is denied again.";
@@ -155,7 +155,7 @@ async function forgetOldDenials(denials: string): Promise<void> {
 }
 
 async function firstDenial(home: string, event: SendEvent, thread: string, card: string): Promise<boolean> {
-  const denials = join(home, ".local/state/fleet/ask-guard");
+  const denials = join(home, ".local/state/hedge/ask-guard");
   const message = typeof event.tool_input?.message === "string" ? event.tool_input.message : "";
   const key = createHash("sha256").update(JSON.stringify([event.session_id ?? "", event.agent_id ?? "", thread, card, message])).digest("hex").slice(0, 32);
   try {

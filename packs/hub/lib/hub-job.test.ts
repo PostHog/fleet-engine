@@ -18,15 +18,15 @@ function stubT3(dir: string, threadExit = 0) {
   chmodSync(join(dir, "t3"), 0o755);
 }
 
-test("a thread starts with the T3 provider and the model of its FLEET_MODELS row, passed together, and its text only on standard input", () => {
+test("a thread starts with the T3 provider and the model of its HEDGE_MODELS row, passed together, and its text only on standard input", () => {
   const dir = temp.make("thread-");
   stubT3(dir);
-  const choice = threadModel("implementation", "fallback-model", { FLEET_MODELS: row("codex", "gpt-model") });
+  const choice = threadModel("implementation", "fallback-model", { HEDGE_MODELS: row("codex", "gpt-model") });
   const run = Bun.spawnSync(["sh", "-c", threadScript(dir, "Disk alert box-1", choice)], { stdin: Buffer.from("the task"), env: { PATH: `${dir}:/usr/bin:/bin`, HOME: dir } });
   expect(run.exitCode).toBe(0);
   expect(readFileSync(join(dir, "argv"), "utf8").split("\n")).toEqual(["thread", "start", "--title", "Disk alert box-1", "--provider", "codex", "--model", "gpt-model", dir, "-", ""]);
   expect(readFileSync(join(dir, "stdin"), "utf8")).toBe("the task");
-  expect(threadModel("implementation", "fallback-model", { FLEET_MODELS: row("claude", "big-model") })).toEqual({ provider: "claudeAgent", model: "big-model" });
+  expect(threadModel("implementation", "fallback-model", { HEDGE_MODELS: row("claude", "big-model") })).toEqual({ provider: "claudeAgent", model: "big-model" });
   expect(threadModel("implementation", "fallback-model", {})).toEqual({ provider: "claudeAgent", model: "fallback-model" });
 });
 
@@ -105,8 +105,8 @@ test("the kernel holds the lock for the holder's lifetime: while another process
   const home = temp.make("lock-");
   const lines: string[] = [];
   const ran: string[] = [];
-  Bun.spawnSync(["mkdir", "-p", join(home, ".local/state/fleet")]);
-  const holder = Bun.spawn(["flock", join(home, ".local/state/fleet/job.lock"), "-c", "echo held; exec cat"], { stdin: "pipe", stdout: "pipe", env: { PATH: "/usr/bin:/bin" } });
+  Bun.spawnSync(["mkdir", "-p", join(home, ".local/state/hedge")]);
+  const holder = Bun.spawn(["flock", join(home, ".local/state/hedge/job.lock"), "-c", "echo held; exec cat"], { stdin: "pipe", stdout: "pipe", env: { PATH: "/usr/bin:/bin" } });
   const reader = holder.stdout.getReader();
   expect(new TextDecoder().decode((await reader.read()).value).trim()).toBe("held");
   expect(await underLock(lockContext(home, lines), "job", "The job", async () => (ran.push("blocked"), 0))).toBe(0);

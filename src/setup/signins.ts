@@ -25,7 +25,7 @@ export function githubSignIn(machine: Machine, signedIn: () => Promise<void>): S
     id: "github",
     title: "Sign in to GitHub",
     minutes: 1,
-    why: "Once, with every permission Fleet needs: your profile repo, your org's packs, your keys, and pushes to large repos.",
+    why: "Once, with every permission Hedge needs: your profile repo, your org's packs, your keys, and pushes to large repos.",
     url: "https://github.com/login/device",
     get command() {
       const scopes = githubScopes.join(",");
@@ -88,13 +88,13 @@ async function claudeRequestRejected(machine: Machine): Promise<boolean> {
 }
 
 function environmentTokenDead(host: string | undefined) {
-  if (host) return `The CLAUDE_CODE_OAUTH_TOKEN that ${host} gets from its environment is no longer valid, and claude auth login cannot replace it. Make a new token with claude setup-token and give it to the box (on a PostHog devbox: hogli devbox:setup --configure-claude), then run fleet setup again.`;
-  return "The CLAUDE_CODE_OAUTH_TOKEN in this machine's environment is no longer valid, and claude auth login cannot replace it. Make a new token with claude setup-token, put it where your environment sets CLAUDE_CODE_OAUTH_TOKEN, then run fleet setup again in a new shell.";
+  if (host) return `The CLAUDE_CODE_OAUTH_TOKEN that ${host} gets from its environment is no longer valid, and claude auth login cannot replace it. Make a new token with claude setup-token and give it to the box (on a PostHog devbox: hogli devbox:setup --configure-claude), then run hedge setup again.`;
+  return "The CLAUDE_CODE_OAUTH_TOKEN in this machine's environment is no longer valid, and claude auth login cannot replace it. Make a new token with claude setup-token, put it where your environment sets CLAUDE_CODE_OAUTH_TOKEN, then run hedge setup again in a new shell.";
 }
 
 function environmentApiKeyDead(host: string | undefined) {
-  if (host) return `The ANTHROPIC_API_KEY that ${host} gets from its environment is no longer valid, and claude auth login cannot replace it. Put a working key where the box's environment sets ANTHROPIC_API_KEY, or unset ANTHROPIC_API_KEY there to use a Claude sign-in, then run fleet setup again.`;
-  return "The ANTHROPIC_API_KEY in this machine's environment is no longer valid, and claude auth login cannot replace it. Put a working key where your environment sets ANTHROPIC_API_KEY, or unset ANTHROPIC_API_KEY to use a Claude sign-in, then run fleet setup again in a new shell.";
+  if (host) return `The ANTHROPIC_API_KEY that ${host} gets from its environment is no longer valid, and claude auth login cannot replace it. Put a working key where the box's environment sets ANTHROPIC_API_KEY, or unset ANTHROPIC_API_KEY there to use a Claude sign-in, then run hedge setup again.`;
+  return "The ANTHROPIC_API_KEY in this machine's environment is no longer valid, and claude auth login cannot replace it. Put a working key where your environment sets ANTHROPIC_API_KEY, or unset ANTHROPIC_API_KEY to use a Claude sign-in, then run hedge setup again in a new shell.";
 }
 
 export const codexProbeTimeoutMs = 20_000;
@@ -108,7 +108,7 @@ export function chatgptSignIn(machine: Machine, models: ModelRow[]): SignIn {
     why: "Codex signs in with your ChatGPT plan. Setup checks with a real request, because a stale sign-in still looks signed in.",
     command: ["codex", "login"],
     async probe() {
-      const dir = mkdtempSync(join(tmpdir(), "fleet-codex-probe-"));
+      const dir = mkdtempSync(join(tmpdir(), "hedge-codex-probe-"));
       try {
         const command = ["codex", "exec", "--ephemeral", "--sandbox", "read-only", "--ignore-user-config", "--skip-git-repo-check", ...(model ? ["--model", model] : []), "Reply with the word ok."];
         return (await machine.exec(command, { cwd: dir, timeoutMs: codexProbeTimeoutMs })).code === 0;

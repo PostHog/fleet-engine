@@ -40,7 +40,7 @@ export async function pageData({ audience, team = [] }: PageOptions): Promise<Pa
   const names = new Set(manifests.map((manifest) => manifest.name));
   const holds = (need: Need) => !needPacks[need] || names.has(needPacks[need]!);
   const noteOn = (loaded: LoadedPack[], folder: string) => loaded.filter((pack) => existsSync(join(pack.dir, "SETUP.md"))).map((pack) => [pack.manifest.name, `${folder}/packs/${pack.manifest.name}/SETUP.md`]);
-  const setupNotes: Record<string, string> = Object.fromEntries([...noteOn(engine, "~/.local/share/fleet/engine"), ...noteOn(team, "~/.local/share/fleet/sources/<source>")]);
+  const setupNotes: Record<string, string> = Object.fromEntries([...noteOn(engine, "~/.local/share/hedge/engine"), ...noteOn(team, "~/.local/share/hedge/sources/<source>")]);
   const packs = manifests.map((manifest) => pagePack(manifest, holds, setupNotes[manifest.name]));
   const used = new Set(packs.flatMap((pack) => pack.workflows.flatMap((workflow) => workflow.needs)));
   const start = presets.find((preset) => preset.id === defaultPreset)!;

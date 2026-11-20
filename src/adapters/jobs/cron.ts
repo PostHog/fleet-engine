@@ -1,7 +1,7 @@
 import { quote } from "./launcher.ts";
 
-export const marker = (id: string) => `# fleet:${id}`;
-const markedLine = /\s# fleet:([A-Za-z0-9._-]+)$/;
+export const marker = (id: string) => `# hedge:${id}`;
+const markedLine = /\s# (?:hedge|fleet):([A-Za-z0-9._-]+)$/;
 
 export const cronSafe = (path: string) => !/[%\n\r]/.test(path);
 

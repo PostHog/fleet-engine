@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AvailableSource } from "../../src/pack/types.ts";
 import { tempDirs } from "../../src/testing/git.ts";
@@ -13,6 +13,9 @@ import { launchHere, launchOnBox, launchOnNodes, spawnRunner, type Run } from ".
 import { manifest, serve } from "./lib/slack.ts";
 import { handleTrigger, retryPending, syncFollowed, takeTurn, triggerOf, type Started, type TriggerDeps } from "./lib/trigger.ts";
 import { startSlackStub, type Message } from "./testing.ts";
+import { remoteLauncher } from "../../src/hub/ssh.ts";
+import { main } from "../../src/cli.ts";
+import { repoRoot } from "../../src/testing/cli.ts";
 
 const temp = tempDirs();
 const stops: Array<() => Promise<void> | void> = [];
@@ -36,7 +39,7 @@ async function homeWithTokens(tokens: Record<string, string> = { appToken, userT
 }
 
 const saveApp = (home: string, tokens: Record<string, string>) => secretStore(home, "slack").write("app", JSON.stringify(tokens));
-const statePath = (home: string) => join(home, ".local/state/fleet/slack/slack-trigger.json");
+const statePath = (home: string) => join(home, ".local/state/hedge/slack/slack-trigger.json");
 
 function processes(answers: (argv: string[], input?: string) => { code: number; stdout: string; stderr?: string } | undefined = () => undefined) {
   const calls: Array<{ argv: string[]; input?: string; timeoutMs?: number }> = [];
@@ -69,7 +72,7 @@ async function t3Server() {
 function commandDeps(home: string, extra: Partial<SlackCommandDeps> = {}): SlackCommandDeps & { printed: string[] } {
   const printed: string[] = [];
   return {
-    env: { FLEET_SETTINGS: settings(), FLEET_ENGINE_DIR: "/opt/fleet-engine" }, home, freeBytes: gigabytes(100), slackUserId: () => ownerId, slackEmoji: () => "t3code", secrets: secretStore(home, "slack"), stateDir: join(home, ".local/state/fleet/slack"), threads: t3Threads(models, { home }),
+    env: { HEDGE_SETTINGS: settings(), HEDGE_ENGINE_DIR: "/opt/fleet-engine" }, home, freeBytes: gigabytes(100), slackUserId: () => ownerId, slackEmoji: () => "t3code", secrets: secretStore(home, "slack"), stateDir: join(home, ".local/state/hedge/slack"), threads: t3Threads(models, { home }),
     print: (line) => printed.push(line), readStdin: async () => "", every: () => () => {}, sleep: async () => {}, printed, ...extra,
   };
 }
@@ -102,7 +105,7 @@ describe("which Slack events start a thread", () => {
   });
 });
 
-describe("fleet slack-trigger run", () => {
+describe("hedge slack-trigger run", () => {
   test("over Socket Mode, the owner's message, reaction, and mention start three threads on this machine's T3, each with :eyes: and an ephemeral link", async () => {
     const t3 = await t3Server();
     const slack = slackStub([
@@ -146,12 +149,12 @@ describe("fleet slack-trigger run", () => {
     const slack = slackStub([{ user: ownerId, ts: "200.1", text: "deploy check :t3code:" }]);
     const home = await homeWithTokens();
     const stop = new AbortController();
-    const fleet = processes((argv) => {
+    const hedge = processes((argv) => {
       if (argv.slice(1).join(" ") === "box spawn") return { code: 0, stdout: "claimed box-7 from the pool\nbox-7 env-box-7\n" };
       if (argv.slice(1, 4).join(" ") === "box run box-7") return { code: 0, stdout: `${JSON.stringify({ threadId: "thread-on-box" })}\n` };
       return undefined;
     });
-    const deps = commandDeps(home, { slackBase: slack.base, stop: stop.signal, run: fleet.run, env: { FLEET_SETTINGS: settings({ "hub.boxTemplate": "devbox" }), FLEET_ENGINE_DIR: "/opt/fleet-engine" } });
+    const deps = commandDeps(home, { slackBase: slack.base, stop: stop.signal, run: hedge.run, env: { HEDGE_SETTINGS: settings({ "hub.boxTemplate": "devbox" }), HEDGE_ENGINE_DIR: "/opt/fleet-engine" } });
     const running = listen(deps);
     await slack.connected();
     slack.send({ type: "message", user: ownerId, channel: "C1", ts: "200.1", text: "deploy check :t3code:" });
@@ -159,8 +162,8 @@ describe("fleet slack-trigger run", () => {
     stop.abort();
     await running;
 
-    const ran = fleet.calls.filter((call) => call.argv[0] === "/opt/fleet-engine/fleet");
-    expect(ran.map((call) => call.argv.slice(1).join(" "))).toEqual(["box spawn", "box run box-7 -- fleet slack-trigger launch"]);
+    const ran = hedge.calls.filter((call) => call.argv[0] === "/opt/fleet-engine/hedge");
+    expect(ran.map((call) => call.argv.slice(1).join(" "))).toEqual(["box spawn", "box run box-7 -- hedge slack-trigger launch"]);
     expect(JSON.parse(ran[1]!.input!)).toMatchObject({ title: "Slack: deploy check", prompt: expect.stringContaining("> deploy check :t3code:") });
     expect(slack.method("chat.postEphemeral")[0]!.args.text).toBe("Started <https://app.t3.codes/threads/env-box-7/thread-on-box|Slack: deploy check> on box-7.");
   });
@@ -170,8 +173,8 @@ describe("fleet slack-trigger run", () => {
     const home = await homeWithTokens();
     const stop = new AbortController();
     let started = 0;
-    const fleet = processes((argv) => (argv[0] === "ssh" ? { code: 0, stdout: `${JSON.stringify({ threadId: `t-${++started}`, url: `https://app.t3.codes/threads/env-${argv.at(-2)}/t-${started}` })}\n` } : undefined));
-    const deps = commandDeps(home, { slackBase: slack.base, stop: stop.signal, run: fleet.run, env: { FLEET_SETTINGS: settings({ "slack.nodes": "devbox-1 devbox-2", "hub.boxTemplate": "devbox" }), FLEET_ENGINE_DIR: "/opt/fleet-engine" } });
+    const hedge = processes((argv) => (argv[0] === "ssh" ? { code: 0, stdout: `${JSON.stringify({ threadId: `t-${++started}`, url: `https://app.t3.codes/threads/env-${argv.at(-2)}/t-${started}` })}\n` } : undefined));
+    const deps = commandDeps(home, { slackBase: slack.base, stop: stop.signal, run: hedge.run, env: { HEDGE_SETTINGS: settings({ "slack.nodes": "devbox-1 devbox-2", "hub.boxTemplate": "devbox" }), HEDGE_ENGINE_DIR: "/opt/fleet-engine" } });
     const running = listen(deps);
     await slack.connected();
     for (const ts of ["210.1", "210.2", "210.3"]) {
@@ -181,12 +184,12 @@ describe("fleet slack-trigger run", () => {
     stop.abort();
     await running;
 
-    const ssh = fleet.calls.filter((call) => call.argv[0] === "ssh");
+    const ssh = hedge.calls.filter((call) => call.argv[0] === "ssh");
     expect(ssh.map((call) => call.argv.at(-2))).toEqual(["devbox-1", "devbox-2", "devbox-1"]);
-    expect(ssh[0]!.argv.at(-1)).toEndWith('/.local/share/fleet/engine/fleet" slack-trigger launch');
+    expect(ssh[0]!.argv.at(-1)).toEndWith(`${remoteLauncher} slack-trigger launch`);
     expect(ssh[0]!.argv).toContain("BatchMode=yes");
     expect(JSON.parse(ssh[0]!.input!)).toMatchObject({ title: "Slack: first", commandId: expect.any(String) });
-    expect(fleet.calls.some((call) => call.argv.includes("box"))).toBe(false);
+    expect(hedge.calls.some((call) => call.argv.includes("box"))).toBe(false);
     expect(slack.method("chat.postEphemeral").map((call) => call.args.text)).toEqual([
       "Started <https://app.t3.codes/threads/env-devbox-1/t-1|Slack: first> on devbox-1.",
       "Started <https://app.t3.codes/threads/env-devbox-2/t-2|Slack: second> on devbox-2.",
@@ -197,7 +200,7 @@ describe("fleet slack-trigger run", () => {
   test("refuses a slack.nodes entry that is not a node's SSH name, or that names a box", async () => {
     const home = await homeWithTokens();
     for (const nodes of ["devbox-1 -oProxyCommand=x", "box-lane", "Devbox_1"]) {
-      await expect(listen(commandDeps(home, { run: processes().run, slackBase: "http://127.0.0.1:9", stop: AbortSignal.abort(), env: { FLEET_SETTINGS: settings({ "slack.nodes": nodes }) } }))).rejects.toThrow("slack.nodes names");
+      await expect(listen(commandDeps(home, { run: processes().run, slackBase: "http://127.0.0.1:9", stop: AbortSignal.abort(), env: { HEDGE_SETTINGS: settings({ "slack.nodes": nodes }) } }))).rejects.toThrow("slack.nodes names");
     }
   });
 
@@ -205,8 +208,8 @@ describe("fleet slack-trigger run", () => {
     const t3 = await t3Server();
     const slack = slackStub([{ user: ownerId, ts: "300.1", text: "full disk :t3code:" }]);
     const home = await homeWithTokens();
-    mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
-    writeFileSync(join(home, ".local/state/fleet/disk-free.json"), JSON.stringify({ checkedAt: new Date().toISOString(), boxes: { "devbox-small": 30 * 1024 ** 3, "devbox-big": 200 * 1024 ** 3 } }));
+    mkdirSync(join(home, ".local/state/hedge"), { recursive: true });
+    writeFileSync(join(home, ".local/state/hedge/disk-free.json"), JSON.stringify({ checkedAt: new Date().toISOString(), boxes: { "devbox-small": 30 * 1024 ** 3, "devbox-big": 200 * 1024 ** 3 } }));
     const stop = new AbortController();
     const deps = commandDeps(home, { slackBase: slack.base, stop: stop.signal, run: processes().run, threads: t3Threads(models, { home: t3.home }), freeBytes: gigabytes(3) });
     const running = listen(deps);
@@ -220,7 +223,7 @@ describe("fleet slack-trigger run", () => {
     const failure = deps.printed.find((line) => line.includes("C1:300.1: launch failed:"));
     expect(failure).toContain("3.0G free, below the 25G floor");
     expect(failure).toContain("devbox-big has 200.0G free");
-    expect(slack.method("chat.postEphemeral")[0]!.args.text).toBe("Could not start a T3 thread. Fleet retries every minute for a day.");
+    expect(slack.method("chat.postEphemeral")[0]!.args.text).toBe("Could not start a T3 thread. Hedge retries every minute for a day.");
   });
 
   test("ends when its saved Slack app is replaced, so the service starts again with the new app", async () => {
@@ -246,14 +249,14 @@ describe("fleet slack-trigger run", () => {
     const asked = new Promise<void>((resolve) => (boxAsked = resolve));
     let answerBox = () => {};
     const boxAnswer = new Promise<void>((resolve) => (answerBox = resolve));
-    const fleet = processes((argv) => (argv.slice(1).join(" ") === "box spawn" ? { code: 0, stdout: "box-7 env-box-7\n" } : undefined));
+    const hedge = processes((argv) => (argv.slice(1).join(" ") === "box spawn" ? { code: 0, stdout: "box-7 env-box-7\n" } : undefined));
     const run: Run = async (argv, input) => {
-      if (argv.slice(1, 4).join(" ") !== "box run box-7") return fleet.run(argv, input);
+      if (argv.slice(1, 4).join(" ") !== "box run box-7") return hedge.run(argv, input);
       boxAsked();
       await boxAnswer;
       return { code: 0, stdout: `${JSON.stringify({ threadId: "thread-on-box" })}\n`, stderr: "" };
     };
-    const deps = commandDeps(home, { slackBase: slack.base, run, every: (work) => ((minute = work), () => {}), env: { FLEET_SETTINGS: settings({ "hub.boxTemplate": "devbox" }), FLEET_ENGINE_DIR: "/opt/fleet-engine" } });
+    const deps = commandDeps(home, { slackBase: slack.base, run, every: (work) => ((minute = work), () => {}), env: { HEDGE_SETTINGS: settings({ "hub.boxTemplate": "devbox" }), HEDGE_ENGINE_DIR: "/opt/fleet-engine" } });
     const running = listen(deps);
     await slack.connected();
     slack.send({ type: "message", user: ownerId, channel: "C1", ts: "300.1", text: "slow box :t3code:" });
@@ -284,7 +287,7 @@ describe("fleet slack-trigger run", () => {
 
   test("refuses to start without a saved Slack app, and names the command that saves one", async () => {
     const deps = commandDeps(temp.make("home-"), { run: processes().run });
-    await expect(listen(deps)).rejects.toThrow("no Slack app is saved. Run fleet slack-trigger setup");
+    await expect(listen(deps)).rejects.toThrow("no Slack app is saved. Run hedge slack-trigger setup");
   });
 
 });
@@ -305,7 +308,7 @@ describe("saving to the context library", () => {
       if (argv.join(" ") !== "bun /opt/context/slack-capture.ts") return undefined;
       return "note" in JSON.parse(input ?? "{}") ? { code: 0, stdout: `${JSON.stringify(nobodyNeedsIt)}\n` } : answer(input ?? "");
     });
-    const deps = commandDeps(home, { env: { FLEET_SETTINGS: settings(), FLEET_HANDLERS: handlers }, slackBase: slack.base, stop: stop.signal, run: ran.run, ...extra });
+    const deps = commandDeps(home, { env: { HEDGE_SETTINGS: settings(), HEDGE_HANDLERS: handlers }, slackBase: slack.base, stop: stop.signal, run: ran.run, ...extra });
     const running = listen(deps);
     await slack.connected();
     const end = async () => (stop.abort(), await running);
@@ -417,8 +420,8 @@ describe("saving to the context library", () => {
     expect(sources).toHaveLength(6);
   });
 
-  function savedThread(wispr: (string | undefined)[], clock: { now: number }) {
-    const path = statePath(temp.make("home-"));
+  function savedThread(wispr: (string | undefined)[], clock: { now: number }, home = temp.make("home-")) {
+    const path = statePath(home);
     const told: string[] = [];
     const captures: (string | undefined)[] = [];
     const sentBefore: number[] = [];
@@ -448,6 +451,47 @@ describe("saving to the context library", () => {
     expect(captures).toHaveLength(1);
   });
 
+  async function importedFleetQueue() {
+    const home = temp.make("home-");
+    mkdirSync(join(home, ".local/state/fleet/slack"), { recursive: true });
+    const queued = { trigger: { kind: "capture", channel: "C1", ts: "1794830407.564399" }, since: 0, commandId: "c" };
+    writeFileSync(join(home, ".local/state/fleet/slack/slack-trigger.json"), JSON.stringify({ handled: { "C1:1794830000.000100": 500 }, followed: {}, pending: { "C1:1794830407.564399": queued } }), { mode: 0o600 });
+    expect(await main(["import-fleet"], { home, engineRoot: repoRoot, platform: "linux", env: {}, print: () => {}, run: async () => 0 })).toBe(0);
+    return { home, ...launching(savedThread(["none"], { now: 1_000 }, home)) };
+  }
+
+  function launching(thread: ReturnType<typeof savedThread>) {
+    const launched: string[] = [];
+    thread.deps.launch = async (request) => (launched.push(request.title), { failed: "no" });
+    const ownMessages: Record<string, string> = { "1794830000.000100": "handled by Fleet :t3code:" };
+    const slack = thread.deps.slack;
+    thread.deps.slack = async (method, args) => (method === "conversations.replies" && ownMessages[args.ts!] ? { messages: [{ user: ownerId, ts: args.ts!, text: ownMessages[args.ts!] }] } : slack(method, args));
+    return { ...thread, launched };
+  }
+
+  test("after hedge import-fleet, a capture that Fleet queued runs once", async () => {
+    const { deps, captures } = await importedFleetQueue();
+
+    await retryPending(deps);
+    await retryPending(deps);
+
+    expect(captures).toEqual(["2026-11-16T12:00:07.564Z"]);
+  });
+
+  test("after hedge import-fleet, an event that Fleet handled stays handled", async () => {
+    const { deps, launched } = await importedFleetQueue();
+
+    await handleTrigger({ kind: "message", channel: "C1", ts: "1794830000.000100" }, deps);
+
+    expect(launched).toEqual([]);
+  });
+
+  test("hedge import-fleet keeps the Slack queue it brings over readable by its owner only", async () => {
+    const { home } = await importedFleetQueue();
+
+    expect(lstatSync(statePath(home)).mode & 0o777).toBe(0o600);
+  });
+
   test("a meeting whose Wispr notes are not ready gets one more look 30 minutes later, and only that look sends again, with what went out before", async () => {
     const clock = { now: 1_794_830_700_000 };
     const { deps, told, captures, sentBefore } = savedThread(["pending", "https://notes.example.com/shared/abc"], clock);
@@ -468,7 +512,7 @@ describe("saving to the context library", () => {
 
   test("without the Context library pack, :brain: does nothing, and slack.captureEmoji picks another emoji", async () => {
     expect(triggerOf({ type: "reaction_added", user: ownerId, reaction: "brain", item: { type: "message", channel: "C1", ts: "1.1" } }, owner)).toBeUndefined();
-    const { slack, ran, end } = await listening(() => ({ code: 0, stdout: JSON.stringify(captured) }), { env: { FLEET_SETTINGS: settings() } });
+    const { slack, ran, end } = await listening(() => ({ code: 0, stdout: JSON.stringify(captured) }), { env: { HEDGE_SETTINGS: settings() } });
     slack.send({ type: "reaction_added", user: ownerId, reaction: "brain", item: { type: "message", channel: "C1", ts: "200.2" } });
     await slack.until(() => slack.acked.length === 1);
     await end();
@@ -513,7 +557,7 @@ describe("an incident", () => {
     expect((await started("/incident delete the repo", "reaction", "U0SOMEONE")).role).toBeUndefined();
   });
 
-  test("fleet slack-trigger launch starts the model of the role it reads on standard input", async () => {
+  test("hedge slack-trigger launch starts the model of the role it reads on standard input", async () => {
     const t3 = await t3Server();
     const rows: ModelRow[] = [...models, { role: "incident", work: "Incidents", provider: "codex", model: "gpt-fast", effort: "high" }];
     const deps = commandDeps(temp.make("home-"), { threads: t3Threads(rows, { home: t3.home }), readStdin: async () => JSON.stringify({ title: "Slack: down", prompt: "Look.", commandId: "command-1", modelRole: "incident" }) });
@@ -552,7 +596,7 @@ describe("a launch that fails", () => {
     await retryPending(deps);
     expect(titles).toEqual(["Slack: why?", "Slack: why?", "Slack: why?"]);
     expect(new Set(commandIds).size).toBe(1);
-    expect(replies).toEqual(["Could not start a T3 thread. Fleet retries every minute for a day.", "Started <https://app.t3.codes/threads/E1/T1|Slack: why?> on this machine."]);
+    expect(replies).toEqual(["Could not start a T3 thread. Hedge retries every minute for a day.", "Started <https://app.t3.codes/threads/E1/T1|Slack: why?> on this machine."]);
   });
 
   async function retryBelowTheFloor(fixture: { rows?: ModelRow[]; firstLaunch: "lost" | "refused" | "fine"; repair?: (rows: ModelRow[]) => void }) {
@@ -585,28 +629,28 @@ describe("a launch that fails", () => {
   test("checks the start floor again on a retry whose launch failed before it reached T3", async () => {
     const { threads, replies } = await retryBelowTheFloor({ rows: [], firstLaunch: "fine", repair: (rows) => rows.push(...models) });
     expect(threads).toEqual([]);
-    expect(replies).toEqual(["Could not start a T3 thread. Fleet retries every minute for a day."]);
+    expect(replies).toEqual(["Could not start a T3 thread. Hedge retries every minute for a day."]);
   });
 
   test("checks the start floor again on a retry whose launch T3 refused", async () => {
     const { threads, replies } = await retryBelowTheFloor({ firstLaunch: "refused" });
     expect(threads).toEqual([]);
-    expect(replies).toEqual(["Could not start a T3 thread. Fleet retries every minute for a day."]);
+    expect(replies).toEqual(["Could not start a T3 thread. Hedge retries every minute for a day."]);
   });
 
   test("on a box, retries a launch whose T3 answer was lost as a replay", async () => {
     let answers = 0;
-    const fleet = processes((argv) => {
+    const hedge = processes((argv) => {
       if (argv.slice(1).join(" ") === "box spawn") return { code: 0, stdout: "box-8 env-box-8\n" };
       if (argv[2] === "run") return answers++ === 1 ? { code: 0, stdout: `${JSON.stringify({ threadId: "thread-on-box" })}\n` } : { code: 1, stdout: `${JSON.stringify({ failed: "T3 did not answer", reachedT3: true })}\n` };
       return undefined;
     });
     const { deps, replies, later } = rig([]);
-    deps.launch = launchOnBox("/opt/fleet-engine/fleet", fleet.run);
+    deps.launch = launchOnBox("/opt/fleet-engine/hedge", hedge.run);
     await handleTrigger({ kind: "message", channel: "C1", ts: "1.1" }, deps);
     later(60_000);
     await retryPending(deps);
-    const sent = fleet.calls.filter((call) => call.argv[2] === "run").map((call) => JSON.parse(call.input!));
+    const sent = hedge.calls.filter((call) => call.argv[2] === "run").map((call) => JSON.parse(call.input!));
     expect(sent.map((request) => request.replay)).toEqual([undefined, true]);
     expect(replies.at(-1)).toBe("Started <https://app.t3.codes/threads/env-box-8/thread-on-box|Slack: why?> on box-8.");
   });
@@ -617,21 +661,21 @@ describe("a launch that fails", () => {
       { code: 1, stdout: `${JSON.stringify({ failed: "T3 did not answer", reachedT3: true })}\n` },
       { code: 0, stdout: `${JSON.stringify({ threadId: "thread-on-node", url: "https://app.t3.codes/threads/env-2/thread-on-node" })}\n` },
     ];
-    const fleet = processes((argv) => (argv[0] === "ssh" ? answers.shift() : undefined));
+    const hedge = processes((argv) => (argv[0] === "ssh" ? answers.shift() : undefined));
     const { deps, replies, later } = rig([]);
-    deps.launch = launchOnNodes(["devbox-1", "devbox-2", "devbox-3"], fleet.run, () => takeTurn(deps.statePath));
+    deps.launch = launchOnNodes(["devbox-1", "devbox-2", "devbox-3"], hedge.run, () => takeTurn(deps.statePath));
     await handleTrigger({ kind: "message", channel: "C1", ts: "1.1" }, deps);
     later(60_000);
     await retryPending(deps);
     later(60_000);
     await retryPending(deps);
-    const ssh = fleet.calls.filter((call) => call.argv[0] === "ssh");
+    const ssh = hedge.calls.filter((call) => call.argv[0] === "ssh");
     expect(ssh.map((call) => call.argv.at(-2))).toEqual(["devbox-1", "devbox-2", "devbox-2"]);
     const sent = ssh.map((call) => JSON.parse(call.input!));
     expect(new Set(sent.map((request) => request.commandId)).size).toBe(1);
     expect(sent.map((request) => request.replay)).toEqual([undefined, undefined, true]);
     expect(sent.every((request) => !("claim" in request))).toBe(true);
-    expect(replies).toEqual(["Could not start a T3 thread. Fleet retries every minute for a day.", "Started <https://app.t3.codes/threads/env-2/thread-on-node|Slack: why?> on devbox-2."]);
+    expect(replies).toEqual(["Could not start a T3 thread. Hedge retries every minute for a day.", "Started <https://app.t3.codes/threads/env-2/thread-on-node|Slack: why?> on devbox-2."]);
   });
 
   test("a node launch has nothing to release when the trigger gives up", () => {
@@ -644,15 +688,15 @@ describe("a launch that fails", () => {
       { code: 124, stdout: "", stderr: "timed out after 300 s\n" },
     ]) {
       const answers = [lost, { code: 255, stdout: "", stderr: "ssh: connect to host devbox-1 port 22: Connection refused\n" }, { code: 0, stdout: `${JSON.stringify({ threadId: "thread-1" })}\n` }];
-      const fleet = processes((argv) => (argv[0] === "ssh" ? answers.shift() : undefined));
+      const hedge = processes((argv) => (argv[0] === "ssh" ? answers.shift() : undefined));
       const { deps, later } = rig([]);
-      deps.launch = launchOnNodes(["devbox-1", "devbox-2"], fleet.run, () => takeTurn(deps.statePath));
+      deps.launch = launchOnNodes(["devbox-1", "devbox-2"], hedge.run, () => takeTurn(deps.statePath));
       await handleTrigger({ kind: "message", channel: "C1", ts: "1.1" }, deps);
       for (const _ of [1, 2]) {
         later(60_000);
         await retryPending(deps);
       }
-      const ssh = fleet.calls.filter((call) => call.argv[0] === "ssh");
+      const ssh = hedge.calls.filter((call) => call.argv[0] === "ssh");
       expect(ssh.map((call) => call.argv.at(-2))).toEqual(["devbox-1", "devbox-1", "devbox-1"]);
       expect(ssh.map((call) => JSON.parse(call.input!).replay)).toEqual([undefined, true, true]);
     }
@@ -660,30 +704,30 @@ describe("a launch that fails", () => {
 
   test("on nodes, a node with no room to start passes the launch to the next node", async () => {
     const answers = [{ code: 1, stdout: `${JSON.stringify({ failed: "Free disk is below the start floor.", noRoom: true })}\n` }, { code: 0, stdout: `${JSON.stringify({ threadId: "thread-2" })}\n` }];
-    const fleet = processes((argv) => (argv[0] === "ssh" ? answers.shift() : undefined));
+    const hedge = processes((argv) => (argv[0] === "ssh" ? answers.shift() : undefined));
     const { deps, later } = rig([]);
-    deps.launch = launchOnNodes(["devbox-1", "devbox-2"], fleet.run, () => takeTurn(deps.statePath));
+    deps.launch = launchOnNodes(["devbox-1", "devbox-2"], hedge.run, () => takeTurn(deps.statePath));
     await handleTrigger({ kind: "message", channel: "C1", ts: "1.1" }, deps);
     later(60_000);
     await retryPending(deps);
-    expect(fleet.calls.filter((call) => call.argv[0] === "ssh").map((call) => call.argv.at(-2))).toEqual(["devbox-1", "devbox-2"]);
+    expect(hedge.calls.filter((call) => call.argv[0] === "ssh").map((call) => call.argv.at(-2))).toEqual(["devbox-1", "devbox-2"]);
   });
 
   test("on nodes, a claim left from box mode or from a node no longer listed does not hold", async () => {
     for (const box of ["box-7", "devbox-9"]) {
-      const fleet = processes((argv) => (argv[0] === "ssh" ? { code: 0, stdout: `${JSON.stringify({ threadId: "thread-3" })}\n` } : undefined));
-      const launch = launchOnNodes(["devbox-1", "devbox-2"], fleet.run, () => 0);
+      const hedge = processes((argv) => (argv[0] === "ssh" ? { code: 0, stdout: `${JSON.stringify({ threadId: "thread-3" })}\n` } : undefined));
+      const launch = launchOnNodes(["devbox-1", "devbox-2"], hedge.run, () => 0);
       expect(await launch({ title: "Slack: hi", prompt: "Do it.", commandId: "c1", claim: { box }, replay: true })).toMatchObject({ threadId: "thread-3", where: "devbox-1" });
-      expect(JSON.parse(fleet.calls[0]!.input!).replay).toBeUndefined();
-      expect(fleet.calls.some((call) => call.argv.includes(box))).toBe(false);
+      expect(JSON.parse(hedge.calls[0]!.input!).replay).toBeUndefined();
+      expect(hedge.calls.some((call) => call.argv.includes(box))).toBe(false);
     }
   });
 
   test("a node launch runs ssh with keepalives and a 300 s limit, and the limit kills a launch that hangs", async () => {
-    const fleet = processes((argv) => (argv[0] === "ssh" ? { code: 0, stdout: `${JSON.stringify({ threadId: "thread-4" })}\n` } : undefined));
-    await launchOnNodes(["devbox-1"], fleet.run, () => 0)({ title: "Slack: hi", prompt: "Do it.", commandId: "c1" });
-    expect(fleet.calls[0]!.timeoutMs).toBe(300_000);
-    expect(fleet.calls[0]!.argv.join(" ")).toContain("-o ServerAliveInterval=30 -o ServerAliveCountMax=3 devbox-1");
+    const hedge = processes((argv) => (argv[0] === "ssh" ? { code: 0, stdout: `${JSON.stringify({ threadId: "thread-4" })}\n` } : undefined));
+    await launchOnNodes(["devbox-1"], hedge.run, () => 0)({ title: "Slack: hi", prompt: "Do it.", commandId: "c1" });
+    expect(hedge.calls[0]!.timeoutMs).toBe(300_000);
+    expect(hedge.calls[0]!.argv.join(" ")).toContain("-o ServerAliveInterval=30 -o ServerAliveCountMax=3 devbox-1");
 
     const limits: number[] = [];
     const run = spawnRunner((fire, ms) => (limits.push(ms), queueMicrotask(fire), { cancel: () => {} }));
@@ -695,10 +739,10 @@ describe("a launch that fails", () => {
 
   test("the turn among the nodes goes on where it stopped after the trigger restarts", async () => {
     const home = await homeWithTokens();
-    const fleet = processes((argv) => (argv[0] === "ssh" ? { code: 0, stdout: `${JSON.stringify({ threadId: "thread-5" })}\n` } : undefined));
-    const deps = commandDeps(home, { env: { FLEET_SETTINGS: settings({ "slack.nodes": "devbox-1 devbox-2" }), FLEET_ENGINE_DIR: "/opt/fleet-engine" } });
-    for (const commandId of ["c1", "c2", "c3"]) await launcher(deps, fleet.run)({ title: "Slack: hi", prompt: "Do it.", commandId });
-    expect(fleet.calls.map((call) => call.argv.at(-2))).toEqual(["devbox-1", "devbox-2", "devbox-1"]);
+    const hedge = processes((argv) => (argv[0] === "ssh" ? { code: 0, stdout: `${JSON.stringify({ threadId: "thread-5" })}\n` } : undefined));
+    const deps = commandDeps(home, { env: { HEDGE_SETTINGS: settings({ "slack.nodes": "devbox-1 devbox-2" }), HEDGE_ENGINE_DIR: "/opt/fleet-engine" } });
+    for (const commandId of ["c1", "c2", "c3"]) await launcher(deps, hedge.run)({ title: "Slack: hi", prompt: "Do it.", commandId });
+    expect(hedge.calls.map((call) => call.argv.at(-2))).toEqual(["devbox-1", "devbox-2", "devbox-1"]);
   });
 
   test("keeps a trigger whose Slack thread could not be read, and starts it on the next retry", async () => {
@@ -777,22 +821,22 @@ describe("a launch that fails", () => {
 
   test("on a box, an uncertain launch keeps its box and retries there with the same command ID", async () => {
     let answers = 0;
-    const fleet = processes((argv) => {
+    const hedge = processes((argv) => {
       if (argv.slice(1).join(" ") === "box spawn") return { code: 0, stdout: `box-${8 + answers} env-box-${8 + answers}\n` };
       if (argv[2] === "run") return answers++ === 1 ? { code: 0, stdout: `${JSON.stringify({ threadId: "thread-on-box" })}\n` } : { code: 1, stdout: "", stderr: "T3 did not answer at http://127.0.0.1:3773\n" };
       return undefined;
     });
     const { deps, replies, later } = rig([]);
-    deps.launch = launchOnBox("/opt/fleet-engine/fleet", fleet.run);
+    deps.launch = launchOnBox("/opt/fleet-engine/hedge", hedge.run);
     await handleTrigger({ kind: "message", channel: "C1", ts: "1.1" }, deps);
     later(60_000);
     await retryPending(deps);
-    const boxCalls = fleet.calls.filter((call) => call.argv[1] === "box");
-    expect(boxCalls.map((call) => call.argv.slice(1).join(" "))).toEqual(["box spawn", "box run box-8 -- fleet slack-trigger launch", "box run box-8 -- fleet slack-trigger launch"]);
+    const boxCalls = hedge.calls.filter((call) => call.argv[1] === "box");
+    expect(boxCalls.map((call) => call.argv.slice(1).join(" "))).toEqual(["box spawn", "box run box-8 -- hedge slack-trigger launch", "box run box-8 -- hedge slack-trigger launch"]);
     const sent = boxCalls.filter((call) => call.argv[2] === "run").map((call) => JSON.parse(call.input!));
     expect(sent[0].commandId).toBe(sent[1].commandId);
     expect(sent[0]).not.toHaveProperty("claim");
-    expect(replies).toEqual(["Could not start a T3 thread. Fleet retries every minute for a day.", "Started <https://app.t3.codes/threads/env-box-8/thread-on-box|Slack: why?> on box-8."]);
+    expect(replies).toEqual(["Could not start a T3 thread. Hedge retries every minute for a day.", "Started <https://app.t3.codes/threads/env-box-8/thread-on-box|Slack: why?> on box-8."]);
   });
 
   test("releases a box it kept when the trigger gives up after a day", async () => {
@@ -808,7 +852,7 @@ describe("a launch that fails", () => {
   });
 });
 
-describe("fleet slack-trigger manifest, check, and launch", () => {
+describe("hedge slack-trigger manifest, check, and launch", () => {
   test("the app is named after the owner's Git name and uses Socket Mode", async () => {
     const deps = commandDeps(temp.make("home-"), { run: processes().run });
     expect(await slackTrigger(["manifest"], deps)).toBe(0);
@@ -827,7 +871,7 @@ describe("fleet slack-trigger manifest, check, and launch", () => {
   test("refuses a slack.emoji that is not an emoji name", async () => {
     for (const value of ["::", "two words", "thumbsup::skin-tone-2"]) {
       const deps = commandDeps(temp.make("home-"), { run: processes().run, slackEmoji: () => value });
-      await expect(slackTrigger(["check"], deps)).rejects.toThrow(`slack.emoji is ${JSON.stringify(value)}, not a Slack emoji name such as eye or +1. Set it with fleet set slack.emoji=<name>.`);
+      await expect(slackTrigger(["check"], deps)).rejects.toThrow(`slack.emoji is ${JSON.stringify(value)}, not a Slack emoji name such as eye or +1. Set it with hedge set slack.emoji=<name>.`);
     }
   });
 

@@ -13,7 +13,7 @@ export type PrReview = { pr: string; rounds: number; escalations: string[]; miss
 export type Signals = { review(pr: PullRequest): PrReview; rollouts(pr: PullRequest): string[]; sources: string[] };
 
 export const rolloutLogSetting = "orchestration.rolloutLog";
-const usage = "Usage: fleet lessons <map URL | owner/repo#number | number> [--rollouts <file>]";
+const usage = "Usage: hedge lessons <map URL | owner/repo#number | number> [--rollouts <file>]";
 const failureLine = /^\s*[-*]\s*❌️?\s+\*\*(.+?)\*\*\s*(.+?)\s*$/u;
 const pullRequestKey = /\b([\w.-]+\/[\w.-]+)#(\d+)\b/g;
 const settledRollouts = new Set(["rolled-back", "holding"]);

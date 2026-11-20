@@ -8,7 +8,7 @@ import { forget, giveBack, leave, poolFile, pooled, record, recorded, settle, st
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
 
-const fileIn = () => poolFile(temp.make("fleet-pool-"));
+const fileIn = () => poolFile(temp.make("hedge-pool-"));
 const change = <T>(file: string, step: (pool: Pool) => T) => withPool(file, step);
 
 test("the pool never hands one box to two spawns, and takes boxes back only while it has room", async () => {

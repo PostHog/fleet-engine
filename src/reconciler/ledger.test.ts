@@ -6,7 +6,7 @@ import { changeLedger, readLedger } from "./ledger.ts";
 const temp = tempDirs();
 const step = (id: string) => ({ pack: "team", id, check: ["box-is-on"], undo: ["box-off"] });
 
-test("keeps every step that two Fleet processes record at once", async () => {
+test("keeps every step that two Hedge processes record at once", async () => {
   const home = temp.make("home-");
   const writer = (name: string) =>
     Bun.spawn(["bun", "-e", `const { changeLedger } = await import(${JSON.stringify(join(import.meta.dir, "ledger.ts"))}); await Promise.all(Array.from({ length: 20 }, (_, index) => changeLedger(${JSON.stringify(home)}, "steps", "team/${name}-" + index, { pack: "team", id: "${name}-" + index, check: ["box-is-on"], undo: ["box-off"] })));`], { stderr: "inherit" }).exited;

@@ -6,9 +6,9 @@ export default {
   sdk: 1,
   name: "issued",
   summary: "A served service that issues a key for each node.",
-  register(fleet) {
-    const extra = fleet.workflow({ id: "issued-extra", name: "Issued extra", sentence: "The hub serves one more service.", needs: ["devbox"], default: false });
-    const installed = fleet.check({
+  register(hedge) {
+    const extra = hedge.workflow({ id: "issued-extra", name: "Issued extra", sentence: "The hub serves one more service.", needs: ["devbox"], default: false });
+    const installed = hedge.check({
       on: "hub",
       id: "issued-installed",
       say: "The issued service is not installed.",
@@ -20,7 +20,7 @@ export default {
         },
       },
     });
-    const api = fleet.service({
+    const api = hedge.service({
       on: "hub",
       id: "issued-api",
       after: installed,
@@ -30,7 +30,7 @@ export default {
         credential: async (ctx, node) => {
           if (await ctx.secrets.read("refuse")) throw new Error("the service said no");
           if (await ctx.secrets.read("leak")) {
-            ctx.print(`fleet: ${leakedKey}`);
+            ctx.print(`hedge: ${leakedKey}`);
             throw new Error(`the issue of ${leakedKey} failed`);
           }
           ctx.print(`Issuing a key for ${node}`);
@@ -40,19 +40,19 @@ export default {
         },
       },
     });
-    const spare = fleet.service({ on: "hub", id: "issued-spare", when: extra, serve: { port: 4601, health: "/health", credential: async () => "spare" } });
-    fleet.command("issued-admin", {
+    const spare = hedge.service({ on: "hub", id: "issued-spare", when: extra, serve: { port: 4601, health: "/health", credential: async () => "spare" } });
+    hedge.command("issued-admin", {
       on: "hub",
       summary: "Show what the hub holds",
       run: async (args, ctx) => (ctx.print(`${(await ctx.secrets.read("installed")) ?? "not installed"} ${JSON.stringify(args)}`), args.includes("fail") ? 3 : 0),
     });
-    fleet.command("issued-extra-admin", {
+    hedge.command("issued-extra-admin", {
       on: "hub",
       when: extra,
       summary: "Show the extra service on the hub",
       run: async (args, ctx) => (ctx.print(`extra ${JSON.stringify(args)}`), 0),
     });
-    fleet.command("issued", {
+    hedge.command("issued", {
       summary: "Use the issued service",
       run: async ([mode], ctx) => {
         if (mode === "use" || mode === "spare") {

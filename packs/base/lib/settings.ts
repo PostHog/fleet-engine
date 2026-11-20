@@ -24,6 +24,6 @@ function typed(key: string, type: "number" | "string" | "boolean", env: Env) {
 }
 
 export function resolvedSettings(env: Env = Bun.env): Record<string, unknown> {
-  if (!env.FLEET_SETTINGS) throw new Error("run this command as fleet <command>, so it gets your settings");
-  return JSON.parse(env.FLEET_SETTINGS);
+  if (!env.HEDGE_SETTINGS) throw new Error("run this command as hedge <command>, so it gets your settings");
+  return JSON.parse(env.HEDGE_SETTINGS);
 }

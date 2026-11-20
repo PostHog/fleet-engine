@@ -14,15 +14,15 @@ export type DecisionContext = {
 };
 
 const usage = `Usage:
-  fleet decision record --mark 👤|👍 --class <class> --pr <owner/repo#n>... [--kind <kind>...] [--thread <id>] [--message <id> | --words '<date> "<the user's words>"'] [--condition <text>] [--keep-owed]
-  fleet decision record --mark 🤖 --class <class> --pr <owner/repo#n>... --question <q> --answer <a> --rejected <option> --reason <why> [--kind <kind>...] [--condition <text>] [--thread <id>] [--link <side-fix thread>]
-  fleet decision list [--pr <owner/repo#n>] [--class <class>] [--live]
-  fleet decision void <id> --reason <why its condition no longer holds>
-  fleet decision reverse <id> --words '<date> "<the user's words>"' --thread <id> [--message <id>]
-  fleet decision lift --class <class> --words '<date> "<the user's answer>"' --thread <id> [--message <id>]
-  fleet decision report --pr <owner/repo#n>... [--thread <id>] [--lane <key>]
+  hedge decision record --mark 👤|👍 --class <class> --pr <owner/repo#n>... [--kind <kind>...] [--thread <id>] [--message <id> | --words '<date> "<the user's words>"'] [--condition <text>] [--keep-owed]
+  hedge decision record --mark 🤖 --class <class> --pr <owner/repo#n>... --question <q> --answer <a> --rejected <option> --reason <why> [--kind <kind>...] [--condition <text>] [--thread <id>] [--link <side-fix thread>]
+  hedge decision list [--pr <owner/repo#n>] [--class <class>] [--live]
+  hedge decision void <id> --reason <why its condition no longer holds>
+  hedge decision reverse <id> --words '<date> "<the user's words>"' --thread <id> [--message <id>]
+  hedge decision lift --class <class> --words '<date> "<the user's answer>"' --thread <id> [--message <id>]
+  hedge decision report --pr <owner/repo#n>... [--thread <id>] [--lane <key>]
 
-The decision ledger holds every decision about a pull request's proof and process. It lives on the Fleet hub that
+The decision ledger holds every decision about a pull request's proof and process. It lives on the Hedge hub that
 the setting hub.alias names; other machines read and append it over SSH. Without a hub, it lives on this machine.
 
 record with 👤 or 👍 records the user's answer to your question tool. Without --words it takes their latest answer
@@ -34,12 +34,12 @@ repo#n, owner/repo#n, or its URL), so one answer covers every PR its question na
 records one decision. With --class proof-gap and --kind, the decision accepts those gaps of each PR, and the user's
 choice must start with "Accept", or be "Yes" to a question that starts with "Accept the <kind> gap?"; with --keep-owed, it
 keeps them owed whatever an agent decides. A decision of the user's takes the time they answered: record a gap with
-fleet proof gap before you ask, since a judge gap counts only answers given after it was recorded. --condition names
+hedge proof gap before you ask, since a judge gap counts only answers given after it was recorded. --condition names
 what must stay true at HEAD; the judge checks it. Classes: ${askClasses.join(", ")}.
 With --class merge --kind ${gateOverride} and --condition '<full head sha>: <incident and why>', the user's 👤 answer
-lets the merge gate pass that one PR at that head without a fleet proof gate pass; a push leaves it behind. Only 👤
+lets the merge gate pass that one PR at that head without a hedge proof gate pass; a push leaves it behind. Only 👤
 records it. Each option other than --pr and --kind is taken once.
-record with 🤖 records the agent's own decision with the option it rejected. Fleet reads each PR's Tier line in its
+record with 🤖 records the agent's own decision with the option it rejected. Hedge reads each PR's Tier line in its
 merge-risk callout at HEAD: it refuses an ungraded PR, and on a critical PR anything but process (review and status
 asks, judge and post-deploy-watch gaps). It never takes a panel gap: ${panelRefusal}. The gate never counts a 🤖 ci
 acceptance over CI that ran, nor one under the user's keep-owed, and prints each 🤖 acceptance that lapsed on a kind
@@ -53,9 +53,9 @@ decision. The message must say the words on the quoted date; when two messages o
 by its id. One answer reverses one decision. The user's words must be newer than the decision, and the reversal
 takes the time they wrote them. The decision then prints as 👤 with their words, the replaced answer struck through,
 and counts no more at the gate or in list --live; decide or ask again. Once the reversal holds, reverse writes a void
-too, so an older Fleet stops counting the decision; when the hub drops that void, run the same command again. It
+too, so an older Hedge stops counting the decision; when the hub drops that void, run the same command again. It
 refuses the user's keep-owed, as void does, and a voided decision. Two reversals of 🤖 decisions in one class within
-${brakeDays} days brake the class from the later of the two: record --mark 🤖 and fleet proof review --agent in it
+${brakeDays} days brake the class from the later of the two: record --mark 🤖 and hedge proof review --agent in it
 are refused until lift records the user's answer to your question tool. The question must name the brake and the
 class, and the answer must be given after the brake. An answer that starts with "Lift" lifts it; a "Yes" lifts it only
 when the question starts with "Lift the brake on <class>", such as "Lift the brake on design decisions?". One answer
@@ -69,7 +69,7 @@ PRs whose full gate passed, judge included, and wait on the user's merge word), 
 orchestration.rolloutLog names, whose note names the narrow grant), the lane's decisions sorted 👤 👍 🤖, one proofs
 row per PR from the proof summary the gate saved at its HEAD on GitHub, with its receipt link, and the side fixes the
 lane started. The report never runs the judge. It builds each PR's proof summary again at HEAD, so CI, standing
-rules, decisions and the tier are read as they are now, and takes the judge's verdict from the summary fleet proof gate
+rules, decisions and the tier are read as they are now, and takes the judge's verdict from the summary hedge proof gate
 saved, only while the PR's head, base and base SHA on GitHub, its tier and merge-risk callout, --landed for a merged PR, and the PR's proof
 files, standing rules and ledger decisions are the same. Otherwise it says the gate has not run at HEAD with these
 proofs; a decision recorded after the gate counts as a change. A summary that does not pass now offers no merge,
@@ -88,11 +88,11 @@ function parse(args: string[], valued: string[], repeatable: string[], flagNames
     const arg = args.shift()!;
     if (flagNames.includes(arg)) { parsed.flags.add(arg); continue; }
     if (!arg.startsWith("--")) { parsed.positional.push(arg); continue; }
-    if (!valued.includes(arg) && !repeatable.includes(arg)) throw new Error(`Unknown option ${arg}. Run fleet decision --help`);
+    if (!valued.includes(arg) && !repeatable.includes(arg)) throw new Error(`Unknown option ${arg}. Run hedge decision --help`);
     const value = args.shift();
-    if (value === undefined || value.startsWith("--")) throw new Error(`${arg} needs a value. Run fleet decision --help`);
+    if (value === undefined || value.startsWith("--")) throw new Error(`${arg} needs a value. Run hedge decision --help`);
     if (repeatable.includes(arg)) parsed.lists.set(arg, [...parsed.lists.get(arg) ?? [], value]);
-    else if (parsed.options.has(arg)) throw new Error(`${arg} given twice. Pass it once. Run fleet decision --help`);
+    else if (parsed.options.has(arg)) throw new Error(`${arg} given twice. Pass it once. Run hedge decision --help`);
     else parsed.options.set(arg, value);
   }
   return parsed;
@@ -100,7 +100,7 @@ function parse(args: string[], valued: string[], repeatable: string[], flagNames
 
 function required(parsed: Parsed, option: string) {
   const value = parsed.options.get(option);
-  if (value === undefined || !value.trim()) throw new Error(`${option} is required. Run fleet decision --help`);
+  if (value === undefined || !value.trim()) throw new Error(`${option} is required. Run hedge decision --help`);
   return value;
 }
 
@@ -131,7 +131,7 @@ export type Scope = { class: AskClass; prs: PrRef[]; kinds?: string[]; condition
 const scopeOf = ({ prs, kinds, condition }: Scope): Decision["scope"] => ({ prs: prs.map(refText), ...kinds?.length ? { kinds } : {}, ...condition ? { condition } : {} });
 
 function checkScope({ class: decisionClass, prs, kinds }: Scope) {
-  if (!prs.length) throw new Error("--pr is required. Run fleet decision --help");
+  if (!prs.length) throw new Error("--pr is required. Run hedge decision --help");
   if (decisionClass === "merge" && kinds?.length) {
     if (kinds.some((kind) => kind !== gateOverride)) throw new Error(`A merge decision takes only --kind ${gateOverride}`);
     return;
@@ -244,7 +244,7 @@ export async function appendDecision(ledger: Ledger, decision: Decision) {
   if (decision.mark === "🤖" && brakeOf(events, decision.class)) {
     throw new Error(`The ${decision.class} class was braked while this decision was recorded, so it counts nowhere. An agent decides no ${decision.class} ask alone until the user lifts the brake; ask them`);
   }
-  throw new Error(`Not recorded: decision ${decision.id} is not in the decision ledger when Fleet reads it back. Run the same command again`);
+  throw new Error(`Not recorded: decision ${decision.id} is not in the decision ledger when Hedge reads it back. Run the same command again`);
 }
 
 async function appendHeard(ledger: Ledger, ...events: LedgerEvent[]) {
@@ -253,7 +253,7 @@ async function appendHeard(ledger: Ledger, ...events: LedgerEvent[]) {
   const recorded = new Set(read.map((event) => JSON.stringify(event)));
   if (events.every((event) => recorded.has(JSON.stringify(event)))) return read;
   if (unacknowledged) notRecorded(unacknowledged);
-  throw new Error("Not recorded: the event is not in the decision ledger when Fleet reads it back. Run the same command again");
+  throw new Error("Not recorded: the event is not in the decision ledger when Hedge reads it back. Run the same command again");
 }
 
 export const ledgerHolds = async (ledger: Ledger, id: string) => fold(await ledger.read()).some((recorded) => recorded.id === id);
@@ -279,7 +279,7 @@ export async function decideAlone(input: AgentDecision, context: DecisionContext
   if (!thread) throw new Error("An agent decision needs --thread with this lane's T3 thread id");
   if (input.link !== undefined && input.class !== "scope") throw new Error("--link belongs to a scope decision: the T3 thread its side fix started in");
   const brake = brakeOf(await reachHub(() => ledger.read()), input.class);
-  if (brake) throw new Error(`The ${input.class} class is braked: the user reversed decisions ${brake.ids[0]} and ${brake.ids[1]} within ${brakeDays} days. An agent decides no ${input.class} ask alone until the user lifts it with fleet decision lift; ask them`);
+  if (brake) throw new Error(`The ${input.class} class is braked: the user reversed decisions ${brake.ids[0]} and ${brake.ids[1]} within ${brakeDays} days. An agent decides no ${input.class} ask alone until the user lifts it with hedge decision lift; ask them`);
   if (agentRefusal("non-critical", input.class, input.kinds) === "panel") throw new Error(`${input.prs.map(refText).join(", ")}: ${panelRefusal}. Ask them with your question tool and record their answer with --mark 👤`);
   for (const ref of input.prs) {
     const refusal = agentRefusal(tierOf(await pullBody(ref, context).catch(() => "")), input.class, input.kinds);
@@ -314,10 +314,10 @@ async function record(parsed: Parsed, context: DecisionContext, ledger: Ledger) 
 
 async function voidDecision(parsed: Parsed, context: DecisionContext, ledger: Ledger) {
   const [id, ...rest] = parsed.positional;
-  if (!id || rest.length) throw new Error("Name one decision id. Run fleet decision --help");
+  if (!id || rest.length) throw new Error("Name one decision id. Run hedge decision --help");
   const reason = required(parsed, "--reason");
   const decision = fold(await reachHub(() => ledger.read())).find((candidate) => candidate.id === id);
-  if (!decision) throw new Error(`No decision ${id} in the ledger. Run fleet decision list`);
+  if (!decision) throw new Error(`No decision ${id} in the ledger. Run hedge decision list`);
   if (decision.voided) throw new Error(`Decision ${id} is already voided: ${decision.voided.reason}`);
   refuseKeptOwed(decision);
   const voidedAt = at(context);
@@ -355,19 +355,19 @@ export async function heardInThread(thread: string, words: string, message: stri
 async function repairVoid(decision: DecisionState, at: string, events: LedgerEvent[], context: DecisionContext, ledger: Ledger) {
   if (events.some((event) => event.type === "void" && event.id === decision.id && event.at === at)) throw new Error(`Decision ${decision.id} is already reversed, on ${at.slice(0, 10)}`);
   await appendHeard(ledger, { type: "void", id: decision.id, reason: `reversed by the user: ${decision.answer}`, at });
-  context.print(`${decisionLine(decision)}\nFleet wrote the void of the reversal of ${decision.id} for older readers: the hub had dropped it.`);
+  context.print(`${decisionLine(decision)}\nHedge wrote the void of the reversal of ${decision.id} for older readers: the hub had dropped it.`);
   return 0;
 }
 
 async function reverse(parsed: Parsed, context: DecisionContext, ledger: Ledger) {
   const [id, ...rest] = parsed.positional;
-  if (!id || rest.length) throw new Error("Name one decision id. Run fleet decision --help");
+  if (!id || rest.length) throw new Error("Name one decision id. Run hedge decision --help");
   const words = required(parsed, "--words");
   const thread = parsed.options.get("--thread");
-  if (thread === undefined) throw new Error("Pass --thread with the T3 thread where the user reversed it. Run fleet decision --help");
+  if (thread === undefined) throw new Error("Pass --thread with the T3 thread where the user reversed it. Run hedge decision --help");
   const events = await reachHub(() => ledger.read());
   const decision = fold(events).find((candidate) => candidate.id === id);
-  if (!decision) throw new Error(`No decision ${id} in the ledger. Run fleet decision list`);
+  if (!decision) throw new Error(`No decision ${id} in the ledger. Run hedge decision list`);
   if (decision.reversed) return repairVoid(decision, decision.reversed.at, events, context, ledger);
   if (decision.voided) throw new Error(`Decision ${id} is voided: ${decision.voided.reason}. It counts no more, so there is nothing to reverse`);
   refuseKeptOwed(decision);
@@ -421,7 +421,7 @@ async function lift(parsed: Parsed, context: DecisionContext, ledger: Ledger) {
   if (!liftCounted(read, event)) {
     const use = answerUse(read, `${heard.thread}/${heard.id}`);
     if (use && "decision" in use) throw new Error(`Not lifted: decision ${use.decision} used that answer first. One answer lifts one brake or records one decision; ask the user again`);
-    throw new Error("Not lifted: another lift used that answer first, or the brake changed while Fleet recorded it. One answer lifts one brake; ask the user again");
+    throw new Error("Not lifted: another lift used that answer first, or the brake changed while Hedge recorded it. One answer lifts one brake; ask the user again");
   }
   context.print(`Lifted the brake on ${decisionClass} (reversals of ${brake.ids[0]} and ${brake.ids[1]}): the agent decides its asks alone again. (the user, ${words}, thread ${thread})`);
   return 0;
@@ -429,7 +429,7 @@ async function lift(parsed: Parsed, context: DecisionContext, ledger: Ledger) {
 
 async function report(parsed: Parsed, context: DecisionContext, ledger: Ledger) {
   const prs = prsOf(parsed);
-  if (!prs.length) throw new Error("--pr is required: name each PR of the lane. Run fleet decision --help");
+  if (!prs.length) throw new Error("--pr is required: name each PR of the lane. Run hedge decision --help");
   const events = await reachHub(() => ledger.read());
   const read: Ledger = { read: async () => events, append: (...added) => ledger.append(...added) };
   const lane = parsed.options.get("--lane");
@@ -461,7 +461,7 @@ export async function decisionCommand(args: string[], context: DecisionContext):
   if (name === "reverse") return reverse(parse(args, ["--words", "--thread", "--message"], [], []), context, ledger);
   if (name === "lift") return lift(parse(args, ["--class", "--words", "--thread", "--message"], [], []), context, ledger);
   if (name === "report") return report(parse(args, ["--thread", "--lane"], ["--pr"], []), context, ledger);
-  throw new Error(`Unknown command ${name}. Run fleet decision --help`);
+  throw new Error(`Unknown command ${name}. Run hedge decision --help`);
 }
 
 const acceptsGap = (words: string) => /^(accept|yes)\b/.test(normalized(words));

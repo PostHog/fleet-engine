@@ -15,7 +15,7 @@ const plan = (workflows: Record<string, boolean>, machine = devbox) => resolveEn
 
 describe("the package age workflow", () => {
   const packageAge = join(import.meta.dir, "commands/package-age.ts");
-  const fleet = (home: string, ...args: string[]) => {
+  const hedge = (home: string, ...args: string[]) => {
     const result = Bun.spawnSync(["bun", packageAge, ...args], { env: { PATH: process.env.PATH!, HOME: home }, stdout: "pipe", stderr: "pipe" });
     return { code: result.exitCode, stdout: result.stdout.toString().trim() };
   };
@@ -24,28 +24,28 @@ describe("the package age workflow", () => {
     writeFileSync(path, text);
   };
 
-  test("runs fleet package-age as a step on every machine, with its own check", () => {
+  test("runs hedge package-age as a step on every machine, with its own check", () => {
     expect(plan({}).steps.map((step) => step.id)).not.toContain("package-age");
     for (const machine of [devbox, mac]) {
-      expect(plan({ "package-age": true }, machine).steps.find((step) => step.id === "package-age")).toMatchObject({ run: ["fleet", "package-age"], check: ["fleet", "package-age", "--check"] });
+      expect(plan({ "package-age": true }, machine).steps.find((step) => step.id === "package-age")).toMatchObject({ run: ["hedge", "package-age"], check: ["hedge", "package-age", "--check"] });
     }
   });
 
   test("gives pnpm and Bun a three-day minimum release age on a fresh home, once", () => {
     const home = temp.make("home-");
-    expect(fleet(home, "--check").code).toBe(1);
-    expect(fleet(home)).toMatchObject({ code: 0, stdout: expect.stringContaining("3-day minimum release age") });
+    expect(hedge(home, "--check").code).toBe(1);
+    expect(hedge(home)).toMatchObject({ code: 0, stdout: expect.stringContaining("3-day minimum release age") });
     expect(readFileSync(join(home, ".config/pnpm/config.yaml"), "utf8")).toBe("minimumReleaseAge: 4320\n");
     expect(readFileSync(join(home, ".bunfig.toml"), "utf8")).toBe("[install]\nminimumReleaseAge = 259200\n");
-    expect(fleet(home, "--check").code).toBe(0);
-    expect(fleet(home)).toEqual({ code: 0, stdout: "" });
+    expect(hedge(home, "--check").code).toBe(0);
+    expect(hedge(home)).toEqual({ code: 0, stdout: "" });
   });
 
   test("keeps every key the person already set and adds only the missing age", () => {
     const home = temp.make("home-");
     write(join(home, ".config/pnpm/config.yaml"), "store-dir: /data/pnpm");
     write(join(home, ".bunfig.toml"), '[install]\nregistry = "https://registry.example"\n\n[test]\npreload = ["./setup.ts"]\n');
-    expect(fleet(home).code).toBe(0);
+    expect(hedge(home).code).toBe(0);
     expect(readFileSync(join(home, ".config/pnpm/config.yaml"), "utf8")).toBe("store-dir: /data/pnpm\nminimumReleaseAge: 4320\n");
     expect(readFileSync(join(home, ".bunfig.toml"), "utf8")).toBe('[install]\nminimumReleaseAge = 259200\nregistry = "https://registry.example"\n\n[test]\npreload = ["./setup.ts"]\n');
   });
@@ -54,8 +54,8 @@ describe("the package age workflow", () => {
     const home = temp.make("home-");
     write(join(home, ".config/pnpm/config.yaml"), "minimumReleaseAge: 10080\n");
     write(join(home, ".bunfig.toml"), "[install]\nminimumReleaseAge = 0\n");
-    expect(fleet(home, "--check").code).toBe(0);
-    expect(fleet(home)).toEqual({ code: 0, stdout: "" });
+    expect(hedge(home, "--check").code).toBe(0);
+    expect(hedge(home)).toEqual({ code: 0, stdout: "" });
     expect(readFileSync(join(home, ".config/pnpm/config.yaml"), "utf8")).toBe("minimumReleaseAge: 10080\n");
     expect(readFileSync(join(home, ".bunfig.toml"), "utf8")).toBe("[install]\nminimumReleaseAge = 0\n");
   });
@@ -72,7 +72,7 @@ describe("the package age workflow", () => {
       const home = temp.make("home-");
       write(join(home, ".config/pnpm/config.yaml"), "minimumReleaseAge: 4320\n");
       write(join(home, ".bunfig.toml"), text);
-      const result = fleet(home);
+      const result = hedge(home);
       const after = readFileSync(join(home, ".bunfig.toml"), "utf8");
       if (edited) {
         expect([text, result.code, Bun.TOML.parse(after)]).toEqual([text, 0, expect.objectContaining({ install: expect.objectContaining({ minimumReleaseAge: 259200, registry: "https://registry.example" }) })]);
@@ -87,7 +87,7 @@ describe("the package age workflow", () => {
   test("keeps Windows line endings when it adds the Bun setting", () => {
     const home = temp.make("home-");
     write(join(home, ".bunfig.toml"), '[install]\r\nregistry = "https://registry.example"\r\n');
-    fleet(home);
+    hedge(home);
     expect(readFileSync(join(home, ".bunfig.toml"), "utf8")).toBe('[install]\r\nminimumReleaseAge = 259200\r\nregistry = "https://registry.example"\r\n');
   });
 
@@ -101,8 +101,8 @@ describe("the package age workflow", () => {
       const home = temp.make("home-");
       write(join(home, ".bunfig.toml"), "[install]\nminimumReleaseAge = 259200\n");
       write(join(home, ".config/pnpm/config.yaml"), text);
-      expect([text, fleet(home).code, readFileSync(join(home, ".config/pnpm/config.yaml"), "utf8")]).toEqual([text, code, text]);
-      expect([text, fleet(home, "--check").code]).toEqual([text, code]);
+      expect([text, hedge(home).code, readFileSync(join(home, ".config/pnpm/config.yaml"), "utf8")]).toEqual([text, code, text]);
+      expect([text, hedge(home, "--check").code]).toEqual([text, code]);
     }
   });
 
@@ -115,12 +115,12 @@ describe("the package age workflow", () => {
 
 describe("the OOM survival workflow", () => {
   test("keeps T3's agent scopes alive and asks a person to install earlyoom, on a Linux devbox only", () => {
-    expect(plan({}).files.map((file) => file.target)).not.toContain(".config/systemd/user/t3code-.scope.d/90-fleet-oom.conf");
+    expect(plan({}).files.map((file) => file.target)).not.toContain(".config/systemd/user/t3code-.scope.d/90-hedge-oom.conf");
     const on = plan({ "oom-survival": true });
-    const dropIn = on.files.find((file) => file.target === ".config/systemd/user/t3code-.scope.d/90-fleet-oom.conf");
+    const dropIn = on.files.find((file) => file.target === ".config/systemd/user/t3code-.scope.d/90-hedge-oom.conf");
     expect(dropIn && "source" in dropIn ? readFileSync(dropIn.source, "utf8") : "").toBe("[Scope]\nOOMPolicy=continue\n");
     expect(on.steps.find((step) => step.id === "oom-scope-reload")?.run).toEqual(["systemctl", "--user", "daemon-reload"]);
-    expect(on.human.find((step) => step.id === "earlyoom")).toMatchObject({ command: "sudo sh ~/.local/share/fleet/guards/earlyoom.sh", probe: ["sh", "-c", 'sh "$HOME/.local/share/fleet/guards/earlyoom.sh" --check'], interactive: true });
+    expect(on.human.find((step) => step.id === "earlyoom")).toMatchObject({ command: "sudo sh ~/.local/share/hedge/guards/earlyoom.sh", probe: ["sh", "-c", 'sh "$HOME/.local/share/hedge/guards/earlyoom.sh" --check'], interactive: true });
     const onMac = plan({ "oom-survival": true }, mac);
     expect(onMac.files.filter((file) => file.target.includes("systemd"))).toEqual([]);
     expect(onMac.human).toEqual([]);
@@ -173,7 +173,7 @@ describe("the OOM survival workflow", () => {
       writeFileSync(config, text);
     };
     const run = (...args: string[]) => {
-      const result = Bun.spawnSync(["sh", join(import.meta.dir, "system/earlyoom.sh"), ...args], { env: { PATH: `${bin}:${process.env.PATH}`, FLEET_SYSTEM_ROOT: root }, stdout: "pipe", stderr: "pipe" });
+      const result = Bun.spawnSync(["sh", join(import.meta.dir, "system/earlyoom.sh"), ...args], { env: { PATH: `${bin}:${process.env.PATH}`, HEDGE_SYSTEM_ROOT: root }, stdout: "pipe", stderr: "pipe" });
       return { code: result.exitCode, stdout: result.stdout.toString().trim(), stderr: result.stderr.toString().trim() };
     };
     const install = () => writeFileSync(join(state, "installed"), "");
@@ -183,11 +183,11 @@ describe("the OOM survival workflow", () => {
     return { config, run, service, writeConfig, install, start, stop, flag };
   }
 
-  test("installs earlyoom, enables it, and runs it with Fleet's config instead of the package's default", () => {
+  test("installs earlyoom, enables it, and runs it with Hedge's config instead of the package's default", () => {
     const box = machine();
     expect(box.run()).toMatchObject({ code: 0, stdout: expect.stringContaining("earlyoom: on.") });
     const config = readFileSync(box.config, "utf8");
-    expect(config).toStartWith("# Managed by Fleet's Guards pack.");
+    expect(config).toStartWith("# Managed by Hedge's Guards pack.");
     expect(config).toContain("-m 10,7 -s 100,100 --prefer ^(node|");
     expect(config).toMatch(/--avoid \^\(t3\|[^)]*claude\|codex/);
     expect(box.service()).toEqual({ installed: true, enabled: true, runningConfig: config, starts: 1 });
@@ -208,7 +208,16 @@ describe("the OOM survival workflow", () => {
     expect(box.service()).toMatchObject({ enabled: true, runningConfig: 'EARLYOOM_ARGS="-m 5"\n' });
   });
 
-  test("replaces a config an older Fleet wrote, and restarts earlyoom with the new one", () => {
+  test("replaces a config an older Hedge wrote, and restarts earlyoom with the new one", () => {
+    const box = machine();
+    box.install();
+    box.writeConfig(`# Managed by Hedge's Guards pack. Delete this line to keep your own settings.\nEARLYOOM_ARGS="-m 20"\n`);
+    box.start();
+    expect(box.run().code).toBe(0);
+    expect(box.service().runningConfig).toContain("-m 10,7");
+  });
+
+  test("replaces a config that Hedge wrote before the rename, when its marker still said Fleet", () => {
     const box = machine();
     box.install();
     box.writeConfig(`# Managed by Fleet's Guards pack. Delete this line to keep your own settings.\nEARLYOOM_ARGS="-m 20"\n`);
@@ -229,7 +238,7 @@ describe("the OOM survival workflow", () => {
     }
   });
 
-  test("its check passes only while earlyoom runs with Fleet's config or one the person wrote, and changes nothing", () => {
+  test("its check passes only while earlyoom runs with Hedge's config or one the person wrote, and changes nothing", () => {
     const box = machine();
     expect(box.run("--check").code).toBe(1);
     expect(box.service()).toEqual({ installed: false, enabled: false, runningConfig: undefined, starts: 0 });
@@ -244,7 +253,7 @@ describe("the OOM survival workflow", () => {
     expect(box.service()).toEqual(before);
     box.writeConfig('EARLYOOM_ARGS="-m 5"\n');
     expect(box.run("--check").code).toBe(0);
-    box.writeConfig(`# Managed by Fleet's Guards pack. Delete this line to keep your own settings.\nEARLYOOM_ARGS="-m 20"\n`);
+    box.writeConfig(`# Managed by Hedge's Guards pack. Delete this line to keep your own settings.\nEARLYOOM_ARGS="-m 20"\n`);
     expect(box.run("--check").code).toBe(1);
     box.flag("no-conffiles");
     box.writeConfig(packageDefault);

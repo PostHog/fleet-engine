@@ -7,6 +7,7 @@ import { quote } from "../hub/ssh.ts";
 import { gitEnv } from "../testing/git.ts";
 import { profilePath } from "./profile.ts";
 import { Stopped, type Terminal } from "./terminal.ts";
+import { remoteLauncher } from "../hub/ssh.ts";
 
 export const engineRoot = join(import.meta.dir, "../..");
 
@@ -61,7 +62,7 @@ const otherCoderUserId = "c0a8e4d2-1b3f-4e5a-8d6c-7f9e0a1b2c3d";
 /** What coder whoami -o json prints when signed in, as the Coder CLI writes it. */
 const coderWhoamiJson = (url: string, userId: string) => `${JSON.stringify([{ url: `${url}/`, username: "nora", user_id: userId, organization_ids: [], roles: {} }], null, 2)}\n`;
 /** The one token coder tokens create prints, alone on its line. */
-export const coderToken = ["fleet", "test", "coder", "token"].join("-");
+export const coderToken = ["hedge", "test", "coder", "token"].join("-");
 
 const hostKeyAdded = (host: string) => `Warning: Permanently added '${host}' (ED25519) to the list of known hosts.\n`;
 
@@ -69,7 +70,7 @@ export type HereLink = { environmentId: string; label: string };
 
 export const boxHome = (home: string, host: string) => join(home, "boxes", host);
 
-export const boxMachineFile = (home: string, host: string) => JSON.parse(readFileSync(join(boxHome(home, host), ".config/fleet/machine.json"), "utf8"));
+export const boxMachineFile = (home: string, host: string) => JSON.parse(readFileSync(join(boxHome(home, host), ".config/hedge/machine.json"), "utf8"));
 
 /** The command an SSH call runs on the box, without the PATH prefix. */
 export const onBox = (command: string[]) => (command[0] === "ssh" ? command.at(-1)!.replace(/^PATH=[^;]*; /, "") : undefined);
@@ -87,9 +88,9 @@ export const onBox = (command: string[]) => (command[0] === "ssh" ? command.at(-
  * other than a coder. one; Claude there signs in when its
  * foreground sign-in runs. A command on the box that reads or writes its
  * role file runs for real in a home folder of its own under the test home.
- * The hub takes the nodes the pushed profile lists at each fleet update;
+ * The hub takes the nodes the pushed profile lists at each hedge update;
  * until then it refuses a node's credential when the node applies its
- * profile, and its fleet peers link refuses the node.
+ * profile, and its hedge peers link refuses the node.
  * T3 on each machine reports what the real CLI prints: the shared relayUrl,
  * and a tunnelHostname only when cliPrintsTunnel is set. Its server answers
  * link-state with the tunnel hostname to a session it issued and has not
@@ -100,7 +101,7 @@ export const onBox = (command: string[]) => (command[0] === "ssh" ? command.at(-
  * Each box's T3 environment id is env-<host>, except on the hosts withoutT3, where T3 never ran.
  * T3 here lists hereLinks as its linked environments, and unlink forgets one, or fails with unlinkFails. ssh never reaches the hosts named unreachable.
  */
-export function fakeMachine(home: string, polls: Partial<Record<SignInName, number>> = {}, options: { org?: boolean; createFails?: string; createFailsAfterMaking?: string; lookupFails?: string; publicRepos?: string[]; scopes?: string; failRun?: boolean; exits?: Partial<Record<SignInName, number>>; connectHere?: boolean; boxFiles?: Record<string, string>; hubDown?: boolean; hubUpdateFails?: string; boxCoderAt?: string; boxCoderSameUser?: boolean; claude?: Partial<Record<"claude" | "box:claude", ClaudeSignedIn>>; startedAt?: number; cliPrintsTunnel?: boolean; serverWithoutLinkState?: Array<"box" | "here">; runtimeOrigin?: string; runtimePid?: unknown; serverGone?: boolean; boxConnect?: { authenticated: unknown; linked: unknown }; t3Home?: string; devServerUrl?: string; tunnelStartsAfter?: number; withoutT3?: string[]; hereLinks?: HereLink[]; unreachable?: string[]; unlinkFails?: string } = {}) {
+export function fakeMachine(home: string, polls: Partial<Record<SignInName, number>> = {}, options: { org?: boolean; createFails?: string; createFailsAfterMaking?: string; lookupFails?: string; publicRepos?: string[]; scopes?: string; failRun?: boolean; exits?: Partial<Record<SignInName, number>>; connectHere?: boolean; boxFiles?: Record<string, string>; hubDown?: boolean; hubUpdateFails?: string; boxCoderAt?: string; boxCoderSameUser?: boolean; claude?: Partial<Record<"claude" | "box:claude", ClaudeSignedIn>>; startedAt?: number; cliPrintsTunnel?: boolean; serverWithoutLinkState?: Array<"box" | "here">; runtimeOrigin?: string; runtimePid?: unknown; serverGone?: boolean; boxConnect?: { authenticated: unknown; linked: unknown }; t3Home?: string; devServerUrl?: string; tunnelStartsAfter?: number; withoutT3?: string[]; hereLinks?: HereLink[]; unreachable?: string[]; unlinkFails?: string; installers?: Record<string, string> } = {}) {
   const left: Record<SignInName, number> = { github: 0, claude: 0, chatgpt: 0, coder: 0, "box:github": 0, "box:claude": 0, "box:chatgpt": 0, "box:t3": 0, "box:coder": 0, ...polls };
   const started = new Set<SignInName>();
   const calls: Array<{ command: string[]; cwd?: string; timeoutMs?: number; input?: string }> = [];
@@ -161,7 +162,7 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
     const killed = line.match(/^sh -c 'kill -0 (\S+)'$/)?.[1];
     if (killed !== undefined) return result(!options.serverGone && killed === String("runtimePid" in options ? options.runtimePid : 4242));
     if (line.startsWith("curl ") && !line.startsWith("curl -q --noproxy '*' ")) return { code: 22, output: "curl: (22) The requested URL returned error: 502 from the proxy", stdout: "" };
-    if (line === "t3 auth session issue --json --ttl 5m --label fleet --subject fleet --scope relay:read") {
+    if (line === "t3 auth session issue --json --ttl 5m --label hedge --subject hedge --scope relay:read") {
       const session = { sessionId: `session-${sessions.length + 1}`, token: `t3-bearer-${side.tunnel}-${sessions.length + 1}`, revoked: false };
       sessions.push(session);
       return result(true, `${JSON.stringify({ sessionId: session.sessionId, token: session.token, scopes: ["relay:read"] })}\n`);
@@ -186,23 +187,23 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
     }
   };
   const onTheHub = async (line: string, host: string): Promise<ExecResult | undefined> => {
-    const fleet = line.match(/\/\.local\/share\/fleet\/engine\/fleet" (.+)$/)?.[1];
-    if (fleet === undefined) return undefined;
+    const hedge = line.includes(`${remoteLauncher} `) ? line.slice(line.indexOf(`${remoteLauncher} `) + remoteLauncher.length + 1) : undefined;
+    if (hedge === undefined) return undefined;
     if (options.hubDown) return { code: 255, output: "ssh: connect to host: Connection refused", stdout: "" };
-    if (fleet === "update" && options.hubUpdateFails) return result(false, `${options.hubUpdateFails}\n`);
-    if (fleet === "update") {
+    if (hedge === "update" && options.hubUpdateFails) return result(false, `${options.hubUpdateFails}\n`);
+    if (hedge === "update") {
       hubUpdates.push(host);
       for (const node of (await pushedProfile()).devboxes ?? []) hubTook.add(node);
       return result(true, "✓ Up to date");
     }
-    const linked = fleet.match(/^peers link (\S+)$/)?.[1];
-    if (linked === undefined) return result(false, `unexpected on the hub: ${fleet}`);
+    const linked = hedge.match(/^peers link (\S+)$/)?.[1];
+    if (linked === undefined) return result(false, `unexpected on the hub: ${hedge}`);
     if (!hubTook.has(linked) || !passes("box:t3")) return result(false, `${linked}: not linked`);
     hubLinked.push(linked);
     return result(true, `linked ${linked}`);
   };
-  const forReal = async (line: string, host: string, input?: string): Promise<ExecResult> => {
-    const child = Bun.spawn(["sh", "-c", line], { env: { HOME: boxHome(home, host), PATH: process.env.PATH ?? "" }, stdin: input === undefined ? "ignore" : new Blob([input]), stdout: "pipe", stderr: "pipe" });
+  const forReal = async (line: string, host: string, input?: string, bin?: string): Promise<ExecResult> => {
+    const child = Bun.spawn(["sh", "-c", line], { env: { HOME: boxHome(home, host), PATH: [bin, process.env.PATH ?? ""].filter(Boolean).join(":") }, stdin: input === undefined ? "ignore" : new Blob([input]), stdout: "pipe", stderr: "pipe" });
     const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
     return { code, output: `${stdout}${stderr}`, stdout };
   };
@@ -225,7 +226,7 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
     if (line === "claude -p ok") return claudeReply("box:claude");
     if (line.includes("codex exec")) return result(passes("box:chatgpt"), "ok");
     if (line.startsWith("sh -c 'if [ -f ")) return result(true, Object.entries(options.boxFiles ?? {}).map(([path, text]) => `=== file ${path}\n${text}\n`).join(""));
-    if (line.includes("/.config/fleet/machine.json")) return forReal(line, host, input);
+    if (line.includes("/.config/hedge/machine.json")) return forReal(line, host, input);
     if (line.includes("/userdata/logs/boot-service.log")) return forReal(line, host, input);
     if (line.startsWith("sh -c ") && line.includes("/userdata/environment-id")) return options.withoutT3?.includes(host) ? result(false, "cat: environment-id: No such file or directory") : result(true, `env-${host}\n`);
     return t3(line, "BOXCODE", input, { name: "box", home: boxHome(home, host), linked: passes("box:t3"), tunnel: "box-1.relay.example", sessions: boxSessions }) ?? result(false, `unexpected on the box: ${line}`);
@@ -288,6 +289,7 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
       const { hub } = remote?.includes(" --profile ") ? await pushedProfile() : {};
       if (hub && hub !== node && !options.hubDown) credentials.push({ node, issued: hubTook.has(node) });
       if (options.failRun) return 1;
+      if (remote?.includes('-o "$installer"') && options.installers) return (await forReal(remote, node, undefined, installerBin(home, options.installers))).code;
       if (command.join(" ") === "sh -c coder login") left.coder = 0;
       return 0;
     },
@@ -304,9 +306,17 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
   return { machine, clock, calls, starts, runs, sleeps, opened, coderSsh, hubUpdates, credentials, hubLinked, sessions: () => [...hereSessions, ...boxSessions], hereLinks: () => hereLinks };
 }
 
+function installerBin(home: string, installers: Record<string, string>) {
+  const bin = join(home, "box-installers");
+  mkdirSync(bin, { recursive: true });
+  for (const [ref, script] of Object.entries(installers)) writeFileSync(join(bin, `${ref}.sh`), script);
+  writeFileSync(join(bin, "curl"), `#!/bin/sh\nout=; url=\nwhile [ $# -gt 0 ]; do case "$1" in -o) out=$2; shift ;; -*) ;; *) url=$1 ;; esac; shift; done\nref=\${url%/get.sh}; ref=\${ref##*/}\ncp "${bin}/$ref.sh" "$out"\n`, { mode: 0o755 });
+  return bin;
+}
+
 export const remote = (box: ReturnType<typeof fakeMachine>) => [...box.calls.map((call) => onBox(call.command)), ...box.starts.map(onBox), ...box.runs.map((run) => onBox(run.command))].filter(Boolean) as string[];
 
-export async function fleetSetup(home: string, args: string[], replies: string[] = [], box = fakeMachine(home), fetchSource?: (ref: SourceRef, cache: string) => Promise<FetchedSource>, doctorCode = 0, platform: NodeJS.Platform = "linux", onApply: (dir: string) => void | Promise<void> = () => {}) {
+export async function hedgeSetup(home: string, args: string[], replies: string[] = [], box = fakeMachine(home), fetchSource?: (ref: SourceRef, cache: string) => Promise<FetchedSource>, doctorCode = 0, platform: NodeJS.Platform = "linux", onApply: (dir: string) => void | Promise<void> = () => {}) {
   const io = scripted(replies);
   const applied: string[] = [];
   const skipped: string[][] = [];
@@ -317,12 +327,12 @@ export async function fleetSetup(home: string, args: string[], replies: string[]
   return { code, prompts: io.prompts, output: io.output(), applied, skipped, doctored };
 }
 
-export const machineFile = (home: string) => JSON.parse(readFileSync(join(home, ".config/fleet/machine.json"), "utf8"));
+export const machineFile = (home: string) => JSON.parse(readFileSync(join(home, ".config/hedge/machine.json"), "utf8"));
 
 /** The answers in the profile clone on this machine. */
-export const savedAnswers = (home: string) => JSON.parse(readFileSync(join(profilePath(home), "fleet.json"), "utf8"));
+export const savedAnswers = (home: string) => JSON.parse(readFileSync(join(profilePath(home), "hedge.json"), "utf8"));
 
 /** The answers as pushed to the fake github.com. */
-export async function pushedAnswers(home: string, repo = "nora/fleet-profile") {
-  return JSON.parse((await realGit(home, ["--git-dir", githubRepo(home, repo), "show", "main:fleet.json"])).output);
+export async function pushedAnswers(home: string, repo = "nora/hedge-profile") {
+  return JSON.parse((await realGit(home, ["--git-dir", githubRepo(home, repo), "show", "main:hedge.json"])).output);
 }

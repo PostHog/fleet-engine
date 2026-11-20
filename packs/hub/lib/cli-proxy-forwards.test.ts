@@ -14,14 +14,14 @@ const temp = tempDirs();
 afterEach(() => temp.cleanup());
 
 const clientKey = "c1".repeat(32);
-const balancing = readBoxSettings({ FLEET_SETTINGS: JSON.stringify({ ...boxSettings, "hub.proxyAccounts": 2 }) });
+const balancing = readBoxSettings({ HEDGE_SETTINGS: JSON.stringify({ ...boxSettings, "hub.proxyAccounts": 2 }) });
 const proxyRoute = "'-R' '8317:127.0.0.1:8317'";
 
-test("the proxy is on for fleet commands only while Own-account balancing is on, which hands them hub.proxyAccounts", () => {
-  expect(proxyOn({ FLEET_SETTINGS: JSON.stringify(boxSettings) })).toBe(false);
-  expect(proxyOn({ FLEET_SETTINGS: JSON.stringify({ ...boxSettings, "hub.proxyAccounts": 2 }) })).toBe(true);
+test("the proxy is on for hedge commands only while Own-account balancing is on, which hands them hub.proxyAccounts", () => {
+  expect(proxyOn({ HEDGE_SETTINGS: JSON.stringify(boxSettings) })).toBe(false);
+  expect(proxyOn({ HEDGE_SETTINGS: JSON.stringify({ ...boxSettings, "hub.proxyAccounts": 2 }) })).toBe(true);
   expect(balancing.proxy).toBe(true);
-  expect(readBoxSettings({ FLEET_SETTINGS: JSON.stringify(boxSettings) }).proxy).toBeUndefined();
+  expect(readBoxSettings({ HEDGE_SETTINGS: JSON.stringify(boxSettings) }).proxy).toBeUndefined();
 });
 
 test("a devbox tunnel carries the proxy port only while the workflow is on", () => {
@@ -32,15 +32,15 @@ test("a devbox tunnel carries the proxy port only while the workflow is on", () 
 });
 
 test("a box's hub forward carries the proxy port only while the workflow is on", () => {
-  const off = fakeMachine(temp.make("fleet-box-")).machine;
+  const off = fakeMachine(temp.make("hedge-box-")).machine;
   expect(hubForward(off, "box-lane").map((arg) => `'${arg}'`).join(" ")).not.toContain("8317");
-  const on = fakeMachine(temp.make("fleet-box-"), { settings: balancing }).machine;
+  const on = fakeMachine(temp.make("hedge-box-"), { settings: balancing }).machine;
   expect(hubForward(on, "box-lane").map((arg) => `'${arg}'`).join(" ")).toContain(proxyRoute);
 });
 
 test("handing over connects a box to the proxy with the key on stdin only, under umask 077, and skips it while the workflow is off", async () => {
-  const home = temp.make("fleet-box-");
-  writeHome(home, { ".config/fleet/cli-proxy.key": `${clientKey}\n` });
+  const home = temp.make("hedge-box-");
+  writeHome(home, { ".config/hedge/cli-proxy.key": `${clientKey}\n` });
   const on = fakeMachine(home, { settings: balancing, run: async () => ({ ...ok, code: 1 }) });
   const sent = fakeCoder();
   await handOver(sent.coder, on.machine, "box-lane");
@@ -56,35 +56,35 @@ test("handing over connects a box to the proxy with the key on stdin only, under
 });
 
 test("a box that cannot reach the proxy yet keeps its own sign-in, and the handover goes on", async () => {
-  const on = fakeMachine(temp.make("fleet-box-"), { settings: balancing, run: async () => ({ ...ok, code: 1 }) });
-  writeHome(on.machine.home, { ".config/fleet/cli-proxy.key": `${clientKey}\n` });
+  const on = fakeMachine(temp.make("hedge-box-"), { settings: balancing, run: async () => ({ ...ok, code: 1 }) });
+  writeHome(on.machine.home, { ".config/hedge/cli-proxy.key": `${clientKey}\n` });
   const { coder } = fakeCoder({ ssh: async (_box, command) => ({ ...ok, code: command.includes("cli-proxy connect") ? 1 : 0, stderr: "The proxy does not answer." }) });
   await handOver(coder, on.machine, "box-lane");
   expect(on.lines).toContain("box-lane keeps its own sign-in: The proxy does not answer.");
 
-  const none = fakeMachine(temp.make("fleet-box-"), { settings: balancing, run: async () => ({ ...ok, code: 1 }) });
+  const none = fakeMachine(temp.make("hedge-box-"), { settings: balancing, run: async () => ({ ...ok, code: 1 }) });
   await handOver(fakeCoder().coder, none.machine, "box-lane");
-  expect(none.lines).toContain("skip ~/.config/fleet/cli-proxy.key: this machine has none");
+  expect(none.lines).toContain("skip ~/.config/hedge/cli-proxy.key: this machine has none");
 });
 
 test("a relay port on the proxy port is refused only while the workflow is on, before any tunnel or box forward is built", () => {
   expect(() => tunnelUnit("devbox-1", 8317, true)).toThrow("while Own-account balancing is on, hub.relayPort cannot be 8317");
-  const clash = fakeMachine(temp.make("fleet-box-"), { settings: { ...balancing, relayPort: 8317 } }).machine;
+  const clash = fakeMachine(temp.make("hedge-box-"), { settings: { ...balancing, relayPort: 8317 } }).machine;
   expect(() => hubForward(clash, "box-lane")).toThrow("while Own-account balancing is on, hub.relayPort cannot be 8317");
   expect(tunnelUnit("devbox-1", 8317)).toContain("-R 127.0.0.1:8317:127.0.0.1:8317");
-  const off = fakeMachine(temp.make("fleet-box-"), { settings: { ...readBoxSettings({ FLEET_SETTINGS: JSON.stringify(boxSettings) }), relayPort: 8317 } }).machine;
+  const off = fakeMachine(temp.make("hedge-box-"), { settings: { ...readBoxSettings({ HEDGE_SETTINGS: JSON.stringify(boxSettings) }), relayPort: 8317 } }).machine;
   expect(hubForward(off, "box-lane")).toContain("8317:127.0.0.1:8317");
 });
 
 test("a box handed over on the Codex plan sends Codex through the proxy without another apply", async () => {
-  const hub = fakeMachine(temp.make("fleet-hub-"), { settings: balancing, run: async () => ({ ...ok, code: 1 }) });
-  writeHome(hub.machine.home, { ".config/fleet/cli-proxy.key": `${clientKey}\n` });
-  const boxHome = roleHome(temp.make("fleet-box-"), "devbox");
+  const hub = fakeMachine(temp.make("hedge-hub-"), { settings: balancing, run: async () => ({ ...ok, code: 1 }) });
+  writeHome(hub.machine.home, { ".config/hedge/cli-proxy.key": `${clientKey}\n` });
+  const boxHome = roleHome(temp.make("hedge-box-"), "devbox");
   const fetch = async () => Response.json({ data: [{ id: "gpt-6.1-sol" }] });
   const box = (stdin: string): ProxyMachine => ({ home: boxHome, uid: 1000, user: "me", plan: "codex", devboxes: [], release: { version: "", url: "", sha256: "" }, run: async () => ok, fetch, now: () => 0, sleep: async () => {}, readStdin: async () => stdin, randomKey: () => clientKey, print: () => {} });
   const { coder } = fakeCoder({ ssh: async (_name, command, stdin) => (command.includes("cli-proxy connect") ? { ...ok, code: await cliProxy("connect", box(stdin ?? "")) } : ok) });
   await handOver(coder, hub.machine, "box-lane");
-  expect(parse(readFileSync(join(boxHome, ".codex/config.toml"), "utf8")).model_provider).toBe("fleet-proxy");
+  expect(parse(readFileSync(join(boxHome, ".codex/config.toml"), "utf8")).model_provider).toBe("hedge-proxy");
   expect(existsSync(join(boxHome, ".claude/settings.json"))).toBe(false);
   expect(await cliProxy("check", box(""), "codex")).toBe(0);
 });

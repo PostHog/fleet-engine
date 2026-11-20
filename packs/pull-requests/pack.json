@@ -66,7 +66,7 @@
     },
     {
       "key": "pull-requests.receiptHeading",
-      "question": "Under which heading of a PR body does fleet proof receipt write the proof receipt? Give the heading's words without the hashes.",
+      "question": "Under which heading of a PR body does hedge proof receipt write the proof receipt? Give the heading's words without the hashes.",
       "type": "string",
       "default": "Testing",
       "ask": "never"
@@ -108,14 +108,14 @@
     },
     {
       "key": "pull-requests.reviewFallback",
-      "question": "What should fleet pr review tell an agent to do when no pack provides a review bot? {repo} and {pr} stand for the pull request.",
+      "question": "What should hedge pr review tell an agent to do when no pack provides a review bot? {repo} and {pr} stand for the pull request.",
       "type": "string",
       "optional": true,
       "ask": "never"
     },
     {
       "key": "pull-requests.stampFallback",
-      "question": "What should fleet pr stamp tell an agent to do when no pack provides a review bot? {repo} and {pr} stand for the pull request.",
+      "question": "What should hedge pr stamp tell an agent to do when no pack provides a review bot? {repo} and {pr} stand for the pull request.",
       "type": "string",
       "optional": true,
       "ask": "never"
@@ -174,13 +174,13 @@
       "id": "pr-owners",
       "name": "PR owners",
       "default": true,
-      "sentence": "A thread that still owns an open pull request cannot settle or archive itself until it hands the pull request over, and a box with such a thread is not released. A thread you pinned cannot be settled or snoozed by an agent. A settle, snooze or archive of a thread on a Fleet peer asks that machine's Fleet first, over SSH. When that Fleet does not answer, or is older, the guard reads the thread through T3."
+      "sentence": "A thread that still owns an open pull request cannot settle or archive itself until it hands the pull request over, and a box with such a thread is not released. A thread you pinned cannot be settled or snoozed by an agent. A settle, snooze or archive of a thread on a Hedge peer asks that machine's Hedge first, over SSH. When that Hedge does not answer, or is older, the guard reads the thread through T3."
     }
   ],
   "files": [
     {
       "path": "hooks/settle-guard.ts",
-      "target": ".config/fleet/hooks/PreToolUse/settle-guard.ts",
+      "target": ".config/hedge/hooks/PreToolUse/settle-guard.ts",
       "workflow": "pr-owners"
     }
   ],

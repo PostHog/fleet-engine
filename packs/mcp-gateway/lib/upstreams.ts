@@ -29,14 +29,14 @@ function wanted(upstream: Upstream, hub: Hub): Config {
     command: "node",
     args: [bridgeFile],
     description: marker,
-    env: { HOME: home, CODEX_HOME: home, FLEET_CODEX_BIN: `${codexMount}/current/bin/codex`, FLEET_APP: JSON.stringify(upstream) },
+    env: { HOME: home, CODEX_HOME: home, HEDGE_CODEX_BIN: `${codexMount}/current/bin/codex`, HEDGE_APP: JSON.stringify(upstream) },
     startOnDemand: true,
     options: { timeout: 300000 },
   };
 }
 
-const marker = "Added by Fleet";
-const ours = (config: Config) => config.description === marker || (config.command === "node" && Array.isArray(config.args) && [bridgeFile, legacyBridgeFile].includes(config.args[0]));
+const marker = "Added by Hedge";
+const ours = (config: Config) => config.description === marker || config.description === "Added by Fleet" || (config.command === "node" && Array.isArray(config.args) && [bridgeFile, legacyBridgeFile].includes(config.args[0]));
 
 async function current(call: Api, name: string): Promise<Config | undefined> {
   const names = (await call<Array<{ name: string }>>("servers")).map((server) => server.name);
@@ -47,7 +47,7 @@ async function current(call: Api, name: string): Promise<Config | undefined> {
 async function groupServes(call: Api, upstream: Upstream) {
   const tools = upstream.kind === "oauth" ? upstream.tools : undefined;
   const entry = (await call<Array<{ name: string; servers: Array<string | { name: string; tools?: unknown }> }>>("groups"))
-    .find((group) => group.name === "fleet")?.servers.find((server) => (typeof server === "string" ? server : server.name) === upstream.name);
+    .find((group) => group.name === "hedge")?.servers.find((server) => (typeof server === "string" ? server : server.name) === upstream.name);
   if (!entry) return false;
   return tools === undefined || (typeof entry !== "string" && Bun.deepEquals(entry.tools, tools));
 }
@@ -61,13 +61,13 @@ export async function upstreamRegistered(hub: Hub, upstream: Upstream) {
 }
 
 const refuseTheirs = (config: Config | undefined, upstream: Upstream) => {
-  if (config && !ours(config)) throw new Error(`Keep the MCP gateway's ${upstream.name} server: Fleet did not add it. Remove it in the gateway's dashboard to use ${upstream.title}.`);
+  if (config && !ours(config)) throw new Error(`Keep the MCP gateway's ${upstream.name} server: Hedge did not add it. Remove it in the gateway's dashboard to use ${upstream.title}.`);
 };
 
 export const appSignedIn = (hub: Pick<Hub, "home">, app: CodexApp) => exists(join(appHome(hub.home, app), "auth.json"));
 
 export async function registerUpstream(hub: Hub, upstream: Upstream) {
-  const codexMissing = `${upstream.title} runs through Codex, and this hub has no Codex from Fleet. Run: fleet install-codex`;
+  const codexMissing = `${upstream.title} runs through Codex, and this hub has no Codex from Hedge. Run: hedge install-codex`;
   if (upstream.kind === "codex-app" && !(await exists(hubCodex(hub.home)))) throw new Error(codexMissing);
   const waitsFor = upstream.kind === "local" ? await missingMount(upstream) : undefined;
   if (upstream.kind === "local" && waitsFor) return hub.print(waitingNote(upstream, waitsFor));
@@ -90,14 +90,14 @@ export async function registerUpstream(hub: Hub, upstream: Upstream) {
   if (config?.enabled === false) await call(`${path}/toggle`, "POST", { enabled: true });
   await syncGatewayGroup(call, hub.home);
   const kept = (await current(call, upstream.name)) ?? {};
-  if (!holds(kept, want) || !(await groupServes(call, upstream))) throw new Error(`The MCP gateway did not keep the settings of ${upstream.title}. Run: fleet mcp-gateway doctor`);
+  if (!holds(kept, want) || !(await groupServes(call, upstream))) throw new Error(`The MCP gateway did not keep the settings of ${upstream.title}. Run: hedge mcp-gateway doctor`);
   if (upstream.kind === "oauth") {
-    const signIn = upstream.loopback ? (newClient ? `fleet mcp-gateway sign-in ${upstream.name}` : undefined) : config ? undefined : "fleet mcp-gateway sign-in";
+    const signIn = upstream.loopback ? (newClient ? `hedge mcp-gateway sign-in ${upstream.name}` : undefined) : config ? undefined : "hedge mcp-gateway sign-in";
     return hub.print(`${upstream.title} is in the MCP gateway.${signIn ? ` To sign in to it, on the hub, run: ${signIn}` : ""}`);
   }
   hub.print(`${upstream.title} is in the MCP gateway.`);
   if (upstream.kind === "local") return;
-  if (!(await appSignedIn(hub, upstream))) hub.print(`Sign ${upstream.title} in to ChatGPT, with the account whose ${upstream.title} app it should use. On the hub, run: fleet mcp-gateway sign-in ${upstream.name}`);
+  if (!(await appSignedIn(hub, upstream))) hub.print(`Sign ${upstream.title} in to ChatGPT, with the account whose ${upstream.title} app it should use. On the hub, run: hedge mcp-gateway sign-in ${upstream.name}`);
 }
 
 export async function upstreamsRegistered(hub: Hub) {
@@ -133,7 +133,7 @@ export async function appReady(hub: Hub, app: CodexApp) {
 }
 
 export async function signInApp(hub: Hub, app: CodexApp) {
-  if (!(await exists(hubCodex(hub.home)))) throw new Error(`${app.title} runs through Codex, and this hub has no Codex from Fleet. Run: fleet install-codex`);
+  if (!(await exists(hubCodex(hub.home)))) throw new Error(`${app.title} runs through Codex, and this hub has no Codex from Hedge. Run: hedge install-codex`);
   hub.print(`Sign in with the ChatGPT account whose ${app.title} app the gateway should use. This sign-in stays in its own Codex home.`);
   const code = await deviceSignIn(hub, app);
   if (code) return code;
@@ -147,7 +147,7 @@ export async function signInApp(hub: Hub, app: CodexApp) {
   }
   const toolless: CodexApp[] = [];
   for (const other of reloaded) if (await listsNoTools(call, other).catch(() => false)) toolless.push(other);
-  for (const other of toolless) hub.print(`The gateway finds no ${other.title} tools for this sign-in. Connect ${other.title} in ChatGPT, Settings, Apps, with this ChatGPT account, then run: fleet mcp-gateway reconnect ${other.name}`);
+  for (const other of toolless) hub.print(`The gateway finds no ${other.title} tools for this sign-in. Connect ${other.title} in ChatGPT, Settings, Apps, with this ChatGPT account, then run: hedge mcp-gateway reconnect ${other.name}`);
   if (toolless.length) return 1;
   hub.print(`${sharing.map((other) => other.title).join(", ")} signed in. Agents reach them through the gateway now.`);
   return 0;

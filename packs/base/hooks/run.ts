@@ -28,7 +28,7 @@ export async function dispatch(dir: string, provider: string, input: string, run
     const result = await run(join(dir, name), provider, input);
     results.push({ ...result, name, json: result.code === 0 ? parseDecision(result.stdout) : undefined });
   }
-  const problems = results.filter((result) => result.code !== 0 && result.code !== 2).map((result) => `fleet hook ${result.name}: ${result.stderr.trim() || `exit ${result.code}`}\n`).join("");
+  const problems = results.filter((result) => result.code !== 0 && result.code !== 2).map((result) => `hedge hook ${result.name}: ${result.stderr.trim() || `exit ${result.code}`}\n`).join("");
   const blockJson = results.find((result) => result.json?.decision === "block")?.json;
   const protect = mergeSpecific(provider, results.flatMap((result) => (result.json?.hookSpecificOutput ? [result.json.hookSpecificOutput] : [])));
   const blocked = results.find((result) => result.code === 2);
@@ -69,7 +69,7 @@ function mergeSpecific(provider: string, outputs: Specific[]): Specific | undefi
 function denying(specific: Specific | undefined, reason: string): Specific | undefined {
   if (!specific || (specific.hookEventName !== "PreToolUse" && specific.permissionDecision === undefined)) return specific;
   const kept = specific.permissionDecision === "deny" ? specific.permissionDecisionReason?.trim() : undefined;
-  const denied: Specific = { ...specific, permissionDecision: "deny", permissionDecisionReason: reason.trim() || kept || "A Fleet hook blocked this tool call." };
+  const denied: Specific = { ...specific, permissionDecision: "deny", permissionDecisionReason: reason.trim() || kept || "A Hedge hook blocked this tool call." };
   delete denied.updatedInput;
   return denied;
 }
@@ -106,7 +106,7 @@ if (import.meta.main) {
     process.stderr.write("Usage: run.sh claude|codex <event>\n");
     process.exit(1);
   }
-  const result = await dispatch(join(process.env.HOME ?? homedir(), ".config/fleet/hooks", event), provider, await Bun.stdin.text());
+  const result = await dispatch(join(process.env.HOME ?? homedir(), ".config/hedge/hooks", event), provider, await Bun.stdin.text());
   process.stdout.write(result.stdout);
   process.stderr.write(result.stderr);
   process.exit(result.code);

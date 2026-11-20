@@ -38,7 +38,7 @@ describe("the Pull requests pack", () => {
   });
 
   test("installs the settle guard as a PreToolUse hook while PR owners is on, and drops it when it is off", () => {
-    const target = ".config/fleet/hooks/PreToolUse/settle-guard.ts";
+    const target = ".config/hedge/hooks/PreToolUse/settle-guard.ts";
     expect(withPack().files.find((file) => file.target === target)).toMatchObject({ source: expect.stringMatching(/packs\/pull-requests\/hooks\/settle-guard\.ts$/) });
     expect(withPack({ workflows: { "pr-owners": false } }).files.map((file) => file.target)).not.toContain(target);
   });

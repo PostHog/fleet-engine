@@ -391,7 +391,7 @@ function skipWrapper(texts: string[], start: number, env: Map<string, string>): 
 }
 
 /** The simple commands of one shell program, grouped by pipeline in the order they run. Wrappers such as `sudo -u root`,
- * `env A=1`, `timeout 5`, `fleet heavy --` and keywords such as `then` are taken off, so `name` is the command that runs. */
+ * `env A=1`, `timeout 5`, `hedge heavy --` and keywords such as `then` are taken off, so `name` is the command that runs. */
 export function parse(program: string, context: Context = { env: new Map(), inLoop: false }): Command[][] {
   const env = new Map(context.env);
   const pipelines: Command[][] = [];
@@ -427,7 +427,7 @@ export function parse(program: string, context: Context = { env: new Map(), inLo
         index = wrapper.index;
         chdir = wrapper.chdir ?? chdir;
       }
-      else if (basename(text) === "fleet" && texts[index + 1] === "heavy" && texts.includes("--", index)) index = texts.indexOf("--", index) + 1;
+      else if (["hedge", "fleet"].includes(basename(text)) && texts[index + 1] === "heavy" && texts.includes("--", index)) index = texts.indexOf("--", index) + 1;
       else break;
     }
     const name = texts[index] === undefined ? "" : basename(texts[index]);

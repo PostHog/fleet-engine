@@ -12,7 +12,7 @@ const ok = { code: 0, stdout: "", stderr: "" };
 const settings = { coderUrl: "https://coder.example.com", template: "linux-box" };
 
 function homeWith(files: Record<string, string>) {
-  const home = temp.make("fleet-coder-");
+  const home = temp.make("hedge-coder-");
   for (const [path, content] of Object.entries(files)) {
     mkdirSync(join(home, path, ".."), { recursive: true });
     writeFileSync(join(home, path), content);
@@ -29,12 +29,12 @@ function recording() {
   return { calls, capture };
 }
 
-test("the Coder session comes from the environment first, then Fleet's session files, then the Coder CLI's", () => {
-  const both = { ".config/fleet/coder-session": "fleet-token\n", ".config/fleet/coder-url": "https://fleet.example.com\n", ".config/coderv2/session": "cli-token\n", ".config/coderv2/url": "https://cli.example.com\n" };
+test("the Coder session comes from the environment first, then Hedge's session files, then the Coder CLI's", () => {
+  const both = { ".config/hedge/coder-session": "hedge-token\n", ".config/hedge/coder-url": "https://hedge.example.com\n", ".config/coderv2/session": "cli-token\n", ".config/coderv2/url": "https://cli.example.com\n" };
   const fromEnv = new Coder({ ...settings, home: homeWith(both), env: { CODER_SESSION_TOKEN: "env-token", CODER_URL: "https://env.example.com" } });
   expect([fromEnv.env.CODER_SESSION_TOKEN, fromEnv.env.CODER_URL]).toEqual(["env-token", "https://env.example.com"]);
-  const fromFleet = new Coder({ ...settings, home: homeWith(both), env: {} });
-  expect([fromFleet.env.CODER_SESSION_TOKEN, fromFleet.env.CODER_URL]).toEqual(["fleet-token", "https://fleet.example.com"]);
+  const fromHedge = new Coder({ ...settings, home: homeWith(both), env: {} });
+  expect([fromHedge.env.CODER_SESSION_TOKEN, fromHedge.env.CODER_URL]).toEqual(["hedge-token", "https://hedge.example.com"]);
   const fromCli = new Coder({ ...settings, home: homeWith({ ".config/coderv2/session": "cli-token\n", ".config/coderv2/url": "https://cli.example.com\n" }), env: {} });
   expect([fromCli.env.CODER_SESSION_TOKEN, fromCli.env.CODER_URL]).toEqual(["cli-token", "https://cli.example.com"]);
 });
@@ -110,7 +110,7 @@ test("a grant mints a dated token, writes the URL and token on the devbox over s
     env: { CODER_URL: "https://coder.example.com" },
     token: async (args: string[]) => {
       tokens.push(args);
-      return args[0] === "list" ? JSON.stringify([{ id: "k1", token_name: "fleet-devbox-1-202610010000-abcd", expires_at: "2026-11-02T00:00:00Z" }, { id: "k2", token_name: "someone-else", expires_at: "2026-12-01T00:00:00Z" }]) : "new-secret\n";
+      return args[0] === "list" ? JSON.stringify([{ id: "k1", token_name: "hedge-devbox-1-202610010000-abcd", expires_at: "2026-11-02T00:00:00Z" }, { id: "k2", token_name: "someone-else", expires_at: "2026-12-01T00:00:00Z" }]) : "new-secret\n";
     },
   };
   const written: Array<{ command: string; stdin?: string }> = [];
@@ -119,19 +119,19 @@ test("a grant mints a dated token, writes the URL and token on the devbox over s
     return ok;
   };
   expect(await grant(coder, "devbox-1", { ifExpiring: true, now, onDevbox, print: () => {} })).toBe(0);
-  expect(tokens[1]?.slice(0, 3)).toEqual(["create", "--name", expect.stringMatching(/^fleet-devbox-1-202611011234-[0-9a-f]{4}$/)]);
+  expect(tokens[1]?.slice(0, 3)).toEqual(["create", "--name", expect.stringMatching(/^hedge-devbox-1-202611011234-[0-9a-f]{4}$/)]);
   expect(written.map((call) => call.stdin)).toEqual([undefined, "https://coder.example.com\n", "new-secret\n"]);
   expect(written.map((call) => call.command).join("\n")).not.toContain("new-secret");
-  expect(tokens.at(-1)).toEqual(["remove", "fleet-devbox-1-202610010000-abcd"]);
+  expect(tokens.at(-1)).toEqual(["remove", "hedge-devbox-1-202610010000-abcd"]);
 });
 
 test("a grant with --if-expiring keeps a token that lasts more than a week", async () => {
   const now = Date.parse("2026-11-01T00:00:00Z");
-  const coder = { env: {}, token: async () => JSON.stringify([{ id: "k1", token_name: "fleet-devbox-1-202610010000-abcd", expires_at: "2026-11-20T00:00:00Z" }]) };
+  const coder = { env: {}, token: async () => JSON.stringify([{ id: "k1", token_name: "hedge-devbox-1-202610010000-abcd", expires_at: "2026-11-20T00:00:00Z" }]) };
   const onDevbox = async () => ({ ...ok, stdout: "k1\n" });
   const lines: string[] = [];
   expect(await grant(coder, "devbox-1", { ifExpiring: true, now, onDevbox, print: (line) => lines.push(line) })).toBe(0);
-  expect(lines).toEqual(["fleet-devbox-1-202610010000-abcd: still valid until 2026-11-20T00:00:00Z"]);
+  expect(lines).toEqual(["hedge-devbox-1-202610010000-abcd: still valid until 2026-11-20T00:00:00Z"]);
 });
 
 test("the reaper goes on after a failed delete and fails at the end, so the nightly job does not report success", async () => {
@@ -152,7 +152,7 @@ test("the reaper goes on after a failed delete and fails at the end, so the nigh
 });
 
 function sandboxBin(scripts: Record<string, string>) {
-  const bin = temp.make("fleet-bin-");
+  const bin = temp.make("hedge-bin-");
   for (const [name, script] of Object.entries(scripts)) {
     writeFileSync(join(bin, name), `#!/bin/sh\n${script}\n`);
     chmodSync(join(bin, name), 0o755);
@@ -210,7 +210,7 @@ const announce = (file: string, what = "$$") => `echo ${what} > ${file}.tmp && /
 const hangs = "exec /bin/sleep 30";
 
 test("a command with a time limit is killed when its timer fires, and reports the timeout", async () => {
-  const ready = join(temp.make("fleet-ready-"), "ready");
+  const ready = join(temp.make("hedge-ready-"), "ready");
   const bin = sandboxBin({ hang: `${announce(ready)}\n${hangs}` });
   const clock = handTimer();
   const result = captureWith(clock.timer)([join(bin, "hang")], { timeoutMs: 20 });
@@ -228,7 +228,7 @@ test("a command that ends in time cancels its timer and keeps its output", async
 });
 
 test("downloading the coder CLI counts against the call's time limit, so a hanging download cannot outlast a readiness wait", async () => {
-  const ready = join(temp.make("fleet-ready-"), "ready");
+  const ready = join(temp.make("hedge-ready-"), "ready");
   const bin = sandboxBin({ curl: `${announce(ready)}\n${hangs}` });
   const home = homeWith({});
   const clock = handTimer();
@@ -243,13 +243,13 @@ test("downloading the coder CLI counts against the call's time limit, so a hangi
 
 for (const locked of [false, true]) {
   test(`a timeout kills the whole process group, including a child the shell started without exec${locked ? ", also under a box lock" : ""}`, async () => {
-    const held = join(temp.make("fleet-fifo-"), "held");
+    const held = join(temp.make("hedge-fifo-"), "held");
     expect(Bun.spawnSync(["mkfifo", held]).exitCode).toBe(0);
     const bin = sandboxBin({ spawner: `sh -c 'echo up; exec tail -f /dev/null' > ${held} 2>/dev/null &\nwait` });
     const reader = Bun.spawn(["cat", held], { stdout: "pipe" });
     const clock = handTimer();
     const run = () => captureWith(clock.timer)([join(bin, "spawner")], { timeoutMs: 50 });
-    const result = locked ? withBoxLock(temp.make("fleet-lock-"), "box-a", { waitMs: 0 }, run) : run();
+    const result = locked ? withBoxLock(temp.make("hedge-lock-"), "box-a", { waitMs: 0 }, run) : run();
     const lines = reader.stdout.getReader();
     expect(new TextDecoder().decode((await lines.read()).value)).toBe("up\n");
     clock.fire();
@@ -312,7 +312,7 @@ test("creating a box has a time limit on every Coder API request", async () => {
 });
 
 test("a call that hands its output through to the caller still has a time limit and kills its process group", async () => {
-  const ready = join(temp.make("fleet-ready-"), "ready");
+  const ready = join(temp.make("hedge-ready-"), "ready");
   const bin = sandboxBin({ hang: `${announce(ready)}\n${hangs}` });
   const clock = handTimer();
   const result = captureWith(clock.timer)([join(bin, "hang")], { timeoutMs: 30, inherit: true });

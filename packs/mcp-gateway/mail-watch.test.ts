@@ -31,7 +31,7 @@ function gateway() {
   const server = Bun.serve({
     port: 0,
     async fetch(request) {
-      if (new URL(request.url).pathname !== "/mcphub/mcp/fleet") return new Response(null, { status: 404 });
+      if (new URL(request.url).pathname !== "/mcphub/mcp/hedge") return new Response(null, { status: 404 });
       if (request.headers.get("authorization") !== `Bearer ${key}`) return new Response(null, { status: 401 });
       const session = request.headers.get("mcp-session-id") ?? "";
       if (request.method === "DELETE") return new Response(null, { status: state.sessions.delete(session) ? 200 : 404 });
@@ -296,7 +296,7 @@ test("a gateway that refuses the hub's key fails the check with a sentence that 
   await check();
   watch.gateway.credential = "mcphub_other";
   expect(await check()).toBe(false);
-  expect(lines.at(-1)).toBe("Check failed: The MCP gateway refused the hub's key. Run fleet apply on the hub.");
+  expect(lines.at(-1)).toBe("Check failed: The MCP gateway refused the hub's key. Run hedge apply on the hub.");
 });
 
 test("a reply under eleven pages of newer mail still starts its thread", async () => {

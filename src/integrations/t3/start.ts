@@ -12,7 +12,7 @@ export function t3Threads(models: ModelRow[], session: T3SessionOptions = {}): T
   return {
     async start({ key, title, prompt, modelRole }) {
       const row = models.find((candidate) => candidate.role === modelRole);
-      if (!row) throw new Error(`The model table of your AI plan has no ${modelRole} row, so Fleet cannot start the thread.`);
+      if (!row) throw new Error(`The model table of your AI plan has no ${modelRole} row, so Hedge cannot start the thread.`);
       const refusal = exhaustedRefusal(session.home ?? homedir(), row, title, Date.now());
       if (refusal) throw new Error(refusal);
       let started: StartedThread | undefined;

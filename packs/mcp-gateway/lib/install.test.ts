@@ -10,7 +10,7 @@ const temp = tempDirs();
 afterEach(() => temp.cleanup());
 
 function hubHome(role = "hub") {
-  const home = temp.make("fleet-mcphub-install-");
+  const home = temp.make("hedge-mcphub-install-");
   writeMachineFile(home, role);
   return home;
 }
@@ -25,17 +25,17 @@ function docker(container?: Record<string, unknown>) {
   };
 }
 
-const startCommand = (home: string, image: string) => ["docker", "run", "-d", "--name", "fleet-mcphub", "--label", "org.fleet.service=mcphub", "--restart", "unless-stopped",
-  "--user", "1000:1000", "--security-opt", "no-new-privileges", "--cap-drop", "ALL", "--env-file", join(home, ".local/share/fleet-mcphub/runtime.env"),
-  "-p", "127.0.0.1:3317:3000", "-v", `${join(home, ".local/share/fleet-mcphub")}/data:/app/data`, "-v", `${join(home, ".local/share/fleet-mcphub")}/logs:/app/logs`,
-  "-v", `${join(home, ".local/share/fleet/codex")}:/opt/fleet-codex:ro`, "--entrypoint", "node", image, "dist/index.js"];
-const codexMounted = [{ Destination: "/opt/fleet-codex" }];
+const startCommand = (home: string, image: string) => ["docker", "run", "-d", "--name", "hedge-mcphub", "--label", "org.hedge.service=mcphub", "--restart", "unless-stopped",
+  "--user", "1000:1000", "--security-opt", "no-new-privileges", "--cap-drop", "ALL", "--env-file", join(home, ".local/share/hedge-mcphub/runtime.env"),
+  "-p", "127.0.0.1:3317:3000", "-v", `${join(home, ".local/share/hedge-mcphub")}/data:/app/data`, "-v", `${join(home, ".local/share/hedge-mcphub")}/logs:/app/logs`,
+  "-v", `${join(home, ".local/share/hedge/codex")}:/opt/hedge-codex:ro`, "--entrypoint", "node", image, "dist/index.js"];
+const codexMounted = [{ Destination: "/opt/hedge-codex" }];
 
 test("install runs only on Linux", async () => {
   await expect(install(fakeHub(hubHome(), { platform: "darwin" }))).rejects.toThrow("Install MCPHub on the Linux hub.");
 });
 
-test("install starts the built image on loopback port 3317 with no secret in argv, then syncs the fleet group once MCPHub answers", async () => {
+test("install starts the built image on loopback port 3317 with no secret in argv, then syncs the hedge group once MCPHub answers", async () => {
   const home = hubHome();
   const api = fakeMcpHub({ notReadyFor: 2, home });
   const { calls, run } = fakeRun(docker());
@@ -43,19 +43,19 @@ test("install starts the built image on loopback port 3317 with no secret in arg
   const hub = fakeHub(home, { run, fetch: mcphubFetch(api), sleep: async (ms) => { slept.push(ms); } });
   await install(hub);
   const image = calls[0]!.command[3]!;
-  expect(image).toMatch(/^fleet-mcphub:1\.1\.0-[0-9a-f]{12}$/);
-  expect(calls.map((call) => call.command)).toEqual([["docker", "image", "inspect", image], ["docker", "container", "inspect", "fleet-mcphub"], ["docker", "image", "inspect", image], startCommand(home, image)]);
-  const secrets = readFileSync(join(home, ".local/share/fleet-mcphub/runtime.env"), "utf8").match(/=([\w-]{43})$/gm)!.map((line) => line.slice(1));
+  expect(image).toMatch(/^hedge-mcphub:1\.1\.0-[0-9a-f]{12}$/);
+  expect(calls.map((call) => call.command)).toEqual([["docker", "image", "inspect", image], ["docker", "container", "inspect", "hedge-mcphub"], ["docker", "image", "inspect", image], startCommand(home, image)]);
+  const secrets = readFileSync(join(home, ".local/share/hedge-mcphub/runtime.env"), "utf8").match(/=([\w-]{43})$/gm)!.map((line) => line.slice(1));
   expect(secrets).toHaveLength(2);
   for (const secret of secrets) expect(JSON.stringify(calls)).not.toContain(secret);
   expect(slept).toEqual([500, 500]);
-  expect(api.groups).toEqual([{ id: "group-1", name: "fleet", servers: ["tickets", "calendar"] }]);
+  expect(api.groups).toEqual([{ id: "group-1", name: "hedge", servers: ["tickets", "calendar"] }]);
   expect(hub.printed).toEqual(["MCPHub installed: http://127.0.0.1:3317/mcphub/"]);
-  expect(statSync(join(home, ".local/share/fleet/codex")).isDirectory()).toBe(true);
+  expect(statSync(join(home, ".local/share/hedge/codex")).isDirectory()).toBe(true);
 });
 
 test("install keeps a running container of the same image, starts a stopped one, and replaces one of an older image", async () => {
-  const label = { "org.fleet.service": "mcphub" };
+  const label = { "org.hedge.service": "mcphub" };
   const image = (calls: RunCall[]) => calls[0]!.command[3]!;
   const sameImage = (home: string, running: boolean) => {
     const fake: ReturnType<typeof fakeRun> = fakeRun((call) => docker({ Config: { Labels: label, Env: environmentOf(home) }, Image: `sha256:${image(fake.calls)}`, State: { Running: running }, Mounts: codexMounted })(call));
@@ -68,26 +68,26 @@ test("install keeps a running container of the same image, starts a stopped one,
   const stoppedHome = hubHome();
   const stopped = sameImage(stoppedHome, false);
   await install(fakeHub(stoppedHome, { run: stopped.run }));
-  expect(stopped.calls.filter((call) => !call.command.includes("inspect")).map((call) => call.command)).toEqual([["docker", "start", "fleet-mcphub"]]);
+  expect(stopped.calls.filter((call) => !call.command.includes("inspect")).map((call) => call.command)).toEqual([["docker", "start", "hedge-mcphub"]]);
   const home = hubHome();
   const old = fakeRun(docker({ Config: { Labels: label }, Image: "sha256:older", State: { Running: true }, Mounts: codexMounted }));
   await install(fakeHub(home, { run: old.run }));
-  expect(old.calls.filter((call) => !call.command.includes("inspect")).map((call) => call.command)).toEqual([["docker", "stop", "fleet-mcphub"], ["docker", "rm", "fleet-mcphub"], startCommand(home, image(old.calls))]);
+  expect(old.calls.filter((call) => !call.command.includes("inspect")).map((call) => call.command)).toEqual([["docker", "stop", "hedge-mcphub"], ["docker", "rm", "hedge-mcphub"], startCommand(home, image(old.calls))]);
 });
 
 test("install replaces a container of the same image that cannot reach the hub's Codex, so the Slack bridge can start it", async () => {
   const home = hubHome();
-  const fake: ReturnType<typeof fakeRun> = fakeRun((call) => docker({ Config: { Labels: { "org.fleet.service": "mcphub" }, Env: environmentOf(home) }, Image: `sha256:${fake.calls[0]!.command[3]}`, State: { Running: true }, Mounts: [] })(call));
+  const fake: ReturnType<typeof fakeRun> = fakeRun((call) => docker({ Config: { Labels: { "org.hedge.service": "mcphub" }, Env: environmentOf(home) }, Image: `sha256:${fake.calls[0]!.command[3]}`, State: { Running: true }, Mounts: [] })(call));
   await install(fakeHub(home, { run: fake.run }));
-  expect(fake.calls.filter((call) => !call.command.includes("inspect")).map((call) => call.command)).toEqual([["docker", "stop", "fleet-mcphub"], ["docker", "rm", "fleet-mcphub"], startCommand(home, fake.calls[0]!.command[3]!)]);
+  expect(fake.calls.filter((call) => !call.command.includes("inspect")).map((call) => call.command)).toEqual([["docker", "stop", "hedge-mcphub"], ["docker", "rm", "hedge-mcphub"], startCommand(home, fake.calls[0]!.command[3]!)]);
 });
 
-test("installing again on a hub that an older Fleet installed at its HTTPS host moves MCPHub to loopback and keeps every secret", async () => {
+test("installing again on a hub that an older Hedge installed at its HTTPS host moves MCPHub to loopback and keeps every secret", async () => {
   const home = hubHome();
   const docker = fakeRun(dockerHost(home));
   await install(fakeHub(home, { run: docker.run, gateway: { httpsHost: "hub.internal.example.com", relayPort: 60001 } }));
-  const settingsPath = join(home, ".local/share/fleet-mcphub/data/mcp_settings.json");
-  const environmentPath = join(home, ".local/share/fleet-mcphub/runtime.env");
+  const settingsPath = join(home, ".local/share/hedge-mcphub/data/mcp_settings.json");
+  const environmentPath = join(home, ".local/share/hedge-mcphub/runtime.env");
   const before = { settings: JSON.parse(readFileSync(settingsPath, "utf8")), environment: environmentOf(home) };
   expect(before.settings.systemConfig.install.baseUrl).toBe("https://hub.internal.example.com:60001/mcphub");
   const oldEnvironment = join(home, "old-runtime-env");
@@ -108,9 +108,9 @@ test("installing again on a hub that an older Fleet installed at its HTTPS host 
   expect(docker.calls.filter((call) => !call.command.includes("inspect"))).toEqual([]);
 });
 
-test("install keeps a container named fleet-mcphub that Fleet did not make", async () => {
+test("install keeps a container named hedge-mcphub that Hedge did not make", async () => {
   const { calls, run } = fakeRun(docker({ Config: { Labels: {} }, Image: "sha256:other", State: { Running: true } }));
-  await expect(install(fakeHub(hubHome(), { run }))).rejects.toThrow("Keep unmanaged Docker container fleet-mcphub. Review it before installation.");
+  await expect(install(fakeHub(hubHome(), { run }))).rejects.toThrow("Keep unmanaged Docker container hedge-mcphub. Review it before installation.");
   expect(calls.some((call) => ["run", "stop", "rm"].includes(call.command[1]!))).toBe(false);
 });
 
@@ -126,7 +126,7 @@ test("the build checks the pinned source archive, applies the approval patch, an
       const output = call.command[call.command.indexOf("-v", call.command.indexOf("-v") + 1) + 1]!.split(":")[0]!;
       for (const file of ["clients/legacyMcpClient.js", "services/mcpService.js"]) mkdirSync(join(output, file, ".."), { recursive: true }), writeFileSync(join(output, file), file);
     }
-    if (tool === "docker" && noun === "build") dockerfile = readFileSync(join(call.command[4]!, "Dockerfile"), "utf8"), bridge = readFileSync(join(call.command[4]!, "fleet-app-bridge.mjs"));
+    if (tool === "docker" && noun === "build") dockerfile = readFileSync(join(call.command[4]!, "Dockerfile"), "utf8"), bridge = readFileSync(join(call.command[4]!, "hedge-app-bridge.mjs"));
     return {};
   });
   const fetched: string[] = [];
@@ -138,8 +138,8 @@ test("the build checks the pinned source archive, applies the approval patch, an
   expect(calls[2]!.command[2]).toBe(join(hub.root, "mcphub/1.1.0-elicitation.patch"));
   expect(calls[3]!.command).toContain(mcphubImage);
   expect(calls[4]!.command.slice(0, 4)).toEqual(["docker", "build", "-t", image]);
-  expect(dockerfile).toStartWith(`FROM ${mcphubImage}\nCOPY sdk/ /fleet-sdk/\n`);
-  expect(dockerfile).toEndWith("COPY fleet-app-bridge.mjs /app/fleet-app-bridge.mjs\nCOPY fleet-app-bridge.mjs /app/fleet-slack-bridge.mjs\nLABEL org.fleet.patch=\"1.1.0-elicitation\"\n");
+  expect(dockerfile).toStartWith(`FROM ${mcphubImage}\nCOPY sdk/ /hedge-sdk/\n`);
+  expect(dockerfile).toEndWith("COPY hedge-app-bridge.mjs /app/hedge-app-bridge.mjs\nCOPY hedge-app-bridge.mjs /app/hedge-slack-bridge.mjs\nLABEL org.hedge.patch=\"1.1.0-elicitation\"\n");
   expect(bridge.equals(await bridgeBundle(hub.root))).toBe(true);
   expect(dockerfile).not.toMatch(/grafana/i);
   expect(existsSync(calls[4]!.command[4]!)).toBe(false);

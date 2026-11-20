@@ -1,6 +1,8 @@
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, relative } from "node:path";
+import { repoUrl } from "../pack/sources.ts";
+import type { SourceRef } from "../pack/types.ts";
 
 export const gitEnv = {
   ...process.env,
@@ -22,6 +24,13 @@ export function git(dir: string, ...args: string[]) {
   return result.stdout.toString().trim();
 }
 
+export async function cachedCheckout(dir: string, ref: SourceRef) {
+  mkdirSync(dir, { recursive: true });
+  await spawnGit(dir, "init", "-q");
+  await spawnGit(dir, "commit", "-q", "--allow-empty", "-m", "cached");
+  writeFileSync(join(dir, ".git", "hedge-source.json"), JSON.stringify({ repo: repoUrl(ref.repo), ref: ref.ref, commit: await spawnGit(dir, "rev-parse", "HEAD") }) + "\n");
+}
+
 export async function spawnGit(dir: string, ...args: string[]) {
   const child = Bun.spawn(["git", ...args], { cwd: dir, env: gitEnv, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
   const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
@@ -32,7 +41,7 @@ export async function spawnGit(dir: string, ...args: string[]) {
 export function tempDirs() {
   const dirs: string[] = [];
   return {
-    make(prefix = "fleet-test-") {
+    make(prefix = "hedge-test-") {
       const dir = mkdtempSync(join(tmpdir(), prefix));
       dirs.push(dir);
       return dir;
@@ -73,7 +82,7 @@ function restore(entries: Entry[], from: string, to: string) {
 export function template(build: (dir: string) => unknown) {
   let ready: Promise<{ from: string; entries: Entry[] }> | undefined;
   const prepare = async () => {
-    const from = mkdtempSync(join(tmpdir(), "fleet-template-"));
+    const from = mkdtempSync(join(tmpdir(), "hedge-template-"));
     try {
       await build(from);
       return { from, entries: snapshot(from) };

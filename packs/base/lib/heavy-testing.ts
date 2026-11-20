@@ -33,8 +33,8 @@ export async function heavy(bin: string, settings: Record<string, unknown>, ...a
 
 export async function heavyWith(extra: Record<string, string>, bin: string, settings: Record<string, unknown>, ...args: string[]) {
   const home = temp.make("home-");
-  const { FLEET_HEAVY_SLOTS: _, ...inherited } = Bun.env;
-  const env = { ...inherited, HOME: home, XDG_RUNTIME_DIR: home, PATH: `${bin}:${Bun.env.PATH}`, FLEET_SETTINGS: JSON.stringify(settings), ...extra };
+  const { HEDGE_HEAVY_SLOTS: _, ...inherited } = Bun.env;
+  const env = { ...inherited, HOME: home, XDG_RUNTIME_DIR: home, PATH: `${bin}:${Bun.env.PATH}`, HEDGE_SETTINGS: JSON.stringify(settings), ...extra };
   const child = Bun.spawn([process.execPath, join(import.meta.dir, "../commands/heavy.ts"), ...args], { env, stdout: "pipe", stderr: "pipe" });
   return { code: await child.exited, stdout: await new Response(child.stdout).text(), stderr: await new Response(child.stderr).text() };
 }
@@ -73,8 +73,8 @@ export function machine(slots = 1) {
   const tmp = temp.make("tmp-");
   const folder = temp.make("work-");
   const started: Array<ReturnType<typeof Bun.spawn>> = [];
-  const { FLEET_HEAVY_SLOTS: _, T3CODE_THREAD_ID: __, ...inherited } = Bun.env;
-  const env = (extra: Record<string, string>) => ({ ...inherited, HOME: home, XDG_RUNTIME_DIR: home, TMPDIR: tmp, PATH: `${bin}:${Bun.env.PATH}`, FLEET_SETTINGS: JSON.stringify(roomy), FLEET_HEAVY_SLOTS: String(slots), ...extra });
+  const { HEDGE_HEAVY_SLOTS: _, T3CODE_THREAD_ID: __, ...inherited } = Bun.env;
+  const env = (extra: Record<string, string>) => ({ ...inherited, HOME: home, XDG_RUNTIME_DIR: home, TMPDIR: tmp, PATH: `${bin}:${Bun.env.PATH}`, HEDGE_SETTINGS: JSON.stringify(roomy), HEDGE_HEAVY_SLOTS: String(slots), ...extra });
   const start = (args: string[], extra: Record<string, string> = {}) => {
     const child = Bun.spawn([process.execPath, join(import.meta.dir, "../commands/heavy.ts"), ...args], { cwd: folder, env: env(extra), stdout: "pipe", stderr: "pipe", detached: true });
     started.push(child);

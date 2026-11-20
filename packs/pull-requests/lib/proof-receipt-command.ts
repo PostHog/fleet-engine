@@ -25,12 +25,12 @@ async function storedArtifact(home: string, head: ProofIdentity) {
 
 function readBody(head: ProofIdentity, context: ReceiptContext) {
   const pull = readPullRequest(head, context.run);
-  if (!pull.body.trim()) throw new Error(`The body of ${head.repository}#${head.pr} read empty. fleet never writes over a body it could not read: retry, or add text to the body first`);
+  if (!pull.body.trim()) throw new Error(`The body of ${head.repository}#${head.pr} read empty. hedge never writes over a body it could not read: retry, or add text to the body first`);
   return pull;
 }
 
 async function writeBody(head: ProofIdentity, body: string, context: ReceiptContext) {
-  const directory = await mkdtemp(join(tmpdir(), "fleet-receipt-"));
+  const directory = await mkdtemp(join(tmpdir(), "hedge-receipt-"));
   try {
     const input = join(directory, "body.json");
     await writeFile(input, JSON.stringify({ body }), { mode: 0o600 });
@@ -99,9 +99,9 @@ export async function runReceipt(head: ProofIdentity, items: string[] | undefine
     await recordReceipt(home, head, published.url);
   } else await saveLocal();
   const intended = keepBody(first.body, place(published?.url));
-  if (readBody(head, context).body !== first.body) throw new Error("The PR body changed while fleet built the receipt. Run the receipt again");
+  if (readBody(head, context).body !== first.body) throw new Error("The PR body changed while hedge built the receipt. Run the receipt again");
   await writeBody(head, intended, context);
-  if (readBody(head, context).body !== intended) throw new Error("The PR body reads back different from the one fleet wrote. Check the body by hand, then run the receipt again");
+  if (readBody(head, context).body !== intended) throw new Error("The PR body reads back different from the one hedge wrote. Check the body by hand, then run the receipt again");
   if (items) await recordNotChecked(home, head, items);
   await recordBody();
   print(`receipt written at ${short(head.commit)}${published ? `: ${published.url}` : ""}`);

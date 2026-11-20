@@ -10,7 +10,7 @@ import { Stopped, type Terminal } from "../setup/terminal.ts";
 
 export type DevboxCommandContext = { home: string; terminal: Terminal; machine: Machine; machineFile: MachineFile; plan: Plan };
 
-const usage = "usage: fleet devbox, fleet devbox add <ssh host>, or fleet devbox remove <ssh host>";
+const usage = "usage: hedge devbox, hedge devbox add <ssh host>, or hedge devbox remove <ssh host>";
 
 /** Lists the devboxes, or makes an SSH host a devbox with the same steps setup runs. */
 export async function devboxCommand(args: string[], context: DevboxCommandContext): Promise<number> {
@@ -18,7 +18,7 @@ export async function devboxCommand(args: string[], context: DevboxCommandContex
   if (!args.length) {
     const hosts = machineFile.devboxes ?? [];
     terminal.print(hosts.length ? `Your devboxes: ${hosts.join(", ")}` : "No devbox yet.");
-    terminal.print("Add one with fleet devbox add <ssh host>.");
+    terminal.print("Add one with hedge devbox add <ssh host>.");
     return 0;
   }
   const [action, host, ...rest] = args;
@@ -47,7 +47,7 @@ export async function devboxCommand(args: string[], context: DevboxCommandContex
   } catch (error) {
     if (!(error instanceof Stopped)) throw error;
     terminal.print("");
-    terminal.print(`Stopped. Run fleet devbox add ${host} again to pick up where it stopped.`);
+    terminal.print(`Stopped. Run hedge devbox add ${host} again to pick up where it stopped.`);
     return 130;
   }
   terminal.print("");

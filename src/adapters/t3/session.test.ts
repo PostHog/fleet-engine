@@ -35,5 +35,5 @@ test.if(process.platform === "linux")("works inside a session that the running T
   stub = await startT3Stub({ shell });
   const answer = await localT3Server.session(stub.home, (rpc) => rpc.get("/api/orchestration/shell"));
   expect(answer).toEqual(shell);
-  expect(await stub.cliCalls()).toEqual(["auth session issue --json --ttl 5m --label fleet --subject fleet", "auth session revoke shell-session"]);
+  expect(await stub.cliCalls()).toEqual(["auth session issue --json --ttl 5m --label hedge --subject hedge", "auth session revoke shell-session"]);
 });

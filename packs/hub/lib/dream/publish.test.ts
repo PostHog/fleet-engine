@@ -30,20 +30,20 @@ function dreamTemplate(subtree: string) {
     const checkout = join(home, subtree ? ".agents/memory-repo" : ".agents/memory");
     git(home, "clone", "-q", origin, checkout);
     if (subtree) symlinkSync(join(checkout, subtree), join(home, ".agents/memory"));
-    writeHome(home, { ".config/fleet/machine.json": JSON.stringify({ schema: 1, role: "hub" }) });
-    git(checkout, "worktree", "add", "-q", join(home, ".local/state/fleet/dream/2026-11-05/memory"), "-b", "dream/2026-11-05", "origin/main");
+    writeHome(home, { ".config/hedge/machine.json": JSON.stringify({ schema: 1, role: "hub" }) });
+    git(checkout, "worktree", "add", "-q", join(home, ".local/state/hedge/dream/2026-11-05/memory"), "-b", "dream/2026-11-05", "origin/main");
   });
   dreamTemplates.set(subtree, built);
   return built;
 }
 
 async function dreamWorktree(subtree = "memory") {
-  const home = await dreamTemplate(subtree)(temp.make("fleet-dream-publish-"));
+  const home = await dreamTemplate(subtree)(temp.make("hedge-dream-publish-"));
   const laptop = join(home, "laptop");
   const prefix = subtree ? `${subtree}/` : "";
-  const worktree = join(home, ".local/state/fleet/dream/2026-11-05/memory");
+  const worktree = join(home, ".local/state/hedge/dream/2026-11-05/memory");
   const settings = { ...dreamSettings, "memory.subtree": subtree };
-  return { home, laptop, worktree, prefix, io: () => quietIo(home, { git: realGit, env: { FLEET_SETTINGS: JSON.stringify(settings) } }) };
+  return { home, laptop, worktree, prefix, io: () => quietIo(home, { git: realGit, env: { HEDGE_SETTINGS: JSON.stringify(settings) } }) };
 }
 
 const mainOf = (home: string, ...args: string[]) => git(home, "--git-dir", join(home, "origin.git"), ...args);
@@ -58,7 +58,7 @@ test("publish rebases the Dream's commits onto the memory repo's newer main and 
 
   expect(await dreamCommand(["publish", worktree], dream)).toBe(0);
 
-  expect(printed).toEqual([`Fleet dream: pushed ${git(worktree, "rev-parse", "--short", "HEAD")} to main.`]);
+  expect(printed).toEqual([`Hedge dream: pushed ${git(worktree, "rev-parse", "--short", "HEAD")} to main.`]);
   expect(mainOf(home, "log", "--format=%s", "main")).toBe(["Report: 2026-11-05", "Condense: rule", "memory: laptop", "memory: laptop"].join("\n"));
   expect(mainOf(home, "show", "main:memory/tech/rule.md")).toContain("Shorter.");
   expect(mainOf(home, "show", "main:memory/tech/new.md")).toContain("name: new");
@@ -66,11 +66,11 @@ test("publish rebases the Dream's commits onto the memory repo's newer main and 
 
 test("publish refuses commits outside the memory folder and dreams/, a conflict marker, a binary file, or a secret, even one a later commit removes or one in a commit message, and pushes nothing", async () => {
   const cases: Array<[string, Record<string, string>, string]> = [
-    ["outside", { "README.md": "# Changed\n" }, "Fleet dream: the commits change files outside memory/ and dreams/: README.md."],
-    ["marker", { "memory/tech/rule.md": "<<<<<<< HEAD\nA\n=======\nB\n>>>>>>> main\n" }, "Fleet dream: the commits add a conflict marker."],
-    ["binary", { "memory/tech/blob.md": "a\0b" }, "Fleet dream: the commits add a binary file. Memory holds text only."],
-    ["secret", { "memory/tech/token.md": `token ${fakeToken()}\n` }, "Fleet dream: the commits hold a secret (GitHub token), in this or an earlier commit. Remove it and rewrite the commits."],
-    ["message", { "memory/tech/fine.md": note("fine") }, "Fleet dream: the commits hold a secret (GitHub token), in this or an earlier commit. Remove it and rewrite the commits."],
+    ["outside", { "README.md": "# Changed\n" }, "Hedge dream: the commits change files outside memory/ and dreams/: README.md."],
+    ["marker", { "memory/tech/rule.md": "<<<<<<< HEAD\nA\n=======\nB\n>>>>>>> main\n" }, "Hedge dream: the commits add a conflict marker."],
+    ["binary", { "memory/tech/blob.md": "a\0b" }, "Hedge dream: the commits add a binary file. Memory holds text only."],
+    ["secret", { "memory/tech/token.md": `token ${fakeToken()}\n` }, "Hedge dream: the commits hold a secret (GitHub token), in this or an earlier commit. Remove it and rewrite the commits."],
+    ["message", { "memory/tech/fine.md": note("fine") }, "Hedge dream: the commits hold a secret (GitHub token), in this or an earlier commit. Remove it and rewrite the commits."],
   ];
   for (const [name, files, refusal] of cases) {
     const { home, worktree, io } = await dreamWorktree();
@@ -105,7 +105,7 @@ test("publish stops on a rebase conflict, names the file, and leaves the worktre
 
   expect(await dreamCommand(["publish", worktree], dream)).toBe(1);
 
-  expect(said).toEqual(["Fleet dream: rebasing onto main conflicts in memory/tech/rule.md. Merge origin/main, keep both sides, and publish again."]);
+  expect(said).toEqual(["Hedge dream: rebasing onto main conflicts in memory/tech/rule.md. Merge origin/main, keep both sides, and publish again."]);
   expect(git(worktree, "rev-parse", "--abbrev-ref", "HEAD")).toBe("dream/2026-11-05");
   expect(readFileSync(join(worktree, "memory/tech/rule.md"), "utf8")).toContain("Dream's version.");
   expect(mainOf(home, "show", "main:memory/tech/rule.md")).toContain("Laptop's version.");
@@ -115,13 +115,13 @@ test("publish refuses uncommitted changes, and says when there is nothing to pub
   const { worktree, io } = await dreamWorktree();
   const first = io();
   expect(await dreamCommand(["publish", worktree], first.io)).toBe(0);
-  expect(first.printed).toEqual(["Fleet dream: nothing to publish."]);
+  expect(first.printed).toEqual(["Hedge dream: nothing to publish."]);
   writeHome(worktree, { "memory/tech/draft.md": "draft\n" });
   const second = io();
 
   expect(await dreamCommand(["publish", worktree], second.io)).toBe(1);
 
-  expect(second.said).toEqual(["Fleet dream: the worktree has uncommitted changes. Commit each change first."]);
+  expect(second.said).toEqual(["Hedge dream: the worktree has uncommitted changes. Commit each change first."]);
   expect(existsSync(join(worktree, "memory/tech/draft.md"))).toBe(true);
 });
 
@@ -131,7 +131,7 @@ test("publish with no worktree prints its usage and exits 2", async () => {
 
   expect(await dreamCommand(["publish"], dream)).toBe(2);
 
-  expect(said).toEqual(["Usage: fleet dream publish <worktree>"]);
+  expect(said).toEqual(["Usage: hedge dream publish <worktree>"]);
 });
 
 test("publish refuses what the final tree hides from a commit-by-commit check: a merge that drops main's outside change, a padded name, a secret in a name, a symlink, and a submodule", async () => {
@@ -142,19 +142,19 @@ test("publish refuses what the final tree hides from a commit-by-commit check: a
       git(laptop, "push", "-q", "origin", "HEAD:main");
       git(worktree, "fetch", "-q", "origin", "main");
       git(worktree, "-c", "commit.gpgsign=false", "merge", "-q", "-s", "ours", "--no-edit", "origin/main");
-    }, "Fleet dream: the commits change files outside memory/ and dreams/: README.md."],
-    ["padded", (worktree) => commit(worktree, "Change: padded", { " memory/leak.md": "leak\n" }), "Fleet dream: the commits change files outside memory/ and dreams/:  memory/leak.md."],
-    ["named", (worktree) => commit(worktree, "Change: named", { [`memory/${fakeToken()}.md`]: "harmless\n" }), "Fleet dream: the commits hold a secret (GitHub token), in this or an earlier commit. Remove it and rewrite the commits."],
+    }, "Hedge dream: the commits change files outside memory/ and dreams/: README.md."],
+    ["padded", (worktree) => commit(worktree, "Change: padded", { " memory/leak.md": "leak\n" }), "Hedge dream: the commits change files outside memory/ and dreams/:  memory/leak.md."],
+    ["named", (worktree) => commit(worktree, "Change: named", { [`memory/${fakeToken()}.md`]: "harmless\n" }), "Hedge dream: the commits hold a secret (GitHub token), in this or an earlier commit. Remove it and rewrite the commits."],
     ["symlink", (worktree) => {
       rmSync(join(worktree, "memory/MEMORY.md"));
       symlinkSync("../README.md", join(worktree, "memory/MEMORY.md"));
       commit(worktree, "Change: symlink", {});
-    }, "Fleet dream: the commits add a symlink or a submodule: memory/MEMORY.md. Memory holds plain files only."],
+    }, "Hedge dream: the commits add a symlink or a submodule: memory/MEMORY.md. Memory holds plain files only."],
     ["submodule", (worktree) => {
       git(worktree, "update-index", "--add", "--cacheinfo", `160000,${git(worktree, "rev-parse", "HEAD")},memory/vendor`);
       git(worktree, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "Change: submodule");
       mkdirSync(join(worktree, "memory/vendor"));
-    }, "Fleet dream: the commits add a symlink or a submodule: memory/vendor. Memory holds plain files only."],
+    }, "Hedge dream: the commits add a symlink or a submodule: memory/vendor. Memory holds plain files only."],
   ];
   for (const [name, change, refusal] of cases) {
     const { home, laptop, worktree, io } = await dreamWorktree();
@@ -178,7 +178,7 @@ test("publish refuses when a guard's Git command fails, and pushes nothing", asy
 
   expect(await dreamCommand(["publish", worktree], { ...dream, git: failingLog })).toBe(1);
 
-  expect(said[0]).toStartWith("Fleet dream: cannot check the outgoing commits: git ");
+  expect(said[0]).toStartWith("Hedge dream: cannot check the outgoing commits: git ");
   expect(mainOf(home, "rev-parse", "main")).toBe(before);
 });
 
@@ -193,7 +193,7 @@ test("publish refuses a worktree paused in a rebase, and leaves it paused", asyn
 
   expect(await dreamCommand(["publish", worktree], dream)).toBe(1);
 
-  expect(said).toEqual(["Fleet dream: the worktree is in the middle of a rebase, merge, cherry-pick or revert. Finish or abort it, then publish again."]);
+  expect(said).toEqual(["Hedge dream: the worktree is in the middle of a rebase, merge, cherry-pick or revert. Finish or abort it, then publish again."]);
   expect(mainOf(home, "rev-parse", "main")).toBe(before);
 });
 
@@ -210,7 +210,7 @@ test("publish refuses a checkout that is not the memory repo's, and pushes nothi
 
   expect(await dreamCommand(["publish", project], dream)).toBe(1);
 
-  expect(said).toEqual([`Fleet dream: ${project} is not a worktree of the memory checkout ${join(home, ".agents/memory")}.`]);
+  expect(said).toEqual([`Hedge dream: ${project} is not a worktree of the memory checkout ${join(home, ".agents/memory")}.`]);
   expect(git(home, "--git-dir", other, "log", "--format=%s", "main")).toBe("Start");
 });
 
@@ -219,13 +219,13 @@ test("publish refuses an outside file or a symlink that only an earlier outgoing
     ["outside", (worktree) => {
       commit(worktree, "Change: readme", { "README.md": "# Private text\n" });
       commit(worktree, "Change: restore", { "README.md": "# Notes\n", "memory/tech/new.md": note("new") });
-    }, "Fleet dream: the commits change files outside memory/ and dreams/: README.md."],
+    }, "Hedge dream: the commits change files outside memory/ and dreams/: README.md."],
     ["symlink", (worktree) => {
       symlinkSync("../../README.md", join(worktree, "memory/tech/link.md"));
       commit(worktree, "Change: link", {});
       rmSync(join(worktree, "memory/tech/link.md"));
       commit(worktree, "Change: text", { "memory/tech/link.md": note("link") });
-    }, "Fleet dream: the commits add a symlink or a submodule: memory/tech/link.md. Memory holds plain files only."],
+    }, "Hedge dream: the commits add a symlink or a submodule: memory/tech/link.md. Memory holds plain files only."],
     ["merge", (worktree, laptop) => {
       commit(worktree, "Change: rule", { "memory/tech/rule.md": note("rule", {}, "Dream's version.") });
       commit(laptop, "memory: laptop", { "memory/tech/other.md": note("other") });
@@ -237,7 +237,7 @@ test("publish refuses an outside file or a symlink that only an earlier outgoing
       git(worktree, "-c", "commit.gpgsign=false", "commit", "-q", "--no-edit");
       rmSync(join(worktree, "memory/tech/link.md"));
       commit(worktree, "Change: text", { "memory/tech/link.md": note("link") });
-    }, "Fleet dream: the commits add a symlink or a submodule: memory/tech/link.md. Memory holds plain files only."],
+    }, "Hedge dream: the commits add a symlink or a submodule: memory/tech/link.md. Memory holds plain files only."],
   ];
   for (const [name, change, refusal] of cases) {
     const { home, laptop, worktree, io } = await dreamWorktree();
@@ -265,13 +265,13 @@ test("publish pushes the commit it checked, not one made in the worktree after t
   expect(await dreamCommand(["publish", worktree], { ...dream, git: lateCommit })).toBe(0);
 
   expect(mainOf(home, "rev-parse", "main")).toBe(checked);
-  expect(printed).toEqual([`Fleet dream: pushed ${checked.slice(0, 7)} to main.`]);
+  expect(printed).toEqual([`Hedge dream: pushed ${checked.slice(0, 7)} to main.`]);
 });
 
 test("publish accepts memory.subtree with a trailing slash, as the memory sync does", async () => {
   const { home, worktree } = await dreamWorktree();
   commit(worktree, "Change: new", { "memory/tech/new.md": note("new") });
-  const { io: dream } = quietIo(home, { git: realGit, env: { FLEET_SETTINGS: JSON.stringify({ ...dreamSettings, "memory.subtree": "memory/" }) } });
+  const { io: dream } = quietIo(home, { git: realGit, env: { HEDGE_SETTINGS: JSON.stringify({ ...dreamSettings, "memory.subtree": "memory/" }) } });
 
   expect(await dreamCommand(["publish", worktree], dream)).toBe(0);
 
@@ -279,15 +279,15 @@ test("publish accepts memory.subtree with a trailing slash, as the memory sync d
 });
 
 test("publish to a memory repo with no main yet says the memory sync creates it", async () => {
-  const home = temp.make("fleet-dream-publish-");
+  const home = temp.make("hedge-dream-publish-");
   const checkout = join(home, ".agents/memory");
   git(home, "init", "-q", "--bare", "-b", "main", join(home, "origin.git"));
   git(home, "clone", "-q", join(home, "origin.git"), checkout);
   commit(checkout, "memory: hub", { "MEMORY.md": "# Memory index\n" });
-  writeHome(home, { ".config/fleet/machine.json": JSON.stringify({ schema: 1, role: "hub" }) });
-  const { io: dream, said } = quietIo(home, { git: realGit, env: { FLEET_SETTINGS: JSON.stringify({ ...dreamSettings, "memory.subtree": "" }) } });
+  writeHome(home, { ".config/hedge/machine.json": JSON.stringify({ schema: 1, role: "hub" }) });
+  const { io: dream, said } = quietIo(home, { git: realGit, env: { HEDGE_SETTINGS: JSON.stringify({ ...dreamSettings, "memory.subtree": "" }) } });
 
   expect(await dreamCommand(["publish", checkout], dream)).toBe(1);
 
-  expect(said).toEqual(["Fleet dream: the memory repo has no main yet. Run fleet memory-sync to create it, then publish again."]);
+  expect(said).toEqual(["Hedge dream: the memory repo has no main yet. Run hedge memory-sync to create it, then publish again."]);
 });

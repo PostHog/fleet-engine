@@ -9,9 +9,9 @@ export type ModelRow = { role: string; work: string; provider: "claude" | "codex
 const efforts = ["low", "medium", "high", "xhigh", "max"];
 
 export function modelTable(env: Env = Bun.env): ModelRow[] {
-  if (!env.FLEET_MODELS) throw new Error("run this command as fleet <command>, so it gets your model table");
-  const rows = JSON.parse(env.FLEET_MODELS) as unknown;
-  if (!Array.isArray(rows) || !rows.every(isRow)) throw new Error("FLEET_MODELS holds a malformed row");
+  if (!env.HEDGE_MODELS) throw new Error("run this command as hedge <command>, so it gets your model table");
+  const rows = JSON.parse(env.HEDGE_MODELS) as unknown;
+  if (!Array.isArray(rows) || !rows.every(isRow)) throw new Error("HEDGE_MODELS holds a malformed row");
   return rows;
 }
 

@@ -14,7 +14,7 @@ export type ContextOptions = { home: string; plan: Plan; pack: string; code: Pac
 export const credentialName = (id: string) => `credential.${id}`;
 
 export async function packContext({ home, plan, pack, code, workflows, print, clock, stdin = () => Bun.stdin.stream() }: ContextOptions): Promise<Context> {
-  const stateDir = join(home, ".local/state/fleet", pack);
+  const stateDir = join(home, ".local/state/hedge", pack);
   await mkdir(stateDir, { recursive: true, mode: 0o700 });
   const threads = t3Threads(plan.models, { home });
   const secrets = secretStore(home, pack);
@@ -26,7 +26,7 @@ export async function packContext({ home, plan, pack, code, workflows, print, cl
         const listing = workflows.filter((workflow) => workflow.settings?.includes(key));
         const active = (workflow: Workflow) => plan.workflows.some((entry) => entry.id === workflow.id && entry.active);
         const off = listing.some(active) ? undefined : listing[0];
-        throw new Error(off ? `${key} belongs to the ${off.name} workflow, which is off. Turn it on with fleet packs --workflows ${off.id}=on.` : `${key} has no value. Set it with fleet set ${key}=<value>.`);
+        throw new Error(off ? `${key} belongs to the ${off.name} workflow, which is off. Turn it on with hedge packs --workflows ${off.id}=on.` : `${key} has no value. Set it with hedge set ${key}=<value>.`);
       }
       return value as T;
     },
@@ -43,21 +43,21 @@ export async function packContext({ home, plan, pack, code, workflows, print, cl
       const entry = plan.catalog?.find((item) => item.pack === pack && item.id === id);
       if (!entry) throw new Error(`the service catalog has no ${pack}/${id}: its workflow or plan is off in your profile.`);
       const credential = await secrets.read(credentialName(id));
-      if (!credential) throw new Error(`${pack}/${id} has no credential on this machine yet. Run fleet apply on the hub.`);
+      if (!credential) throw new Error(`${pack}/${id} has no credential on this machine yet. Run hedge apply on the hub.`);
       return { url: `http://127.0.0.1:${entry.port}`, credential };
     },
   };
 }
 
 export function secretStore(home: string, pack: string): Secrets {
-  const dir = join(home, ".config/fleet/secrets", pack);
+  const dir = join(home, ".config/hedge/secrets", pack);
   const path = (name: string) => {
     if (!isSecretName(name)) throw new Error(`a secret's name is lowercase words joined by dashes or dots, not ${JSON.stringify(name)}`);
     return join(dir, name);
   };
   return {
     async read(name) {
-      const shown = `~/.config/fleet/secrets/${pack}/${name}`;
+      const shown = `~/.config/hedge/secrets/${pack}/${name}`;
       let file;
       try {
         file = await open(path(name), constants.O_RDONLY | constants.O_NOFOLLOW);

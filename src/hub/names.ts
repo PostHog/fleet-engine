@@ -9,6 +9,6 @@ export const isBoxName = (name: string) => boxName.test(name);
 export const canBeDevbox = (name: string) => isNodeName(name) && !isKeptForBoxes(name);
 
 export function sshName(alias: string): string {
-  if (!isNodeName(alias)) throw new Error(`${JSON.stringify(alias)} is not an SSH name Fleet can use.`);
+  if (!isNodeName(alias)) throw new Error(`${JSON.stringify(alias)} is not an SSH name Hedge can use.`);
   return alias;
 }

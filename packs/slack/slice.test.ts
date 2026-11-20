@@ -76,9 +76,9 @@ async function hub() {
   cpSync(join(t3.home, ".t3/userdata/server-runtime.json"), join(home, ".t3/userdata/server-runtime.json"));
   writeFileSync(join(home, ".gitconfig"), "[user]\n\tname = Nora Example\n");
   const profile = temp.make("profile-");
-  writeFileSync(join(profile, "fleet.json"), JSON.stringify({ schema: 1, engine: { repo: "example/engine", ref: "main", channel: "track" }, sources: [], packs: ["slack"], plan: "claude", settings: { "slack.userId": ownerId, "base.startFloorGigabytes": 0 }, workflows: { "slack-thread": true } }));
+  writeFileSync(join(profile, "hedge.json"), JSON.stringify({ schema: 1, engine: { repo: "example/engine", ref: "main", channel: "track" }, sources: [], packs: ["slack"], plan: "claude", settings: { "slack.userId": ownerId, "base.startFloorGigabytes": 0 }, workflows: { "slack-thread": true } }));
   const minutes: Array<() => void> = [];
-  const engineFleet = join(repoRoot, "fleet");
+  const engineHedge = join(repoRoot, "hedge");
   let lines: string[] = [];
   const systemd = fakeSystemd();
   const options: CliOptions = {
@@ -87,46 +87,46 @@ async function hub() {
     platform: "linux",
     env: {},
     print: (line) => lines.push(line),
-    run: async (command) => (command[0] === "/bin/sh" && command[1] === engineFleet ? main(command.slice(2), { ...options, print: () => {} }) : 0),
+    run: async (command) => (command[0] === "/bin/sh" && command[1] === engineHedge ? main(command.slice(2), { ...options, print: () => {} }) : 0),
     adapters: () => [filesAdapter, jobsAdapter({ run: systemd.run, engineRoot: repoRoot })],
     clock: { now: () => Date.parse("2026-11-10T12:00:00Z"), sleep: (ms) => (ms === 60_000 ? new Promise<void>((resolve) => minutes.push(resolve)) : Promise.resolve()) },
   };
-  const fleet = async (...args: string[]) => {
+  const hedge = async (...args: string[]) => {
     lines = [];
     return { code: await main(args, options), lines };
   };
   const setup = async (appToken: string) => {
     const restore = typed(appToken, userToken);
     try {
-      return await fleet("slack-trigger", "setup");
+      return await hedge("slack-trigger", "setup");
     } finally {
       restore();
     }
   };
   const minute = () => minutes.splice(0).forEach((resolve) => resolve());
   const trigger = () => systemd.service(home, "slack-trigger");
-  return { home, profile, slack, liveApps, t3, fleet, setup, minute, trigger, started: () => systemd.started("slack-trigger") };
+  return { home, profile, slack, liveApps, t3, hedge, setup, minute, trigger, started: () => systemd.started("slack-trigger") };
 }
 
 test("setup installs the trigger, an owner's message starts one thread, and after a lost answer the restarted trigger posts its link once", async () => {
-  const { home, profile, slack, liveApps, t3, fleet, setup, minute, trigger } = await hub();
-  const todo = "Make your own Slack app for Start a thread from Slack, then paste its two tokens. Fleet keeps them where only you can read them. Run: fleet slack-trigger setup";
+  const { home, profile, slack, liveApps, t3, hedge, setup, minute, trigger } = await hub();
+  const todo = "Make your own Slack app for Start a thread from Slack, then paste its two tokens. Hedge keeps them where only you can read them. Run: hedge slack-trigger setup";
   const saved = "Saved both tokens where only you can read them. A running Slack trigger starts again with them within a minute.";
   const replies = () => slack.method("chat.postEphemeral").map((call) => call.args.text);
 
-  const before = await fleet("apply", "--profile", profile);
+  const before = await hedge("apply", "--profile", profile);
   expect(before.lines.join("\n")).toContain(todo);
   expect(trigger()).toBe("gone");
   expect(await setup(firstApp)).toEqual({ code: 0, lines: expect.arrayContaining([saved, expect.stringContaining("T3Code%20-%20Nora%20Example")]) });
   expect(trigger()).toBe("running");
-  await fleet("apply");
+  await hedge("apply");
   expect(trigger()).toBe("running");
 
-  const serving = fleet("run", "slack/slack-trigger");
+  const serving = hedge("run", "slack/slack-trigger");
   await slack.connected();
   slack.send({ type: "message", user: ownerId, channel: "C1", ts: "100.1", text: "the build is red :t3code:" });
   await slack.until(() => replies().length === 1);
-  expect(replies()).toEqual(["Could not start a T3 thread. Fleet retries every minute for a day."]);
+  expect(replies()).toEqual(["Could not start a T3 thread. Hedge retries every minute for a day."]);
   expect(t3.threads.map((thread) => thread.title)).toEqual(["Slack: the build is red"]);
 
   liveApps.add(secondApp);
@@ -134,25 +134,25 @@ test("setup installs the trigger, an owner's message starts one thread, and afte
   liveApps.delete(firstApp);
   minute();
   expect((await serving).code).toBe(0);
-  const restarted = fleet("run", "slack/slack-trigger");
+  const restarted = hedge("run", "slack/slack-trigger");
   await slack.connected(2);
   minute();
   await slack.until(() => replies().length === 2);
   expect(replies()[1]).toBe("Started <https://app.t3.codes/threads/env-hub/thread-1|Slack: the build is red> on this machine.");
   expect(t3.threads.map((thread) => thread.id)).toEqual(["thread-1"]);
 
-  rmSync(join(home, ".config/fleet/secrets/slack/app"));
+  rmSync(join(home, ".config/hedge/secrets/slack/app"));
   minute();
   expect((await restarted).code).toBe(0);
   mkdirSync(join(home, ".bun/bin"), { recursive: true });
   symlinkSync(process.execPath, join(home, ".bun/bin/bun"));
-  const launched = Bun.spawn(["/bin/sh", join(home, ".local/state/fleet/jobs/slack-trigger.sh")], { env: { HOME: home } });
+  const launched = Bun.spawn(["/bin/sh", join(home, ".local/state/hedge/jobs/slack-trigger.sh")], { env: { HOME: home } });
   stops.push(() => launched.kill());
-  expect(await logged(join(home, ".local/state/fleet/jobs/slack-trigger.log"))).toBe(`fleet run: slack/slack-trigger waits until slack-app passes. ${todo}\n`);
+  expect(await logged(join(home, ".local/state/hedge/jobs/slack-trigger.log"))).toBe(`hedge run: slack/slack-trigger waits until slack-app passes. ${todo}\n`);
   launched.kill();
   await launched.exited;
   expect(launched.signalCode).toBe("SIGTERM");
-  expect((await fleet("apply")).lines.join("\n")).toContain(todo);
+  expect((await hedge("apply")).lines.join("\n")).toContain(todo);
   expect(trigger()).toBe("gone");
 });
 
@@ -162,28 +162,28 @@ async function pushedFrom(profile: string) {
   await spawnGit(profile, "init", "-q", "-b", "main");
   await spawnGit(profile, "config", "user.name", "Test");
   await spawnGit(profile, "config", "user.email", "test@example.com");
-  await spawnGit(profile, "add", "fleet.json");
+  await spawnGit(profile, "add", "hedge.json");
   await spawnGit(profile, "commit", "-q", "-m", "Start");
   await spawnGit(profile, "remote", "add", "origin", remote);
   await spawnGit(profile, "push", "-q", "-u", "origin", "main");
 }
 
-test("fleet set slack.emoji restarts the trigger, and the trigger then starts a thread from that emoji and not from :t3code:", async () => {
-  const { home, profile, slack, t3, fleet, setup, minute, started } = await hub();
+test("hedge set slack.emoji restarts the trigger, and the trigger then starts a thread from that emoji and not from :t3code:", async () => {
+  const { home, profile, slack, t3, hedge, setup, minute, started } = await hub();
   await pushedFrom(profile);
-  await fleet("apply", "--profile", profile);
+  await hedge("apply", "--profile", profile);
   await setup(firstApp);
   const before = started();
 
-  expect((await fleet("set", "slack.emoji=:eye:")).code).toBe(0);
+  expect((await hedge("set", "slack.emoji=:eye:")).code).toBe(0);
   expect(started()).toBe(before + 1);
 
-  const serving = fleet("run", "slack/slack-trigger");
+  const serving = hedge("run", "slack/slack-trigger");
   await slack.connected();
   slack.send({ type: "message", user: ownerId, channel: "C1", ts: "100.1", text: "the build is red :t3code:" });
   slack.send({ type: "reaction_added", user: ownerId, reaction: "eye", item: { type: "message", channel: "C1", ts: "100.1" } });
   await slack.until(() => slack.method("chat.postEphemeral").length === 1);
-  rmSync(join(home, ".config/fleet/secrets/slack/app"));
+  rmSync(join(home, ".config/hedge/secrets/slack/app"));
   minute();
   await serving;
 
@@ -191,21 +191,21 @@ test("fleet set slack.emoji restarts the trigger, and the trigger then starts a 
   expect(t3.rpcCalls.find((call) => call.tag === "orchestration.launchThread")!.payload).toMatchObject({ initialMessage: { text: expect.stringContaining("Nora Example reacted with :eye: to a Slack message.") } });
 });
 
-test("fleet slack-trigger names the Slack pack when the pack is off", async () => {
-  const { profile, fleet } = await hub();
-  writeFileSync(join(profile, "fleet.json"), JSON.stringify({ schema: 1, engine: { repo: "example/engine", ref: "main", channel: "track" }, sources: [], packs: [], plan: "claude", settings: {}, workflows: {} }));
-  await fleet("apply", "--profile", profile);
-  expect(await fleet("slack-trigger", "check")).toEqual({ code: 2, lines: ["fleet slack-trigger comes from the Slack pack, which is off. Turn it on with fleet packs."] });
+test("hedge slack-trigger names the Slack pack when the pack is off", async () => {
+  const { profile, hedge } = await hub();
+  writeFileSync(join(profile, "hedge.json"), JSON.stringify({ schema: 1, engine: { repo: "example/engine", ref: "main", channel: "track" }, sources: [], packs: [], plan: "claude", settings: {}, workflows: {} }));
+  await hedge("apply", "--profile", profile);
+  expect(await hedge("slack-trigger", "check")).toEqual({ code: 2, lines: ["hedge slack-trigger comes from the Slack pack, which is off. Turn it on with hedge packs."] });
 });
 
 test("the Slack app check fails for a saved app that the trigger cannot use, so apply keeps the To do", async () => {
-  const { home, profile, fleet } = await hub();
-  await fleet("apply", "--profile", profile);
+  const { home, profile, hedge } = await hub();
+  await hedge("apply", "--profile", profile);
   const store = secretStore(home, "slack");
   for (const saved of ["{", JSON.stringify({ appToken: "wrong", userToken }), JSON.stringify({ appToken: firstApp })]) {
     await store.write("app", saved);
-    expect((await fleet("run", "slack/slack-app")).code).toBe(1);
+    expect((await hedge("run", "slack/slack-app")).code).toBe(1);
   }
   await store.write("app", JSON.stringify({ appToken: firstApp, userToken }));
-  expect((await fleet("run", "slack/slack-app")).code).toBe(0);
+  expect((await hedge("run", "slack/slack-app")).code).toBe(0);
 });

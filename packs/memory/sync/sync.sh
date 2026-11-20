@@ -1,19 +1,19 @@
 #!/bin/sh
 # Keeps the memory checkout in step with the user's private memory repo on every machine.
 # Each run commits this machine's changes, rebases them onto main, and pushes.
-# With FLEET_MEMORY_SUBTREE, the checkout sits beside the memory folder, the memory folder links to that
+# With HEDGE_MEMORY_SUBTREE, the checkout sits beside the memory folder, the memory folder links to that
 # folder of the repo, and only that folder is committed and pushed.
 # MEMORY.md and every INDEX.md merge by union. When two machines change the same lines of another file, this
 # machine's version wins and the other goes to .conflicts/ in the memory folder.
 # A conflict marker, a secret, or a change outside the subtree in any outgoing commit stops the push.
 # Commits are signed when the user's Git config signs commits, so a repo that requires signatures takes them.
 # A checkout of another repo than memory.repo moves aside, and this machine's unsynced notes carry over.
-# Every state that stops the sync exits 1, so the job log and fleet doctor see it.
+# Every state that stops the sync exits 1, so the job log and hedge doctor see it.
 set -eu
 
-url=${FLEET_MEMORY_URL:?FLEET_MEMORY_URL is not set}
-memory=${FLEET_MEMORY_DIR:-$HOME/.agents/memory}
-subtree=$(printf '%s' "${FLEET_MEMORY_SUBTREE:-}" | sed -e 's#^/*##' -e 's#/*$##')
+url=${HEDGE_MEMORY_URL:?HEDGE_MEMORY_URL is not set}
+memory=${HEDGE_MEMORY_DIR:-$HOME/.agents/memory}
+subtree=$(printf '%s' "${HEDGE_MEMORY_SUBTREE:-}" | sed -e 's#^/*##' -e 's#/*$##')
 machine=${CODER_WORKSPACE_NAME:-$(hostname -s)}
 here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 g() { git -c core.quotePath=false -C "$checkout" "$@"; }
@@ -62,7 +62,7 @@ if [ -e "$checkout/.git" ]; then
   origin=$(g remote get-url origin 2>/dev/null || true)
   if [ "$(repo_name "$origin")" != "$(repo_name "$url")" ]; then
     aside="$checkout.old-$(date -u +%Y%m%dT%H%M%SZ)"
-    carry="$(g rev-parse --absolute-git-dir)/fleet-carry"
+    carry="$(g rev-parse --absolute-git-dir)/hedge-carry"
     { g diff --name-only HEAD -- "$scope" 2>/dev/null || true
       g ls-files --others --exclude-standard -- "$scope"
       g diff --name-only origin/main...HEAD -- "$scope" 2>/dev/null || true
@@ -82,7 +82,7 @@ if [ -n "$aside" ]; then
     [ -n "$path" ] && [ -f "$aside/$path" ] || continue
     mkdir -p "$(dirname "$checkout/$path")"
     cp -p "$aside/$path" "$checkout/$path"
-  done < "$aside/.git/fleet-carry"
+  done < "$aside/.git/hedge-carry"
   echo "Memory: $checkout synced with $origin, but memory.repo is $url. Moved it to $aside and carried this machine's unsynced notes over."
 fi
 
@@ -127,8 +127,8 @@ if [ -n "$subtree" ]; then
   fi
 fi
 
-marker="$gitdir/fleet-sync-rebase"
-snapshot="$gitdir/fleet-sync-files.tar"
+marker="$gitdir/hedge-sync-rebase"
+snapshot="$gitdir/hedge-sync-files.tar"
 rebasing() { [ -d "$gitdir/rebase-merge" ] || [ -d "$gitdir/rebase-apply" ]; }
 if rebasing && [ -f "$marker" ]; then
   conflicted=$(g diff --name-only --diff-filter=U)
@@ -257,9 +257,9 @@ while :; do
       exit 0
     fi
     parted=$(g merge-base HEAD origin/main 2>/dev/null || g hash-object -t tree /dev/null)
-    at_risk "$parted" "$gitdir/fleet-sync-at-risk"
+    at_risk "$parted" "$gitdir/hedge-sync-at-risk"
     rebase || fail "cannot rebase $checkout onto origin/main. Not synced."
-    keep_lost "$parted" "$gitdir/fleet-sync-at-risk"
+    keep_lost "$parted" "$gitdir/hedge-sync-at-risk"
     base=origin/main
   else
     has_commits || { echo "Memory: $url is empty, and this machine has nothing to share yet."; exit 0; }

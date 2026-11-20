@@ -32,7 +32,7 @@ export function mergeBase(identity: ProofIdentity, run: Run) {
   const after = found();
   if (after) return after;
   const where = `Cannot find where ${identity.repository}#${identity.pr} branched from its base ${base} here`;
-  if (!remotes.length) throw new Error(`${where}: no remote of this checkout points at ${identity.repository}. Run the command in a checkout of ${identity.repository}, or add one here: git remote add fleet-base https://github.com/${identity.repository}.git && git fetch fleet-base ${base} pull/${identity.pr}/head`);
+  if (!remotes.length) throw new Error(`${where}: no remote of this checkout points at ${identity.repository}. Run the command in a checkout of ${identity.repository}, or add one here: git remote add hedge-base https://github.com/${identity.repository}.git && git fetch hedge-base ${base} pull/${identity.pr}/head`);
   if (run(["git", "cat-file", "-e", `${identity.commit}^{commit}`]).code !== 0) throw new Error(`${where}: ${short(identity.commit)} is not in this checkout. Run git fetch ${remotes[0]} pull/${identity.pr}/head`);
   throw new Error(`${where}, after fetching ${base} from ${remotes.join(", ")}: ${short(identity.commit)} shares no history with it`);
 }

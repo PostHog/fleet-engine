@@ -7,5 +7,5 @@ import { trackerSetting } from "../lib/wayfinder.ts";
 
 await runCommand(() => runLessons(Bun.argv.slice(2), {
   home: homedir(), host: hostname(), print: (line) => console.log(line), warn: (line) => console.error(line),
-  tracker: () => mapTracker(optionalStringSetting(trackerSetting), Bun.env.FLEET_PROFILE_DIR), rolloutLog: () => stringSetting(rolloutLogSetting),
+  tracker: () => mapTracker(optionalStringSetting(trackerSetting), Bun.env.HEDGE_PROFILE_DIR), rolloutLog: () => stringSetting(rolloutLogSetting),
 }));

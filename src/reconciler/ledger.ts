@@ -2,28 +2,30 @@ import { lstat, mkdir, readFile, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 import { checkParents, inside } from "../files/install.ts";
 import { writePrivateFile } from "../files/private.ts";
+import { asHedge } from "./engine-command.ts";
 
-/** A step with an undo that held on this machine, as it was when it last applied, so Fleet can undo it after it leaves the plan. */
+/** A step with an undo that held on this machine, as it was when it last applied, so Hedge can undo it after it leaves the plan. */
 export type LedgerStep = { pack: string; id: string; check: string[]; undo: string[]; after?: string; prerequisite?: string[] };
 
 /** A human step with an undo text whose probe passed on this machine, so doctor can say what a person removes after it leaves the plan. */
 export type LedgerHuman = { pack: string; id: string; probe: string[]; undo: string };
 export type Ledger = { steps: LedgerStep[]; human: LedgerHuman[] };
 
-const ledgerPath = ".local/state/fleet/steps.json";
-const lockPath = ".local/state/fleet/steps.lock";
+const ledgerPath = ".local/state/hedge/steps.json";
+const lockPath = ".local/state/hedge/steps.lock";
 const isStrings = (value: unknown): value is string[] => Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === "string");
 
 export const ledgerKey = (step: { pack: string; id: string }) => `${step.pack}/${step.id}`;
 
-export const undoVariable = "FLEET_UNDO";
+export const undoVariable = "HEDGE_UNDO";
 
-/** The pack whose command line this is, when it is the undo, check or prerequisite of the ledger step that FLEET_UNDO names, or the probe of its human step. */
+/** The pack whose command line this is, when it is the undo, check or prerequisite of the ledger step that HEDGE_UNDO names, or the probe of its human step. */
 export async function undoingPack(home: string, env: Record<string, string | undefined>, command: string[]): Promise<string | undefined> {
   const key = env[undoVariable];
   if (!key) return undefined;
   const ledger = await readLedger(home);
-  const same = (line: string[] | undefined) => line?.length === command.length && line.every((part, index) => part === command[index]);
+  const typed = asHedge(command);
+  const same = (line: string[] | undefined) => line?.length === typed.length && asHedge(line).every((part, index) => part === typed[index]);
   const step = ledger.steps.find((item) => ledgerKey(item) === key);
   if (step && [step.undo, step.check, step.prerequisite].some(same)) return step.pack;
   const human = ledger.human.find((item) => ledgerKey(item) === key);
@@ -39,13 +41,19 @@ export async function readLedger(home: string): Promise<Ledger> {
   });
   if (!info) return { steps: [], human: [] };
   if (!info.isFile()) throw new Error(`${ledgerPath} must be a regular file`);
-  const value = JSON.parse(await readFile(path, "utf8")) as { version?: unknown; steps?: unknown; human?: unknown };
+  const ledger = asLedger(JSON.parse(await readFile(path, "utf8")));
+  if (!ledger) throw new Error(`${ledgerPath} is not a Hedge step ledger`);
+  return ledger;
+}
+
+export function asLedger(parsed: unknown): Ledger | undefined {
+  const value = (parsed ?? {}) as { version?: unknown; steps?: unknown; human?: unknown };
   const valid = (step: Partial<LedgerStep>) =>
     typeof step.pack === "string" && typeof step.id === "string" && isStrings(step.check) && isStrings(step.undo) && (step.after === undefined || typeof step.after === "string") && (step.prerequisite === undefined || isStrings(step.prerequisite));
   const validHuman = (step: Partial<LedgerHuman>) => typeof step.pack === "string" && typeof step.id === "string" && isStrings(step.probe) && typeof step.undo === "string";
   const human = value.human ?? [];
   const records = (list: unknown, check: (item: never) => boolean) => Array.isArray(list) && list.every((item) => item && typeof item === "object" && check(item as never));
-  if (value.version !== 1 || !records(value.steps, valid) || !records(human, validHuman)) throw new Error(`${ledgerPath} is not a Fleet step ledger`);
+  if (value.version !== 1 || !records(value.steps, valid) || !records(human, validHuman)) return undefined;
   return { steps: value.steps as LedgerStep[], human: human as LedgerHuman[] };
 }
 
@@ -71,7 +79,7 @@ async function rewrite<List extends keyof Ledger>(home: string, list: List, key:
 
 const lockWaits = 400;
 
-/** Holds the ledger's lock while work runs. Another Fleet process holds it only for one read and write, so this waits a little for it, and names it when it stays. */
+/** Holds the ledger's lock while work runs. Another Hedge process holds it only for one read and write, so this waits a little for it, and names it when it stays. */
 async function locked<T>(home: string, work: () => Promise<T>): Promise<T> {
   await checkParents(home, lockPath);
   const lock = inside(home, lockPath);
@@ -82,7 +90,7 @@ async function locked<T>(home: string, work: () => Promise<T>): Promise<T> {
       break;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      if (wait === lockWaits) throw new Error(`Another Fleet apply holds ${lock}. Remove it only if that apply has stopped.`);
+      if (wait === lockWaits) throw new Error(`Another Hedge apply holds ${lock}. Remove it only if that apply has stopped.`);
       await Bun.sleep(5);
     }
   }

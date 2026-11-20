@@ -2,9 +2,9 @@ import { constants } from "node:fs";
 import { access, lstat, mkdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-export const fleetCargoConfig = "[net]\ngit-fetch-with-cli = true\n";
+export const hedgeCargoConfig = "[net]\ngit-fetch-with-cli = true\n";
 
-const usage = "usage: fleet cargo-git-cli [--check]";
+const usage = "usage: hedge cargo-git-cli [--check]";
 
 type Cargo = { home: string; cargoHome?: string };
 
@@ -14,7 +14,7 @@ export async function cargoGitCliCommand(args: string[], cargo: Cargo): Promise<
   if (!(await needsConfig(dir))) return 0;
   if (args[0] === "--check") return 1;
   await mkdir(dir, { recursive: true });
-  await writeFile(join(dir, "config.toml"), fleetCargoConfig);
+  await writeFile(join(dir, "config.toml"), hedgeCargoConfig);
   return 0;
 }
 

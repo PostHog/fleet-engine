@@ -15,10 +15,10 @@ export type HttpsHub = {
   caddyInstalled(): boolean; run: Run; sleep(ms: number): Promise<void>; print(line: string): void;
 };
 
-const marker = "# Managed by Fleet hub HTTPS.";
-const service = "fleet-hub-https.service";
+const marker = "# Managed by Hedge hub HTTPS.";
+const service = "hedge-hub-https.service";
 const caddy = "/usr/bin/caddy";
-const httpsDir = (home: string) => join(home, ".local/share/fleet-hub-https");
+const httpsDir = (home: string) => join(home, ".local/share/hedge-hub-https");
 const gateway = `reverse_proxy 127.0.0.1:${gatewayPort}`;
 const authorityDir = (home: string) => join(httpsDir(home), "caddy/pki/authorities/local");
 const certificatePattern = /^(-----BEGIN CERTIFICATE-----\n[A-Za-z0-9+/=\n]+-----END CERTIFICATE-----\n?)+$/;
@@ -63,13 +63,13 @@ https://${host}:${port} {
 
 const unit = `${marker}
 [Unit]
-Description=Fleet private hub HTTPS
+Description=Hedge private hub HTTPS
 After=network.target
 
 [Service]
-ExecStart=${caddy} run --config "%h/.local/share/fleet-hub-https/Caddyfile" --adapter caddyfile
-Environment=XDG_DATA_HOME=%h/.local/share/fleet-hub-https
-Environment=XDG_CONFIG_HOME=%h/.local/share/fleet-hub-https
+ExecStart=${caddy} run --config "%h/.local/share/hedge-hub-https/Caddyfile" --adapter caddyfile
+Environment=XDG_DATA_HOME=%h/.local/share/hedge-hub-https
+Environment=XDG_CONFIG_HOME=%h/.local/share/hedge-hub-https
 Restart=always
 RestartSec=5
 UMask=0077
@@ -84,7 +84,7 @@ export async function hubHttps(mode: HttpsMode, hub: HttpsHub): Promise<number> 
   if (!hub.httpsHost) return hub.print("Hub HTTPS is off: hub.httpsHost is empty."), 0;
   if (!hostPattern.test(hub.httpsHost)) throw new Error(`hub.httpsHost is not a host name: ${JSON.stringify(hub.httpsHost)}`);
   if (mode === "trusted") return trusted(hub);
-  if (readRole(hub.home) !== "hub") throw new Error(`fleet hub-https ${mode} runs only on the hub.`);
+  if (readRole(hub.home) !== "hub") throw new Error(`hedge hub-https ${mode} runs only on the hub.`);
   if (mode === "ca") return printAuthority(hub);
   const port = relayPortOf(hub.relayPort);
   const origin = `https://${hub.httpsHost}:${port}`;
@@ -97,7 +97,7 @@ export async function hubHttps(mode: HttpsMode, hub: HttpsHub): Promise<number> 
   const systemctl = (...args: string[]) => must(hub.run, ["systemctl", "--user", ...args]);
   const config = join(httpsDir(hub.home), "Caddyfile");
   const files: Managed[] = [{ path: config, content: caddyfile(hub.home, hub.httpsHost, port) }, { path: join(hub.home, ".config/systemd/user", service), content: unit }];
-  if (mode === "doctor") await requireInstalled(hub.home, files, marker, "hub HTTPS", "fleet hub-https install");
+  if (mode === "doctor") await requireInstalled(hub.home, files, marker, "hub HTTPS", "hedge hub-https install");
   if (mode === "install") {
     await refuseLinks(hub.home, join(authorityDir(hub.home), "root.key"), "hub HTTPS path");
     const changed = await changedFiles(hub.home, files, marker, "hub HTTPS");
@@ -141,7 +141,7 @@ async function printAuthority(hub: HttpsHub): Promise<number> {
   const path = join(authorityDir(hub.home), "root.crt");
   await refuseLinks(hub.home, path, "hub HTTPS path");
   const text = await readIfThere(path);
-  if (text === undefined) throw new Error("Hub HTTPS has no root certificate yet. Run fleet hub-https install.");
+  if (text === undefined) throw new Error("Hub HTTPS has no root certificate yet. Run hedge hub-https install.");
   if (!certificatePattern.test(text)) throw new Error(`${path} is not a public certificate.`);
   hub.print(`${caHeading}${path}`);
   hub.print(text.trimEnd());
@@ -154,7 +154,7 @@ async function trusted(hub: HttpsHub): Promise<number> {
   const answer = await hub.run(onHub(hub.alias, ["hub-https", "ca"]), { timeoutMs: trustProbeLimitMs });
   const certificate = answer.code === 0 ? answer.stdout.split("\n").filter((line) => !line.startsWith(caHeading)).join("\n").trim() + "\n" : "";
   if (!certificatePattern.test(certificate)) return hub.print(`${hub.alias} gave no public root certificate: ${(answer.stderr || answer.stdout).trim()}`), 1;
-  const folder = await mkdtemp(join(tmpdir(), "fleet-hub-ca-"));
+  const folder = await mkdtemp(join(tmpdir(), "hedge-hub-ca-"));
   try {
     const path = join(folder, "hub-ca.crt");
     await writePrivateFile(path, certificate);

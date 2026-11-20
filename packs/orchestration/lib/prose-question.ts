@@ -16,7 +16,7 @@ export function asksForDecision(message: string): boolean {
 export const fallbackPerson = "the person";
 
 export function personName(home: string): string {
-  const file = join(home, ".local/state/fleet/settings.json");
+  const file = join(home, ".local/state/hedge/settings.json");
   if (!existsSync(file)) return fallbackPerson;
   try {
     const person = (JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>)["guards.person"];

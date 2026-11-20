@@ -25,7 +25,7 @@ export function anchorCheck(findings: string, diff: string, earlier: EarlierFind
     ...unanchored > 0 ? [`- ${unanchored} finding${unanchored === 1 ? "" : "s"} quote${unanchored === 1 ? "s" : ""} no anchor.`] : [],
     ...repeats,
   ];
-  return notes.length ? `${anchorHeading}\n\nfleet compared each finding's anchor with the diff and with earlier reviews of this PR.\n\n${notes.join("\n")}` : "";
+  return notes.length ? `${anchorHeading}\n\nhedge compared each finding's anchor with the diff and with earlier reviews of this PR.\n\n${notes.join("\n")}` : "";
 }
 
 function findingLines(findings: string) {

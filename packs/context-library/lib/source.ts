@@ -169,7 +169,7 @@ async function limitedText(response: Response, url: string): Promise<string> {
 export async function readPage(source: string, fetcher: Fetch = fetch): Promise<string> {
   let url = source;
   for (let hop = 0; ; hop++) {
-    if (!namedPublicSite(new URL(url))) throw new Error(`${url} is not allowed: fleet context add reads only https pages on a named public site`);
+    if (!namedPublicSite(new URL(url))) throw new Error(`${url} is not allowed: hedge context add reads only https pages on a named public site`);
     const response = await fetcher(url, { redirect: "manual", headers: { accept: "text/html, text/plain, text/markdown" }, signal: AbortSignal.timeout(60_000) });
     const location = response.headers.get("location");
     if (response.status >= 300 && response.status < 400 && location) {
@@ -186,7 +186,7 @@ export async function readPage(source: string, fetcher: Fetch = fetch): Promise<
     if (type.includes("html")) return pageText(await limitedText(response, url), url);
     if (/^text\/|json|xml/.test(type)) return limitedText(response, url);
     await discard(response);
-    throw new Error(`${url} sent ${type || "no content type"}, which fleet context add cannot read as text`);
+    throw new Error(`${url} sent ${type || "no content type"}, which hedge context add cannot read as text`);
   }
 }
 
@@ -196,7 +196,7 @@ export function hubSources(home: string, fetcher: Fetch = fetch): Sources {
     async call(route, tool, args) {
       const client = await readGatewayClient(home, {}).catch(() => undefined);
       if (!client) throw new Error(`This source is read through the hub's MCP gateway, and this machine has no gateway key. ${grantHint}`);
-      const opened = await openRoute({ gateway: { url: client.baseUrl.replace(/\/mcphub$/, ""), credential: client.token }, fetch: fetcher }, route, "fleet-context-add");
+      const opened = await openRoute({ gateway: { url: client.baseUrl.replace(/\/mcphub$/, ""), credential: client.token }, fetch: fetcher }, route, "hedge-context-add");
       try {
         return (await opened.call(tool, args)).text;
       } finally {

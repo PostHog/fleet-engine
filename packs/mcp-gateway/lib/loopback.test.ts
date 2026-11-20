@@ -45,10 +45,10 @@ function pagesServer() {
 function hubWithPages(fields: Partial<FakeMcpHub> = {}) {
   const home = temp.make("loopback-");
   writeMcpHubSettings(home);
-  const dir = join(home, ".config/fleet/mcp-gateway/upstreams");
+  const dir = join(home, ".config/hedge/mcp-gateway/upstreams");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "pages.json"), JSON.stringify(pages));
-  const api = fakeMcpHub({ groups: [{ id: "g", name: "fleet", servers: ["tickets", "calendar"] }], ...fields });
+  const api = fakeMcpHub({ groups: [{ id: "g", name: "hedge", servers: ["tickets", "calendar"] }], ...fields });
   const gateway = mcphubFetch(api);
   const upstream = pagesServer();
   const fetch = (input: string | URL | Request, init?: RequestInit) => (new URL(String(input)).hostname.endsWith("pages.example.com") ? upstream.fetch(input, init) : gateway(input, init));
@@ -66,18 +66,18 @@ test("an upstream that accepts only loopback callbacks joins the gateway with a 
   const { api, hub, upstream } = hubWithPages();
   await registerUpstreams(hub);
   expect(upstream.seen.registrations).toEqual([{
-    client_name: "Fleet MCP gateway", redirect_uris: [callback], token_endpoint_auth_method: "none", grant_types: ["authorization_code", "refresh_token"], response_types: ["code"], scope: "pages offline_access",
+    client_name: "Hedge MCP gateway", redirect_uris: [callback], token_endpoint_auth_method: "none", grant_types: ["authorization_code", "refresh_token"], response_types: ["code"], scope: "pages offline_access",
   }]);
-  expect(api.configs.pages).toEqual({ type: "streamable-http", url: pages.url, description: "Added by Fleet", startOnDemand: true, oauth: { redirectUri: callback, scopes: ["pages", "offline_access"], clientId: "client-1" } });
-  expect(hub.printed).toEqual(["Pages is in the MCP gateway. To sign in to it, on the hub, run: fleet mcp-gateway sign-in pages"]);
+  expect(api.configs.pages).toEqual({ type: "streamable-http", url: pages.url, description: "Added by Hedge", startOnDemand: true, oauth: { redirectUri: callback, scopes: ["pages", "offline_access"], clientId: "client-1" } });
+  expect(hub.printed).toEqual(["Pages is in the MCP gateway. To sign in to it, on the hub, run: hedge mcp-gateway sign-in pages"]);
   expect(await upstreamsRegistered(hub)).toBe(true);
   await registerUpstreams(hub);
   expect(upstream.seen.registrations).toHaveLength(1);
 });
 
 test("an upstream in the group without a client, or with a client for the hub's HTTPS callback, is not ready, and the gateway registers a loopback client in its place", async () => {
-  const { api, hub, upstream } = hubWithPages({ servers: ["tickets", "calendar", "pages"], groups: [{ id: "g", name: "fleet", servers: ["tickets", "calendar", "pages"] }] });
-  const base = { type: "streamable-http", url: pages.url, description: "Added by Fleet", startOnDemand: true };
+  const { api, hub, upstream } = hubWithPages({ servers: ["tickets", "calendar", "pages"], groups: [{ id: "g", name: "hedge", servers: ["tickets", "calendar", "pages"] }] });
+  const base = { type: "streamable-http", url: pages.url, description: "Added by Hedge", startOnDemand: true };
   api.configs.pages = { ...base, oauth: { redirectUri: callback, scopes: ["pages", "offline_access"] } };
   expect(await upstreamsRegistered(hub)).toBe(false);
   api.configs.pages = { ...base, oauth: { redirectUri: "https://hub.example.com:60001/mcphub/oauth/callback", clientId: "hub-client", refreshToken: "grant-of-hub-client" } };
@@ -131,7 +131,7 @@ test("sign-in names the command for a hand sign-in instead of the gateway's own 
   const waiting = fakeHub(home);
   await signIn(waiting);
   expect(waiting.printed).toEqual([
-    "pages: on the hub, run: fleet mcp-gateway sign-in pages",
+    "pages: on the hub, run: hedge mcp-gateway sign-in pages",
     "On your computer, keep this running while you sign in: coder port-forward my-hub --tcp 3317",
     "tickets: https://tickets.example.com/authorize",
   ]);

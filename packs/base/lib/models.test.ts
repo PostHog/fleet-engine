@@ -8,7 +8,7 @@ const rows: ModelRow[] = [
   { role: "lookup", work: "Find files", provider: "claude", model: "small-model", effort: "medium" },
   { role: "review", work: "Review Claude's code", provider: "codex", model: "large-model", effort: "high" },
 ];
-const env = { FLEET_MODELS: JSON.stringify(rows) };
+const env = { HEDGE_MODELS: JSON.stringify(rows) };
 
 test("reads the row of a role from the model table of the user's plan", () => {
   expect(modelFor("review", env)).toEqual(rows[1]!);
@@ -17,8 +17,8 @@ test("reads the row of a role from the model table of the user's plan", () => {
 
 test("refuses a role the table lacks, a missing table, and a malformed row", () => {
   expect(() => modelFor("review-codex", env)).toThrow("the model table of your AI plan has no review-codex row");
-  expect(() => modelFor("lookup", {})).toThrow("run this command as fleet <command>, so it gets your model table");
-  expect(() => modelTable({ FLEET_MODELS: JSON.stringify([{ ...rows[0], provider: "gemini" }]) })).toThrow("FLEET_MODELS holds a malformed row");
+  expect(() => modelFor("lookup", {})).toThrow("run this command as hedge <command>, so it gets your model table");
+  expect(() => modelTable({ HEDGE_MODELS: JSON.stringify([{ ...rows[0], provider: "gemini" }]) })).toThrow("HEDGE_MODELS holds a malformed row");
 });
 
 test("an empty or relative CLAUDE_CONFIG_DIR never lets the checkout under review set a Claude reviewer's env", () => {

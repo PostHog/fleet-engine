@@ -77,7 +77,7 @@ function splitPair(text: string, usage: string): [string, string] {
 const yes = ["true", "on", "yes", "y"];
 const no = ["false", "off", "no", "n"];
 
-/** Reads a typed setting value from text, the same way for flags, questions, and fleet set. */
+/** Reads a typed setting value from text, the same way for flags, questions, and hedge set. */
 export function parseSettingValue(setting: PackSetting, raw: string): SettingValue {
   const text = raw.trim();
   if (setting.type === "number") {

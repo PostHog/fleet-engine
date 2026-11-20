@@ -32,7 +32,7 @@ export type SlackCommandDeps = {
   stop?: AbortSignal;
 };
 
-export const usage = "Usage: fleet slack-trigger manifest | setup | check | launch";
+export const usage = "Usage: hedge slack-trigger manifest | setup | check | launch";
 
 export const appSecret = "app";
 const memberId = /^[UW][A-Z0-9]+$/;
@@ -53,15 +53,15 @@ export function everyOn(sleep: Sleep): Every {
 
 export async function ownerOf(deps: Pick<SlackCommandDeps, "slackUserId" | "slackEmoji">, run: Run): Promise<Owner> {
   const slackUserId = deps.slackUserId();
-  if (!memberId.test(slackUserId)) throw new Error(`slack.userId is ${JSON.stringify(slackUserId)}, not a Slack member ID such as U012ABCDEF. Set it with fleet set slack.userId=<your member ID>.`);
+  if (!memberId.test(slackUserId)) throw new Error(`slack.userId is ${JSON.stringify(slackUserId)}, not a Slack member ID such as U012ABCDEF. Set it with hedge set slack.userId=<your member ID>.`);
   const name = (await run(["git", "config", "--get", "user.name"])).stdout.trim();
-  if (!name) throw new Error("Git has no user.name, which names your Slack app. Run fleet apply after gh auth login, so Fleet sets your Git identity.");
+  if (!name) throw new Error("Git has no user.name, which names your Slack app. Run hedge apply after gh auth login, so Hedge sets your Git identity.");
   return { name, slackUserId, emoji: emojiName(deps.slackEmoji()) };
 }
 
 function emojiName(value: string, key = "slack.emoji"): string {
   const name = value.trim().replace(/^:(.*):$/, "$1");
-  if (!emojiNamePattern.test(name)) throw new Error(`${key} is ${JSON.stringify(value)}, not a Slack emoji name such as eye or +1. Set it with fleet set ${key}=<name>.`);
+  if (!emojiNamePattern.test(name)) throw new Error(`${key} is ${JSON.stringify(value)}, not a Slack emoji name such as eye or +1. Set it with hedge set ${key}=<name>.`);
   return name;
 }
 
@@ -70,7 +70,7 @@ const roomHere = (deps: SlackCommandDeps) => startRoom(deps.home, deps.env, deps
 export function nodesOf(env: Env): string[] {
   const nodes = (optionalStringSetting("slack.nodes", env) ?? "").split(/[\s,]+/).filter(Boolean);
   const bad = nodes.filter((node) => !isNodeName(node) || isKeptForBoxes(node));
-  if (bad.length) throw new Error(`slack.nodes names ${bad.map((node) => JSON.stringify(node)).join(", ")}, not the SSH name of a node such as devbox-1. Set it with fleet set slack.nodes="devbox-1 devbox-2".`);
+  if (bad.length) throw new Error(`slack.nodes names ${bad.map((node) => JSON.stringify(node)).join(", ")}, not the SSH name of a node such as devbox-1. Set it with hedge set slack.nodes="devbox-1 devbox-2".`);
   return [...new Set(nodes)];
 }
 
@@ -79,7 +79,7 @@ const triggerState = (deps: SlackCommandDeps) => join(deps.stateDir, "slack-trig
 export function launcher(deps: SlackCommandDeps, run: Run): Launch {
   const nodes = nodesOf(deps.env);
   if (nodes.length) return launchOnNodes(nodes, run, () => takeTurn(triggerState(deps)));
-  if (optionalStringSetting("hub.boxTemplate", deps.env) !== undefined) return launchOnBox(join(deps.env.FLEET_ENGINE_DIR ?? "", "fleet"), run);
+  if (optionalStringSetting("hub.boxTemplate", deps.env) !== undefined) return launchOnBox(join(deps.env.HEDGE_ENGINE_DIR ?? "", "hedge"), run);
   return launchHere(deps.threads, roomHere(deps));
 }
 
@@ -98,7 +98,7 @@ export async function slackTrigger(args: string[], deps: SlackCommandDeps): Prom
 }
 
 export function captureHandler(env: Env, run: Run): { capture: Capture; share: Share } | undefined {
-  const handler = (JSON.parse(env.FLEET_HANDLERS || "{}") as Record<string, string>)["slack-capture"];
+  const handler = (JSON.parse(env.HEDGE_HANDLERS || "{}") as Record<string, string>)["slack-capture"];
   if (!handler) return undefined;
   const ask = async (request: unknown, answered: (parsed: Record<string, unknown>) => boolean, what: string) => {
     const answer = await run(["bun", handler], JSON.stringify(request));
@@ -169,7 +169,7 @@ async function walkThrough(owner: Owner, deps: SlackCommandDeps, read: ReadSecre
   const base = deps.slackBase ?? slackApiBase;
   const say = deps.print;
   const entered: string[] = [];
-  say(`Fleet starts a T3 thread when you, ${owner.slackUserId}, write to your own Slack app. Make that app in four steps.`);
+  say(`Hedge starts a T3 thread when you, ${owner.slackUserId}, write to your own Slack app. Make that app in four steps.`);
   say("");
   say(`1. Open this link, pick your workspace, and create the app: ${manifestLink(owner.name)}`);
   say("2. Under Basic Information, App-Level Tokens, generate a token with the connections:write scope.");
@@ -183,7 +183,7 @@ async function walkThrough(owner: Owner, deps: SlackCommandDeps, read: ReadSecre
     }, say, entered, keyboard);
     await deps.secrets.write(appSecret, `${JSON.stringify({ appToken, userToken }, null, 2)}\n`);
   } catch (error) {
-    if (error instanceof Interrupted) return say(`Stopped. Nothing was saved. Run fleet slack-trigger setup again.`), 130;
+    if (error instanceof Interrupted) return say(`Stopped. Nothing was saved. Run hedge slack-trigger setup again.`), 130;
     throw error;
   }
   say("Saved both tokens where only you can read them. A running Slack trigger starts again with them within a minute.");
@@ -230,7 +230,7 @@ async function checkApp(owner: Owner, deps: SlackCommandDeps): Promise<number> {
 
 async function launchFromStdin(deps: SlackCommandDeps): Promise<number> {
   const request = JSON.parse(await deps.readStdin()) as Partial<LaunchRequest>;
-  if (typeof request.title !== "string" || typeof request.prompt !== "string" || typeof request.commandId !== "string") throw new Error("fleet slack-trigger launch reads {\"title\", \"prompt\", \"commandId\"} as JSON on standard input");
+  if (typeof request.title !== "string" || typeof request.prompt !== "string" || typeof request.commandId !== "string") throw new Error("hedge slack-trigger launch reads {\"title\", \"prompt\", \"commandId\"} as JSON on standard input");
   const launched = await launchHere(deps.threads, roomHere(deps))({ title: request.title, prompt: request.prompt, commandId: request.commandId, replay: request.replay === true, ...(typeof request.modelRole === "string" ? { modelRole: request.modelRole } : {}) });
   if ("failed" in launched) return deps.print(JSON.stringify({ failed: launched.failed, ...(launched.reachedT3 ? { reachedT3: true } : {}), ...(launched.noRoom ? { noRoom: true } : {}) })), 1;
   deps.print(JSON.stringify({ threadId: launched.threadId, ...(launched.url ? { url: launched.url } : {}) }));

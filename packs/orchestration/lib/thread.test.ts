@@ -58,22 +58,22 @@ async function thread(t3: T3Stub, args: string[], stdin = "") {
 const dispatched = (t3: T3Stub) => t3.rpcCalls.filter((call) => call.tag === "orchestration.dispatchCommand").map((call) => call.payload as Record<string, unknown>);
 const sends = (t3: T3Stub) => t3.toolCalls.filter((call) => call.name === "t3_thread_send").map((call) => call.args);
 
-test("fleet thread send reaches a thread on a linked environment, found without --host, through T3's send tool", async () => {
+test("hedge thread send reaches a thread on a linked environment, found without --host, through T3's send tool", async () => {
   const t3 = await stub();
   const { code, output } = await thread(t3, ["send", "mcp:linked-busy", "Rebase", "on", "main"]);
 
   expect(code).toBe(0);
   expect(JSON.parse(output)).toMatchObject({ host: "devbox-2", threadId: "mcp:linked-busy", delivery: "queued" });
-  expect(sends(t3)).toEqual([{ environmentId: "env-linked", threadId: "mcp:linked-busy", message: "Rebase on main", mode: "queue", clientRequestId: expect.stringMatching(/^fleet-thread-send:/) }]);
+  expect(sends(t3)).toEqual([{ environmentId: "env-linked", threadId: "mcp:linked-busy", message: "Rebase on main", mode: "queue", clientRequestId: expect.stringMatching(/^hedge-thread-send:/) }]);
   expect(dispatched(t3)).toEqual([]);
 });
 
 // T3 stamps a message that comes over its WebSocket as typed by a person. A queue that a stopped or failed run
 // held lets such a message go only when someone types in the web or mobile app, so it never started. T3's send
 // tool stamps it as an agent's, which T3 releases once the thread completes a later run.
-test("fleet thread send takes the message from stdin and queues it behind the running turn of a thread on this machine as an agent's message", async () => {
+test("hedge thread send takes the message from stdin and queues it behind the running turn of a thread on this machine as an agent's message", async () => {
   const t3 = await stub();
-  const child = Bun.spawn(["bun", command, "send", "--host", hostname(), "mcp:local-busy"], { env: { ...Bun.env, HOME: t3.home, FLEET_SETTINGS: "{}" }, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+  const child = Bun.spawn(["bun", command, "send", "--host", hostname(), "mcp:local-busy"], { env: { ...Bun.env, HOME: t3.home, HEDGE_SETTINGS: "{}" }, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
   child.stdin.write("It's done'; rm -rf ~ #\n");
   child.stdin.end();
   const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
@@ -81,7 +81,7 @@ test("fleet thread send takes the message from stdin and queues it behind the ru
   expect(stderr).toBe("");
   expect(code).toBe(0);
   expect(JSON.parse(stdout)).toMatchObject({ threadId: "mcp:local-busy", delivery: "queued" });
-  expect(sends(t3)).toEqual([{ threadId: "mcp:local-busy", message: "It's done'; rm -rf ~ #", mode: "queue", clientRequestId: expect.stringMatching(/^fleet-thread-send:/) }]);
+  expect(sends(t3)).toEqual([{ threadId: "mcp:local-busy", message: "It's done'; rm -rf ~ #", mode: "queue", clientRequestId: expect.stringMatching(/^hedge-thread-send:/) }]);
   expect(dispatched(t3)).toEqual([]);
 });
 
@@ -94,7 +94,7 @@ test("an idle thread on this machine starts a turn with the message", async () =
   expect(sends(t3)).toEqual([expect.objectContaining({ threadId: "mcp:local-idle", message: "Go", mode: "queue" })]);
 });
 
-test("fleet thread send refuses an archived thread, an empty message, and a thread it cannot place, and sends nothing", async () => {
+test("hedge thread send refuses an archived thread, an empty message, and a thread it cannot place, and sends nothing", async () => {
   const t3 = await stub();
 
   await expect(thread(t3, ["send", "mcp:local-archived", "Hi"])).rejects.toThrow("Thread mcp:local-archived is archived. Unarchive it before you send it a message.");
@@ -164,7 +164,7 @@ test("an unqualified send waits for every machine to answer, so a copy on a sile
   expect(code).toBe(0);
 });
 
-test("fleet thread read finds a linked thread and prints its messages", async () => {
+test("hedge thread read finds a linked thread and prints its messages", async () => {
   const t3 = await stub();
   const { code, output } = await thread(t3, ["read", "mcp:linked-done"]);
   const read = JSON.parse(output);
@@ -175,18 +175,18 @@ test("fleet thread read finds a linked thread and prints its messages", async ()
   expect(read.thread.items.map((item: { text: string }) => item.text)).toEqual(["Ship it", "Shipped."]);
 });
 
-test("fleet thread find names the machine that has a thread, local or linked, without reading the thread", async () => {
+test("hedge thread find names the machine that has a thread, local or linked, without reading the thread", async () => {
   const t3 = await stub();
 
   expect(JSON.parse((await thread(t3, ["find", "remote-only"])).output)).toEqual({ host: "devbox-2", threadId: "mcp:remote-only" });
   expect(JSON.parse((await thread(t3, ["find", "mcp:local-idle"])).output)).toEqual({ host: "this-box", threadId: "mcp:local-idle" });
   await expect(thread(t3, ["find", "mcp:everywhere"])).rejects.toThrow("Thread mcp:everywhere is on this-box, devbox-2. Choose one with --host.");
-  await expect(thread(t3, ["find", "mcp:local-idle", "extra"])).rejects.toThrow("Usage: fleet thread list");
+  await expect(thread(t3, ["find", "mcp:local-idle", "extra"])).rejects.toThrow("Usage: hedge thread list");
   expect(t3.toolCalls.filter((call) => call.name === "t3_thread_read").map((call) => call.args.limit)).toEqual([1, 1]);
   expect(t3.rpcCalls.filter((call) => call.tag === "orchestration.getThreadProjection")).toEqual([]);
 });
 
-test("fleet thread read --words exports only what a person typed in a thread on a linked machine, each with the reply it answered", async () => {
+test("hedge thread read --words exports only what a person typed in a thread on a linked machine, each with the reply it answered", async () => {
   const long = "z".repeat(60_000);
   const t3 = await stub(fixture([linkedEnvironment], [linkedThread("mcp:talk", { items: [
     linkedItem("user_message", "First ask"),
@@ -208,7 +208,7 @@ test("fleet thread read --words exports only what a person typed in a thread on 
   expect(read.words[1].text).toBe(long);
 });
 
-test("fleet thread read --words reads every page of a long thread on a linked machine, each word at the time T3 gives its item", async () => {
+test("hedge thread read --words reads every page of a long thread on a linked machine, each word at the time T3 gives its item", async () => {
   const items = Array.from({ length: 150 }, (_, index) => index === 1 || index === 140
     ? linkedItem("user_message", `Ask ${index}`, { itemId: `ask-${index}`, updatedAt: `2026-10-25T07:${String(index % 60).padStart(2, "0")}:00.000Z` })
     : linkedItem("assistant_message", `Reply ${index}`, { itemId: `reply-${index}` }));
@@ -222,7 +222,7 @@ test("fleet thread read --words reads every page of a long thread on a linked ma
   expect(t3.toolCalls.filter((call) => call.name === "t3_thread_read" && call.args.view === "messages").map((call) => call.args.afterPosition)).toEqual([undefined, 99]);
 });
 
-test("fleet thread list lists the threads of this machine and each linked environment", async () => {
+test("hedge thread list lists the threads of this machine and each linked environment", async () => {
   const t3 = await stub();
   const { code, output } = await thread(t3, ["list", "--json"]);
   const reports = JSON.parse(output);
@@ -234,9 +234,9 @@ test("fleet thread list lists the threads of this machine and each linked enviro
   ]);
 });
 
-test("fleet thread without an action prints its usage", async () => {
+test("hedge thread without an action prints its usage", async () => {
   const t3 = await stub();
 
-  await expect(thread(t3, [])).rejects.toThrow("Usage: fleet thread list");
-  await expect(thread(t3, ["read"])).rejects.toThrow("Usage: fleet thread list");
+  await expect(thread(t3, [])).rejects.toThrow("Usage: hedge thread list");
+  await expect(thread(t3, ["read"])).rejects.toThrow("Usage: hedge thread list");
 });

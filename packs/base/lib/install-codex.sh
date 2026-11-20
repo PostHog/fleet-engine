@@ -2,7 +2,7 @@
 set -eu
 
 fail() {
-  printf 'fleet install-codex: %s\n' "$1" >&2
+  printf 'hedge install-codex: %s\n' "$1" >&2
   exit 1
 }
 
@@ -37,14 +37,14 @@ case "$os $chip" in
   *) fail "no Codex build for $chip. Install Codex from https://github.com/openai/codex." ;;
 esac
 
-share="$HOME/.local/share/fleet"
-if [ "$os" = Darwin ] && [ "${FLEET_CODEX_LOCKED:-}" != "$$" ]; then
-  command -v python3 >/dev/null 2>&1 || fail "needs python3 to install Codex safely. Install the Command Line Tools with xcode-select --install, then run fleet apply."
+share="$HOME/.local/share/hedge"
+if [ "$os" = Darwin ] && [ "${HEDGE_CODEX_LOCKED:-}" != "$$" ]; then
+  command -v python3 >/dev/null 2>&1 || fail "needs python3 to install Codex safely. Install the Command Line Tools with xcode-select --install, then run hedge apply."
   mkdir -p "$share" || fail "could not create $share."
-  FLEET_CODEX_LOCKED=$$ exec python3 -c 'import fcntl, os, sys; lock = os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT, 0o644); fcntl.flock(lock, fcntl.LOCK_EX); os.dup2(lock, 9); os.set_inheritable(9, True); os.execv("/bin/sh", ["sh"] + sys.argv[2:])' "$share/codex.lock" "$0" "$@"
+  HEDGE_CODEX_LOCKED=$$ exec python3 -c 'import fcntl, os, sys; lock = os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT, 0o644); fcntl.flock(lock, fcntl.LOCK_EX); os.dup2(lock, 9); os.set_inheritable(9, True); os.execv("/bin/sh", ["sh"] + sys.argv[2:])' "$share/codex.lock" "$0" "$@"
 fi
-unset FLEET_CODEX_LOCKED
-[ "$os" = Darwin ] || command -v flock >/dev/null 2>&1 || fail "needs flock to install Codex safely. Install util-linux or BusyBox, then run fleet apply."
+unset HEDGE_CODEX_LOCKED
+[ "$os" = Darwin ] || command -v flock >/dev/null 2>&1 || fail "needs flock to install Codex safely. Install util-linux or BusyBox, then run hedge apply."
 package="$share/codex"
 releases="$package/releases"
 current="$package/current"
@@ -61,8 +61,8 @@ if [ "$os" != Darwin ]; then
 fi
 if [ -e "$link" ] || [ -L "$link" ]; then
   case "$(readlink "$link" || true)" in
-    "$current/bin/codex"|"$package/bin/codex") ;;
-    *) fail "$link exists and Fleet did not install it. Move it away, then run fleet apply." ;;
+    "$current/bin/codex"|"$package/bin/codex"|"$HOME/.local/share/fleet/codex/current/bin/codex"|"$HOME/.local/share/fleet/codex/bin/codex") ;;
+    *) fail "$link exists and Hedge did not install it. Move it away, then run hedge apply." ;;
   esac
 fi
 

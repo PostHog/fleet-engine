@@ -7,7 +7,7 @@
   "risk": "The hub holds sign-ins for your MCP servers and reaches every devbox over SSH. Keep it as private as your laptop.",
   "skills": [
     "skills/dream",
-    "skills/fleet-hub"
+    "skills/hedge-hub"
   ],
   "settings": [
     {
@@ -104,14 +104,14 @@
     },
     {
       "key": "hub.threadFolder",
-      "question": "Which folder do the hub's threads start in, such as ~/notes? The hub starts its disk alerts there. Fleet adds it as a T3 Code project when T3 does not know it yet.",
+      "question": "Which folder do the hub's threads start in, such as ~/notes? The hub starts its disk alerts there. Hedge adds it as a T3 Code project when T3 does not know it yet.",
       "type": "string",
       "default": "~",
       "ask": "never"
     },
     {
       "key": "hub.proxyAccounts",
-      "question": "How many of your own subscriptions must the hub's proxy hold before fleet cli-proxy doctor passes? They are Claude subscriptions, or Codex ones on the Codex plan.",
+      "question": "How many of your own subscriptions must the hub's proxy hold before hedge cli-proxy doctor passes? They are Claude subscriptions, or Codex ones on the Codex plan.",
       "type": "number",
       "default": 2,
       "ask": "never"
@@ -177,8 +177,8 @@
         "hub.diskAlertGigabytes",
         "hub.threadFolder"
       ],
-      "sentence": "The hub cleans a devbox whose disk runs low with fleet prune and each tool's own cache cleaner, and names the largest folders only when that cannot free enough.",
-      "risk": "The sweep deletes only this. Through fleet prune: worktrees idle for 6 hours, or 24 when no T3 thread or agent owns them, whose commits are on the default branch or in a merged pull request, whose T3 thread is closed, or whose agent has been idle for a day. Their commits stay on their branch, but their lockfile and tool output changes are dropped. Also worktree folders that Git no longer tracks and no open T3 thread uses. Itself: the oldest part of a T3 boot log over 100 MB. Through pnpm store prune, uv cache prune and go clean -cache: caches those tools fill again. It never runs Nix garbage collection and never removes Cargo build output, the uv cache folder, old T3 versions, Docker data or Bun's cache, which projects can link into. It deletes no other file. For the rest, you decide."
+      "sentence": "The hub cleans a devbox whose disk runs low with hedge prune and each tool's own cache cleaner, and names the largest folders only when that cannot free enough.",
+      "risk": "The sweep deletes only this. Through hedge prune: worktrees idle for 6 hours, or 24 when no T3 thread or agent owns them, whose commits are on the default branch or in a merged pull request, whose T3 thread is closed, or whose agent has been idle for a day. Their commits stay on their branch, but their lockfile and tool output changes are dropped. Also worktree folders that Git no longer tracks and no open T3 thread uses. Itself: the oldest part of a T3 boot log over 100 MB. Through pnpm store prune, uv cache prune and go clean -cache: caches those tools fill again. It never runs Nix garbage collection and never removes Cargo build output, the uv cache folder, old T3 versions, Docker data or Bun's cache, which projects can link into. It deletes no other file. For the rest, you decide."
     },
     {
       "id": "linked-hub",
@@ -238,7 +238,7 @@
         "hub.proxyHistoryDays"
       ],
       "sentence": "The hub's proxy serves its management panel on loopback, with quota history, drain forecasts, and buttons that spend a subscription's banked weekly or Fable reset.",
-      "risk": "The panel can change the proxy's settings and subscriptions, and spend banked resets, which do not come back. It also turns on CLIProxyAPI's plugins, so anyone with the management key can install and run other plugins from CLIProxyAPI's plugin store on the hub; fleet cli-proxy doctor fails on any plugin besides Fleet's pinned quota-ledger. It listens only on the hub's loopback port 8317, which the SSH tunnels also carry to your devboxes and boxes, and it asks for the management key, which stays on the hub. Every tunnelled client reaches the proxy as 127.0.0.1, so 5 wrong sign-ins from any machine ban 127.0.0.1 from the management API for 30 minutes. That also stops the hub's balancer and fleet cli-proxy doctor until the ban ends. Fleet does not route it through the hub's HTTPS."
+      "risk": "The panel can change the proxy's settings and subscriptions, and spend banked resets, which do not come back. It also turns on CLIProxyAPI's plugins, so anyone with the management key can install and run other plugins from CLIProxyAPI's plugin store on the hub; hedge cli-proxy doctor fails on any plugin besides Hedge's pinned quota-ledger. It listens only on the hub's loopback port 8317, which the SSH tunnels also carry to your devboxes and boxes, and it asks for the management key, which stays on the hub. Every tunnelled client reaches the proxy as 127.0.0.1, so 5 wrong sign-ins from any machine ban 127.0.0.1 from the management API for 30 minutes. That also stops the hub's balancer and hedge cli-proxy doctor until the ban ends. Hedge does not route it through the hub's HTTPS."
     }
   ],
   "config": [
@@ -260,7 +260,7 @@
     {
       "provider": "claude",
       "key": "apiKeyHelper",
-      "value": "cat \"$HOME/.config/fleet/cli-proxy.key\"",
+      "value": "cat \"$HOME/.config/hedge/cli-proxy.key\"",
       "roles": [
         "hub",
         "devbox"
@@ -275,7 +275,7 @@
     {
       "provider": "codex",
       "key": "model_provider",
-      "value": "fleet-proxy",
+      "value": "hedge-proxy",
       "roles": [
         "hub",
         "devbox"
@@ -289,16 +289,16 @@
     },
     {
       "provider": "codex",
-      "key": "model_providers.fleet-proxy",
+      "key": "model_providers.hedge-proxy",
       "value": {
-        "name": "Fleet CLI proxy",
+        "name": "Hedge CLI proxy",
         "base_url": "http://127.0.0.1:8317/v1",
         "wire_api": "responses",
         "auth": {
           "command": "/bin/sh",
           "args": [
             "-c",
-            "cat \"$HOME/.config/fleet/cli-proxy.key\""
+            "cat \"$HOME/.config/hedge/cli-proxy.key\""
           ]
         }
       },
@@ -318,7 +318,7 @@
     {
       "id": "box-sweep",
       "command": [
-        "fleet",
+        "hedge",
         "box",
         "sweep"
       ],
@@ -333,7 +333,7 @@
     {
       "id": "box-nightly",
       "command": [
-        "fleet",
+        "hedge",
         "box",
         "nightly"
       ],
@@ -349,7 +349,7 @@
     {
       "id": "devbox-grants",
       "command": [
-        "fleet",
+        "hedge",
         "box",
         "grants"
       ],
@@ -365,7 +365,7 @@
     {
       "id": "box-restore",
       "command": [
-        "fleet",
+        "hedge",
         "box",
         "restore"
       ],
@@ -381,7 +381,7 @@
     {
       "id": "secret-sweep",
       "command": [
-        "fleet",
+        "hedge",
         "secret",
         "sweep"
       ],
@@ -393,7 +393,7 @@
     {
       "id": "dream",
       "command": [
-        "fleet",
+        "hedge",
         "dream",
         "run"
       ],
@@ -409,7 +409,7 @@
     {
       "id": "peers-renew",
       "command": [
-        "fleet",
+        "hedge",
         "peers",
         "renew"
       ],
@@ -426,7 +426,7 @@
     {
       "id": "peers-restore",
       "command": [
-        "fleet",
+        "hedge",
         "peers",
         "restore"
       ],
@@ -442,7 +442,7 @@
     {
       "id": "disk-watch",
       "command": [
-        "fleet",
+        "hedge",
         "disk-watch"
       ],
       "schedule": {
@@ -456,7 +456,7 @@
     {
       "id": "cli-proxy-balance",
       "command": [
-        "fleet",
+        "hedge",
         "cli-proxy-balance"
       ],
       "schedule": {
@@ -476,25 +476,25 @@
   "human": [
     {
       "id": "box-claude-token",
-      "say": "Make a long-lived Claude token for your boxes, then paste the token it prints into fleet box token. The hub hands it to each new box.",
+      "say": "Make a long-lived Claude token for your boxes, then paste the token it prints into hedge box token. The hub hands it to each new box.",
       "command": "claude setup-token",
       "interactive": true,
       "probe": [
         "sh",
         "-c",
-        "test \"$(stat -c %a \"$HOME/.config/fleet/box-claude-token\" 2>/dev/null)\" = 600"
+        "test \"$(stat -c %a \"$HOME/.config/hedge/box-claude-token\" 2>/dev/null)\" = 600"
       ],
       "roles": [
         "hub"
       ],
       "workflow": "boxes",
-      "undo": "Delete ~/.config/fleet/box-claude-token once no box needs your Claude token."
+      "undo": "Delete ~/.config/hedge/box-claude-token once no box needs your Claude token."
     },
     {
       "id": "hub-https-trust",
-      "say": "Trust the hub's private certificate on this computer, so your browser opens the hub's sign-in pages over HTTPS. On the hub, run fleet hub-https ca, save the certificate it prints as hub-ca.crt on this Mac, open it in Keychain Access, and set it to Always Trust. Fleet skips this step while hub.httpsHost is empty.",
+      "say": "Trust the hub's private certificate on this computer, so your browser opens the hub's sign-in pages over HTTPS. On the hub, run hedge hub-https ca, save the certificate it prints as hub-ca.crt on this Mac, open it in Keychain Access, and set it to Always Trust. Hedge skips this step while hub.httpsHost is empty.",
       "probe": [
-        "fleet",
+        "hedge",
         "hub-https",
         "trusted"
       ],
@@ -508,22 +508,22 @@
     {
       "id": "hub-https",
       "run": [
-        "fleet",
+        "hedge",
         "hub-https",
         "install"
       ],
       "check": [
-        "fleet",
+        "hedge",
         "hub-https",
         "doctor"
       ],
       "undo": [
-        "fleet",
+        "hedge",
         "hub-https",
         "remove"
       ],
       "left": [
-        "fleet",
+        "hedge",
         "hub-https",
         "left"
       ],
@@ -535,22 +535,22 @@
     {
       "id": "ssh-tunnels",
       "run": [
-        "fleet",
+        "hedge",
         "ssh-tunnels",
         "install"
       ],
       "check": [
-        "fleet",
+        "hedge",
         "ssh-tunnels",
         "doctor"
       ],
       "undo": [
-        "fleet",
+        "hedge",
         "ssh-tunnels",
         "remove"
       ],
       "left": [
-        "fleet",
+        "hedge",
         "ssh-tunnels",
         "left"
       ],
@@ -563,22 +563,22 @@
     {
       "id": "peers",
       "run": [
-        "fleet",
+        "hedge",
         "peers",
         "install"
       ],
       "check": [
-        "fleet",
+        "hedge",
         "peers",
         "doctor"
       ],
       "undo": [
-        "fleet",
+        "hedge",
         "peers",
         "remove"
       ],
       "left": [
-        "fleet",
+        "hedge",
         "peers",
         "left"
       ],
@@ -591,22 +591,22 @@
     {
       "id": "hub-tunnel",
       "run": [
-        "fleet",
+        "hedge",
         "hub-tunnel",
         "install"
       ],
       "check": [
-        "fleet",
+        "hedge",
         "hub-tunnel",
         "doctor"
       ],
       "undo": [
-        "fleet",
+        "hedge",
         "hub-tunnel",
         "remove"
       ],
       "left": [
-        "fleet",
+        "hedge",
         "hub-tunnel",
         "left"
       ],
@@ -618,22 +618,22 @@
     {
       "id": "cli-proxy",
       "run": [
-        "fleet",
+        "hedge",
         "cli-proxy",
         "install"
       ],
       "check": [
-        "fleet",
+        "hedge",
         "cli-proxy",
         "doctor"
       ],
       "undo": [
-        "fleet",
+        "hedge",
         "cli-proxy",
         "remove"
       ],
       "left": [
-        "fleet",
+        "hedge",
         "cli-proxy",
         "left"
       ],
@@ -652,11 +652,11 @@
     {
       "id": "coder-session",
       "run": [
-        "fleet",
+        "hedge",
         "box",
         "session"
       ],
-      "say": "The hub's Coder session expires soon, has expired, or Coder did not answer, so devbox tokens and boxes stop working when it runs out. Run fleet box session on the hub to see which. Most often the fix is coder login <your Coder address> on the hub.",
+      "say": "The hub's Coder session expires soon, has expired, or Coder did not answer, so devbox tokens and boxes stop working when it runs out. Run hedge box session on the hub to see which. Most often the fix is coder login <your Coder address> on the hub.",
       "roles": [
         "hub"
       ],
@@ -665,11 +665,11 @@
     {
       "id": "cli-proxy-client",
       "run": [
-        "fleet",
+        "hedge",
         "cli-proxy",
         "check"
       ],
-      "say": "Claude Code cannot reach your own-account proxy, so fleet apply keeps it on its own sign-in until the proxy answers. Run fleet cli-proxy check here to see why.",
+      "say": "Claude Code cannot reach your own-account proxy, so hedge apply keeps it on its own sign-in until the proxy answers. Run hedge cli-proxy check here to see why.",
       "roles": [
         "hub",
         "devbox"
@@ -683,12 +683,12 @@
     {
       "id": "cli-proxy-codex",
       "run": [
-        "fleet",
+        "hedge",
         "cli-proxy",
         "check",
         "codex"
       ],
-      "say": "Codex cannot reach your own-account proxy, so fleet apply keeps it on its own sign-in until the proxy answers. Run fleet cli-proxy check codex here to see why.",
+      "say": "Codex cannot reach your own-account proxy, so hedge apply keeps it on its own sign-in until the proxy answers. Run hedge cli-proxy check codex here to see why.",
       "roles": [
         "hub",
         "devbox"

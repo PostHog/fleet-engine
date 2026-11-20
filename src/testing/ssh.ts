@@ -7,8 +7,8 @@ import { spawnAsync } from "./spawn.ts";
 export type Answer = { code: number; stdout: string; stderr: string };
 export type Host = (args: string[]) => Promise<Answer>;
 
-/** A fleet on another machine: its main, with what it prints as standard output and what it fails with as standard error. */
-export function remoteFleet(options: () => CliOptions): Host {
+/** A hedge on another machine: its main, with what it prints as standard output and what it fails with as standard error. */
+export function remoteHedge(options: () => CliOptions): Host {
   return async (args) => {
     const out: string[] = [];
     const err: string[] = [];
@@ -17,10 +17,10 @@ export function remoteFleet(options: () => CliOptions): Host {
   };
 }
 
-/** ssh that runs its remote line in a real login shell, sh unless named, in an empty home whose fleet launcher hands its words to the named host's fleet. A host that is down, or not named, answers as ssh does, and an aborted signal ends the call as a killed ssh. */
+/** ssh that runs its remote line in a real login shell, sh unless named, in an empty home whose hedge launcher hands its words to the named host's hedge. A host that is down, or not named, answers as ssh does, and an aborted signal ends the call as a killed ssh. */
 export function fakeSsh(home: string, hosts: Record<string, Host | "down">, shell = "sh"): CommandRunner {
-  mkdirSync(join(home, ".local/share/fleet/engine"), { recursive: true });
-  writeFileSync(join(home, ".local/share/fleet/engine/fleet"), `printf '%s\\0' "$@"\n`);
+  mkdirSync(join(home, ".local/share/hedge/engine"), { recursive: true });
+  writeFileSync(join(home, ".local/share/hedge/engine/hedge"), `printf '%s\\0' "$@"\n`);
   return async (command, options = {}) => {
     if (command[0] !== "ssh" || !command.includes("BatchMode=yes")) return { code: 127, stdout: "", stderr: `${command[0]}: not ssh in batch mode\n` };
     const host = command.at(-2)!;

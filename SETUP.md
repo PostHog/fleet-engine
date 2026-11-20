@@ -1,8 +1,8 @@
-# Set up Fleet with the person
+# Set up Hedge with the person
 
 You are an agent in T3 Code on the person's Mac. They pasted the prompt from
-the Fleet README or the Fleet page. Set up Fleet with them, from nothing to a
-passing `fleet doctor` on this Mac.
+the Hedge README or the Hedge page. Set up Hedge with them, from nothing to a
+passing `hedge doctor` on this Mac.
 
 ## How you work
 
@@ -22,7 +22,7 @@ passing `fleet doctor` on this Mac.
   Only when the host has no secret prompt, run the command in a Terminal
   window (see "Terminal only for a terminal screen"), where it asks for the
   secret itself.
-- **Say a word before you use it.** The first time you say a Fleet word to the
+- **Say a word before you use it.** The first time you say a Hedge word to the
   person, such as workflow, pack, profile, hub, or node, explain it in one
   plain line.
 - **Speak to their choice.** Once they answer step 2, describe only the setup
@@ -36,34 +36,34 @@ passing `fleet doctor` on this Mac.
   chat when you can (T3 Code shows HTML pages that agents publish). Otherwise
   describe it in three lines of text.
 - **One PATH.** Your shell started before the install. Begin every command
-  that runs `fleet`, `gh`, `bun`, `claude`, `codex`, or `coder` with
+  that runs `hedge`, `gh`, `bun`, `claude`, `codex`, or `coder` with
   `export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH";`.
 - **When a step fails.** Explain its last lines and fix what they name. When
-  it still fails, or the cause is not clear, offer `fleet triage`. It exists
-  after the install makes `~/.local/bin/fleet`. Run
-  `fleet triage --print --note "<the failed step and its last line>"` and
-  show the person the report. It opens a **public** issue for the Fleet
+  it still fails, or the cause is not clear, offer `hedge triage`. It exists
+  after the install makes `~/.local/bin/hedge`. Run
+  `hedge triage --print --note "<the failed step and its last line>"` and
+  show the person the report. It opens a **public** issue for the Hedge
   maintainer, with private details taken out, so ask before you run the same
   command with `--send`. When `gh` is not signed in, `--send` saves the
   report to a file, says where, and exits 1. That exit is not a new failure.
 - **Terminal only for a terminal screen.** A command that draws its own
   screen in a terminal and reads the person's keys there, such as
-  `claude auth login` inside `fleet devbox add`, runs in a Terminal window:
-  write it to a file in `~/.cache/fleet-setup` that ends in `.command`, with
+  `claude auth login` inside `hedge devbox add`, runs in a Terminal window:
+  write it to a file in `~/.cache/hedge-setup` that ends in `.command`, with
   a `#!/bin/sh` line and the `PATH` line above, make it executable, and
   `open` it. Ask them to tell you when it ends. Each step that needs this
   says so.
 
 ## Picks from the page
 
-The prompt can end with a list that starts with `My picks from the Fleet
-page:`. The person chose these on the Fleet page, so do not ask for them
+The prompt can end with a list that starts with `My picks from the Hedge
+page:`. The person chose these on the Hedge page, so do not ask for them
 again. When a step uses a line, say the pick back in one sentence and go on.
 Ask everything else as the steps say. Without the list, ask every question.
 
 | Line | How to use it |
 | --- | --- |
-| `Where Fleet runs` | The answer to step 4. |
+| `Where Hedge runs` | The answer to step 4. |
 | `Packs on the first setup` | The packs for step 6, picked one by one. `none` means no pack. Still ask the AI plan, and read each pack's setup note. |
 | `Packs once the hub runs` | The answer to item 8 of step 9. `none` means no pack, so skip item 8. |
 
@@ -90,12 +90,12 @@ one. Skip a topic that does not fit their picks:
   `:t3code:` starts a thread about it.
 - **Threads on nodes.** T3 Code starts a thread on any linked machine. On a
   node, the thread keeps working while the Mac sleeps.
-- **What runs each night.** Each machine runs `fleet update` every night, so
+- **What runs each night.** Each machine runs `hedge update` every night, so
   it takes the newest engine and their profile by itself. The last screen of
   setup lists the other jobs under "Runs by itself".
 
 Say whether the step runs once or again later. The install and each sign-in
-run once per machine. `fleet update` runs again every night by itself.
+run once per machine. `hedge update` runs again every night by itself.
 
 ## 1. Check the Mac and start the install
 
@@ -103,11 +103,11 @@ Run `uname -s` and `id -u`. Go on when the output is `Darwin` and a user ID
 other than `0`. On another system, tell the person that this guide is for a
 Mac, and point them at "Set it up by hand" in the README.
 
-Then check for an earlier setup: `~/.local/bin/fleet packs` lists the packs
-and their workflows when Fleet already runs here. When it does, show the list
+Then check for an earlier setup: `~/.local/bin/hedge packs` lists the packs
+and their workflows when Hedge already runs here. When it does, show the list
 and ask:
 
-- **Change only what they name** (recommended): run `fleet packs` with
+- **Change only what they name** (recommended): run `hedge packs` with
   `--add`, `--remove`, and `--workflows` for each change, then go on to step
   8. Everything else stays as it is.
 - **Run setup again**: setup reuses their profile repo and starts from its
@@ -116,12 +116,12 @@ and ask:
   `--workflows`. Everything else stays as it is. Files they changed by hand
   are kept, and step 8 shows them.
 
-Also read `~/.local/state/fleet/state.json` when it exists. Its `groups`
-object has one name for each Fleet that manages files here. A name other
-than `fleet` is another Fleet, such as one the person set up by hand. Tell
+Also read `~/.local/state/hedge/state.json` when it exists. Its `groups`
+object has one name for each Hedge that manages files here. A name other
+than `hedge` is another Hedge, such as one the person set up by hand. Tell
 them now that setup stops at its files, and what happens then (see "Another
-Fleet keeps the files" in step 7). Ask them to stop what still runs that
-Fleet, such as a LaunchAgent, so it does not put its files back. Then start
+Hedge keeps the files" in step 7). Ask them to stop what still runs that
+Hedge, such as a LaunchAgent, so it does not put its files back. Then start
 the install as below.
 
 Without an earlier setup, start the install now, so it runs while you ask
@@ -130,11 +130,11 @@ and read the script. Keep it in view, because a pipe into `sh` hides what
 runs:
 
 ```sh
-mkdir -p ~/.cache/fleet-setup && curl -fsSL https://raw.githubusercontent.com/PostHog/fleet-engine/main/get.sh -o ~/.cache/fleet-setup/get.sh && curl -fsSL https://raw.githubusercontent.com/PostHog/fleet-engine/main/presets.json -o ~/.cache/fleet-setup/presets.json && cat ~/.cache/fleet-setup/get.sh
+mkdir -p ~/.cache/hedge-setup && curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh -o ~/.cache/hedge-setup/get.sh && curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/presets.json -o ~/.cache/hedge-setup/presets.json && cat ~/.cache/hedge-setup/get.sh
 ```
 
 Tell the person in two lines what it adds when missing: the GitHub CLI, Bun,
-and the `t3` command, the engine in `~/.local/share/fleet/engine`, `fleet` in
+and the `t3` command, the engine in `~/.local/share/hedge/engine`, `hedge` in
 `~/.local/bin`, and one `PATH` line in their login file. They asked for this
 setup, so start it at once, in the background, and say they can tell you to
 stop it. When the script does more than this, tell them what, and ask before
@@ -145,7 +145,7 @@ and no password. When `xcode-select -p` succeeds, start it in the background
 yourself:
 
 ```sh
-sh ~/.cache/fleet-setup/get.sh --install-only
+sh ~/.cache/hedge-setup/get.sh --install-only
 ```
 
 When `xcode-select -p` fails, the Command Line Tools are missing. A Mac
@@ -154,7 +154,7 @@ waits for them. Run it in a Terminal window then, and ask them to tell you
 when it ends:
 
 ```sh
-printf '#!/bin/sh\nsh ~/.cache/fleet-setup/get.sh --install-only\n' > ~/.cache/fleet-setup/install.command && chmod +x ~/.cache/fleet-setup/install.command && open ~/.cache/fleet-setup/install.command
+printf '#!/bin/sh\nsh ~/.cache/hedge-setup/get.sh --install-only\n' > ~/.cache/hedge-setup/install.command && chmod +x ~/.cache/hedge-setup/install.command && open ~/.cache/hedge-setup/install.command
 ```
 
 Go on to step 2 while it runs. Use the wait (see "While something runs").
@@ -168,10 +168,10 @@ already answer. On a rerun of setup (step 1), leave out the Packs question:
 setup starts from the packs in their profile.
 
 1. **New to you.** A multi-select question: "Which of these are new to you?"
-   with T3 Code (the app you are talking in), Fleet (what it sets up),
+   with T3 Code (the app you are talking in), Hedge (what it sets up),
    Devboxes (Linux machines in the cloud, such as Coder workspaces, where
    agents keep working while the Mac sleeps), and "None, I know all three".
-2. **Where Fleet runs**, with the options of step 4.
+2. **Where Hedge runs**, with the options of step 4.
 3. **Packs**, with the options of step 6.
 4. **AI plan**, with the options of step 6.
 
@@ -180,27 +180,27 @@ Each pick in question 1 adds an explainer to a later step:
 | New to | Add |
 | --- | --- |
 | T3 Code | In step 3: a **thread** is one agent conversation with its own task. A **worktree** is a separate checkout of the same repo, so several threads change code at once without touching each other. T3 Code shows every machine's threads on the Mac and the phone. |
-| Fleet | In step 3: the picture, and one pack from step 6 with one of its workflows as an example. |
+| Hedge | In step 3: the picture, and one pack from step 6 with one of its workflows as an example. |
 | Devboxes | In step 4: what a hub and a node are, and why agents run better on them. |
 
 When the packs are "One by one", ask the multi-select of step 6 right after.
 
-## 3. Show what Fleet is
+## 3. Show what Hedge is
 
 Fetch the picture from
-`https://raw.githubusercontent.com/PostHog/fleet-engine/main/docs/fleet.svg`
-and show it. Then say: Fleet installs agent rules, skills, and workflows. A
+`https://raw.githubusercontent.com/PostHog/hedge/main/docs/hedge.svg`
+and show it. Then say: Hedge installs agent rules, skills, and workflows. A
 **workflow** is one way of working that agents follow, such as a draft pull
 request for every fix. A **pack** is a set of workflows that you turn on as
 a whole. Your answers go to your **profile**, a private GitHub repo named
-`fleet-profile`, so every machine you add gets the same setup. A team pack
+`hedge-profile`, so every machine you add gets the same setup. A team pack
 can keep its members' profiles in the team's GitHub org instead, as
-`fleet-profile-<login>`, so teammates can read each other's setup.
+`hedge-profile-<login>`, so teammates can read each other's setup.
 
-## 4. Where Fleet runs
+## 4. Where Hedge runs
 
 Step 2 asks "Mac only, or Mac plus a hub and nodes?", with these options,
-unless the picks from the page say where Fleet runs:
+unless the picks from the page say where Hedge runs:
 
 - **Mac only.** A full setup: the skills and rules of every pack they pick,
   and the workflows that run on a Mac, run on this Mac. Agents stop when the Mac
@@ -225,7 +225,7 @@ The picks from the page line `Mac plus a hub and a node` means one node.
 Below, "the nodes" means as many as they chose.
 
 By default, T3 Code on the Mac starts new threads on the nodes, not on the
-Mac or the hub: each `fleet devbox add` of a node sets this up. A choice they
+Mac or the hub: each `hedge devbox add` of a node sets this up. A choice they
 already made in T3 Code's load balancing settings stays.
 
 **T3 Connect's limit.** A free T3 Connect account links up to 3 machines.
@@ -248,7 +248,7 @@ sizes, and that you create them in step 5. They can tell you to stop.
 ## 5. Install the tools
 
 The install from step 1 runs in the background. It is done when
-`~/.local/bin/fleet help` prints the list of commands. When it stops with an
+`~/.local/bin/hedge help` prints the list of commands. When it stops with an
 error, explain its last lines, fix what they name, and run it again: it
 continues from where it stopped. Use the wait (see "While something runs").
 
@@ -257,7 +257,7 @@ step 9 now. On a rerun of setup, step 1 starts no install: run items 1 to 5
 before step 7.
 
 - After item 1, run `coder list`. When it lists a workspace whose name
-  starts with `fleet-`, an earlier setup may have made it. Ask the reuse
+  starts with `hedge-`, an earlier setup may have made it. Ask the reuse
   question of step 9 now, and show the list. Reuse means no `coder create`
   for that workspace. When it lists none, do not ask.
 - In item 4, start each `coder create` in the background, all at once. They
@@ -271,19 +271,19 @@ before step 7.
 Step 2 asks these. Skip the packs question when the picks from the page name
 the packs:
 
-- **Packs.** One option per preset in `~/.cache/fleet-setup/presets.json`,
+- **Packs.** One option per preset in `~/.cache/hedge-setup/presets.json`,
   with its `blurb`, and "One by one". For one by one, ask a multi-select
   question with the packs below whose row says "Always", plus those whose
   row fits their answer in step 4. A pack whose row says "Step 9" needs a
   hub that runs, so step 9 offers it. Base is always on.
-  [The Fleet page](https://posthog.github.io/fleet-engine/) shows what each
+  [The Hedge page](https://posthog.github.io/hedge/) shows what each
   pack does.
 - **AI plan.** Claude, ChatGPT, or both: it decides the sign-ins and the
   model defaults. Recommend the agent they set up in T3 Code
   (`claude auth status` or `codex login status` passes).
 
 For each pack they pick whose row names a setup note, read that note in
-`~/.local/share/fleet/engine` once the install is done, and follow it in
+`~/.local/share/hedge/engine` once the install is done, and follow it in
 step 7. Read only the notes of the packs they picked. Ask the questions of
 all the notes together, in one call, before step 7.
 
@@ -295,7 +295,7 @@ all the notes together, in one call, before step 7.
 | `integrations` | Claude Code and Codex get the official GitHub, Context7, and Convex plugins, and Claude can hand work to Codex. | Always | None |
 | `memory` | Agents on all your machines share what they learn through your own private memory repo. | Always | `packs/memory/SETUP.md` |
 | `context-library` | Agents find your plans, research, decisions and saved threads in a private notes repo, and you save new ones with one command. | Always | `packs/context-library/SETUP.md` |
-| `recovery` | Threads that stop on a usage limit or a provider outage continue once the provider answers again, and fleet providers says which provider has capacity. | Step 9 | `packs/recovery/SETUP.md` |
+| `recovery` | Threads that stop on a usage limit or a provider outage continue once the provider answers again, and hedge providers says which provider has capacity. | Step 9 | `packs/recovery/SETUP.md` |
 | `guards` | Hooks stop an agent's shell commands from running network code, using GitHub outside your owners, pushing past review, or polling in loops. | Always | `packs/guards/SETUP.md` |
 | `slack` | Your own message, reaction, or mention in Slack starts a T3 thread about it. | With Mac only, or in step 9 | `packs/slack/SETUP.md` |
 | `incident-io` | An agent that watches a risky change pages you, and only you, through incident.io when it goes wrong. | With Mac only, or in step 9 | `packs/incident-io/SETUP.md` |
@@ -307,7 +307,7 @@ all the notes together, in one call, before step 7.
 Build the command from the answers, so setup asks nothing twice:
 
 ```sh
-fleet setup --chat --preset <id> --plan <claude|codex|both> --devbox skip
+hedge setup --chat --preset <id> --plan <claude|codex|both> --devbox skip
 ```
 
 For one by one, use `--preset starter`, add `--remove pull-requests` when
@@ -330,7 +330,7 @@ When it ends with code `2`, it lists what it still needs:
   your question tool, then add `--set <pack.key>=<answer>` to the command.
 - **A line `Needs you: <sign-in>`, then `In a terminal, run: <command>`.**
   Say what it is for. When the pack's setup note says how to give the
-  command its secrets, such as `fleet slack-trigger setup` in the Slack note,
+  command its secrets, such as `hedge slack-trigger setup` in the Slack note,
   follow the note: ask with the secret prompt and give the files to the
   command. Only a command that draws its own terminal screen runs in Terminal
   (see "Terminal only for a terminal screen").
@@ -341,65 +341,101 @@ wait (see "While something runs").
 
 | Sign-in | What it is for |
 | --- | --- |
-| GitHub | Once, with every permission Fleet needs: it creates their private `fleet-profile` repo, adds their SSH keys, and reads their org's packs. |
+| GitHub | Once, with every permission Hedge needs: it creates their private `hedge-profile` repo, adds their SSH keys, and reads their org's packs. |
 | Claude | Claude Code on this Mac uses their Claude plan. |
 | ChatGPT | Codex on this Mac uses their ChatGPT plan. Setup checks it with a real request. With both plans, it comes after the Mac is ready to use, right after setup installs Codex. |
 
-### Another Fleet keeps the files
+### Another Hedge keeps the files
 
-When setup stops with a `To do:` line that starts with `Another Fleet setup
-keeps`, the files it names belong to another Fleet on this Mac. Say how many
-files that is, and that they are the same kind of rules and guides Fleet
+When setup stops with a `To do:` line that starts with `Another Hedge setup
+keeps`, the files it names belong to another Hedge on this Mac. Say how many
+files that is, and that they are the same kind of rules and guides Hedge
 installs. Ask:
 
-- **Take them over** (recommended): run the `fleet apply --adopt-from <name>`
-  that the line names, then the setup command again. Fleet copies the other
-  Fleet's state and every file or linked folder it replaces to
-  `~/.local/state/fleet/backups/`. A linked folder moves whole, with
-  everything in it, so say which ones move. The other Fleet's files that
+- **Take them over** (recommended): run the `hedge apply --adopt-from <name>`
+  that the line names, then the setup command again. Hedge copies the other
+  Hedge's state and every file or linked folder it replaces to
+  `~/.local/state/hedge/backups/`. A linked folder moves whole, with
+  everything in it, so say which ones move. The other Hedge's files that
   this profile does not write stay where they are, except those inside a
   linked folder that moves, and the old Codex rules file
-  `~/.codex/rules/fleet.rules`. Fleet removes that file while it is unchanged,
+  `~/.codex/rules/fleet.rules`. Hedge removes that file while it is unchanged,
   because the base pack's rules replace it, and keeps it when it changed.
 - **Stop here**: nothing changes, and setup cannot finish while the other
-  Fleet keeps the files.
+  Hedge keeps the files.
 
 ## 8. Check the result
 
 ```sh
-fleet doctor
+hedge doctor
 ```
 
 The step is done when every line is explained to the person:
 
-- `Fix:` Fleet can repair it. Run `fleet apply`, then `fleet doctor` again.
+- `Fix:` Hedge can repair it. Run `hedge apply`, then `hedge doctor` again.
 - `To do:` the person does it. Say exactly what and where.
 - `Note:` information only.
 - `Everything matches your profile.` The Mac is set up.
 
-### When Fleet kept something of theirs
+### When Hedge kept something of theirs
 
 A line that starts with `Kept your` names a file or a setting that the person
-had before Fleet, which Fleet left as it was. Never show the raw key alone.
-Say in plain words what it controls, what Fleet's value does instead, and
-whether `fleet doctor` passes while it stays. Then ask:
+had before Hedge, which Hedge left as it was. Never show the raw key alone.
+Say in plain words what it controls, what Hedge's value does instead, and
+whether `hedge doctor` passes while it stays. Then ask:
 
-- **Take Fleet's version**: run the `fleet apply --adopt <path>` that the
+- **Take Hedge's version**: run the `hedge apply --adopt <path>` that the
   line names. A line that says `Removed item changed locally` names a file
-  that Fleet no longer installs, so there is nothing to take: keep it, or
-  move it away by hand. Fleet keeps the new file up to date, and their old
-  file stays in `~/.local/state/fleet/backups/`. When the old file holds their own
+  that Hedge no longer installs, so there is nothing to take: keep it, or
+  move it away by hand. Hedge keeps the new file up to date, and their old
+  file stays in `~/.local/state/hedge/backups/`. When the old file holds their own
   skills or rules, agents stop reading them. Say which ones they lose, and
   offer to move the ones they still want to the "About me" file in their
   profile, which agents read after the packs' rules.
-- **Keep theirs**: nothing changes, and the line stays in `fleet doctor`. This
+- **Keep theirs**: nothing changes, and the line stays in `hedge doctor`. This
   makes sense when they set the value on purpose, such as a model proxy their
   company needs.
 
-Recommend taking Fleet's version, unless they set the value on purpose.
+Recommend taking Hedge's version, unless they set the value on purpose.
 
-Tell them that a new Terminal window has `fleet` on its `PATH`. With Mac
+Tell them that a new Terminal window has `hedge` on its `PATH`. With Mac
 only, go on to step 10. With a hub and nodes, go on to step 9.
+
+### Go back to Fleet
+
+On its first run, `get.sh` turns Fleet's jobs off and keeps their files and
+launchers. It does this only on a machine with a Fleet engine install in
+`~/.local/share/fleet/engine`. When Fleet's `~/.local/bin/fleet` runs an
+engine in another folder, `get.sh` stops before it changes anything, so there
+is nothing to go back from. To go back on a machine that `get.sh` moved:
+
+1. Stop Hedge's jobs. On Linux, run
+   `systemctl --user disable --now` for each unit that
+   `systemctl --user list-units --all 'hedge-*'` names, and delete the
+   `# hedge:` lines with `crontab -e`. On a Mac, run
+   `launchctl bootout gui/$(id -u)/<label>` for each `dev.hedge.*` agent.
+   In T3 Code, turn off each `hedge:` scheduled task. For the MCP hub, run
+   `docker update --restart=no hedge-mcphub` and `docker stop hedge-mcphub`,
+   because both hubs use port 3317.
+2. When `~/.local/share/fleet/engine/fleet doctor` prints `Fleet is now Hedge`, check out the
+   commit before the rename:
+   `git -C ~/.local/share/fleet/engine checkout -q --detach <commit>`.
+3. Run `~/.local/share/fleet/engine/fleet packs --workflows nightly-updates=off`. This turns
+   off Fleet's nightly updates, so its updater does not check out Hedge
+   again. It also turns off the nightly Claude Code, Codex and T3 Code
+   updates. It saves the change in the profile, pushes it, and applies, so
+   it writes the `# fleet:` crontab lines again. Other machines on this
+   profile take the change at their next apply.
+4. Turn the stopped units back on. `get.sh` named each one as
+   `stopped and turned off the ...`. On Linux, run
+   `systemctl --user enable --now <unit>`. On a Mac, run
+   `launchctl enable gui/$(id -u)/<label>`, then
+   `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/<label>.plist`.
+   Skip `dev.fleet.fleet-update` and `dev.fleet.agent-update`: step 3 turned
+   them off. For the MCP hub, run
+   `docker update --restart=unless-stopped fleet-mcphub` and
+   `docker start fleet-mcphub`.
+5. In T3 Code, turn each `fleet:` scheduled task back on.
 
 ## 9. Add the hub and the nodes
 
@@ -409,15 +445,15 @@ each item on this Mac. Items 1 to 5 start early, in step 5, so the
 workspaces are made while the Mac is set up. Items 6 to 10 run here, after
 the Mac is ready to use. The person chose a hub and nodes in step 2, so
 create them without asking again. Show each command as you start it.
-Creating a workspace and `fleet devbox add` take minutes; use each wait
+Creating a workspace and `hedge devbox add` take minutes; use each wait
 (see "While something runs").
 
-Before item 3 below, run `coder list`, and `fleet hub status` once Fleet is
-set up on this Mac. When either names a hub or a Fleet workspace, ask
+Before item 3 below, run `coder list`, and `hedge hub status` once Hedge is
+set up on this Mac. When either names a hub or a Hedge workspace, ask
 whether to reuse a hub:
 
-- **Reuse** the hub that `fleet hub status` names: skip items 3 to 7 for
-  it. It keeps its links and disk watch. A Coder workspace that runs Fleet
+- **Reuse** the hub that `hedge hub status` names: skip items 3 to 7 for
+  it. It keeps its links and disk watch. A Coder workspace that runs Hedge
   but is not named as the hub skips items 3 to 6 only.
 - **Make a new one** (recommended when no hub is named): when there is no
   hub, or the old one is on another Coder deployment, another account, or a
@@ -425,15 +461,15 @@ whether to reuse a hub:
 
 **Clean up what you replace.** When a new hub or node replaces an old
 workspace, clean up only after item 10 passes on the new one, and ask before
-you remove anything. A workspace from step 5 that `fleet devbox add` never
+you remove anything. A workspace from step 5 that `hedge devbox add` never
 touched is not a devbox yet. It needs only item 2, after the person says
 yes, and it can go at once:
 
-1. Run `fleet devbox remove coder.<old name>` on this Mac. It takes the old
+1. Run `hedge devbox remove coder.<old name>` on this Mac. It takes the old
    host out of their profile, unlinks it in T3 Code here, and drops it from
    load balancing. The hub stops its tunnel, disk watch, and link to that
-   host at its next `fleet update`. An old hub can go only after
-   `fleet hub here` named the new one. When it stops with an error, fix what
+   host at its next `hedge update`. An old hub can go only after
+   `hedge hub here` named the new one. When it stops with an error, fix what
    it names and run it again. When it says T3 Code here has no link it can
    find, remove the old machine in T3 Code's Settings → Environments.
 2. Delete the old workspace with `coder delete <old name>`.
@@ -448,10 +484,10 @@ When step 7 printed that a team pack is ticked, such as `✓ You are in the
 when it has one:
 
 ```sh
-~/.local/share/fleet/sources/<source>/packs/<pack>/SETUP.md
+~/.local/share/hedge/sources/<source>/packs/<pack>/SETUP.md
 ```
 
-`<source>` is the folder in `~/.local/share/fleet/sources` that holds the
+`<source>` is the folder in `~/.local/share/hedge/sources` that holds the
 pack. A team pack may already have made a devbox in step 7, and its note
 says which template, parameters, and devbox to use. Where it differs from
 the steps below, follow the note. Step 5 made the workspaces before step 7,
@@ -460,11 +496,11 @@ made, replace the early workspaces: see "Clean up what you replace".
 
 1. **Coder CLI.** When `command -v coder` finds nothing, download
    `https://coder.com/install.sh` to
-   `~/.cache/fleet-setup/coder-install.sh`, read it, and run it. It needs
+   `~/.cache/hedge-setup/coder-install.sh`, read it, and run it. It needs
    no Homebrew and no password:
 
    ```sh
-   sh ~/.cache/fleet-setup/coder-install.sh --method standalone --prefix "$HOME/.local"
+   sh ~/.cache/hedge-setup/coder-install.sh --method standalone --prefix "$HOME/.local"
    ```
 
    When `coder whoami` fails, sign in. Read their Coder address from
@@ -482,7 +518,7 @@ made, replace the early workspaces: see "Clean up what you replace".
    asks for the token itself:
 
    ```sh
-   printf '#!/bin/sh\nexport PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"\ncoder login %s\n' '<coder address>' > ~/.cache/fleet-setup/coder.command && chmod +x ~/.cache/fleet-setup/coder.command && open ~/.cache/fleet-setup/coder.command
+   printf '#!/bin/sh\nexport PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"\ncoder login %s\n' '<coder address>' > ~/.cache/hedge-setup/coder.command && chmod +x ~/.cache/hedge-setup/coder.command && open ~/.cache/hedge-setup/coder.command
    ```
 
    The step is done when `coder whoami` passes.
@@ -491,16 +527,16 @@ made, replace the early workspaces: see "Clean up what you replace".
    `coder_parameter` blocks in its files:
 
    ```sh
-   coder templates pull <template> ~/.cache/fleet-setup/template-<template>
+   coder templates pull <template> ~/.cache/hedge-setup/template-<template>
    ```
 
    Find the disk size parameter. Ask for each parameter without a default.
    When `coder templates pull` fails, open the template's page in the Coder
    web app, `<coder address>/templates/<template>`, and ask the person to
    read you the parameters and their allowed values from it.
-3. **Names.** Use `fleet-hub` and `fleet-node-1`, `fleet-node-2`, and so on.
+3. **Names.** Use `hedge-hub` and `hedge-node-1`, `hedge-node-2`, and so on.
    When `coder list` already has a workspace by that name that they do not
-   reuse, add the next free number instead, such as `fleet-hub-2`, so the new
+   reuse, add the next free number instead, such as `hedge-hub-2`, so the new
    machine and the one it replaces never share a name. Ask for a name only
    when they want another. Below, `<hub>` and `<node>` stand for them, and
    `<name>` for any of them.
@@ -520,27 +556,27 @@ made, replace the early workspaces: see "Clean up what you replace".
    `coder schedule stop <name> manual`.
 5. **SSH.** Run `coder config-ssh --yes`. The step is done when
    `ssh coder.<name> true` passes for each workspace.
-6. **Fleet on the hub.** Run `fleet hub status` first. When it names a hub
+6. **Hedge on the hub.** Run `hedge hub status` first. When it names a hub
    that step 5 did not create, ask the reuse question above now. On
    **Reuse**, delete the early hub with `coder delete <name>` after the
-   person says yes, and skip items 6 and 7. Otherwise, `fleet devbox add`
-   installs Fleet, applies their profile, and links T3 Code. It also signs
+   person says yes, and skip items 6 and 7. Otherwise, `hedge devbox add`
+   installs Hedge, applies their profile, and links T3 Code. It also signs
    the workspace in to Coder, so the hub reaches the node over SSH. Its Claude
    sign-in, `claude auth login` on the workspace, draws its own terminal
    screen and reads a code there, so run it in a Terminal window:
 
    ```sh
-   printf '#!/bin/sh\nexport PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"\nfleet devbox add %s\n' 'coder.<hub>' > ~/.cache/fleet-setup/devbox.command && chmod +x ~/.cache/fleet-setup/devbox.command && open ~/.cache/fleet-setup/devbox.command
+   printf '#!/bin/sh\nexport PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"\nhedge devbox add %s\n' 'coder.<hub>' > ~/.cache/hedge-setup/devbox.command && chmod +x ~/.cache/hedge-setup/devbox.command && open ~/.cache/hedge-setup/devbox.command
    ```
 
    Before it opens, explain its sign-ins from the table in step 4 of
-   [Getting started](https://github.com/PostHog/fleet-engine/blob/main/docs/getting-started.md).
+   [Getting started](https://github.com/PostHog/hedge/blob/main/docs/getting-started.md).
    Ask them to tell you when it prints that the host is their devbox now.
-7. **Name the hub.** Run `fleet hub here` on the hub. It saves
+7. **Name the hub.** Run `hedge hub here` on the hub. It saves
    `coder.<hub>` as the hub in their profile:
 
    ```sh
-   ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; fleet hub here'
+   ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge hub here'
    ```
 
 8. **Hub packs.** Ask with a multi-select question which of these to turn
@@ -564,42 +600,42 @@ made, replace the early workspaces: see "Clean up what you replace".
    when the line does not name `hub`:
 
    ```sh
-   fleet packs --add hub --workflows mcp-gateway=off
+   hedge packs --add hub --workflows mcp-gateway=off
    ```
 
    Then have the hub take the change now, not at its nightly update:
 
    ```sh
-   ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; fleet update'
+   ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge update'
    ```
 
-9. **Fleet on the nodes.** Run `fleet devbox add` again in a Terminal window,
+9. **Hedge on the nodes.** Run `hedge devbox add` again in a Terminal window,
    for each node, one after the other:
 
    ```sh
-   printf '#!/bin/sh\nexport PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"\nfleet devbox add %s\n' 'coder.<node>' > ~/.cache/fleet-setup/devbox.command && chmod +x ~/.cache/fleet-setup/devbox.command && open ~/.cache/fleet-setup/devbox.command
+   printf '#!/bin/sh\nexport PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"\nhedge devbox add %s\n' 'coder.<node>' > ~/.cache/hedge-setup/devbox.command && chmod +x ~/.cache/hedge-setup/devbox.command && open ~/.cache/hedge-setup/devbox.command
    ```
 
    It lists the node in their profile and has the hub take it before the
    node applies, so the hub's tunnels, disk watch, and credentials include
    it. At the end, the hub links the node in T3 Code. It prints two lines
    that start with `✓ The hub` when both worked. When it says the hub did
-   not answer, run the `fleet update` command from step 8 again. When it
+   not answer, run the `hedge update` command from step 8 again. When it
    says the hub has not linked the node yet, run this, with the node's name:
 
    ```sh
-   ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; fleet peers link coder.<node>'
+   ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge peers link coder.<node>'
    ```
 
-   The last line of `fleet devbox add` says which machines T3 Code on the
+   The last line of `hedge devbox add` says which machines T3 Code on the
    Mac starts new threads on. After the last node, ask them to quit and
    reopen T3 Code once, so it reads that.
-10. **Check.** Run `fleet doctor` on the Mac, and on each workspace over SSH.
+10. **Check.** Run `hedge doctor` on the Mac, and on each workspace over SSH.
     A command over SSH does not read the workspace's login files, so it sets
     the `PATH` itself:
 
     ```sh
-    ssh coder.<name> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; fleet doctor'
+    ssh coder.<name> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge doctor'
     ```
 
     Explain each line as in step 8. When a `To do:` line on the hub names a
@@ -609,25 +645,25 @@ made, replace the early workspaces: see "Clean up what you replace".
     Terminal window, as `ssh -t coder.<hub>` with the same `PATH` line.
 
 To add a node later, when the load grows, run items 3, 4, 5 and 9 above
-again with the next node name and a 500 GB disk, then `fleet doctor` on it.
+again with the next node name and a 500 GB disk, then `hedge doctor` on it.
 
 Then go on to step 10.
 
 ## 10. Hand over
 
-Add their profile as a T3 Code project named `fleet-profile`, so they can
+Add their profile as a T3 Code project named `hedge-profile`, so they can
 open a thread there. Skip it when T3 Code already lists that project:
 
 ```sh
-t3 project add --title fleet-profile ~/.local/share/fleet/profile
+t3 project add --title hedge-profile ~/.local/share/hedge/profile
 ```
 
 Then give them these habits, one line each:
 
 - When something does not fit how you work, open a thread in the
-  `fleet-profile` project and say what to change. Every machine takes the
+  `hedge-profile` project and say what to change. Every machine takes the
   change.
-- Fleet keeps itself up to date: each machine runs `fleet update` every night.
+- Hedge keeps itself up to date: each machine runs `hedge update` every night.
 - **Side fix.** When an agent finds an unrelated problem, it hands the fix to
   a new thread with its own pull request, and stays on its task.
 - **Conductor.** For big work, one thread writes a map of tickets and starts

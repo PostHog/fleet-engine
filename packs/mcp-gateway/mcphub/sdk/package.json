@@ -1,5 +1,5 @@
 {
-  "name": "fleet-mcphub-sdk",
+  "name": "hedge-mcphub-sdk",
   "private": true,
   "packageManager": "pnpm@10.12.4",
   "dependencies": {

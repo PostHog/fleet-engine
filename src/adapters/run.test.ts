@@ -24,8 +24,8 @@ describe("the command runner", () => {
     const before = process.env.CLAUDE_CONFIG_DIR;
     process.env.CLAUDE_CONFIG_DIR = "/elsewhere";
     try {
-      const shown = await spawnRunner(["sh", "-c", 'printf "%s %s" "$HOME" "${CLAUDE_CONFIG_DIR-unset}"'], { home: "/tmp/fleet-home", clearEnv: ["CLAUDE_CONFIG_DIR"] });
-      expect(shown.stdout).toBe("/tmp/fleet-home unset");
+      const shown = await spawnRunner(["sh", "-c", 'printf "%s %s" "$HOME" "${CLAUDE_CONFIG_DIR-unset}"'], { home: "/tmp/hedge-home", clearEnv: ["CLAUDE_CONFIG_DIR"] });
+      expect(shown.stdout).toBe("/tmp/hedge-home unset");
       expect((await spawnRunner(["sh", "-c", 'printf %s "$CLAUDE_CONFIG_DIR"'])).stdout).toBe("/elsewhere");
     } finally {
       if (before === undefined) delete process.env.CLAUDE_CONFIG_DIR;
@@ -225,7 +225,7 @@ describe.each([
       {
         id: `${name}:home`,
         pack: "engine",
-        say: `Fleet left ${what} alone: it could not look up your account's home folder, so it cannot tell whether ${home} is yours. Check that your system lists your user (getent passwd on Linux, dscacheutil on a Mac), then run fleet apply.`,
+        say: `Hedge left ${what} alone: it could not look up your account's home folder, so it cannot tell whether ${home} is yours. Check that your system lists your user (getent passwd on Linux, dscacheutil on a Mac), then run hedge apply.`,
         repair: "human",
       },
     ]);

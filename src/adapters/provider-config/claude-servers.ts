@@ -5,7 +5,7 @@ import { inside } from "../../files/install.ts";
 import { linkOnPath, optional, readState, writeWithBackups } from "./store.ts";
 
 export const claudeJson = ".claude.json";
-export const serversTarget = ".config/fleet/claude-servers.json";
+export const serversTarget = ".config/hedge/claude-servers.json";
 
 /** value is what the pack asked for; stored is what Claude Code wrote for it, which can differ in shape. */
 type Owned = { name: string; value: unknown; stored: unknown; pack: string };
@@ -21,7 +21,7 @@ export function wantedServers(plan: Plan): Wanted[] {
 const finding = (id: string, say: string, repair?: Finding["repair"]): Finding => ({ id, pack: "engine", say, ...(repair ? { repair } : {}) });
 
 /**
- * Claude Code runs without CLAUDE_CONFIG_DIR, so it writes the ~/.claude.json that Fleet reads.
+ * Claude Code runs without CLAUDE_CONFIG_DIR, so it writes the ~/.claude.json that Hedge reads.
  * Adds and removes the Claude MCP servers packs declare through claude mcp, so Claude Code writes ~/.claude.json itself.
  * Claude Code saves that file from several paths, not all of them locked, so no other writer can avoid racing it.
  */
@@ -35,7 +35,7 @@ export async function reconcileServers(plan: Plan, home: string, options: { dryR
   try {
     servers = await currentServers(home);
   } catch (error) {
-    result.findings.push(finding(`kept:${claudeJson}`, `Kept ${claudeJson} as it is: Fleet cannot read it (${(error as Error).message}). Fix the file, then run fleet apply.`, "human"));
+    result.findings.push(finding(`kept:${claudeJson}`, `Kept ${claudeJson} as it is: Hedge cannot read it (${(error as Error).message}). Fix the file, then run hedge apply.`, "human"));
     return result;
   }
   const next: Owned[] = [];
@@ -59,11 +59,11 @@ export async function reconcileServers(plan: Plan, home: string, options: { dryR
     if (options.outage && !options.gated(["mcpServers", old.name])) next.push(old);
     else if (same(servers[old.name], old.stored)) remove.push(old.name);
   }
-  if (kept.length) result.findings.push(finding(`kept:${claudeJson}`, `Kept your ${kept.join(", ")} in ${claudeJson}. Run fleet apply --adopt ${claudeJson} to take Fleet's value.`));
+  if (kept.length) result.findings.push(finding(`kept:${claudeJson}`, `Kept your ${kept.join(", ")} in ${claudeJson}. Run hedge apply --adopt ${claudeJson} to take Hedge's value.`));
   const removedOnly = remove.filter((name) => !add.some((server) => server.name === name));
   const reason = [add.length ? `set ${add.map((server) => `mcpServers.${server.name}`).join(", ")}` : "", removedOnly.length ? `remove ${removedOnly.map((name) => `mcpServers.${name}`).join(", ")}` : ""].filter(Boolean).join("; ");
   if (reason && (await linkOnPath(home, claudeJson))) {
-    result.findings.push(finding(`kept:${claudeJson}`, `Kept ${claudeJson} because it is a link or sits in a linked folder. Fleet would ${reason} there. Make it a plain file in a plain folder to let Fleet change it.`));
+    result.findings.push(finding(`kept:${claudeJson}`, `Kept ${claudeJson} because it is a link or sits in a linked folder. Hedge would ${reason} there. Make it a plain file in a plain folder to let Hedge change it.`));
     return result;
   }
   if (options.dryRun) {
@@ -79,7 +79,7 @@ export async function reconcileServers(plan: Plan, home: string, options: { dryR
     blocked.add(name);
     const old = previous.find((item) => item.name === name);
     if (old) next.push(old);
-    result.findings.push(finding(`claude-server:${name}`, `Claude Code did not remove the MCP server ${name}: ${firstLine(removed)}. Run fleet apply again.`, "apply"));
+    result.findings.push(finding(`claude-server:${name}`, `Claude Code did not remove the MCP server ${name}: ${firstLine(removed)}. Run hedge apply again.`, "apply"));
   }
   const added: Wanted[] = [];
   for (const server of add.filter((item) => !blocked.has(item.name))) {

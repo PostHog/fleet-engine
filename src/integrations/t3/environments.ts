@@ -91,7 +91,7 @@ export async function readLinkedMessages(client: Pick<T3HttpClient, "callTool">,
 export type LinkedSend = { threadId: string; messageId: string; delivery: "started" | "queued" | "steered" | "restarted" };
 
 export async function sendLinkedMessage(client: Pick<T3HttpClient, "callTool">, environmentId: string, threadId: string, message: string): Promise<LinkedSend> {
-  const sent = await client.callTool<LinkedSend>("t3_thread_send", { environmentId, threadId, message, mode: "queue", clientRequestId: `fleet-thread-send:${randomUUID()}` });
+  const sent = await client.callTool<LinkedSend>("t3_thread_send", { environmentId, threadId, message, mode: "queue", clientRequestId: `hedge-thread-send:${randomUUID()}` });
   return { threadId: sent.threadId, messageId: sent.messageId, delivery: sent.delivery };
 }
 

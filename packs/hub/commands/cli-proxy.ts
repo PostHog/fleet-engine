@@ -39,11 +39,11 @@ function panel(historyDays: number): Panel {
 await runCommand(() => {
   const [mode = "plan", ...rest] = Bun.argv.slice(2);
   const agent = mode === "check" && rest.length === 1 && rest[0] === "codex" ? "codex" : rest.length ? undefined : "claude";
-  if (!agent || !modes.includes(mode)) return console.error("Usage: fleet cli-proxy [plan|install|doctor|catalog|check [codex]|disconnect|remove|left], or fleet cli-proxy connect < key file"), 2;
+  if (!agent || !modes.includes(mode)) return console.error("Usage: hedge cli-proxy [plan|install|doctor|catalog|check [codex]|disconnect|remove|left], or hedge cli-proxy connect < key file"), 2;
   const days = panelDays(Bun.env);
   return cliProxy(mode as ProxyMode, {
-    home: homedir(), uid: process.getuid?.() ?? 0, user: userInfo().username, ...(plans.includes(Bun.env.FLEET_PLAN ?? "") ? { plan: Bun.env.FLEET_PLAN as AiPlan } : {}), ...(proxyOn(Bun.env) ? { accounts: numberSetting("hub.proxyAccounts") } : {}), ...(days === undefined ? {} : { panel: panel(days) }),
+    home: homedir(), uid: process.getuid?.() ?? 0, user: userInfo().username, ...(plans.includes(Bun.env.HEDGE_PLAN ?? "") ? { plan: Bun.env.HEDGE_PLAN as AiPlan } : {}), ...(proxyOn(Bun.env) ? { accounts: numberSetting("hub.proxyAccounts") } : {}), ...(days === undefined ? {} : { panel: panel(days) }),
     devboxes: mode === "doctor" ? tunnelTargets(stringSetting("hub.alias"), peerMachine().devboxes, hostname()) : [],
     release: release(), run, fetch, now: Date.now, sleep: (ms) => Bun.sleep(ms), readStdin: () => Bun.stdin.text(), randomKey: () => randomBytes(32).toString("hex"), print: (line) => console.log(line),
   }, agent as Agent);
-}, "fleet cli-proxy", failedExit(Bun.argv[2]));
+}, "hedge cli-proxy", failedExit(Bun.argv[2]));

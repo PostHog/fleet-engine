@@ -10,7 +10,7 @@ export type SecretProvidersModule = { providers: Record<string, ProviderFactory>
 export const rowsSeam = "secret-rows";
 export const providersSeam = "secret-providers";
 
-const handlers = (env: Env) => JSON.parse(env.FLEET_HANDLERS || "{}") as Record<string, string>;
+const handlers = (env: Env) => JSON.parse(env.HEDGE_HANDLERS || "{}") as Record<string, string>;
 
 const notInstalled = (name: string): Provider => ({ name, check: async () => ({ ok: false, reason: `no pack on this hub brings the ${name} provider, so the value cannot be checked. Turn on the pack that brings it` }) });
 

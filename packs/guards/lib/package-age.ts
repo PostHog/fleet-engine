@@ -64,7 +64,7 @@ function judge(config: Config): Verdict {
 
 /** Adds a three-day minimum release age to the user pnpm and Bun config where it is missing; with --check, exits 1 while one is missing. A config it cannot parse or edit safely stays as it is. */
 export function packageAgeCommand(args: string[], inputs: PackageAgeInputs): number {
-  if (args.length > 1 || (args.length === 1 && args[0] !== "--check")) throw new Error("usage: fleet package-age [--check]");
+  if (args.length > 1 || (args.length === 1 && args[0] !== "--check")) throw new Error("usage: hedge package-age [--check]");
   const verdicts = [judge(pnpm(inputs)), judge(bun(inputs))];
   if (args[0] === "--check") return verdicts.every((verdict) => verdict.state === "set") ? 0 : 1;
   for (const { config, state, next } of verdicts) {
@@ -73,7 +73,7 @@ export function packageAgeCommand(args: string[], inputs: PackageAgeInputs): num
       writeFileSync(config.path, next);
       inputs.print(`Added a ${days}-day minimum release age to ${config.path}.`);
     }
-    if (state === "unsafe") inputs.print(`Kept ${config.path} as it is: Fleet cannot add the setting safely. Add ${config.key} to it by hand, so ${config.tool} installs only versions at least ${days} days old.`);
+    if (state === "unsafe") inputs.print(`Kept ${config.path} as it is: Hedge cannot add the setting safely. Add ${config.key} to it by hand, so ${config.tool} installs only versions at least ${days} days old.`);
   }
   return verdicts.some((verdict) => verdict.state === "unsafe") ? 1 : 0;
 }

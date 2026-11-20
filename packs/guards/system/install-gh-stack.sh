@@ -22,7 +22,7 @@ digest() {
 
 data=${GH_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/gh}
 binary="$data/extensions/gh-stack/gh-stack"
-marker="$HOME/.config/fleet/gh-stack.version"
+marker="$HOME/.config/hedge/gh-stack.version"
 current() { [ -f "$binary" ] && [ "$(digest "$binary")" = "$sum" ]; }
 
 if $check; then current; exit; fi
@@ -33,7 +33,7 @@ if current; then
   exit 0
 fi
 if [ -e "$data/extensions/gh-stack" ]; then
-  [ -f "$marker" ] || fail "kept the gh-stack that Fleet did not install. Run gh extension remove stack, then fleet apply, to use the pinned $tag."
+  [ -f "$marker" ] || fail "kept the gh-stack that Hedge did not install. Run gh extension remove stack, then hedge apply, to use the pinned $tag."
   gh extension remove stack >/dev/null
 fi
 

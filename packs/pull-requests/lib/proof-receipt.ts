@@ -6,12 +6,16 @@ import type { Display } from "./proof-display.ts";
 import type { ReviewDisplay } from "./proof-review-display.ts";
 import { summaryGaps, type GapProof, type KindProof, type ProofSummary } from "./proof.ts";
 
-export const receiptOpen = "<!-- fleet-proof-receipt";
-export const receiptClose = "<!-- /fleet-proof-receipt -->";
+export const receiptOpen = "<!-- hedge-proof-receipt";
+export const receiptClose = "<!-- /hedge-proof-receipt -->";
+const legacyReceiptOpen = "<!-- fleet-proof-receipt";
+const legacyReceiptClose = "<!-- /fleet-proof-receipt -->";
 const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
-const blockText = String.raw`${escaped(receiptOpen)}\b[^>]*-->(?:(?!${escaped(receiptOpen)})[\s\S])*?${escaped(receiptClose)}`;
+const opens = `(?:${escaped(receiptOpen)}|${escaped(legacyReceiptOpen)})`;
+const blockText = String.raw`${opens}\b[^>]*-->(?:(?!${opens})[\s\S])*?(?:${escaped(receiptClose)}|${escaped(legacyReceiptClose)})`;
 const blockAndBreak = new RegExp(String.raw`${blockText}(?:\r?\n){0,2}`, "g");
-const marker = /<!-- fleet-proof-receipt head=([0-9a-f]{40}) hash=([0-9a-f]+) -->/;
+const marker = /<!-- (?:hedge|fleet)-proof-receipt head=([0-9a-f]{40}) hash=([0-9a-f]+) -->/;
+const withCurrentMarkers = (body: string) => body.replaceAll(legacyReceiptOpen, receiptOpen).replaceAll(legacyReceiptClose, receiptClose);
 
 export function withoutReceipt(body: string) {
   const stripped = body.replace(blockAndBreak, "");
@@ -100,7 +104,7 @@ function kindRow(kind: KindProof, input: ReceiptInput, warnings: string[]) {
     return row([kind.kind, "no evidence", "missing", ""]);
   }
   const lines = input.display.lines[from.commit]?.[kind.kind];
-  if (!lines) warnings.push(`warning: ${kind.kind} has no line of what ran at ${short(from.commit)}. Run fleet proof save --commit ${from.commit} --kind ${kind.kind} --ran '<what ran>' --result '<what it showed>'`);
+  if (!lines) warnings.push(`warning: ${kind.kind} has no line of what ran at ${short(from.commit)}. Run hedge proof save --commit ${from.commit} --kind ${kind.kind} --ran '<what ran>' --result '<what it showed>'`);
   const ran = lines ? guardField(`what ran of ${kind.kind}`, lines.ran) : "no line recorded";
   const result = kind.kind === "prod-shape" ? prodShapeResult : lines ? guardField(`result of ${kind.kind}`, lines.result) : "no line recorded";
   return row([kind.kind, ran, result, from.cell]);
@@ -139,10 +143,10 @@ export function renderSection(input: ReceiptInput) {
   const gaps = gapLines(input);
   const captioned = new Set(input.display.screenshots.map((shot) => `${shot.commit}/${shot.name}`));
   for (const { commit, names } of input.screenshots) for (const name of names) {
-    if (!captioned.has(`${commit}/${name}`)) warnings.push(`warning: screenshot ${name} at ${short(commit)} has no caption. Run fleet proof save --commit ${commit} --kind ui-walk --caption '<what it shows>' <the screenshot>`);
+    if (!captioned.has(`${commit}/${name}`)) warnings.push(`warning: screenshot ${name} at ${short(commit)} has no caption. Run hedge proof save --commit ${commit} --kind ui-walk --caption '<what it shows>' <the screenshot>`);
   }
   for (const shot of input.display.screenshots.filter((candidate) => !candidate.url)) {
-    warnings.push(`warning: screenshot ${shot.name} at ${short(shot.commit)} has no published URL. Run fleet proof publish --commit ${shot.commit} --asset-repo <owner/fork> <the screenshot>`);
+    warnings.push(`warning: screenshot ${shot.name} at ${short(shot.commit)} has no published URL. Run hedge proof publish --commit ${shot.commit} --asset-repo <owner/fork> <the screenshot>`);
   }
   const section = [
     "| Proof | What ran | Result | Commit |", "| --- | --- | --- | --- |", ...rows, reviewRow(input.reviews), judgeRow(input.summary), "",
@@ -166,7 +170,8 @@ export async function screenshotFiles(summary: ProofSummary) {
 
 const count = (text: string, part: string) => text.split(part).length - 1;
 
-export function checkMarkers(body: string) {
+export function checkMarkers(written: string) {
+  const body = withCurrentMarkers(written);
   const [opens, closes] = [count(body, receiptOpen), count(body, receiptClose)];
   const start = body.indexOf(receiptOpen);
   const whole = start < 0 || new RegExp(`^${marker.source}`).test(body.slice(start));
@@ -248,7 +253,8 @@ function sectionOf(body: string, heading: string) {
   return { found, next };
 }
 
-export function placeReceipt(body: string, receipt: Receipt, heading: string): string {
+export function placeReceipt(written: string, receipt: Receipt, heading: string): string {
+  const body = withCurrentMarkers(written);
   const start = body.indexOf(receiptOpen);
   if (start >= 0) {
     const end = body.indexOf(receiptClose) + receiptClose.length;

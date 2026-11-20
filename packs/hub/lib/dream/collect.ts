@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Env, Result } from "../coder.ts";
-import { peersOf, quote, remoteFleet } from "../machine.ts";
+import { peersOf, quote, remoteHedge } from "../machine.ts";
 import { readSeen, unreachedPath, type Unreached } from "./analyze.ts";
 import { digestLines, memoryCheckout, parseSince, sessionKeepDays, stateDir, type Digest } from "./digest.ts";
 
@@ -25,7 +25,7 @@ function parseDigests(text: string, source: string, say: (line: string) => void)
   const found: Digest[] = [];
   for (const line of text.split("\n")) {
     if (!line.trim()) continue;
-    try { found.push(JSON.parse(line)); } catch { say(`Fleet dream: skipped a broken digest line from ${source}`); }
+    try { found.push(JSON.parse(line)); } catch { say(`Hedge dream: skipped a broken digest line from ${source}`); }
   }
   return found;
 }
@@ -41,7 +41,7 @@ type Reached = { machine: string; sessions: number };
 export const collectedDir = (run: string) => join(run, "collected");
 
 async function gather(since: number, run: string, io: CollectIo) {
-  const remote = remoteFleet(`dream digest --since ${quote(new Date(since).toISOString())}`);
+  const remote = remoteHedge(`dream digest --since ${quote(new Date(since).toISOString())}`);
   const gathered = parseDigests(digestLines(io.home, io.self, since, io.now(), io.env), io.self, io.say);
   const reached: Reached[] = [{ machine: io.self, sessions: gathered.length }];
   const failed: string[] = [];
@@ -51,7 +51,7 @@ async function gather(since: number, run: string, io: CollectIo) {
     let text: string;
     if (existsSync(saved)) {
       text = readFileSync(saved, "utf8");
-      io.say(`Fleet dream: ${machine} was read earlier in this run.`);
+      io.say(`Hedge dream: ${machine} was read earlier in this run.`);
     } else {
       const answer = await call();
       if (answer.code !== 0) {
@@ -117,6 +117,6 @@ export async function collect(since: string, io: CollectIo): Promise<string> {
   const oldest = dateOf(io.now() - sessionKeepDays * day);
   for (const old of readdirSync(state).filter((name) => /^\d{4}-\d{2}-\d{2}$/.test(name) && name < oldest)) rmSync(join(state, old), { recursive: true, force: true });
   await io.git(["-C", memoryCheckout(io.home, io.env), "worktree", "prune"]);
-  io.say(`Fleet dream: ${gathered.length} sessions read, ${kept} new in ${run}.${failed.length ? ` Not reached: ${failed.join("; ")}.` : ""}`);
+  io.say(`Hedge dream: ${gathered.length} sessions read, ${kept} new in ${run}.${failed.length ? ` Not reached: ${failed.join("; ")}.` : ""}`);
   return run;
 }

@@ -1,7 +1,7 @@
 import { realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { ModelRow, PackJob, Plan } from "../../pack/types.ts";
-import { taskPrefix, type FleetTask, type T3Tasks } from "../jobs/adapter.ts";
+import { taskPrefix, type HedgeTask, type T3Tasks } from "../jobs/adapter.ts";
 import { same } from "../provider-config/fields.ts";
 import type { CommandRunner } from "../run.ts";
 import type { ModelSelection, T3Rpc, T3Server } from "./port.ts";
@@ -23,11 +23,11 @@ type ScheduledTask = {
   title: string;
   prompt: string;
   enabled: boolean;
-  schedule: FleetTask["schedule"];
+  schedule: HedgeTask["schedule"];
   projectId: string;
   workspaceStrategy: { type: string; baseRef?: string; startFromOrigin?: boolean };
   modelSelection: ModelSelection;
-  runtimeMode: FleetTask["runtimeMode"];
+  runtimeMode: HedgeTask["runtimeMode"];
 };
 
 export async function activeProjects(rpc: T3Rpc): Promise<ShellProject[]> {
@@ -53,7 +53,7 @@ export function t3Tasks(server: T3Server, home: string, options: { plan: Plan; r
   const local = (path: string) => realPath(expandHome(home, path));
   const strategy = async (root: string) => {
     const base = await baseRef(options.run, root);
-    if (!base) throw new Error(`${root} has no main or master branch to start worktrees from. Push one, then run fleet apply.`);
+    if (!base) throw new Error(`${root} has no main or master branch to start worktrees from. Push one, then run hedge apply.`);
     return { type: "worktree", baseRef: base, startFromOrigin: true };
   };
   return {
@@ -77,7 +77,7 @@ export function t3Tasks(server: T3Server, home: string, options: { plan: Plan; r
               schedule: task.schedule,
               project,
               modelRole: job !== undefined && same(task.modelSelection, expected) ? job.modelRole : `model:${task.modelSelection.instanceId}/${task.modelSelection.model}`,
-              workspaceStrategy: (wantedStrategy === undefined || same(task.workspaceStrategy, wantedStrategy) ? task.workspaceStrategy.type : JSON.stringify(task.workspaceStrategy)) as FleetTask["workspaceStrategy"],
+              workspaceStrategy: (wantedStrategy === undefined || same(task.workspaceStrategy, wantedStrategy) ? task.workspaceStrategy.type : JSON.stringify(task.workspaceStrategy)) as HedgeTask["workspaceStrategy"],
               runtimeMode: task.runtimeMode,
             };
           }),
@@ -86,9 +86,9 @@ export function t3Tasks(server: T3Server, home: string, options: { plan: Plan; r
     upsert: (task) =>
       server.session(home, async (rpc) => {
         const project = (await activeProjects(rpc)).find((item) => realPath(item.workspaceRoot) === local(task.project));
-        if (!project) throw new Error(`T3 Code has no project at ${task.project}, so Fleet cannot add the ${task.id} task. Run fleet apply again once T3 Code lists the project.`);
+        if (!project) throw new Error(`T3 Code has no project at ${task.project}, so Hedge cannot add the ${task.id} task. Run hedge apply again once T3 Code lists the project.`);
         const modelSelection = await modelOf(rpc, task.modelRole);
-        if (!modelSelection) throw new Error(`T3 Code has no default model, so Fleet cannot add the ${task.id} task. Pick a model in T3 Code, then run fleet apply.`);
+        if (!modelSelection) throw new Error(`T3 Code has no default model, so Hedge cannot add the ${task.id} task. Pick a model in T3 Code, then run hedge apply.`);
         await rpc.call("scheduledTasks.upsert", {
           id: task.id,
           title: task.title,

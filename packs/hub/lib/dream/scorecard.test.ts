@@ -10,7 +10,7 @@ afterEach(() => temp.cleanup());
 const now = Date.parse("2026-11-05T04:10:00Z");
 
 async function memoryRepo() {
-  const checkout = temp.make("fleet-memory-");
+  const checkout = temp.make("hedge-memory-");
   await spawnGit(checkout, "init", "--quiet", "-b", "main");
   const commit = async (files: Record<string, string>, message: string, date: string) => {
     for (const [path, text] of Object.entries(files)) {
@@ -34,7 +34,7 @@ test("readMemories reads each memory with the topics of its commits, and skips t
 });
 
 test("readMemories reads the memories of a memory.subtree folder by their paths in that folder", async () => {
-  const repo = temp.make("fleet-memory-repo-");
+  const repo = temp.make("hedge-memory-repo-");
   await spawnGit(repo, "init", "--quiet", "-b", "main");
   for (const [path, text] of Object.entries({ "memory/MEMORY.md": "# Memory\n- [Tests](tech/run-tests.md)\n", "memory/tech/run-tests.md": "---\nname: run-tests\n---\nRun them.\n", "app/notes.md": "not memory\n" })) {
     mkdirSync(join(repo, path, ".."), { recursive: true });
@@ -49,7 +49,7 @@ test("readMemories reads the memories of a memory.subtree folder by their paths 
 
 test("recordRuns copies each analyzed session into the ledger without its text, and the scorecard counts a repeat on a remembered topic", async () => {
   const checkout = await memoryRepo();
-  const state = temp.make("fleet-dream-state-");
+  const state = temp.make("hedge-dream-state-");
   const run = join(state, "2026-10-28");
   mkdirSync(join(run, "digests"), { recursive: true });
   mkdirSync(join(run, "findings"), { recursive: true });

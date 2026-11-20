@@ -18,7 +18,7 @@ export type FieldRecord = { [target: string]: Field[] };
 type Merged = { record: Field[]; kept: string[]; reason: string; after?: string; document: Document };
 type FilesResult = AdapterResult & { plugins?: string[]; claudeEnabled?: Record<string, boolean>; marketplaces?: Record<string, string | null>; codexPlugins?: string[] };
 
-export const recordTarget = ".config/fleet/provider-fields.json";
+export const recordTarget = ".config/hedge/provider-fields.json";
 const claudeSettings = ".claude/settings.json";
 
 /** Claude MCP servers live in ~/.claude.json, which Claude Code writes itself, so claude-servers.ts adds them through claude mcp. */
@@ -46,7 +46,7 @@ export function providerConfigAdapter(options: { run?: CommandRunner } = {}): Ad
         return result;
       };
       const result = context.dryRun ? await reconcile() : await withLock(context.home, reconcile);
-      if (outage) result.findings.push({ id: "config:outage", pack: "engine", say: "Kept every provider setting and plugin that Fleet would remove until all your pack sources can be fetched.", repair: "apply" });
+      if (outage) result.findings.push({ id: "config:outage", pack: "engine", say: "Kept every provider setting and plugin that Hedge would remove until all your pack sources can be fetched.", repair: "apply" });
       return result;
     },
   };
@@ -68,12 +68,12 @@ async function reconcileFiles(plan: Plan, home: string, dryRun: boolean, adopt: 
       merged = merge(target, before, old, fields, adopt.includes(target.path), { outage, gated: gatedPath(gated, target.provider), dropped: gatedFields(plan, target), configPath: join(home, target.path) });
     } catch (error) {
       keepOld();
-      result.findings.push({ id: `kept:${target.path}`, pack: "engine", say: `Kept ${target.path} as it is: Fleet cannot read it (${(error as Error).message}). Fix the file, then run fleet apply.`, repair: "human" });
+      result.findings.push({ id: `kept:${target.path}`, pack: "engine", say: `Kept ${target.path} as it is: Hedge cannot read it (${(error as Error).message}). Fix the file, then run hedge apply.`, repair: "human" });
       continue;
     }
     if (merged.after !== undefined && link) {
       keepOld();
-      result.findings.push({ id: `kept:${target.path}`, pack: "engine", say: `Kept ${target.path} because ${link === inside(home, target.path) ? "it is a link" : `${link} is a link`}. Fleet would ${merged.reason} there. Make it a plain file in a plain folder to let Fleet change it.` });
+      result.findings.push({ id: `kept:${target.path}`, pack: "engine", say: `Kept ${target.path} because ${link === inside(home, target.path) ? "it is a link" : `${link} is a link`}. Hedge would ${merged.reason} there. Make it a plain file in a plain folder to let Hedge change it.` });
       continue;
     }
     if (merged.record.length) next[target.path] = merged.record;
@@ -83,7 +83,7 @@ async function reconcileFiles(plan: Plan, home: string, dryRun: boolean, adopt: 
       result.marketplaces = declaredMarketplaces(merged.document);
     }
     if (target.provider === "codex" && !link) result.codexPlugins = acceptedCodexPlugins(merged.document);
-    if (merged.kept.length) result.findings.push({ id: `kept:${target.path}`, pack: "engine", say: `Kept your ${merged.kept.join(", ")} in ${target.path}. Run fleet apply --adopt ${target.path} to take Fleet's value.` });
+    if (merged.kept.length) result.findings.push({ id: `kept:${target.path}`, pack: "engine", say: `Kept your ${merged.kept.join(", ")} in ${target.path}. Run hedge apply --adopt ${target.path} to take Hedge's value.` });
     if (merged.after !== undefined) writes.push({ target: target.path, before, after: merged.after, action: { target: target.path, operation: before === undefined ? "create" : "replace", reason: merged.reason } });
   }
   if (dryRun) {
@@ -194,7 +194,7 @@ function gatedKeys(plan: Plan) {
 
 type GatedField = Field & { check: string };
 
-/** The config entries of this target that the gate dropped, with Fleet's value. Entries that wait for the same check leave together, even during an outage and without a record, unless one of them holds another value. */
+/** The config entries of this target that the gate dropped, with Hedge's value. Entries that wait for the same check leave together, even during an outage and without a record, unless one of them holds another value. */
 function gatedFields(plan: Plan, target: Target): GatedField[] {
   return plan.dropped.flatMap((entry) => {
     if (!entry.check || entry.value === undefined || !entry.item.startsWith(`config ${target.provider}:`)) return [];

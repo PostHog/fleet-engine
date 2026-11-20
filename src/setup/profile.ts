@@ -5,13 +5,17 @@ import type { PackManifest, Profile, ProfileFile, SettingValue } from "../pack/t
 import { bothChanged, loadProfile, saveAnswers } from "../profile/profile.ts";
 import type { Machine } from "./commands.ts";
 import { defaultSources, engineRepo } from "./defaults.ts";
+import { profileFile } from "../legacy.ts";
+import { releaseIn, releaseRefsAtHead } from "../update.ts";
 import type { Draft } from "./questions.ts";
 import type { Step } from "./runner.ts";
 import { Stopped, type Terminal } from "./terminal.ts";
 
-export const profileRepoName = "fleet-profile";
-export const memoryRepoName = "fleet-memory";
-export const profilePath = (home: string) => join(home, ".local", "share", "fleet", "profile");
+export const profileRepoName = "hedge-profile";
+export const memoryRepoName = "hedge-memory";
+const legacyProfileRepoName = "fleet-profile";
+const legacyMemoryRepoName = "fleet-memory";
+export const profilePath = (home: string) => join(home, ".local", "share", "hedge", "profile");
 
 export type ProfileContext = {
   terminal: Terminal;
@@ -21,7 +25,7 @@ export type ProfileContext = {
   nonInteractive: boolean;
   draft: Draft;
   packs(): PackManifest[];
-  /** Called once fleet.json holds every answer and is pushed: the draft is no longer needed. */
+  /** Called once hedge.json holds every answer and is pushed: the draft is no longer needed. */
   saved(dir: string): Promise<void>;
 };
 
@@ -59,8 +63,14 @@ export async function memoryRepo(machine: Machine, named: unknown, login?: strin
   const onGitHub = typeof named === "string" ? githubSlug(named, key) : undefined;
   if (typeof named === "string" && !onGitHub) return { repo: named, missing: false, make: async (print: (line: string) => void) => print(`✓ Using your ${noun} ${named}`) };
   const { gh, visibility, login: signedIn } = github(machine);
-  const slug = onGitHub ?? `${login ?? (await signedIn())}/${memoryRepoName}`;
-  const seen = await visibility(slug);
+  const owner = onGitHub ? undefined : (login ?? (await signedIn()));
+  let slug = onGitHub ?? `${owner}/${memoryRepoName}`;
+  let seen = await visibility(slug);
+  if (seen === undefined && owner) {
+    const legacy = `${owner}/${legacyMemoryRepoName}`;
+    const legacySeen = await visibility(legacy);
+    if (legacySeen !== undefined) [slug, seen] = [legacy, legacySeen];
+  }
   const missing = seen === undefined;
   if (!missing && !isPrivate(seen)) throw new Error(`${slug} is not private, and agents write notes about you there. Make it private, or name a private repo with --set ${key}=<owner/name>.`);
   const make = async (print: (line: string) => void) => {
@@ -75,7 +85,7 @@ function githubSlug(named: string, key: string) {
   const [, host, path] = /^[a-z][\w+.-]*:\/\/(?:[^@/]*@)?([^/:?#]+)(?::\d*)?(\/[^?#]*)?/i.exec(named) ?? /^(?:[^@/:]+@)?([^/:]+):(?!\/\/)(.*)$/.exec(named) ?? [];
   if (!host || !/^(?:www\.)?github\.com\.?$/i.test(host)) return undefined;
   const slug = /^\/?([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/.exec(path ?? "")?.[1];
-  if (!slug) throw new Error(`${named} is on GitHub, but Fleet cannot read its owner/name. Set ${key}=<owner/name>.`);
+  if (!slug) throw new Error(`${named} is on GitHub, but Hedge cannot read its owner/name. Set ${key}=<owner/name>.`);
   return slug;
 }
 
@@ -87,7 +97,9 @@ async function lookUp(machine: Machine, home: string, packs: PackManifest[], pic
   const team = org && `${org}/${profileRepoName}-${login}`;
   const dir = profilePath(home);
   const inUse = await clonedProfile(machine, dir, login);
-  const found = inUse && (await exists(inUse)) ? inUse : team && (await exists(team)) ? team : (await exists(personal)) ? personal : undefined;
+  const legacyTeam = org && `${org}/${legacyProfileRepoName}-${login}`;
+  let found: string | undefined;
+  for (const repo of [inUse, team, personal, legacyTeam, `${login}/${legacyProfileRepoName}`]) if (!found && repo && (await exists(repo))) found = repo;
   if (found && !same(found, personal)) await requirePrivate(machine, found);
   if (found) await checkout(machine, dir, found);
   return { gh, login, exists, personal, org, team, dir, found };
@@ -97,7 +109,7 @@ const same = (a: string | undefined, b: string | undefined) => a !== undefined &
 
 export async function existingProfile(machine: Machine, home: string, packs: PackManifest[], picked: string[]): Promise<Profile | undefined> {
   const { found, dir } = await lookUp(machine, home, packs, picked);
-  return found && existsSync(join(dir, "fleet.json")) ? loadProfile(dir) : undefined;
+  return found && existsSync(profileFile(dir)) ? loadProfile(dir) : undefined;
 }
 
 async function makeProfile(context: ProfileContext) {
@@ -111,11 +123,11 @@ async function makeProfile(context: ProfileContext) {
   const memory = shared && (await memoryRepo(machine, shared.named, login, shared.kind));
   await confirm(context, [...(found ? [] : [profileRepo]), ...(memory?.missing ? [memory.repo] : [])], org && !found ? org : undefined);
   if (!found) {
-    const made = await create(profileRepo, "My Fleet profile");
+    const made = await create(profileRepo, "My Hedge profile");
     if (made.code !== 0 && same(profileRepo, team) && !(await exists(profileRepo))) {
-      terminal.print(`  · The ${org} org did not let you create ${team} (${lastLine(made.output).replace(/^GraphQL: /, "")}), so Fleet uses your own account.`);
+      terminal.print(`  · The ${org} org did not let you create ${team} (${lastLine(made.output).replace(/^GraphQL: /, "")}), so Hedge uses your own account.`);
       profileRepo = personal;
-      await gh("repo", "create", personal, "--private", "--description", "My Fleet profile");
+      await gh("repo", "create", personal, "--private", "--description", "My Hedge profile");
     } else if (made.code !== 0 && !same(profileRepo, team)) throw new Error(`gh repo create failed: ${lastLine(made.output)}`);
     if (same(profileRepo, team)) await requirePrivate(machine, profileRepo);
     terminal.print(`  ✓ Created the private repo ${profileRepo}${same(profileRepo, team) ? ` in the ${org} org` : ""}`);
@@ -136,13 +148,13 @@ async function makeProfile(context: ProfileContext) {
   Object.assign(draft, { settings: { ...draft.settings, ...Object.fromEntries(answeredElsewhere.map((key) => [key, saved[key] as SettingValue])) } });
   const { inferred: _inferred, ...picked } = draft;
   const answers: Partial<ProfileFile> = {
-    ...(existsSync(join(dir, "fleet.json")) ? {} : { schema: 1, engine: await enginePin(context), sources: defaultSources, plan: "both", settings: {}, workflows: {} }),
+    ...(existsSync(profileFile(dir)) ? {} : { schema: 1, engine: await enginePin(context), sources: defaultSources, plan: "both", settings: {}, workflows: {} }),
     ...picked,
     ...(memory && memory.repo !== shared?.named ? { settings: { ...draft.settings, "memory.repo": memory.repo } } : {}),
   };
   if (started.length) {
     await git(machine, dir, "add", "--", ...started);
-    await git(machine, dir, "commit", "-q", "-m", "Start my Fleet profile", "--", ...started);
+    await git(machine, dir, "commit", "-q", "-m", "Start my Hedge profile", "--", ...started);
   }
   await saveAnswers(dir, answers);
   await git(machine, dir, "branch", "-M", "main");
@@ -156,14 +168,14 @@ async function clonedProfile(machine: Machine, dir: string, login: string) {
   if (!existsSync(join(dir, ".git"))) return undefined;
   const origin = await machine.exec(["git", "-C", dir, "config", "--get", "remote.origin.url"]);
   const repo = githubRepoOf(origin.output.trim());
-  const names = [`${login}/${profileRepoName}`.toLowerCase(), `/${profileRepoName}-${login}`.toLowerCase()];
-  return repo && (repo.toLowerCase() === names[0] || repo.toLowerCase().endsWith(names[1]!)) ? repo : undefined;
+  const ours = (name: string) => repo !== undefined && (repo.toLowerCase() === `${login}/${name}`.toLowerCase() || repo.toLowerCase().endsWith(`/${name}-${login}`.toLowerCase()));
+  return ours(profileRepoName) || ours(legacyProfileRepoName) ? repo : undefined;
 }
 
 const isPrivate = (visibility: string | undefined) => visibility === "PRIVATE" || visibility === "INTERNAL";
 
 async function requirePrivate(machine: Machine, repo: string) {
-  if (!isPrivate(await github(machine).visibility(repo))) throw new Error(`${repo} is not private. Make it private, then run fleet setup again.`);
+  if (!isPrivate(await github(machine).visibility(repo))) throw new Error(`${repo} is not private. Make it private, then run hedge setup again.`);
 }
 
 /** The GitHub org where the first picked pack that names one keeps its members' profiles. */
@@ -174,7 +186,7 @@ function profileOrg(packs: PackManifest[], picked: string[]) {
 async function confirm({ terminal, nonInteractive }: ProfileContext, missing: string[], org: string | undefined) {
   if (!missing.length || nonInteractive) return;
   const where = org ? `in the ${org} GitHub org, private to the org,` : "in your GitHub account";
-  terminal.print(`  Fleet creates ${missing.length === 1 ? "the private repo" : "the private repos"} ${missing.join(" and ")} ${where} and pushes your answers there.`);
+  terminal.print(`  Hedge creates ${missing.length === 1 ? "the private repo" : "the private repos"} ${missing.join(" and ")} ${where} and pushes your answers there.`);
   for (;;) {
     const reply = (await terminal.ask("  Go ahead? (Y/n) ")).toLowerCase();
     if (reply === "" || reply === "y" || reply === "yes") return;
@@ -189,15 +201,15 @@ async function checkout(machine: Machine, dir: string, repo: string) {
   if (existsSync(join(dir, ".git"))) {
     const urls = (await machine.exec(["git", "-C", dir, "config", "--get-regexp", "^remote\\.origin\\.(push)?url$"])).output.trim().split("\n").map((line) => line.split(" ").slice(1).join(" "));
     const other = urls.find((url) => githubRepoOf(url)?.toLowerCase() !== repo.toLowerCase());
-    if (other !== undefined) throw new Error(`${dir} is a clone of ${other || "nothing"}, not ${repo}. Move it away, then run fleet setup again.`);
+    if (other !== undefined) throw new Error(`${dir} is a clone of ${other || "nothing"}, not ${repo}. Move it away, then run hedge setup again.`);
     await git(machine, dir, "fetch", "-q", "origin");
     const remote = await machine.exec(["git", "-C", dir, "rev-parse", "--verify", "-q", "origin/main"]);
     if (remote.code !== 0) return;
     const merged = await machine.exec(["git", "-C", dir, "merge", "-q", "--ff-only", "origin/main"]);
-    if (merged.code !== 0) throw new Error(`${bothChanged(dir, repo)} Move ${dir} away, then run fleet setup again: it clones ${repo} and saves your answers on top.`);
+    if (merged.code !== 0) throw new Error(`${bothChanged(dir, repo)} Move ${dir} away, then run hedge setup again: it clones ${repo} and saves your answers on top.`);
     return;
   }
-  if (existsSync(dir)) throw new Error(`${dir} exists and is not your profile. Move it away, then run fleet setup again.`);
+  if (existsSync(dir)) throw new Error(`${dir} exists and is not your profile. Move it away, then run hedge setup again.`);
   await mkdir(join(dir, ".."), { recursive: true });
   const cloned = await machine.exec(["git", "clone", "-q", `https://github.com/${repo}.git`, dir]);
   if (cloned.code !== 0) throw new Error(`could not clone ${repo}: ${lastLine(cloned.output)}`);
@@ -212,7 +224,7 @@ export function githubRepoOf(url: string) {
 
 function savedSettings(dir: string): Record<string, unknown> {
   try {
-    return (JSON.parse(readFileSync(join(dir, "fleet.json"), "utf8")) as { settings?: Record<string, unknown> }).settings ?? {};
+    return (JSON.parse(readFileSync(profileFile(dir), "utf8")) as { settings?: Record<string, unknown> }).settings ?? {};
   } catch {
     return {};
   }
@@ -237,9 +249,9 @@ async function startFiles(dir: string, context: ProfileContext, sharedWith: stri
 
 /** The engine ref this profile pins: the release tag the engine runs on, or main on the track channel. */
 async function enginePin({ machine, engineRoot }: ProfileContext): Promise<ProfileFile["engine"]> {
-  const tag = await machine.exec(["git", "-C", engineRoot, "describe", "--tags", "--exact-match", "--match", "v[0-9]*"]);
-  const ref = tag.output.trim();
-  return tag.code === 0 && /^v\d+\.\d+\.\d+$/.test(ref) ? { repo: engineRepo, ref, channel: "release" } : { repo: engineRepo, ref: "main", channel: "track" };
+  const refs = await machine.exec(releaseRefsAtHead(engineRoot));
+  const ref = refs.code === 0 ? releaseIn(refs.output) : undefined;
+  return ref ? { repo: engineRepo, ref, channel: "release" } : { repo: engineRepo, ref: "main", channel: "track" };
 }
 
 async function git(machine: Machine, dir: string, ...args: string[]) {
@@ -257,21 +269,21 @@ export function profileGuide(packs: PackManifest[], sharedWith?: string) {
       return [`### ${pack.title ?? pack.name}`, "", "| Setting | What it is | Default |", "| --- | --- | --- |", ...rows].join("\n");
     });
   return [
-    "# My Fleet profile",
+    "# My Hedge profile",
     "",
-    "Fleet reads this repo on every machine of mine. Fleet's commands change it for me, so I rarely edit it by hand.",
+    "Hedge reads this repo on every machine of mine. Hedge's commands change it for me, so I rarely edit it by hand.",
     "",
     ...(sharedWith ? [`This repo lives in the ${sharedWith} org, where teammates may read it, so keep secrets out of it.`, ""] : []),
-    "- `fleet.json`: my packs, my AI plans, my settings, and the workflows I turned on or off.",
+    "- `hedge.json`: my packs, my AI plans, my settings, and the workflows I turned on or off.",
     "- `about-me.md`: how I like to work. Agents read it after my packs' rules.",
-    "- `install.sh`: installs Fleet from this profile. A Coder devbox runs it as my dotfiles.",
+    "- `install.sh`: installs Hedge from this profile. A Coder devbox runs it as my dotfiles.",
     "",
     "## Changing things",
     "",
-    "- `fleet packs --add <pack>` or `--remove <pack>` turns a pack on or off.",
-    "- `fleet settings` lists my settings, and `fleet set <pack.key>=<value>` changes one.",
+    "- `hedge packs --add <pack>` or `--remove <pack>` turns a pack on or off.",
+    "- `hedge settings` lists my settings, and `hedge set <pack.key>=<value>` changes one.",
     "",
-    "Each change applies on this machine at once. My other machines pick it up at their next daily `fleet update`.",
+    "Each change applies on this machine at once. My other machines pick it up at their next daily `hedge update`.",
     "",
     "## Settings",
     "",

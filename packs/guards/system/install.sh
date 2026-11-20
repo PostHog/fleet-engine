@@ -43,7 +43,7 @@ section() {
   for prefix in "$@"; do printf '  insteadOf = %s\n  pushInsteadOf = %s\n' "$prefix" "$prefix"; done
 }
 {
-  echo "# Managed by Fleet's Guards pack from the signed Git allowlist. Do not edit."
+  echo "# Managed by Hedge's Guards pack from the signed Git allowlist. Do not edit."
   printf '[protocol "fleet-blocked"]\n  allow = always\n'
   printf '[core]\n  sshCommand = %s\n' "$ssh_check"
   printf '[ssh]\n  variant = ssh\n'
@@ -65,8 +65,8 @@ section() {
 cat > "$work/git-remote-fleet-blocked" <<'HELPER'
 #!/bin/sh
 url=$(printf '%s' "${2:-${1:-}}" | sed -e 's#//[^/@]*@#//<redacted>@#' -e 's/?.*$/?<redacted>/')
-person=$(sed -n 's/^ *"guards.person": *"\([^"]*\)".*/\1/p' "$HOME/.local/state/fleet/settings.json" 2>/dev/null)
-echo "fatal: Fleet blocked Git access to $url: its owner is not on the signed Git allowlist. Stop and ask ${person:-the person who runs this machine}. Do not retry, change the URL, or work around the block." >&2
+person=$(sed -n 's/^ *"guards.person": *"\([^"]*\)".*/\1/p' "$HOME/.local/state/hedge/settings.json" 2>/dev/null)
+echo "fatal: Hedge blocked Git access to $url: its owner is not on the signed Git allowlist. Stop and ask ${person:-the person who runs this machine}. Do not retry, change the URL, or work around the block." >&2
 exit 1
 HELPER
 
@@ -79,8 +79,8 @@ for arg do host=$command; command=$arg; done
 host=$(printf '%s' "${host#*@}" | tr '[:upper:]' '[:lower:]')
 owner=$(printf '%s' "$command" | sed -n "s#^git-[a-z-]* '/*\([A-Za-z0-9-]*\)/[^']*'\$#\1#p")
 if { [ "$host" = github.com ] || [ "$host" = ssh.github.com ]; } && grep -qixF -- "$owner" "$list"; then exec ssh "$@"; fi
-person=$(sed -n 's/^ *"guards.person": *"\([^"]*\)".*/\1/p' "$HOME/.local/state/fleet/settings.json" 2>/dev/null)
-echo "fatal: Fleet blocked Git access over SSH to $host: its owner is not on the signed Git allowlist. Stop and ask ${person:-the person who runs this machine}. Do not retry, change the URL, or work around the block." >&2
+person=$(sed -n 's/^ *"guards.person": *"\([^"]*\)".*/\1/p' "$HOME/.local/state/hedge/settings.json" 2>/dev/null)
+echo "fatal: Hedge blocked Git access over SSH to $host: its owner is not on the signed Git allowlist. Stop and ask ${person:-the person who runs this machine}. Do not retry, change the URL, or work around the block." >&2
 exit 1
 CHECK
 } > "$work/fleet-git-ssh"

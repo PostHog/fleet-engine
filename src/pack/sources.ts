@@ -14,8 +14,14 @@ export type Clock = { sleep(ms: number): Promise<void> };
 
 const realClock: Clock = { sleep: (ms) => Bun.sleep(ms) };
 
-/** What the cache last loaded successfully: the source's repository, ref, and commit. */
-type Good = { repo: string; ref: string; commit: string };
+type Good = { repo: string; ref: string; commit: string; asked?: string };
+
+export const withoutUserinfo = (text: string) => text.replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/?#]*@/gi, "$1");
+
+function cleaned(source: FetchedSource): FetchedSource {
+  if ("error" in source) return { ...source, error: withoutUserinfo(source.error) };
+  return source.stale === undefined ? source : { ...source, stale: withoutUserinfo(source.stale) };
+}
 
 export async function fetchSources(refs: SourceRef[], cacheRoot: string): Promise<FetchedSource[]> {
   return Promise.all(refs.map((ref) => fetchSource(ref, cacheRoot)));
@@ -31,9 +37,9 @@ export async function fetchSource(ref: SourceRef, cacheRoot: string, loadLimitMs
   const dir = cacheDir(ref, cacheRoot);
   if (typeof dir !== "string") return { ref, error: dir.error };
   const lock = await waitLock(cacheLock(cacheRoot, ref.name), clock.sleep, cacheWaitMs);
-  if (!lock) return { ref, error: `another Fleet run kept working in ${dir} for over ${cacheWaitMs / 60_000} minutes` };
+  if (!lock) return { ref, error: `another Hedge run kept working in ${dir} for over ${cacheWaitMs / 60_000} minutes` };
   try {
-    return await fetchLocked(ref, dir, loadLimitMs);
+    return cleaned(await fetchLocked(ref, dir, loadLimitMs));
   } finally {
     lock.release();
   }
@@ -74,7 +80,7 @@ async function localEdits(dir: string) {
 }
 
 function editsReason(ref: SourceRef, dir: string, edits: string[]) {
-  return `kept your edits to ${edits.join(", ")} in ${dir}. Commit or undo them there, and Fleet updates ${ref.name} again`;
+  return `kept your edits to ${edits.join(", ")} in ${dir}. Commit or undo them there, and Hedge updates ${ref.name} again`;
 }
 
 async function keepEdits(ref: SourceRef, dir: string, edits: string[], loadLimitMs: number): Promise<FetchedSource> {
@@ -93,6 +99,7 @@ async function fallBack(ref: SourceRef, dir: string, repo: string, good: Good | 
   if (!(await git(dir, "checkout", "-q", "--detach", good.commit)).ok) return { ref, error: reason };
   const loaded = await load(dir, loadLimitMs);
   if ("error" in loaded) return { ref, error: reason };
+  await saveGood(dir, { repo: good.repo, ref: good.ref, commit: good.commit, ...(good.ref === ref.ref ? {} : { asked: ref.ref }) });
   return { ref, dir, packs: loaded.packs, stale: good.ref === ref.ref ? reason : `${reason}; using ${good.ref} instead` };
 }
 
@@ -113,7 +120,7 @@ async function load(dir: string, limitMs: number): Promise<{ packs: LoadedPack[]
 }
 
 function goodPath(dir: string) {
-  return join(dir, ".git", "fleet-source.json");
+  return join(dir, ".git", "hedge-source.json");
 }
 
 async function lastGood(dir: string): Promise<Good | undefined> {
@@ -147,7 +154,7 @@ async function git(dir: string, ...args: string[]) {
 }
 
 export function sourceCache(home: string) {
-  return join(home, ".local", "share", "fleet", "sources");
+  return join(home, ".local", "share", "hedge", "sources");
 }
 
 export async function followsBranch(ref: SourceRef, cacheRoot: string) {
@@ -169,7 +176,7 @@ export type Advance =
   | { state: "failed"; say: string };
 
 /**
- * Moves a branch source forward from the commit it last loaded, for fleet refresh.
+ * Moves a branch source forward from the commit it last loaded, for hedge refresh.
  * It asks the remote first and fetches only when the branch moved. It leaves the
  * source as it is while another run works in its cache, while it has local edits,
  * and when the new commit does not build on the old one.
@@ -180,7 +187,8 @@ export async function advanceSource(ref: SourceRef, cacheRoot: string, from: str
   const lock = tryLock(cacheLock(cacheRoot, ref.name));
   if (!lock) return { state: "busy" };
   try {
-    return await advanceLocked(ref, dir, from, loadLimitMs);
+    const advanced = await advanceLocked(ref, dir, from, loadLimitMs);
+    return "say" in advanced ? { ...advanced, say: withoutUserinfo(advanced.say) } : advanced;
   } finally {
     lock.release();
   }
@@ -195,9 +203,9 @@ async function advanceLocked(ref: SourceRef, dir: string, from: string, loadLimi
   const commit = listed.stdout.split("\n").map((line) => line.split("\t")).find(([, name]) => name === head)?.[0];
   if (!commit) return { state: "failed", say: `${ref.repo} has no branch ${branch}` };
   if (commit === from) return { state: "same", commit };
-  const rewritten = (tip: string) => ({ state: "refused" as const, say: `${branch} of ${ref.repo} moved to ${tip.slice(0, 12)}, which does not build on ${from.slice(0, 12)}, the commit Fleet loaded last. Fleet refresh runs no pack code from a rewritten branch. Run fleet update to take it.` });
+  const rewritten = (tip: string) => ({ state: "refused" as const, say: `${branch} of ${ref.repo} moved to ${tip.slice(0, 12)}, which does not build on ${from.slice(0, 12)}, the commit Hedge loaded last. Hedge refresh runs no pack code from a rewritten branch. Run hedge update to take it.` });
   const edits = await localEdits(dir);
-  if (edits.length) return { state: "edited", say: `${ref.name} moved, but Fleet ${editsReason(ref, dir, edits)}.` };
+  if (edits.length) return { state: "edited", say: `${ref.name} moved, but Hedge ${editsReason(ref, dir, edits)}.` };
   const fetched = await git(dir, "fetch", "-q", "--no-tags", repo, head);
   if (!fetched.ok) return { state: "failed", say: `could not fetch ${branch} from ${ref.repo}: ${fetched.stderr}` };
   const tip = (await git(dir, "rev-parse", "FETCH_HEAD")).stdout;
@@ -213,10 +221,21 @@ async function advanceLocked(ref: SourceRef, dir: string, from: string, loadLimi
   return { state: "moved", commit: tip, source: { ref, dir, packs: loaded.packs } };
 }
 
-export async function cachedSource(ref: SourceRef, cacheRoot: string): Promise<FetchedSource> {
-  const dir = join(cacheRoot, ref.name);
-  if (!existsSync(join(dir, ".git"))) return { ref, error: "never fetched; run fleet apply" };
-  return { ref, dir, packs: await loadPacks(dir) };
+export async function cachedSource(ref: SourceRef, cacheRoot: string, clock: Clock = realClock): Promise<FetchedSource> {
+  const dir = cacheDir(ref, cacheRoot);
+  if (typeof dir !== "string") return { ref, error: dir.error };
+  if (!existsSync(join(dir, ".git"))) return { ref, error: "never fetched; run hedge apply" };
+  const lock = await waitLock(cacheLock(cacheRoot, ref.name), clock.sleep, cacheWaitMs);
+  if (!lock) return { ref, error: `another Hedge run kept working in ${dir} for over ${cacheWaitMs / 60_000} minutes` };
+  try {
+    const good = await lastGood(dir);
+    const head = (await git(dir, "rev-parse", "HEAD")).stdout;
+    const asked = good?.ref === ref.ref || good?.asked === ref.ref;
+    if (good?.repo !== repoUrl(ref.repo) || !asked || good.commit !== head) return { ref, error: `the cached checkout is not ${ref.ref}; run hedge apply` };
+    return { ref, dir, packs: await loadPacks(dir) };
+  } finally {
+    lock.release();
+  }
 }
 
 async function hasPackTs(dir: string) {

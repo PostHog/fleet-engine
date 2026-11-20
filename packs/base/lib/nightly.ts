@@ -4,8 +4,8 @@ import { engineCommand } from "../../../src/reconciler/engine-command.ts";
 
 export const nightWindowUtc = { firstHour: 0, lastHour: 5 };
 
-const usage = "usage: fleet nightly <id> -- <command>...";
-const stampFile = (home: string, id: string) => join(home, ".local/state/fleet/nightly", id);
+const usage = "usage: hedge nightly <id> -- <command>...";
+const stampFile = (home: string, id: string) => join(home, ".local/state/hedge/nightly", id);
 const stillRunning = 75;
 
 const onceADay = `stamp=$1 today=$2
@@ -26,7 +26,7 @@ export async function nightlyCommand(args: string[], context: NightlyContext): P
   if (now.getUTCHours() < nightWindowUtc.firstHour || now.getUTCHours() > nightWindowUtc.lastHour) return 0;
   const stamp = stampFile(context.home, id);
   await mkdir(dirname(stamp), { recursive: true });
-  const once = ["/bin/sh", "-c", onceADay, "fleet-nightly", stamp, now.toISOString().slice(0, 10), ...engineCommand(command, context.engineRoot)];
+  const once = ["/bin/sh", "-c", onceADay, "hedge-nightly", stamp, now.toISOString().slice(0, 10), ...engineCommand(command, context.engineRoot)];
   const code = await Bun.spawn(oneAtATime(`${stamp}.lock`, once), { stdio: ["ignore", "inherit", "inherit"] }).exited;
   return code === stillRunning ? 0 : code;
 }

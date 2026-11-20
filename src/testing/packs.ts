@@ -11,7 +11,7 @@ export const mac: MachineFile = { schema: 1, role: "mac" };
 export const devbox: MachineFile = { schema: 1, role: "devbox" };
 
 export async function engineSource(): Promise<AvailableSource> {
-  return { ref: { name: "engine", repo: "PostHog/fleet-engine", ref: "main" }, dir: engineDir, packs: await loadPacks(engineDir) };
+  return { ref: { name: "engine", repo: "PostHog/hedge", ref: "main" }, dir: engineDir, packs: await loadPacks(engineDir) };
 }
 
 const skillRepos: Record<string, string> = { "agent-skills": "Silthus/agent-skills", "mattpocock-skills": "mattpocock/skills" };
@@ -37,7 +37,7 @@ export function resolveEngine(sources: AvailableSource[], fields: Partial<Profil
   const profile: Profile = {
     schema: 1,
     dir: "/profile",
-    engine: { repo: "PostHog/fleet-engine", ref: "main", channel: "track" },
+    engine: { repo: "PostHog/hedge", ref: "main", channel: "track" },
     sources: sources.filter((source) => source.ref.name !== "engine").map((source) => source.ref),
     packs: [],
     plan: "both",
@@ -48,11 +48,11 @@ export function resolveEngine(sources: AvailableSource[], fields: Partial<Profil
   return resolve(profile, machine, sources);
 }
 
-export function engineSteps(engineRoot: string, fleet: (args: string[]) => Promise<number>, other: Runner = async () => 0): Runner {
-  const launcher = join(engineRoot, "fleet");
+export function engineSteps(engineRoot: string, hedge: (args: string[]) => Promise<number>, other: Runner = async () => 0): Runner {
+  const launcher = join(engineRoot, "hedge");
   return async (command) => {
     if (command[0] !== "/bin/sh" || command[1] !== launcher) return other(command);
-    return existsSync(join(engineRoot, "packs/base/commands", `${command[2]}.ts`)) ? 0 : fleet(command.slice(2));
+    return existsSync(join(engineRoot, "packs/base/commands", `${command[2]}.ts`)) ? 0 : hedge(command.slice(2));
   };
 }
 

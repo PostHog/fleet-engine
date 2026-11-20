@@ -15,9 +15,9 @@ export type Signer = {
   sshCommand?: string;
 };
 
-export const sshKeyTarget = ".ssh/fleet_ed25519";
-export const coderKeyTarget = ".ssh/fleet-coder-git.pub";
-export const onePasswordKeyTarget = ".config/fleet/signing-key.pub";
+export const sshKeyTarget = ".ssh/hedge_ed25519";
+export const coderKeyTarget = ".ssh/hedge-coder-git.pub";
+export const onePasswordKeyTarget = ".config/hedge/signing-key.pub";
 
 const onePasswordPrograms: Record<Os, string> = { darwin: "/Applications/1Password.app/Contents/MacOS/op-ssh-sign", linux: "/opt/1Password/op-ssh-sign" };
 

@@ -48,7 +48,7 @@ function syncedNotesTemplate(firstAt: string) {
     });
     git(home, "clone", "-q", origin, join(home, ".agents/memory-repo"));
     symlinkSync(join(home, ".agents/memory-repo/memory"), join(home, ".agents/memory"));
-    writeHome(home, { ".config/fleet/machine.json": JSON.stringify({ schema: 1, role: "hub" }) });
+    writeHome(home, { ".config/hedge/machine.json": JSON.stringify({ schema: 1, role: "hub" }) });
     commitAt(writer, "2026-11-04T12:00:00Z", "memory: devbox-1", {
       "memory/tech/trap.md": note("trap", {}, "Always run the slow suite twice."),
       "memory/projects/app/rule.md": note("rule", { originSessionId: "s-2" }, "Deploy on Tuesdays."),
@@ -64,8 +64,8 @@ function syncedNotesTemplate(firstAt: string) {
 }
 
 async function hubWithSyncedNotes(firstAt = "2026-11-03T10:00:00Z") {
-  const home = await syncedNotesTemplate(firstAt)(temp.make("fleet-dream-audit-"));
-  const state = ".local/state/fleet/dream";
+  const home = await syncedNotesTemplate(firstAt)(temp.make("hedge-dream-audit-"));
+  const state = ".local/state/hedge/dream";
   writeHome(home, {
     [`${state}/2026-11-05/digests/s-1.json`]: JSON.stringify(digest({ memoryWrites: ["tech/trap.md"], memoryShown: ["tech/old-read.md"] })),
     [`${state}/2026-11-05/findings/s-1.json`]: JSON.stringify({ taskType: "fix", findings: [] }),
@@ -165,7 +165,7 @@ test("audit exits 1 and writes no audit when the memory checkout cannot fetch", 
 
   expect(await dreamCommand(["audit"], io)).toBe(1);
 
-  expect(said.at(-1)).toStartWith("Fleet dream: audit failed: cannot fetch the memory repo");
+  expect(said.at(-1)).toStartWith("Hedge dream: audit failed: cannot fetch the memory repo");
   expect(existsSync(join(run, "audit.md"))).toBe(false);
 });
 
@@ -190,7 +190,7 @@ test("prepare still prints the run when the audit fails, and says why", async ()
   expect(await dreamCommand(["prepare"], io)).toBe(0);
 
   expect(printed).toEqual([run]);
-  expect(said).toContain(`Fleet dream: audit failed: cannot fetch the memory repo in ${join(home, ".agents/memory")}`);
+  expect(said).toContain(`Hedge dream: audit failed: cannot fetch the memory repo in ${join(home, ".agents/memory")}`);
 });
 
 test("a limited audit moves through the backlog: the next audit checks only the notes the limit left", async () => {
@@ -217,7 +217,7 @@ test("the first audit of a memory repo younger than a day checks every note sinc
 
 test("audit asks about the last session that wrote the note before its sync commit, from any run, and falls back to its originSessionId", async () => {
   const { home, run } = await hubWithSyncedNotes();
-  const state = join(home, ".local/state/fleet/dream");
+  const state = join(home, ".local/state/hedge/dream");
   writeHome(state, {
     "2026-11-05/digests/s-9.json": JSON.stringify(digest({ session: "s-9", startedAt: "2026-11-04T20:00:00Z", memoryWrites: ["tech/trap.md"], entries: [{ at: "2026-11-04T20:00:00Z", role: "user", text: "Too late to write it." }] })),
     "2026-11-04/digests/s-4.json": JSON.stringify(digest({ machine: "devbox-3", session: "s-4", startedAt: "2026-11-04T11:30:00Z", memoryWrites: ["projects/app/lone.md"], entries: [{ at: "2026-11-04T11:30:00Z", role: "user", text: "Note the Mac." }] })),

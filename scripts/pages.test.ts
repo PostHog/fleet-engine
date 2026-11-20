@@ -64,6 +64,6 @@ describe("GitHub Pages", () => {
   });
 
   test("the README links the page", () => {
-    expect(read("README.md")).toContain("https://posthog.github.io/fleet-engine/");
+    expect(read("README.md")).toContain("https://posthog.github.io/hedge/");
   });
 });

@@ -9,7 +9,7 @@ import { panelOutcome } from "./proof-panel.ts";
 
 export type ProofIdentity = { repository: string; pr: number; commit: string };
 const sha = /^[0-9a-f]{40}$/;
-export const ledgerRoot = (home: string) => join(home, ".local/state/fleet/proof");
+export const ledgerRoot = (home: string) => join(home, ".local/state/hedge/proof");
 
 export function prDirectory(home: string, { repository, pr }: PrRef) {
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository) || repository.split("/").some((part) => part === "." || part === "..")) throw new Error(`Invalid repository ${repository || "(none)"}. Use owner/name`);
@@ -169,7 +169,7 @@ Answer ESCALATE only in one of these cases:
 1. A later finding asks to undo, or contradicts, what an earlier finding asked for. The reviewers disagree, so a human must choose.
 2. The same finding comes back in a later review after it was reported and fixed. The loop does not converge.
 
-fleet ends some findings with an Anchor check. Its "Seen before" lines name findings that quote the same changed line as a finding of an earlier review: weigh them for case 2.
+hedge ends some findings with an Anchor check. Its "Seen before" lines name findings that quote the same changed line as a finding of an earlier review: weigh them for case 2.
 
 Only open blockers and majors count. The findings below leave out minor and nit findings, which need no response, and every TESTS block, whose items get a test-only fix. None of them needs a new read.
 
@@ -200,7 +200,7 @@ export function parseVerdict(output: string, model: string): ArbiterVerdict {
 
 export type ReviewLimits = { free: number; ceiling: number };
 
-export const atCeiling = `fleet proof asks nothing more. For each open blocker or major, revert the fix that brought it in, or list it in a "## Known issues" section of the PR body, one "- <blocker|major>: <file:line> <finding>" item each, and answer its finding "<n>. known: <why>". A blocker or major that the last read found in the fixes since the panel is reverted, never listed. An open blocker holds the merge; the user's merge word accepts the rest. Only the user's --override runs another review`;
+export const atCeiling = `hedge proof asks nothing more. For each open blocker or major, revert the fix that brought it in, or list it in a "## Known issues" section of the PR body, one "- <blocker|major>: <file:line> <finding>" item each, and answer its finding "<n>. known: <why>". A blocker or major that the last read found in the fixes since the panel is reverted, never listed. An open blocker holds the merge; the user's merge word accepts the rest. Only the user's --override runs another review`;
 
 const budgetSpent = ({ ceiling }: ReviewLimits) => `The review budget of ${ceiling} reviews is spent. ${atCeiling}`;
 
@@ -221,7 +221,7 @@ function askUser(identity: ProofIdentity, stop: string) {
   return `${stop} Ask the user with your question tool. Question: "${roundQuestion} ${identity.repository}#${identity.pr}: ${stop}" Options: "${runOption}", "${stopOption}". When they choose "${runOption}", run this command again with --override '<date> "${runOption}"'. Or decide the round yourself with --agent '<your reason>', a 🤖 review decision in the ledger, when the PR's tier lets you.`;
 }
 
-export type CapturedBy = "fleet" | "author";
+export type CapturedBy = "hedge" | "author";
 export type DecisionMark = Pick<Decision, "mark" | "id">;
 export type ReviewRequest = { scope: string; base?: string; from?: string; decision?: Decision; phase?: string; arbiter: Arbiter; limits: ReviewLimits; cleanBaseMerge?: CleanBaseMerge; quietCommit?: QuietCommit; capturedBy?: CapturedBy; lock?: LockRound };
 export type Reserved = { round: number | "final"; id: string; directory: string };
@@ -233,7 +233,7 @@ async function startFinalRead(home: string, identity: ProofIdentity, base: strin
   if (base === undefined) throw new Error("A final read needs --base with the latest reviewed commit");
   if (base === identity.commit) throw new Error("HEAD is already reviewed. Skip the final read.");
   const quiet = decision ? undefined : reviewedThrough(identity.commit, new Set([base]), cleanBaseMerge, quietCommit);
-  if (quiet?.quiet.length) throw new Error(`HEAD needs no final read: final read carried from ${short(base)}: ${quietReason(quiet.kinds)}. fleet proof gate counts the carry. To read it anyway, pass --agent '<your reason>', or the user's --override`);
+  if (quiet?.quiet.length) throw new Error(`HEAD needs no final read: final read carried from ${short(base)}: ${quietReason(quiet.kinds)}. hedge proof gate counts the carry. To read it anyway, pass --agent '<your reason>', or the user's --override`);
   const reviews = join(pullRequestDirectory(home, identity), "reviews");
   for (let attempt = 1; attempt <= 100; attempt++) {
     const started = await reviewNames(reviews);
@@ -333,7 +333,7 @@ export const keepGapOption = "Keep the gap open";
 const gapLead = (identity: ProofIdentity, kind: string) => `Accept the ${kind} gap? ${identity.repository}#${identity.pr}:`;
 export const gapQuestion = (identity: ProofIdentity, kind: string, reason: string) => `${gapLead(identity, kind)} ${reason}`;
 
-export const recordGapCommand = (identity: ProofIdentity, kind: string) => `fleet decision record --mark 👤 --class proof-gap --kind ${kind} --pr ${identity.repository}#${identity.pr}`;
+export const recordGapCommand = (identity: ProofIdentity, kind: string) => `hedge decision record --mark 👤 --class proof-gap --kind ${kind} --pr ${identity.repository}#${identity.pr}`;
 
 export function askGap(identity: ProofIdentity, kind: string, reason: string) {
   return `Ask the user with your question tool. Question: "${gapQuestion(identity, kind, reason)}" Options: "${acceptGapOption}", "${keepGapOption}". When they choose "${acceptGapOption}", run ${recordGapCommand(identity, kind)}`;
@@ -341,7 +341,7 @@ export function askGap(identity: ProofIdentity, kind: string, reason: string) {
 
 export function requireChoice(answer: HeardAnswer, lead: string, [accept, decline]: [string, string], refused: string) {
   if (answer.source !== "question") throw new Error(`"${answer.words}" is a message the user typed. Only their answer to your question tool counts: ask "${lead} …" with the options "${accept}" and "${decline}"`);
-  if (!normalized(answer.answered).startsWith(normalized(lead))) throw new Error(`"${answer.words}" answers another question ("${answer.answered}"). Ask the question that fleet proof printed, which starts "${lead}"`);
+  if (!normalized(answer.answered).startsWith(normalized(lead))) throw new Error(`"${answer.words}" answers another question ("${answer.answered}"). Ask the question that hedge proof printed, which starts "${lead}"`);
   if (![accept, `${accept} (Recommended)`].map(normalized).includes(normalized(answer.words))) throw new Error(`The user chose "${answer.words}", not "${accept}". ${refused}`);
 }
 
@@ -391,7 +391,7 @@ export async function unfinishedReview(home: string, identity: ProofIdentity, ca
     const reservation = await readReservation(directory);
     const finished = await hasFindings(directory);
     if (reservation?.capturedBy !== capturedBy || reservation.commit !== identity.commit || finished) continue;
-    if (capturedBy === "fleet" && reservation.scope !== "full" && !reservation.base) { await rm(directory, { recursive: true, force: true }); continue; }
+    if (capturedBy === "hedge" && reservation.scope !== "full" && !reservation.base) { await rm(directory, { recursive: true, force: true }); continue; }
     return { reservation, directory };
   }
   return undefined;
@@ -426,13 +426,13 @@ export async function finishReview(home: string, identity: ProofIdentity, round:
   const bytes = await readFile(findings);
   if (!bytes.toString().trim()) throw new Error(`${findings} is empty. Save the reviewer's findings, or "No findings." when it found none`);
   const directory = await roundDirectory(home, identity, round);
-  if (await panelOutcome(directory) !== "none") throw new Error(`Round ${round} is a panel round, and fleet saves its findings once every lens is done. Rerun its failed lenses with fleet proof review, or wait for the running ones with fleet proof review --wait. For a PR that the user's rules exempt from the swarm, record fleet proof gap --kind panel --reason <the exception> instead`);
+  if (await panelOutcome(directory) !== "none") throw new Error(`Round ${round} is a panel round, and Hedge saves its findings once every lens is done. Rerun its failed lenses with hedge proof review, or wait for the running ones with hedge proof review --wait. For a PR that the user's rules exempt from the swarm, record hedge proof gap --kind panel --reason <the exception> instead`);
   await storeFindings(directory, identity, round, bytes, reviewer.trim(), "author");
   return directory;
 }
 
 export async function storeCapturedFindings(directory: string, identity: ProofIdentity, round: RoundId, answer: string, reviewer: string, usage?: Usage) {
-  await storeFindings(directory, identity, round, Buffer.from(answer.trim() + "\n"), reviewer, "fleet", usage);
+  await storeFindings(directory, identity, round, Buffer.from(answer.trim() + "\n"), reviewer, "hedge", usage);
 }
 
 async function storeFindings(directory: string, identity: ProofIdentity, round: RoundId, bytes: Buffer, reviewer: string, capturedBy: CapturedBy, usage?: Usage) {
@@ -644,7 +644,7 @@ export async function requireNone(home: string, identity: ProofIdentity, reason:
 
 export async function authorOf(home: string, identity: ProofIdentity) {
   const author = (await readOwed(home, identity))?.author;
-  if (!author) throw new Error("The PR has no recorded author family. Run fleet proof require with --author claude|gpt, or from the author's session");
+  if (!author) throw new Error("The PR has no recorded author family. Run hedge proof require with --author claude|gpt, or from the author's session");
   return author;
 }
 
@@ -697,7 +697,7 @@ async function recordedAnswers(home: string) {
 export async function refuseInstructionQuote(home: string, text: string) {
   const answer = normalized(text);
   if (instructionSentences(await agentInstructions(home)).some((sentence) => answer.includes(sentence))) {
-    throw new Error("This quotes the user's instructions in ~/.agents, not their answer to this question. A standing rule there is recorded once with fleet proof standing; otherwise ask the user and record their reply");
+    throw new Error("This quotes the user's instructions in ~/.agents, not their answer to this question. A standing rule there is recorded once with hedge proof standing; otherwise ask the user and record their reply");
   }
 }
 
@@ -709,7 +709,7 @@ type Standing = { kind: StandingKind; until: string; rule: string; recordedAt: s
 const standingPath = (home: string) => join(ledgerRoot(home), "standing.json");
 
 function standingKind(value: string): StandingKind {
-  if (retiredStandingKinds.includes(value)) throw new Error(`A standing rule no longer takes ${value}. Decide a review round with --agent '<your reason>', and a ${retiredStandingKinds.slice(1).join(" or ")} gap with fleet decision record --mark 🤖: both land in the decision ledger`);
+  if (retiredStandingKinds.includes(value)) throw new Error(`A standing rule no longer takes ${value}. Decide a review round with --agent '<your reason>', and a ${retiredStandingKinds.slice(1).join(" or ")} gap with hedge decision record --mark 🤖: both land in the decision ledger`);
   if (!(standingKinds as readonly string[]).includes(value)) throw new Error(`Unknown standing kind ${value}. Use one of ${standingKinds.join(", ")}`);
   return value as StandingKind;
 }
@@ -726,7 +726,7 @@ export async function recordStanding(home: string, kinds: string, until: string,
   if (!/^\d{4}-\d{2}-\d{2}$/.test(until) || Number.isNaN(Date.parse(until))) throw new Error("--until needs a date such as 2026-11-02");
   const scope = repositories === undefined ? undefined : repositories.split(",");
   if (scope && !scope.every((repository) => /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository))) throw new Error("--repositories needs owner/name repositories separated by commas, such as owner/name");
-  const command = `fleet proof standing --kind ${kinds} --until ${until} ${repositories ? `--repositories ${repositories} ` : ""}--rule "${rule}"`;
+  const command = `hedge proof standing --kind ${kinds} --until ${until} ${repositories ? `--repositories ${repositories} ` : ""}--rule "${rule}"`;
   if (normalized(rule).length < minimumRule || !normalized(await agentInstructions(home)).includes(normalized(command))) {
     throw new Error(`The user's instructions in ~/.agents/AGENTS.md or ~/.agents/guides must hold this command word for word: ${command}. Only their own instructions set a standing rule, its kinds, its repositories, and its date`);
   }
@@ -755,7 +755,7 @@ export async function standingFor(home: string, kind: StandingKind, now: Date, r
 }
 
 function standingCommands(instructions: string) {
-  const commands = instructions.replace(/\s+/g, " ").matchAll(/fleet proof standing --kind ([a-z,-]+) --until (\d{4}-\d{2}-\d{2}) (?:--repositories (\S+) )?--rule ["“]([^"”]*)["”]/g);
+  const commands = instructions.replace(/\s+/g, " ").matchAll(/hedge proof standing --kind ([a-z,-]+) --until (\d{4}-\d{2}-\d{2}) (?:--repositories (\S+) )?--rule ["“]([^"”]*)["”]/g);
   return [...commands].map(([, kinds, until, repositories, rule]) => ({ kinds: kinds!.split(","), until: until!, repositories: repositories?.split(","), rule: rule! }));
 }
 
@@ -888,7 +888,7 @@ function kindLine(kind: ProofKind, proof: KindState) {
     case "carried": return `${kind}: evidence of ${short(proof.from)} carried across ${proof.merges} clean merge(s) of the base`;
     case "gap": return `${kind}: ${gapText(proof.gap)}`;
     case "missing": return proof.newest
-      ? `${kind}: missing at HEAD; the newest evidence is at ${short(proof.newest)}. Save new evidence, or run fleet proof save --kind ${kind} --reuse-from ${short(proof.newest)} --reason <why it still proves HEAD>`
+      ? `${kind}: missing at HEAD; the newest evidence is at ${short(proof.newest)}. Save new evidence, or run hedge proof save --kind ${kind} --reuse-from ${short(proof.newest)} --reason <why it still proves HEAD>`
       : `${kind}: missing`;
   }
 }
@@ -964,11 +964,11 @@ async function devObservedStatus(weigh: Weigh, cleanBaseMerge: CleanBaseMerge, d
   }
   if (gap) return { ...status(acceptance ? undefined : "gap", gapState()), ...countedGap(weighed) };
   const merged = dev?.mergedAt && `the dev PR merged at ${dev.mergedAt}${dev.mergeCommit ? ` as ${short(dev.mergeCommit)}` : ""}`;
-  const reason = !dev ? "no dev PR is recorded; run fleet proof require --after-dev <owner/name>#<number>"
+  const reason = !dev ? "no dev PR is recorded; run hedge proof require --after-dev <owner/name>#<number>"
     : dev.error ? `cannot read the dev PR (${dev.error})`
     : !merged ? "the dev PR is not merged yet"
-    : saved !== undefined ? `${merged}, after the newest dev-observed evidence, saved at ${isoOf(saved)}. Observe dev again and save the result with fleet proof run --kind dev-observed -- <command>`
-    : `${merged}. Observe dev and save the result with fleet proof run --kind dev-observed -- <command>`;
+    : saved !== undefined ? `${merged}, after the newest dev-observed evidence, saved at ${isoOf(saved)}. Observe dev again and save the result with hedge proof run --kind dev-observed -- <command>`
+    : `${merged}. Observe dev and save the result with hedge proof run --kind dev-observed -- <command>`;
   return { ...status("missing", { state: "waiting", dev: dev ? devText(dev.ref) : "an unrecorded dev PR", reason }), ...lapseOf(weighed) };
 }
 
@@ -981,7 +981,7 @@ async function finishedReviews(home: string, identity: ProofIdentity) {
     const reservation = await readJson<(ProofIdentity & { reviewer?: string; capturedBy?: CapturedBy }) | undefined>(join(reviews, name, "round.json"), undefined);
     const findings = await stat(join(reviews, name, "findings.md"), { bigint: true }).catch(() => undefined);
     const panel = await panelOutcome(join(reviews, name));
-    const counted = panel === "none" || (panel === "finished" && reservation?.capturedBy === "fleet");
+    const counted = panel === "none" || (panel === "finished" && reservation?.capturedBy === "hedge");
     if (reservation && findings && counted) finished.push({ name, commit: reservation.commit, reviewer: reservation.reviewer, finishedAt: findings.mtimeNs, panel: panel === "finished" });
   }
   return finished.sort((a, b) => (a.finishedAt < b.finishedAt ? -1 : a.finishedAt > b.finishedAt ? 1 : 0));
@@ -1032,7 +1032,7 @@ async function carryForward(home: string, identity: ProofIdentity, reviewed: Set
   return carried;
 }
 
-const panelHint = "Run fleet proof review, which runs the lenses of the PR's review tier, or, for a PR that the user's rules exempt from the swarm, record fleet proof gap --kind panel --reason <the exception>";
+const panelHint = "Run hedge proof review, which runs the lenses of the PR's review tier, or, for a PR that the user's rules exempt from the swarm, record hedge proof gap --kind panel --reason <the exception>";
 
 async function reviewStatus(weigh: Weigh, cleanBaseMerge: CleanBaseMerge, quietCommit: QuietCommit): Promise<Status & { panelGap?: GapProof }> {
   const { home, identity, decisions } = weigh;
@@ -1074,7 +1074,7 @@ async function responseStatuses(home: string, identity: ProofIdentity, body: str
     const findings = await readFile(join(reviews, name, "findings.md"), "utf8");
     const responses = await readFile(join(reviews, name, "responses.md"), "utf8").catch(() => "");
     const missing = unanswered(findings, responses);
-    if (missing.length) return { problem: "missing", line: `review: ${reviewLabel(name)} has unanswered findings ${missing.join(", ")}; answer each with fleet proof respond --round ${name} <responses.md>` };
+    if (missing.length) return { problem: "missing", line: `review: ${reviewLabel(name)} has unanswered findings ${missing.join(", ")}; answer each with hedge proof respond --round ${name} <responses.md>` };
     const unlisted = body === undefined ? [] : unlistedKnown(findings, responses, knownIssues(body));
     if (unlisted.length) return { problem: "missing", line: `known issues: ${reviewLabel(name)} answers findings ${unlisted.join(", ")} known, but the "## Known issues" section of the PR body does not list their file:line` };
     const blockers = knownBlockers(findings, responses);
@@ -1091,7 +1091,7 @@ async function ciStatus(weigh: Weigh, ci: CiResult): Promise<Status & { gap?: Ga
   if (ci.state === "green") return { problem: undefined, line, covered: "green" };
   const gap = await readJson<Gap | undefined>(gapPath(home, identity, "ci"), undefined);
   const weighed = await gapAcceptance({ ...weigh, ci }, gap, "ci");
-  if (!gap && weighed.acceptance?.by !== "the user") return { problem: "missing", line: ci.state === "pending" ? line : `${line}. Fix it, or record fleet proof gap --kind ci --reason <why CI cannot run> when it cannot run here`, ...lapseOf(weighed) };
+  if (!gap && weighed.acceptance?.by !== "the user") return { problem: "missing", line: ci.state === "pending" ? line : `${line}. Fix it, or record hedge proof gap --kind ci --reason <why CI cannot run> when it cannot run here`, ...lapseOf(weighed) };
   const recorded = gapProof(gap, weighed, decisions);
   return { problem: weighed.acceptance ? undefined : "gap", line: `${line}; ${gapText(recorded)}`, covered: "gap accepted", gap: recorded, ...countedGap(weighed) };
 }
@@ -1106,7 +1106,7 @@ function headStatus(identity: ProofIdentity, before: PushedHead, after: PushedHe
   return { problem: undefined, line: `head: ${short(identity.commit)} is the PR's head on GitHub` };
 }
 
-/** devPull reads the dev PR that a prod PR waits on (fleet proof require --after-dev). */
+/** devPull reads the dev PR that a prod PR waits on (hedge proof require --after-dev). */
 export type GateOptions = { ci: () => CiResult; pushedHead: () => PushedHead; ledger: Ledger; landed?: boolean; cleanBaseMerge?: CleanBaseMerge; quietCommit?: QuietCommit; now?: Date; devPull?: (dev: DevPr) => DevPull | Promise<DevPull> };
 
 // A fenced block is an example, never the section: drop it before looking for the heading.
@@ -1148,7 +1148,7 @@ export const summaryLines = (summary: CheckedSummary) => [
 ];
 
 const owedPart = (owed: Owed | undefined): CheckedSummary["owed"] =>
-  !owed ? { state: "unrecorded", kinds: [], line: "owed proofs: not recorded; run fleet proof require --kinds <kind,kind> or fleet proof require --none --reason <why>" }
+  !owed ? { state: "unrecorded", kinds: [], line: "owed proofs: not recorded; run hedge proof require --kinds <kind,kind> or hedge proof require --none --reason <why>" }
   : !owed.kinds.length ? { state: "none", kinds: [], ...owed.none ? { reason: owed.none.reason } : {}, line: `owed proofs: none (${owed.none?.reason ?? "no reason recorded"})` }
   : { state: "owed", kinds: owed.kinds };
 

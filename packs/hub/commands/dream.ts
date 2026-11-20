@@ -35,4 +35,4 @@ await runCommand(() => dreamCommand(Bun.argv.slice(2), {
   analyst: () => modelAnalyst(modelFor("lookup", env), home, env, boundedSpawn()),
   checker: () => modelAsk<Verdict>(modelFor("survey", env), home, env, boundedSpawn(), checkerPrompt, checkerSchema),
   launch: (title, prompt) => withT3Session((client) => launchScratchThread(client, { title, prompt, row: modelFor("implementation", env) }), { home, scopes: ["orchestration:read", "orchestration:operate"] }),
-}), "fleet dream");
+}), "hedge dream");

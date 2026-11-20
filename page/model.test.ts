@@ -6,7 +6,7 @@ import { loadPacks } from "../src/pack/manifest.ts";
 import { parseSetupFlags } from "../src/setup/flags.ts";
 import { picksFrom } from "../src/setup/questions.ts";
 import { loadCatalog } from "../src/setup/setup.ts";
-import { engineRoot, fakeMachine, fleetSetup, githubRepo, pushedAnswers, scripted } from "../src/setup/testing.ts";
+import { engineRoot, fakeMachine, hedgeSetup, githubRepo, pushedAnswers, scripted } from "../src/setup/testing.ts";
 import { isolateGit, tempDirs } from "../src/testing/git.ts";
 import { pageData } from "../scripts/build-page.ts";
 import { firstStart, installPrompt, promptData, setupSplit, startPrompt, toggleSelected, toggleStart, type PageData, type Start } from "./model.ts";
@@ -27,34 +27,34 @@ const everyPack = () => select(...data.packs.map((pack) => pack.name));
 const line = (text: string, label: string) => text.match(new RegExp(`^- ${label}: (.*)$`, "m"))?.[1];
 const step = (text: string, start: string) => text.split("\n").find((item) => /^\d+\. /.test(item) && item.includes(start));
 
-async function macWithFleet() {
+async function macWithHedge() {
   const home = temp.make("home-");
-  expect((await fleetSetup(home, ["--non-interactive", "--preset", "starter", "--plan", "claude", "--devbox", "skip"], [], fakeMachine(home), undefined, 0, "darwin")).code).toBe(0);
+  expect((await hedgeSetup(home, ["--non-interactive", "--preset", "starter", "--plan", "claude", "--devbox", "skip"], [], fakeMachine(home), undefined, 0, "darwin")).code).toBe(0);
   const io = scripted([]);
-  const fleet = (args: string[]) => main(args, { home, engineRoot, platform: "darwin", print: io.terminal.print, terminal: io.terminal, apply: async () => 0, setup: { machine: fakeMachine(home).machine } });
-  return { home, fleet, output: io.output };
+  const hedge = (args: string[]) => main(args, { home, engineRoot, platform: "darwin", print: io.terminal.print, terminal: io.terminal, apply: async () => 0, setup: { machine: fakeMachine(home).machine } });
+  return { home, hedge, output: io.output };
 }
 
-async function fleetCommands() {
+async function hedgeCommands() {
   let usage = "";
   await main(["help"], { home: "/nonexistent", engineRoot: root, platform: "darwin", print: (text) => (usage += `${text}\n`) });
   const commandFiles = (dir: string) => (existsSync(join(dir, "commands")) ? readdirSync(join(dir, "commands")).filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts")).map((name) => name.slice(0, -3)) : []);
   const shipped = (await loadPacks(root)).flatMap(({ dir, code }) => [...Object.keys(code?.commands ?? {}), ...commandFiles(dir)]);
-  return new Set([...[...usage.matchAll(/^ {2}fleet ([a-z][a-z-]*)/gm)].map((match) => match[1]!), ...shipped]);
+  return new Set([...[...usage.matchAll(/^ {2}hedge ([a-z][a-z-]*)/gm)].map((match) => match[1]!), ...shipped]);
 }
 
 describe("the Getting started prompt", () => {
-  const readmePrompt = () => readFileSync(join(root, "README.md"), "utf8").match(/```text\n\s*(Set up Fleet[^\n]+)\n/)![1]!;
+  const readmePrompt = () => readFileSync(join(root, "README.md"), "utf8").match(/```text\n\s*(Set up Hedge[^\n]+)\n/)![1]!;
 
-  test("with Mac only, is the README's prompt plus where Fleet runs and the three packs that are on by default", () => {
-    expect(startPrompt(data, firstStart)).toBe(`${readmePrompt()}\n\nMy picks from the Fleet page:\n- Where Fleet runs: Mac only\n- Packs on the first setup: pull-requests, orchestration, communication`);
+  test("with Mac only, is the README's prompt plus where Hedge runs and the three packs that are on by default", () => {
+    expect(startPrompt(data, firstStart)).toBe(`${readmePrompt()}\n\nMy picks from the Hedge page:\n- Where Hedge runs: Mac only\n- Packs on the first setup: pull-requests, orchestration, communication`);
   });
 
   test("with a hub and a node, changes only the place and adds the Hub pack for once the hub runs", () => {
     const mac = startPrompt(data, firstStart).split("\n");
     const hub = startPrompt(data, withHub).split("\n");
-    expect(hub.filter((text) => !mac.includes(text))).toEqual(["- Where Fleet runs: Mac plus a hub and a node", "- Packs once the hub runs: hub"]);
-    expect(mac.filter((text) => !hub.includes(text))).toEqual(["- Where Fleet runs: Mac only"]);
+    expect(hub.filter((text) => !mac.includes(text))).toEqual(["- Where Hedge runs: Mac plus a hub and a node", "- Packs once the hub runs: hub"]);
+    expect(mac.filter((text) => !hub.includes(text))).toEqual(["- Where Hedge runs: Mac only"]);
   });
 
   test("a pack that is switched off leaves the first setup, and comes back when it is switched on", () => {
@@ -90,32 +90,32 @@ describe("the install prompt", () => {
     expect(installPrompt(data, [])).toBe("");
   });
 
-  test("names the selected packs, each setup note, and one fleet packs command that adds them", () => {
+  test("names the selected packs, each setup note, and one hedge packs command that adds them", () => {
     expect(installPrompt(data, select("guards", "memory", "communication"))).toBe(
       [
-        "Add these Fleet packs to my setup with me: Communication, Memory, and Guards.",
+        "Add these Hedge packs to my setup with me: Communication, Memory, and Guards.",
         "",
-        "Fleet already runs on this machine. Ask me each choice with your question tool, and run every command yourself.",
+        "Hedge already runs on this machine. Ask me each choice with your question tool, and run every command yourself.",
         "",
-        "1. Run `fleet update`, so this machine has the newest engine and packs. Then run `fleet packs`, and leave out each pack that is already on.",
-        '2. Read the setup note of each pack. Ask me what it asks, and collect the flags that it names. Where a note names "the setup command" or "the command in step 9", use the `fleet packs` command of this prompt. Do not run a step that a note puts after that command yet.',
-        "   - Memory: ~/.local/share/fleet/engine/packs/memory/SETUP.md",
-        "   - Guards: ~/.local/share/fleet/engine/packs/guards/SETUP.md",
+        "1. Run `hedge update`, so this machine has the newest engine and packs. Then run `hedge packs`, and leave out each pack that is already on.",
+        '2. Read the setup note of each pack. Ask me what it asks, and collect the flags that it names. Where a note names "the setup command" or "the command in step 9", use the `hedge packs` command of this prompt. Do not run a step that a note puts after that command yet.',
+        "   - Memory: ~/.local/share/hedge/engine/packs/memory/SETUP.md",
+        "   - Guards: ~/.local/share/hedge/engine/packs/guards/SETUP.md",
         "3. Turn the packs on with one command, and add the flags that the notes name:",
-        "   fleet packs --add communication --add memory --add guards",
+        "   hedge packs --add communication --add memory --add guards",
         "4. Do the steps that each note puts after the command.",
-        "5. Run `fleet doctor`, and explain each line. Do each `To do:` line with me, and say what a sign-in is for before it opens.",
-        "6. My other machines take the change at their next `fleet update`. To give it to one now, run `fleet update` there.",
+        "5. Run `hedge doctor`, and explain each line. Do each `To do:` line with me, and say what a sign-in is for before it opens.",
+        "6. My other machines take the change at their next `hedge update`. To give it to one now, run `hedge update` there.",
       ].join("\n"),
     );
   });
 
   test("for one pack without a setup note, names that pack alone and no note", () => {
     const text = installPrompt(data, select("communication"));
-    expect(text.split("\n")[0]).toBe("Add this Fleet pack to my setup with me: Communication.");
+    expect(text.split("\n")[0]).toBe("Add this Hedge pack to my setup with me: Communication.");
     expect(text).not.toMatch(/\bnotes?\b/);
-    expect(text).toContain("3. Run `fleet doctor`");
-    expect(text).toContain("2. Turn the packs on with one command:\n   fleet packs --add communication\n");
+    expect(text).toContain("3. Run `hedge doctor`");
+    expect(text).toContain("2. Turn the packs on with one command:\n   hedge packs --add communication\n");
   });
 
   test("selecting a pack selects the packs it requires, and taking one back takes back the packs that require it", () => {
@@ -124,16 +124,16 @@ describe("the install prompt", () => {
     expect(select("base")).toEqual([]);
   });
 
-  test("for a pack that needs a hub, checks for the hub before it reads a note, in the words fleet hub status prints", async () => {
+  test("for a pack that needs a hub, checks for the hub before it reads a note, in the words hedge hub status prints", async () => {
     const text = installPrompt(data, select("memory", "recovery", "hub"));
     expect(step(text, "need a hub")).toBe(
-      '2. These packs need a hub: Hub and Recovery. Run `fleet hub status`. When it prints "The hub: not named", I have no hub yet. Tell me, leave those packs out, and offer to add a hub and a node first with step 9 of https://raw.githubusercontent.com/PostHog/fleet-engine/main/SETUP.md. Otherwise the name after "The hub:" is the SSH name of the hub. Use it as the host of each SSH command in a note.',
+      '2. These packs need a hub: Hub and Recovery. Run `hedge hub status`. When it prints "The hub: not named", I have no hub yet. Tell me, leave those packs out, and offer to add a hub and a node first with step 9 of https://raw.githubusercontent.com/PostHog/hedge/main/SETUP.md. Otherwise the name after "The hub:" is the SSH name of the hub. Use it as the host of each SSH command in a note.',
     );
     expect(installPrompt(data, select("recovery"))).toContain("2. This pack needs a hub: Recovery.");
     expect(installPrompt(data, select("recovery"))).toContain("leave that pack out");
     expect(installPrompt(data, select("memory", "slack"))).not.toContain("hub");
-    const mac = await macWithFleet();
-    expect(await mac.fleet(["hub", "status"])).toBe(0);
+    const mac = await macWithHedge();
+    expect(await mac.hedge(["hub", "status"])).toBe(0);
     expect(mac.output()).toContain("\nThe hub: not named.");
     expect(readFileSync(join(root, "SETUP.md"), "utf8")).toContain("\n## 9. Add the hub and the nodes\n");
   });
@@ -141,45 +141,45 @@ describe("the install prompt", () => {
   test("for a pack that needs a hub, updates the hub after the command and before the steps a note puts after it", () => {
     const steps = installPrompt(data, select("recovery")).split("\n").filter((item) => /^\d+\. /.test(item)).map((item) => item.replace(/^\d+\. /, "").split(/[.,:]/)[0]);
     expect(steps).toEqual([
-      "Run `fleet update`",
+      "Run `hedge update`",
       "This pack needs a hub",
       "Read the setup note of each pack",
       "Turn the packs on with one command",
-      "Run `fleet update` on the hub over SSH",
+      "Run `hedge update` on the hub over SSH",
       "Do the steps that each note puts after the command",
-      "Run `fleet doctor`",
-      "My other machines take the change at their next `fleet update`",
+      "Run `hedge doctor`",
+      "My other machines take the change at their next `hedge update`",
     ]);
   });
 
-  test("names only fleet commands that exist", async () => {
-    const known = await fleetCommands();
-    const used = [...installPrompt(data, everyPack()).matchAll(/\bfleet ([a-z][a-z-]*)\b/g)].map((match) => match[1]!);
+  test("names only hedge commands that exist", async () => {
+    const known = await hedgeCommands();
+    const used = [...installPrompt(data, everyPack()).matchAll(/\bhedge ([a-z][a-z-]*)\b/g)].map((match) => match[1]!);
     expect(new Set(used)).toEqual(new Set(["update", "packs", "hub", "doctor"]));
     expect(used.filter((command) => !known.has(command))).toEqual([]);
   });
 
-  test("names the setup note of every pack that has one, at the path where a machine that runs Fleet keeps it", () => {
-    const named = [...installPrompt(data, everyPack()).matchAll(/^ {3}- [^:]+: ~\/\.local\/share\/fleet\/engine\/(\S+)$/gm)].map((match) => match[1]!);
+  test("names the setup note of every pack that has one, at the path where a machine that runs Hedge keeps it", () => {
+    const named = [...installPrompt(data, everyPack()).matchAll(/^ {3}- [^:]+: ~\/\.local\/share\/hedge\/engine\/(\S+)$/gm)].map((match) => match[1]!);
     const held = readdirSync(join(root, "packs")).filter((pack) => existsSync(join(root, "packs", pack, "SETUP.md")));
     expect(named.toSorted()).toEqual(held.map((pack) => `packs/${pack}/SETUP.md`).toSorted());
   });
 
-  test("Memory's note leaves the memory repo to the command, and the command of the prompt makes it on a Fleet that already runs", async () => {
+  test("Memory's note leaves the memory repo to the command, and the command of the prompt makes it on a Hedge that already runs", async () => {
     const note = readFileSync(join(root, "packs/memory/SETUP.md"), "utf8").replace(/\s+/g, " ");
-    expect(note).toContain("`fleet setup` and `fleet packs --add memory` create it when it is missing. Add nothing to the command.");
-    const mac = await macWithFleet();
-    const command = installPrompt(data, select("memory")).match(/^ {3}fleet (packs .*)$/m)![1]!;
-    expect(await mac.fleet(command.split(" "))).toBe(0);
-    expect(existsSync(githubRepo(mac.home, "nora/fleet-memory"))).toBe(true);
-    expect(await pushedAnswers(mac.home)).toMatchObject({ packs: expect.arrayContaining(["memory"]), settings: { "memory.repo": "nora/fleet-memory" } });
+    expect(note).toContain("`hedge setup` and `hedge packs --add memory` create it when it is missing. Add nothing to the command.");
+    const mac = await macWithHedge();
+    const command = installPrompt(data, select("memory")).match(/^ {3}hedge (packs .*)$/m)![1]!;
+    expect(await mac.hedge(command.split(" "))).toBe(0);
+    expect(existsSync(githubRepo(mac.home, "nora/hedge-memory"))).toBe(true);
+    expect(await pushedAnswers(mac.home)).toMatchObject({ packs: expect.arrayContaining(["memory"]), settings: { "memory.repo": "nora/hedge-memory" } });
   });
 
-  test("its command turns the selected packs on in the profile of a machine that runs Fleet", async () => {
-    const mac = await macWithFleet();
+  test("its command turns the selected packs on in the profile of a machine that runs Hedge", async () => {
+    const mac = await macWithHedge();
     const selected = select("communication", "guards");
-    const command = installPrompt(data, selected).match(/^ {3}fleet (packs .*)$/m)![1]!;
-    expect(await mac.fleet(command.split(" "))).toBe(0);
+    const command = installPrompt(data, selected).match(/^ {3}hedge (packs .*)$/m)![1]!;
+    expect(await mac.hedge(command.split(" "))).toBe(0);
     expect((await pushedAnswers(mac.home)).packs).toEqual(expect.arrayContaining(selected));
   });
 });

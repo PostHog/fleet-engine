@@ -22,12 +22,12 @@ test("ran, result and caption stay out of the gate's and the judge's evidence, a
   const head = await pr.commit("feature.txt", "greet new members\n");
   pr.pullRequestState({ body: graded("non-critical") });
   await reviewHead(pr);
-  await pr.fleet("require", "--kinds", "live-run,ui-walk");
+  await pr.hedge("require", "--kinds", "live-run,ui-walk");
   const judge = fakeModel(pr, "JUDGE", verdict());
-  await pr.fleet("save", "--kind", "live-run", "--ran", "Sent a test email to the sandbox inbox", "--result", "Delivered in one attempt", file(pr, "run.log", "sent 1 message, delivered\n"));
-  await pr.fleet("save", "--kind", "ui-walk", "--caption", "Settings page after the save", file(pr, "after.png", png("after")));
+  await pr.hedge("save", "--kind", "live-run", "--ran", "Sent a test email to the sandbox inbox", "--result", "Delivered in one attempt", file(pr, "run.log", "sent 1 message, delivered\n"));
+  await pr.hedge("save", "--kind", "ui-walk", "--caption", "Settings page after the save", file(pr, "after.png", png("after")));
 
-  expect((await pr.fleet("gate")).code).toBe(0);
+  expect((await pr.hedge("gate")).code).toBe(0);
   const [prompt] = judge.prompts();
   expect(prompt).toContain("sent 1 message, delivered");
   for (const text of ["Sent a test email", "Delivered in one attempt", "Settings page after the save"]) expect(prompt).not.toContain(text);
@@ -36,13 +36,13 @@ test("ran, result and caption stay out of the gate's and the judge's evidence, a
   const gated = await proofRow(pr);
   expect(gated).toContain(`live-run at ${head.slice(0, 7)}`);
 
-  expect((await pr.fleet("save", "--kind", "live-run", "--ran", "Sent two test emails", "--result", "Both delivered")).code).toBe(0);
+  expect((await pr.hedge("save", "--kind", "live-run", "--ran", "Sent two test emails", "--result", "Both delivered")).code).toBe(0);
   tick(pr);
-  await pr.fleet("save", "--kind", "ui-walk", "--caption", "The settings page after the save", "after.png");
+  await pr.hedge("save", "--kind", "ui-walk", "--caption", "The settings page after the save", "after.png");
   expect(await proofRow(pr)).toBe(gated);
   expect(readdirSync(join(commit, "live-run")).length).toBe(1);
 
-  await pr.fleet("save", "--kind", "live-run", file(pr, "second.log", "a second run, delivered\n"));
+  await pr.hedge("save", "--kind", "live-run", file(pr, "second.log", "a second run, delivered\n"));
   const display = await readDisplay(pr.home, ref);
   expect(display.lines[head]).toEqual({ "live-run": { ran: "Sent two test emails", result: "Both delivered" } });
   expect(display.screenshots.map(({ caption, captionedAt }) => [caption, captionedAt])).toEqual([["The settings page after the save", "2026-10-25T12:00:00.000Z"]]);
@@ -52,11 +52,11 @@ test("captioned screenshots read in first-caption order, and a published one sho
   const pr = await checkout();
   const head = await pr.commit("feature.txt", "greet new members\n");
   const first = file(pr, "first.png", png("first"));
-  await pr.fleet("save", "--kind", "ui-walk", "--caption", "Open the settings page", first);
+  await pr.hedge("save", "--kind", "ui-walk", "--caption", "Open the settings page", first);
   tick(pr);
-  await pr.fleet("save", "--kind", "ui-walk", "--caption", "Save the new sender", file(pr, "second.png", png("second")));
+  await pr.hedge("save", "--kind", "ui-walk", "--caption", "Save the new sender", file(pr, "second.png", png("second")));
   tick(pr);
-  await pr.fleet("save", "--kind", "ui-walk", "--caption", "Open the email settings page", first);
+  await pr.hedge("save", "--kind", "ui-walk", "--caption", "Open the email settings page", first);
   const published = "c".repeat(40);
   const github: GitHub = async (path, _body, method = "GET") => {
     if (path === "user") return { login: "tester" };
@@ -88,7 +88,7 @@ test("save refuses lines and captions it cannot place", async () => {
     [["--kind", "live-run", "--ran", "Sent\nand read", "--result", "Delivered"], "--ran needs one line of text"],
     [["--kind", "live-run"], "Pass at least one file"],
   ];
-  for (const [args, message] of refusals) await expect(pr.fleet("save", ...args)).rejects.toThrow(message);
+  for (const [args, message] of refusals) await expect(pr.hedge("save", ...args)).rejects.toThrow(message);
   expect(await readDisplay(pr.home, ref)).toEqual({ lines: {}, screenshots: [] });
 });
 

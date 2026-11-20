@@ -114,16 +114,16 @@ test("a balanced pool with fill-first routing changes nothing and logs nothing",
   expect(lines).toEqual([]);
 });
 
-test("fleet cli-proxy-balance runs only on the hub, reads the management key from its private file, and refuses unknown options", async () => {
+test("hedge cli-proxy-balance runs only on the hub, reads the management key from its private file, and refuses unknown options", async () => {
   const { fetch, calls } = managementApi({ strategy: "fill-first" });
   const lines: string[] = [];
   const deps = (home: string) => ({ home, fetch, now: () => now, ledger: false, log: (line: string) => lines.push(line) });
-  await expect(balanceCommand([], deps(roleHome(temp.make("fleet-balance-"), "devbox")))).rejects.toThrow("fleet cli-proxy-balance runs only on the hub");
-  const home = roleHome(temp.make("fleet-balance-"), "hub");
-  await expect(balanceCommand([], deps(home))).rejects.toThrow("Run fleet cli-proxy install");
-  mkdirSync(join(home, ".local/share/fleet-cli-proxy"), { recursive: true });
-  writeFileSync(join(home, ".local/share/fleet-cli-proxy/management.env"), `MANAGEMENT_PASSWORD=${managementKey}\n`);
-  await expect(balanceCommand(["--fast"], deps(home))).rejects.toThrow("Usage: fleet cli-proxy-balance [--dry-run]");
+  await expect(balanceCommand([], deps(roleHome(temp.make("hedge-balance-"), "devbox")))).rejects.toThrow("hedge cli-proxy-balance runs only on the hub");
+  const home = roleHome(temp.make("hedge-balance-"), "hub");
+  await expect(balanceCommand([], deps(home))).rejects.toThrow("Run hedge cli-proxy install");
+  mkdirSync(join(home, ".local/share/hedge-cli-proxy"), { recursive: true });
+  writeFileSync(join(home, ".local/share/hedge-cli-proxy/management.env"), `MANAGEMENT_PASSWORD=${managementKey}\n`);
+  await expect(balanceCommand(["--fast"], deps(home))).rejects.toThrow("Usage: hedge cli-proxy-balance [--dry-run]");
   expect(await balanceCommand(["--dry-run"], deps(home))).toBe(0);
   expect(calls.every((call) => call.auth === `Bearer ${managementKey}`)).toBe(true);
   expect(lines.join("\n")).not.toContain(managementKey);
@@ -204,13 +204,13 @@ test("balance tells an expired login apart from usage it could not read, ranks t
   ];
   const { fetch } = managementApi({ strategy: "fill-first", files, usage: { "1": { seven_day: { utilization: 20, resets_at: new Date(now + day).toISOString() } } } });
   const lines: string[] = [];
-  const home = roleHome(temp.make("fleet-balance-"), "hub");
-  mkdirSync(join(home, ".local/share/fleet-cli-proxy"), { recursive: true });
-  writeFileSync(join(home, ".local/share/fleet-cli-proxy/management.env"), `MANAGEMENT_PASSWORD=${managementKey}\n`);
+  const home = roleHome(temp.make("hedge-balance-"), "hub");
+  mkdirSync(join(home, ".local/share/hedge-cli-proxy"), { recursive: true });
+  writeFileSync(join(home, ".local/share/hedge-cli-proxy/management.env"), `MANAGEMENT_PASSWORD=${managementKey}\n`);
   expect(await balanceCommand([], { home, fetch, now: () => now, ledger: false, log: (line) => lines.push(line) })).toBe(0);
   expect(lines.filter((line) => line.startsWith("Codex catalog:")).at(-1)).toBe("Codex catalog: every source failed, so the proxy serves its built-in catalog");
   expect(lines.filter((line) => !line.startsWith("Claude subscription 1:") && !line.startsWith("Codex catalog:") && !line.startsWith("Model registry:"))).toEqual([
-    "Claude subscription 2: priority 0, usage unreadable: its login expired. Sign it in again on the hub; fleet cli-proxy doctor names the command",
+    "Claude subscription 2: priority 0, usage unreadable: its login expired. Sign it in again on the hub; hedge cli-proxy doctor names the command",
     "Claude subscription 3: priority 0, usage unreadable",
     "Claude subscription 4: priority 0, usage unreadable",
   ]);
@@ -244,7 +244,7 @@ test("balance reports each blocked credential of either provider on every run, a
   expect(runs[0]!.join("\n")).not.toContain("alice");
 });
 
-test("the balancer's journal lines name each subscription by its short id, as fleet cli-proxy doctor does, and never by its auth file, which holds the account's email", async () => {
+test("the balancer's journal lines name each subscription by its short id, as hedge cli-proxy doctor does, and never by its auth file, which holds the account's email", async () => {
   const files = [
     { name: "claude-user@example.com.json", provider: "claude", auth_index: "aaaabbbbcccc", priority: 2 },
     { name: "claude-other@example.com.json", provider: "claude", auth_index: "ddddeeeeffff", priority: 1, unavailable: true, cooldowns: [{ reason: "quota" }] },

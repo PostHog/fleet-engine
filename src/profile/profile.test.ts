@@ -23,7 +23,7 @@ const packs: PackManifest[] = [
 
 const profile: ProfileFile = {
   schema: 1,
-  engine: { repo: "PostHog/fleet-engine", ref: "v0.1.0", channel: "release" },
+  engine: { repo: "PostHog/hedge", ref: "v0.1.0", channel: "release" },
   sources: [],
   packs: ["orchestration"],
   plan: "both",
@@ -37,7 +37,7 @@ function profileRepo(file: unknown = profile) {
   const text = JSON.stringify(file, null, 2) + "\n";
   const built = profileRepos.get(text) ?? template(async (dir) => {
     await spawnGit(dir, "init", "-q", "-b", "main");
-    writeFileSync(join(dir, "fleet.json"), text);
+    writeFileSync(join(dir, "hedge.json"), text);
     await spawnGit(dir, "add", ".");
     await spawnGit(dir, "commit", "-q", "-m", "Start");
   });
@@ -48,7 +48,7 @@ function profileRepo(file: unknown = profile) {
 describe("profile", () => {
   test("rejects a schema it does not know", async () => {
     const dir = await profileRepo({ ...profile, schema: 3 });
-    expect(loadProfile(dir)).rejects.toThrow(new ProfileError(`${join(dir, "fleet.json")}: unknown schema 3`));
+    expect(loadProfile(dir)).rejects.toThrow(new ProfileError(`${join(dir, "hedge.json")}: unknown schema 3`));
   });
 
   test("loads about-me.md when it exists", async () => {
@@ -67,24 +67,24 @@ describe("profile", () => {
 
     await saveAnswers(dir, { workflows: workflowOverrides({ maps: true, "quality-loop": true }, packs) });
     expect((await loadProfile(dir)).workflows).toEqual({ "quality-loop": true });
-    expect(await spawnGit(dir, "log", "--format=%s")).toBe("Save Fleet answers\nSave Fleet answers\nStart");
+    expect(await spawnGit(dir, "log", "--format=%s")).toBe("Save Hedge answers\nSave Hedge answers\nStart");
   });
 
   test("keeps answers it was not given", async () => {
-    const dir = await profileRepo({ ...profile, settings: { "orchestration.tracker": "me/fleet-profile" } });
+    const dir = await profileRepo({ ...profile, settings: { "orchestration.tracker": "me/hedge-profile" } });
     await saveAnswers(dir, { plan: "claude" });
-    const saved = JSON.parse(readFileSync(join(dir, "fleet.json"), "utf8"));
-    expect(saved).toMatchObject({ plan: "claude", settings: { "orchestration.tracker": "me/fleet-profile" } });
+    const saved = JSON.parse(readFileSync(join(dir, "hedge.json"), "utf8"));
+    expect(saved).toMatchObject({ plan: "claude", settings: { "orchestration.tracker": "me/hedge-profile" } });
   });
 });
 
 describe("saving answers", () => {
-  test("commits only fleet.json and leaves other staged files staged", async () => {
+  test("commits only hedge.json and leaves other staged files staged", async () => {
     const dir = await profileRepo();
     writeFileSync(join(dir, "notes.txt"), "private\n");
     await spawnGit(dir, "add", "notes.txt");
     await saveAnswers(dir, { plan: "claude" });
-    expect(await spawnGit(dir, "show", "--name-only", "--format=", "HEAD")).toBe("fleet.json");
+    expect(await spawnGit(dir, "show", "--name-only", "--format=", "HEAD")).toBe("hedge.json");
     expect(await spawnGit(dir, "diff", "--cached", "--name-only")).toBe("notes.txt");
   });
 
@@ -97,16 +97,16 @@ describe("saving answers", () => {
   test("refuses to rewrite a profile of an unknown schema", async () => {
     const dir = await profileRepo({ ...profile, schema: 9 });
     expect(saveAnswers(dir, { plan: "claude" })).rejects.toThrow("unknown schema 9");
-    expect(JSON.parse(readFileSync(join(dir, "fleet.json"), "utf8")).schema).toBe(9);
+    expect(JSON.parse(readFileSync(join(dir, "hedge.json"), "utf8")).schema).toBe(9);
   });
 
-  test("fails when Git cannot stage fleet.json", async () => {
+  test("fails when Git cannot stage hedge.json", async () => {
     const dir = await profileRepo();
-    await spawnGit(dir, "rm", "-q", "--cached", "fleet.json");
-    writeFileSync(join(dir, ".gitignore"), "fleet.json\n");
+    await spawnGit(dir, "rm", "-q", "--cached", "hedge.json");
+    writeFileSync(join(dir, ".gitignore"), "hedge.json\n");
     await spawnGit(dir, "add", ".gitignore");
     await spawnGit(dir, "commit", "-q", "-m", "Ignore");
-    expect(saveAnswers(dir, { plan: "claude" })).rejects.toThrow("could not stage fleet.json");
+    expect(saveAnswers(dir, { plan: "claude" })).rejects.toThrow("could not stage hedge.json");
   });
 
   test("pushes when asked, even when nothing changed", async () => {
@@ -129,8 +129,8 @@ describe("saving answers", () => {
     const other = temp.make("other-");
     await spawnGit(other, "clone", "-q", remote, ".");
     const elsewhere = async (change: (file: Record<string, unknown>) => Record<string, unknown>) => {
-      const file = JSON.parse(readFileSync(join(other, "fleet.json"), "utf8"));
-      writeFileSync(join(other, "fleet.json"), JSON.stringify(change(file), null, 2) + "\n");
+      const file = JSON.parse(readFileSync(join(other, "hedge.json"), "utf8"));
+      writeFileSync(join(other, "hedge.json"), JSON.stringify(change(file), null, 2) + "\n");
       await spawnGit(other, "commit", "-q", "-am", "Elsewhere");
       await spawnGit(other, "push", "-q");
     };
@@ -139,9 +139,9 @@ describe("saving answers", () => {
 
   test("takes what another machine pushed before it saves, so a change here keeps the hub named on the hub", async () => {
     const { dir, remote, elsewhere } = await profileBehind();
-    await elsewhere((file) => ({ ...file, hub: "coder.fleet-hub" }));
+    await elsewhere((file) => ({ ...file, hub: "coder.hedge-hub" }));
     await saveAnswers(dir, { packs: ["hub"] }, { push: true });
-    expect(JSON.parse(await spawnGit(remote, "show", "main:fleet.json"))).toMatchObject({ hub: "coder.fleet-hub", packs: ["hub"] });
+    expect(JSON.parse(await spawnGit(remote, "show", "main:hedge.json"))).toMatchObject({ hub: "coder.hedge-hub", packs: ["hub"] });
     expect(await spawnGit(remote, "rev-parse", "main")).toBe(await spawnGit(dir, "rev-parse", "HEAD"));
   });
 
@@ -152,7 +152,7 @@ describe("saving answers", () => {
     const error = await saveAnswers(dir, { packs: [...loaded.packs, "hub"] }, { push: true }).catch((caught: Error) => caught);
     expect(error).toBeInstanceOf(ProfileError);
     expect((error as Error).message).toBe(`${dir}: another machine changed packs in your profile while this command ran. Run the command again to change them on top of that.`);
-    expect(JSON.parse(await spawnGit(remote, "show", "main:fleet.json")).packs).toEqual(["orchestration", "memory"]);
+    expect(JSON.parse(await spawnGit(remote, "show", "main:hedge.json")).packs).toEqual(["orchestration", "memory"]);
     expect(await spawnGit(dir, "status", "--porcelain")).toBe("");
   });
 
@@ -164,12 +164,12 @@ describe("saving answers", () => {
     expect(error).toBeInstanceOf(ProfileError);
     expect((error as Error).message).toBe(`${dir}: could not take the changes another machine pushed. ${dir} and its remote both have changes the other lacks. Run git -C ${dir} pull --rebase, then try again.`);
     expect(await spawnGit(dir, "status", "--porcelain")).toBe("");
-    expect(JSON.parse(readFileSync(join(dir, "fleet.json"), "utf8")).plan).toBe("codex");
+    expect(JSON.parse(readFileSync(join(dir, "hedge.json"), "utf8")).plan).toBe("codex");
   });
 
   test("a profile with changes it has not committed takes nothing and saves nothing, and says to commit or discard them", async () => {
     const { dir, remote, elsewhere } = await profileBehind();
-    await elsewhere((file) => ({ ...file, hub: "coder.fleet-hub" }));
+    await elsewhere((file) => ({ ...file, hub: "coder.hedge-hub" }));
     writeFileSync(join(dir, "about-me.md"), "Hi\n");
     await spawnGit(dir, "add", "about-me.md");
     const before = await spawnGit(dir, "rev-parse", "HEAD");
@@ -177,29 +177,29 @@ describe("saving answers", () => {
     expect(error).toBeInstanceOf(ProfileError);
     expect((error as Error).message).toBe(`${dir}: could not take the changes another machine pushed, because ${dir} has changes that are not committed. Commit or discard them, then try again.`);
     expect(await spawnGit(dir, "rev-parse", "HEAD")).toBe(before);
-    expect(JSON.parse(await spawnGit(remote, "show", "main:fleet.json")).packs).toEqual(["orchestration"]);
+    expect(JSON.parse(await spawnGit(remote, "show", "main:hedge.json")).packs).toEqual(["orchestration"]);
   });
 
-  test("a profile whose Git stashes changes on its own before a pull still refuses them, and keeps fleet.json readable", async () => {
+  test("a profile whose Git stashes changes on its own before a pull still refuses them, and keeps hedge.json readable", async () => {
     const { dir, elsewhere } = await profileBehind();
     await spawnGit(dir, "config", "rebase.autoStash", "true");
     await elsewhere((file) => ({ ...file, plan: "claude" }));
     const edited = JSON.stringify({ ...profile, plan: "codex" }, null, 2) + "\n";
-    writeFileSync(join(dir, "fleet.json"), edited);
+    writeFileSync(join(dir, "hedge.json"), edited);
     const error = await saveAnswers(dir, { packs: ["hub"] }, { push: true }).catch((caught: Error) => caught);
     expect(error).toBeInstanceOf(ProfileError);
     expect((error as Error).message).toContain(`because ${dir} has changes that are not committed.`);
-    expect(readFileSync(join(dir, "fleet.json"), "utf8")).toBe(edited);
+    expect(readFileSync(join(dir, "hedge.json"), "utf8")).toBe(edited);
   });
 
   test("a failed push never shows the credentials in the remote's URL", async () => {
     const dir = await profileRepo();
-    await spawnGit(dir, "remote", "add", "origin", "http://nora:hunter2@127.0.0.1:1/nora/fleet-profile.git?access_token=EXAMPLE_TOKEN");
+    await spawnGit(dir, "remote", "add", "origin", "http://nora:hunter2@127.0.0.1:1/nora/hedge-profile.git?access_token=EXAMPLE_TOKEN");
     await spawnGit(dir, "config", "branch.main.remote", "origin");
     await spawnGit(dir, "config", "branch.main.merge", "refs/heads/main");
     const error = await saveAnswers(dir, { plan: "claude" }, { push: true }).catch((caught: Error) => caught);
     expect(error).toBeInstanceOf(ProfileError);
-    expect((error as Error).message).toContain("http://127.0.0.1:1/nora/fleet-profile.git");
+    expect((error as Error).message).toContain("http://127.0.0.1:1/nora/hedge-profile.git");
     expect((error as Error).message).not.toMatch(/hunter2|EXAMPLE_TOKEN|nora:/);
   });
 
@@ -217,7 +217,7 @@ describe("machine file", () => {
   test("rejects an unknown role", async () => {
     const home = temp.make("home-");
     await saveMachine(home, { schema: 1, role: "linux" });
-    writeFileSync(join(home, ".config/fleet/machine.json"), JSON.stringify({ schema: 1, role: "toaster" }));
+    writeFileSync(join(home, ".config/hedge/machine.json"), JSON.stringify({ schema: 1, role: "toaster" }));
     expect(loadMachine(home)).rejects.toThrow("role must be mac, devbox, linux, or hub");
   });
 
@@ -232,14 +232,14 @@ describe("machine file", () => {
     const coder = { CODER_AGENT_URL: "https://coder.example", CODER: "true" };
     expect(thisMachine(undefined, "darwin", {}, "laptop")).toEqual({ schema: 1, role: "mac", name: "laptop" });
     expect(thisMachine(undefined, "darwin", coder, "laptop")).toEqual({ schema: 1, role: "mac", name: "laptop" });
-    expect(thisMachine({ schema: 1, role: "mac", name: "octo-mac", profileDir: "/Users/octo/fleet-profile" }, "darwin", coder, "laptop")).toEqual({ schema: 1, role: "mac", name: "octo-mac", profileDir: "/Users/octo/fleet-profile" });
+    expect(thisMachine({ schema: 1, role: "mac", name: "octo-mac", profileDir: "/Users/octo/hedge-profile" }, "darwin", coder, "laptop")).toEqual({ schema: 1, role: "mac", name: "octo-mac", profileDir: "/Users/octo/hedge-profile" });
     expect(thisMachine(undefined, "linux", coder, "not a host")).toEqual({ schema: 1, role: "devbox", coder: true });
   });
 
   test("rejects a schema it does not know", async () => {
     const home = temp.make("home-");
     await saveMachine(home, { schema: 1, role: "linux" });
-    const path = join(home, ".config/fleet/machine.json");
+    const path = join(home, ".config/hedge/machine.json");
     writeFileSync(path, JSON.stringify({ schema: 9, role: "linux" }));
     expect(loadMachine(home)).rejects.toThrow(`${path}: unknown schema 9`);
   });

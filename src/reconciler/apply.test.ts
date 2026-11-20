@@ -37,11 +37,26 @@ function plan(overrides: Partial<Plan> = {}): Plan {
 const exitCodes = (codes: Record<string, number>) => async (command: string[]) => codes[command.join(" ")] ?? 0;
 
 describe("apply", () => {
+  test("a step from before the rename that writes to FLEET_PROFILE_DIR writes to the profile this run applies, even when the shell still names an old one", async () => {
+    const home = temp.make("home-");
+    const [old, current] = [temp.make("old-profile-"), temp.make("profile-")];
+    const saved = process.env.FLEET_PROFILE_DIR;
+    process.env.FLEET_PROFILE_DIR = old;
+    try {
+      await apply(plan({ machine: { schema: 1, role: "linux", profileDir: current }, steps: [{ id: "mark", pack: "team", run: ["/bin/sh", "-c", 'touch "$FLEET_PROFILE_DIR/marked"'] }] }), { home, adapters: [] });
+    } finally {
+      if (saved === undefined) delete process.env.FLEET_PROFILE_DIR;
+      else process.env.FLEET_PROFILE_DIR = saved;
+    }
+    expect(existsSync(join(old, "marked"))).toBe(false);
+    expect(existsSync(join(current, "marked"))).toBe(true);
+  });
+
   test("refuses to write while a setting is unanswered", async () => {
     const home = temp.make("home-");
     const report = await apply(plan({ unanswered: [{ key: "orchestration.tracker", question: "Which repo holds your maps?", type: "string" }] }), { home });
     expect(report.ok).toBe(false);
-    expect(report.findings).toContainEqual({ id: "unanswered:orchestration.tracker", pack: "orchestration", say: "Which repo holds your maps? Answer it with fleet set orchestration.tracker=<value>.", repair: "human" });
+    expect(report.findings).toContainEqual({ id: "unanswered:orchestration.tracker", pack: "orchestration", say: "Which repo holds your maps? Answer it with hedge set orchestration.tracker=<value>.", repair: "human" });
     expect(existsSync(join(home, ".agents"))).toBe(false);
   });
 
@@ -60,12 +75,12 @@ describe("apply", () => {
     const home = temp.make("home-");
     mkdirSync(join(home, ".agents"), { recursive: true });
     writeFileSync(join(home, ".agents/AGENTS.md"), "old rules\n");
-    mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
+    mkdirSync(join(home, ".local/state/hedge"), { recursive: true });
     const state = JSON.stringify({ version: 1, groups: { core: { ".agents/AGENTS.md": { kind: "file", hash: "0".repeat(64) } } } });
-    writeFileSync(join(home, ".local/state/fleet/state.json"), state);
+    writeFileSync(join(home, ".local/state/hedge/state.json"), state);
     const offline = plan({ packs: [...plan().packs, { name: "team", source: "", ref: "", available: false, reason: "not found; unreachable sources: team" }] });
-    await expect(apply(offline, { home, adoptFrom: ["core"] })).rejects.toThrow("Run fleet apply --adopt-from core again once it can apply .agents/AGENTS.md.");
-    expect(readFileSync(join(home, ".local/state/fleet/state.json"), "utf8")).toBe(state);
+    await expect(apply(offline, { home, adoptFrom: ["core"] })).rejects.toThrow("Run hedge apply --adopt-from core again once it can apply .agents/AGENTS.md.");
+    expect(readFileSync(join(home, ".local/state/hedge/state.json"), "utf8")).toBe(state);
     expect(readFileSync(join(home, ".agents/AGENTS.md"), "utf8")).toBe("old rules\n");
   });
 
@@ -74,17 +89,17 @@ describe("apply", () => {
     const outside = temp.make("outside-");
     writeFileSync(join(outside, "other.md"), "theirs\n");
     symlinkSync(outside, join(home, "guides"));
-    mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
+    mkdirSync(join(home, ".local/state/hedge"), { recursive: true });
     const state = JSON.stringify({ version: 1, groups: { core: { "guides/other.md": { kind: "file", hash: "0".repeat(64) } } } });
-    writeFileSync(join(home, ".local/state/fleet/state.json"), state);
+    writeFileSync(join(home, ".local/state/hedge/state.json"), state);
     const inside = plan({ files: [{ target: "guides/new.md", content: "new\n" }] });
     const offline = { ...inside, packs: [...inside.packs, { name: "team", source: "", ref: "", available: false, reason: "not found; unreachable sources: team" }] };
-    await expect(apply(offline, { home, adoptFrom: ["core"] })).rejects.toThrow("Run fleet apply --adopt-from core again once it can apply guides/new.md.");
-    expect(readFileSync(join(home, ".local/state/fleet/state.json"), "utf8")).toBe(state);
+    await expect(apply(offline, { home, adoptFrom: ["core"] })).rejects.toThrow("Run hedge apply --adopt-from core again once it can apply guides/new.md.");
+    expect(readFileSync(join(home, ".local/state/hedge/state.json"), "utf8")).toBe(state);
     expect(lstatSync(join(home, "guides")).isSymbolicLink()).toBe(true);
   });
 
-  test("keeps Fleet's own folder link while an outage keeps the file it now writes inside it", async () => {
+  test("keeps Hedge's own folder link while an outage keeps the file it now writes inside it", async () => {
     const home = temp.make("home-");
     const guides = temp.make("guides-");
     await apply(plan({ files: [{ target: "guides", source: guides }] }), { home });
@@ -126,7 +141,7 @@ describe("apply", () => {
     expect(apply(plan(), { home, adopt: [".bashrc"] })).rejects.toThrow("nothing to adopt at .bashrc");
   });
 
-  test("marks only the failing pack when a pack step fails", async () => {
+  test("skips the rest of the failing pack when a pack step fails, and fails apply whatever the pack", async () => {
     const steps = [
       { id: "a", run: ["one"], pack: "hub" },
       { id: "b", run: ["two"], pack: "hub" },
@@ -135,8 +150,17 @@ describe("apply", () => {
     const ran: string[] = [];
     const report = await apply(plan({ steps }), { home: temp.make("home-"), run: async (command) => (ran.push(command[0]!), command[0] === "one" ? 1 : 0) });
     expect(ran).toEqual(["one", "three"]);
-    expect(report.ok).toBe(true);
+    expect(report.ok).toBe(false);
     expect(report.findings).toEqual([{ id: "step:a", pack: "hub", say: "Step a of the hub pack failed.", repair: "apply" }]);
+  });
+
+  test("fails apply when a check that Hedge repairs still fails after its repair, but not when it waits for a person", async () => {
+    const gateway = { id: "gateway", say: "The gateway is not installed.", probe: ["gateway-installed"], repair: ["gateway-installed", "--repair"], pack: "hub" };
+    const signIn = { id: "sign-in", say: "Sign in.", command: "service login", probe: ["signed-in"], pack: "hub" };
+    const broken = await apply(plan({ human: [gateway] }), { home: temp.make("home-"), run: exitCodes({ "gateway-installed": 1, "gateway-installed --repair": 1 }) });
+    const waiting = await apply(plan({ human: [signIn] }), { home: temp.make("home-"), run: exitCodes({ "signed-in": 1 }) });
+    expect([broken.ok, broken.findings]).toEqual([false, [{ id: "human:gateway", pack: "hub", say: "The gateway is not installed.", repair: "human" }]]);
+    expect(waiting.ok).toBe(true);
   });
 
   test("skips a step whose check already passes", async () => {
@@ -258,7 +282,7 @@ describe("check", () => {
     expect(report.findings).toEqual([{ id: "human:github", pack: "base", say: "Sign in to GitHub. Run: gh auth login --web", repair: "human" }]);
   });
 
-  test("names a failing check that Fleet can repair as a Fix for apply, even when nothing waits for it", async () => {
+  test("names a failing check that Hedge can repair as a Fix for apply, even when nothing waits for it", async () => {
     const human = [{ id: "gateway", say: "The gateway is not installed.", probe: ["gateway-installed"], repair: ["gateway-installed", "--repair"], pack: "hub" }];
     const home = temp.make("home-");
     await apply(plan(), { home });
@@ -267,7 +291,7 @@ describe("check", () => {
     expect(report.findings).toEqual([{ id: "human:gateway", pack: "hub", say: "The gateway is not installed.", repair: "apply" }]);
   });
 
-  test("keeps a failing check as a To do when its fix still needs a person's command, even with a Fleet repair", async () => {
+  test("keeps a failing check as a To do when its fix still needs a person's command, even with a Hedge repair", async () => {
     const human = [{ id: "service", say: "Sign in to the service.", command: "service login", interactive: true as const, probe: ["service-ready"], repair: ["service-ready", "--repair"], pack: "base" }];
     const home = temp.make("home-");
     await apply(plan(), { home });
@@ -294,14 +318,14 @@ describe("check", () => {
   });
 });
 
-describe("a leading fleet in a pack's commands", () => {
-  const launcher = ["/bin/sh", "/engine/fleet"];
+describe("a leading hedge in a pack's commands", () => {
+  const launcher = ["/bin/sh", "/engine/hedge"];
   const team = {
     engineRoot: "/engine",
     files: [],
-    human: [{ id: "login", pack: "team", say: "Sign in.", command: "fleet login", probe: ["fleet", "whoami"] }],
-    steps: [{ id: "start", pack: "team", run: ["fleet", "start"], check: ["fleet", "status"], after: "login" }],
-    checks: [{ id: "healthy", pack: "team", run: ["fleet", "health"], say: "Unhealthy." }],
+    human: [{ id: "login", pack: "team", say: "Sign in.", command: "hedge login", probe: ["hedge", "whoami"] }],
+    steps: [{ id: "start", pack: "team", run: ["hedge", "start"], check: ["hedge", "status"], after: "login" }],
+    checks: [{ id: "healthy", pack: "team", run: ["hedge", "health"], say: "Unhealthy." }],
   };
   const recorder = (codes: Record<string, number> = {}) => {
     const calls: string[] = [];
@@ -309,7 +333,7 @@ describe("a leading fleet in a pack's commands", () => {
   };
 
   test("runs this engine's launcher in apply", async () => {
-    const { calls, run } = recorder({ "/bin/sh /engine/fleet status": 1 });
+    const { calls, run } = recorder({ "/bin/sh /engine/hedge status": 1 });
     await apply(plan(team), { home: temp.make("home-"), run });
     expect(calls).toEqual([[...launcher, "whoami"], [...launcher, "status"], [...launcher, "start"], [...launcher, "status"]].map((command) => command.join(" ")));
   });
@@ -322,7 +346,7 @@ describe("a leading fleet in a pack's commands", () => {
 
   test("leaves other commands and a plan without an engine as they are", async () => {
     const { calls, run } = recorder();
-    await check(plan({ ...team, engineRoot: undefined, checks: [{ id: "gh", pack: "team", run: ["gh", "fleet"], say: "No gh." }] }), { home: temp.make("home-"), run });
-    expect(calls).toEqual(["gh fleet", "fleet whoami", "fleet status", "fleet whoami"]);
+    await check(plan({ ...team, engineRoot: undefined, checks: [{ id: "gh", pack: "team", run: ["gh", "hedge"], say: "No gh." }] }), { home: temp.make("home-"), run });
+    expect(calls).toEqual(["gh hedge", "hedge whoami", "hedge status", "hedge whoami"]);
   });
 });

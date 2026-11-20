@@ -34,7 +34,7 @@ function fakeGateway(handlers: Record<string, Handler> = {}, listen?: () => Resp
     idleTimeout: 0,
     async fetch(request) {
       const url = new URL(request.url);
-      if (url.pathname !== "/mcphub/mcp/fleet") return new Response(null, { status: 404 });
+      if (url.pathname !== "/mcphub/mcp/hedge") return new Response(null, { status: 404 });
       if (request.headers.get("authorization") !== `Bearer ${token}`) return new Response("Unauthorized", { status: 401 });
       const session = request.headers.get("mcp-session-id");
       const protocol = request.headers.get("mcp-protocol-version");
@@ -298,7 +298,7 @@ test("holds a request sent while a new session starts, then sends it with the ne
   const renewal = intercepting("initialize", async (init) => {
     if (++initializes === 2) release();
     if (initializes === 2) await new Promise<void>((resolve) => { resume = resolve; });
-    return fetch(`${gateway.baseUrl}/mcp/fleet`, init);
+    return fetch(`${gateway.baseUrl}/mcp/hedge`, init);
   });
   let resume: () => void = () => {};
   const gateway = fakeGateway({ "tools/list": (message) => Response.json({ jsonrpc: "2.0", id: message.id, result: { tools: [] } }) });
@@ -324,7 +324,7 @@ test("exits with one line that says what to do when MCPHub restarts and refuses 
   gateway.restart({ refuseInitialize: true });
   client.send({ jsonrpc: "2.0", id: 10, method: "tools/list" });
   expect(await done).toBe(1);
-  expect(client.errors).toEqual(["The MCP gateway lost this session and could not start a new one. Restart this MCP server, and on the hub, run: fleet mcp-gateway doctor"]);
+  expect(client.errors).toEqual(["The MCP gateway lost this session and could not start a new one. Restart this MCP server, and on the hub, run: hedge mcp-gateway doctor"]);
   expect(client.received.filter((message) => message.id === 10)).toEqual([]);
 });
 
@@ -381,7 +381,7 @@ test("stops with one plain line, without the key, when the gateway refuses it", 
   const done = bridge({ client: { baseUrl: gateway.baseUrl, token: "mcphub_revoked-token" }, stdin: client.stdin, write: client.write, fail: client.fail, fetch });
   client.send(initialize);
   expect(await done).toBe(1);
-  expect(client.errors).toEqual(["The MCP gateway refused this machine's key. Run fleet apply on this machine to pull its key from the hub."]);
+  expect(client.errors).toEqual(["The MCP gateway refused this machine's key. Run hedge apply on this machine to pull its key from the hub."]);
   expect(client.received).toEqual([]);
 });
 
@@ -391,7 +391,7 @@ test("stops with one plain line, without the key, when the gateway is unreachabl
   const done = bridge({ client: { baseUrl: "http://127.0.0.1:3317/mcphub", token }, stdin: client.stdin, write: client.write, fail: client.fail, fetch: unreachable });
   client.send(initialize);
   expect(await done).toBe(1);
-  expect(client.errors).toEqual(["Cannot reach the MCP gateway at http://127.0.0.1:3317/mcphub. On the hub, run: fleet mcp-gateway doctor"]);
+  expect(client.errors).toEqual(["Cannot reach the MCP gateway at http://127.0.0.1:3317/mcphub. On the hub, run: hedge mcp-gateway doctor"]);
   expect(client.errors.join("\n")).not.toContain(token);
 });
 

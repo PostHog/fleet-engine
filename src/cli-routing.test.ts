@@ -7,24 +7,24 @@ import { tempDirs } from "./testing/git.ts";
 
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
-const { profileDir, fleet, engineWithCommands } = cliFixtures(temp);
+const { profileDir, hedge, engineWithCommands } = cliFixtures(temp);
 
-describe("fleet routing", () => {
+describe("hedge routing", () => {
   async function machineWith(packs: string[]) {
     const home = temp.make("home-");
     const engine = engineWithCommands();
-    expect((await fleet(["apply", "--profile", profileDir(packs)], home, engine)).code).toBe(0);
+    expect((await hedge(["apply", "--profile", profileDir(packs)], home, engine)).code).toBe(0);
     return { home, engine };
   }
 
   test("runs an engine command", async () => {
     const { home, engine } = await machineWith(["tools"]);
-    expect(await fleet(["doctor"], home, engine)).toMatchObject({ code: 0 });
+    expect(await hedge(["doctor"], home, engine)).toMatchObject({ code: 0 });
   });
 
   test("runs a command from an enabled pack with its arguments", async () => {
     const { home, engine } = await machineWith(["tools"]);
-    expect((await fleet(["hello", "a", "b"], home, engine)).code).toBe(0);
+    expect((await hedge(["hello", "a", "b"], home, engine)).code).toBe(0);
     expect(readFileSync(join(home, "hello.txt"), "utf8")).toBe("tools a b");
   });
 
@@ -37,12 +37,12 @@ describe("fleet routing", () => {
       { key: "tools.name", question: "Which name?", type: "string", default: "plain" },
     ];
     writeFileSync(join(tools, "pack.json"), JSON.stringify({ schema: 1, name: "tools", summary: "tools pack.", settings }));
-    writeFileSync(join(tools, "commands/hello.ts"), `await Bun.write(Bun.env.HOME + "/hello.txt", Bun.env.FLEET_SETTINGS ?? "none");\n`);
+    writeFileSync(join(tools, "commands/hello.ts"), `await Bun.write(Bun.env.HOME + "/hello.txt", Bun.env.HEDGE_SETTINGS ?? "none");\n`);
     const profile = profileDir(["tools"]);
-    const file = JSON.parse(readFileSync(join(profile, "fleet.json"), "utf8"));
-    writeFileSync(join(profile, "fleet.json"), JSON.stringify({ ...file, settings: { "tools.name": "mine" } }));
-    expect((await fleet(["apply", "--profile", profile], home, engine)).code).toBe(0);
-    expect((await fleet(["hello"], home, engine)).code).toBe(0);
+    const file = JSON.parse(readFileSync(join(profile, "hedge.json"), "utf8"));
+    writeFileSync(join(profile, "hedge.json"), JSON.stringify({ ...file, settings: { "tools.name": "mine" } }));
+    expect((await hedge(["apply", "--profile", profile], home, engine)).code).toBe(0);
+    expect((await hedge(["hello"], home, engine)).code).toBe(0);
     expect(JSON.parse(readFileSync(join(home, "hello.txt"), "utf8"))).toMatchObject({ "tools.slots": 2, "tools.name": "mine" });
   });
 
@@ -50,12 +50,12 @@ describe("fleet routing", () => {
     const home = temp.make("home-");
     const engine = engineWithCommands();
     writeFileSync(join(engine, "packs/rival/pack.json"), JSON.stringify({ schema: 1, name: "rival", summary: "rival pack.", handlers: [{ seam: "review-bot", path: "lib/bot.ts" }, { seam: "pr-command", path: "lib/bot.ts", subcommands: ["queue-wait"] }] }));
-    writeFileSync(join(engine, "packs/tools/commands/hello.ts"), `await Bun.write(Bun.env.HOME + "/hello.txt", JSON.stringify([Bun.env.FLEET_HANDLERS, Bun.env.FLEET_HANDLER_SUBCOMMANDS]));\n`);
+    writeFileSync(join(engine, "packs/tools/commands/hello.ts"), `await Bun.write(Bun.env.HOME + "/hello.txt", JSON.stringify([Bun.env.HEDGE_HANDLERS, Bun.env.HEDGE_HANDLER_SUBCOMMANDS]));\n`);
     rmSync(join(engine, "packs/rival/commands/hello.ts"));
     mkdirSync(join(engine, "packs/rival/lib"));
     writeFileSync(join(engine, "packs/rival/lib/bot.ts"), "export {};\n");
-    expect((await fleet(["apply", "--profile", profileDir(["tools", "rival"])], home, engine)).code).toBe(0);
-    expect((await fleet(["hello"], home, engine)).code).toBe(0);
+    expect((await hedge(["apply", "--profile", profileDir(["tools", "rival"])], home, engine)).code).toBe(0);
+    expect((await hedge(["hello"], home, engine)).code).toBe(0);
     const [handlers, subcommands] = JSON.parse(readFileSync(join(home, "hello.txt"), "utf8"));
     expect(JSON.parse(handlers)).toEqual({ "review-bot": join(engine, "packs/rival/lib/bot.ts"), "pr-command": join(engine, "packs/rival/lib/bot.ts") });
     expect(JSON.parse(subcommands)).toEqual({ "pr-command": ["queue-wait"] });
@@ -63,8 +63,8 @@ describe("fleet routing", () => {
 
   test("gives a pack command the model table of the user's AI plan", async () => {
     const { home, engine } = await machineWith(["tools"]);
-    writeFileSync(join(engine, "packs/tools/commands/hello.ts"), `await Bun.write(Bun.env.HOME + "/hello.txt", Bun.env.FLEET_MODELS ?? "none");\n`);
-    expect((await fleet(["hello"], home, engine)).code).toBe(0);
+    writeFileSync(join(engine, "packs/tools/commands/hello.ts"), `await Bun.write(Bun.env.HOME + "/hello.txt", Bun.env.HEDGE_MODELS ?? "none");\n`);
+    expect((await hedge(["hello"], home, engine)).code).toBe(0);
     const models = JSON.parse(readFileSync(join(home, "hello.txt"), "utf8"));
     expect(models.map((row: { role: string }) => row.role)).toEqual(["lookup", "survey", "research", "implementation", "review", "review-codex", "security", "incident"]);
     expect(models.find((row: { role: string }) => row.role === "review")).toMatchObject({ provider: "codex" });
@@ -72,26 +72,26 @@ describe("fleet routing", () => {
 
   test("gives a pack command the user's AI plan", async () => {
     const { home, engine } = await machineWith(["tools"]);
-    writeFileSync(join(engine, "packs/tools/commands/hello.ts"), `await Bun.write(Bun.env.HOME + "/hello.txt", Bun.env.FLEET_PLAN ?? "none");\n`);
-    expect((await fleet(["hello"], home, engine)).code).toBe(0);
+    writeFileSync(join(engine, "packs/tools/commands/hello.ts"), `await Bun.write(Bun.env.HOME + "/hello.txt", Bun.env.HEDGE_PLAN ?? "none");\n`);
+    expect((await hedge(["hello"], home, engine)).code).toBe(0);
     expect(readFileSync(join(home, "hello.txt"), "utf8")).toBe("both");
   });
 
-  test.if(process.platform === "linux")("runs a fleet heavy job as the fleet process itself, so a stop sent only to fleet reaches the job once", async () => {
+  test.if(process.platform === "linux")("runs a hedge heavy job as the hedge process itself, so a stop sent only to hedge reaches the job once", async () => {
     const home = temp.make("home-");
     const engine = engineWithCommands();
     cpSync(join(repoRoot, "src"), join(engine, "src"), { recursive: true });
-    cpSync(join(repoRoot, "fleet"), join(engine, "fleet"));
+    cpSync(join(repoRoot, "hedge"), join(engine, "hedge"));
     symlinkSync(join(repoRoot, "node_modules"), join(engine, "node_modules"));
     const profile = profileDir(["tools"]);
-    const saved = JSON.parse(readFileSync(join(profile, "fleet.json"), "utf8"));
-    writeFileSync(join(profile, "fleet.json"), JSON.stringify({ ...saved, settings: { "base.heavySlots": 1, "base.diskFloorGigabytes": 0 } }));
-    expect((await fleet(["apply", "--profile", profile], home, engine)).code).toBe(0);
+    const saved = JSON.parse(readFileSync(join(profile, "hedge.json"), "utf8"));
+    writeFileSync(join(profile, "hedge.json"), JSON.stringify({ ...saved, settings: { "base.heavySlots": 1, "base.diskFloorGigabytes": 0 } }));
+    expect((await hedge(["apply", "--profile", profile], home, engine)).code).toBe(0);
     const bin = temp.make("bin-");
     writeFileSync(join(bin, "systemd-run"), `#!/bin/sh\nwhile [ "$1" != -- ]; do shift; done; shift; exec "$@"\n`, { mode: 0o755 });
     const env = { ...Bun.env, HOME: home, XDG_RUNTIME_DIR: home, PATH: `${bin}:${Bun.env.PATH}` };
     const stops = join(home, "stops");
-    const job = Bun.spawn(["sh", join(engine, "fleet"), "heavy", "--", "sh", "-c", `tail -f /dev/null 9>&- & tail=$!; trap 'kill $tail; echo TERM >> "$0"; exit 143' TERM; echo $$; wait $tail`, stops], { env, stdin: "ignore", stdout: "pipe", stderr: "pipe", detached: true });
+    const job = Bun.spawn(["sh", join(engine, "hedge"), "heavy", "--", "sh", "-c", `tail -f /dev/null 9>&- & tail=$!; trap 'kill $tail; echo TERM >> "$0"; exit 143' TERM; echo $$; wait $tail`, stops], { env, stdin: "ignore", stdout: "pipe", stderr: "pipe", detached: true });
     try {
       const reader = job.stdout.getReader();
       let said = "";
@@ -109,36 +109,36 @@ describe("fleet routing", () => {
     }
   });
 
-  test("runs a leading fleet in a pack step with this engine's launcher, not one on PATH", async () => {
+  test("runs a leading hedge in a pack step with this engine's launcher, not one on PATH", async () => {
     const home = temp.make("home-");
     const engine = engineWithCommands();
     cpSync(join(repoRoot, "src"), join(engine, "src"), { recursive: true });
-    cpSync(join(repoRoot, "fleet"), join(engine, "fleet"));
+    cpSync(join(repoRoot, "hedge"), join(engine, "hedge"));
     symlinkSync(join(repoRoot, "node_modules"), join(engine, "node_modules"));
     const base = JSON.parse(readFileSync(join(engine, "packs/base/pack.json"), "utf8"));
     writeFileSync(join(engine, "packs/base/pack.json"), JSON.stringify({ ...base, steps: [] }));
-    writeFileSync(join(engine, "packs/tools/pack.json"), JSON.stringify({ schema: 1, name: "tools", summary: "tools pack.", steps: [{ id: "greet", run: ["fleet", "hello", "from-step"] }] }));
+    writeFileSync(join(engine, "packs/tools/pack.json"), JSON.stringify({ schema: 1, name: "tools", summary: "tools pack.", steps: [{ id: "greet", run: ["hedge", "hello", "from-step"] }] }));
     const lines: string[] = [];
     const code = await main(["apply", "--profile", profileDir(["tools"])], { home, engineRoot: engine, platform: "linux", env: {}, print: (line) => lines.push(line) });
     expect({ code, output: lines.join("\n") }).toMatchObject({ code: 0 });
     expect(readFileSync(join(home, "hello.txt"), "utf8")).toBe("tools from-step");
   });
 
-  test("doctor --profile runs the nested fleet in a step's check against that profile, not the remembered one", async () => {
+  test("doctor --profile runs the nested hedge in a step's check against that profile, not the remembered one", async () => {
     const home = temp.make("home-");
     const engine = engineWithCommands();
     cpSync(join(repoRoot, "src"), join(engine, "src"), { recursive: true });
-    cpSync(join(repoRoot, "fleet"), join(engine, "fleet"));
+    cpSync(join(repoRoot, "hedge"), join(engine, "hedge"));
     symlinkSync(join(repoRoot, "node_modules"), join(engine, "node_modules"));
     const base = JSON.parse(readFileSync(join(engine, "packs/base/pack.json"), "utf8"));
     writeFileSync(join(engine, "packs/base/pack.json"), JSON.stringify({ ...base, steps: [] }));
     const settings = [{ key: "tools.name", question: "Which name?", type: "string" }];
-    writeFileSync(join(engine, "packs/tools/pack.json"), JSON.stringify({ schema: 1, name: "tools", summary: "tools pack.", settings, steps: [{ id: "greet", run: ["true"], check: ["fleet", "hello"] }] }));
-    writeFileSync(join(engine, "packs/tools/commands/hello.ts"), `await Bun.write(Bun.env.HOME + "/hello.txt", JSON.parse(Bun.env.FLEET_SETTINGS ?? "{}")["tools.name"] ?? "none");\n`);
+    writeFileSync(join(engine, "packs/tools/pack.json"), JSON.stringify({ schema: 1, name: "tools", summary: "tools pack.", settings, steps: [{ id: "greet", run: ["true"], check: ["hedge", "hello"] }] }));
+    writeFileSync(join(engine, "packs/tools/commands/hello.ts"), `await Bun.write(Bun.env.HOME + "/hello.txt", JSON.parse(Bun.env.HEDGE_SETTINGS ?? "{}")["tools.name"] ?? "none");\n`);
     const named = (name: string) => {
       const dir = profileDir(["tools"]);
-      const file = JSON.parse(readFileSync(join(dir, "fleet.json"), "utf8"));
-      writeFileSync(join(dir, "fleet.json"), JSON.stringify({ ...file, settings: { "tools.name": name } }));
+      const file = JSON.parse(readFileSync(join(dir, "hedge.json"), "utf8"));
+      writeFileSync(join(dir, "hedge.json"), JSON.stringify({ ...file, settings: { "tools.name": name } }));
       return dir;
     };
     const remembered = named("remembered");
@@ -149,29 +149,29 @@ describe("fleet routing", () => {
 
     await run(["doctor", "--profile", chosen]);
     expect(readFileSync(join(home, "hello.txt"), "utf8")).toBe("chosen");
-    expect(JSON.parse(readFileSync(join(home, ".config/fleet/machine.json"), "utf8")).profileDir).toBe(remembered);
+    expect(JSON.parse(readFileSync(join(home, ".config/hedge/machine.json"), "utf8")).profileDir).toBe(remembered);
   });
 
   test("doctor --profile runs a pack.ts check against that profile, not the remembered one", async () => {
     const home = temp.make("home-");
     const engine = engineWithCommands();
     cpSync(join(repoRoot, "src"), join(engine, "src"), { recursive: true });
-    cpSync(join(repoRoot, "fleet"), join(engine, "fleet"));
+    cpSync(join(repoRoot, "hedge"), join(engine, "hedge"));
     symlinkSync(join(repoRoot, "node_modules"), join(engine, "node_modules"));
     const base = JSON.parse(readFileSync(join(engine, "packs/base/pack.json"), "utf8"));
     writeFileSync(join(engine, "packs/base/pack.json"), JSON.stringify({ ...base, steps: [] }));
     mkdirSync(join(engine, "packs/probe"));
     writeFileSync(
       join(engine, "packs/probe/pack.ts"),
-      `export default { sdk: 1, name: "probe", summary: "probe pack.", register(fleet) {
-  const greeting = fleet.setting({ key: "probe.greeting", type: "string", question: "Which greeting?" });
-  fleet.check({ id: "probe-greeted", say: "Greet with the chosen profile.", test: async (ctx) => ctx.get(greeting) === "chosen" });
+      `export default { sdk: 1, name: "probe", summary: "probe pack.", register(hedge) {
+  const greeting = hedge.setting({ key: "probe.greeting", type: "string", question: "Which greeting?" });
+  hedge.check({ id: "probe-greeted", say: "Greet with the chosen profile.", test: async (ctx) => ctx.get(greeting) === "chosen" });
 } };\n`,
     );
     const named = (name: string) => {
       const dir = profileDir(["probe"]);
-      const file = JSON.parse(readFileSync(join(dir, "fleet.json"), "utf8"));
-      writeFileSync(join(dir, "fleet.json"), JSON.stringify({ ...file, settings: { "probe.greeting": name } }));
+      const file = JSON.parse(readFileSync(join(dir, "hedge.json"), "utf8"));
+      writeFileSync(join(dir, "hedge.json"), JSON.stringify({ ...file, settings: { "probe.greeting": name } }));
       return dir;
     };
     const lines: string[] = [];
@@ -188,15 +188,15 @@ describe("fleet routing", () => {
 
   test("reports a command that two enabled packs ship", async () => {
     const home = temp.make("home-");
-    const result = await fleet(["apply", "--profile", profileDir(["tools", "rival"])], home, engineWithCommands());
-    expect(result).toMatchObject({ code: 1, output: "fleet: command hello is shipped by both tools and rival" });
+    const result = await hedge(["apply", "--profile", profileDir(["tools", "rival"])], home, engineWithCommands());
+    expect(result).toMatchObject({ code: 1, output: "hedge: command hello is shipped by both tools and rival" });
     expect(existsSync(join(home, ".agents"))).toBe(false);
   });
 
   test("names the pack to turn on for a command of a disabled pack", async () => {
     const { home, engine } = await machineWith([]);
-    expect(await fleet(["hello"], home, engine)).toMatchObject({ code: 2, output: "fleet hello comes from the Rival Tools pack, which is off. Turn it on with fleet packs." });
+    expect(await hedge(["hello"], home, engine)).toMatchObject({ code: 2, output: "hedge hello comes from the Rival Tools pack, which is off. Turn it on with hedge packs." });
     expect(existsSync(join(home, "hello.txt"))).toBe(false);
-    expect((await fleet(["nope"], home, engine)).output).toStartWith("fleet: unknown command nope");
+    expect((await hedge(["nope"], home, engine)).output).toStartWith("hedge: unknown command nope");
   });
 });

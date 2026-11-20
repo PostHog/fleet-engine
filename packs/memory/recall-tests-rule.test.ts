@@ -68,7 +68,7 @@ describe("the Tests rule before a test edit", () => {
     const home = await machineWithGuide();
     const memoryTest = write("packs/memory/recall.test.ts", "const root = '~/.agents/memory';\n");
     expect((await fire(home, "claude", "PreToolUse", { session_id: "s1", cwd: home, ...memoryTest })).context).toContain(testsRule);
-    const both = await fire(home, "claude", "PreToolUse", { session_id: "s2", cwd: home, ...write("e2e/proof.test.ts", "// fleet proof 12\n") });
+    const both = await fire(home, "claude", "PreToolUse", { session_id: "s2", cwd: home, ...write("e2e/proof.test.ts", "// hedge proof 12\n") });
     expect(both.context.indexOf(testsRule)).toBeGreaterThanOrEqual(0);
     expect(both.context.indexOf(testsRule)).toBeLessThan(both.context.indexOf("Pass full SHAs"));
   });
@@ -105,7 +105,7 @@ describe("the Tests rule before a test edit", () => {
     mkdirSync(locked);
     chmodSync(locked, 0o000);
     try {
-      const call = { session_id: "s1", cwd: home, ...write("src/app.test.ts", "// fleet proof 12\n") };
+      const call = { session_id: "s1", cwd: home, ...write("src/app.test.ts", "// hedge proof 12\n") };
       const first = await fire(home, "claude", "PreToolUse", call);
       expect(first.code).toBe(0);
       expect(first.context).toContain(testsRule);

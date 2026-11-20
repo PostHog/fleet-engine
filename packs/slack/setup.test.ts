@@ -46,7 +46,7 @@ function slackStub(hold: Promise<void> = Promise.resolve()) {
 }
 
 const files = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => (entry.isDirectory() ? files(join(dir, entry.name)) : [join(dir, entry.name)]));
-const tokensPath = (home: string) => join(home, ".config/fleet/secrets/slack/app");
+const tokensPath = (home: string) => join(home, ".config/hedge/secrets/slack/app");
 
 function setupDeps(home: string, extra: Partial<SlackCommandDeps>): SlackCommandDeps {
   const threads = { start: async () => { throw new Error("setup starts no thread"); }, send: async () => { throw new Error("setup sends no message"); } };
@@ -59,7 +59,7 @@ function harness(home: string) {
 import { secretStore } from ${JSON.stringify(resolve(import.meta.dir, "../../src/runner/context.ts"))};
 const run = async (argv: string[]) => argv[0] === "git" ? { code: 0, stdout: "Nora Example\\n", stderr: "" } : { code: 127, stdout: "", stderr: "" };
 const threads = { start: async () => { throw new Error("setup starts no thread"); }, send: async () => { throw new Error("setup sends no message"); } };
-process.exit(await slackTrigger(["setup"], { env: Bun.env, home: Bun.env.HOME!, slackUserId: () => JSON.parse(Bun.env.FLEET_SETTINGS!)["slack.userId"], slackEmoji: () => "t3code", secrets: secretStore(Bun.env.HOME!, "slack"), stateDir: Bun.env.HOME!, threads, every: () => () => {}, print: (line) => console.log(line), readStdin: () => Bun.stdin.text(), run, slackBase: Bun.argv[2] }));
+process.exit(await slackTrigger(["setup"], { env: Bun.env, home: Bun.env.HOME!, slackUserId: () => JSON.parse(Bun.env.HEDGE_SETTINGS!)["slack.userId"], slackEmoji: () => "t3code", secrets: secretStore(Bun.env.HOME!, "slack"), stateDir: Bun.env.HOME!, threads, every: () => () => {}, print: (line) => console.log(line), readStdin: () => Bun.stdin.text(), run, slackBase: Bun.argv[2] }));
 `);
   return script;
 }
@@ -106,15 +106,15 @@ function inTerminal(command: string[], env: Record<string, string>) {
   };
 }
 
-describe("fleet slack-trigger setup", () => {
+describe("hedge slack-trigger setup", () => {
   test("in a terminal, reads both tokens without echo, also typed ahead while Slack checks the last one, rejects a token for someone else, and saves them with mode 600 and nowhere else", async () => {
     let typed = () => {};
     const slack = slackStub(new Promise<void>((resolve) => (typed = resolve)));
     const home = temp.make("home-");
     const profile = join(home, "profile");
     mkdirSync(profile);
-    writeFileSync(join(profile, "fleet.json"), "{}\n");
-    const terminal = inTerminal(["bun", harness(home), slack.base], { HOME: home, FLEET_SETTINGS: settings, FLEET_PROFILE_DIR: profile });
+    writeFileSync(join(profile, "hedge.json"), "{}\n");
+    const terminal = inTerminal(["bun", harness(home), slack.base], { HOME: home, HEDGE_SETTINGS: settings, HEDGE_PROFILE_DIR: profile });
     await terminal.answer("app-level token (xapp-…, hidden): ", appToken);
     await terminal.answer("user token (xoxp-…, hidden): ", otherUserToken);
     await slack.checked;
@@ -132,19 +132,19 @@ describe("fleet slack-trigger setup", () => {
     expect(slack.methods).toEqual(["apps.connections.open", "auth.test", "auth.test"]);
   });
 
-  for (const form of [{ where: "on the Mac", line: /^ *(printf .* \| fleet slack-trigger setup)$/m }, { where: "over SSH on the hub", line: /^ *(printf .* \| ssh coder\.<hub> '.*; fleet slack-trigger setup')$/m }]) {
+  for (const form of [{ where: "on the Mac", line: /^ *(printf .* \| hedge slack-trigger setup)$/m }, { where: "over SSH on the hub", line: /^ *(printf .* \| ssh coder\.<hub> '.*; hedge slack-trigger setup')$/m }]) {
     test(`the setup note's command ${form.where} pipes both tokens from the secret prompt's files into setup, which saves them without printing them`, async () => {
       const slack = slackStub();
       const home = temp.make("home-");
       const bin = join(home, "bin");
       mkdirSync(bin);
-      writeFileSync(join(bin, "fleet"), `#!/bin/sh\n[ "$*" = "slack-trigger setup" ] || exit 64\nexec bun '${harness(home)}' '${slack.base}'\n`, { mode: 0o755 });
+      writeFileSync(join(bin, "hedge"), `#!/bin/sh\n[ "$*" = "slack-trigger setup" ] || exit 64\nexec bun '${harness(home)}' '${slack.base}'\n`, { mode: 0o755 });
       writeFileSync(join(bin, "ssh"), `#!/bin/sh\n[ "$#" = 2 ] && [ "$1" = coder.hub ] || exit 64\nexec sh -c "$2"\n`, { mode: 0o755 });
       writeFileSync(join(home, "app-token"), appToken);
       writeFileSync(join(home, "user-token"), `${userToken}\n`);
       const note = readFileSync(join(import.meta.dir, "SETUP.md"), "utf8");
       const command = note.match(form.line)![1]!.replace("<app token file>", join(home, "app-token")).replace("<user token file>", join(home, "user-token")).replace("coder.<hub>", "coder.hub");
-      const child = Bun.spawn(["sh", "-c", command], { stdin: "ignore", stdout: "pipe", stderr: "pipe", env: { PATH: `${bin}:${process.env.PATH ?? "/usr/bin:/bin"}`, HOME: home, FLEET_SETTINGS: settings } });
+      const child = Bun.spawn(["sh", "-c", command], { stdin: "ignore", stdout: "pipe", stderr: "pipe", env: { PATH: `${bin}:${process.env.PATH ?? "/usr/bin:/bin"}`, HOME: home, HEDGE_SETTINGS: settings } });
       const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
       expect([code, err]).toEqual([0, ""]);
       expect(out).toContain("Saved both tokens where only you can read them.");
@@ -156,7 +156,7 @@ describe("fleet slack-trigger setup", () => {
   test("with piped tokens, stops at the first token Slack refuses, names it, and saves nothing, instead of reading the next token as a second try", async () => {
     const slack = slackStub();
     const home = temp.make("home-");
-    const child = Bun.spawn(["bun", harness(home), slack.base], { stdin: new TextEncoder().encode(`xapp-test-refused\n${userToken}\n`), stdout: "pipe", stderr: "pipe", env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: home, FLEET_SETTINGS: settings } });
+    const child = Bun.spawn(["bun", harness(home), slack.base], { stdin: new TextEncoder().encode(`xapp-test-refused\n${userToken}\n`), stdout: "pipe", stderr: "pipe", env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: home, HEDGE_SETTINGS: settings } });
     const [code, out] = await Promise.all([child.exited, new Response(child.stdout).text()]);
     expect(code).toBe(130);
     expect(out).toContain("Paste the app-level token (xapp-…, hidden):    Slack did not accept it: apps.connections.open: invalid_auth.");
@@ -319,6 +319,6 @@ describe("the Slack app step", () => {
     const outcome = await humanStep(packSignIn(step, [], context, undefined), context).run();
     expect(outcome).toBe("unanswered");
     expect(ran).toEqual([step.probe]);
-    expect(printed).toEqual([`  Needs you: ${step.say}`, "  In a terminal, run: sh -c 'fleet slack-trigger setup'"]);
+    expect(printed).toEqual([`  Needs you: ${step.say}`, "  In a terminal, run: sh -c 'hedge slack-trigger setup'"]);
   });
 });

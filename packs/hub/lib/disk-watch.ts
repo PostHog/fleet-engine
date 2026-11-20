@@ -4,7 +4,7 @@ import { freeBytes, freeInodeShare, freeMapFile, inodeFloorShare, shownInodes, t
 import { numberSetting, stringSetting } from "../../base/lib/settings.ts";
 import type { Env } from "./coder.ts";
 import { threadModel, requireHubRole, spawnText, sshArgv, stateDir, threadScript, underLock, writeStateFile, type JobContext } from "./hub-job.ts";
-import { devboxesOf, quote, remoteFleet } from "./machine.ts";
+import { devboxesOf, quote, remoteHedge } from "./machine.ts";
 
 const gigabyte = 1024 ** 3;
 const hour = 3600_000;
@@ -106,7 +106,7 @@ function hubDisks(context: DiskWatchContext, local: string, sweepBelowGigabytes:
   const { env } = context;
   const onBox = (box: string, command: string) => (box === local ? ["sh", "-c", command] : sshArgv(box, command));
   const inLoginShell = (command: string) => `bash -lc ${quote(command)}`;
-  const localFleet = join(env.FLEET_ENGINE_DIR ?? join(context.home, ".local/share/fleet/engine"), "fleet");
+  const localHedge = join(env.HEDGE_ENGINE_DIR ?? join(context.home, ".local/share/hedge/engine"), "hedge");
   const hosts = new Map([[local, context.self]]);
   const read = async (box: string) => {
     if (box === local) return { bytes: (context.localFree ?? (() => freeBytes(context.home)))(), inodes: (context.localInodes ?? (() => freeInodeShare(context.home)))() };
@@ -117,16 +117,16 @@ function hubDisks(context: DiskWatchContext, local: string, sweepBelowGigabytes:
   };
   const sweep = async (box: string) => {
     const floors = ["--floor", String(sweepBelowGigabytes), "--alert-floor", String(alertBelowGigabytes)];
-    const argv = box === local ? ["sh", localFleet, "disk-sweep", ...floors] : sshArgv(box, `${inLoginShell(remoteFleet(["disk-sweep", ...floors].join(" ")))} 2>&1`);
+    const argv = box === local ? ["sh", localHedge, "disk-sweep", ...floors] : sshArgv(box, `${inLoginShell(remoteHedge(["disk-sweep", ...floors].join(" ")))} 2>&1`);
     const swept = await spawnText(argv, env, { timeoutMs: sweepMinutes * 60_000 });
     const output = `${swept.stdout}${swept.stderr}`.trim();
     return swept.code === 0 ? output : `The sweep failed with exit ${swept.code === 124 ? "timeout" : swept.code}.\n${output}`;
   };
   const alert = async (box: string, free: Space, report: string) => {
     const shownFree = `${(free.bytes / gigabyte).toFixed(1)}G free, ${shownInodes(free.inodes)}`;
-    const look = `df -h ~; df -i ~; ${remoteFleet("prune --dry-run --no-fetch --min-idle-hours 1")}`;
+    const look = `df -h ~; df -i ~; ${remoteHedge("prune --dry-run --no-fetch --min-idle-hours 1")}`;
     const prompt = `${box} has ${shownFree}, below ${alertBelowGigabytes}G or ${alertBelowInodes * 100}% of inodes, though a cleanup sweep ran within the hour. A full disk crashes T3 and every lane on the box, and without inodes every new file fails with ENOSPC.
-The sweep ran fleet prune, trimmed the T3 boot log, and ran the pnpm, uv and Go cache cleaners. It removed nothing else. Its report from this pass ends with the largest folders under $HOME:
+The sweep ran hedge prune, trimmed the T3 boot log, and ran the pnpm, uv and Go cache cleaners. It removed nothing else. Its report from this pass ends with the largest folders under $HOME:
 
 ${report}
 
@@ -140,7 +140,7 @@ Delete nothing and start no lanes. Reply in at most 10 lines: the free space, th
 
 export async function diskWatchCommand(args: string[], context: DiskWatchContext): Promise<number> {
   const dryRun = args[0] === "--dry-run";
-  if (args.length > Number(dryRun)) throw new Error("Usage: fleet disk-watch [--dry-run]");
+  if (args.length > Number(dryRun)) throw new Error("Usage: hedge disk-watch [--dry-run]");
   requireHubRole(context.home, "disk-watch");
   const { env } = context;
   const targets = diskWatchTargets(env, context.home, stringSetting("hub.alias", env), context.self);

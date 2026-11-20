@@ -1,7 +1,7 @@
 # Secret store
 
-`fleet secret` keeps each credential once, on the Fleet hub. An agent on any
-machine runs a command with it through `fleet secret run`. The value goes into
+`hedge secret` keeps each credential once, on the Hedge hub. An agent on any
+machine runs a command with it through `hedge secret run`. The value goes into
 that command's environment only. It is never written to the agent's disk, and
 its exact text is removed from the command's output. The Hub pack brings the
 command. Without a hub (`hub.alias` unset), the store lives on this machine.
@@ -46,7 +46,7 @@ export const rows = (provider) => [
   { name: "example-send", provider: provider("example-key", { project: "12" }), scope: "email:write", project: "12", region: "us",
     settings: "https://example.com/settings/keys", env: ["EXAMPLE_API_KEY"] },
   { name: "chat-app", provider: { name: "chat-app" }, scope: "the chat app's tokens", settings: "https://example.com/apps",
-    env: ["CHAT_BOT_TOKEN"], file: { path: ".config/fleet/chat-app.json", format: "json", fields: { botToken: "CHAT_BOT_TOKEN" }, renew: "the chat pack's setup" } },
+    env: ["CHAT_BOT_TOKEN"], file: { path: ".config/hedge/chat-app.json", format: "json", fields: { botToken: "CHAT_BOT_TOKEN" }, renew: "the chat pack's setup" } },
 ];
 ```
 
@@ -56,8 +56,8 @@ or `{ ok: false, reason: "<why>" }`. A reason never repeats a value.
 ## Use a secret
 
 ```sh
-fleet secret list
-fleet secret run example-send -- <command>
+hedge secret list
+hedge secret run example-send -- <command>
 ```
 
 - `list` shows each secret's kind, provider, project, region, scope and state.
@@ -89,7 +89,7 @@ fleet secret run example-send -- <command>
 1. Ask the user with a `request_secret` card with `delivery: "file"`. For a
    secret with more than one variable, the card asks for one `VAR=value` line
    per variable.
-2. Run `fleet secret put <name> --file <the saved file>`.
+2. Run `hedge secret put <name> --file <the saved file>`.
 
 `put` takes only a file in T3's secret-file directory
 (`~/.t3/userdata/secrets/files`). It deletes the file on success, on failure
@@ -113,8 +113,8 @@ the conductor puts it at intake before the lane exists, or the thread id of a
 lane started on its own.
 
 ```sh
-fleet secret put stripe-test --file <the saved file> --lane example/tickets#401 --env STRIPE_KEY --why intake --revoke <link>
-fleet secret drop --lane example/tickets#401
+hedge secret put stripe-test --file <the saved file> --lane example/tickets#401 --env STRIPE_KEY --why intake --revoke <link>
+hedge secret drop --lane example/tickets#401
 ```
 
 - `--env` names the one variable that `run` sets. `--why` is required:
@@ -128,7 +128,7 @@ fleet secret drop --lane example/tickets#401
 - A put is refused when its name, lane, links or reason would spell a value
   the store already holds, or when the log already shows its value. Puts take
   no lock, so a put that lands in the same instant is not part of this check.
-- A put is refused when any line Fleet prints from it would spell the value:
+- A put is refused when any line Hedge prints from it would spell the value:
   its list line, card, stored and dropped lines, its due and need lines in
   each expiry state, and the report's revoke and late-put lines. A line that
   joins several secrets, such as a drop's, is withheld when it would spell a
@@ -141,12 +141,12 @@ fleet secret drop --lane example/tickets#401
   put it ends, so a renewal that lands meanwhile stays. A value is deleted
   only once its drop event is back in the log whole; a torn drop keeps the
   value, turns the store off, and says so.
-- `fleet decision report --pr <ref>... --lane <key>` lists the revoke link of
+- `hedge decision report --pr <ref>... --lane <key>` lists the revoke link of
   each lane secret under Still yours, and the lane's late puts (any `--why`
   but `intake`), misses marked. The hub builds these lines from its event log
   and withholds any line that would show a value it holds.
 
-Each machine with the Hub pack runs `fleet secret sweep` each night at 02:47
+Each machine with the Hub pack runs `hedge secret sweep` each night at 02:47
 as a pack job. On a machine whose secrets the hub keeps, it does nothing. On
 the hub, and on a machine without a hub, it drops
 each lane value past its store expiry, by the same drop rule, and deletes each value file that a
@@ -158,8 +158,8 @@ after that, unless the event log is missing. It touches only the store's own
 ## Stop every read
 
 ```sh
-fleet secret off "suspected leak in <thread>"
-fleet secret on --words '2026-11-13 "Yes, turn it on"' --thread <id>
+hedge secret off "suspected leak in <thread>"
+hedge secret on --words '2026-11-13 "Yes, turn it on"' --thread <id>
 ```
 
 Any agent may turn the store off. To turn it on, ask the user with the
@@ -189,12 +189,12 @@ settings link.
 
 ## On the hub
 
-- Values: `~/.config/fleet/secrets/<name>.<put id>` (0600, in a 0700
+- Values: `~/.config/hedge/secrets/<name>.<put id>` (0600, in a 0700
   directory). Each put writes a new file; none is rewritten.
-- Event log: `~/.local/state/fleet/secrets.jsonl`, one JSON line per put, drop,
+- Event log: `~/.local/state/hedge/secrets.jsonl`, one JSON line per put, drop,
   read, off and on, never a value.
 
-Other machines send one JSON request to `fleet secret hub` over SSH stdin and
+Other machines send one JSON request to `hedge secret hub` over SSH stdin and
 read one JSON answer on stdout, so a value never reaches a command line. The hub
 is the only reader of value files, so the switch and the read log cover every
 read that hands a value out. The hub's own guard also reads the stored values

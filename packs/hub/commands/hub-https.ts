@@ -10,10 +10,10 @@ const unsetFree = ["remove", "left"];
 
 await runCommand(() => {
   const [mode = "plan", ...rest] = Bun.argv.slice(2);
-  if (rest.length || !modes.includes(mode)) return console.error("Usage: fleet hub-https [plan|install|doctor|ca|trusted|remove|left]"), 2;
+  if (rest.length || !modes.includes(mode)) return console.error("Usage: hedge hub-https [plan|install|doctor|ca|trusted|remove|left]"), 2;
   const settled = !unsetFree.includes(mode);
   return hubHttps(mode as HttpsMode, {
     home: homedir(), alias: settled ? stringSetting("hub.alias") : "", httpsHost: settled ? optionalStringSetting("hub.httpsHost") : undefined, relayPort: settled ? numberSetting("hub.relayPort") : 0, user: userInfo().username, uid: process.getuid?.() ?? 0,
     caddyInstalled: () => existsSync("/usr/bin/caddy"), run, sleep: (ms) => Bun.sleep(ms), print: (line) => console.log(line),
   });
-}, "fleet hub-https", failedExit(Bun.argv[2]));
+}, "hedge hub-https", failedExit(Bun.argv[2]));

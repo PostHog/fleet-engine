@@ -36,8 +36,8 @@ function proxyConfiguration(home: string): Proxy | undefined {
   };
   const baseUrl = value("ANTHROPIC_BASE_URL");
   if (!baseUrl) return undefined;
-  const fleetKey = sameOrigin(baseUrl, process.env.FLEET_CLI_PROXY_URL || "http://127.0.0.1:8317") ? readText(join(home, ".config/fleet/cli-proxy.key")) : undefined;
-  const key = value("ANTHROPIC_AUTH_TOKEN") || value("ANTHROPIC_API_KEY") || fleetKey;
+  const hedgeKey = sameOrigin(baseUrl, process.env.HEDGE_CLI_PROXY_URL || "http://127.0.0.1:8317") ? readText(join(home, ".config/hedge/cli-proxy.key")) : undefined;
+  const key = value("ANTHROPIC_AUTH_TOKEN") || value("ANTHROPIC_API_KEY") || hedgeKey;
   if (!key) return undefined;
   try {
     const url = new URL(baseUrl);
@@ -90,7 +90,7 @@ async function writeLine(line: string): Promise<void> {
 }
 
 function claudeExecutable(home: string, cwd: string): string {
-  if (process.env.FLEET_CLAUDE_EXECUTABLE) return process.env.FLEET_CLAUDE_EXECUTABLE;
+  if (process.env.HEDGE_CLAUDE_EXECUTABLE) return process.env.HEDGE_CLAUDE_EXECUTABLE;
   const wrapper = realpathSync(join(import.meta.dir, "claude"));
   for (const folder of (process.env.PATH ?? "").split(":")) {
     const candidate = resolve(cwd, folder || ".", "claude");
@@ -198,7 +198,7 @@ async function main(args: string[]): Promise<number> {
   const home = process.env.HOME || homedir();
   const streamJson = optionValue(args, "--output-format") === "stream-json";
   const proxy = streamJson ? proxyConfiguration(home) : undefined;
-  const { FLEET_CLAUDE_CWD: launchedIn, ...env } = process.env;
+  const { HEDGE_CLAUDE_CWD: launchedIn, ...env } = process.env;
   const cwd = launchedIn || process.cwd();
   const launch = shapeClaudeLaunch(args, env, cwd);
   const child = spawn(claudeExecutable(home, cwd), launch.args, { cwd, env: launch.env, stdio: ["inherit", proxy ? "pipe" : "inherit", "inherit"] });
@@ -220,7 +220,7 @@ async function main(args: string[]): Promise<number> {
   } catch (error) {
     aborted.abort();
     child.kill("SIGTERM");
-    console.error(`Fleet's Claude wrapper: ${(error as Error).message}`);
+    console.error(`Hedge's Claude wrapper: ${(error as Error).message}`);
     return 1;
   } finally {
     for (const [signal, handler] of handlers) process.off(signal, handler);

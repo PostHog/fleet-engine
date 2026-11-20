@@ -34,7 +34,7 @@ const seedRepository = template(async (repository) => {
 });
 
 export async function checkout() {
-  const directory = fixture("fleet-proof-checkout-");
+  const directory = fixture("hedge-proof-checkout-");
   const [home, repository, bin, github] = ["home", "repository", "bin", "github"].map((name) => join(directory, name));
   for (const path of [home, bin, github]) mkdirSync(path);
   writeFileSync(join(bin, "gh"), `#!/bin/sh
@@ -119,8 +119,8 @@ printf '{"number":42,"url":"https://github.com/example/product/pull/42","baseRef
   const clock = { now: new Date("2026-10-25T12:00:00Z") };
   const env: Record<string, string | undefined> = {
     ...gitEnv, PATH: `${bin}:${process.env.PATH}`,
-    CLAUDE_CODE_SESSION_ID: "session-under-test", CODEX_THREAD_ID: undefined, FLEET_SETTINGS: JSON.stringify(settings), FLEET_MODELS: JSON.stringify(models),
-    FLEET_PROOF_JUDGE: `cat >/dev/null; echo '${verdict()}'`, FLEET_PROOF_JUDGE_MODEL: "judge-under-test", T3CODE_THREAD_ID: "thread-1", FLEET_PROOF_RETRY_DELAY_MS: "0",
+    CLAUDE_CODE_SESSION_ID: "session-under-test", CODEX_THREAD_ID: undefined, HEDGE_SETTINGS: JSON.stringify(settings), HEDGE_MODELS: JSON.stringify(models),
+    HEDGE_PROOF_JUDGE: `cat >/dev/null; echo '${verdict()}'`, HEDGE_PROOF_JUDGE_MODEL: "judge-under-test", T3CODE_THREAD_ID: "thread-1", HEDGE_PROOF_RETRY_DELAY_MS: "0",
   };
   const git = async (...args: string[]) => {
     const result = await spawnAsync(["git", ...args], { cwd: repository, env });
@@ -153,7 +153,7 @@ printf '{"number":42,"url":"https://github.com/example/product/pull/42","baseRef
   const pendingCards = new Set<string>();
   const panel: { lostWorkers: boolean; onPause?: () => Promise<void>; beforeWorker?: () => Promise<void> } = { lostWorkers: false };
   const startTimes = new Map<number, string>();
-  const fleetAt = async (cwd: string, pid: number, args: string[]) => {
+  const hedgeAt = async (cwd: string, pid: number, args: string[]) => {
     const lines: string[] = [];
     const context: ProofContext = {
       home, cwd, env, pid, print: (line) => lines.push(line), now: () => clock.now, threadWords: reader.words, ssh: hub.ssh,
@@ -172,18 +172,18 @@ printf '{"number":42,"url":"https://github.com/example/product/pull/42","baseRef
     const code = await proofCommand(args, context);
     return { code, output: lines.join("\n") };
   };
-  const fleetIn = (cwd: string, ...args: string[]) => fleetAt(cwd, process.pid, args);
-  const fleet = (...args: string[]) => fleetIn(repository, ...args);
-  const fleetAs = (pid: number, ...args: string[]) => fleetAt(repository, pid, args);
+  const hedgeIn = (cwd: string, ...args: string[]) => hedgeAt(cwd, process.pid, args);
+  const hedge = (...args: string[]) => hedgeIn(repository, ...args);
+  const hedgeAs = (pid: number, ...args: string[]) => hedgeAt(repository, pid, args);
   const decideIn = async (cwd: string, ...args: string[]) => {
     const lines: string[] = [];
     const code = await decisionCommand(args, { home, cwd, env, print: (line) => lines.push(line), now: () => clock.now, threadWords: reader.words, ssh: hub.ssh, pendingCard: async (thread) => pendingCards.has(thread) });
     return { code, output: lines.join("\n") };
   };
   const decide = (...args: string[]) => decideIn(repository, ...args);
-  const pullRequest = join(home, ".local/state/fleet/proof/example/product/42");
+  const pullRequest = join(home, ".local/state/hedge/proof/example/product/42");
   await seedRepository(repository);
-  return { home, repository, pullRequest, env, git, commit, advanceBase, fleet, fleetIn, fleetAs, ci, statuses, required, pullRequestState, githubHead, githubCalls, githubBody, githubFault, githubComment, whileGithubReadsPull, clock, say, choose, chooseGap, reader, panel, hub, pendingCards, decide, decideIn, startTimes };
+  return { home, repository, pullRequest, env, git, commit, advanceBase, hedge, hedgeIn, hedgeAs, ci, statuses, required, pullRequestState, githubHead, githubCalls, githubBody, githubFault, githubComment, whileGithubReadsPull, clock, say, choose, chooseGap, reader, panel, hub, pendingCards, decide, decideIn, startTimes };
 }
 
 export type Checkout = Awaited<ReturnType<typeof checkout>>;
@@ -275,7 +275,7 @@ export function fakeModel(pr: Checkout, role: "REVIEWER" | "JUDGE", answer: stri
   mkdirSync(prompts, { recursive: true });
   const reply = join(pr.home, `${role.toLowerCase()}-answer`);
   writeFileSync(reply, answer);
-  pr.env[`FLEET_PROOF_${role}`] = `cat > "${prompts}/$(date +%s%N).txt"; cat "${reply}"`;
+  pr.env[`HEDGE_PROOF_${role}`] = `cat > "${prompts}/$(date +%s%N).txt"; cat "${reply}"`;
   return {
     answer: (text: string) => writeFileSync(reply, text),
     prompts: () => readdirSync(prompts).sort().map((name) => readFileSync(join(prompts, name), "utf8")),
@@ -283,9 +283,9 @@ export function fakeModel(pr: Checkout, role: "REVIEWER" | "JUDGE", answer: stri
 }
 
 export async function reviewHead(pr: Checkout) {
-  expect((await pr.fleet("review-start", "--scope", "full")).code).toBe(0);
+  expect((await pr.hedge("review-start", "--scope", "full")).code).toBe(0);
   writeFileSync(join(pr.repository, "findings.md"), "No findings.\n");
-  expect((await pr.fleet("review-finish", "--round", "1", "--reviewer", "gpt-6.1-sol", "findings.md")).code).toBe(0);
+  expect((await pr.hedge("review-finish", "--round", "1", "--reviewer", "gpt-6.1-sol", "findings.md")).code).toBe(0);
   markPanel(pr, "1");
   return pr.git("rev-parse", "HEAD");
 }
@@ -296,16 +296,16 @@ export function markPanel(pr: Checkout, round: string) {
   writeFileSync(join(directory, "lenses/correctness.json"), JSON.stringify({ state: "done", attempts: 1 }));
   writeFileSync(join(directory, "panel.json"), JSON.stringify({ lenses: [{ name: "correctness", title: "Correctness", family: "gpt", model: "gpt-6.1-sol" }], changedFiles: [], cwd: pr.repository, readable: [] }));
   const reservation = join(directory, "round.json");
-  writeFileSync(reservation, JSON.stringify({ ...JSON.parse(readFileSync(reservation, "utf8")), capturedBy: "fleet" }));
+  writeFileSync(reservation, JSON.stringify({ ...JSON.parse(readFileSync(reservation, "utf8")), capturedBy: "hedge" }));
 }
 
 export const ledgerDecisions = (pr: Checkout) => {
-  const path = join(pr.home, ".local/state/fleet/decisions.jsonl");
+  const path = join(pr.home, ".local/state/hedge/decisions.jsonl");
   return existsSync(path) ? readFileSync(path, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line).decision).filter(Boolean) : [];
 };
 
 type Hub = "up" | "down" | "drops appends" | "loses the acknowledgement of appends" | "stalls on appends" | "stalls after it lands an append";
-const refused = { code: 255, stdout: "", stderr: "ssh: connect to host fleet-hub port 22: Connection refused\n" };
+const refused = { code: 255, stdout: "", stderr: "ssh: connect to host hedge-hub port 22: Connection refused\n" };
 
 export function hubAt(pr: Checkout, hub: Hub | boolean = "up") {
   const remote = join(pr.home, "hub-home");
@@ -316,7 +316,7 @@ export function hubAt(pr: Checkout, hub: Hub | boolean = "up") {
   const stalls: ((result: SshResult) => void)[] = [];
   const stall = () => { stalled(); return new Promise<SshResult>((resolve) => stalls.push(resolve)); };
   const releaseAppends = () => stalls.splice(0).forEach((resolve) => resolve(refused));
-  pr.env.FLEET_SETTINGS = JSON.stringify({ ...settings, "hub.alias": "fleet-hub" });
+  pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "hub.alias": "hedge-hub" });
   pr.hub.ssh = async (host, command, stdin) => {
     hosts.push(host);
     if (state.hub === "down") return refused;
@@ -338,7 +338,7 @@ export const graded = (tier: string, grade = "low") => `## Merge risk\n\n<!-- me
 
 export async function finishRound(pr: Checkout, round: string) {
   writeFileSync(join(pr.repository, "findings.md"), `Findings of ${round}.\n`);
-  await pr.fleet("review-finish", "--round", round, "--reviewer", "gpt-6.1-sol", "findings.md");
+  await pr.hedge("review-finish", "--round", round, "--reviewer", "gpt-6.1-sol", "findings.md");
 }
 
 export function recordingModel(pr: Checkout, provider: "claude" | "codex", answer: string) {

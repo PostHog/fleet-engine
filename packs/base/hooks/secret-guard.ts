@@ -233,16 +233,16 @@ export const redactSecrets = (text: string) => replaceSecrets(text, (kind) => `[
 
 const redact = (value: unknown) => mapStrings(value, redactSecrets);
 
-const storeHint = 'T3\'s `request_secret` tool and file delivery (`delivery: "file"`), then hand that file to `fleet secret put --file <path>` where this Fleet has `fleet secret`';
+const storeHint = 'T3\'s `request_secret` tool and file delivery (`delivery: "file"`), then hand that file to `hedge secret put --file <path>` where this Hedge has `hedge secret`';
 
 function promptReason(kinds: string[]) {
-  return `Fleet held this message back: it looks like it carries a ${kinds.join(", ")}. Send it again without the value. `
+  return `Hedge held this message back: it looks like it carries a ${kinds.join(", ")}. Send it again without the value. `
     + `To give the agent a secret, let it ask with ${storeHint}, or save it in a file or an environment variable yourself and tell the agent its name. `
     + "If the value is real, rotate it: the app may have saved the message.";
 }
 
 function toolOutputReason(kinds: string[], action: string) {
-  return `Fleet ${action} this tool output: it carries a ${kinds.join(", ")}. Never print a secret or repeat it in chat, commands, or files. `
+  return `Hedge ${action} this tool output: it carries a ${kinds.join(", ")}. Never print a secret or repeat it in chat, commands, or files. `
     + "Rerun the command so its output leaves the value out, for example by reading it into an environment variable. "
     + `When you need a secret from the user, ask with ${storeHint}, or pass a \`request_secret\` secretRef to a T3 tool; never save the value by hand. `
     + "Without T3, ask the user to save it in a file or an environment variable and give you its name.";
@@ -268,10 +268,10 @@ export function guard(provider: Provider, event: HookEvent): HookDecision | unde
 }
 
 function uncheckedGuard(provider: Provider, event: HookEvent): HookDecision {
-  const kinds = ["value Fleet's secret guard could not check"];
+  const kinds = ["value Hedge's secret guard could not check"];
   if (event.hook_event_name === "UserPromptSubmit") return promptDecision(provider, kinds);
   if (provider === "codex") return toolOutputDecision(provider, kinds, undefined);
-  return { hookSpecificOutput: { hookEventName: "PostToolUse", updatedToolOutput: "[withheld: Fleet's secret guard could not check this output]", additionalContext: toolOutputReason(kinds, "withheld") } };
+  return { hookSpecificOutput: { hookEventName: "PostToolUse", updatedToolOutput: "[withheld: Hedge's secret guard could not check this output]", additionalContext: toolOutputReason(kinds, "withheld") } };
 }
 
 function checkedGuard(provider: Provider, event: HookEvent): HookDecision | undefined {

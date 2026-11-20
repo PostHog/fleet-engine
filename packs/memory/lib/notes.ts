@@ -8,7 +8,7 @@ export type HookInput = { session_id?: string; agent_id?: string; cwd?: string; 
 export type Shown = { at: string; event: "memoryShown"; session: string; agent?: string; via: "index" | "trigger" | "guide"; note: string; trigger?: string };
 
 export const memoryRoot = (home: string) => join(home, ".agents/memory");
-export const stateDir = (home: string) => join(home, ".local/state/fleet/memory");
+export const stateDir = (home: string) => join(home, ".local/state/hedge/memory");
 export const repoIndexPath = (repo: string) => `projects/${repo}/INDEX.md`;
 
 const shownFile = (home: string, session: string) => join(stateDir(home), "shown", `${session.replace(/[^\w-]/g, "")}.jsonl`);

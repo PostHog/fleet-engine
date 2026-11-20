@@ -10,7 +10,7 @@ afterEach(() => temp.cleanup());
 const command = join(import.meta.dir, "..", "commands", "pr.ts");
 
 async function branch(base: Record<string, string>, change: Record<string, string | null>) {
-  const repo = temp.make("fleet-pr-size-");
+  const repo = temp.make("hedge-pr-size-");
   const write = (files: Record<string, string | null>) => {
     for (const [path, text] of Object.entries(files)) {
       if (text === null) {
@@ -30,7 +30,7 @@ async function branch(base: Record<string, string>, change: Record<string, strin
   await spawnGit(repo, "add", "-A");
   await spawnGit(repo, "commit", "-qm", "work");
   return async (...args: string[]) => {
-    const result = await spawnAsync([process.execPath, command, "size", ...args, "--base", "main"], { cwd: join(repo, subdirectory), env: { ...gitEnv, ...configured, FLEET_HANDLERS: "{}" } });
+    const result = await spawnAsync([process.execPath, command, "size", ...args, "--base", "main"], { cwd: join(repo, subdirectory), env: { ...gitEnv, ...configured, HEDGE_HANDLERS: "{}" } });
     return { code: result.exitCode, out: result.stdout.trim(), err: result.stderr.trim() };
   };
 }
@@ -90,13 +90,13 @@ test("compares nothing without an estimate", async () => {
 });
 
 test("refuses a missing base or a count that is not a number", async () => {
-  const refused = await spawnAsync([process.execPath, command, "size"], { cwd: temp.make(), env: { ...gitEnv, FLEET_HANDLERS: "{}" } });
+  const refused = await spawnAsync([process.execPath, command, "size"], { cwd: temp.make(), env: { ...gitEnv, HEDGE_HANDLERS: "{}" } });
 
-  expect(refused.stderr).toContain("Usage: fleet pr size --base <ref> [--lines <n>] [--concepts <n>]");
-  const notANumber = await spawnAsync([process.execPath, command, "size", "--base", "main", "--lines", "many"], { cwd: temp.make(), env: { ...gitEnv, FLEET_HANDLERS: "{}" } });
+  expect(refused.stderr).toContain("Usage: hedge pr size --base <ref> [--lines <n>] [--concepts <n>]");
+  const notANumber = await spawnAsync([process.execPath, command, "size", "--base", "main", "--lines", "many"], { cwd: temp.make(), env: { ...gitEnv, HEDGE_HANDLERS: "{}" } });
 
   expect(notANumber.exitCode).toBe(1);
-  expect(notANumber.stderr).toContain("Usage: fleet pr size");
+  expect(notANumber.stderr).toContain("Usage: hedge pr size");
   const size = await branch({ "a.ts": "\n" }, { "b.ts": "\n" });
 
   expect((await size("--base", "nowhere", "--lines", "1")).err).toContain("git merge-base nowhere HEAD");

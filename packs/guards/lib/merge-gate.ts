@@ -16,15 +16,15 @@ const graphqlMerge = /\b(?:mergePullRequest|enablePullRequestAutoMerge|enqueuePu
 const restMerge = /\/repos\/[^/\s]+\/[^/\s]+\/pulls\/\d+\/merge\b/i;
 
 const oneShape = "`gh pr comment <number> --repo <owner>/<repo> --body '/trunk merge'`";
-export const cliReason = `Fleet blocked this command: an agent enters the Trunk merge queue only with ${oneShape}, which the merge gate checks. Use that form.`;
-export const graphqlReason = `Fleet blocked this call: a GraphQL merge, auto-merge, enqueue, or comment that posts \`/trunk merge\` skips the merge gate, and a query read from piped input or an unreadable file may be one. Enqueue with ${oneShape}, or merge with \`gh pr merge <number> --repo <owner>/<repo>\`.`;
-export const rawReason = `Fleet blocked this command: it merges a PR or posts \`/trunk merge\` straight to the GitHub API, or sends GitHub a payload the merge gate cannot read, which skips the merge gate. Enqueue with ${oneShape}.`;
-export const otherEndpointReason = `Fleet blocked this call: it writes \`/trunk merge\` somewhere other than a new PR comment, such as an edited comment or a review. Enqueue with ${oneShape}.`;
-export const splitStringReason = "Fleet blocked this command: `env -S` runs a command line that the merge gate cannot read. Write the gh, trunk, or curl command out as its own words.";
-export const shellAliasReason = "Fleet blocked this command: it runs a gh alias that the merge gate cannot read, a shell alias or one with arguments. Write the gh command out.";
+export const cliReason = `Hedge blocked this command: an agent enters the Trunk merge queue only with ${oneShape}, which the merge gate checks. Use that form.`;
+export const graphqlReason = `Hedge blocked this call: a GraphQL merge, auto-merge, enqueue, or comment that posts \`/trunk merge\` skips the merge gate, and a query read from piped input or an unreadable file may be one. Enqueue with ${oneShape}, or merge with \`gh pr merge <number> --repo <owner>/<repo>\`.`;
+export const rawReason = `Hedge blocked this command: it merges a PR or posts \`/trunk merge\` straight to the GitHub API, or sends GitHub a payload the merge gate cannot read, which skips the merge gate. Enqueue with ${oneShape}.`;
+export const otherEndpointReason = `Hedge blocked this call: it writes \`/trunk merge\` somewhere other than a new PR comment, such as an edited comment or a review. Enqueue with ${oneShape}.`;
+export const splitStringReason = "Hedge blocked this command: `env -S` runs a command line that the merge gate cannot read. Write the gh, trunk, or curl command out as its own words.";
+export const shellAliasReason = "Hedge blocked this command: it runs a gh alias that the merge gate cannot read, a shell alias or one with arguments. Write the gh command out.";
 const pipedVia = " (piped body)";
 const pipedNote = " A piped body cannot be read, so the gate counts it as an enqueue. If the comment does not post `/trunk merge`, send it with `--body`, a heredoc, or a file instead.";
-const unnamedReason = (what: string) => `Fleet blocked this command: it ${what} without naming the PR, so the merge gate cannot check it. Name the PR by number and repository: ${oneShape}.`;
+const unnamedReason = (what: string) => `Hedge blocked this command: it ${what} without naming the PR, so the merge gate cannot check it. Name the PR by number and repository: ${oneShape}.`;
 
 /** Parses guards.merge-gate-exempt: owner/repo or owner/* entries, separated by commas or spaces. */
 export function exemptList(value: unknown): string[] {
@@ -343,9 +343,9 @@ function overrideIn(decisions: DecisionState[], layer: Layer): boolean {
     && decision.scope.prs.some((ref) => sameRepo(ref.replace(/#\d+$/, ""), layer.repository) && ref.endsWith(`#${layer.pr}`)));
 }
 
-const gateCommand = ({ repository, pr, head }: Layer) => `fleet proof gate --repo ${repository} --pr ${pr} --commit ${head}`;
+const gateCommand = ({ repository, pr, head }: Layer) => `hedge proof gate --repo ${repository} --pr ${pr} --commit ${head}`;
 const overrideHint = (person: string) => `For an incident fix that cannot wait for the gate, ask ${person} with the question tool, naming the PR and its full head sha, with the options "${overrideChoice}" and "Keep the gate closed", and record the answer `
-  + `with \`fleet decision record --mark 👤 --class merge --kind ${gateOverride} --pr <owner/repo#n> --condition '<full head sha>: <incident and why>'\`.`;
+  + `with \`hedge decision record --mark 👤 --class merge --kind ${gateOverride} --pr <owner/repo#n> --condition '<full head sha>: <incident and why>'\`.`;
 
 /** Why the call may not go out, or undefined when every open layer of every target passed the gate at its head. */
 export async function mergeGateRisk(intent: MergeIntent, io: GateIO, person: string): Promise<string | undefined> {
@@ -368,22 +368,22 @@ export async function mergeGateRisk(intent: MergeIntent, io: GateIO, person: str
       }
     }
   } catch (error) {
-    return `Fleet blocked this merge: the merge gate could not check it (${(error as Error).message}). A merge needs a \`fleet proof gate\` pass at each PR's head on GitHub; try again when GitHub answers.`;
+    return `Hedge blocked this merge: the merge gate could not check it (${(error as Error).message}). A merge needs a \`hedge proof gate\` pass at each PR's head on GitHub; try again when GitHub answers.`;
   }
   if (!missing.length) return undefined;
   const hub = hubError ? ` The decision ledger could not be read (${hubError}), so only this machine's gate records counted.` : "";
-  return `Fleet blocked this merge: \`fleet proof gate\` has not passed at the head of ${missing.join("; ")}. A missing proof store, a pass at an older head, or a pass that a later failed run at the same head replaced does not count.${hub} `
+  return `Hedge blocked this merge: \`hedge proof gate\` has not passed at the head of ${missing.join("; ")}. A missing proof store, a pass at an older head, or a pass that a later failed run at the same head replaced does not count.${hub} `
     + `Run the gate on each head until it exits 0, then enqueue again. ${overrideHint(person)}${intent.targets.some((target) => target.via.endsWith(pipedVia)) ? pipedNote : ""}`;
 }
 
 export const mergeGateDeadlineMs = 15_000;
 const after = (ms: number) => new Promise<void>((done) => { setTimeout(done, ms).unref(); });
-const deadlineReason = "Fleet blocked this merge: the merge gate could not read GitHub and the decision ledger in time. Try again; a merge needs a `fleet proof gate` pass at each PR's head.";
+const deadlineReason = "Hedge blocked this merge: the merge gate could not read GitHub and the decision ledger in time. Try again; a merge needs a `hedge proof gate` pass at each PR's head.";
 
 /** The check's answer, or a refusal when it fails or runs past the deadline: the hook must answer before its host's timeout lets the call through. */
 export async function beforeDeadline(check: () => Promise<string | undefined>, deadline: Promise<void> = after(mergeGateDeadlineMs)): Promise<string | undefined> {
   try { return await Promise.race([check(), deadline.then(() => deadlineReason)]); }
-  catch (error) { return `Fleet blocked this merge: the merge gate failed (${(error as Error).message}).`; }
+  catch (error) { return `Hedge blocked this merge: the merge gate failed (${(error as Error).message}).`; }
 }
 
 export function realGateIO(home: string, env: Env): GateIO {

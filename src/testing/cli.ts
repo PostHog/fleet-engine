@@ -7,13 +7,13 @@ export const repoRoot = join(import.meta.dir, "../..");
 export function cliFixtures(temp: { make(prefix?: string): string }) {
   function profileDir(packs: string[] = [], aboutMe?: string) {
     const dir = temp.make("profile-");
-    const profile = { schema: 1, engine: { repo: "PostHog/fleet-engine", ref: "main", channel: "track" }, sources: [], packs, plan: "both", settings: {}, workflows: {} };
-    writeFileSync(join(dir, "fleet.json"), JSON.stringify(profile));
+    const profile = { schema: 1, engine: { repo: "PostHog/hedge", ref: "main", channel: "track" }, sources: [], packs, plan: "both", settings: {}, workflows: {} };
+    writeFileSync(join(dir, "hedge.json"), JSON.stringify(profile));
     if (aboutMe) writeFileSync(join(dir, "about-me.md"), aboutMe);
     return dir;
   }
 
-  async function fleet(args: string[], home: string, engineRoot = repoRoot, env: Record<string, string> = {}) {
+  async function hedge(args: string[], home: string, engineRoot = repoRoot, env: Record<string, string> = {}) {
     const lines: string[] = [];
     const code = await main(args, { home, engineRoot, platform: "linux", env, print: (line) => lines.push(line), run: async () => 0 });
     return { code, output: lines.join("\n") };
@@ -30,5 +30,5 @@ export function cliFixtures(temp: { make(prefix?: string): string }) {
     return root;
   }
 
-  return { profileDir, fleet, engineWithCommands };
+  return { profileDir, hedge, engineWithCommands };
 }

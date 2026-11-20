@@ -3,7 +3,7 @@ import {
   type Comment, type FetchDiscussion, type FetchIssue, type MapIo, type MapRef, type Ticket,
 } from "./wayfinder.ts";
 
-const usage = "Usage: fleet decisions <map URL | owner/repo#number | number>";
+const usage = "Usage: hedge decisions <map URL | owner/repo#number | number>";
 const whoByMark: Record<string, string> = {
   "👤": "👤 Human", "👍": "👍 Accepted default", "🤖": "🤖 Agent", "✅": "✅ Old mark (retired 2026-11-13)",
 };

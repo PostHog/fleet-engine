@@ -110,12 +110,14 @@ export async function accountHome(uid = process.getuid?.(), sources = system) {
 
 export type HomeGuard = { run?: CommandRunner; accountHome?: () => Promise<string | undefined> };
 
+const thisAccountHome = async () => Bun.env.HEDGE_ACCOUNT_HOME || (await accountHome());
+
 export async function skipOtherHome(adapter: string, what: string, home: string, options: HomeGuard): Promise<AdapterResult | undefined> {
-  const lookup = options.accountHome ?? (options.run ? undefined : () => accountHome());
+  const lookup = options.accountHome ?? (options.run ? undefined : thisAccountHome);
   if (!lookup) return undefined;
   const account = await lookup();
   if (account === undefined) {
-    const say = `Fleet left ${what} alone: it could not look up your account's home folder, so it cannot tell whether ${home} is yours. Check that your system lists your user (getent passwd on Linux, dscacheutil on a Mac), then run fleet apply.`;
+    const say = `Hedge left ${what} alone: it could not look up your account's home folder, so it cannot tell whether ${home} is yours. Check that your system lists your user (getent passwd on Linux, dscacheutil on a Mac), then run hedge apply.`;
     return { actions: [], findings: [{ id: `${adapter}:home`, pack: "engine", say, repair: "human" }] };
   }
   return resolve(account) === resolve(home) ? undefined : { actions: [], findings: [] };

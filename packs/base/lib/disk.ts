@@ -7,9 +7,9 @@ type Env = Record<string, string | undefined>;
 
 const gigabyte = 1024 ** 3;
 const hour = 3600_000;
-const usage = "Usage: fleet disk [--start [--min-free <GB>]]";
+const usage = "Usage: hedge disk [--start [--min-free <GB>]]";
 
-export const startFloorVariable = "FLEET_START_MIN_FREE_GB";
+export const startFloorVariable = "HEDGE_START_MIN_FREE_GB";
 export const freeMapFile = "disk-free.json";
 
 export type DiskStatus = { critical: boolean; message: string };
@@ -49,7 +49,7 @@ export function diskStatus(space: Space, floorGigabytes: number): DiskStatus {
   if (!short.length) return { critical: false, message: `Disk: ${free}.` };
   return {
     critical: true,
-    message: `Disk is critical: ${free}, ${short.join(" and ")}. Do not start worktree lanes or heavy jobs here. fleet prune frees space every few minutes, and fleet disk-sweep lists the folders with the most files.`,
+    message: `Disk is critical: ${free}, ${short.join(" and ")}. Do not start worktree lanes or heavy jobs here. hedge prune frees space every few minutes, and hedge disk-sweep lists the folders with the most files.`,
   };
 }
 
@@ -72,7 +72,7 @@ export function startDecision(free: number, floor: number, place: StartPlace, in
   if (inodes < inodeFloorShare) {
     return {
       critical: true,
-      message: `Fleet starts no new thread or scheduled run on ${place.here}: ${shownInodes(inodes)}, below ${inodeFloorShare * 100}%. Without inodes every new file fails with ENOSPC, though bytes remain. Run fleet disk-sweep to list the folders with the most files.`,
+      message: `Hedge starts no new thread or scheduled run on ${place.here}: ${shownInodes(inodes)}, below ${inodeFloorShare * 100}%. Without inodes every new file fails with ENOSPC, though bytes remain. Run hedge disk-sweep to list the folders with the most files.`,
     };
   }
   if (free >= floor * gigabyte) return { critical: false, message: `Disk: ${shown(free)}, above the ${floor}G floor for new threads.` };
@@ -83,12 +83,12 @@ export function startDecision(free: number, floor: number, place: StartPlace, in
     .sort((a, b) => b[1] - a[1]);
   const elsewhere = best
     ? `${best[0]} has ${shown(best[1])} (disk-watch, ${Math.round((place.now - Date.parse(fresh!.checkedAt)) / 60_000)} min ago): start it there.`
-    : "Fleet knows no devbox with room. The hub's disk watch measures them every 15 minutes.";
+    : "Hedge knows no devbox with room. The hub's disk watch measures them every 15 minutes.";
   return {
     critical: true,
     message: [
-      `Fleet starts no new thread or scheduled run on ${place.here}: ${shown(free)}, below the ${floor}G floor. A full disk stops every run on the machine.`,
-      "Run fleet disk to check the space, and fleet prune --dry-run to see what it can free.",
+      `Hedge starts no new thread or scheduled run on ${place.here}: ${shown(free)}, below the ${floor}G floor. A full disk stops every run on the machine.`,
+      "Run hedge disk to check the space, and hedge prune --dry-run to see what it can free.",
       elsewhere,
       `${startFloorVariable} or --min-free <GB> changes the floor.`,
     ].join("\n"),
@@ -132,7 +132,7 @@ function startCommand(args: string[], space: Space, place: StartPlace, env: Env)
   return 0;
 }
 
-export const freeMapPath = (home: string, env: Env = Bun.env) => join(env.XDG_STATE_HOME ?? join(home, ".local/state"), "fleet", freeMapFile);
+export const freeMapPath = (home: string, env: Env = Bun.env) => join(env.XDG_STATE_HOME ?? join(home, ".local/state"), "hedge", freeMapFile);
 
 function parseFreeMap(text: string): FreeMap | undefined {
   try {
@@ -150,7 +150,7 @@ export function readFreeMap(home: string, env: Env = Bun.env): FreeMap | undefin
   const hub = optionalStringSetting("hub.alias", env);
   if (!hub) return undefined;
   try {
-    const answer = Bun.spawnSync(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", hub, `cat "\${XDG_STATE_HOME:-$HOME/.local/state}/fleet/${freeMapFile}"`], { env, stdin: "ignore", stdout: "pipe", stderr: "ignore", timeout: 10_000 });
+    const answer = Bun.spawnSync(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", hub, `cat "\${XDG_STATE_HOME:-$HOME/.local/state}/hedge/${freeMapFile}"`], { env, stdin: "ignore", stdout: "pipe", stderr: "ignore", timeout: 10_000 });
     return answer.exitCode === 0 ? parseFreeMap(answer.stdout.toString()) : undefined;
   } catch {
     return undefined;
@@ -159,7 +159,7 @@ export function readFreeMap(home: string, env: Env = Bun.env): FreeMap | undefin
 
 function savedMachine(home: string): { role?: unknown; name?: unknown } {
   try {
-    return JSON.parse(readFileSync(join(home, ".config/fleet/machine.json"), "utf8")) as { role?: unknown; name?: unknown };
+    return JSON.parse(readFileSync(join(home, ".config/hedge/machine.json"), "utf8")) as { role?: unknown; name?: unknown };
   } catch {
     return {};
   }

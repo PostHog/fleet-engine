@@ -1,12 +1,19 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { main } from "../../../src/cli.ts";
 import { tempDirs } from "../../../src/testing/git.ts";
+import { devbox, engineSource, resolveEngine } from "../../../src/testing/packs.ts";
+import { jobsAdapter } from "../../../src/adapters/jobs/adapter.ts";
+import type { CommandRunner } from "../../../src/adapters/run.ts";
+import { apply } from "../../../src/reconciler/apply.ts";
 
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
 const onLinux = test.skipIf(process.platform !== "linux");
 const script = join(import.meta.dir, "install-codex.sh");
+const engineRoot = join(import.meta.dir, "../../..");
+const launcher = join(engineRoot, "hedge");
 const tag = "rust-v9.9.9";
 const realMv = Bun.which("mv") ?? "/bin/mv";
 const realReadlink = Bun.which("readlink") ?? "/bin/readlink";
@@ -92,7 +99,7 @@ async function version(home: string) {
   return (await new Response(child.stdout).text()).trim();
 }
 
-const codexHome = (home: string) => join(home, ".local/share/fleet/codex");
+const codexHome = (home: string) => join(home, ".local/share/hedge/codex");
 
 describe("install-codex.sh", () => {
   onLinux.each([
@@ -144,7 +151,7 @@ describe("install-codex.sh", () => {
     await box.publish("rust-v10.1.0");
     const log = join(box.bin, "calls.log");
     writeFileSync(log, "");
-    const lock = join(box.home, ".local/share/fleet/codex.lock");
+    const lock = join(box.home, ".local/share/hedge/codex.lock");
     const held = (name: string) => `if ${realFlock} -n "${lock}" true; then echo "${name} free" >> "${log}"; else echo "${name} locked" >> "${log}"; fi`;
     stub(box.bin, "readlink", `${held("readlink")}\nexec ${realReadlink} "$@"`);
     stub(box.bin, "rm", `${held("rm")}\nexec ${Bun.which("rm") ?? "/bin/rm"} "$@"`);
@@ -182,7 +189,7 @@ describe("install-codex.sh", () => {
     expect(await install(box)).toMatchObject({ code: 0, stdout: "codex-cli 9.9.9 x86_64-unknown-linux-musl\n" });
     expect(readdirSync(final)).toEqual(["bin"]);
     expect(await version(box.home)).toBe("codex-cli 9.9.9 x86_64-unknown-linux-musl");
-    expect(readdirSync(join(box.home, ".local/share/fleet")).filter((name) => name.startsWith("codex-new."))).toEqual([]);
+    expect(readdirSync(join(box.home, ".local/share/hedge")).filter((name) => name.startsWith("codex-new."))).toEqual([]);
   });
 
   onLinux.each([["ls's default quoting", {}], ["QUOTING_STYLE=c", { QUOTING_STYLE: "c" }]] as const)("keeps a release while a session still runs from it, with %s", async (_quoting, env) => {
@@ -220,7 +227,7 @@ describe("install-codex.sh", () => {
     expect(await version(box.home)).toBe("codex-cli 9.9.9 x86_64-unknown-linux-musl");
     expect(readlinkSync(join(codexHome(box.home), "current"))).toBe(`releases/${tag}`);
     expect(readdirSync(join(box.home, ".local/bin"))).toEqual(["codex"]);
-    expect(readdirSync(join(box.home, ".local/share/fleet")).filter((name) => name.startsWith("codex-new."))).toEqual([]);
+    expect(readdirSync(join(box.home, ".local/share/hedge")).filter((name) => name.startsWith("codex-new."))).toEqual([]);
   });
 
   onLinux("removes its partial download when it is stopped", async () => {
@@ -228,7 +235,7 @@ describe("install-codex.sh", () => {
     writeFileSync(join(box.bin, "term-on-download"), "");
     const result = await install(box);
     expect(result.code).not.toBe(0);
-    expect(readdirSync(join(box.home, ".local/share/fleet"))).toEqual(["codex.lock"]);
+    expect(readdirSync(join(box.home, ".local/share/hedge"))).toEqual(["codex.lock"]);
     expect(existsSync(join(box.home, ".local/bin/codex"))).toBe(false);
   });
 
@@ -266,13 +273,94 @@ describe("install-codex.sh", () => {
     expect(existsSync(join(codexHome(box.home), "releases", tag))).toBe(false);
   });
 
-  onLinux("keeps a codex in ~/.local/bin that Fleet did not install", async () => {
+  function fleetCodex(home: string) {
+    const fleets = join(home, ".local/share/fleet/codex");
+    mkdirSync(join(fleets, "releases/rust-v0.1.0/bin"), { recursive: true });
+    writeFileSync(join(fleets, "releases/rust-v0.1.0/bin/codex"), "#!/bin/sh\necho codex-cli 0.1.0\n");
+    chmodSync(join(fleets, "releases/rust-v0.1.0/bin/codex"), 0o755);
+    symlinkSync("releases/rust-v0.1.0", join(fleets, "current"));
+    mkdirSync(join(home, ".local/bin"), { recursive: true });
+    symlinkSync(join(fleets, "current/bin/codex"), join(home, ".local/bin/codex"));
+    return fleets;
+  }
+
+  async function codexOnPath(home: string, path: string) {
+    const child = Bun.spawn(["codex", "--version"], { env: { HOME: home, PATH: path }, stdout: "pipe", stderr: "pipe" });
+    return (await new Response(child.stdout).text()).trim();
+  }
+
+  onLinux("hedge apply, with each command run in the box through the hedge launcher, moves the Codex that Fleet installed to Hedge's release package and keeps Fleet's copy", async () => {
+    const box = await machine("x86_64", ["x86_64-unknown-linux-musl"]);
+    rmSync(join(box.bin, "bun"));
+    symlinkSync(process.execPath, join(box.bin, "bun"));
+    stub(box.bin, "npx", "echo 10.9.0");
+    stub(box.bin, "node", "echo v22.0.0");
+    const fleets = fleetCodex(box.home);
+    const path = `${box.bin}:${box.home}/.local/bin:/usr/bin:/bin`;
+    const profile = temp.make("profile-");
+    writeFileSync(join(profile, "hedge.json"), JSON.stringify({ schema: 1, engine: { repo: "PostHog/hedge", ref: "main", channel: "track" }, sources: [], packs: [], plan: "codex", settings: {}, workflows: {} }));
+    const lines: string[] = [];
+    const hedge = (args: string[]) => main(args, { home: box.home, engineRoot, platform: "linux", env: {}, print: (line) => lines.push(line), run: inTheBox });
+    const inTheBox = async (command: string[]) => {
+      if (!Bun.which(command[0]!, { PATH: path })) return 127;
+      return Bun.spawn(command, { env: { HOME: box.home, PATH: path, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" }, stdout: "ignore", stderr: "ignore" }).exited;
+    };
+    const before = await codexOnPath(box.home, path);
+    const saved = process.env.PATH;
+    process.env.PATH = path;
+    let applied: number;
+    try {
+      applied = await hedge(["apply", "--profile", profile]);
+    } finally {
+      process.env.PATH = saved;
+    }
+
+    expect(applied).toBe(0);
+    expect([before, await codexOnPath(box.home, path)]).toEqual(["codex-cli 0.1.0", "codex-cli 9.9.9 x86_64-unknown-linux-musl"]);
+    expect(readlinkSync(join(box.home, ".local/bin/codex"))).toBe(join(codexHome(box.home), "current/bin/codex"));
+    expect(readFileSync(join(fleets, "releases/rust-v0.1.0/bin/codex"), "utf8")).toContain("0.1.0");
+  });
+
+  onLinux("the nightly agent-update job, run at night from the cron entry that apply writes, moves the Codex that Fleet installed to Hedge's release package", async () => {
+    const box = await machine("x86_64", ["x86_64-unknown-linux-musl"]);
+    rmSync(join(box.bin, "bun"));
+    symlinkSync(process.execPath, join(box.bin, "bun"));
+    mkdirSync(join(box.home, ".bun"), { recursive: true });
+    symlinkSync(box.bin, join(box.home, ".bun/bin"));
+    fleetCodex(box.home);
+    const path = `${box.bin}:${box.home}/.local/bin:/usr/bin:/bin`;
+    const profile = temp.make("profile-");
+    writeFileSync(join(profile, "hedge.json"), JSON.stringify({ schema: 1, engine: { repo: "PostHog/hedge", ref: "main", channel: "track" }, sources: [], packs: [], plan: "codex", settings: {}, workflows: {} }));
+    mkdirSync(join(box.home, ".config/hedge"), { recursive: true });
+    writeFileSync(join(box.home, ".config/hedge/machine.json"), JSON.stringify({ schema: 1, role: "devbox", profileDir: profile }));
+    const plan = resolveEngine([await engineSource()], { plan: "codex" }, devbox);
+    const crontab = { text: "" };
+    const run: CommandRunner = async (command, options) => {
+      if (command.join(" ") === "crontab -l") return { code: 0, stdout: crontab.text };
+      if (command.join(" ") === "crontab -") return (crontab.text = options?.input ?? ""), { code: 0, stdout: "" };
+      return { code: 127, stdout: "" };
+    };
+    await apply({ ...plan, files: [], config: [], steps: [], checks: [], human: [], jobs: plan.jobs.filter((job) => job.id === "agent-update") }, { home: box.home, adapters: [jobsAdapter({ run, engineRoot })] });
+    const entry = crontab.text.split("\n").find((line) => line.endsWith("# hedge:agent-update"));
+    expect(entry).toBeDefined();
+    const clock = join(temp.make("clock-"), "clock.ts");
+    writeFileSync(clock, `const at = Date.parse("2026-11-10T02:17:00Z");\nconst RealDate = Date;\nglobalThis.Date = class extends RealDate { constructor(...args) { args.length ? super(...args) : super(at); } static now() { return at; } };\n`);
+
+    const code = await Bun.spawn(["/bin/sh", "-c", entry!.replace(/^(\S+\s+){5}/, "")], { env: { HOME: box.home, PATH: "/usr/bin:/bin", BUN_OPTIONS: `--preload ${clock}`, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" }, stdout: "ignore", stderr: "ignore" }).exited;
+
+    const log = join(box.home, ".local/state/hedge/jobs/agent-update.log");
+    expect({ code, codex: readFileSync(log, "utf8").split("\n").find((line) => line.startsWith("Codex:")) }).toEqual({ code: 0, codex: "Codex: up to date." });
+    expect(await codexOnPath(box.home, path)).toBe("codex-cli 9.9.9 x86_64-unknown-linux-musl");
+    expect(readlinkSync(join(box.home, ".local/bin/codex"))).toBe(join(codexHome(box.home), "current/bin/codex"));
+  });
+
+  onLinux("keeps a codex in ~/.local/bin that Hedge did not install", async () => {
     const box = await machine("x86_64", ["x86_64-unknown-linux-musl"]);
     mkdirSync(join(box.home, ".local/bin"), { recursive: true });
     writeFileSync(join(box.home, ".local/bin/codex"), "mine\n");
     const result = await install(box);
     expect(result.code).not.toBe(0);
-    expect(result.stderr).toContain("Fleet did not install it");
+    expect(result.stderr).toContain("Hedge did not install it");
     expect(readFileSync(join(box.home, ".local/bin/codex"), "utf8")).toBe("mine\n");
   });
 
@@ -297,7 +385,7 @@ describe("install-codex.sh", () => {
     expect(readlinkSync(join(box.home, ".local/bin/codex"))).toBe(join(codexHome(box.home), "current/bin/codex"));
     expect(box.calls()).not.toContain("flock");
     expect(box.calls()).not.toContain("sha256sum");
-    expect(readdirSync(join(box.home, ".local/share/fleet")).sort()).toEqual(["codex", "codex.lock"]);
+    expect(readdirSync(join(box.home, ".local/share/hedge")).sort()).toEqual(["codex", "codex.lock"]);
   });
 
   onLinux("on an Apple silicon Mac whose shell runs under Rosetta, installs the arm64 package", async () => {
@@ -311,7 +399,7 @@ describe("install-codex.sh", () => {
   onLinux("on a Mac, waits for an install that holds the lock", async () => {
     const box = await machine("arm64", ["aarch64-apple-darwin"], { os: "Darwin" });
     onMac(box);
-    const share = join(box.home, ".local/share/fleet");
+    const share = join(box.home, ".local/share/hedge");
     mkdirSync(share, { recursive: true });
     const lock = join(share, "codex.lock");
     writeFileSync(lock, "");
@@ -341,7 +429,7 @@ describe("install-codex.sh", () => {
   onLinux("on a Mac, still holds the lock when descriptors 3 to 8 are already open", async () => {
     const box = await machine("arm64", ["aarch64-apple-darwin"], { os: "Darwin" });
     onMac(box);
-    const lock = join(box.home, ".local/share/fleet/codex.lock");
+    const lock = join(box.home, ".local/share/hedge/codex.lock");
     stub(box.bin, "curl", `if ${realFlock} -n "${lock}" true; then echo "curl free" >> "${join(box.bin, "calls.log")}"; fi\nexec ${join(box.bin, "curl.real")} "$@"`, join(box.bin, "curl.real"));
     const busy = Array.from({ length: 6 }, (_, index) => `${index + 3}</dev/null`).join(" ");
     const child = Bun.spawn(["/bin/sh", "-c", `exec ${busy}; exec /bin/sh "$0"`, script], { env: { HOME: box.home, PATH: `${box.bin}:${box.home}/.local/bin:/usr/bin:/bin` }, stdout: "pipe", stderr: "pipe" });
@@ -373,7 +461,7 @@ describe("install-codex.sh", () => {
     }
   });
 
-  onLinux("removes Fleet's earlier Bun install of Codex only when it shadows the new one", async () => {
+  onLinux("removes Hedge's earlier Bun install of Codex only when it shadows the new one", async () => {
     const box = await machine("x86_64", ["x86_64-unknown-linux-musl"]);
     const shim = join(box.home, ".bun/install/global/node_modules/@openai/codex/bin");
     mkdirSync(shim, { recursive: true });

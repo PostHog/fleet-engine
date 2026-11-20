@@ -15,7 +15,7 @@ const dev = { repository: "example/charts", pr: 11 };
 const mergedAt = "2026-11-17T09:00:00Z";
 
 async function prodPr() {
-  const home = mkdtempSync(join(tmpdir(), "fleet-dev-observed-"));
+  const home = mkdtempSync(join(tmpdir(), "hedge-dev-observed-"));
   homes.push(home);
   expect(await requireProofs(home, prod, [], "claude", dev)).toEqual(["dev-observed"]);
   return {
@@ -61,7 +61,7 @@ test("a prod PR waits on the dev result until the dev PR merged and its observat
 });
 
 test("require --after-dev owes dev-observed, which needs its dev PR, and the dev PR does not change", async () => {
-  const home = mkdtempSync(join(tmpdir(), "fleet-dev-observed-require-"));
+  const home = mkdtempSync(join(tmpdir(), "hedge-dev-observed-require-"));
   homes.push(home);
   const printed: string[] = [];
   const require = (...args: string[]) => proofCommand(["require", ...args, "--author", "claude", "--repo", prod.repository, "--pr", String(prod.pr), "--commit", prod.commit], { home, cwd: home, env: {}, print: (text) => printed.push(text) });

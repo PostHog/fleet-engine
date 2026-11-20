@@ -2,7 +2,7 @@ import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, rmSync,
 import { join } from "node:path";
 import type { Terminal } from "../setup/terminal.ts";
 
-export const stateDir = (home: string) => join(home, ".local", "state", "fleet");
+export const stateDir = (home: string) => join(home, ".local", "state", "hedge");
 const logsDir = (home: string) => join(stateDir(home), "logs");
 export const transcriptPath = (home: string) => join(logsDir(home), "setup.log");
 export const failurePath = (home: string) => join(logsDir(home), "setup-failed.json");
@@ -13,7 +13,7 @@ export type SetupFailure = { at: string; step?: string; error: string };
 
 export type TimedStep = { id: string; title?: string; start?: string; end?: string; blocked?: boolean; outcome?: string; error?: string };
 
-/** The setup timings file that fleet setup writes after each step. */
+/** The setup timings file that hedge setup writes after each step. */
 export type SetupTimings = { started?: string; usable?: string; steps: TimedStep[] };
 
 export type Recorder = {
@@ -24,7 +24,7 @@ export type Recorder = {
 };
 
 /**
- * Records one fleet setup run: every line it prints and every answer typed,
+ * Records one hedge setup run: every line it prints and every answer typed,
  * appended to the setup transcript. A new run clears the last failure.
  * Only the user can read the records, and a record that cannot be written
  * never stops setup.
@@ -39,12 +39,12 @@ export function recordSetup(home: string, terminal: Terminal, args: string[], no
     return true;
   });
   const write = (line: string) => void (ready && quietly(() => appendFileSync(path, `${line}\n`, { mode: 0o600 })));
-  write(`=== fleet setup${args.length ? ` ${args.join(" ")}` : ""} at ${now.toISOString()}`);
+  write(`=== hedge setup${args.length ? ` ${args.join(" ")}` : ""} at ${now.toISOString()}`);
   let header: string | undefined;
   let step: string | undefined;
   const print = (line: string) => {
     write(line);
-    if (/^Fleet setup · \d+ of \d+/.test(line)) [header, step] = [line.split(" · ").slice(1, 2).join(""), undefined];
+    if (/^Hedge setup · \d+ of \d+/.test(line)) [header, step] = [line.split(" · ").slice(1, 2).join(""), undefined];
     else if (header && step === undefined && line.trim()) step = line.trim().replace(/^▶ /, "");
   };
   return {

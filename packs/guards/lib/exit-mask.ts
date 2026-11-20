@@ -12,7 +12,7 @@ function gitSubcommand(args: string[]): string | undefined {
 }
 
 function statusMatters({ name, args: [first, second, ...rest] }: Command): string | undefined {
-  if (name === "fleet" && first === "proof" && ["gate", "review", "save"].includes(second ?? "")) return `fleet proof ${second}`;
+  if ((name === "hedge" || name === "fleet") && first === "proof" && ["gate", "review", "save"].includes(second ?? "")) return `${name} proof ${second}`;
   if (name === "git") {
     const subcommand = gitSubcommand([first, second, ...rest].filter((arg) => arg !== undefined));
     return subcommand === "push" || subcommand === "commit" ? `git ${subcommand}` : undefined;
@@ -27,7 +27,7 @@ const pipefail = (args: string[]) => args.includes("pipefail");
 const errexit = (args: string[]) => args.some((arg) => arg === "-e" || shortCluster(arg, "e", "o"));
 const printsStatus = (command: Command | undefined) => (command?.name === "echo" || command?.name === "printf") && command.args.some((arg) => arg.includes("$?"));
 
-export const exitMaskReason = (what: string, how: string, person: string) => `Fleet blocked this command: ${how} hides the exit status of \`${what}\`, `
+export const exitMaskReason = (what: string, how: string, person: string) => `Hedge blocked this command: ${how} hides the exit status of \`${what}\`, `
   + "so a failure reads as a success. Fix: run it alone or chain the next step with `&&`; to trim output, redirect it "
   + "(`> /tmp/out.log 2>&1`) and read the file next, or start with `set -o pipefail;`. `PIPESTATUS` also works. "
   + `If you are not sure, stop and ask ${person}.`;

@@ -40,7 +40,7 @@ export type Workflow = {
 
 /**
  * The payload of T3's scheduledTasks.upsert. The enclosing PackJob's id and
- * schedule are the task's: the Jobs adapter owns the task as fleet:<job id>
+ * schedule are the task's: the Jobs adapter owns the task as hedge:<job id>
  * and maps { every, at } to T3's interval or fixed_time trigger.
  */
 export type T3Task = {
@@ -53,9 +53,9 @@ export type T3Task = {
   project?: string;
 };
 
-/** Limits an item to some machines, plans, or one workflow. An item without a field fits every value. The role solo fits the only machine: it is not a devbox, the Hub pack is off, and the profile lists no devboxes. oncePerFleet keeps the item on one machine: the first node the profile lists, else the hub. */
+/** Limits an item to some machines, plans, or one workflow. An item without a field fits every value. The role solo fits the only machine: it is not a devbox, the Hub pack is off, and the profile lists no devboxes. oncePerHedge keeps the item on one machine: the first node the profile lists, else the hub. */
 /** unless: workflows of any pack that the item gives way to: it stays out of the plan while one of them is on. */
-export type Scope = { on?: Os[]; roles?: Array<MachineRole | "solo">; oncePerFleet?: boolean; plans?: AiPlan[]; workflow?: string; unless?: string[] };
+export type Scope = { on?: Os[]; roles?: Array<MachineRole | "solo">; oncePerHedge?: boolean; oncePerFleet?: boolean; plans?: AiPlan[]; workflow?: string; unless?: string[] };
 
 export type TimerSchedule = { every: "5m" | "15m" | "1h" | "1d"; at?: string };
 
@@ -76,7 +76,7 @@ export type HumanStep = Scope & {
   probe: string[];
   /** The command reads the keyboard, such as a sign-in that asks to paste a code: it runs in the foreground with the terminal, and the probe runs once it ends. */
   interactive?: true;
-  /** A command that Fleet runs during apply when the probe fails, before it probes again. */
+  /** A command that Hedge runs during apply when the probe fails, before it probes again. */
   repair?: string[];
   /** What a person does to remove what this step set, once it leaves this machine's plan. Doctor says it while the probe, or left when set, still passes. */
   undo?: string;
@@ -84,7 +84,7 @@ export type HumanStep = Scope & {
   left?: string[];
 };
 
-/** The exit code of a step's check that means it cannot tell yet, such as before the step's human step passes. Only an undo reads it. When Fleet decides whether to run a step, 3 fails like any other code. */
+/** The exit code of a step's check that means it cannot tell yet, such as before the step's human step passes. Only an undo reads it. When Hedge decides whether to run a step, 3 fails like any other code. */
 export const cannotTell = 3;
 
 export type PackStep = Scope & {
@@ -94,7 +94,7 @@ export type PackStep = Scope & {
   check?: string[];
   /** The id of a human step of the same pack that must pass before this step runs. */
   after?: string;
-  /** Reverses what the step set. Fleet runs it while the check still holds, once the step leaves this machine's plan: its workflow or pack is off, or the machine no longer fits it. Fleet keeps the commands of each step that held in the machine's step ledger, so it can undo a step whose pack is gone from the profile. */
+  /** Reverses what the step set. Hedge runs it while the check still holds, once the step leaves this machine's plan: its workflow or pack is off, or the machine no longer fits it. Hedge keeps the commands of each step that held in the machine's step ledger, so it can undo a step whose pack is gone from the profile. */
   undo?: string[];
   /** Exits 0 while anything the step set is still on this machine, and any other code once nothing is. An undo reads it instead of the check, for a check that also passes when the step has nothing to hold. */
   left?: string[];
@@ -104,7 +104,7 @@ export type PackStep = Scope & {
  * A T3 Code project script that runs when T3 makes a worktree of a project
  * whose folder matches one of projects: an absolute path or one under ~/,
  * where * stands for one folder name. The T3 adapter owns it as
- * fleet-<pack>-<id>.
+ * hedge-<pack>-<id>.
  */
 /** projectSetting names a setting whose value, a path, is one more project; resolve adds it to projects. */
 export type T3ProjectScript = Scope & { id: string; name: string; command: string; projects: string[]; projectSetting?: string };
@@ -122,7 +122,7 @@ export type CatalogEntry = { pack: string; id: string; port: number; health: str
 /** A file from the pack, linked at target under the home directory. */
 export type PackFile = Scope & { path: string; target: string };
 
-/** A Codex rules file of the pack. Fleet joins the ones that fit the machine and writes them as one plain file, .codex/rules/fleet-<pack>.rules, for a Codex plan only. */
+/** A Codex rules file of the pack. Hedge joins the ones that fit the machine and writes them as one plain file, .codex/rules/hedge-<pack>.rules, for a Codex plan only. */
 export type CodexRules = Scope & { path: string };
 
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
@@ -168,8 +168,8 @@ export type PackCheck = Scope & { id: string; run: string[]; say: string };
 export const handlerSeams = ["review-bot", "heavy-route", "pr-command", "slack-capture", "secret-rows", "secret-providers", "proof-receipt"] as const;
 export type HandlerSeam = (typeof handlerSeams)[number];
 
-/** A script of the pack that a command of another pack hands its work to, such as the review bot behind fleet pr review, the heavy-route handler that decides where a fleet heavy command runs, the pr-command handler that runs the fleet pr subcommands a pack adds, the slack-capture handler that saves a Slack thread the owner reacts to, the secret-rows and secret-providers modules that declare the secret store's rows and their checks, or the proof-receipt handler that publishes the full proof receipt of fleet proof receipt. */
-export type PackHandler = Scope & { seam: HandlerSeam; path: string; /** The fleet pr words a pr-command handler runs; fleet pr routes only these to it. */ subcommands?: string[] };
+/** A script of the pack that a command of another pack hands its work to, such as the review bot behind hedge pr review, the heavy-route handler that decides where a hedge heavy command runs, the pr-command handler that runs the hedge pr subcommands a pack adds, the slack-capture handler that saves a Slack thread the owner reacts to, the secret-rows and secret-providers modules that declare the secret store's rows and their checks, or the proof-receipt handler that publishes the full proof receipt of hedge proof receipt. */
+export type PackHandler = Scope & { seam: HandlerSeam; path: string; /** The hedge pr words a pr-command handler runs; hedge pr routes only these to it. */ subcommands?: string[] };
 
 export type SourceRef = { name: string; repo: string; ref: string };
 
@@ -229,7 +229,7 @@ export type Plan = {
   reachesHub?: true;
   /** This machine pulls its credentials from the hub: a node that reaches the hub, or a Mac on a profile with a hub, which reaches the hub through its own tunnel. */
   pullsFromHub?: true;
-  /** The engine whose launcher a leading fleet in a pack's commands runs. */
+  /** The engine whose launcher a leading hedge in a pack's commands runs. */
   engineRoot?: string;
   os: Os;
   ai: AiPlan;

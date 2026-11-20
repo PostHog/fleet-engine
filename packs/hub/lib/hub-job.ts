@@ -12,7 +12,7 @@ const drainMs = 5_000;
 const lockBusy = 75;
 const timedOut = 124;
 
-export const stateDir = (home: string, env: Env) => join(env.XDG_STATE_HOME ?? join(home, ".local/state"), "fleet");
+export const stateDir = (home: string, env: Env) => join(env.XDG_STATE_HOME ?? join(home, ".local/state"), "hedge");
 export const sshArgv = (host: string, command: string) => ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host, command];
 
 const realTimer: Timer = (ms, fire) => {
@@ -55,7 +55,7 @@ export async function spawnText(argv: string[], env: Env, options: { stdin?: str
 
 export function requireHubRole(home: string, command: string): void {
   const role = readRole(home);
-  if (role !== "hub") throw new Error(`fleet ${command} runs only on the hub. This machine's role is ${role ?? "not set"}. Run fleet hub here on the hub, or run this there.`);
+  if (role !== "hub") throw new Error(`hedge ${command} runs only on the hub. This machine's role is ${role ?? "not set"}. Run hedge hub here on the hub, or run this there.`);
 }
 
 function takeLock(path: string, env: Env): (() => void) | undefined {

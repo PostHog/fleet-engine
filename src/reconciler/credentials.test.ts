@@ -21,9 +21,9 @@ function machine(saved: MachineFile) {
   cpSync(join(import.meta.dir, "fixtures/issued"), join(engine, "packs/issued"), { recursive: true });
   const home = temp.make("home-");
   const profile = temp.make("profile-");
-  writeFileSync(join(profile, "fleet.json"), JSON.stringify({ schema: 1, engine: { repo: "example/engine", ref: "main", channel: "track" }, sources: [], packs: ["issued"], plan: "claude", settings: {}, workflows: {}, hub: "hub-1", devboxes: ["node-2"] }));
-  mkdirSync(join(home, ".config/fleet"), { recursive: true });
-  writeFileSync(join(home, ".config/fleet/machine.json"), JSON.stringify({ ...saved, profileDir: profile }));
+  writeFileSync(join(profile, "hedge.json"), JSON.stringify({ schema: 1, engine: { repo: "example/engine", ref: "main", channel: "track" }, sources: [], packs: ["issued"], plan: "claude", settings: {}, workflows: {}, hub: "hub-1", devboxes: ["node-2"] }));
+  mkdirSync(join(home, ".config/hedge"), { recursive: true });
+  writeFileSync(join(home, ".config/hedge/machine.json"), JSON.stringify({ ...saved, profileDir: profile }));
   let lines: string[] = [];
   const options: CliOptions = {
     home,
@@ -35,79 +35,79 @@ function machine(saved: MachineFile) {
     run: engineSteps(engine, (args) => main(args, { ...options, print: () => {} })),
     adapters: () => [filesAdapter],
   };
-  const fleet = async (...args: string[]) => {
+  const hedge = async (...args: string[]) => {
     lines = [];
     const code = await main(args, options);
     return { code, output: lines.join("\n") };
   };
-  return Object.assign(fleet, { home });
+  return Object.assign(hedge, { home });
 }
 
 test("on the hub, apply runs the install repair, issues the hub's own key once, and ctx.use returns it with the loopback URL", async () => {
-  const fleet = machine(hub);
-  expect(await fleet("issued", "use")).toEqual({ code: 1, output: "fleet: issued/issued-api has no credential on this machine yet. Run fleet apply on the hub." });
-  const first = await fleet("apply");
+  const hedge = machine(hub);
+  expect(await hedge("issued", "use")).toEqual({ code: 1, output: "hedge: issued/issued-api has no credential on this machine yet. Run hedge apply on the hub." });
+  const first = await hedge("apply");
   expect(first.code).toBe(0);
   expect(first.output).not.toContain("not installed");
-  expect(await fleet("issued", "use")).toEqual({ code: 0, output: "http://127.0.0.1:4600 key-1-for-hub-1" });
-  expect((await fleet("apply")).code).toBe(0);
-  expect(await fleet("issued", "use")).toEqual({ code: 0, output: "http://127.0.0.1:4600 key-1-for-hub-1" });
+  expect(await hedge("issued", "use")).toEqual({ code: 0, output: "http://127.0.0.1:4600 key-1-for-hub-1" });
+  expect((await hedge("apply")).code).toBe(0);
+  expect(await hedge("issued", "use")).toEqual({ code: 0, output: "http://127.0.0.1:4600 key-1-for-hub-1" });
 });
 
 test("before apply runs its repair, a dry run and doctor name the failing check as a Fix, not a To do", async () => {
-  const fleet = machine(hub);
-  const previewed = await fleet("apply", "--dry-run");
+  const hedge = machine(hub);
+  const previewed = await hedge("apply", "--dry-run");
   expect(previewed.output).toContain("Fix: The issued service is not installed.\n");
   expect(previewed.output).not.toContain("To do:");
-  const doctored = await fleet("doctor");
+  const doctored = await hedge("doctor");
   expect(doctored.output).toContain("Fix: The issued service is not installed.\n");
   expect(doctored.output).not.toContain("To do:");
 });
 
-test("a repair that fails leaves the check as a To do, and the hub issues no key for a service whose gate failed", async () => {
-  const fleet = machine(hub);
-  expect((await fleet("issued", "break")).code).toBe(0);
-  const applied = await fleet("apply");
-  expect(applied.code).toBe(0);
+test("a repair that fails leaves the check as a To do, fails apply, and the hub issues no key for a service whose gate failed", async () => {
+  const hedge = machine(hub);
+  expect((await hedge("issued", "break")).code).toBe(0);
+  const applied = await hedge("apply");
+  expect(applied.code).toBe(1);
   expect(applied.output).toContain("To do: The issued service is not installed.\n");
-  expect((await fleet("issued", "use")).output).toBe("fleet: issued/issued-api has no credential on this machine yet. Run fleet apply on the hub.");
+  expect((await hedge("issued", "use")).output).toBe("hedge: issued/issued-api has no credential on this machine yet. Run hedge apply on the hub.");
 });
 
 test("on the hub, a stored credential that other users can read gives a finding that says how to fix the file", async () => {
-  const fleet = machine(hub);
-  await fleet("apply");
-  chmodSync(join(fleet.home, ".config/fleet/secrets/issued/credential.issued-api"), 0o644);
-  const applied = await fleet("apply");
+  const hedge = machine(hub);
+  await hedge("apply");
+  chmodSync(join(hedge.home, ".config/hedge/secrets/issued/credential.issued-api"), 0o644);
+  const applied = await hedge("apply");
   expect(applied.code).toBe(0);
-  expect(applied.output).toContain("To do: ~/.config/fleet/secrets/issued/credential.issued-api is open to other users. Run chmod 600 ~/.config/fleet/secrets/issued/credential.issued-api, or save the secret again.");
+  expect(applied.output).toContain("To do: ~/.config/hedge/secrets/issued/credential.issued-api is open to other users. Run chmod 600 ~/.config/hedge/secrets/issued/credential.issued-api, or save the secret again.");
   expect(applied.output).not.toContain("Could not issue");
 });
 
 test("a service that refuses to issue a key gives a finding, and apply stores nothing", async () => {
-  const fleet = machine(hub);
-  expect((await fleet("issued", "refuse")).code).toBe(0);
-  const applied = await fleet("apply");
-  expect(applied.output).toContain("Fix: Could not issue the credential of issued/issued-api. Run fleet credential issued/issued-api hub-1 to see why. Fleet tries again at the next apply.");
+  const hedge = machine(hub);
+  expect((await hedge("issued", "refuse")).code).toBe(0);
+  const applied = await hedge("apply");
+  expect(applied.output).toContain("Fix: Could not issue the credential of issued/issued-api. Run hedge credential issued/issued-api hub-1 to see why. Hedge tries again at the next apply.");
   expect(applied.code).toBe(0);
-  expect((await fleet("issued", "use")).output).toBe("fleet: issued/issued-api has no credential on this machine yet. Run fleet apply on the hub.");
+  expect((await hedge("issued", "use")).output).toBe("hedge: issued/issued-api has no credential on this machine yet. Run hedge apply on the hub.");
 });
 
 test("the hub's finding copies nothing that a failing service printed or threw, so its key stays out of the report", async () => {
-  const fleet = machine(hub);
-  expect((await fleet("issued", "leak")).code).toBe(0);
-  const applied = await fleet("apply");
-  const report = applied.output.split("\n").filter((line) => line !== `fleet: ${leakedKey}`).join("\n");
-  expect(report).toContain("Fix: Could not issue the credential of issued/issued-api. Run fleet credential issued/issued-api hub-1 to see why. Fleet tries again at the next apply.");
+  const hedge = machine(hub);
+  expect((await hedge("issued", "leak")).code).toBe(0);
+  const applied = await hedge("apply");
+  const report = applied.output.split("\n").filter((line) => line !== `hedge: ${leakedKey}`).join("\n");
+  expect(report).toContain("Fix: Could not issue the credential of issued/issued-api. Run hedge credential issued/issued-api hub-1 to see why. Hedge tries again at the next apply.");
   expect(report).not.toContain(leakedKey);
 });
 
 test("a node issues nothing in its own apply, and ctx.use fails fast with a sentence", async () => {
-  const fleet = machine(node);
-  expect((await fleet("apply")).code).toBe(0);
-  expect(await fleet("issued", "use")).toEqual({ code: 1, output: "fleet: issued/issued-api has no credential on this machine yet. Run fleet apply on the hub." });
+  const hedge = machine(node);
+  expect((await hedge("apply")).code).toBe(0);
+  expect(await hedge("issued", "use")).toEqual({ code: 1, output: "hedge: issued/issued-api has no credential on this machine yet. Run hedge apply on the hub." });
 });
 
 test("ctx.use names a service that the catalog leaves out because its workflow is off", async () => {
-  const fleet = machine(hub);
-  expect(await fleet("issued", "spare")).toEqual({ code: 1, output: "fleet: the service catalog has no issued/issued-spare: its workflow or plan is off in your profile." });
+  const hedge = machine(hub);
+  expect(await hedge("issued", "spare")).toEqual({ code: 1, output: "hedge: the service catalog has no issued/issued-spare: its workflow or plan is off in your profile." });
 });

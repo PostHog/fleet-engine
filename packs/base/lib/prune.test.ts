@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdir, mkdtemp, readdir, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rename, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { spawnAsync } from "../../../src/testing/spawn.ts";
 import { type AutoOptions, type CacheHost, cwdsFromLsof, decide, evictable, onlyDisposable, prune, pruneOptions, type PruneOptions, readSightings, readState, reclaimCaches, reclaimT3Versions, recordSightings, removeTreeCommand, t3StatePath, type Facts, type Verdict } from "./prune.ts";
 
@@ -76,7 +76,7 @@ const commit = async (cwd: string, message: string) => sh(cwd, "git", "-c", "use
 
 /** A repository whose main branch is also origin/main, with an empty T3 worktree root next to it. */
 async function repository(): Promise<{ base: string; repo: string; root: string }> {
-  const base = await mkdtemp(join(tmpdir(), "fleet-prune-"));
+  const base = await mkdtemp(join(tmpdir(), "hedge-prune-"));
   temporary.push(base);
   const repo = join(base, "repo");
   await mkdir(repo);
@@ -197,8 +197,8 @@ const pressured = (later: number, lines: string[]): Partial<PruneOptions> => ({
   now: later, minIdleHours: 1, unownedIdleHours: 6, agentIdleHours: 6, dryRun: true, log: (line) => lines.push(line), evict: { targetGigabytes: 1, free: () => 0 },
 });
 
-onLinux("fleet prune on a home keeps the landed worktree of an open top-level thread and removes the one of a finished subagent", async () => {
-  const home = await mkdtemp(join(tmpdir(), "fleet-prune-home-"));
+onLinux("hedge prune on a home keeps the landed worktree of an open top-level thread and removes the one of a finished subagent", async () => {
+  const home = await mkdtemp(join(tmpdir(), "hedge-prune-home-"));
   temporary.push(home);
   const repo = join(home, "repo");
   await mkdir(repo);
@@ -224,7 +224,7 @@ onLinux("fleet prune on a home keeps the landed worktree of an open top-level th
   ]);
 
   const run = await spawnAsync(["bun", join(import.meta.dir, "../commands/prune.ts"), "--no-fetch"], {
-    env: { HOME: home, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0", XDG_STATE_HOME: join(home, ".local/state"), PATH: Bun.env.PATH, FLEET_SETTINGS: JSON.stringify({ "base.diskFloorGigabytes": 0 }) },
+    env: { HOME: home, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0", XDG_STATE_HOME: join(home, ".local/state"), PATH: Bun.env.PATH, HEDGE_SETTINGS: JSON.stringify({ "base.diskFloorGigabytes": 0 }) },
   });
 
   expect(run.stderr).toBe("");
@@ -527,7 +527,7 @@ onLinux("keeps a worktree whose Git metadata is gone, with its uncommitted work"
 });
 
 test("records where processes run and forgets sightings older than two days", async () => {
-  const base = await mkdtemp(join(tmpdir(), "fleet-sightings-"));
+  const base = await mkdtemp(join(tmpdir(), "hedge-sightings-"));
   temporary.push(base);
   const path = join(base, "state/sightings.json");
   recordSightings(path, ["/old"], now - 49 * 3600_000);
@@ -537,7 +537,7 @@ test("records where processes run and forgets sightings older than two days", as
 });
 
 test("reads the live orchestration v2 state of a nightly T3 and ignores its frozen legacy tables", async () => {
-  const userdata = await mkdtemp(join(tmpdir(), "fleet-state-v2-"));
+  const userdata = await mkdtemp(join(tmpdir(), "hedge-state-v2-"));
   temporary.push(userdata);
   await writeFile(join(userdata, "state.sqlite"), "");
   const state = join(userdata, "statev2.sqlite");
@@ -589,7 +589,7 @@ test("reads the live orchestration v2 state of a nightly T3 and ignores its froz
 });
 
 test("removes old T3 versions and keeps the active, updating, linked, and recent ones", async () => {
-  const t3Home = await mkdtemp(join(tmpdir(), "fleet-t3-versions-"));
+  const t3Home = await mkdtemp(join(tmpdir(), "hedge-t3-versions-"));
   temporary.push(t3Home);
   const versions = join(t3Home, "runtime/versions");
   const old = (now - 3 * 86_400_000) / 1000;
@@ -609,7 +609,7 @@ test("removes old T3 versions and keeps the active, updating, linked, and recent
 });
 
 test("keeps every T3 version when the service state is unreadable", async () => {
-  const t3Home = await mkdtemp(join(tmpdir(), "fleet-t3-versions-"));
+  const t3Home = await mkdtemp(join(tmpdir(), "hedge-t3-versions-"));
   temporary.push(t3Home);
   const versions = join(t3Home, "runtime/versions");
   const old = (now - 3 * 86_400_000) / 1000;
@@ -689,9 +689,9 @@ test("keeps the uv cache while a uv process runs", () => {
 
 test("takes the disk floor from settings and keeps the low and target marks above it", () => {
   const { options, auto } = pruneOptions(["--auto"], () => {}, { home: "/home/test", env: {}, floorGigabytes: 12 });
-  expect(auto).toMatchObject({ criticalFreeGigabytes: 12, lowFreeGigabytes: 27, targetFreeGigabytes: 42, stampPath: "/home/test/.local/state/fleet/worktree-prune.last" });
-  expect(options).toMatchObject({ worktreeRoot: "/home/test/.t3/worktrees", sightingsPath: "/home/test/.local/state/fleet/worktree-sightings.json" });
-  expect(pruneOptions([], () => {}, { home: "/home/test", env: { XDG_STATE_HOME: "/state" }, floorGigabytes: 10 }).options.sightingsPath).toBe("/state/fleet/worktree-sightings.json");
+  expect(auto).toMatchObject({ criticalFreeGigabytes: 12, lowFreeGigabytes: 27, targetFreeGigabytes: 42, stampPath: "/home/test/.local/state/hedge/worktree-prune.last" });
+  expect(options).toMatchObject({ worktreeRoot: "/home/test/.t3/worktrees", sightingsPath: "/home/test/.local/state/hedge/worktree-sightings.json" });
+  expect(pruneOptions([], () => {}, { home: "/home/test", env: { XDG_STATE_HOME: "/state" }, floorGigabytes: 10 }).options.sightingsPath).toBe("/state/hedge/worktree-sightings.json");
 });
 
 test("on a Mac, reads the working directories of processes from lsof", () => {
@@ -714,10 +714,44 @@ test("removes a tree without leaving its filesystem, with the flag each platform
 });
 
 test("a pass on a machine where T3 made no worktrees yet keeps nothing and fails nothing", async () => {
-  const home = await mkdtemp(join(tmpdir(), "fleet-fresh-"));
+  const home = await mkdtemp(join(tmpdir(), "hedge-fresh-"));
   temporary.push(home);
   const lines: string[] = [];
   const { options } = pruneOptions(["--no-fetch"], (line) => lines.push(line), { home, env: {}, floorGigabytes: 10 });
   expect(prune(options)).toEqual([]);
   expect(lines.at(-1)).toMatch(/^Done: 0 removed, 0 kept\. [\d.]+G free$/);
+});
+
+onLinux("prune keeps a landed worktree whose repository is a Fleet checkout from before the rename, and its other worktrees still go", async () => {
+  const { base, repo, root } = await repository();
+  const old = join(base, ".local/share/fleet/engine");
+  await mkdir(dirname(old), { recursive: true });
+  await rename(repo, old);
+  const backed = join(root, "engine", "backed");
+  await sh(old, "git", "worktree", "add", "-q", "-b", "backed", backed);
+  const elsewhere = await landedWorktrees("plain");
+  const statePath = t3State(join(base, "statev2.sqlite"), [backed, ...elsewhere.paths].map((worktreePath) => ({ worktreePath, settledAt })));
+
+  const verdicts = [...pass(base, root, statePath, { home: base }), ...pass(elsewhere.base, elsewhere.root, statePath, { home: base })];
+
+  expect(verdicts.find((verdict) => verdict.path === backed)).toMatchObject({ remove: false, reason: "its Git repository is in a Fleet path from before the rename" });
+  expect(await readdir(join(root, "engine"))).toEqual(["backed"]);
+  expect(await readdir(join(elsewhere.root, "repo"))).toEqual([]);
+});
+
+onLinux("prune keeps every worktree in a Fleet path from before the rename, also through a linked root, and inspects none of them", async () => {
+  const { base, repo } = await repository();
+  const inFleet = join(base, ".local/share/fleet/worktrees");
+  const inside = join(inFleet, "repo", "inside");
+  const linkedReal = join(base, ".local/share/fleet/linked");
+  const linked = join(base, "linked", "repo", "through");
+  await sh(repo, "git", "worktree", "add", "-q", "-b", "inside", inside);
+  await sh(repo, "git", "worktree", "add", "-q", "-b", "through", join(linkedReal, "repo", "through"));
+  await symlink(linkedReal, join(base, "linked"));
+  const statePath = t3State(join(base, "statev2.sqlite"), [inside, linked].map((worktreePath) => ({ worktreePath, settledAt })));
+
+  const verdicts = [...pass(base, inFleet, statePath, { home: base }), ...pass(base, join(base, "linked"), statePath, { home: base })];
+
+  expect(verdicts.sort((a, b) => a.path.localeCompare(b.path))).toEqual([join(linkedReal, "repo", "through"), inside].map((path) => ({ path, remove: false, reason: "it is in a Fleet path from before the rename" })));
+  expect([await readdir(join(inFleet, "repo")), await readdir(join(linkedReal, "repo"))]).toEqual([["inside"], ["through"]]);
 });

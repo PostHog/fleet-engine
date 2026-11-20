@@ -55,7 +55,7 @@ feed() {
   offset=0
   lines=0
   while :; do
-    { printf 'fleet privacy scan\n'; tail -c +"$((offset + 1))" "$2" | head -c "$window"; } >"$work/leaks-in/$1~$offset~$lines" 2>/dev/null ||
+    { printf 'hedge privacy scan\n'; tail -c +"$((offset + 1))" "$2" | head -c "$window"; } >"$work/leaks-in/$1~$offset~$lines" 2>/dev/null ||
       broken "could not stage $1 for gitleaks"
     [ $((offset + window)) -lt "$size" ] || break
     skipped=$(tail -c +"$((offset + 1))" "$2" 2>/dev/null | head -c "$step" | tr -dc '\n' | wc -c) || broken "could not stage $1 for gitleaks"

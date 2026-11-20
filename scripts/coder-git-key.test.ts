@@ -8,8 +8,8 @@ const directories: string[] = [];
 afterEach(() => directories.splice(0).forEach((path) => rmSync(path, { recursive: true, force: true })));
 
 function fakeTools(): { bin: string; runtime: string } {
-  const bin = mkdtempSync(join(tmpdir(), "fleet-coder-key-bin-"));
-  const runtime = mkdtempSync(join(tmpdir(), "fleet-coder-key-run-"));
+  const bin = mkdtempSync(join(tmpdir(), "hedge-coder-key-bin-"));
+  const runtime = mkdtempSync(join(tmpdir(), "hedge-coder-key-run-"));
   directories.push(bin, runtime);
   const tools: Record<string, string> = {
     curl: `case "$*" in
@@ -33,14 +33,14 @@ function run(args: string[]) {
   const child = Bun.spawnSync(["sh", script, ...args], {
     env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, XDG_RUNTIME_DIR: runtime, FAKE_LOG: log },
   });
-  const leftovers = readdirSync(runtime).filter((name) => name.startsWith("fleet-coder-git."));
+  const leftovers = readdirSync(runtime).filter((name) => name.startsWith("hedge-coder-git."));
   return { code: child.exitCode, log: existsSync(log) ? readFileSync(log, "utf8") : "", leftovers };
 }
 
 test("signing passes the fetched private key to ssh-keygen and leaves no key file behind", () => {
-  const signed = run(["-Y", "sign", "-n", "git", "-f", "/home/user/.ssh/fleet-coder-git.pub", "-U", "/tmp/buffer"]);
+  const signed = run(["-Y", "sign", "-n", "git", "-f", "/home/user/.ssh/hedge-coder-git.pub", "-U", "/tmp/buffer"]);
   expect(signed.code).toBe(0);
-  expect(signed.log).toMatch(/^-Y sign -n git -f \S+fleet-coder-git\.\S+ \/tmp\/buffer\nPRIVATE KEY\n$/);
+  expect(signed.log).toMatch(/^-Y sign -n git -f \S+hedge-coder-git\.\S+ \/tmp\/buffer\nPRIVATE KEY\n$/);
   expect(signed.leftovers).toEqual([]);
 });
 

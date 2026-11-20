@@ -51,12 +51,12 @@ function stillYours(rows: Row[], card: string | undefined) {
   const blockers = lane.filter(({ state, summary }) => state !== "closed" && summary.tier === "critical").flatMap(({ ref, summary }) =>
     summaryGaps(summary).filter(({ gap }) => !gap.accepted).map(({ kind, gap }) =>
       `- **Blocker:** ${refText(ref)} is critical at HEAD and its ${kind} gap is not accepted: ${gap.reason ?? "no reason recorded"}${gap.lapsed ? ` (🤖 decision ${gap.lapsed.id} lapsed: ${gap.lapsed.reason})` : ""}.`));
-  const unknown = rows.flatMap((pr) => "unknown" in pr ? [`- ${refText(pr.ref)}: its proofs are not known here (${pr.unknown}). Run fleet proof gate.`] : []);
+  const unknown = rows.flatMap((pr) => "unknown" in pr ? [`- ${refText(pr.ref)}: its proofs are not known here (${pr.unknown}). Run hedge proof gate.`] : []);
   const ungated = rows.flatMap((pr) => "ungated" in pr && pr.state !== "closed"
-    ? [`- ${refText(pr.ref)}: the gate has not run at HEAD ${short(pr.ungated)} with these proofs, so they are not known to pass. Run fleet proof gate${pr.state === "merged" ? " --landed" : ""}.`] : []);
+    ? [`- ${refText(pr.ref)}: the gate has not run at HEAD ${short(pr.ungated)} with these proofs, so they are not known to pass. Run hedge proof gate${pr.state === "merged" ? " --landed" : ""}.`] : []);
   const blocked = new Set(lane.filter(({ summary }) => summary.tier === "critical" && summaryGaps(summary).some(({ gap }) => !gap.accepted)).map(({ ref }) => refText(ref)));
   const failing = lane.filter(({ ref, state, summary }) => state !== "closed" && summary.code !== 0 && !blocked.has(refText(ref)))
-    .map(({ ref, state, summary }) => `- ${refText(ref)}: its proofs are not shown to pass at HEAD ${short(summary.commit)} as read now (gate exit ${summary.code}). Run fleet proof gate${state === "merged" ? " --landed" : ""} in its checkout to see why.`);
+    .map(({ ref, state, summary }) => `- ${refText(ref)}: its proofs are not shown to pass at HEAD ${short(summary.commit)} as read now (gate exit ${summary.code}). Run hedge proof gate${state === "merged" ? " --landed" : ""} in its checkout to see why.`);
   const merges = lane.filter(({ state, summary }) => state === "open" && summary.code === 0)
     .map(({ ref }) => `- Merge ${refText(ref)}: its proofs pass, and it waits on your merge word.`);
   return [...blockers, ...card ? [`- A question card waits for your answer in thread ${card}.`] : [], ...unknown, ...ungated, ...failing, ...merges];

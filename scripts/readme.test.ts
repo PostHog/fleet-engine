@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 const root = join(import.meta.dir, "..");
 const readme = () => readFileSync(join(root, "README.md"), "utf8");
-const rawMain = "https://raw.githubusercontent.com/PostHog/fleet-engine/main/";
+const rawMain = "https://raw.githubusercontent.com/PostHog/hedge/main/";
 
 function gettingStarted() {
   const text = readme();
@@ -22,7 +22,7 @@ function prompt() {
 }
 
 describe("the README", () => {
-  test("opens with a picture of Fleet that is in the repo", () => {
+  test("opens with a picture of Hedge that is in the repo", () => {
     const text = readme();
     const picture = text.match(/<img src="([^"]+)"/);
     expect(picture).not.toBeNull();

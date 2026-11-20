@@ -15,4 +15,4 @@ await runCommand(() => boxCommand(Bun.argv.slice(2), {
   print: (line) => console.log(line),
   readStdin: () => Bun.stdin.text(),
   hooks: dreamHooks(Bun.env, homedir(), () => coderOf(thisMachine())),
-}), "fleet box");
+}), "hedge box");

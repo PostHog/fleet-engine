@@ -12,7 +12,7 @@ afterEach(async () => {
 });
 
 function temporaryHome(): string {
-  const home = mkdtempSync(join(tmpdir(), "fleet-t3-home-"));
+  const home = mkdtempSync(join(tmpdir(), "hedge-t3-home-"));
   cleanups.push(() => rmSync(home, { recursive: true, force: true }));
   return home;
 }
@@ -93,8 +93,8 @@ test("linked environments are listed by the local server, and their threads are 
   expect(t3.rpcTags).toEqual(["peerLinks.list"]);
   expect(t3.toolCalls.map(({ name, args }) => [name, args.cursor ?? null])).toEqual([["t3_thread_list", null], ["t3_thread_list", 1], ["t3_thread_read", null]]);
   const cli = await t3.cliCalls();
-  expect(cli[0]).toBe("auth session issue --json --ttl 5m --label fleet --subject fleet --scope orchestration:read --scope access:read");
-  expect(cli[1]).toBe("auth session issue --json --ttl 5m --label fleet --subject mcp-client --scope orchestration:read");
+  expect(cli[0]).toBe("auth session issue --json --ttl 5m --label hedge --subject hedge --scope orchestration:read --scope access:read");
+  expect(cli[1]).toBe("auth session issue --json --ttl 5m --label hedge --subject mcp-client --scope orchestration:read");
   expect(cli.slice(2).sort()).toEqual(["auth session revoke mcp-session", "auth session revoke shell-session"]);
 });
 
@@ -287,7 +287,7 @@ test("a thread starts in T3's scratch project with the model row's provider, mod
     modelSelection: { instanceId: "codex", model: "gpt-big", options: [{ id: "reasoningEffort", value: "high" }] },
   });
   const cli = await t3.cliCalls();
-  expect(cli[0]).toBe("auth session issue --json --ttl 5m --label fleet --subject fleet --scope orchestration:read --scope orchestration:operate");
+  expect(cli[0]).toBe("auth session issue --json --ttl 5m --label hedge --subject hedge --scope orchestration:read --scope orchestration:operate");
   expect(cli.at(-1)).toBe("auth session revoke shell-session");
 });
 
@@ -302,7 +302,7 @@ test("a session can ask for the scopes its caller needs, such as access:write to
     },
   });
   expect(calls).toEqual([
-    ["auth", "session", "issue", "--json", "--ttl", "5m", "--label", "fleet", "--subject", "fleet", "--scope", "access:read", "--scope", "access:write"],
+    ["auth", "session", "issue", "--json", "--ttl", "5m", "--label", "hedge", "--subject", "hedge", "--scope", "access:read", "--scope", "access:write"],
     ["auth", "session", "revoke", "write-session"],
   ]);
 });

@@ -106,5 +106,5 @@ export function header(steps: Step[], done: Set<string>) {
   const left = steps.filter((step) => !done.has(step.id));
   const minutes = Math.ceil(left.reduce((sum, step) => sum + step.minutes, 0));
   const position = Math.min(steps.length - left.length + 1, steps.length);
-  return `Fleet setup · ${position} of ${steps.length} · about ${minutes} min left`;
+  return `Hedge setup · ${position} of ${steps.length} · about ${minutes} min left`;
 }

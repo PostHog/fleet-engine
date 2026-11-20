@@ -3,7 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { mapRef, proseLines } from "./wayfinder.ts";
 
-const usage = "Usage: fleet map";
+const usage = "Usage: hedge map";
 
 test("a map is a URL, an owner/repo#number, or a number on the tracker", () => {
   const tracker = () => "acme/maps";

@@ -33,6 +33,14 @@ export function tryLock(path: string): Held | undefined {
   };
 }
 
+export const stateLock = ".local/state/hedge/hedge.lock";
+
+export function holdLock(path: string): Held {
+  const held = tryLock(path);
+  if (!held) throw new Error(`Another Hedge operation holds ${path}. Run this again once it ends.`);
+  return held;
+}
+
 /** Waits up to limitMs for the lock, asking sleep for each pause. */
 export async function waitLock(path: string, sleep: (ms: number) => Promise<void>, limitMs: number): Promise<Held | undefined> {
   for (let waited = 0; ; waited += pollMs) {

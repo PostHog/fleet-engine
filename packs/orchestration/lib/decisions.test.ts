@@ -48,7 +48,7 @@ const expected = [
   "Involvement: 1 grilling answered, 1 prototype iterated over 2 rounds.",
 ].join("\n");
 
-test("fleet decisions tables the newest answer per question from the map and its closed tickets", async () => {
+test("hedge decisions tables the newest answer per question from the map and its closed tickets", async () => {
   const lines: string[] = [];
 
   const code = await runDecisions(["acme/maps#1"], { ...fixtureFetchers(fixture), tracker: () => "", print: (line) => lines.push(line) });
@@ -57,7 +57,7 @@ test("fleet decisions tables the newest answer per question from the map and its
   expect(code).toBe(0);
 });
 
-test("fleet decisions says when a map has no decisions and no human-in-the-loop tickets", async () => {
+test("hedge decisions says when a map has no decisions and no human-in-the-loop tickets", async () => {
   const lines: string[] = [];
   const empty = { issues: [issueNode(repository, 1, { children: [issueNode(repository, 2, { state: "CLOSED" })] })] };
 
@@ -66,17 +66,17 @@ test("fleet decisions says when a map has no decisions and no human-in-the-loop 
   expect(lines.join("\n")).toBe("No load-bearing decisions.\n\nInvolvement: no human-in-the-loop tickets.");
 });
 
-test("fleet decisions runs as a pack command against the tracker from the settings", async () => {
-  const home = await mkdtemp(join(tmpdir(), "fleet-decisions-"));
+test("hedge decisions runs as a pack command against the tracker from the settings", async () => {
+  const home = await mkdtemp(join(tmpdir(), "hedge-decisions-"));
   cleanups.push(home);
   const bin = await fakeGitHub(home, fixture);
 
-  const result = await runPackCommand("decisions", ["1"], { HOME: home, PATH: `${bin}:${Bun.env.PATH}`, FLEET_SETTINGS: JSON.stringify({ "orchestration.tracker": repository }) });
+  const result = await runPackCommand("decisions", ["1"], { HOME: home, PATH: `${bin}:${Bun.env.PATH}`, HEDGE_SETTINGS: JSON.stringify({ "orchestration.tracker": repository }) });
 
   expect(result).toEqual({ stdout: `${expected}\n`, stderr: "", code: 0 });
 });
 
-test("fleet decisions takes the newest answer by edit time, so an edited comment counts from its edit", async () => {
+test("hedge decisions takes the newest answer by edit time, so an edited comment counts from its edit", async () => {
   const edited: GitHubFixture = {
     issues: [issueNode(repository, 1, { children: [issueNode(repository, 2, { state: "CLOSED" }), issueNode(repository, 3, { state: "CLOSED" })] })],
     discussions: {
@@ -90,16 +90,16 @@ test("fleet decisions takes the newest answer by edit time, so an edited comment
   await runDecisions(["acme/maps#1"], { ...fixtureFetchers(edited), tracker: () => "", print: (line) => lines.push(line) });
 
   expect(lines.join("\n")).toBe(want);
-  const home = await mkdtemp(join(tmpdir(), "fleet-decisions-"));
+  const home = await mkdtemp(join(tmpdir(), "hedge-decisions-"));
   cleanups.push(home);
   const bin = await fakeGitHub(home, edited);
-  expect(await runPackCommand("decisions", ["acme/maps#1"], { HOME: home, PATH: `${bin}:${Bun.env.PATH}`, FLEET_SETTINGS: "{}" })).toEqual({ stdout: `${want}\n`, stderr: "", code: 0 });
+  expect(await runPackCommand("decisions", ["acme/maps#1"], { HOME: home, PATH: `${bin}:${Bun.env.PATH}`, HEDGE_SETTINGS: "{}" })).toEqual({ stdout: `${want}\n`, stderr: "", code: 0 });
   const discussionQueries = (await readFile(join(bin, "queries.log"), "utf8")).split("\n").filter((query) => query.includes("comments("));
   expect(discussionQueries.length).toBeGreaterThan(0);
   expect(discussionQueries.every((query) => /comments\(.*nodes \{.*\bupdatedAt\b/.test(query))).toBe(true);
 });
 
-test("fleet decisions counts answers in the map's comments next to its body and its closed tickets", async () => {
+test("hedge decisions counts answers in the map's comments next to its body and its closed tickets", async () => {
   const commented: GitHubFixture = {
     issues: [issueNode(repository, 1, { children: [issueNode(repository, 2, { state: "CLOSED" })] })],
     discussions: {
@@ -127,7 +127,7 @@ test("fleet decisions counts answers in the map's comments next to its body and 
   ].join("\n"));
 });
 
-test("fleet decisions leaves out an old ✅ progress note whose bold text asks no question", async () => {
+test("hedge decisions leaves out an old ✅ progress note whose bold text asks no question", async () => {
   const body = ["- ✅ **#55 closed** (conductor) Handoff verified", "- ✅ **Old question?** Old answer"].join("\n");
   const lines: string[] = [];
 
@@ -142,7 +142,7 @@ test("fleet decisions leaves out an old ✅ progress note whose bold text asks n
   ].join("\n"));
 });
 
-test("fleet decisions leaves out a question with no answer, under any mark", async () => {
+test("hedge decisions leaves out a question with no answer, under any mark", async () => {
   const body = ["- ✅ **Which queue?**   ", "- 👤 **Which bus?**   ", "- ✅ **Which store?** Postgres"].join("\n");
   const lines: string[] = [];
 
@@ -157,7 +157,7 @@ test("fleet decisions leaves out a question with no answer, under any mark", asy
   ].join("\n"));
 });
 
-test("fleet decisions keeps a marked answer over an old ✅ answer to the same question, earlier or later", async () => {
+test("hedge decisions keeps a marked answer over an old ✅ answer to the same question, earlier or later", async () => {
   const body = ["- 👤 **Which store?** Postgres", "- ✅ **Which store?** SQLite", "- ✅ **Which queue?** Redis"].join("\n");
   const comments = [{ author: "ada", body: "- ✅ **Which store?** MySQL", url: url(1, "c1"), createdAt: "2026-11-01T09:00:00Z", updatedAt: "2026-11-20T09:00:00Z" }];
   const lines: string[] = [];
@@ -175,7 +175,7 @@ test("fleet decisions keeps a marked answer over an old ✅ answer to the same q
   ].join("\n"));
 });
 
-test("fleet decisions lists a marked answer where it was given, not where an old ✅ answer to it stood", async () => {
+test("hedge decisions lists a marked answer where it was given, not where an old ✅ answer to it stood", async () => {
   const body = ["- ✅ **Which queue?** Redis", "- 🤖 **Which bus?** Kafka"].join("\n");
   const comments = [{ author: "ada", body: "- 🤖 **Which queue?** SQS", url: url(1, "c1"), createdAt: "2026-11-14T09:00:00Z", updatedAt: "2026-11-14T09:00:00Z" }];
   const lines: string[] = [];
@@ -192,7 +192,7 @@ test("fleet decisions lists a marked answer where it was given, not where an old
   ].join("\n"));
 });
 
-test("fleet decisions lists a newer ✅ answer where its question first stood", async () => {
+test("hedge decisions lists a newer ✅ answer where its question first stood", async () => {
   const body = ["- ✅ **Which cache?** Memcached", "- ✅ **Which lock?** etcd"].join("\n");
   const comments = [{ author: "ada", body: "- ✅ **Which cache?** Redis", url: url(1, "c1"), createdAt: "2026-11-14T09:00:00Z", updatedAt: "2026-11-14T09:00:00Z" }];
   const lines: string[] = [];
@@ -209,7 +209,7 @@ test("fleet decisions lists a newer ✅ answer where its question first stood", 
   ].join("\n"));
 });
 
-test("fleet decisions shows old ✅ lines as their own group after the three marks", async () => {
+test("hedge decisions shows old ✅ lines as their own group after the three marks", async () => {
   const body = ["- ✅ **Old question?** Old answer", "- 🤖 **Agent question?** Took A", "- 👤 **Human question?** His answer"].join("\n");
   const lines: string[] = [];
 
@@ -227,7 +227,7 @@ test("fleet decisions shows old ✅ lines as their own group after the three mar
   ].join("\n"));
 });
 
-test("fleet decisions ignores an example decision inside a longer fence", async () => {
+test("hedge decisions ignores an example decision inside a longer fence", async () => {
   const body = ["- 👤 **Which store?** Postgres", "````md", "Write answers like this:", "```", "- 🤖 **Which store?** An example", "```", "````"].join("\n");
   const lines: string[] = [];
 
@@ -236,9 +236,9 @@ test("fleet decisions ignores an example decision inside a longer fence", async 
   expect(lines.join("\n")).toBe(["| Question | Answer | Who | Where |", "| --- | --- | --- | --- |", `| Which store? | Postgres | 👤 Human | [map #1](https://github.com/${repository}/issues/1) |`, "", "Involvement: no human-in-the-loop tickets."].join("\n"));
 });
 
-test("fleet decisions refuses a bad map", async () => {
+test("hedge decisions refuses a bad map", async () => {
   const io = { ...fixtureFetchers({ issues: [] }), tracker: () => "", print: () => {} };
-  const usage = "Usage: fleet decisions <map URL | owner/repo#number | number>";
+  const usage = "Usage: hedge decisions <map URL | owner/repo#number | number>";
   await expect(runDecisions([], io)).rejects.toThrow(usage);
   await expect(runDecisions(["acme/maps"], io)).rejects.toThrow(usage);
 });

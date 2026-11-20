@@ -12,8 +12,8 @@ const graceAfterExit = 15;
 
 function ended(signIn: SignIn, code: number) {
   const name = signIn.command![0];
-  if (code === 127) return `${name} is not installed here. Install it, then run fleet setup again.`;
-  return `${signIn.command!.join(" ")} ended${code ? ` with code ${code}` : ""}, but ${signIn.title} still does not pass its check. Fix what it says above, then run fleet setup again.`;
+  if (code === 127) return `${name} is not installed here. Install it, then run hedge setup again.`;
+  return `${signIn.command!.join(" ")} ended${code ? ` with code ${code}` : ""}, but ${signIn.title} still does not pass its check. Fix what it says above, then run hedge setup again.`;
 }
 
 export type SignIn = {
@@ -98,7 +98,7 @@ async function withKeyboard(signIn: SignIn, { terminal, machine }: HumanContext)
   return signIn.after?.();
 }
 
-/** A pack's human step, followed by the pack steps that wait for it. A leading fleet in their commands runs the engine at engineRoot. */
+/** A pack's human step, followed by the pack steps that wait for it. A leading hedge in their commands runs the engine at engineRoot. */
 export function packSignIn(step: Owned<HumanStep>, steps: Array<Owned<PackStep>>, context: HumanContext, engineRoot: string | undefined): SignIn {
   const { machine, terminal } = context;
   const exec = (command: string[]) => machine.exec(engineCommand(command, engineRoot));
@@ -110,7 +110,7 @@ export function packSignIn(step: Owned<HumanStep>, steps: Array<Owned<PackStep>>
     why: `The ${step.pack} pack needs this.`,
     probe: () => passes(step.probe),
     ...(step.command ? { command: ["sh", "-c", engineShellCommand(step.command, engineRoot)] } : {}),
-    ...(step.command && /^fleet( \S+)+$/.test(step.command) ? { finishes: true as const } : {}),
+    ...(step.command && /^hedge( \S+)+$/.test(step.command) ? { finishes: true as const } : {}),
     ...(step.interactive ? { interactive: true as const } : {}),
     async after() {
       for (const next of steps.filter((item) => item.pack === step.pack && item.after === step.id)) {
