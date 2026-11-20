@@ -7,7 +7,7 @@ import { guardField } from "./proof-receipt.ts";
 import { pullRequestDirectory, readJson, writeJson, type ProofIdentity } from "./proof.ts";
 
 export const sanityVerdicts = ["cut", "justified"] as const;
-export type SanityPass = { commit: string; verdict: (typeof sanityVerdicts)[number]; reason: string; production: number; recordedAt: string };
+export type SanityPass = { commit: string; verdict: (typeof sanityVerdicts)[number]; reason: string; production: number | null; recordedAt: string };
 
 function pullOf(head: ProofIdentity, run: Run): PullRequest | undefined {
   try { return readPullRequest(head, run); } catch { return undefined; }
@@ -38,8 +38,7 @@ export async function recordSanity(home: string, head: ProofIdentity, run: Run, 
   const { growth, missing } = await growthAtHead(home, head, run);
   const production = growth.final?.production;
   if (missing) throw new Error(missing);
-  if (production === undefined) throw new Error("Hedge cannot count the production lines at HEAD here. Run it in the PR's checkout after its first finished review round");
-  const pass: SanityPass = { commit: head.commit, verdict: verdict as SanityPass["verdict"], reason, production, recordedAt: now.toISOString() };
+  const pass: SanityPass = { commit: head.commit, verdict: verdict as SanityPass["verdict"], reason, production: production ?? null, recordedAt: now.toISOString() };
   await mkdir(sanityDirectory(home, head), { recursive: true, mode: 0o700 });
   await writeJson(join(sanityDirectory(home, head), `${head.commit}.json`), pass);
   return pass;
@@ -48,8 +47,14 @@ export async function recordSanity(home: string, head: ProofIdentity, run: Run, 
 export async function requireSanity(home: string, head: ProofIdentity, run: Run) {
   const { growth, missing } = await growthAtHead(home, head, run);
   const [first, final] = [growth.first?.production, growth.final?.production];
-  if (first && missing) throw new Error(missing);
-  if (!first || final === undefined || final <= 2 * first) return;
-  if (((await readSanity(home, head)).at(-1)?.production ?? -1) >= final) return;
+  if (!first) return;
+  if (missing) throw new Error(missing);
+  const last = (await readSanity(home, head)).at(-1);
+  if (final === undefined) {
+    if (last?.commit === head.commit) return;
+    throw new Error(`Hedge cannot count the production lines at HEAD, so it cannot tell whether they grew past twice the ${first} of round 1. Before another round, read the growth since round 1 by hand, then cut it back to base behaviour or justify it: hedge proof sanity --verdict cut|justified --reason '<why>'`);
+  }
+  if (final <= 2 * first) return;
+  if ((last?.production ?? -1) >= final) return;
   throw new Error(`Production lines grew from ${first} at round 1 to ${final} at HEAD, past twice the first. Before another round, cut the PR back to base behaviour, or justify the growth: hedge proof sanity --verdict cut|justified --reason '<why>'`);
 }
