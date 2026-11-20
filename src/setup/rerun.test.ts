@@ -93,7 +93,7 @@ describe("hedge setup after a stop", () => {
 
     const resumed = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""], box);
 
-    expect(resumed.output).toContain("Your profile's origin could not be reached (fatal: unable to access 'https://git.example/nora/profile.git': Could not resolve host: git.example).");
+    expect(resumed.output).toContain("Your profile's origin could not be reached (fatal: unable to access 'https://git.example/nora/profile.git/': Could not resolve host: git.example).");
     expect(resumed.output).not.toContain(password);
     expect(resumed.code).toBe(0);
   });

@@ -405,16 +405,16 @@ describe("hedge setup profile", () => {
     expect(rerun.output).toContain(`hedge: ${profilePath(home)} is a clone of https://github.com/nora/hedge-profile-public.git, not nora/hedge-profile.`);
   });
 
-  test("names a profile folder that pushes elsewhere without the sign-in in that address", async () => {
+  test.each([["plain text", ["pretend", "pass", "x"]], ["text with an apostrophe", ["pretend", "pa'ss", "x"]], ["text with a double quote", ["pretend", 'pa"ss', "x"]], ["text with an at sign", ["pretend", "pa@ss", "x"]]])("names a profile folder that pushes elsewhere without the sign-in in that address, when the password is %s", async (_, parts) => {
     const home = temp.make("home-");
     expect((await hedgeSetup(home, starter, ["", ""])).code).toBe(0);
-    const password = ["pretend", "pass", "x"].join("-");
-    await spawnGit(profilePath(home), "config", "remote.origin.pushurl", `https://nora:${password}@git.example/nora/mirror.git`);
+    const password = parts.join("-");
+    await spawnGit(profilePath(home), "config", "remote.origin.pushurl", `HTTPS://nora:${password}@git.example/nora/mirror.git`);
     writeFileSync(join(home, ".config/hedge/machine.json"), JSON.stringify({ schema: 1, role: "linux" }));
     const rerun = await hedgeSetup(home, starter, ["", ""]);
     expect(rerun.code).toBe(1);
-    expect(rerun.output).toContain(`hedge: ${profilePath(home)} is a clone of https://git.example/nora/mirror.git, not nora/hedge-profile.`);
-    expect(rerun.output).not.toContain(password);
+    expect(rerun.output).toContain(`hedge: ${profilePath(home)} is a clone of HTTPS://git.example/nora/mirror.git, not nora/hedge-profile.`);
+    for (const part of password.split(/['"@]/)) expect(rerun.output).not.toContain(part);
   });
 
   test("refuses to take over a folder that is not the profile", async () => {
