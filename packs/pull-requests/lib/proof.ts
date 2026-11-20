@@ -255,7 +255,7 @@ function askUser(identity: ProofIdentity, stop: string) {
 
 export type CapturedBy = "hedge" | "author";
 export type DecisionMark = Pick<Decision, "mark" | "id">;
-export type ReviewRequest = { opening?: boolean; sanity?: () => Promise<void>; scope: string; base?: string; from?: string; decision?: Decision; phase?: string; arbiter: Arbiter; limits: ReviewLimits; cleanBaseMerge?: CleanBaseMerge; quietCommit?: QuietCommit; capturedBy?: CapturedBy; lock?: LockRound; lockBudget: LockBudget; now: () => Date };
+export type ReviewRequest = { opening?: () => Promise<boolean>; sanity?: () => Promise<void>; scope: string; base?: string; from?: string; decision?: Decision; phase?: string; arbiter: Arbiter; limits: ReviewLimits; cleanBaseMerge?: CleanBaseMerge; quietCommit?: QuietCommit; capturedBy?: CapturedBy; lock?: LockRound; lockBudget: LockBudget; now: () => Date };
 export type Reserved = { round: number | "final"; id: string; directory: string };
 type Permit = { arbiter: Arbiter; limits: ReviewLimits };
 
@@ -306,10 +306,10 @@ export async function startReview(home: string, identity: ProofIdentity, request
   const reviews = join(pullRequestDirectory(home, identity), "reviews");
   await mkdir(reviews, { recursive: true, mode: 0o700 });
   if (scope === "final") return startFinalRead(home, identity, base, decision, finalReadPhase(phase ?? "review"), permit, cleanBaseMerge, quietCommit, capturedBy, from, { lock, lockBudget, now });
-  return startRound(home, identity, reviews, { scope, base, from, decision, permit, cleanBaseMerge, capturedBy, opening: request.opening ?? false, sanity: request.sanity ?? (async () => {}), reserving: { lock, lockBudget, now } });
+  return startRound(home, identity, reviews, { scope, base, from, decision, permit, cleanBaseMerge, capturedBy, opening: request.opening ?? (async () => false), sanity: request.sanity ?? (async () => {}), reserving: { lock, lockBudget, now } });
 }
 
-type RoundStart = { scope: string; base?: string; from?: string; decision: Decision | undefined; permit: Permit; cleanBaseMerge: CleanBaseMerge; capturedBy: CapturedBy; opening: boolean; sanity: () => Promise<void>; reserving: Reserving };
+type RoundStart = { scope: string; base?: string; from?: string; decision: Decision | undefined; permit: Permit; cleanBaseMerge: CleanBaseMerge; capturedBy: CapturedBy; opening: () => Promise<boolean>; sanity: () => Promise<void>; reserving: Reserving };
 
 async function startRound(home: string, identity: ProofIdentity, reviews: string, { scope, base, from, decision, permit, cleanBaseMerge, capturedBy, opening, sanity, reserving: { lockBudget, ...stamping } }: RoundStart): Promise<Reserved> {
   const { free, ceiling } = permit.limits;
@@ -317,7 +317,7 @@ async function startRound(home: string, identity: ProofIdentity, reviews: string
   const permitRound = async ({ round, spent }: Awaited<ReturnType<typeof snapshot>>) => {
     if (round === 1 && scope !== "full") throw new Error("Round 1 is --scope full: it reviews the whole PR diff. Drop --base");
     if (round > 1) await requireFinished(reviews, round);
-    if (round > 1 && !opening && decision?.mark !== "👤") await requireBoughtRound(home, identity);
+    if (round > 1 && decision?.mark !== "👤" && !await opening()) await requireBoughtRound(home, identity);
     if (round > 1) await checkLaterRound(reviews, round, scope, base, decision, cleanBaseMerge);
     if (round > 1) await sanity();
     return permitReview(home, identity, spent >= free, spent >= ceiling ? budgetSpent(permit.limits) : undefined, decision, permit);
@@ -363,7 +363,7 @@ async function requireBoughtRound(home: string, identity: ProofIdentity) {
   if (answeredFindings(findings, responses).findings.some(buysRound)) return;
   const label = reviewLabel(last.name);
   const stop = `${label[0]!.toUpperCase()}${label.slice(1)} found no bug in production code that the PR introduced, so the review loop stops.`;
-  throw new Error(`${stop} Reject a finding the base has too with its base lines, and list it under Known issues. When fixes since ${label} changed production code, give them a final read with --scope final. Only the user's --override runs another round: ask the user with your question tool. Question: "${roundQuestion} ${identity.repository}#${identity.pr}: ${stop}" Options: "${runOption}", "${stopOption}". When they choose "${runOption}", run this command again with --override '<date> "${runOption}"'`);
+  throw new Error(`${stop} Reject a finding the base has too with its base lines, and list it under Known issues. When fixes since ${label} changed production code, give them a final read with --scope final. Do not ask the user for another round. Only the user's --override runs one: when the user asks for it, confirm it with your question tool. Question: "${roundQuestion} ${identity.repository}#${identity.pr}: ${stop}" Options: "${runOption}", "${stopOption}". When they choose "${runOption}", run this command again with --override '<date> "${runOption}"'`);
 }
 
 type AnsweredFinding = ReturnType<typeof answeredFindings>["findings"][number];
@@ -373,7 +373,7 @@ const tailField = /^(?:anchor|sites):/i;
 
 function buysRound({ text, note, test, answer }: AnsweredFinding) {
   if (note || test || answer?.verdict === "rejected" || answer?.verdict === "known") return false;
-  const fields = itemFields(text);
+  const fields = fieldsOutsideCode(text);
   const severity = fields && statedSeverity(fields);
   if (!fields || (severity !== "blocker" && severity !== "major")) return false;
   const tail = fields.findIndex((field) => tailField.test(field));
@@ -554,6 +554,9 @@ const testsBlock = /^\s*(?:#+\s*)?\**TESTS\b/;
 const listItem = /^\s*(?:[-*]|\d+[.)])\s+(.*)/;
 const severityField = /^\**(blocker|major|minor|nit)\**$/i;
 const severityShorthand = /^\**(?:minor|nit)(?:[,:]\**|\**[,:])\s/i;
+
+const fieldsOutsideCode = (text: string) => listItem.exec(text.split("\n")[0]!)?.[1]
+  ?.replace(/(`+)[^`][\s\S]*?\1(?!`)/g, (span) => span.replace(/\|/g, "\u0000")).split("|").map((field) => field.replace(/\u0000/g, "|").trim());
 
 const itemFields = (text: string) => listItem.exec(text.split("\n")[0]!)?.[1]?.split("|").map((field) => field.trim());
 

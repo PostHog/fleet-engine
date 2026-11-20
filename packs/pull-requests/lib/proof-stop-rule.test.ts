@@ -192,3 +192,15 @@ test("a sanity pass needs a reason without figures, and a half-written pass file
   expect((await pr.hedge("sanity", "--verdict", "justified", "--reason", "The fix needs its own parser")).code).toBe(0);
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).code).toBe(0);
 });
+
+test("a pipe inside code in a finding stays in its field, so a docs file buys no round and a production bug still does", async () => {
+  const docs = await checkout();
+  const docsReviewed = await firstRound(docs, ["- major | `docs/A|B.md:7` | the page names the wrong flag | anchor: greet 0"], ["1. fixed: the page names the flag"]);
+  await docs.commit("feature.ts", lines(11, "greet"));
+  await expect(docs.hedge("review-start", "--scope", "fixes", "--base", docsReviewed)).rejects.toThrow(stops);
+
+  const code = await checkout();
+  const codeReviewed = await firstRound(code, ["- major | feature.ts:2 | `flags | [base]` drops the last flag | anchor: greet 1"], ["1. fixed: the flags keep it"]);
+  await code.commit("feature.ts", lines(11, "greet"));
+  expect((await code.hedge("review-start", "--scope", "fixes", "--base", codeReviewed)).code).toBe(0);
+});
