@@ -45,13 +45,14 @@
   prints no command when the hub's Coder address is plain HTTP, and says so
   when the Coder CLI could not be fetched from the hub's Coder address. It
   runs `coder login` and `coder config-ssh` on the node under
-  `timeout -s KILL`. It kills them there, and every process they started,
-  2 minutes after the command starts on the node. For a connection that
-  stops answering, the hub stops its SSH call 150 seconds after it starts
-  that call, and that time includes the SSH setup. It removes the token
-  when they fail or time out, under `timeout` too, with 1 minute. When the
-  removal fails or times out, it names the token and the command that
-  removes it.
+  `timeout -s KILL`. 2 minutes after the command starts on the node, it
+  kills them there, with the processes they started that are still in
+  their process group. For a connection that stops answering, the hub
+  stops its SSH call 150 seconds after it starts that call, and that time
+  includes the SSH setup. It removes the token when they fail or time out,
+  under `timeout` too: the removal gets TERM after 1 minute, and KILL 10
+  seconds after that. When the removal fails or times out, it names the
+  token and the command that removes it.
   After the node applies the profile, it asks the node's
   `hedge doctor --to-do` which steps are left. When the apply passed and
   the node finds nothing but those steps, it goes on with the sign-ins,

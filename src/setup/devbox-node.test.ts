@@ -4,11 +4,14 @@ import { join } from "node:path";
 import { isolateGit, spawnGit, tempDirs } from "../testing/git.ts";
 import { profilePath } from "./profile.ts";
 import { overSsh } from "./devbox.ts";
-import { boxHome, coderToken, fakeMachine, machineFile, personCoderToken, ended, setUpToAdd, throughSsh } from "./testing.ts";
+import { boxHome, coderToken, fakeMachine, machineFile, personCoderToken, processRunning, setUpToAdd, stopFakeProcesses, throughSsh, until } from "./testing.ts";
 
 isolateGit();
 const temp = tempDirs();
-afterEach(() => temp.cleanup());
+afterEach(async () => {
+  await stopFakeProcesses();
+  temp.cleanup();
+});
 
 const node = "coder.hedge-node-1";
 const onLinux = test.if(process.platform === "linux");
@@ -27,6 +30,16 @@ async function nameHub(home: string, hub: string) {
 }
 
 const lastLine = (output: string) => output.split("\n").at(-1);
+const timedOut = `hedge: Hedge could not sign ${node} in to Coder: coder login and coder config-ssh did not finish within 2 minutes.`;
+const stuckSignIn = async (box: ReturnType<typeof fakeMachine>, adding: Promise<number>) => {
+  const stuck = await Promise.race([box.stuckSignIn(), adding.then(() => [])]);
+  expect(stuck).toHaveLength(2);
+  return stuck;
+};
+const signInKilledAtDeadline = async (box: ReturnType<typeof fakeMachine>, adding: Promise<number>) => {
+  await stuckSignIn(box, adding);
+  await box.passTime(120_000);
+};
 const tokenSent = (box: ReturnType<typeof fakeMachine>) => box.calls.some((call) => call.input?.includes(coderToken));
 const coderFile = (home: string, name: string) => join(boxHome(home, node), ".config/coderv2", name);
 const coderFiles = (home: string) => Object.fromEntries(["url", "session"].filter((name) => existsSync(coderFile(home, name))).map((name) => [name, readFileSync(coderFile(home, name), "utf8")]));
@@ -71,43 +84,66 @@ describe("hedge devbox add signs the workspace in to Coder", () => {
     expect(statSync(coderFile(home, "session")).mode & 0o777).toBe(0o600);
   });
 
-  onLinux("and removes the token it made when the deadline on the workspace kills a stuck coder login and the child it started", async () => {
+  onLinux("and removes the token it made when the deadline on the workspace kills a stuck coder login and the child it started, 2 minutes after the command starts there", async () => {
     const { home, io, add } = await signedUp();
     keepsOwnSsh(home);
     const box = fakeMachine(home, { "box:coder": 1 }, { signInTimesOut: true });
-    expect(await add(box)).toBe(1);
-    expect(await Promise.all(box.stuckProcesses().map(ended))).toEqual([true, true]);
+    const adding = add(box);
+    const stuck = await stuckSignIn(box, adding);
+    await box.passTime(119_999);
+    expect(stuck.map(processRunning)).toEqual([true, true]);
+    await box.passTime(1);
+    expect(stuck.map(processRunning)).toEqual([false, false]);
+    expect(await adding).toBe(1);
     expect([box.coderTokens(), sshConfig(home), coderFiles(home)]).toEqual([[], ownSshConfig, {}]);
-    expect(lastLine(io.output())).toBe(`hedge: Hedge could not sign ${node} in to Coder: coder login and coder config-ssh did not finish within 2 minutes.`);
+    expect(lastLine(io.output())).toBe(timedOut);
   });
 
-  test("and returns, and removes the token it made, 150 seconds after it starts a sign-in whose SSH connection stops answering", async () => {
+  test("and returns, and removes the token it made, 150 seconds after it starts an SSH call whose connection stops answering after the sign-in, SSH setup included", async () => {
     const { home, io, add } = await signedUp();
     const box = fakeMachine(home, { "box:coder": 1 }, { signInConnectionStalls: true });
     const adding = add(box);
-    await box.signInAnnounced;
-    box.passTime(150_000);
+    const startedAt = await Promise.race([box.signInAnnounced, adding.then(() => undefined)]);
+    expect(startedAt).toBeNumber();
+    await box.passTime(startedAt! + 149_999 - box.clock.now());
+    expect(box.openConnections()).toBe(1);
+    await box.passTime(1);
     expect(box.openConnections()).toBe(0);
     expect(await adding).toBe(1);
     expect(box.coderTokens()).toEqual([]);
-    expect(lastLine(io.output())).toBe(`hedge: Hedge could not sign ${node} in to Coder: coder login and coder config-ssh did not finish within 2 minutes.`);
+    expect(lastLine(io.output())).toBe(timedOut);
   });
 
   onLinux("and names the token and the command that removes it when timeout on the workspace ends coder login and its removal fails too", async () => {
     const { home, io, add } = await signedUp();
     const box = fakeMachine(home, { "box:coder": 1 }, { signInTimesOut: true, coderTokenRemoveFails: true });
-    expect(await add(box)).toBe(1);
+    const adding = add(box);
+    await signInKilledAtDeadline(box, adding);
+    expect(await adding).toBe(1);
     const [name] = box.coderTokens();
-    expect(lastLine(io.output())).toBe(`hedge: Hedge could not sign ${node} in to Coder: coder login and coder config-ssh did not finish within 2 minutes. Hedge could not remove the token it made, ${name}. Remove it with coder tokens remove ${name}.`);
+    expect(lastLine(io.output())).toBe(`${timedOut} Hedge could not remove the token it made, ${name}. Remove it with coder tokens remove ${name}.`);
   });
 
-  onLinux("and names the token and the command that removes it when its removal does not finish in time", async () => {
+  onLinux("and names the token and the command that removes it when its removal stays alive after TERM at 1 minute and is killed 10 seconds later", async () => {
     const { home, io, add } = await signedUp();
     const box = fakeMachine(home, { "box:coder": 1 }, { signInTimesOut: true, coderTokenRemoveHangs: true });
-    expect(await add(box)).toBe(1);
+    const adding = add(box);
+    await signInKilledAtDeadline(box, adding);
+    const [removal] = await Promise.race([box.stuckRemoval(), adding.then(() => [])]);
+    expect(removal).toBeNumber();
+    await box.passTime(59_999);
+    expect([processRunning(removal!), box.removalTerms()]).toEqual([true, []]);
+    await box.passTime(1);
+    await until(() => box.removalTerms().length > 0);
+    expect([processRunning(removal!), box.removalTerms()]).toEqual([true, ["TERM"]]);
+    await box.passTime(9_999);
+    expect(processRunning(removal!)).toBe(true);
+    await box.passTime(1);
+    expect(processRunning(removal!)).toBe(false);
+    expect(await adding).toBe(1);
     const [name] = box.coderTokens();
     expect(box.coderTokens()).toEqual([name!]);
-    expect(lastLine(io.output())).toBe(`hedge: Hedge could not sign ${node} in to Coder: coder login and coder config-ssh did not finish within 2 minutes. Hedge could not remove the token it made, ${name}. Remove it with coder tokens remove ${name}.`);
+    expect(lastLine(io.output())).toBe(`${timedOut} Hedge could not remove the token it made, ${name}. Remove it with coder tokens remove ${name}.`);
   });
 
   test("and reports a coder login that the workspace killed before its time ran out as a failure with its output, not as a timeout", async () => {

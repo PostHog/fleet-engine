@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { main } from "../cli.ts";
 import type { FetchedSource, SourceRef } from "../pack/types.ts";
@@ -102,7 +102,7 @@ export const onBox = (command: string[]) => (command[0] === "ssh" ? command.at(-
  * takes every curl request which does not turn proxies off. The box's tunnel answers only after tunnelStartsAfter lookups, and the tunnel here only after hereTunnelStartsAfter.
  * Each box's T3 environment id is env-<host>, except on the hosts withoutT3, where T3 never ran.
  * T3 here lists hereLinks as its linked environments, and unlink forgets one, or fails with unlinkFails. T3 on the hub lists hubLinks. ssh never reaches the hosts named unreachable.
- * This machine is signed in to Coder at coderAt, https://coder.example.com unless set. A box answers Coder's build info, and serves the Coder CLI, only at boxReachesCoderAt, this machine's address unless set; coderRedirects makes the build info or the CLI answer with a redirect instead, which its curl follows when told to on the command line or in ~/.curlrc, unless -q comes first or --max-redirs is 0. Its curl refuses any other protocol than HTTPS when told --proto =https. coderCli makes the CLI download answer with another status than 200, with no body, or with a CLI whose version fails. Every shell command on the box runs with boxEnv, and one that dies of a signal exits 255, as ssh does when the remote command dies of one, since it ignores exit-signal. Its Coder sign-in runs in bash -c, as sshd runs it in a bash login shell, which runs the last command in place of itself. Its Coder CLI signs in with CODER_SESSION_TOKEN and CODER_URL from boxEnv, or else the session and url files in ~/.config/coderv2, when they hold a token this machine made and has not removed, and an address it reaches, or personCoderToken at any address, as another Coder user unless boxCoderSameUser. Without them a box is signed in as this machine's user while its box:coder sign-in passes. It waits for ever on a url or session FIFO, so it fails there. The Coder CLI it downloads runs coder login as the real one does: it takes CODER_SESSION_TOKEN as the session only with --use-token-as-session, else it makes a new one, and without the variable the person pastes one; it signs in only at an address the box reaches, with a token the server knows, and writes session, then url, for only their owner to read; like the real one, it keeps the mode of a session file that is there and logs the mode each session file has as it writes the token, which sessionModes returns. With coderLoginKilled, its coder login is killed with SIGKILL as it starts. Its coder config-ssh needs a known token too, fails with coderConfigSshFails, and writes ~/.ssh/config for CODER_URL, or else for the address in the url file, as the coder config-ssh of a signed-in box does. Here, coder tokens create and remove keep the list coderTokens returns, coderTokenRemoveFails makes a removal fail, and coderTokenRemoveHangs makes it wait for ever, unless timeout runs it with a limit above 0, which then exits 124. timeout on the box runs its command, and takes -s, -k and --foreground before the limit. With signInTimesOut, a limit above 0 arms its deadline, which works as GNU timeout does: it runs the command in a process group of its own, and when the deadline fires it sends the signal to that group, or with --foreground to the command alone, and with -s KILL to the group it dies of SIGKILL itself; it ignores -k. Its coder login ignores SIGTERM, starts a child that holds the output, and stays alive with it until the deadline fires: it fires the armed deadline at once with SIGALRM, as the timer of GNU timeout does when the limit runs out, so no real time passes, and fails when no deadline is armed. stuckProcesses returns the pids of that login and its child, and ended resolves once a pid has ended. With signInConnectionStalls, coder login on the box prints a line as it starts, and the SSH connection stays open after the sign-in ran there. signInAnnounced resolves when that line comes through the connection. passTime moves this machine's clock on, and ends a connection by its process group when the exec's timeoutMs has passed, as realMachine.exec does, which gives exit 137. openConnections counts the connections still open. hedge peers link on the hub renews the node's link in the list T3 on the hub returns.
+ * This machine is signed in to Coder at coderAt, https://coder.example.com unless set. A box answers Coder's build info, and serves the Coder CLI, only at boxReachesCoderAt, this machine's address unless set; coderRedirects makes the build info or the CLI answer with a redirect instead, which its curl follows when told to on the command line or in ~/.curlrc, unless -q comes first or --max-redirs is 0. Its curl refuses any other protocol than HTTPS when told --proto =https. coderCli makes the CLI download answer with another status than 200, with no body, or with a CLI whose version fails. Every shell command on the box runs with boxEnv, and one that dies of a signal exits 255, as ssh does when the remote command dies of one, since it ignores exit-signal. Its Coder sign-in runs in bash -c, as sshd runs it in a bash login shell, which runs the last command in place of itself. Its Coder CLI signs in with CODER_SESSION_TOKEN and CODER_URL from boxEnv, or else the session and url files in ~/.config/coderv2, when they hold a token this machine made and has not removed, and an address it reaches, or personCoderToken at any address, as another Coder user unless boxCoderSameUser. Without them a box is signed in as this machine's user while its box:coder sign-in passes. It waits for ever on a url or session FIFO, so it fails there. The Coder CLI it downloads runs coder login as the real one does: it takes CODER_SESSION_TOKEN as the session only with --use-token-as-session, else it makes a new one, and without the variable the person pastes one; it signs in only at an address the box reaches, with a token the server knows, and writes session, then url, for only their owner to read; like the real one, it keeps the mode of a session file that is there and logs the mode each session file has as it writes the token, which sessionModes returns. With coderLoginKilled, its coder login is killed with SIGKILL as it starts. Its coder config-ssh needs a known token too, fails with coderConfigSshFails, and writes ~/.ssh/config for CODER_URL, or else for the address in the url file, as the coder config-ssh of a signed-in box does. Here, coder tokens create and remove keep the list coderTokens returns; coderTokenRemoveFails makes a removal fail, and coderTokenRemoveHangs makes it write each TERM it gets to removalTerms and stay alive until it is killed. One fake timeout runs here and on the box: it takes only -s KILL, -k and a limit, arms its deadline on this machine's fake clock, and at the deadline signals the command's process group as GNU timeout does. With signInTimesOut, coder login on the box ignores TERM and stays alive with a child that holds the output. stuckSignIn and stuckRemoval wait for the pids of what hangs. With signInConnectionStalls, SSH setup takes 5 seconds of the fake clock, coder login on the box prints a line as it starts, signInAnnounced resolves with the time the SSH call started once that line comes through, and the connection stays open after the sign-in. passTime moves the clock on, fires the deadlines that have passed, waits until each signal is sent and each group it kills has ended, and ends a connection by its process group when the exec's timeoutMs has passed. openConnections counts the connections still open, and stopFakeProcesses kills what is left. hedge peers link on the hub renews the node's link in the list T3 on the hub returns.
  * With node set, every other command on a box runs on a Node.
  */
 export function fakeMachine(home: string, polls: Partial<Record<SignInName, number>> = {}, options: { org?: boolean; createFails?: string; createFailsAfterMaking?: string; lookupFails?: string; publicRepos?: string[]; scopes?: string; failRun?: boolean; exits?: Partial<Record<SignInName, number>>; connectHere?: boolean; boxFiles?: Record<string, string>; hubDown?: boolean; hubUpdateFails?: string; boxCoderSameUser?: boolean; boxEnv?: Record<string, string>; coderRedirects?: Array<"probe" | "binary">; coderCli?: "non-200" | "empty" | "broken"; claude?: Partial<Record<"claude" | "box:claude", ClaudeSignedIn>>; startedAt?: number; cliPrintsTunnel?: boolean; serverWithoutLinkState?: Array<"box" | "here">; runtimeOrigin?: string; runtimePid?: unknown; serverGone?: boolean; boxConnect?: { authenticated: unknown; linked: unknown }; hereConnect?: { desired?: unknown; authenticated?: unknown; linked?: unknown }; t3Home?: string; devServerUrl?: string; tunnelStartsAfter?: number; hereTunnelStartsAfter?: number; withoutT3?: string[]; hereLinks?: HereLink[]; unreachable?: string[]; unlinkFails?: string; hereStatusFailures?: number; installers?: Record<string, string>; installerEnv?: Record<string, string>; hubLinks?: HereLink[]; boxReachesCoderAt?: string; coderAt?: string; coderTokenRemoveFails?: boolean; coderConfigSshFails?: boolean; coderLoginKilled?: boolean; signInTimesOut?: boolean; signInConnectionStalls?: boolean; coderTokenRemoveHangs?: boolean; node?: Node } = {}) {
@@ -113,12 +113,17 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
   const serverTokens = join(home, "coder-server-tokens");
   const coderArgv = join(home, "coder-argv");
   const sessionModes = join(home, "coder-session-modes");
-  const armedDeadline = join(home, "box-deadline-pid");
-  const stuckPids = join(home, "box-stuck-pids");
-  const readLines = (path: string) => (existsSync(path) ? readFileSync(path, "utf8").split("\n").filter(Boolean) : []);
-  const keepTokens = () => writeFileSync(serverTokens, [...coderTokens].map((token) => `${token}\n`).join(""));
-  keepTokens();
+  const stuckSignIn = join(home, "stuck-sign-in");
+  const stuckRemoval = join(home, "stuck-removal");
+  const removalTerms = join(home, "removal-terms");
+  const tokenNameList = join(home, "coder-token-names");
+  const removedTokens = join(home, "removed-coder-tokens");
+  const deadlines = join(home, "deadlines");
+  const timeoutBin = fakeTimeout(home, deadlines);
   const tokenNames = new Map<string, string>();
+  const keepTokens = () => (writeFileSync(serverTokens, [...coderTokens].map((token) => `${token}\n`).join("")), writeFileSync(tokenNameList, [...tokenNames.keys()].map((name) => `${name}\n`).join("")));
+  keepTokens();
+  const hereCoder = hereCoderBin(home, tokenNameList, removedTokens, options.coderTokenRemoveFails ? "fails" : options.coderTokenRemoveHangs ? "hangs" : "removes", { stuck: stuckRemoval, terms: removalTerms });
   const coderAt = options.coderAt ?? "https://coder.example.com";
   const reachesCoderAt = options.boxReachesCoderAt ?? coderAt;
   const hubUpdates: string[] = [];
@@ -235,33 +240,80 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
     return result(true, `linked ${linked}`);
   };
   const onBoxEnv = (host: string, bin?: string, env: Record<string, string> = {}) => ({ PATH: [bin, process.env.PATH ?? ""].filter(Boolean).join(":"), ...options.boxEnv, ...env, HOME: boxHome(home, host) });
-  const signInEnv = (host: string) => onBoxEnv(host, undefined, { PATH: [boxTimeout(home, armedDeadline, Boolean(options.signInTimesOut)), join(boxHome(home, host), ".local/bin"), "/usr/bin:/bin"].join(":") });
+  const signInEnv = (host: string) => onBoxEnv(host, undefined, { PATH: [timeoutBin, join(boxHome(home, host), ".local/bin"), "/usr/bin:/bin"].join(":") });
   const forReal = async (line: string, host: string, input?: string, bin?: string, env: Record<string, string> = {}, shell = "sh"): Promise<ExecResult> => {
     const child = Bun.spawn([shell, "-c", line], { env: onBoxEnv(host, bin, env), stdin: input === undefined ? "ignore" : new Blob([input]), stdout: "pipe", stderr: "pipe" });
     const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
     return { code: child.signalCode ? sshLostExit : code, output: `${stdout}${stderr}`, stdout };
   };
-  const connections: Array<{ endsAt: number; ended: boolean; end: () => void }> = [];
-  let announced = () => {};
-  const signInAnnounced = new Promise<void>((resolve) => (announced = resolve));
+  const connections: Array<{ endsAt: number; ended: boolean; group?: number; end: () => void }> = [];
+  let announced = (_startedAt: number) => {};
+  const signInAnnounced = new Promise<number>((resolve) => (announced = resolve));
   const stalledConnection = async (line: string, host: string, run: { input?: string; timeoutMs?: number }): Promise<ExecResult> => {
-    const child = Bun.spawn(["sh", "-c", 'bash -c "$1"; exec sleep 30', "ssh", line], { detached: true, env: signInEnv(host), stdin: new Blob([run.input ?? ""]), stdout: "pipe", stderr: "pipe" });
-    const connection = { endsAt: run.timeoutMs === undefined ? Infinity : now + run.timeoutMs, ended: false, end: () => ((connection.ended = true), process.kill(-child.pid, "SIGKILL")) };
+    const startedAt = now;
+    const connection: (typeof connections)[number] = { endsAt: run.timeoutMs === undefined ? Infinity : now + run.timeoutMs, ended: false, end: () => void (connection.ended = true) };
     connections.push(connection);
+    await passTime(sshSetupMs);
+    if (connection.ended) return { code: sshLostExit, output: "", stdout: "" };
+    const child = Bun.spawn(["sh", "-c", 'bash -c "$1"; exec sleep 2147483647', "ssh", line], { detached: true, env: signInEnv(host), stdin: new Blob([run.input ?? ""]), stdout: "pipe", stderr: "pipe" });
+    connection.group = child.pid;
+    connection.end = () => ((connection.ended = true), killGroup(child.pid));
     const stderr = new Response(child.stderr).text();
     const decoder = new TextDecoder();
     let stdout = "";
     for await (const chunk of child.stdout) {
       stdout += decoder.decode(chunk, { stream: true });
-      if (stdout.includes(signInStartedLine)) announced();
+      if (stdout.includes(signInStartedLine)) announced(startedAt);
     }
     const code = await child.exited;
     connection.ended = true;
     return { code, output: `${stdout}${await stderr}`, stdout };
   };
-  const passTime = (ms: number) => {
+  const armed = new Map<number, { fireAt: number[]; fired: number }>();
+  const deadlineFiles = () => (existsSync(deadlines) ? readdirSync(deadlines) : []);
+  const deadlineFile = (pid: number, kind: "armed" | "group" | "sent") => join(deadlines, `${pid}.${kind}`);
+  const timeoutRuns = (pid: number) => existsSync(deadlineFile(pid, "armed")) && processRunning(pid) && readText(`/proc/${pid}/cmdline`).includes(join(timeoutBin, "timeout"));
+  const armNew = () => {
+    for (const file of deadlineFiles()) {
+      const pid = Number(file.match(/^(\d+)\.armed$/)?.[1]);
+      const [limit, grace] = readText(join(deadlines, file)).split(" ");
+      if (!pid || armed.has(pid) || !limit) continue;
+      const at = now + Number(limit) * 1000;
+      armed.set(pid, { fireAt: grace === "-" ? [at] : [at, at + Number(grace) * 1000], fired: 0 });
+    }
+  };
+  const fire = async (pid: number, deadline: { fireAt: number[]; fired: number }) => {
+    await until(() => existsSync(deadlineFile(pid, "group")) || !timeoutRuns(pid));
+    if (!timeoutRuns(pid)) return void (deadline.fired = deadline.fireAt.length);
+    deadline.fired++;
+    process.kill(pid, "SIGALRM");
+    await until(() => readLines(deadlineFile(pid, "sent")).length >= deadline.fired || !processRunning(pid));
+    if (readLines(deadlineFile(pid, "sent")).at(-1) !== "KILL") return;
+    const group = Number(readText(deadlineFile(pid, "group")));
+    await until(() => !processRunning(pid) && groupEnded(group));
+    for (const kind of ["armed", "group", "sent"] as const) rmSync(deadlineFile(pid, kind), { force: true });
+  };
+  const passTime = async (ms: number) => {
+    armNew();
     now += ms;
     for (const connection of connections) if (!connection.ended && connection.endsAt <= now) connection.end();
+    for (const [pid, deadline] of armed) while (deadline.fired < deadline.fireAt.length && deadline.fireAt[deadline.fired]! <= now) await fire(pid, deadline);
+  };
+  fakeProcesses.push(async () => {
+    const groups = [...connections.flatMap((connection) => (connection.ended || connection.group === undefined ? [] : [connection.group])), ...deadlineFiles().filter((file) => file.endsWith(".group")).map((file) => Number(readText(join(deadlines, file))))].filter(Boolean);
+    const timeouts = deadlineFiles().flatMap((file) => Number(file.match(/^(\d+)\.armed$/)?.[1]) || []).filter(timeoutRuns);
+    for (const connection of connections) connection.ended = true;
+    groups.forEach(killGroup);
+    for (const pid of timeouts) process.kill(pid, "SIGKILL");
+    await until(() => groups.every(groupEnded) && !timeouts.some(processRunning));
+  });
+  const underTimeout = async (command: string[]): Promise<ExecResult> => {
+    const child = Bun.spawn([join(timeoutBin, "timeout"), ...command.slice(1)], { env: { PATH: `${hereCoder}:/usr/bin:/bin` }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+    const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    for (const name of readLines(removedTokens)) coderTokens.delete(tokenNames.get(name) ?? ""), tokenNames.delete(name);
+    rmSync(removedTokens, { force: true });
+    keepTokens();
+    return { code, output: `${stdout}${stderr}`, stdout };
   };
   const prepared = new Set<string>();
   const onNode = (line: string, host: string) => {
@@ -292,7 +344,7 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
       return result(true, "Updated \"~/.ssh/config\"");
     }
     const login = options.coderLoginKilled ? "killed" : options.signInTimesOut ? "stuck" : options.signInConnectionStalls ? "announces" : undefined;
-    const network = () => coderNetwork(home, reachesCoderAt, options.coderRedirects ?? [], options.coderCli, serverTokens, { configSsh: Boolean(options.coderConfigSshFails), login }, { argv: coderArgv, modes: sessionModes, deadline: armedDeadline, stuck: stuckPids });
+    const network = () => coderNetwork(home, reachesCoderAt, options.coderRedirects ?? [], options.coderCli, serverTokens, { configSsh: Boolean(options.coderConfigSshFails), login }, { argv: coderArgv, modes: sessionModes, stuck: stuckSignIn });
     if (line.includes("/api/v2/buildinfo")) return forReal(line, host, input, network());
     if (line.includes("/bin/coder-linux-")) return forReal(line, host, input, undefined, { PATH: `${network()}:/usr/bin:/bin` });
     if (line.includes("/coderv2")) return forReal(line, host, input, undefined, signInEnv(host), "bash");
@@ -332,13 +384,7 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
       if (line === "coder whoami") return passes("coder") ? result(true, coderWhoami.replace("https://coder.example.com", coderAt)) : result(false, "You are not logged in");
       if (line === "coder whoami -o json") return passes("coder") ? result(true, coderWhoamiJson(coderAt, coderUserId)) : result(false, "You are not logged in");
       if (line.startsWith("coder tokens create --name ")) return passes("coder") ? (tokenNames.set(command[4]!, coderToken), coderTokens.add(coderToken), keepTokens(), result(true, `${coderToken}\n`)) : result(false, "You are not logged in");
-      const timed = underTimeout(command);
-      const removed = timed.command.join(" ").match(/^coder tokens remove (\S+)$/)?.[1];
-      if (removed !== undefined && options.coderTokenRemoveHangs) {
-        if (!timed.limit) throw new Error("coder tokens remove waits for ever");
-        return { code: 124, output: "", stdout: "" };
-      }
-      if (removed !== undefined) return options.coderTokenRemoveFails ? result(false, "error: Coder did not answer") : result(coderTokens.delete(tokenNames.get(removed) ?? "") && tokenNames.delete(removed) && (keepTokens(), true), "");
+      if (command[0] === "timeout") return underTimeout(command);
       if (line === "hogli devbox:status") return result(devbox);
       if (line === "hogli devbox:start") return (devbox = true), result(true, "up");
       if (line === "gh api user --jq .login") return result(true, "nora\n");
@@ -383,7 +429,7 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
     },
     async sleep(ms) {
       sleeps.push(ms);
-      now += ms;
+      await passTime(ms);
       for (const name of started) if (left[name] > 0) left[name]--;
     },
     async openUrl(url) {
@@ -391,7 +437,7 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
     },
     has: () => true,
   };
-  return { machine, clock, calls, starts, runs, sleeps, opened, coderTokens: () => [...tokenNames.keys()], coderArgv: () => (existsSync(coderArgv) ? readFileSync(coderArgv, "utf8") : ""), sessionModes: () => readLines(sessionModes), stuckProcesses: () => readLines(stuckPids).map(Number), signInAnnounced, passTime, openConnections: () => connections.filter((connection) => !connection.ended).length, hubUpdates, credentials, hubLinked, sessions: () => [...hereSessions, ...boxSessions], hereLinks: () => hereLinks, peerLinks };
+  return { machine, clock, calls, starts, runs, sleeps, opened, coderTokens: () => [...tokenNames.keys()], coderArgv: () => (existsSync(coderArgv) ? readFileSync(coderArgv, "utf8") : ""), sessionModes: () => readLines(sessionModes), stuckSignIn: () => linesOnceThere(stuckSignIn, 2), stuckRemoval: () => linesOnceThere(stuckRemoval, 1), removalTerms: () => readLines(removalTerms), signInAnnounced, passTime, openConnections: () => connections.filter((connection) => !connection.ended).length, hubUpdates, credentials, hubLinked, sessions: () => [...hereSessions, ...boxSessions], hereLinks: () => hereLinks, peerLinks };
 }
 
 const renewedUntil = "2099-01-01T00:00:00.000Z";
@@ -400,60 +446,97 @@ const sshLostExit = 255;
 
 type CoderFails = { configSsh: boolean; login: "killed" | "stuck" | "announces" | undefined };
 
-type CoderLogs = { argv: string; modes: string; deadline: string; stuck: string };
+type CoderLogs = { argv: string; modes: string; stuck: string };
 
 const signInStartedLine = "coder login: signing in";
 
-const running = (pid: number) => {
+const sshSetupMs = 5_000;
+
+const hangs = "sleep 2147483647";
+
+const readText = (path: string) => {
   try {
-    return !/^\d+ \(.*\) Z /.test(readFileSync(`/proc/${pid}/stat`, "utf8"));
+    return readFileSync(path, "utf8").trim();
   } catch {
-    return false;
+    return "";
   }
 };
 
-/** Resolves once the process has ended, a zombie included; a process that never ends keeps it waiting. */
-export async function ended(pid: number) {
-  while (running(pid)) await Bun.sleep(1);
-  return true;
-}
+const readLines = (path: string) => readText(path).split("\n").filter(Boolean);
 
-const positiveSeconds = /^[1-9]\d*$/;
-
-const underTimeout = (command: string[]) => {
-  if (command[0] !== "timeout") return { command };
-  let at = 1;
-  while (["-k", "-s"].includes(command[at] ?? "")) at += 2;
-  return { limit: positiveSeconds.test(command[at] ?? "") ? Number(command[at]) : undefined, command: command.slice(at + 1) };
+export const until = async (done: () => boolean) => {
+  while (!done()) await Bun.sleep(1);
 };
 
-const boxTimeout = (home: string, armed: string, deadline: boolean) => {
-  const bin = join(home, "box-timeout");
+const linesOnceThere = async (path: string, count: number) => (await until(() => readLines(path).length >= count), readLines(path).map(Number));
+
+export const processRunning = (pid: number) => !/^$|^\d+ \(.*\) Z /.test(readText(`/proc/${pid}/stat`));
+
+const groupEnded = (group: number) => !existsSync("/proc") || readdirSync("/proc").every((entry) => {
+  const stat = /^\d+$/.test(entry) ? readText(`/proc/${entry}/stat`) : "";
+  const [state, , pgrp] = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+  return !stat || state === "Z" || pgrp !== String(group);
+});
+
+const killGroup = (group: number) => {
+  try {
+    process.kill(-group, "SIGKILL");
+  } catch {}
+};
+
+const fakeProcesses: Array<() => Promise<void>> = [];
+
+export const stopFakeProcesses = async () => void (await Promise.all(fakeProcesses.splice(0).map((stop) => stop())));
+
+const fakeTimeout = (home: string, deadlines: string) => {
+  const bin = join(home, "fake-timeout");
   mkdirSync(bin, { recursive: true });
+  mkdirSync(deadlines, { recursive: true });
   const lines = [
     "#!/bin/sh",
-    "sig=TERM; group=1; prev=; n=0; limit=",
-    `for a; do n=$((n + 1)); case "$prev" in -s) sig=$a; prev=; continue ;; -k) prev=; continue ;; esac; case "$a" in -k | -s) prev=$a ;; --foreground) group= ;; -*) ;; *) limit=$a; break ;; esac; done`,
-    'shift "$n"',
-    `case "$limit" in "" | 0* | *[!0-9]*) exec "$@" ;; esac`,
-    ...(deadline ? groupDeadline(armed) : ['exec "$@"']),
+    "sig=TERM grace=",
+    'refuse() { echo "timeout: $1" >&2; exit 125; }',
+    'while :; do case "$1" in',
+    '  -s) [ "$2" = KILL ] || refuse "Hedge sends no signal but KILL, not $2"; sig=KILL; shift 2 ;;',
+    '  -k) case "$2" in "" | *[!0-9]*) refuse "invalid time interval $2" ;; esac; grace=$2; shift 2 ;;',
+    '  -*) refuse "unrecognized option $1" ;;',
+    "  *) break ;;",
+    "esac; done",
+    'case "$1" in "" | *[!0-9]*) refuse "invalid time interval $1" ;; esac',
+    "limit=$1; shift",
+    '[ $# -gt 0 ] || refuse "missing operand"',
+    '[ "$limit" -gt 0 ] && command -v setsid >/dev/null || exec "$@"',
+    `at='${deadlines}'/$$`,
+    `printf '%s %s\\n' "$limit" "\${grace:--}" > "$at.new" && mv "$at.new" "$at.armed"`,
+    "fired=0",
+    `trap 'fired=$((fired + 1)); if [ $fired$sig = 1TERM ]; then kill -s TERM -- -$child; echo TERM >> "$at.sent"; else kill -s KILL -- -$child; echo KILL >> "$at.sent"; kill -s KILL $$; fi' ALRM`,
+    "exec 3<&0",
+    'setsid "$@" <&3 3<&- &',
+    "child=$!",
+    "exec 3<&-",
+    'echo "$child" > "$at.group"',
+    'while :; do wait "$child"; s=$?; kill -0 "$child" 2>/dev/null || break; done',
+    'rm -f "$at.armed" "$at.sent"',
+    'kill -s 0 -- "-$child" 2>/dev/null || rm -f "$at.group"',
+    '[ "$fired" = 0 ] || exit 124',
+    'exit "$s"',
   ];
   writeFileSync(join(bin, "timeout"), `${lines.join("\n")}\n`, { mode: 0o755 });
   return bin;
 };
 
-const groupDeadline = (armed: string) => [
-  "fired=",
-  `trap 'fired=1; kill -s "$sig" -- "\${group:+-}$child"; [ "$sig$group" != KILL1 ] || kill -s KILL $$' ALRM`,
-  "exec 3<&0",
-  'setsid "$@" <&3 3<&- &',
-  "child=$!",
-  "exec 3<&-",
-  `echo $$ > '${armed}'`,
-  'while :; do wait "$child"; s=$?; kill -0 "$child" 2>/dev/null || break; done',
-  '[ -z "$fired" ] || exit 124',
-  'exit "$s"',
-];
+const hereCoderBin = (home: string, names: string, removed: string, removal: "removes" | "fails" | "hangs", logs: { stuck: string; terms: string }) => {
+  const bin = join(home, "here-coder");
+  mkdirSync(bin, { recursive: true });
+  const removes = {
+    removes: `echo "$3" >> '${removed}'`,
+    fails: 'echo "error: Coder did not answer" >&2; exit 1',
+    hangs: [`trap '' TERM`, `${hangs} &`, `trap "echo TERM >> '${logs.terms}'" TERM`, `echo $$ >> '${logs.stuck}'`, 'while kill -0 "$!" 2>/dev/null; do wait "$!"; done'].join("\n"),
+  }[removal];
+  const lines = ["#!/bin/sh", '[ "$1 $2 $#" = "tokens remove 3" ] || { echo "coder: unexpected $*" >&2; exit 1; }', `grep -qxF -- "$3" '${names}' || { echo "error: no token named $3" >&2; exit 1; }`, removes];
+  writeFileSync(join(bin, "coder"), `${lines.join("\n")}\n`, { mode: 0o755 });
+  return bin;
+};
 
 const writeSshConfig = (boxHomeDir: string, address: string) => (mkdirSync(join(boxHomeDir, ".ssh"), { recursive: true }), writeFileSync(join(boxHomeDir, ".ssh/config"), `# coder ${address}\n`));
 
@@ -461,7 +544,7 @@ const loginStart = (login: CoderFails["login"], logs: CoderLogs) => {
   if (login === "killed") return "kill -9 $$";
   if (login === "announces") return `echo '${signInStartedLine}'`;
   if (login !== "stuck") return ":";
-  return [`[ -s '${logs.deadline}' ] || { echo "coder login waits for ever, as nothing on the workspace stops it" >&2; exit 1; }`, "trap '' TERM", `sleep 30 & echo $! >> '${logs.stuck}'`, `echo $$ >> '${logs.stuck}'`, `kill -ALRM "$(cat '${logs.deadline}')"`, "exec sleep 30"].join("\n  ");
+  return ["trap '' TERM", `${hangs} & echo $! >> '${logs.stuck}'`, `echo $$ >> '${logs.stuck}'`, `exec ${hangs}`].join("\n  ");
 };
 
 const downloadedCoder = (reach: string, serverTokens: string, fails: CoderFails, logs: CoderLogs) => `#!/bin/sh
