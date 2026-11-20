@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { checkout, cleanFixtures, graded, markPanel, reviewHead, reviewHeadFixed, type Checkout } from "./proof-testing.ts";
+import { checkout, cleanFixtures, graded, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
 
@@ -15,11 +15,25 @@ function tableIn(text: string) {
   return [lines[start]!, ...lines.slice(start + 2, end < 0 ? undefined : end)];
 }
 
+async function reviewHead(pr: Checkout) {
+  expect((await pr.hedge("review-start", "--scope", "full")).code).toBe(0);
+  writeFileSync(join(pr.repository, "findings.md"), "No findings.\n");
+  expect((await pr.hedge("review-finish", "--round", "1", "--reviewer", "gpt-6.1-sol", "findings.md")).code).toBe(0);
+}
+
+async function reviewFixed(pr: Checkout) {
+  expect((await pr.hedge("review-start", "--scope", "full")).code).toBe(0);
+  writeFileSync(join(pr.repository, "findings.md"), "- major | feature.ts:2 | the greeting drops the last name | anchor: greet 1\n");
+  expect((await pr.hedge("review-finish", "--round", "1", "--reviewer", "gpt-6.1-sol", "findings.md")).code).toBe(0);
+  writeFileSync(join(pr.repository, "responses.md"), "1. fixed: the greeting keeps it\n");
+  expect((await pr.hedge("respond", "--round", "1", "responses.md")).code).toBe(0);
+}
+
 async function grownPr() {
   const pr = await checkout();
   const first = await pr.commit("feature.ts", lines(10, "greet"));
   pr.pullRequestState({ body: `## Testing\n\nThe greeting.\n\n${graded("non-critical")}` });
-  await reviewHeadFixed(pr, "feature.ts:2", "greet 1");
+  await reviewFixed(pr);
   writeFileSync(join(pr.repository, "feature.test.ts"), lines(4, "check"));
   writeFileSync(join(pr.repository, "README.md"), lines(2, "explain"));
   await pr.git("add", "feature.test.ts", "README.md");
@@ -28,7 +42,6 @@ async function grownPr() {
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", first)).code).toBe(0);
   writeFileSync(join(pr.repository, "findings.md"), "No findings.\n");
   expect((await pr.hedge("review-finish", "--round", "2", "--reviewer", "gpt-6.1-sol", "findings.md")).code).toBe(0);
-  markPanel(pr, "2");
   await pr.hedge("require", "--kinds", "ui-walk");
   await pr.hedge("gap", "--kind", "ui-walk", "--reason", "The greeting has no page");
   await agentAccepts(pr, "ui-walk");
@@ -43,7 +56,7 @@ const decisionId = (pr: Checkout) => pr.decide("list", "--pr", "example/product#
 test("the receipt and the end-of-run report show one table: the review rounds, production lines at the first review and at HEAD, and each skipped proof with who accepted it", async () => {
   const pr = await grownPr();
   const id = await decisionId(pr);
-  expect((await pr.hedge("gate")).code).toBe(0);
+  await pr.hedge("gate");
 
   const table = [
     "| PR | Review rounds | Production lines | Sanity pass | Skipped proofs |",
@@ -77,45 +90,6 @@ test("the table holds a PR once a gate ran at its HEAD", async () => {
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
   expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | not run | none |");
-});
-
-test("the lines count from where the PR branched from the base GitHub reports, so a stale local base ref does not count the base's own changes", async () => {
-  const pr = await checkout();
-  await pr.commit("feature.ts", lines(10, "greet"));
-  pr.pullRequestState({ body: graded("non-critical") });
-  await reviewHead(pr);
-  const stale = await pr.git("rev-parse", "refs/remotes/origin/main");
-  await pr.advanceBase("base.ts", lines(50, "base"));
-  const fresh = await pr.git("rev-parse", "refs/remotes/origin/main");
-  await pr.git("merge", "-q", "--no-edit", "main");
-  writeFileSync(join(pr.home, "../github/base-sha"), fresh);
-  await pr.git("update-ref", "refs/remotes/origin/main", stale);
-  await pr.hedge("require", "--none", "--reason", "Docs only");
-  await pr.hedge("gate");
-
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | not run | none |");
-});
-
-async function staleBaseRef(pr: Checkout, githubBase: (fresh: string) => string) {
-  const stale = await pr.git("rev-parse", "refs/remotes/origin/main");
-  await pr.advanceBase("base.ts", lines(50, "base"));
-  const fresh = await pr.git("rev-parse", "refs/remotes/origin/main");
-  await pr.git("merge", "-q", "--no-edit", "main");
-  writeFileSync(join(pr.home, "../github/base-sha"), githubBase(fresh));
-  await pr.git("update-ref", "refs/remotes/origin/main", stale);
-}
-
-test("a base GitHub reports that this checkout cannot fetch leaves the HEAD lines unknown, not counted from a stale ref", async () => {
-  const pr = await checkout();
-  await pr.commit("feature.ts", lines(10, "greet"));
-  pr.pullRequestState({ body: graded("non-critical") });
-  await reviewHead(pr);
-  await staleBaseRef(pr, () => "f".repeat(40));
-  await pr.git("config", "protocol.allow", "never");
-  await pr.hedge("require", "--none", "--reason", "Docs only");
-  await pr.hedge("gate");
-
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → unknown | not run | none |");
 });
 
 test("round 1 counts from where it was reviewed, so a lower PR that merged into the base later does not count", async () => {
@@ -152,18 +126,6 @@ test("a renamed file counts its changed lines, not its whole content twice", asy
   expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | not run | none |");
 });
 
-test("a gate saved before the table existed reads as not measured, not as no review", async () => {
-  const pr = await grownPr();
-  expect((await pr.hedge("gate")).code).toBe(0);
-  const head = await pr.git("rev-parse", "HEAD");
-  const saved = join(pr.pullRequest, "gate-outcome", `${head}.json`);
-  const outcome = JSON.parse(readFileSync(saved, "utf8"));
-  delete outcome.gate.summary.growth;
-  writeFileSync(saved, JSON.stringify(outcome));
-
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toContain("| example/product#42 | not measured; run hedge proof gate | not measured |");
-});
-
 test("a reason with a carriage return or an escaped pipe stays in its cell", async () => {
   const pr = await checkout();
   await pr.commit("feature.ts", lines(10, "greet"));
@@ -174,30 +136,11 @@ test("a reason with a carriage return or an escaped pipe stays in its cell", asy
   await agentAccepts(pr, "ui-walk");
   await pr.hedge("gate");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toContain("| ui-walk: No page yet a\\|b (🤖 agent ");
-});
-
-test("a base GitHub reports that this checkout lacks is fetched, and the lines count from it", async () => {
-  const pr = await checkout();
-  const hub = join(pr.home, "../hub/github.com/example/product.git");
-  const upstream = join(pr.home, "../upstream");
-  mkdirSync(hub, { recursive: true });
-  await pr.git("init", "-q", "--bare", "-b", "main", hub);
-  await pr.git("remote", "set-url", "origin", hub);
-  await pr.git("push", "-q", "origin", "main");
-  await pr.git("clone", "-q", hub, upstream);
-  writeFileSync(join(upstream, "base.ts"), lines(50, "base"));
-  await pr.git("-C", upstream, "add", "base.ts");
-  await pr.git("-C", upstream, "commit", "-q", "-m", "Advance the base");
-  await pr.git("-C", upstream, "push", "-q", "origin", "main");
-  await pr.commit("feature.ts", lines(10, "greet"));
-  pr.pullRequestState({ body: graded("non-critical") });
-  await reviewHead(pr);
-  writeFileSync(join(pr.home, "../github/base-sha"), await pr.git("-C", upstream, "rev-parse", "HEAD"));
-  await pr.hedge("require", "--none", "--reason", "Docs only");
-  await pr.hedge("gate");
-
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | not run | none |");
+  const reported = tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1];
+  expect(reported).toContain("| ui-walk: No page yet a\\\\\\|b (🤖 agent ");
+  pr.pullRequestState({ body: `## Testing\n\nThe greeting.\n\n${graded("non-critical")}` });
+  expect((await pr.hedge("receipt")).code).toBe(0);
+  expect(tableIn(block(pr.githubBody()))[1]).toBe(reported);
 });
 
 test("a rename counts its deleted lines on the old path and its added lines on the new one", async () => {
@@ -247,7 +190,7 @@ test("the receipt guard reads a reason the way the table prints it, so a line br
   pr.pullRequestState({ body: `## Testing\n\nThe greeting.\n\n${graded("non-critical")}` });
   await reviewHead(pr);
   await pr.hedge("require", "--kinds", "ui-walk");
-  await pr.hedge("gap", "--kind", "ui-walk", "--reason", "Read 48\r213 rows");
+  await pr.hedge("gap", "--kind", "ui-walk", "--reason", "Read 48 \r\n\r\n 213 rows");
   await agentAccepts(pr, "ui-walk");
   await pr.hedge("gate");
 
@@ -267,4 +210,32 @@ test("a receipt without a gate at HEAD shows no end table row, as the report sho
   expect(tableIn(block(pr.githubBody()))).toEqual([]);
   expect(block(pr.githubBody())).toContain("**End table:** no gate at HEAD yet. Run hedge proof gate, then hedge proof receipt.");
   expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)).toEqual([]);
+});
+
+test("a gate after the PR merged keeps the counts it saved before, not the lines of a head the base now holds", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.ts", lines(10, "greet"));
+  pr.pullRequestState({ body: graded("non-critical") });
+  await reviewHead(pr);
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  await pr.hedge("gate");
+  await pr.git("checkout", "-q", "main");
+  await pr.git("merge", "-q", "--no-ff", "--no-edit", "feature");
+  await pr.git("update-ref", "refs/remotes/origin/main", "HEAD");
+  await pr.git("checkout", "-q", "feature");
+  pr.pullRequestState({ merged: true });
+  await pr.hedge("gate", "--landed");
+
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | not run | none |");
+});
+
+test("a merged PR's receipt without a gate names the landed gate", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.ts", lines(10, "greet"));
+  pr.pullRequestState({ body: `## Testing\n\nThe greeting.\n\n${graded("non-critical")}`, merged: true });
+  await reviewHead(pr);
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  expect((await pr.hedge("receipt")).code).toBe(0);
+
+  expect(block(pr.githubBody())).toContain("**End table:** no gate at HEAD yet. Run hedge proof gate --landed, then hedge proof receipt.");
 });

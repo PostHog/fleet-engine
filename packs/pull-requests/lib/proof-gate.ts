@@ -20,7 +20,7 @@ export type FinalGate = { code: number; reason: string; lines: string[]; verdict
 
 type Checked = Awaited<ReturnType<typeof proofGate>>;
 type Judged = { code: number; lines: string[]; covered: string; judge: JudgeSummary; reason?: string };
-type GateKey = { head: string; base: string; baseSha: string; tier: string; callout: string; landed: boolean; fingerprint: string };
+type GateKey = { head: string; base: string; baseSha: string; tier: string; callout: string; landed: boolean; fingerprint: string; endTable: true };
 type Condition = Checked["conditions"][number];
 type SavedGate = { key: GateKey; gate: FinalGate; conditions: Condition[] };
 
@@ -52,7 +52,7 @@ async function fingerprintOf(home: string, ref: PrRef, files: string, decisions:
 }
 
 const keyOf = (pull: PullRequest, landed: boolean, fingerprint: string): GateKey =>
-  ({ head: pull.head, base: pull.base, baseSha: pull.baseSha, tier: tierOf(pull.body), callout: createHash("sha256").update(riskCalloutOf(pull.body) ?? "").digest("hex"), landed, fingerprint });
+  ({ head: pull.head, base: pull.base, baseSha: pull.baseSha, tier: tierOf(pull.body), callout: createHash("sha256").update(riskCalloutOf(pull.body) ?? "").digest("hex"), landed, fingerprint, endTable: true });
 
 export async function finalGate(head: ProofIdentity, context: GateContext, { landed = false }: { landed?: boolean } = {}): Promise<FinalGate> {
   const { home, env, run, now, ssh } = context;
@@ -71,15 +71,17 @@ export async function finalGate(head: ProofIdentity, context: GateContext, { lan
     reason: judged.code === 0 ? "pass" : judged.reason ?? `exit ${judged.code}`,
     lines: [...checked.lines, ...judged.lines, ...stale],
     verdict: judged.code === 0 ? `gate: pass (${checked.summary}; judge: ${judged.covered})` : `gate: fail (exit ${judged.code})`,
-    summary: { ...checked.proofSummary, code: judged.code, judge: judged.judge, ...await grownBy(home, head, run, (pull as PullRequest | undefined)?.baseSha) },
+    summary: { ...checked.proofSummary, code: judged.code, judge: judged.judge, growth: await grownBy(home, head, run, landed) },
   };
   if (pull) await writeJson(savedPath(home, head, head.commit), { key: keyOf(pull, landed, await fingerprintOf(home, head, files, checked.decisions)), gate, conditions: checked.conditions } satisfies SavedGate);
   return gate;
 }
 
-async function grownBy(home: string, head: ProofIdentity, run: Run, baseSha: string | undefined) {
+
+async function grownBy(home: string, head: ProofIdentity, run: Run, landed: boolean) {
+  const kept = landed ? (await readJson<SavedGate | undefined>(savedPath(home, head, head.commit), undefined))?.gate.summary.growth : undefined;
   const sanity = (await readSanity(home, head)).at(-1);
-  return { growth: { ...await measureGrowth(home, head, run, baseSha), ...sanity ? { sanity } : {} } };
+  return { ...kept ?? await measureGrowth(home, head, run), ...sanity ? { sanity } : {} };
 }
 
 const pushedHeadOf = (head: ProofIdentity, run: Run, seen: (pull: PullRequest) => void = () => {}) => (): PushedHead => {

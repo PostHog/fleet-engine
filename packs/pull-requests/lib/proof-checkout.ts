@@ -12,10 +12,6 @@ export function topLevel(run: Run) {
   return result.code === 0 ? result.stdout.trim() : undefined;
 }
 
-const fetchBase = (run: Run, base: string, remotes: string[]) => {
-  for (const remote of remotes) run(["git", "fetch", "--quiet", remote, `+refs/heads/${base}:refs/remotes/${remote}/${base}`]);
-};
-
 /**
  * Where the PR branched from its base. A base branch this checkout has not fetched is fetched from the repository's
  * remote once; without such a remote, or without the commit, the error names the commands that fix it.
@@ -32,7 +28,7 @@ export function mergeBase(identity: ProofIdentity, run: Run) {
   };
   const before = found();
   if (before) return before;
-  fetchBase(run, base, remotes);
+  for (const remote of remotes) run(["git", "fetch", "--quiet", remote, `+refs/heads/${base}:refs/remotes/${remote}/${base}`]);
   const after = found();
   if (after) return after;
   const where = `Cannot find where ${identity.repository}#${identity.pr} branched from its base ${base} here`;
@@ -79,18 +75,6 @@ function gradeOf(body: string | undefined) {
   return grade ?? (/merge[- ]risk/i.test(body) ? "unreadable" : "none");
 }
 
-function branchPoint(identity: ProofIdentity, run: Run, baseSha?: string) {
-  if (!baseSha) return mergeBase(identity, run);
-  const found = () => run(["git", "merge-base", baseSha, identity.commit]);
-  let point = found();
-  if (point.code !== 0) {
-    fetchBase(run, pullRequestDetails(identity, run).baseRefName, remotesOf(identity.repository, run));
-    point = found();
-  }
-  if (point.code !== 0) throw new Error(`Cannot find the base ${short(baseSha)} that GitHub reports for ${identity.repository}#${identity.pr} here`);
-  return point.stdout.trim();
-}
-
 function changedLines(identity: ProofIdentity, run: Run, start: string, renames: boolean) {
   const stat = run(["git", "diff", "--numstat", "-z", renames ? "--find-renames" : "--no-renames", "--no-relative", start, identity.commit]);
   if (stat.code !== 0) return undefined;
@@ -120,9 +104,11 @@ const productionLines = (identity: ProofIdentity, run: Run) => {
 
 export type DiffSize = { production: number; tests: number; docs: number };
 
-export function diffSize(identity: ProofIdentity, run: Run, { baseSha, from }: { baseSha?: string; from?: string }): DiffSize | undefined {
+export function diffSize(identity: ProofIdentity, run: Run, from?: string): DiffSize | undefined {
   try {
-    const changed = changedLines(identity, run, from ?? branchPoint(identity, run, baseSha), true)?.filter(({ lines }) => Number.isFinite(lines));
+    const start = from ?? mergeBase(identity, run);
+    if (start === identity.commit) return undefined;
+    const changed = changedLines(identity, run, start, true)?.filter(({ lines }) => Number.isFinite(lines));
     return changed && { production: linesOf(changed, authored), tests: linesOf(changed, isTestFile), docs: linesOf(changed, (path) => docsFile.test(path)) };
   } catch { return undefined; }
 }

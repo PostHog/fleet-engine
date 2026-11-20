@@ -62,7 +62,7 @@ export async function runReceipt(head: ProofIdentity, items: string[] | undefine
   const reviews = await receiptReviews(head, home);
   let rendered: ReturnType<typeof renderSection>;
   try {
-    rendered = renderSection({ summary, gated, display, notChecked, reviews, screenshots: await screenshotFiles(summary) });
+    rendered = renderSection({ summary, gated, landed: first.state === "merged", display, notChecked, reviews, screenshots: await screenshotFiles(summary) });
   } catch (error) { if (error instanceof GuardRefusal) { print(error.message); return 2; } throw error; }
   for (const warning of rendered.warnings) print(warning);
   const title = `Proof receipt: ${head.repository}#${head.pr}`;

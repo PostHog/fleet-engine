@@ -17,6 +17,15 @@
   `hedge proof sanity --verdict cut|justified --reason '<why>'`. The end
   table shows the latest pass.
 
+### One end table for the review and the skipped proofs
+
+- The proof receipt and `hedge decision report` print one table: the review
+  rounds and final reads, the production lines at round 1 and at HEAD with
+  tests and docs apart, and each skipped proof with its reason and who
+  accepted it. `hedge proof gate` measures the lines and saves them, so the
+  table holds a pull request once a gate ran at its HEAD. A gate saved by an
+  older Hedge no longer counts, so run `hedge proof gate` again once.
+
 ### Fleet is now Hedge
 
 - The product and its command are now Hedge and `hedge`. `get.sh` points

@@ -50,7 +50,7 @@ const holdsFigure = (seen: string) => figures.some((pattern) => pattern.test(kep
 
 const codeSpan = /(`+)(?!`)[\s\S]*?[^`]\1(?!`)/g;
 const escapeMarkup = (text: string) => text.replace(/[\\`*_~[\]<>&!]/g, "\\$&");
-function literal(text: string) {
+export function literal(text: string) {
   let out = "";
   let last = 0;
   for (const span of text.matchAll(codeSpan)) {
@@ -84,7 +84,7 @@ export const prodShapeResult = "measured on production; details in the receipt";
 
 export type ReceiptReview = ReviewDisplay & { lenses?: Plan["lenses"] };
 export type ReceiptInput = {
-  summary: ProofSummary; gated: boolean; display: Display; notChecked: string[]; reviews: ReceiptReview[];
+  summary: ProofSummary; gated: boolean; landed: boolean; display: Display; notChecked: string[]; reviews: ReceiptReview[];
   screenshots: { commit: string; names: string[] }[];
 };
 
@@ -142,7 +142,7 @@ export function renderSection(input: ReceiptInput) {
     "| Proof | What ran | Result | Commit |", "| --- | --- | --- | --- |", ...rows, reviewRow(input.reviews), judgeRow(input.summary), "",
     ...input.gated
       ? endTable([{ ref: input.summary, summary: input.summary, reason: (kind, reason) => guardField(`gap reason of ${kind}`, oneLine(reason)) }])
-      : ["**End table:** no gate at HEAD yet. Run hedge proof gate, then hedge proof receipt."],
+      : [`**End table:** no gate at HEAD yet. Run hedge proof gate${input.landed ? " --landed" : ""}, then hedge proof receipt.`],
     "",
     `**Not checked:** ${notChecked.join("; ") || "none recorded"}`,
   ].join("\n");

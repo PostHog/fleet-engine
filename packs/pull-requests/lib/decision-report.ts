@@ -6,6 +6,7 @@ import { covers, decisionLine, refText, type DecisionState, type Env, type Ledge
 import { readPullRequest, runIn, type PullRequest } from "./pr-ci.ts";
 import { receiptOf, summaryGaps, type ProofSummary } from "./proof.ts";
 import { endTable } from "./proof-end-table.ts";
+import { literal } from "./proof-receipt.ts";
 import { currentSummary } from "./proof-gate.ts";
 import type { LaneReport } from "../../hub/lib/secret-store.ts";
 
@@ -119,7 +120,7 @@ export async function renderReport({ prs, thread, lane }: { prs: PrRef[]; thread
     "### Merged under the narrow grant", ...listed(await grantMerges(prs, context)), "",
     "### Decisions", ...listed(sorted.map(decisionLine)), "",
     "### Proofs", "| PR | Ran | Deferred | Voided | Receipt |", "| --- | --- | --- | --- | --- |", ...rows.map((pr) => proofRow(pr, decisions)), "",
-    "### Review and skipped proofs", ...gatedRows.length ? endTable(gatedRows.map(({ ref, summary }) => ({ ref, summary, reason: (_kind, reason) => reason }))) : ["None gated at HEAD."], "",
+    "### Review and skipped proofs", ...gatedRows.length ? endTable(gatedRows.map(({ ref, summary }) => ({ ref, summary, reason: (_kind, reason) => literal(reason) }))) : ["None gated at HEAD."], "",
     "### Side fixes started", ...listed(sideFixes),
   ].join("\n");
 }
