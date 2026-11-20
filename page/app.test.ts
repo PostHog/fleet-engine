@@ -150,6 +150,17 @@ describe("the Packs page in a browser", () => {
     expect(command(packs)).toBe("hedge packs --add communication --add guards --add memory");
   });
 
+  test("ticking a team pack adds to the command each pack its card says it adds, also a pack with no card, and unticking it takes them back", async () => {
+    const needy: LoadedPack = { dir: "/team/packs/acme", manifest: { schema: 1, name: "acme", summary: "A team pack.", requires: ["integrations", "context-library"] } };
+    const team = visit("packs/index.html", { files: await buildSite({ audience: "posthog", team: [needy] }) });
+    input(team, "#pick-acme").click();
+    expect(selected(team)).toEqual(["memory", "acme"]);
+    expect([text(team, "install-count"), command(team)]).toEqual(["3 packs selected", "hedge packs --add integrations --add memory --add acme"]);
+    input(team, "#pick-acme").click();
+    input(team, "#pick-memory").click();
+    expect([shown(team, "install-empty"), shown(team, "install-full")]).toEqual([true, false]);
+  });
+
   test("leaves out a remembered pack that this site does not have", () => {
     const team = visit("packs/index.html", { files: teamSite });
     input(team, "#pick-acme").click();

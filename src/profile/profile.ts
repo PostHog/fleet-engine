@@ -125,7 +125,7 @@ export function withPicksOn(file: Record<string, unknown>): Record<string, unkno
 }
 
 function withNewPicksOn(file: Record<string, unknown>, listedBefore: unknown): Record<string, unknown> {
-  const { packs, workflows } = file;
+  const { packs, workflows = {} } = file;
   if (!Array.isArray(packs) || !isRecord(workflows)) return file;
   const before = Array.isArray(listedBefore) ? listedBefore : [];
   const on = listedPicks(packs, workflows).filter((item) => !item.packs.some((name) => before.includes(name)));

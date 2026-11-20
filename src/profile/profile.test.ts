@@ -103,6 +103,13 @@ describe("a pick that turns its main workflow on", () => {
     await saveAnswers(dir, { ...profile, packs: ["slack", "guards"] });
     expect(await loadProfile(dir)).toMatchObject({ packs: ["slack", "guards"], workflows: { "slack-thread": true, "shell-guards": true, "package-age": true }, migrations: [picksTurnOn] });
   });
+
+  test("turns the workflow on in a profile whose first save names packs and no workflows", async () => {
+    const dir = temp.make("profile-");
+    await spawnGit(dir, "init", "-q", "-b", "main");
+    await saveAnswers(dir, { schema: 1, engine: profile.engine, sources: [], packs: ["slack", "guards"], plan: "both", settings: {} });
+    expect(await loadProfile(dir)).toMatchObject({ packs: ["slack", "guards"], workflows: { "slack-thread": true, "shell-guards": true, "package-age": true }, migrations: [picksTurnOn] });
+  });
 });
 
 describe("saving answers", () => {

@@ -276,7 +276,8 @@ describe("the site build", () => {
     const site = await buildSite({ audience: "posthog", team });
     expect(teamData.teamPacks).toEqual(["posthog"]);
     expect(visibleText(page("packs/index.html", site))).toContain("Adds integrations Adds Memory Adds gone");
-    expect(toggleSelected(promptData(teamData), [], "posthog")).toEqual(["memory", "posthog"]);
+    expect(promptOn(page("packs/posthog/index.html", site), "install")).toContain("hedge packs --add integrations --add gone --add memory --add posthog\n");
+    expect(installPrompt(carried(page("packs/index.html", site)), toggleSelected(carried(page("packs/index.html", site)), [], "posthog"))).toContain("hedge packs --add integrations --add gone --add memory --add posthog\n");
     expect(Object.keys(site)).not.toContain("packs/quiet/index.html");
   });
 
