@@ -279,7 +279,7 @@ async function checkout(machine: Machine, home: string, dir: string, repo: strin
   if (existsSync(join(dir, ".git"))) {
     const urls = (await machine.exec(["git", "-C", dir, "config", "--get-regexp", "^remote\\.origin\\.(push)?url$"])).output.trim().split("\n").map((line) => line.split(" ").slice(1).join(" "));
     const other = urls.find((url) => githubRepoOf(url)?.toLowerCase() !== repo.toLowerCase());
-    if (other !== undefined) throw new Error(`${dir} is a clone of ${withoutCredentials(other) || "nothing"}, not ${repo}. Move it away, then run hedge setup again.`);
+    if (other !== undefined) throw new Error(`${dir} is a clone of ${other ? (githubRepoOf(other) ?? "another remote") : "nothing"}, not ${repo}. Move it away, then run hedge setup again.`);
     if (await takeOrigin(machine, home, dir)) throw new Error(`${bothChanged(dir, repo)} Move ${dir} away, then run hedge setup again: it clones ${repo} and saves your answers on top.`);
     return;
   }

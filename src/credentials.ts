@@ -1,6 +1,6 @@
 export function withoutCredentials(line: string) {
   return line.replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, (found) => {
-    const address = found.replace(/['"`.,:;)\]>]+$/, "");
+    const address = found.replace(/['"`.,:;)>]+$/, "");
     const after = found.slice(address.length);
     try {
       const url = new URL(address);
