@@ -47,6 +47,25 @@
 - On a box without a browser, ChatGPT signs in with a device code, and
   Claude in a terminal. When device code sign-in is off, setup says how to
   turn it on, or how to sign in over an SSH port forward.
+- Setup starts a new ChatGPT sign-in only when Codex says the old one is
+  gone. When Codex cannot tell, setup keeps the sign-in and says why. It
+  reads the Codex credentials store from `config.toml` as TOML.
+- Setup takes the profile's new commits when it starts, before it reads
+  your answers, so a rerun keeps what another machine pushed before it. When
+  it cannot reach the profile's origin, it says so and goes on with the copy
+  on the machine, as it did before this fetch. When
+  another machine pushes first, setup stops and keeps its commit. It says to
+  commit or discard the changes in the checkout that are not committed, to
+  bring it up to date with `git -C <profile> pull --rebase`, or to drop its
+  commit when it made one, and then to run the same command again. Two machines that
+  save the same profile at the same time can overwrite each other's
+  answers, as before.
+- Setup takes and saves the profile only on `origin`. When the checkout's
+  branch tracks a local branch or another remote, setup stops before it
+  commits and says to point the branch at `origin`.
+- `scripts/template-parameters.sh` prints a default only for a number, a
+  `bool`, or a parameter with a fixed list of values, so no free-text
+  default, such as a key, reaches the agent's output.
 - Each page of the site carries its own script and styles, so a cached page
   always runs its own script.
 

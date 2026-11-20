@@ -22,18 +22,21 @@ You need:
 On your Mac, sign in to Coder and create two workspaces: a hub with a 200 GB
 disk and a node with a 500 GB disk. Give every template parameter with its
 own `--parameter`, so you see each value Coder uses. Set the dotfiles
-parameter to your profile repo: `https://github.com/<login>/hedge-profile`,
-or `https://github.com/<login>/fleet-profile` when you have a profile from
-before the rename. `hedge setup` makes `hedge-profile` in step 2 when you
+parameter to the SSH address of your profile repo:
+`git@github.com:<login>/hedge-profile.git`, or
+`git@github.com:<login>/fleet-profile.git` when you have a profile from
+before the rename. Coder clones it with the workspace's Git SSH key, so a
+private profile works. Its `https://github.com/` address fails on a private
+repo, because the box has no GitHub sign-in yet. `hedge setup` makes `hedge-profile` in step 2 when you
 have none. When setup prints another repo in step 2, such as a profile in a
 team's org, change the dotfiles parameter of each workspace to
-`https://github.com/<repo>` in the Coder web app: open the workspace, go to
+`git@github.com:<repo>.git` in the Coder web app: open the workspace, go to
 **Settings → Parameters**, set it, and submit.
 
 ```sh
 coder login <your Coder URL>
-coder create hedge-hub --template <template> --preset none --parameter <disk parameter>=200 --parameter <dotfiles parameter>=https://github.com/<login>/hedge-profile --yes
-coder create hedge-node-1 --template <template> --preset none --parameter <disk parameter>=500 --parameter <dotfiles parameter>=https://github.com/<login>/hedge-profile --yes
+coder create hedge-hub --template <template> --preset none --parameter <disk parameter>=200 --parameter <dotfiles parameter>=git@github.com:<login>/hedge-profile.git --yes
+coder create hedge-node-1 --template <template> --preset none --parameter <disk parameter>=500 --parameter <dotfiles parameter>=git@github.com:<login>/hedge-profile.git --yes
 coder schedule stop hedge-hub manual
 coder schedule stop hedge-node-1 manual
 coder config-ssh --yes
@@ -89,7 +92,7 @@ the link on your Mac or your phone:
 | --- | --- |
 | GitHub | The code from the terminal on `github.com/login/device`, then your approval. Hedge asks for `repo`, `read:org`, `admin:public_key`, `admin:ssh_signing_key`, and `workflow` once, so it can make your profile repo, add your keys, and push to large repos, where GitHub can ask for `workflow` even when a push changes no workflow file. |
 | Claude | Your Claude account in the browser. Paste the code it shows back into the terminal. Only when your plan includes Claude. |
-| ChatGPT | The code from the terminal, on the page it prints. Only when your plan includes Codex. Setup checks the sign-in with a real request, because a stale sign-in still looks signed in. When your ChatGPT account or workspace turns device code sign-in off, turn it on in ChatGPT's settings under Security, or ask the workspace admin. Without it, run `ssh -L 1455:localhost:1455 coder.hedge-hub` on your Mac, run `codex login` in that SSH session, open the link it prints on the Mac, and run setup again. |
+| ChatGPT | The code from the terminal, on the page it prints. Only when your plan includes Codex. Setup checks the sign-in with a real request, because a stale sign-in still looks signed in. When your ChatGPT account or workspace turns device code sign-in off, turn it on in ChatGPT's settings under Security, or ask the workspace admin. Without it, run `ssh -L 1455:localhost:1455 coder.hedge-hub` on your Mac, run `codex login -c 'cli_auth_credentials_store="file"'` in that SSH session, open the link it prints on the Mac, and run setup again. |
 
 Setup creates the private repo `hedge-profile` in your GitHub account and saves
 your answers there. When a team pack you picked names a profile org, setup
