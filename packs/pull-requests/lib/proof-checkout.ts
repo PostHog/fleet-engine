@@ -103,15 +103,17 @@ const productionLines = (identity: ProofIdentity, run: Run) => {
 
 export type DiffSize = { production: number; tests: number; docs: number };
 
+const offline = (run: Run): Run => (command) => run(["env", "GIT_NO_LAZY_FETCH=1", ...command]);
+
 export function forkPoint(identity: ProofIdentity, run: Run, baseSha: string) {
-  const found = run(["env", "GIT_NO_LAZY_FETCH=1", "git", "merge-base", identity.commit, baseSha]);
+  const found = offline(run)(["git", "merge-base", identity.commit, baseSha]);
   return found.code === 0 && found.stdout.trim() || undefined;
 }
 
 export function diffSize(identity: ProofIdentity, run: Run, start: string): DiffSize | undefined {
   try {
     if (start === identity.commit) return undefined;
-    const changed = changedLines(identity, run, start, true)?.filter(({ lines }) => Number.isFinite(lines));
+    const changed = changedLines(identity, offline(run), start, true)?.filter(({ lines }) => Number.isFinite(lines));
     return changed && { production: linesOf(changed, authored), tests: linesOf(changed, isTestFile), docs: linesOf(changed, (path) => docsFile.test(path)) };
   } catch { return undefined; }
 }

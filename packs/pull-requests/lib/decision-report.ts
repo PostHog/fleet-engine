@@ -105,9 +105,12 @@ function proofRow(pr: Row, decisions: DecisionState[]) {
 }
 
 export async function renderReport({ prs: named, thread, lane }: { prs: PrRef[]; thread?: string; lane?: string }, ledger: Ledger, decisions: DecisionState[], context: ReportContext): Promise<string> {
-  const prs = named.filter((ref, index) => named.findIndex((other) => refText(other).toLowerCase() === refText(ref).toLowerCase()) === index);
+  const spelled = named.filter((ref, index) => named.findIndex((other) => refText(other) === refText(ref)) === index);
+  const read = await Promise.all(spelled.map((ref) => lanePr(ref, ledger, context)));
+  const sameAs = (row: Row) => (other: Row) => refText(other.ref).toLowerCase() === refText(row.ref).toLowerCase();
+  const rows = read.filter((row) => (read.find((other) => sameAs(row)(other) && gated(other)) ?? read.find(sameAs(row))) === row);
+  const prs = rows.map(({ ref }) => ref);
   const secrets = lane === undefined ? undefined : await context.laneSecrets(lane);
-  const rows = await Promise.all(prs.map((ref) => lanePr(ref, ledger, context)));
   const card = thread && await (context.pendingCard ?? t3PendingCard(context.home))(thread) ? thread : undefined;
   const ours = decisions.filter((decision) => prs.some((ref) => covers(decision, ref)) || (thread !== undefined && sameThread(decision.where.thread, thread)));
   const sorted = [...ours].sort((a, b) => markOrder.indexOf(a.mark) - markOrder.indexOf(b.mark));
