@@ -45,8 +45,9 @@ const usage = `Hedge: one setup for T3 Code, agents, and your workflows
                      Answer a few questions and set up this machine
   hedge apply [--profile <dir>] [--adopt <path>]... [--adopt-from <name>]... [--skip <pack>/<step>]... [--dry-run]
                      Put your profile's packs onto this machine
-  hedge doctor [--profile <dir>]
-                     Check this machine against your profile without changing it
+  hedge doctor [--profile <dir>] [--to-do]
+                     Check this machine against your profile without changing it,
+                     or print the steps left for you as JSON
   hedge update       Move the engine and your profile forward, then apply
   hedge refresh      Fetch the pack sources that follow a branch, and when one moved,
                      update the files, skills, guides, and instructions of your packs
@@ -175,6 +176,7 @@ async function triage(args: string[], options: CliOptions) {
 async function reconcile(command: "apply" | "doctor", args: string[], options: CliOptions) {
   const flags = parseFlags(args);
   const doctor = command === "doctor";
+  if (flags.toDo && !doctor) throw new Error("unknown option --to-do");
   const preview = doctor || flags.dryRun;
   const holds = () => fleetOf(options).holds(options.home, options.platform);
   const held = await holds();
@@ -189,6 +191,7 @@ async function reconcile(command: "apply" | "doctor", args: string[], options: C
   const adapters = (options.adapters ?? engineAdapters)();
   const issue: Issuer = (entries, node) => issueCredentials(entries, node, plan, sources, options);
   const report = doctor ? await check(plan, { home: options.home, adapters, run: options.run }) : await apply(plan, { home: options.home, adopt: flags.adopt, adoptFrom: flags.adoptFrom, skip: flags.skip, dryRun: flags.dryRun, adapters, run: options.run, issue, progress: options.print });
+  if (flags.toDo) return printToDo(report, held, options.print);
   if (doctor) {
     const drifted = await drift(plan, report.humanLeft);
     report.findings.push(...drifted);
@@ -551,7 +554,7 @@ async function loadPlan(options: CliOptions, profileFlag: string | undefined, mo
 }
 
 function parseFlags(args: string[]) {
-  const flags: { profile?: string; adopt: string[]; adoptFrom: string[]; skip: string[]; dryRun: boolean } = { adopt: [], adoptFrom: [], skip: [], dryRun: false };
+  const flags: { profile?: string; adopt: string[]; adoptFrom: string[]; skip: string[]; dryRun: boolean; toDo: boolean } = { adopt: [], adoptFrom: [], skip: [], dryRun: false, toDo: false };
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     const value = () => {
@@ -564,6 +567,7 @@ function parseFlags(args: string[]) {
     else if (arg === "--adopt-from") flags.adoptFrom.push(value());
     else if (arg === "--skip") flags.skip.push(value());
     else if (arg === "--dry-run") flags.dryRun = true;
+    else if (arg === "--to-do") flags.toDo = true;
     else throw new Error(`unknown option ${arg}`);
   }
   return flags;
@@ -576,6 +580,15 @@ function printReport(report: Report, command: string, print: (line: string) => v
   if (command === "doctor") print(report.ok ? "Everything matches your profile." : "Run hedge apply to fix what Hedge can fix.");
   else if (dryRun) print(report.ok ? `Preview: ${changes.length} change${changes.length === 1 ? "" : "s"} to apply. Nothing was written.` : "Preview: Hedge could not apply your profile. Nothing was written.");
   else print(report.ok ? `Applied ${changes.length} change${changes.length === 1 ? "" : "s"}.` : "Hedge could not apply your profile.");
+}
+
+function printToDo(report: Report, held: Report["findings"], print: (line: string) => void) {
+  const asks = (finding: Report["findings"][number], step: Report["humanLeft"][number]) => finding.repair === "human" && finding.id === `human:${step.id}` && finding.pack === step.pack;
+  const others = [...held, ...report.findings.filter((finding) => (finding.repair || finding.id.startsWith("kept:")) && !report.humanLeft.some((step) => asks(finding, step)))];
+  const steps = report.humanLeft.filter((step) => report.findings.some((finding) => asks(finding, step)));
+  printFindings(others, print);
+  print(JSON.stringify(steps.map(({ pack, id, say, command }) => ({ pack, id, say, ...(command ? { command } : {}) }))));
+  return others.length ? 1 : 0;
 }
 
 function printFindings(findings: Report["findings"], print: (line: string) => void) {

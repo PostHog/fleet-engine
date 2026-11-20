@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { main } from "../cli.ts";
 import { git, isolateGit, tempDirs } from "../testing/git.ts";
-import { boxHome, coderToken, engineRoot, fakeMachine, hedgeSetup, machineFile, onBox, scripted } from "./testing.ts";
+import { boxHome, coderToken, engineRoot, fakeMachine, hedgeSetup, machineFile, personCoderToken, scripted } from "./testing.ts";
 
 isolateGit();
 const temp = tempDirs();
@@ -196,16 +196,18 @@ describe("hedge devbox add", () => {
     const box = fakeMachine(home, { "box:coder": 1 });
     expect(await main(["devbox", "add", "coder.hedge-node-1"], { ...options, setup: { machine: box.machine } })).toBe(0);
     expect(io.output()).toContain("  ✓ Sign in to Coder on coder.hedge-node-1: done");
-    expect(box.coderSsh).toEqual(["https://coder.example.com"]);
-    const login = box.calls.find((call) => onBox(call.command)?.includes("coder login"));
-    expect(login?.input).toBe(`${coderToken}\n`);
+    const sshConfig = (host: string) => readFileSync(join(boxHome(home, host), ".ssh/config"), "utf8");
+    expect(sshConfig("coder.hedge-node-1")).toBe("# coder https://coder.example.com\n");
+    const coderFile = (name: string) => join(boxHome(home, "coder.hedge-node-1"), ".config/coderv2", name);
+    expect([readFileSync(coderFile("url"), "utf8"), readFileSync(coderFile("session"), "utf8")]).toEqual(["https://coder.example.com", coderToken]);
+    expect([statSync(coderFile("url")).mode & 0o777, statSync(coderFile("session")).mode & 0o777]).toEqual([0o600, 0o600]);
     expect(box.calls.flatMap((call) => call.command).join(" ")).not.toContain(coderToken);
     expect(io.output()).not.toContain(coderToken);
 
     const again = fakeMachine(home);
     expect(await main(["devbox", "add", "coder.hedge-node-2"], { ...options, setup: { machine: again.machine } })).toBe(0);
-    expect(again.calls.map((call) => call.command.join(" "))).not.toContain("coder tokens create");
-    expect(again.coderSsh).toEqual(["https://coder.example.com"]);
+    expect(again.coderTokens()).toEqual([]);
+    expect(sshConfig("coder.hedge-node-2")).toBe("# coder https://coder.example.com\n");
   });
 
   test("hedge devbox add again signs the workspace in anew when its Coder session has expired", async () => {
@@ -216,17 +218,7 @@ describe("hedge devbox add", () => {
     expect(await main(["devbox", "add", "coder.hedge-node-1"], { ...options, setup: { machine: fakeMachine(home, { "box:coder": 1 }).machine } })).toBe(0);
     const expired = fakeMachine(home, { "box:coder": 1 });
     expect(await main(["devbox", "add", "coder.hedge-node-1"], { ...options, setup: { machine: expired.machine } })).toBe(0);
-    expect(expired.coderSsh).toEqual(["https://coder.example.com"]);
-  });
-
-  test("hedge devbox add signs a workspace in to this machine's Coder deployment when it is signed in to another one", async () => {
-    const home = temp.make("home-");
-    expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""])).code).toBe(0);
-    const io = scripted([]);
-    const options = { home, engineRoot, platform: "linux" as const, print: io.terminal.print, terminal: io.terminal };
-    const elsewhere = fakeMachine(home, {}, { boxCoderAt: "https://other-coder.example.com" });
-    expect(await main(["devbox", "add", "coder.hedge-node-1"], { ...options, setup: { machine: elsewhere.machine } })).toBe(0);
-    expect(elsewhere.coderSsh).toEqual(["https://coder.example.com"]);
+    expect([expired.coderTokens().length, readFileSync(join(boxHome(home, "coder.hedge-node-1"), ".ssh/config"), "utf8")]).toEqual([1, "# coder https://coder.example.com\n"]);
   });
 
   test("hedge devbox add keeps a workspace's Coder session when it reaches the same deployment at another address", async () => {
@@ -234,9 +226,14 @@ describe("hedge devbox add", () => {
     expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""])).code).toBe(0);
     const io = scripted([]);
     const options = { home, engineRoot, platform: "linux" as const, print: io.terminal.print, terminal: io.terminal };
-    const internal = fakeMachine(home, {}, { boxCoderAt: "http://coder.internal", boxCoderSameUser: true });
+    const config = join(boxHome(home, "coder.hedge-node-1"), ".config/coderv2");
+    mkdirSync(config, { recursive: true });
+    writeFileSync(join(config, "url"), "http://coder.internal");
+    writeFileSync(join(config, "session"), personCoderToken);
+    const internal = fakeMachine(home, {}, { boxCoderSameUser: true });
     expect(await main(["devbox", "add", "coder.hedge-node-1"], { ...options, setup: { machine: internal.machine } })).toBe(0);
-    expect(internal.coderSsh).toEqual(["http://coder.internal"]);
+    expect(readFileSync(join(boxHome(home, "coder.hedge-node-1"), ".ssh/config"), "utf8")).toBe("# coder http://coder.internal\n");
+    expect(internal.coderTokens()).toEqual([]);
   });
 
   test("hedge devbox add stops with what to run when this machine is not signed in to Coder, and leaves other SSH hosts alone", async () => {
@@ -250,7 +247,7 @@ describe("hedge devbox add", () => {
 
     const plain = fakeMachine(home, { "box:coder": 1 });
     expect(await main(["devbox", "add", "node-2"], { ...options, setup: { machine: plain.machine } })).toBe(0);
-    expect(plain.coderSsh).toEqual([]);
+    expect(existsSync(join(boxHome(home, "node-2"), ".ssh/config"))).toBe(false);
     expect(io.output()).not.toContain("Sign in to Coder on node-2");
   });
 });

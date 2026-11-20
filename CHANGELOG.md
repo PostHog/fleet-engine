@@ -68,6 +68,49 @@
   default, such as a key, reaches the agent's output.
 - Each page of the site carries its own script and styles, so a cached page
   always runs its own script.
+- `hedge devbox add` signs a node in to Coder only at the hub's own Coder
+  address, and only over HTTPS, checked with no redirect followed. The
+  node's own Coder CLI signs in with `coder login --use-token-as-session`:
+  the new token goes over SSH on standard input into the environment of
+  that one command, never into an argument. It installs a missing Coder CLI
+  only from that address over HTTPS, only from an HTTP 200 answer with no
+  redirect, and only after the downloaded CLI runs. When the node does not
+  reach that address over HTTPS, it makes no token and names the sign-in
+  the person does there.
+  Before it runs any Coder command on the node, it checks the node's Coder
+  `url` and `session` paths and its environment with the shell alone. When
+  a path is not a plain file, `CODER_URL` or `CODER_SESSION_TOKEN` is set,
+  or the node is signed in at another address as another user, it leaves
+  that sign-in alone, makes no token, installs a missing Coder CLI as
+  above, and lists the sign-in among the steps for the person. That step
+  names the paths to move aside and the variables to remove first. It
+  prints no command when the hub's Coder address is plain HTTP, and says so
+  when the Coder CLI could not be fetched from the hub's Coder address. It
+  runs `coder login` and `coder config-ssh` on the node under
+  `timeout -s KILL`. 2 minutes after the command starts on the node, it
+  kills them there, with the processes they started that are still in
+  their process group. For a connection that stops answering, the hub
+  stops its SSH call 150 seconds after it starts that call, and that time
+  includes the SSH setup. It removes the token when they fail or time out,
+  under `timeout` too: the removal gets TERM after 1 minute, and KILL 10
+  seconds after that. When the removal fails or times out, it names the
+  token and the command that removes it.
+  After the node applies the profile, it asks the node's
+  `hedge doctor --to-do` which steps are left. When the apply passed and
+  the node finds nothing but those steps, it goes on with the sign-ins,
+  T3 Connect and the link, and ends with a list of them, each with its
+  command, and a line to run `hedge apply` on the node after them. It runs
+  none of them itself. When the apply failed, or the node finds anything
+  else, it stops at the profile step, with what `hedge doctor` there
+  found. A node with an older Hedge, which has
+  no `--to-do`, finishes the step and points to `hedge doctor` there. A
+  rerun keeps a node engine that runs the hub's engine commit, when its
+  `hedge` command runs. When T3 Code on the hub reaches the node, it says
+  so, and does not ask for `hedge peers link`.
+- `hedge doctor --to-do` prints the steps left for the person as JSON, and
+  before it the other findings. It exits 1 when there are other findings.
+  A step that Hedge repairs itself is a finding, never a step for the
+  person.
 
 ### Fleet is now Hedge
 

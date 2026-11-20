@@ -3,7 +3,7 @@ import { saveMachine, validHost } from "../profile/profile.ts";
 import type { Machine } from "../setup/commands.ts";
 import { balanceThreads } from "../setup/devbox-balance.ts";
 import { removeDevbox } from "../setup/devbox-remove.ts";
-import { addressHere, devboxSteps, linkFromHub, listInProfile, nameBox, overSsh, profileForBox, tellHub } from "../setup/devbox.ts";
+import { addressHere, devboxSteps, type LeftStep, linkFromHub, listInProfile, nameBox, overSsh, printLeftForYou, profileForBox, tellHub } from "../setup/devbox.ts";
 import { FlagError, refuseUnusableDevbox } from "../setup/flags.ts";
 import { runSteps } from "../setup/runner.ts";
 import { Stopped, type Terminal } from "../setup/terminal.ts";
@@ -34,7 +34,8 @@ export async function devboxCommand(args: string[], context: DevboxCommandContex
   const listedHub = await listInProfile(machineFile.profileDir, host);
   const hub = listedHub && listedHub !== host ? listedHub : undefined;
   const hubTook = hub !== undefined && (await tellHub(context, hub, host));
-  const steps = () => devboxSteps(host, { terminal, machine: context.machine, nonInteractive: false, plan: context.plan.ai, models: context.plan.models, profile: () => profileForBox(context.machine, machineFile.profileDir), rerun: `hedge devbox add ${host}` });
+  let left: LeftStep[] = [];
+  const steps = () => devboxSteps(host, { terminal, machine: context.machine, nonInteractive: false, plan: context.plan.ai, models: context.plan.models, profile: () => profileForBox(context.machine, machineFile.profileDir), rerun: `hedge devbox add ${host}`, leftForYou: (steps) => (left = [...left, ...steps]), ...(context.plan.engineRoot ? { engineRoot: context.plan.engineRoot } : {}) });
   try {
     await runSteps(steps, {
       terminal,
@@ -44,17 +45,19 @@ export async function devboxCommand(args: string[], context: DevboxCommandContex
         await remember();
       },
     });
+    terminal.print("");
+    terminal.print(`${host} is your devbox now. It runs your profile, and T3 Code here and there can reach each other.`);
+    if (hub) await linkFromHub({ ...context, ...(machineFile.name ? { self: machineFile.name } : {}) }, hub, host, hubTook);
+    await balanceThreads(context);
+    return 0;
   } catch (error) {
     if (!(error instanceof Stopped)) throw error;
     terminal.print("");
     terminal.print(`Stopped. Run hedge devbox add ${host} again to pick up where it stopped.`);
     return 130;
+  } finally {
+    printLeftForYou(terminal, host, left);
   }
-  terminal.print("");
-  terminal.print(`${host} is your devbox now. It runs your profile, and T3 Code here and there can reach each other.`);
-  if (hub) await linkFromHub(context, hub, host, hubTook);
-  await balanceThreads(context);
-  return 0;
 }
 
 export const asksAddress = (args: string[]) => args.length === 1 && args[0] === "address";
