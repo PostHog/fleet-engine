@@ -319,3 +319,11 @@ test("a first panel that asks for a fixes scope after a clean single review meet
 
   await expect(pr.hedge("review", "--lens", "correctness", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(stops);
 });
+
+test("a [base] marker in bold still keeps a finding from buying a round", async () => {
+  const pr = await checkout();
+  const reviewed = await firstRound(pr, ["- major | feature.ts:2 | **[base]** the base drops an empty name too, base feature.ts:2 | anchor: greet 1"], ["1. fixed: an empty name is kept now"]);
+  await pr.commit("feature.ts", lines(11, "greet"));
+
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(stops);
+});

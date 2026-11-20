@@ -378,7 +378,7 @@ function buysRound({ text, note, test, answer }: AnsweredFinding) {
   const severity = fields && statedSeverity(fields);
   if (!fields || (severity !== "blocker" && severity !== "major")) return false;
   const tail = fields.findIndex((field) => tailField.test(field));
-  if (fields.slice(0, tail < 0 ? undefined : tail).some((field) => /^\[base\]/i.test(field))) return false;
+  if (fields.slice(0, tail < 0 ? undefined : tail).some((field) => /^[*_]*\[base\]/i.test(field))) return false;
   const site = fields.slice(0, 2).map(locationOf).find(Boolean);
   return site === undefined || isProductionFile(site);
 }

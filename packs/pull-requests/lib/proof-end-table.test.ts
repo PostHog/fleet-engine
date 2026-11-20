@@ -559,5 +559,5 @@ test("round 1 counts from its fork point with GitHub's base, so base changes it 
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | not run | none |");
 });
