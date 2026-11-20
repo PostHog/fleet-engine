@@ -10,7 +10,7 @@ import { displayEntry } from "./proof-display.ts";
 import { receiptMarker } from "./proof-receipt.ts";
 import { baseRefs, cleanBaseMerge, devPullOf, diffOf, mergeBase, pullRequestDetails, remotesOf, topLevel } from "./proof-checkout.ts";
 import { quietCommitIn } from "./proof-delta.ts";
-import { measureGrowth, type Growth } from "./proof-end-table.ts";
+import { isCommitSha, measureGrowth, type Growth } from "./proof-end-table.ts";
 import { judge, readCriticalPaths, type JudgeInput } from "./proof-judge.ts";
 import { askModel, familyOf, modelLabel, readRiskRubric, readRubric, reviewerRow, skillReferences } from "./proof-models.ts";
 
@@ -79,7 +79,7 @@ export async function finalGate(head: ProofIdentity, context: GateContext, { lan
 
 
 function unmeasured(head: ProofIdentity, run: Run, pull: PullRequest | undefined, growth: Growth, landed: boolean) {
-  if (growth.final || !pull?.baseSha || run(["git", "cat-file", "-e", `${pull.baseSha}^{commit}`]).code === 0) return [];
+  if (growth.final || !isCommitSha(pull?.baseSha) || run(["git", "cat-file", "-e", `${pull.baseSha}^{commit}`]).code === 0) return [];
   const remote = remotesOf(head.repository, run)[0] ?? `<a remote of ${head.repository}>`;
   return [`growth: unknown at HEAD, since the base commit ${pull.baseSha.slice(0, 7)} that GitHub reports is not in this checkout. Run git fetch ${remote} ${pull.base}, then hedge proof gate${landed ? " --landed" : ""} again`];
 }

@@ -444,7 +444,7 @@ test("a gate saved by an engine without the end table shows no row until the gat
   await pr.hedge("gate");
   const saved = join(pr.pullRequest, "gate-outcome", `${await pr.git("rev-parse", "HEAD")}.json`);
   const outcome = JSON.parse(readFileSync(saved, "utf8"));
-  const { baseSha: _baseSha, endTable: _endTable, ...oldKey } = outcome.key;
+  const { endTable: _endTable, ...oldKey } = outcome.key;
   const { growth: _growth, ...oldSummary } = outcome.gate.summary;
   writeFileSync(saved, JSON.stringify({ ...outcome, key: oldKey, gate: { ...outcome.gate, summary: oldSummary } }));
 
@@ -453,4 +453,15 @@ test("a gate saved by an engine without the end table shows no row until the gat
   expect(block(pr.githubBody())).toContain("**End table:** no gate at HEAD yet. Run hedge proof gate, then hedge proof receipt.");
   await pr.hedge("gate");
   expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | none |");
+});
+
+test("a base commit from GitHub that is not a string counts unknown, and the gate still saves its verdict", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.ts", lines(3, "greet"));
+  pr.pullRequestState({ body: graded("non-critical"), baseSha: 42 });
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  const gate = await pr.hedge("gate");
+
+  expect(gate.output).not.toContain("TypeError");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | unknown at HEAD | none |");
 });
