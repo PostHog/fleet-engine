@@ -374,7 +374,7 @@ command instead, unless the PR is a one-way door or its tier keeps the gap the u
       const reason = required(options, "--reason", "gap");
       const gap = await recordGap(context.home, identity(), kind, reason, context.now?.());
       context.print(JSON.stringify(gap));
-      context.print(askGap(identity(), kind, reason, autonomyOf(context.env, gradeAt(identity(), context), "proof-gap", [kind])));
+      context.print(askGap(identity(), kind, reason, autonomyOf(context.env, () => gradeAt(identity(), context), "proof-gap", [kind])));
       return 0;
     },
   },
@@ -956,7 +956,7 @@ function roundOption(options: Map<string, string>) {
 }
 
 async function decisionOf(options: Map<string, string>, head: ProofIdentity, context: CommandContext): Promise<{ arbiter: Arbiter; autonomy: () => Autonomy; limits: { free: number; ceiling: number }; decision?: Decision }> {
-  const rest = { arbiter: arbiterOf(context), autonomy: () => autonomyOf(context.env, gradeAt(head, context), "review"), limits: { free: numberSetting("pull-requests.freeReviews", context.env), ceiling: numberSetting("pull-requests.reviewCeiling", context.env) } };
+  const rest = { arbiter: arbiterOf(context), autonomy: () => autonomyOf(context.env, () => gradeAt(head, context), "review"), limits: { free: numberSetting("pull-requests.freeReviews", context.env), ceiling: numberSetting("pull-requests.reviewCeiling", context.env) } };
   const words = options.get("--override");
   const reason = options.get("--agent") ?? options.get("--standing");
   if (options.has("--agent") && options.has("--standing")) throw new Error("Pass --agent, not --standing too: --standing is its old name");

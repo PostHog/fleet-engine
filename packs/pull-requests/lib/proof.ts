@@ -9,7 +9,7 @@ import { isProductionFile } from "./proof-checkout.ts";
 import { panelOutcome } from "./proof-panel.ts";
 import { anchorHeading } from "./finding-anchors.ts";
 import type { Growth } from "./proof-end-table.ts";
-import { endTableNote, gradeOf, type Autonomy } from "./proof-autonomy.ts";
+import { endTableNote, gradeOf, shellQuoted, type Autonomy } from "./proof-autonomy.ts";
 
 export type ProofIdentity = { repository: string; pr: number; commit: string };
 const sha = /^[0-9a-f]{40}$/;
@@ -408,7 +408,7 @@ export const gapQuestion = (identity: ProofIdentity, kind: string, reason: strin
 export const recordGapCommand = (identity: ProofIdentity, kind: string) => `hedge decision record --mark 👤 --class proof-gap --kind ${kind} --pr ${identity.repository}#${identity.pr}`;
 
 export function askGap(identity: ProofIdentity, kind: string, reason: string, autonomy: Autonomy) {
-  if (autonomy === "end") return `Decide the gap yourself: run hedge decision record --mark 🤖 --class proof-gap --kind ${kind} --pr ${identity.repository}#${identity.pr} --question "${gapQuestion(identity, kind, reason)}" --answer "${acceptGapOption}" --rejected "${keepGapOption}" --reason '<your reason>'. Keep the gap open while the proof can still run. The user reads it in the end table of hedge decision report`;
+  if (autonomy === "end") return `Decide the gap yourself: run hedge decision record --mark 🤖 --class proof-gap --kind ${kind} --pr ${identity.repository}#${identity.pr} --question ${shellQuoted(gapQuestion(identity, kind, reason))} --answer ${shellQuoted(acceptGapOption)} --rejected ${shellQuoted(keepGapOption)} --reason '<your reason>'. Keep the gap open while the proof can still run. It lands in the ledger as a 🤖 proof-gap decision, and ${endTableNote}.`;
   return `Ask the user with your question tool. Question: "${gapQuestion(identity, kind, reason)}" Options: "${acceptGapOption}", "${keepGapOption}". When they choose "${acceptGapOption}", run ${recordGapCommand(identity, kind)}`;
 }
 
@@ -886,7 +886,7 @@ export async function judgeGap(home: string, identity: ProofIdentity, now: Date,
   const gap = await readJson<Gap | undefined>(gapPath(home, identity, "judge"), undefined);
   if (gap?.commit !== identity.commit) return undefined;
   const weighed = await gapAcceptance({ home, identity, now, decisions, tier }, gap, "judge");
-  return { reason: gap.reason, acceptance: weighed.acceptance, lapsed: weighed.lapsed, line: weighed.acceptance?.line ?? notAccepted(decisions, weighed), condition: weighed.condition };
+  return { reason: gap.reason, acceptance: weighed.acceptance, lapsed: weighed.lapsed, kept: weighed.kept, line: weighed.acceptance?.line ?? notAccepted(decisions, weighed), condition: weighed.condition };
 }
 
 export type JudgeGap = NonNullable<Awaited<ReturnType<typeof judgeGap>>>;
@@ -910,7 +910,7 @@ export async function readDecisions(ledger: Ledger): Promise<Decisions> {
 type Acceptance = { by: "the user" | "agent" | "standing rule"; line: string; id?: string; mark?: Mark };
 export type Condition = { id: string; kind: string; condition: string };
 type Weigh = { home: string; identity: ProofIdentity; now: Date; decisions: Decisions; tier: Tier; ci?: CiResult };
-type Weighed = { acceptance?: Acceptance; lapsed?: { id: string; reason: string }; condition?: Condition };
+type Weighed = { acceptance?: Acceptance; lapsed?: { id: string; reason: string }; condition?: Condition; kept?: string };
 
 async function gapAcceptance(weigh: Weigh, gap: Gap | undefined, kind: GapKind): Promise<Weighed> {
   const { home, identity, now, decisions, tier, ci } = weigh;
@@ -932,7 +932,7 @@ async function gapAcceptance(weigh: Weigh, gap: Gap | undefined, kind: GapKind):
   if (agent && !lapse) return accepted(agent, "agent");
   const lapsed = agent && lapse ? { id: agent.id, reason: lapse } : undefined;
   const standing = kept || !Array.isArray(decisions) ? undefined : await standingFor(home, kind, now, identity.repository);
-  if (!standing) return { lapsed };
+  if (!standing) return { lapsed, ...kept ? { kept: kept.id } : {} };
   const scoped = standing.repositories ? { condition: { id: `standing rule ${kind} until ${standing.until}`, kind, condition: standing.rule } } : {};
   return { acceptance: { by: "standing rule", line: `accepted by standing rule until ${standing.until}${standing.repositories ? ` for ${standing.repositories.join(", ")}` : ""}` }, ...scoped };
 }
