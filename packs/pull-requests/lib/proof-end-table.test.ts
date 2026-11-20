@@ -126,6 +126,36 @@ test("a renamed file counts its changed lines, not its whole content twice", asy
   expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | not run | none |");
 });
 
+test("a second remote of the same repository with a stale base does not count the base's later work as the PR's", async () => {
+  const pr = await checkout();
+  const fork = await pr.git("rev-parse", "refs/remotes/origin/main");
+  await pr.git("remote", "add", "hedge-base", "https://github.com/example/product.git");
+  await pr.git("update-ref", "refs/remotes/hedge-base/main", fork);
+  await pr.advanceBase("base.ts", lines(50, "landed"));
+  await pr.git("merge", "-q", "--no-edit", "refs/remotes/origin/main");
+  await pr.commit("feature.ts", lines(3, "greet"));
+  pr.pullRequestState({ body: graded("non-critical") });
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  await pr.hedge("gate");
+
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | 3 at HEAD | none |");
+});
+
+test("a stale base ref counts from the base commit GitHub reports, so the base's later work is not the PR's", async () => {
+  const pr = await checkout();
+  const fork = await pr.git("rev-parse", "refs/remotes/origin/main");
+  await pr.advanceBase("base.ts", lines(50, "landed"));
+  const landed = await pr.git("rev-parse", "refs/remotes/origin/main");
+  await pr.git("merge", "-q", "--no-edit", landed);
+  await pr.commit("feature.ts", lines(3, "greet"));
+  await pr.git("update-ref", "refs/remotes/origin/main", fork);
+  pr.pullRequestState({ body: graded("non-critical"), baseSha: landed });
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  await pr.hedge("gate");
+
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | 3 at HEAD | none |");
+});
+
 test("a reason with a carriage return or an escaped pipe stays in its cell", async () => {
   const pr = await checkout();
   await pr.commit("feature.ts", lines(10, "greet"));

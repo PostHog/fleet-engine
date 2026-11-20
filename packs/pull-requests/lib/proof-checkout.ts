@@ -17,18 +17,20 @@ export function topLevel(run: Run) {
  * remote once; without such a remote, or without the commit, the error names the commands that fix it.
  */
 export function mergeBase(identity: ProofIdentity, run: Run) {
-  const base = pullRequestDetails(identity, run).baseRefName;
+  const { baseRefName: base, baseSha } = pullRequestDetails(identity, run);
   const remotes = remotesOf(identity.repository, run);
+  const present = (commit: string) => run(["git", "rev-parse", "--verify", "--quiet", `${commit}^{commit}`]).code === 0;
+  const fetchBase = () => { for (const remote of remotes) run(["git", "fetch", "--quiet", remote, `+refs/heads/${base}:refs/remotes/${remote}/${base}`]); };
   const found = () => {
-    for (const remote of remotes) {
-      const result = run(["git", "merge-base", `refs/remotes/${remote}/${base}`, identity.commit]);
-      if (result.code === 0) return result.stdout.trim();
-    }
-    return undefined;
+    const tips = [...remotes.map((remote) => `refs/remotes/${remote}/${base}`), ...baseSha ? [baseSha] : []].filter(present);
+    if (!tips.length) return undefined;
+    const result = run(["git", "merge-base", identity.commit, ...tips]);
+    return result.code === 0 && result.stdout.trim() || undefined;
   };
+  if (baseSha && !present(baseSha)) fetchBase();
   const before = found();
   if (before) return before;
-  for (const remote of remotes) run(["git", "fetch", "--quiet", remote, `+refs/heads/${base}:refs/remotes/${remote}/${base}`]);
+  fetchBase();
   const after = found();
   if (after) return after;
   const where = `Cannot find where ${identity.repository}#${identity.pr} branched from its base ${base} here`;
@@ -125,8 +127,8 @@ export function reviewTier(identity: ProofIdentity, run: Run, body: string | und
 
 export function pullRequestDetails(identity: ProofIdentity, run: Run) {
   try {
-    const { title, body, base } = readPullRequest(identity, run);
-    return { title, body, baseRefName: base };
+    const { title, body, base, baseSha } = readPullRequest(identity, run);
+    return { title, body, baseRefName: base, baseSha };
   } catch (error) {
     throw new Error(`Cannot read ${identity.repository}#${identity.pr} over GitHub's REST API (${(error as Error).message})`);
   }
