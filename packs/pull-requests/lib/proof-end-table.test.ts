@@ -523,3 +523,16 @@ test("a PR gated under two spellings with different verdicts reports the failing
     expect(report).toContain("its proofs are not shown to pass");
   }
 });
+
+test("a round 1 that read an empty range shows zero lines at round 1, not unknown", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: graded("non-critical") });
+  expect((await pr.hedge("review-start", "--scope", "full")).code).toBe(0);
+  writeFileSync(join(pr.repository, "findings.md"), "No findings.\n");
+  expect((await pr.hedge("review-finish", "--round", "1", "--reviewer", "gpt-6.1-sol", "findings.md")).code).toBe(0);
+  await pr.commit("feature.ts", lines(30, "greet"));
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  await pr.hedge("gate");
+
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 0 → 30 | none |");
+});

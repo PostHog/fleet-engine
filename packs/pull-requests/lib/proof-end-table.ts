@@ -20,7 +20,8 @@ export async function measureGrowth(home: string, head: ProofIdentity, run: Run,
   const reviews = await finishedReviews(home, head);
   const rounds = reviews.filter(({ name }) => isRound(name)).sort((a, b) => Number(a.name) - Number(b.name));
   const opening = rounds[0];
-  const first = opening?.scope === "full" && opening.from ? sizeAt({ ...head, commit: opening.commit }, run, opening.from) : undefined;
+  const empty = { production: 0, tests: 0, docs: 0 };
+  const first = opening?.scope === "full" && opening.from ? opening.from === opening.commit ? { ...empty, commit: opening.commit } : sizeAt({ ...head, commit: opening.commit }, run, opening.from) : undefined;
   const final = sizeAt(head, run, isCommitSha(baseSha) ? forkPoint(head, run, baseSha) : undefined);
   return { rounds: rounds.length, finalReads: reviews.length - rounds.length, ...first ? { first } : {}, ...final ? { final } : {} };
 }
