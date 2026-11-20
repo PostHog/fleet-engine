@@ -9,7 +9,7 @@ export const needsHubPacks = ["hub", "mcp-gateway", "security"];
 export const makesOwnDevbox = (packs: string[]) => packs.some((pack) => ownDevboxPacks.includes(pack));
 
 export const defaultSources: SourceRef[] = [
-  { name: "agent-skills", repo: "Silthus/agent-skills", ref: "1cef0948e85fcccb44f4f030baae70c7ce883315" },
+  { name: "agent-skills", repo: "Silthus/agent-skills", ref: "6595e9ffecd03afdede25947d8d09361026cda92" },
   { name: "mattpocock-skills", repo: "mattpocock/skills", ref: "4ae2317ddb22b046e26455e4f9c9b3aaaf62212d" },
 ];
 
