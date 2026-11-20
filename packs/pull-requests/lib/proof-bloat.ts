@@ -47,7 +47,7 @@ function scoreOf(text: string): Pick<BloatScore, "cuttable" | "hunks"> | undefin
     const value = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1)) as Partial<BloatScore>;
     const { cuttable, hunks } = value;
     if (!Number.isInteger(cuttable) || cuttable! < 0 || cuttable! > 100 || !Array.isArray(hunks)) return undefined;
-    if (!hunks.every((hunk) => typeof hunk?.citation === "string" && hunk.citation.trim() && typeof hunk.reason === "string" && hunk.reason.trim())) return undefined;
+    if (!hunks.every((hunk) => typeof hunk?.citation === "string" && /:\d+(?:-\d+)?$/.test(hunk.citation.trim()) && typeof hunk.reason === "string" && hunk.reason.trim())) return undefined;
     if (cuttable! > 0 && !hunks.length) return undefined;
     return { cuttable: cuttable!, hunks: hunks.map(({ citation, reason }) => ({ citation, reason })) };
   } catch { return undefined; }
@@ -55,11 +55,19 @@ function scoreOf(text: string): Pick<BloatScore, "cuttable" | "hunks"> | undefin
 
 const shaped = (score: BloatScore | undefined): score is BloatScore => score !== undefined && scoreOf(JSON.stringify(score)) !== undefined;
 
-export async function readBloat(home: string, head: ProofIdentity) {
+export async function readBloat(home: string, head: ProofIdentity, inputs: () => string | undefined) {
   const directory = bloatDirectory(home, head);
   const names = (await readdir(directory).catch(() => [] as string[])).filter((name) => /^[0-9a-f]{40}\.json$/.test(name));
   const scores = (await Promise.all(names.map((name) => readJson<BloatScore | undefined>(join(directory, name), undefined).catch(() => undefined)))).filter(shaped);
-  return scores.find((score) => score.commit === head.commit) ?? scores.sort((a, b) => a.recordedAt.localeCompare(b.recordedAt)).at(-1);
+  const current = scores.filter((score) => score.commit !== head.commit || score.digest === inputs());
+  return current.find((score) => score.commit === head.commit) ?? current.sort((a, b) => a.recordedAt.localeCompare(b.recordedAt)).at(-1);
+}
+
+const digestOf = (prompt: string) => createHash("sha256").update(prompt).digest("hex");
+
+export function inputsDigest(head: ProofIdentity, run: Run, growth: { first?: Sized; final?: Sized }, body: string) {
+  const prompt = growth.first && growth.final ? promptOf(body, head, run, growth.first, growth.final) : undefined;
+  return prompt && digestOf(prompt);
 }
 
 function promptOf(body: string, head: ProofIdentity, run: Run, first: Sized, final: Sized) {
@@ -78,7 +86,7 @@ export async function scoreBloat(home: string, head: ProofIdentity, run: Run, gr
   const { first, final, body } = growth;
   const prompt = promptOf(body, head, run, first, final);
   if (!prompt) return `the diffs pass the bloat judge's cap of ${diffCap} characters`;
-  const digest = createHash("sha256").update(prompt).digest("hex");
+  const digest = digestOf(prompt);
   const path = join(bloatDirectory(home, head), `${head.commit}.json`);
   const saved = await readJson<BloatScore | undefined>(path, undefined).catch(() => undefined);
   if (shaped(saved) && saved.digest === digest) return saved;

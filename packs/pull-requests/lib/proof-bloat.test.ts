@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { writeFileSync } from "node:fs";
+import { readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { checkout, cleanFixtures, fakeModel, graded, type Checkout } from "./proof-testing.ts";
 
@@ -56,7 +56,7 @@ test("a judge that gives no score leaves the growth to be read by hand and is as
 
   await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(
     "past twice the first. Read the growth by hand: the bloat judge bloat-judge-under-test gave no score: its answer is not the JSON asked for. Before another round");
-  for (const answer of [{ cuttable: 101, hunks: [] }, { cuttable: 30, hunks: [] }, { cuttable: 30, hunks: [{ citation: " ", reason: "not needed" }] }]) {
+  for (const answer of [{ cuttable: 101, hunks: [] }, { cuttable: 30, hunks: [] }, { cuttable: 30, hunks: [{ citation: " ", reason: "not needed" }] }, { cuttable: 30, hunks: [{ citation: "no citation available", reason: "not needed" }] }]) {
     judge.answer(JSON.stringify(answer));
     await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow("Read the growth by hand");
   }
@@ -68,11 +68,11 @@ test("a judge that gives no score leaves the growth to be read by hand and is as
   judge.answer("{}");
   await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow("Read the growth by hand: the bloat judge a replacement command gave no score");
   const prompts = judge.prompts();
-  expect(prompts).toHaveLength(6);
+  expect(prompts).toHaveLength(7);
   expect(prompts[0]).toContain("The PR description has no Problem section.");
 });
 
-test("a later HEAD or an edited Problem section gets its own score, and the end table names the commit of an older score", async () => {
+test("a later HEAD or an edited Problem section gets its own score, a gate shows no score of old inputs, and the end table names the commit of an older score", async () => {
   const pr = await checkout();
   const hunk = { citation: "retry.ts:1-11", reason: "the problem never retries" };
   const judge = fakeModel(pr, "BLOAT_JUDGE", JSON.stringify({ cuttable: 52, hunks: [hunk] }));
@@ -83,12 +83,13 @@ test("a later HEAD or an edited Problem section gets its own score, and the end 
   await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow("reads 40%");
   expect(judge.prompts()[1]).toContain("a slow store times it out");
   pr.pullRequestState({ body: problem + graded("non-critical") });
-  judge.answer("no score");
-  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow("Read the growth by hand");
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
   const unscored = (await pr.decide("report", "--pr", "example/product#42")).output.split("\n");
   expect(unscored.find((line) => /^\| example\/product#42 \| \d+ rounds? \|/.test(line))).toBe("| example/product#42 | 1 round | 10 → 21 (×2.1) | not run | none |");
+  judge.answer("no score");
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow("Read the growth by hand");
+  expect(readdirSync(join(pr.pullRequest, "judge", "bloat"))).toEqual([]);
   await pr.commit("retry.ts", lines(13, "retry"));
   judge.answer(JSON.stringify({ cuttable: 56, hunks: [hunk] }));
   pr.clock.now = new Date("2026-10-25T13:00:00Z");
