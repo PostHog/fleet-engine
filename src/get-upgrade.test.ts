@@ -106,7 +106,6 @@ describe("get.sh upgrades a machine that Fleet runs", () => {
     expect(result.code).toBe(1);
     expect(result.output).toContain(`Hedge: ${link} is a link, and Hedge finds and stops only a Fleet engine that sits in ${link} itself, so Hedge changed nothing. Stop Fleet's services, cron jobs and fleet: tasks in T3 Code by hand and delete the link ${link}, or move the engine to ${link} in place of the link. Then run get.sh again.`);
     expect(result.output).not.toContain("ls -l");
-    expect(result.output).toContain(`delete the link ${link}, or move the engine to ${link} in place of the link. Then run get.sh again.`);
     expect(tree(machine.home)).toEqual(before);
     expect(machine.state().units).toEqual({ "fleet-watch.service": running });
   });

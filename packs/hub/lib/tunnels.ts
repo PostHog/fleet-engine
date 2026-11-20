@@ -14,7 +14,7 @@ export type TunnelMachine = { home: string; devboxes: string[]; dialsHub: string
 const marker = "# Managed by Hedge hub SSH tunnels.";
 const tunnelAddress = "127.0.0.1";
 const hostsMarker = (home: string) => ` # hedge-hub-tunnel ${home}`;
-const hostsOwner = (line: string) => /^[^#]* # hedge-hub-tunnel (.*)$/.exec(line)?.[1];
+const hostsOwner = (line: string) => /^[^#]* # hedge-hub-tunnel ([^\n]*)$/.exec(line)?.[1];
 const ownedHostsLine = (home: string) => (line: string) => hostsOwner(line) === home;
 const markedHostsLine = (line: string) => line.endsWith(" # fleet-hub-tunnel") || line.includes(" # hedge-hub-tunnel ");
 const unitName = (alias: string) => `hedge-ssh-${alias}.service`;

@@ -236,15 +236,34 @@ test("on a devbox, install then remove in the same home leaves the hosts file as
   write(before);
   expect(await sshTunnels("install", deps)).toBe(0);
   expect(await sshTunnels("left", deps)).toBe(0);
-  const installed = read();
-  const refused = devbox({ home: deps.home, hosts, httpsHost: undefined }, "refused");
-  await expect(sshTunnels("remove", refused.deps)).rejects.toThrow("a password is required");
-  expect(read()).toBe(installed);
   expect(await sshTunnels("remove", devbox({ home: deps.home, hosts, httpsHost: undefined }).deps)).toBe(0);
   expect(read()).toBe(before);
+  const refused = devbox({ home: deps.home, hosts, httpsHost: undefined }, "refused");
   expect(await sshTunnels("left", refused.deps)).toBe(1);
   expect(await sshTunnels("remove", refused.deps)).toBe(0);
   expect(read()).toBe(before);
+});
+
+test("on a devbox, remove with this home's hosts line fails with the refusal when the privileged write is refused, and leaves the hosts file as it was", async () => {
+  const { deps, write, read } = devbox({ httpsHost: undefined }, "refused");
+  const owned = `${base}${fleetLine}\n${lineOf(deps.home)}\n`;
+  write(owned);
+  await expect(sshTunnels("remove", deps)).rejects.toThrow("sudo: a password is required");
+  expect(read()).toBe(owned);
+});
+
+test("a home path with a Unicode line or paragraph separator gets one hosts line after two installs and none after remove", async () => {
+  for (const separator of ["\u2028", "\u2029"]) {
+    const home = roleHome(temp.make(`hedge-tunnels-${separator}-`), "devbox");
+    const { deps, read } = devbox({ home });
+    expect(await sshTunnels("install", deps)).toBe(0);
+    expect(await sshTunnels("install", deps)).toBe(0);
+    expect(read()).toBe(`${base}${lineOf(home)}\n`);
+    expect(await sshTunnels("left", { ...deps, httpsHost: undefined })).toBe(0);
+    expect(await sshTunnels("remove", { ...deps, httpsHost: undefined })).toBe(0);
+    expect(read()).toBe(base);
+    expect(await sshTunnels("left", deps)).toBe(1);
+  }
 });
 
 test("the hub treats every name hedge devbox add keeps for pool boxes as a box, even one listed by hand", async () => {

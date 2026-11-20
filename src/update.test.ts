@@ -626,7 +626,7 @@ cat "$(dirname "$0")/VERSION" > "$HOME/applied"
     expect(result.version).toBe("v0.1.1");
     expect(result.output).toContain(`hedge update: warning: could not save the new major notice in ${noticePath(home)}, so hedge doctor may name the wrong release: Parent is not a real directory: `);
     expect([readFileSync(join(other, "update.json"), "utf8"), readFileSync(join(other, "hedge/update.json"), "utf8")]).toEqual([fleetsOwn, fleetsOwn]);
-    expect((await spawnGit(engineDir, "for-each-ref", "--format=%(refname)", "refs/hedge/releases")).trim()).toBe("refs/hedge/releases/v0.1.1");
+    expect(await triageEngineLine(engineDir)).toBe("- Engine: v0.1.1");
   });
 
   const noticeCases: Array<[string, string[], (home: string, outside: string) => string]> = [
