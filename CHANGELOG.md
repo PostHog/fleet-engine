@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Decide alone, and show one table at the end
+
+- The setting `pull-requests.autonomy` sets how often an agent asks about a
+  review round or a proof gap. `ask`, the default, keeps the question. With
+  `end`, `hedge proof` tells the agent to decide alone as a 🤖 decision, and
+  the user reads each one in the end table of `hedge decision report`.
+- A one-way door, an ungraded pull request, a panel gap, and a product gap on
+  a critical pull request still go to the user.
+
 ### The review loop stops on its own
 
 - A review round runs after another review only when the latest review found

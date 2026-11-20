@@ -96,6 +96,10 @@ _Avoid_: Decision type, category
 The `Tier:` line of a pull request's merge-risk callout at HEAD: critical or non-critical. A pull request without it is ungraded. The tier limits what an agent may decide alone.
 _Avoid_: Risk level, grade
 
+**Autonomy**:
+The setting `pull-requests.autonomy`: how often an agent asks the user about a review round or a proof gap. On `ask`, the default, `hedge proof` tells the agent to ask the user each time. On `end`, it tells the agent to decide alone as a 🤖 decision, wherever the tier lets it, and the user reads every such decision in the end table. A one-way door, an ungraded pull request, a panel gap, and a product gap on a critical pull request still go to the user.
+_Avoid_: Trust level, mode
+
 **Acceptance**:
 A decision that lets the gate pass over a proof gap. The user's acceptance always counts; an agent's acceptance counts only while nothing lapses it.
 _Avoid_: Waiver, override

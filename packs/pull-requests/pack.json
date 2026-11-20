@@ -58,6 +58,23 @@
       ]
     },
     {
+      "key": "pull-requests.autonomy",
+      "question": "When an agent may decide a review round or a skipped proof alone, should it ask you each time, or decide and show you one table at the end?",
+      "type": "choice",
+      "default": "ask",
+      "ask": "never",
+      "choices": [
+        {
+          "value": "ask",
+          "label": "Ask me each time"
+        },
+        {
+          "value": "end",
+          "label": "Decide, and show me one table at the end"
+        }
+      ]
+    },
+    {
       "key": "pull-requests.mergeCommand",
       "question": "Which command merges a pull request when the repo names no merge method? Leave it empty to merge as the rollout skill says.",
       "type": "string",
