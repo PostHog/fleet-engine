@@ -660,12 +660,12 @@ describe("hedge retire-fleet", () => {
     if (target === "a checkout") mkdirSync(checkout, { recursive: true });
     rmSync(link, { recursive: true });
     symlinkSync(checkout, link);
-    const refusal = `Hedge: ${link} is a link, and Hedge finds and stops only a Fleet engine that sits in ${link} itself, so Hedge changed nothing. Run ls -l "${link}" to see where it points.`;
+    const refusal = `Hedge: ${link} is a link, and Hedge finds and stops only a Fleet engine that sits in ${link} itself, so Hedge changed nothing. Stop Fleet's services, cron jobs and fleet: tasks in T3 Code by hand and delete the link ${link}, or move the engine to ${link} in place of the link.`;
     const files = () => readdirSync(linked.home, { recursive: true }).map(String).sort();
     return { ...linked, refusal, files };
   };
 
-  test.each(["a checkout", "a missing folder"])("on a machine whose default Fleet engine folder is a link to %s, retire and its dry run refuse, name only the link and how to see where it points, and change nothing", async (target) => {
+  test.each(["a checkout", "a missing folder"])("on a machine whose default Fleet engine folder is a link to %s, retire and its dry run refuse, name only the link and no shell command with its path, and change nothing", async (target) => {
     const linked = withLinkedEngine(target);
     const before = linked.files();
 
@@ -680,7 +680,7 @@ describe("hedge retire-fleet", () => {
     expect(linked.files()).toEqual(before);
   });
 
-  test("on a machine whose default Fleet engine folder is a link, apply refuses, names only the link and how to see where it points, and starts and changes nothing", async () => {
+  test("on a machine whose default Fleet engine folder is a link, apply refuses, names only the link and no shell command with its path, and starts and changes nothing", async () => {
     const linked = withLinkedEngine();
     const profile = profileDir(["watcher"]);
     const before = linked.files();

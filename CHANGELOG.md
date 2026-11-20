@@ -27,8 +27,7 @@
   again. A `~/.local/bin/fleet` without the `# Fleet` line is not Fleet's,
   and Hedge ignores it. When `~/.local/share/fleet/engine` itself is a link,
   `get.sh`, `hedge retire-fleet`, its dry run, and `hedge apply` refuse the
-  same way and name the link. The message gives the `ls -l` command with the
-  path in quotes, so it also works when the path has spaces.
+  same way and name the link.
   Stop Fleet by hand and delete the link, or move the engine into its place.
 - On the first run, `get.sh` first runs `hedge retire-fleet`, also with
   `--install-only`. When it cannot show that each piece of Fleet stopped, it

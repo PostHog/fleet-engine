@@ -89,7 +89,7 @@ describe("get.sh upgrades a machine that Fleet runs", () => {
     expect(state.crontab).toBe(oldCron);
   });
 
-  onLinuxHost.each(["a custom checkout", "a missing folder"])("stops before it changes anything when the default Fleet engine folder links to %s, and names only the link and how to see where it points", (target) => {
+  onLinuxHost.each(["a custom checkout", "a missing folder"])("stops before it changes anything when the default Fleet engine folder links to %s, and names only the link and no shell command with its path", (target) => {
     const machine = fleetMachine({ oldEngine: "src/fleet-engine" });
     const checkout = join(machine.home, "src/other-engine");
     if (target === "a custom checkout") {
@@ -104,7 +104,8 @@ describe("get.sh upgrades a machine that Fleet runs", () => {
     const result = machine.getSh([]);
 
     expect(result.code).toBe(1);
-    expect(result.output).toContain(`Hedge: ${link} is a link, and Hedge finds and stops only a Fleet engine that sits in ${link} itself, so Hedge changed nothing. Run ls -l "${link}" to see where it points.`);
+    expect(result.output).toContain(`Hedge: ${link} is a link, and Hedge finds and stops only a Fleet engine that sits in ${link} itself, so Hedge changed nothing. Stop Fleet's services, cron jobs and fleet: tasks in T3 Code by hand and delete the link ${link}, or move the engine to ${link} in place of the link. Then run get.sh again.`);
+    expect(result.output).not.toContain("ls -l");
     expect(result.output).toContain(`delete the link ${link}, or move the engine to ${link} in place of the link. Then run get.sh again.`);
     expect(tree(machine.home)).toEqual(before);
     expect(machine.state().units).toEqual({ "fleet-watch.service": running });
