@@ -530,10 +530,10 @@ function skillSettings(settings: Array<PackSetting & { pack: string }>, values: 
 
 function skillFiles(order: Candidate[], profile: Profile, sources: FetchedSource[], plan: Plan): DesiredFile[] {
   const links = new Map<string, { pack: string; dir: string; path: string }>();
-  const add = (pack: string, packDir: string, path: string) => {
+  const add = (pack: string, packDir: string, path: string, fromProfile = false) => {
     const dir = skillDir(pack, packDir, path, sources);
     if (!dir) return plan.dropped.push({ pack, item: `skill ${path}`, reason: "its source is unreachable" });
-    if (pack !== "profile" && path.includes(":") && !existsSync(dir)) return plan.dropped.push({ pack, item: `skill ${path}`, reason: notAtPinReason });
+    if (!fromProfile && path.includes(":") && !existsSync(dir)) return plan.dropped.push({ pack, item: `skill ${path}`, reason: notAtPinReason });
     const name = basename(dir);
     const other = links.get(name);
     if (other && (pack !== "profile" || other.pack === "profile")) throw new ResolveError(`skill ${name} comes from both ${other.pack} and ${pack}`);
@@ -541,7 +541,7 @@ function skillFiles(order: Candidate[], profile: Profile, sources: FetchedSource
     links.set(name, { pack, dir, path });
   };
   for (const { manifest, dir } of order) for (const path of manifest.skills ?? []) add(manifest.name, dir, path);
-  for (const path of profile.overrides?.skills ?? []) add("profile", profile.dir, path);
+  for (const path of profile.overrides?.skills ?? []) add("profile", profile.dir, path, true);
   return [...links].flatMap(([name, { dir }]) => [
     { target: `.agents/skills/${name}`, source: dir },
     { target: `.claude/skills/${name}`, source: dir },
