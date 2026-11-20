@@ -23,8 +23,10 @@ const base = "127.0.0.1 localhost\n10.0.0.1 unrelated.example\n";
 const fleetLine = `127.0.0.1 ${host} # fleet-hub-tunnel`;
 const lineOf = (home: string, name = host) => `127.0.0.1 ${name} # hedge-hub-tunnel ${home}`;
 
-function devbox(fields: Partial<TunnelMachine> = {}) {
+function devbox(fields: Partial<TunnelMachine> = {}, privilegedWrites: "allowed" | "refused" = "allowed") {
   const fake = fakeRun((command, input) => {
+    if (command[0] !== "sudo") return undefined;
+    if (privilegedWrites === "refused") return { code: 1, stderr: "sudo: a password is required" };
     if (command.slice(0, 3).join(" ") === "sudo -n tee" && input !== undefined) writeFileSync(command[3]!, input);
     return undefined;
   });
@@ -106,15 +108,27 @@ test("install keeps a dangling linked unit and a unit Hedge did not write", asyn
   expect(readFileSync(unitPath(other, "devbox-2"), "utf8")).toBe("[Service]\nExecStart=/bin/true\n");
 });
 
-test("on a devbox, install maps hub.httpsHost to loopback in the hosts file once, through sudo, marks the line with this home, and keeps every other entry", async () => {
-  const { deps, hosts, calls, read } = devbox();
+test("on a devbox, install maps hub.httpsHost to loopback in the hosts file once, marks the line with this home, and keeps every other entry, and a second install needs no privileged write", async () => {
+  const { deps, hosts, read } = devbox();
   expect(await sshTunnels("install", deps)).toBe(0);
-  expect(calls).toEqual([`sudo -n tee ${hosts}`]);
   expect(read()).toBe(`${base}${lineOf(deps.home)}\n`);
-  const again = devbox({ home: deps.home, hosts });
+  const again = devbox({ home: deps.home, hosts }, "refused");
   expect(await sshTunnels("install", again.deps)).toBe(0);
-  expect(again.calls).toEqual([]);
+  expect(read()).toBe(`${base}${lineOf(deps.home)}\n`);
   expect(await sshTunnels("doctor", again.deps)).toBe(0);
+});
+
+test("a hosts line of another home whose path holds the marker text and then this home's path stays on install and remove", async () => {
+  const { deps, read, write } = devbox();
+  const lookalike = lineOf(`/x # hedge-hub-tunnel ${deps.home}`);
+  write(`${base}${lookalike}\n`);
+  expect(await sshTunnels("install", deps)).toBe(0);
+  expect(read()).toBe(`${base}${lookalike}\n${lineOf(deps.home)}\n`);
+  expect(await sshTunnels("remove", { ...deps, httpsHost: undefined })).toBe(0);
+  expect(read()).toBe(`${base}${lookalike}\n`);
+  expect(await sshTunnels("left", deps)).toBe(1);
+  expect(await sshTunnels("remove", deps)).toBe(0);
+  expect(read()).toBe(`${base}${lookalike}\n`);
 });
 
 test("install replaces only this home's old line, keeps an old Fleet line and another home's line that map the host to loopback, and the devbox doctor fails until this home's line is there", async () => {
@@ -216,19 +230,21 @@ test("remove on the hub stops and deletes every tunnel unit Hedge wrote, and lef
   expect(await sshTunnels("left", removing.deps)).toBe(1);
 });
 
-test("on a devbox, install then remove in the same home leaves the hosts file as it was, with the old Fleet line and another home's line kept, and left then reports nothing left", async () => {
+test("on a devbox, install then remove in the same home leaves the hosts file as it was, with the old Fleet line and another home's line kept, left then reports nothing left, and a second removal needs no privileged write", async () => {
   const { deps, hosts, read, write } = devbox();
   const before = `${base}${fleetLine}\n${lineOf(`${deps.home}-other`)}\n`;
   write(before);
   expect(await sshTunnels("install", deps)).toBe(0);
   expect(await sshTunnels("left", deps)).toBe(0);
-  const removing = devbox({ home: deps.home, hosts, httpsHost: undefined });
-  expect(await sshTunnels("remove", removing.deps)).toBe(0);
-  expect(removing.calls).toEqual([`sudo -n tee ${hosts}`]);
+  const installed = read();
+  const refused = devbox({ home: deps.home, hosts, httpsHost: undefined }, "refused");
+  await expect(sshTunnels("remove", refused.deps)).rejects.toThrow("a password is required");
+  expect(read()).toBe(installed);
+  expect(await sshTunnels("remove", devbox({ home: deps.home, hosts, httpsHost: undefined }).deps)).toBe(0);
   expect(read()).toBe(before);
-  expect(await sshTunnels("left", removing.deps)).toBe(1);
-  expect(await sshTunnels("remove", removing.deps)).toBe(0);
-  expect(removing.calls).toHaveLength(1);
+  expect(await sshTunnels("left", refused.deps)).toBe(1);
+  expect(await sshTunnels("remove", refused.deps)).toBe(0);
+  expect(read()).toBe(before);
 });
 
 test("the hub treats every name hedge devbox add keeps for pool boxes as a box, even one listed by hand", async () => {
