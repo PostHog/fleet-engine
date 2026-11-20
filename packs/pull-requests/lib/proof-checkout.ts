@@ -105,7 +105,9 @@ export type DiffSize = { production: number; tests: number; docs: number };
 
 export function diffSize(identity: ProofIdentity, run: Run, from?: string): DiffSize | undefined {
   try {
-    const changed = changedLines(identity, run, from ?? mergeBase(identity, run), true)?.filter(({ lines }) => Number.isFinite(lines));
+    const start = from ?? mergeBase(identity, run);
+    if (start === identity.commit) return undefined;
+    const changed = changedLines(identity, run, start, true)?.filter(({ lines }) => Number.isFinite(lines));
     return changed && { production: linesOf(changed, authored), tests: linesOf(changed, isTestFile), docs: linesOf(changed, (path) => docsFile.test(path)) };
   } catch { return undefined; }
 }

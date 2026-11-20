@@ -70,7 +70,7 @@ export async function finalGate(head: ProofIdentity, context: GateContext, { lan
     reason: judged.code === 0 ? "pass" : judged.reason ?? `exit ${judged.code}`,
     lines: [...checked.lines, ...judged.lines, ...stale],
     verdict: judged.code === 0 ? `gate: pass (${checked.summary}; judge: ${judged.covered})` : `gate: fail (exit ${judged.code})`,
-    summary: { ...checked.proofSummary, code: judged.code, judge: judged.judge, growth: await measureGrowth(home, head, run) },
+    summary: { ...checked.proofSummary, code: judged.code, judge: judged.judge, growth: (landed ? (await readJson<SavedGate | undefined>(savedPath(home, head, head.commit), undefined))?.gate.summary.growth : undefined) ?? await measureGrowth(home, head, run) },
   };
   if (pull) await writeJson(savedPath(home, head, head.commit), { key: keyOf(pull, landed, await fingerprintOf(home, head, files, checked.decisions)), gate, conditions: checked.conditions } satisfies SavedGate);
   return gate;
