@@ -1,0 +1,7 @@
+{
+  "voice": "SSfU0eLfP3qeuR4j2bwD",
+  "model": "eleven_multilingual_v2",
+  "seed": 5,
+  "settings": { "stability": 0.55, "similarity_boost": 0.75, "speed": 0.84 },
+  "pauses": { "colon": 0.35, "sentence": 0.95, "chapter": 1.6 }
+}

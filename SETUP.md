@@ -87,9 +87,23 @@ A prompt from an earlier page can carry more lines. Use them too:
 
 ## While something runs
 
-Steps 5, 7, and 9 start commands that take minutes. While one runs in the
-background, explain one of these, in two or three lines, and do not repeat
-one. Skip a topic that does not fit their picks:
+Steps 5, 7, and 9 start commands that take minutes. At the first wait, in
+step 5, offer the three-minute lesson "What Hedge is". In T3 Code, download
+it on the Mac and show it in the chat, so it plays there:
+
+```sh
+mkdir -p ~/.cache/hedge-setup && curl -fsSL -o ~/.cache/hedge-setup/what-hedge-is.mp4 https://posthog.github.io/hedge/assets/lessons/what-hedge-is.mp4
+```
+
+Then show it with its full path, such as
+`![What Hedge is](/Users/<login>/.cache/hedge-setup/what-hedge-is.mp4)`,
+and under it the lesson page
+`https://posthog.github.io/hedge/learn/what-hedge-is/`, which plays it in a
+browser when the chat cannot. In a terminal, or when the download fails,
+give the page link only.
+
+At each later wait, explain one of these, in two or three lines, and do not
+repeat one. Skip a topic that does not fit their picks:
 
 - **T3 Code's inbox.** A thread that finishes or waits for them shows up in
   the inbox. They answer it there, on the Mac or the phone.
@@ -858,6 +872,8 @@ Then give them these habits, one line each:
 - **Build.** Type `/build` and say what you want. The agent sizes the work:
   a small change goes to a pull request, and big work becomes a map of
   tickets with one worker thread per ticket.
+- **Learn.** The video lessons at `https://posthog.github.io/hedge/learn/`
+  show each part of Hedge in a few minutes.
 
-Leave out a habit whose pack they did not pick: the last two need the
-Orchestration pack.
+Leave out a habit whose pack they did not pick: **Side fix** and **Build**
+need the Orchestration pack.

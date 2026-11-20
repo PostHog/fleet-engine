@@ -2,7 +2,9 @@ import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { artFiles, packGroups, videoFiles } from "../page/cast.ts";
+import { captions, isBuilt, type BuiltLesson } from "../page/lessons.ts";
 import type { PageData, PagePack } from "../page/model.ts";
+import { knownNames, lessonProblems, loadLessons } from "./lessons.ts";
 import { site, type ArtSizes } from "../page/views.ts";
 import { engineSettings, loadPacks } from "../src/pack/manifest.ts";
 import type { Audience, LoadedPack, Need, PackManifest, Preset } from "../src/pack/types.ts";
@@ -26,6 +28,8 @@ const needLabels: Record<Need, string> = {
 };
 
 export type PageOptions = { audience: Audience; team?: LoadedPack[] };
+
+export type SiteOptions = PageOptions & { lessonMedia?: string; lessons?: BuiltLesson[] };
 
 export type SiteFiles = Record<string, string | Uint8Array>;
 
@@ -90,15 +94,36 @@ function pngSize(bytes: Uint8Array) {
   return { width: view.getUint32(16), height: view.getUint32(20) };
 }
 
-export async function buildSite(options: PageOptions): Promise<SiteFiles> {
+export async function builtLessons() {
+  const lessons = loadLessons(engineRoot);
+  const names = knownNames(await loadPacks(engineRoot), lessons);
+  const problems = lessons.flatMap((lesson) => lessonProblems(lesson, names));
+  if (problems.length) throw new Error(problems.join("\n"));
+  return lessons.filter(isBuilt);
+}
+
+async function lessonFiles(lessons: BuiltLesson[], media: string) {
+  const files: SiteFiles = Object.fromEntries(lessons.map((lesson) => [`assets/lessons/${lesson.id}.vtt`, captions(lesson)]));
+  for (const lesson of lessons) {
+    for (const [file, site] of [[lesson.cut.video, `${lesson.id}.mp4`], [lesson.cut.poster, `${lesson.id}.jpg`]] as const) {
+      if (!existsSync(join(media, file))) throw new Error(`lesson media ${file} is missing from ${media}. Download the lessons release first`);
+      files[`assets/lessons/${site}`] = await Bun.file(join(media, file)).bytes();
+    }
+  }
+  return files;
+}
+
+export async function buildSite(options: SiteOptions): Promise<SiteFiles> {
   const data = await pageData(options);
+  const checked = options.lessons ?? (await builtLessons());
+  const lessons = options.lessonMedia ? checked : [];
   const bundle = await Bun.build({ entrypoints: [join(engineRoot, "page/app.ts")], root: engineRoot, target: "browser", minify: true });
   if (!bundle.success) throw new AggregateError(bundle.logs, "the page script did not build");
   const art = await Promise.all(artFiles().map(async (file) => [file, await Bun.file(join(artDir, file)).bytes()] as const));
   const sizes: ArtSizes = Object.fromEntries(art.filter(([file]) => file.endsWith(".png")).map(([file, bytes]) => [file, pngSize(bytes)]));
   const script = await bundle.outputs[0]!.text();
   const styles = await Bun.file(join(engineRoot, "page/style.css")).text();
-  const routes = site(data, sizes, { script, styles });
+  const routes = site(data, sizes, { script, styles }, lessons);
   const used = (folder: string, file: string) => routes.some((route) => route.html.includes(`assets/${folder}/${file}"`));
   const shown = art.filter(([file]) => used("art", file));
   const videos = await Promise.all(videoFiles().filter((file) => used("video", file)).map(async (file) => [file, await Bun.file(join(videoDir, file)).bytes()] as const));
@@ -106,12 +131,14 @@ export async function buildSite(options: PageOptions): Promise<SiteFiles> {
     ...Object.fromEntries(routes.map((route) => [route.path, route.html])),
     ...Object.fromEntries(shown.map(([file, bytes]) => [`assets/art/${file}`, bytes])),
     ...Object.fromEntries(videos.map(([file, bytes]) => [`assets/video/${file}`, bytes])),
+    ...(options.lessonMedia ? await lessonFiles(lessons, options.lessonMedia) : {}),
   };
 }
 
 export async function main(args: string[]) {
   let audience: Audience = "public";
   let out = "site";
+  let lessonMedia: string | undefined;
   const team: LoadedPack[] = [];
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
@@ -122,15 +149,17 @@ export async function main(args: string[]) {
       audience = name as Audience;
     } else if (arg === "--source") team.push(...(await loadPacks(resolve(value()))));
     else if (arg === "--out") out = value();
-    else fail(`unknown option ${arg}. Use --audience, --source <dir>, and --out <dir>`);
+    else if (arg === "--lesson-media") lessonMedia = resolve(value());
+    else fail(`unknown option ${arg}. Use --audience, --source <dir>, --lesson-media <dir>, and --out <dir>`);
   }
   if (out.endsWith(".html")) fail("--out takes a directory. The site has one HTML file for each route");
-  const files = await buildSite({ audience, team });
+  const files = await buildSite({ audience, team, ...(lessonMedia ? { lessonMedia } : {}) });
   for (const [path, content] of Object.entries(files)) {
     await mkdir(dirname(join(out, path)), { recursive: true });
     await Bun.write(join(out, path), content);
   }
   console.log(`Wrote ${Object.keys(files).length} files to ${out}`);
+  if (!lessonMedia) console.log("The lessons were left out. Pass --lesson-media <dir> with the files of the lessons release to include them");
 }
 
 function fail(message: string): never {
