@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { Finding } from "../../pack/types.ts";
 import type { Adapter } from "../../reconciler/apply.ts";
@@ -10,7 +10,7 @@ import type { T3Server } from "../t3/port.ts";
 
 export type FleetPiece = { kind: "launchd" | "systemd" | "container" | "t3" | "cron" | "process"; name: string; pid?: number };
 export type OldTasks = { list(): Promise<Array<{ id: string; enabled: boolean }>>; setEnabled(id: string, enabled: boolean): Promise<void>; saved?: true };
-export type Running = { pid: number; ppid: number; argv: string[]; fleetEngine?: string };
+export type Running = { pid: number; ppid: number; argv: string[]; fleetEngine?: string; cwd?: string };
 export type FleetOptions = { run?: CommandRunner; accountHome?: () => Promise<string | undefined>; uid?: number; tasks?: (home: string) => Promise<OldTasks | undefined>; sleep?: (ms: number) => Promise<void>; processes?: () => Promise<Running[]> };
 export type Retirement = { retired: string[]; left: string[]; notes: string[] };
 export type FleetAdapter = Adapter & { retire(home: string, platform: NodeJS.Platform): Promise<Retirement | undefined>; holds(home: string, platform: NodeJS.Platform): Promise<Finding[]> };
@@ -32,21 +32,26 @@ const jobChildren: ReadonlyArray<readonly string[]> = [["update"], ["agent-updat
 const jobOrChild = (argv: string[]) => oldJob(argv) ?? jobChildren.find((command) => command.every((word, index) => argv[index] === word));
 const codexInstaller = "/packs/base/lib/install-codex.sh";
 const interpreters = new Set([...shellPrograms, "node", "bun"]);
-const installerCommands: ReadonlyArray<readonly string[]> = [["claude", "update"], ["claude", "plugin"], ["codex", "plugin"], ["t3", "update"], ["t3", "doctor"], ["bun", "add", "-g", "@openai/codex@latest"]];
+const agentUpdateInstallers: ReadonlyArray<readonly string[]> = [["claude", "update"], ["claude", "plugin"], ["codex", "plugin"], ["t3", "update"], ["t3", "doctor"], ["bun", "add", "-g", "@openai/codex@latest"]];
+const installerCommands: ReadonlyArray<{ job: string; command: readonly string[] }> = [
+  ...agentUpdateInstallers.map((command) => ({ job: "agent-update", command })),
+  { job: "update", command: ["bun", "install", "--frozen-lockfile", "--production"] },
+];
 
 function installerIn(argv: string[]) {
   const starts = interpreters.has(basename(argv[0] ?? "")) ? [0, 1] : [0];
   for (const at of starts) {
     const words = [basename(argv[at] ?? ""), ...argv.slice(at + 1)];
-    const command = installerCommands.find((command) => command.every((word, index) => words[index] === word));
-    if (command) return command;
+    const installer = installerCommands.find(({ command }) => command.every((word, index) => words[index] === word));
+    if (installer) return installer;
   }
   return undefined;
 }
 
-function fleetInstaller(home: string, { argv, fleetEngine }: Running): string | undefined {
-  const command = fleetEngine?.startsWith("/") && underLegacyPath(home, fleetEngine) ? installerIn(argv) : undefined;
-  return command && `agent-update: ${command.slice(0, 2).join(" ")}`;
+function fleetInstaller(home: string, { argv, fleetEngine, cwd }: Running): string | undefined {
+  const fromFleet = [fleetEngine, cwd].some((path) => path?.startsWith("/") && underLegacyPath(home, path));
+  const installer = fromFleet ? installerIn(argv) : undefined;
+  return installer && `${installer.job}: ${installer.command.slice(0, 2).join(" ")}`;
 }
 
 function fleetJob(home: string, words: string[]): string | undefined {
@@ -85,8 +90,10 @@ export function procProcesses(uid: number, root = "/proc"): () => Promise<Runnin
         if (argv.at(-1) === "") argv.pop();
         const stat = readFileSync(join(dir, "stat"), "utf8");
         const ppid = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
-        const fleetEngine = installerIn(argv) ? engineIn(readFileSync(join(dir, "environ"), "utf8")) : undefined;
-        return argv.length ? [{ pid: Number(name), ppid, argv, fleetEngine }] : [];
+        const installer = Boolean(installerIn(argv));
+        const fleetEngine = installer ? engineIn(readFileSync(join(dir, "environ"), "utf8")) : undefined;
+        const cwd = installer ? readlinkSync(join(dir, "cwd")) : undefined;
+        return argv.length ? [{ pid: Number(name), ppid, argv, fleetEngine, cwd }] : [];
       } catch (error) {
         if (vanished(error)) return [];
         throw new Error(`process ${name} could not be read (${(error as Error).message})`);

@@ -620,10 +620,11 @@ what the port changes. The Hub pack is gone after step 4.
 | Today | v2 pack | Items and placement | Behavior change at the port |
 | --- | --- | --- | --- |
 | Base | `base` | Instructions, model table, the dispatcher and its hooks, T3 defaults, update and prune jobs: nodes. Disk watch: hub. | None |
-| Pull requests | `pull-requests` | Guides, settings, `hedge pr`, `hedge proof`: nodes. Owns the seam `pull-requests/review-bot`. | None |
-| Orchestration | `orchestration` | Commands: nodes. Three T3 tasks: hub. | Each task runs once, on the hub. Today it is planned on the hub and on every devbox. |
+| Quality gates | `pull-requests` | Guides, settings, `hedge pr`, `hedge proof`: nodes. The quality loop, signal loop, and PR digest tasks: hub. Owns the seam `pull-requests/review-bot`. | Each task runs once, on the hub. Today it is planned on the hub and on every devbox. |
+| Orchestration | `orchestration` | Maps, side threads, and parking: commands and skills on nodes. | None |
 | Communication | `communication` | Instructions and skills: nodes. | None |
-| Memory | `memory` | Config, sync job, memory-cap hook: nodes. Dream job and skill: hub. | Dream moves in. Placement was the only reason that it lived in the Hub pack. |
+| Memory | `memory` | Config, sync job, memory-cap hook, the context library's prompt hook and sync: nodes. Dream job and skill: hub. | None. Dream and the Context library pack moved in before the port. A profile that lists `context-library` gets only the library. |
+| Hub: provider recovery | `cli-proxy` | The recovery sweep and the `claude` wrapper step: hub and each devbox. | None. The Recovery pack moved into the Hub pack before the port, and its workflow needs own-account balancing. A profile that lists `recovery` gets only that workflow. |
 | Hub: MCP gateway | `mcp-gateway` | Served service under Docker's restart policy, install check with a Hedge repair: hub. Client check, MCP config entries with the bridge: nodes. | Each node pulls its key during apply. `hedge mcphub grant` by hand goes. The sign-in command prints the authorization URL, not a page that Caddy serves. |
 | Hub: own-account balancing | `cli-proxy` | Service with `serve`, balance job: hub. Route check, two gated config keys: Linux nodes. | A Linux node that is not a devbox also gets the route. The route step goes (D15). |
 | Hub: boxes | `boxes` | `hedge box`, sweep and nightly jobs, and a Claude token step: hub. Restore job: `os: "linux"`. | `hedge box` on a node runs on the hub over `ssh`. A plain Linux node also gets the restore job. A Mac never does. |
@@ -729,7 +730,7 @@ The real machines run the private Fleet, not the engine.
    Each devbox renders its own `ssh -L` forward with the catalog's ports, pull
    credentials with `hedge credential`, and run a hub command from a node.
    A second spare devbox joins as a node.
-4. **Finish the split.** `cli-proxy`, `boxes`, `peers`, Dream to Memory,
+4. **Finish the split.** `cli-proxy` with provider recovery, `boxes`, `peers`,
    disk watch to Base, and the other engine packs. Each port states its
    change and keeps the contracts of section 7. Finish D19. Delete the Hub
    pack.

@@ -1,12 +1,19 @@
 {
   "schema": 1,
   "name": "hub",
-  "summary": "One always-on devbox manages the others. It keeps your devboxes linked and watches their disks.",
+  "aliases": [
+    {
+      "name": "recovery",
+      "workflows": [
+        "provider-recovery"
+      ]
+    }
+  ],
+  "summary": "The hub links your boxes, cleans their disks, and keeps your pack secrets. Turn on recovery, and threads go on after a usage limit.",
   "day": "A thread on one devbox starts work on another, and the hub cleans a devbox that fills its disk before you notice.",
   "cost": "You need one devbox that stays on, and some setup on it. Every other machine keeps working when the hub is down.",
   "risk": "The hub holds sign-ins for your MCP servers and reaches every devbox over SSH. Keep it as private as your laptop.",
   "skills": [
-    "skills/dream",
     "skills/hedge-hub"
   ],
   "settings": [
@@ -93,13 +100,6 @@
       "question": "Which port on the hub do the SSH tunnels from your devboxes use?",
       "type": "number",
       "default": 60001,
-      "ask": "never"
-    },
-    {
-      "key": "hub.dreamSessions",
-      "question": "How many sessions may one Dream run send to an analyst model? Each one spends model tokens.",
-      "type": "number",
-      "default": 150,
       "ask": "never"
     },
     {
@@ -195,21 +195,6 @@
       "sentence": "The hub keeps SSH tunnels and T3 links to every devbox open, so each one can start threads on the others."
     },
     {
-      "id": "dream",
-      "name": "Dream",
-      "default": false,
-      "needs": [
-        "hub",
-        "gh"
-      ],
-      "settings": [
-        "hub.alias",
-        "hub.dreamSessions"
-      ],
-      "sentence": "Each night, the hub reads the day's agent sessions from every machine and opens one draft pull request that adds to, condenses, and prunes your shared memory.",
-      "risk": "Every run sends your agent sessions to an analyst model and spends your AI plan's usage, so it starts off. Your session text stays on the hub for 14 days."
-    },
-    {
       "id": "own-account-balancing",
       "name": "Own-account balancing",
       "default": false,
@@ -239,6 +224,19 @@
       ],
       "sentence": "The hub's proxy serves its management panel on loopback, with quota history, drain forecasts, and buttons that spend a subscription's banked weekly or Fable reset.",
       "risk": "The panel can change the proxy's settings and subscriptions, and spend banked resets, which do not come back. It also turns on CLIProxyAPI's plugins, so anyone with the management key can install and run other plugins from CLIProxyAPI's plugin store on the hub; hedge cli-proxy doctor fails on any plugin besides Hedge's pinned quota-ledger, and hedge apply then keeps Claude Code and Codex on the hub off the proxy. It listens only on the hub's loopback port 8317, which the SSH tunnels also carry to your devboxes and boxes, and it asks for the management key, which stays on the hub. Every tunnelled client reaches the proxy as 127.0.0.1, so 5 wrong sign-ins from any machine ban 127.0.0.1 from the management API for 30 minutes. That also stops the hub's balancer and hedge cli-proxy doctor until the ban ends. Hedge does not route it through the hub's HTTPS."
+    },
+    {
+      "id": "provider-recovery",
+      "name": "Provider recovery",
+      "default": false,
+      "needs": [
+        "hub"
+      ],
+      "sentence": "Threads that stop on a usage limit or a provider outage continue by themselves once the provider answers again.",
+      "risk": "Sends continue messages to stopped threads without you in the room, and starts an alert thread in the hub's thread folder.",
+      "requires": [
+        "own-account-balancing"
+      ]
     }
   ],
   "config": [
@@ -391,22 +389,6 @@
       }
     },
     {
-      "id": "dream",
-      "command": [
-        "hedge",
-        "dream",
-        "run"
-      ],
-      "schedule": {
-        "every": "1d",
-        "at": "04:10"
-      },
-      "roles": [
-        "hub"
-      ],
-      "workflow": "dream"
-    },
-    {
       "id": "peers-renew",
       "command": [
         "hedge",
@@ -471,6 +453,21 @@
         "codex",
         "both"
       ]
+    },
+    {
+      "id": "recover",
+      "command": [
+        "hedge",
+        "recover"
+      ],
+      "schedule": {
+        "every": "5m"
+      },
+      "roles": [
+        "hub",
+        "devbox"
+      ],
+      "workflow": "provider-recovery"
     }
   ],
   "human": [
@@ -646,6 +643,28 @@
         "codex",
         "both"
       ]
+    },
+    {
+      "id": "claude-wrapper",
+      "run": [
+        "hedge",
+        "claude-wrapper",
+        "bind"
+      ],
+      "check": [
+        "hedge",
+        "claude-wrapper",
+        "check"
+      ],
+      "workflow": "provider-recovery",
+      "plans": [
+        "claude",
+        "both"
+      ],
+      "roles": [
+        "hub",
+        "devbox"
+      ]
     }
   ],
   "checks": [
@@ -758,6 +777,10 @@
       "pool",
       "help"
     ],
+    "claude-wrapper": [
+      "bind",
+      "check"
+    ],
     "cli-proxy": [
       "plan",
       "install",
@@ -769,20 +792,6 @@
       "check",
       "remove",
       "left"
-    ],
-    "dream": [
-      "digest",
-      "run",
-      "collect",
-      "prepare",
-      "analyze",
-      "audit",
-      "logs",
-      "search",
-      "publish",
-      "scorecard",
-      "budget",
-      "help"
     ],
     "hub-https": [
       "plan",

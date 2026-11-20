@@ -19,11 +19,12 @@ export type FakeMcpHub = {
   bindings: Record<string, Record<string, string>>;
   received: Array<ReturnType<typeof upstreamRequest>>;
   failing: string[];
+  lateRegistrations: Record<string, { clientId: string; clientSecret?: string }>;
   home?: string;
 };
 
 export function fakeMcpHub(fields: Partial<FakeMcpHub> = {}): FakeMcpHub {
-  return { servers: ["tickets", "calendar"], toolCounts: {}, configs: {}, keepsConfig: true, groups: [], calls: [], healthy: true, openWithoutKey: false, notReadyFor: 0, oauthClients: {}, bindings: {}, received: [], failing: [], ...fields };
+  return { servers: ["tickets", "calendar"], toolCounts: {}, configs: {}, keepsConfig: true, groups: [], calls: [], healthy: true, openWithoutKey: false, notReadyFor: 0, oauthClients: {}, bindings: {}, received: [], failing: [], lateRegistrations: {}, ...fields };
 }
 
 function keyOf(state: FakeMcpHub) {
@@ -48,7 +49,8 @@ export function mcphubFetch(state: FakeMcpHub) {
     const path = url.pathname.slice("/mcphub/api/".length);
     const body = init.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined;
     state.calls.push({ method, path, ...(body ? { body } : {}) });
-    if (state.failing.includes(`${method} ${path}`)) return new Response(null, { status: 500 });
+    const nth = state.calls.filter((call) => call.method === method && call.path === path).length;
+    if ([`${method} ${path}`, `${method} ${path} ${JSON.stringify(body)}`, `${method} ${path} #${nth}`].some((call) => state.failing.includes(call))) return new Response(null, { status: 500 });
     if (method === "GET" && path === "servers") return Response.json({ success: true, data: state.servers.map((name) => ({ name, status: "connected", tools: toolsOf(state, name) })) });
     if (method === "GET" && path === "groups") return Response.json({ success: true, data: state.groups });
     if (method === "POST" && path === "groups") {
@@ -73,6 +75,12 @@ export function mcphubFetch(state: FakeMcpHub) {
       if (body?.scope === "all") delete state.oauthClients[name];
       if (state.configs[name]?.oauth) state.configs[name]!.oauth = body?.scope === "all" ? oauth : { ...oauth, clientId, clientSecret };
       connect(state, name);
+      const late = state.lateRegistrations[name];
+      if (late) {
+        delete state.lateRegistrations[name];
+        state.oauthClients[name] = late;
+        if (state.configs[name]?.oauth) state.configs[name]!.oauth = { ...(state.configs[name]!.oauth as Record<string, unknown>), ...late };
+      }
       return Response.json({ success: true });
     }
     const toggle = path.match(/^servers\/([^/]+)\/toggle$/);

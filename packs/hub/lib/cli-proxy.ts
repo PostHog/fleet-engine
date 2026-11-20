@@ -449,7 +449,7 @@ async function disconnect(machine: ProxyMachine): Promise<void> {
   await refuseLinks(machine.home, keyPath(machine.home), `${what} path`);
   await rm(keyPath(machine.home), { force: true });
   machine.print("Claude Code no longer uses the proxy. To sign in again, run claude and enter /login, then restart open Claude Code sessions.");
-  if (codex) machine.print("Codex no longer uses the proxy. To sign in again, run codex login, then restart open Codex sessions.");
+  if (codex) machine.print(`Codex no longer uses the proxy. To sign in again, run codex login -c 'cli_auth_credentials_store="file"' --device-auth, then restart open Codex sessions.`);
   machine.print("hedge apply keeps this machine on its own sign-in while it has no proxy key.");
 }
 

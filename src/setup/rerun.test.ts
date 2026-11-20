@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { main } from "../cli.ts";
 import { loadPacks } from "../pack/manifest.ts";
 import type { FetchedSource, SourceRef } from "../pack/types.ts";
 import { isolateGit, spawnGit, tempDirs } from "../testing/git.ts";
 import { profilePath } from "./profile.ts";
-import { engineRoot, fakeMachine, hedgeSetup, githubRepo, machineFile, pushedAnswers, savedAnswers, scripted } from "./testing.ts";
+import { changeOnFirstCommit, engineRoot, fakeMachine, hedgeSetup, githubRepo, machineFile, pushedAnswers, savedAnswers, scripted } from "./testing.ts";
 
 isolateGit();
 const temp = tempDirs();
@@ -35,6 +35,191 @@ async function packsAfterSetup() {
     },
   };
 }
+
+describe("hedge setup after a stop", () => {
+  test("takes the profile's new commits before it applies", async () => {
+    const home = temp.make("home-");
+    const stopped = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""], undefined, undefined, 0, "linux", () => {
+      throw new Error("apply stopped");
+    });
+    expect(stopped.code).toBe(1);
+    const elsewhere = join(home, "elsewhere");
+    await spawnGit(home, "clone", "-q", githubRepo(home, "nora/hedge-profile"), elsewhere);
+    writeFileSync(join(elsewhere, "about-me.md"), "# Changed on another machine\n");
+    await spawnGit(elsewhere, "commit", "-q", "-am", "change about me");
+    await spawnGit(elsewhere, "push", "-q", "origin", "main");
+
+    let applied = "";
+    const resumed = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""], undefined, undefined, 0, "linux", (dir) => {
+      applied = readFileSync(join(dir, "about-me.md"), "utf8");
+    });
+
+    expect(resumed.code).toBe(0);
+    expect(applied).toBe("# Changed on another machine\n");
+  });
+
+  test("goes on with the copy on this machine, and says so, when the profile's origin cannot be reached", async () => {
+    const home = temp.make("home-");
+    const stopped = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""], undefined, undefined, 0, "linux", () => {
+      throw new Error("apply stopped");
+    });
+    expect(stopped.code).toBe(1);
+    const profile = profilePath(home);
+    await spawnGit(profile, "remote", "set-url", "origin", join(home, "gone.git"));
+    writeFileSync(join(profile, "about-me.md"), "# Only on this machine\n");
+    await spawnGit(profile, "commit", "-q", "-am", "change on this machine");
+
+    let applied = "";
+    const resumed = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""], undefined, undefined, 0, "linux", (dir) => {
+      applied = readFileSync(join(dir, "about-me.md"), "utf8");
+    });
+
+    expect(resumed.output).toContain(`Your profile's origin could not be reached (`);
+    expect(resumed.output).toContain(`Setup goes on with the copy in ${profile}.`);
+    expect(applied).toBe("# Only on this machine\n");
+    expect(resumed.code).toBe(0);
+  });
+});
+
+describe("hedge setup while another machine changes the profile", () => {
+  async function changeElsewhere(home: string, change: (profile: Record<string, unknown>) => void) {
+    const elsewhere = temp.make("elsewhere-");
+    await spawnGit(elsewhere, "clone", "-q", githubRepo(home, "nora/hedge-profile"), "profile");
+    const file = join(elsewhere, "profile/hedge.json");
+    const profile = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+    change(profile);
+    writeFileSync(file, `${JSON.stringify(profile, null, 2)}\n`);
+    await spawnGit(join(elsewhere, "profile"), "commit", "-q", "-am", "change on another machine");
+    await spawnGit(join(elsewhere, "profile"), "push", "-q", "origin", "main");
+  }
+
+  test("a rerun that changes one answer keeps what another machine changed meanwhile", async () => {
+    const home = temp.make("home-");
+    expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""])).code).toBe(0);
+    await changeElsewhere(home, (profile) => {
+      profile.plan = "both";
+      profile.workflows = { ...(profile.workflows as object), "elsewhere-workflow": true };
+    });
+
+    const rerun = await hedgeSetup(home, ["--non-interactive", "--remove", "pull-requests"], []);
+
+    expect(rerun.code).toBe(0);
+    const pushed = await pushedAnswers(home);
+    expect([pushed.plan, pushed.workflows?.["elsewhere-workflow"], pushed.packs?.includes("pull-requests")]).toEqual(["both", true, false]);
+    expect(rerun.output).toContain("Sign in to ChatGPT");
+  });
+
+  test("a rerun that removes a pack keeps the pack another machine added meanwhile", async () => {
+    const home = temp.make("home-");
+    expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""])).code).toBe(0);
+    await changeElsewhere(home, (profile) => void (profile.packs = [...(profile.packs as string[]), "guards"]));
+
+    const rerun = await hedgeSetup(home, ["--non-interactive", "--remove", "pull-requests"], []);
+
+    expect(rerun.code).toBe(0);
+    expect((await pushedAnswers(home)).packs).toEqual(["guards"]);
+  });
+
+  test("a rerun checks its pack change against the packs another machine saved before it, and saves nothing", async () => {
+    const home = temp.make("home-");
+    expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""])).code).toBe(0);
+    await changeElsewhere(home, (profile) => void (profile.packs = [...(profile.packs as string[]), "orchestration"]));
+
+    const rerun = await hedgeSetup(home, ["--non-interactive", "--remove", "pull-requests"], []);
+
+    expect(rerun.code).toBe(2);
+    expect(rerun.output).toContain("hedge setup: Orchestration needs Quality gates. Add pull-requests, or remove orchestration.");
+    expect((await pushedAnswers(home)).packs).toEqual(["pull-requests", "orchestration"]);
+  });
+
+  test("a rerun whose profile push comes after another machine's stops and keeps its commit, stops at the next start until the checkout is up to date, and saves after git pull --rebase", async () => {
+    const home = temp.make("home-");
+    expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""])).code).toBe(0);
+    await changeOnFirstCommit(home, join(temp.make("elsewhere-"), "profile"), 'await Bun.write("about-me.md", "# Changed on another machine\\n");');
+    const args = ["--non-interactive", "--remove", "pull-requests"];
+    const upToDate = `Commit or discard the changes in ${profilePath(home)} that are not committed. Bring it up to date with git -C ${profilePath(home)} pull --rebase`;
+
+    const stopped = await hedgeSetup(home, args, []);
+
+    expect(stopped.code).toBe(1);
+    expect(stopped.output).toContain(`hedge: another machine pushed to your profile before setup could. ${upToDate}, or drop setup's commit, then run the same hedge setup command again.`);
+    expect(JSON.parse(await spawnGit(profilePath(home), "show", "HEAD:hedge.json")).packs).toEqual([]);
+    expect((await pushedAnswers(home)).packs).toEqual(["pull-requests"]);
+    const next = await hedgeSetup(home, args, []);
+    expect(next.code).toBe(1);
+    expect(next.output).toContain(`hedge: ${profilePath(home)} and origin both have changes the other lacks. ${upToDate}, then run the same hedge setup command again.`);
+    await spawnGit(profilePath(home), "pull", "-q", "--rebase");
+    expect((await hedgeSetup(home, args, [])).code).toBe(0);
+    expect((await pushedAnswers(home)).packs).toEqual([]);
+    expect(await spawnGit(home, "--git-dir", githubRepo(home, "nora/hedge-profile"), "show", "main:about-me.md")).toBe("# Changed on another machine");
+  });
+
+  function pushesAfterAnotherMachine(home: string, plan: string) {
+    const box = fakeMachine(home);
+    let published = false;
+    const exec: typeof box.machine.exec = async (command, options) => {
+      if (!published && command[0] === "git" && command[3] === "push") {
+        published = true;
+        await changeElsewhere(home, (profile) => void (profile.plan = plan));
+      }
+      return box.machine.exec(command, options);
+    };
+    return { ...box, machine: { ...box.machine, exec } };
+  }
+
+  test("a rerun whose profile push comes after another machine's says to drop setup's commit only when it made one", async () => {
+    const home = temp.make("home-");
+    expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""])).code).toBe(0);
+    const dir = profilePath(home);
+    const pushAfterElsewhere = async (args: string[], plan: string) => {
+      const before = await spawnGit(dir, "rev-parse", "HEAD");
+      const result = await hedgeSetup(home, ["--non-interactive", ...args], [], pushesAfterAnotherMachine(home, plan));
+      return { ...result, moved: (await spawnGit(dir, "rev-parse", "HEAD")) !== before };
+    };
+    const advice = (drop: boolean) => `hedge: another machine pushed to your profile before setup could. Commit or discard the changes in ${dir} that are not committed. Bring it up to date with git -C ${dir} pull --rebase${drop ? ", or drop setup's commit" : ""}, then run the same hedge setup command again.`;
+
+    const args = ["--remove", "pull-requests"];
+
+    const changed = await pushAfterElsewhere(args, "both");
+
+    expect(changed.code).toBe(1);
+    expect(changed.output).toContain(advice(true));
+    expect(changed.moved).toBe(true);
+    expect(JSON.parse(await spawnGit(dir, "show", "HEAD:hedge.json")).packs).toEqual([]);
+    expect(await pushedAnswers(home)).toMatchObject({ plan: "both", packs: ["pull-requests"] });
+
+    await spawnGit(dir, "pull", "-q", "--rebase");
+    const rejecting = join(githubRepo(home, "nora/hedge-profile"), "hooks/pre-receive");
+    writeFileSync(rejecting, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    expect((await hedgeSetup(home, ["--non-interactive", ...args], [])).output).toContain("pre-receive hook declined");
+    rmSync(rejecting);
+
+    const unchanged = await pushAfterElsewhere(args, "codex");
+
+    expect(unchanged.code).toBe(1);
+    expect(unchanged.output).toContain(advice(false));
+    expect(unchanged.output).not.toContain("drop setup's commit");
+    expect(unchanged.moved).toBe(false);
+    expect(await spawnGit(dir, "status", "--porcelain")).toBe("");
+    expect(await pushedAnswers(home)).toMatchObject({ plan: "codex", packs: ["pull-requests"] });
+  });
+
+  test("an apply-only resume runs the steps of the plan that another machine saved after the stop", async () => {
+    const home = temp.make("home-");
+    const stopped = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""], undefined, undefined, 0, "linux", () => {
+      throw new Error("apply stopped");
+    });
+    expect(stopped.code).toBe(1);
+    await changeElsewhere(home, (profile) => void (profile.plan = "codex"));
+
+    const resumed = await hedgeSetup(home, [], [""]);
+
+    expect(resumed.code).toBe(0);
+    expect(resumed.output).toContain("Sign in to ChatGPT");
+    expect(resumed.output).not.toContain("Sign in to Claude");
+    expect((await pushedAnswers(home)).plan).toBe("codex");
+  });
+});
 
 describe("hedge packs --add memory", () => {
   test("creates the private memory repo, as setup does, and points memory.repo at it", async () => {
@@ -142,9 +327,25 @@ describe("a second hedge setup", () => {
 
   test("with --add, --remove, or --workflows changes only what they name", async () => {
     const home = await grownProfile();
-    const result = await onMac(home, ["--non-interactive", "--add", "memory", "--remove", "communication", "--workflows", "shell-guards=on", "--plan", "both"]);
-    expect(result.output).toContain("✓ Pull requests, Hub, Memory");
-    expect(await pushedAnswers(home)).toMatchObject({ packs: ["pull-requests", "hub", "memory"], workflows: { "pr-digest": true, "shell-guards": true }, plan: "both" });
+    const result = await onMac(home, ["--non-interactive", "--add", "memory", "--remove", "communication", "--workflows", "merge-gate=on", "--plan", "both"]);
+    expect(result.output).toContain("✓ Quality gates, Hub, Memory");
+    expect(await pushedAnswers(home)).toMatchObject({ packs: ["pull-requests", "hub", "memory"], workflows: { "pr-digest": true, "merge-gate": true }, plan: "both" });
+  });
+
+  test("re-picking Everything, by flag or in the picker, keeps every workflow the profile turned off", async () => {
+    const sets = ["--set", "orchestration.loopProject=~/code/app", "--set", "orchestration.qualityArea=src/api", "--set", "orchestration.ledgerRepo=me/ledger", "--set", "slack.userId=U012ABCDEF"];
+    const kept = { "shell-guards": true, "package-age": true, "context-library": true, "quality-loop": false, "signal-loop": false, "pr-digest": false };
+    const home = temp.make("home-");
+    const fewer = ["--remove", "slack", "--remove", "incident-io"];
+    await onMac(home, ["--non-interactive", "--preset", "everything", ...fewer, "--plan", "claude", "--devbox", "skip", ...sets]);
+    const io = scripted([]);
+    expect(await main(["packs", "--workflows", "quality-loop=off,signal-loop=off,pr-digest=off"], { home, engineRoot, platform: "darwin", print: io.terminal.print, terminal: io.terminal, apply: async () => 0, setup: { machine: fakeMachine(home).machine } })).toBe(0);
+    expect((await pushedAnswers(home)).workflows).toEqual(kept);
+    await onMac(home, ["--non-interactive", "--preset", "everything", ...fewer]);
+    expect((await pushedAnswers(home)).workflows).toEqual(kept);
+    const picked = await onMac(home, ["--add", "slack"], ["e", "3", ...Array(16).fill("")]);
+    expect(picked.output).toContain("  3) Everything");
+    expect(await pushedAnswers(home)).toMatchObject({ packs: expect.arrayContaining(["integrations", "slack"]), workflows: kept });
   });
 
   test("with --preset picks that preset again, in place of the profile's packs", async () => {
@@ -184,16 +385,16 @@ describe("a rerun that changes picks", () => {
 
   test("one by one keeps the profile's workflow switches", async () => {
     const home = temp.make("home-");
-    expect((await hedgeSetup(home, ["--non-interactive", "--preset", "starter", "--add", "guards", "--workflows", "package-age=on", "--plan", "claude", "--devbox", "skip"])).code).toBe(0);
+    expect((await hedgeSetup(home, ["--non-interactive", "--preset", "starter", "--add", "guards", "--workflows", "oom-survival=on", "--plan", "claude", "--devbox", "skip"])).code).toBe(0);
     const edited = await hedgeSetup(home, ["--add", "communication"], ["e", "4", ...Array(16).fill("")]);
     expect(edited.code).toBe(0);
-    expect(await pushedAnswers(home)).toMatchObject({ packs: expect.arrayContaining(["pull-requests", "guards", "communication"]), workflows: { "package-age": true } });
+    expect(await pushedAnswers(home)).toMatchObject({ packs: expect.arrayContaining(["pull-requests", "guards", "communication"]), workflows: { "oom-survival": true } });
   });
 });
 
 async function newMachineWithProfile() {
   const home = temp.make("home-");
-  expect((await hedgeSetup(home, ["--non-interactive", "--preset", "starter", "--add", "guards", "--workflows", "package-age=on", "--plan", "claude", "--devbox", "skip"])).code).toBe(0);
+  expect((await hedgeSetup(home, ["--non-interactive", "--preset", "starter", "--add", "guards", "--workflows", "oom-survival=on", "--plan", "claude", "--devbox", "skip"])).code).toBe(0);
   return forgetMachine(home);
 }
 
@@ -208,13 +409,13 @@ describe("hedge setup on a new machine whose profile repo exists", () => {
     const home = await newMachineWithProfile();
     const result = await hedgeSetup(home, [], Array(8).fill(""));
     expect(result.code).toBe(0);
-    expect(await pushedAnswers(home)).toMatchObject({ packs: ["pull-requests", "guards"], workflows: { "package-age": true }, plan: "claude" });
+    expect(await pushedAnswers(home)).toMatchObject({ packs: ["pull-requests", "guards"], workflows: { "oom-survival": true }, plan: "claude" });
   });
 
   test("with --add changes only the pack it names", async () => {
     const home = await newMachineWithProfile();
     expect((await hedgeSetup(home, ["--non-interactive", "--add", "communication", "--devbox", "skip"])).code).toBe(0);
-    expect(await pushedAnswers(home)).toMatchObject({ packs: ["pull-requests", "guards", "communication"], workflows: { "package-age": true }, plan: "claude" });
+    expect(await pushedAnswers(home)).toMatchObject({ packs: ["pull-requests", "guards", "communication"], workflows: { "oom-survival": true }, plan: "claude" });
   });
 
   test("keeps the plan a run before the GitHub sign-in already set with --plan", async () => {

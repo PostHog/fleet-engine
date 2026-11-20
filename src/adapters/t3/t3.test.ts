@@ -143,7 +143,7 @@ function fakeServer(options: { up?: boolean; settings?: Record<string, unknown>;
   return { state, calls, tags, server };
 }
 
-type Machine = { t3?: boolean; service?: "installed" | "not installed" | "unavailable"; manager?: boolean; linger?: "yes" | "no" | ""; sudo?: boolean; originHead?: string; refs?: string[]; remotes?: string[]; gitBroken?: boolean; feed?: string; installFailures?: number; env?: Record<string, string>; reloadFailures?: number; restartFailures?: number };
+type Machine = { home?: string; bus?: { runtime: string; address: string }; t3?: boolean; service?: "installed" | "not installed" | "unavailable"; manager?: boolean; linger?: "yes" | "no" | ""; sudo?: boolean; originHead?: string; refs?: string[]; remotes?: string[]; gitBroken?: boolean; feed?: string; installFailures?: number; env?: Record<string, string>; reloadFailures?: number; restartFailures?: number; sudoRefusal?: string };
 
 const releasesFeed = ["mobile-android-build%2F2.3.0%2Fabc", "v0.1.9-nightly.20990102.7", "v0.1.9-nightly.20990101.3"]
   .map((tag) => `<entry><link rel="alternate" type="text/html" href="https://github.com/pingdotgg/t3code/releases/tag/${tag}"/></entry>`)
@@ -160,13 +160,38 @@ function envOf(command: string[]) {
   return env;
 }
 
+function withoutBus(command: string[]) {
+  const vars = envOf(command);
+  return command[0] === "env" && ("XDG_RUNTIME_DIR" in vars || "DBUS_SESSION_BUS_ADDRESS" in vars) ? command.slice(1 + Object.keys(vars).length) : command;
+}
+
+type RunningService = { invocation: number; settings?: unknown; zone?: string; token?: string };
+
 function runner(server: ReturnType<typeof fakeServer>, machine: Machine = {}) {
   const calls: string[] = [];
-  const state = { t3: machine.t3 ?? true, service: machine.service ?? "installed", installFailures: machine.installFailures ?? 0, installerVersions: [] as string[] };
-  const systemd = { reloadFailures: machine.reloadFailures ?? 0, restartFailures: machine.restartFailures ?? 0, loaded: false, tokenInT3: false, starts: 1 };
-  const run: CommandRunner = async (command) => {
+  const state = { t3: machine.t3 ?? true, service: machine.service ?? "installed", installFailures: machine.installFailures ?? 0, installerVersions: [] as string[], lingering: false };
+  const systemd = { reloadFailures: machine.reloadFailures ?? 0, restartFailures: machine.restartFailures ?? 0, loaded: false, tokenInT3: false, starts: 1, unit: {} as { zone?: string; tokenFile?: string }, running: undefined as RunningService | undefined };
+  const fromHome = (path: string) => (machine.home && existsSync(join(machine.home, path)) ? readFileSync(join(machine.home, path), "utf8") : undefined);
+  const loadUnit = () => {
+    const dropIns = machine.home ? join(machine.home, ".config/systemd/user/t3code.service.d") : undefined;
+    const text = dropIns && existsSync(dropIns) ? readdirSync(dropIns).map((name) => readFileSync(join(dropIns, name), "utf8")).join("\n") : "";
+    systemd.unit = { zone: /^Environment=TZ=(.*)$/m.exec(text)?.[1], tokenFile: /^EnvironmentFile=%h\/(.*)$/m.exec(text)?.[1] };
+  };
+  const startService = () => {
+    systemd.starts++;
+    const settings = fromHome(settingsFile);
+    const token = systemd.unit.tokenFile ? fromHome(systemd.unit.tokenFile) : undefined;
+    systemd.running = { invocation: systemd.starts, settings: settings ? JSON.parse(settings) : undefined, zone: systemd.unit.zone, token: token ? /^CLAUDE_CODE_OAUTH_TOKEN=(.*)$/m.exec(token)?.[1] : undefined };
+  };
+  const run: CommandRunner = async (whole) => {
+    const busVars = envOf(whole);
+    const command = withoutBus(whole);
     const line = command.join(" ");
     calls.push(line);
+    const bus = machine.bus ?? { runtime: "/run/user/1000", address: "unix:path=/run/user/1000/bus" };
+    const onBus = (busVars.XDG_RUNTIME_DIR ?? machine.env?.XDG_RUNTIME_DIR) === bus.runtime && (busVars.DBUS_SESSION_BUS_ADDRESS ?? machine.env?.DBUS_SESSION_BUS_ADDRESS) === bus.address;
+    const managerRuns = machine.manager !== false || state.lingering;
+    if ((line.startsWith("systemctl --user ") || line.startsWith("t3 service ")) && !(onBus && managerRuns)) return { code: 1, stdout: "", stderr: "Failed to connect to bus: No medium found" };
     if (command[0] === "t3" && !state.t3) return { code: 127, stdout: "" };
     if (line === "t3 --version") return { code: 0, stdout: "0.9.0-nightly\n" };
     if (command[0] === "curl" && command.at(-1) === "https://github.com/pingdotgg/t3code/releases.atom") return machine.feed === undefined ? { code: 0, stdout: releasesFeed } : machine.feed ? { code: 0, stdout: machine.feed } : { code: 22, stdout: "", stderr: "curl: (22) The requested URL returned error: 503" };
@@ -180,16 +205,16 @@ function runner(server: ReturnType<typeof fakeServer>, machine: Machine = {}) {
       if (state.service === "not installed") return { code: 0, stdout: "T3 Code service\n  Status: not installed\n  Next: Run `t3 service install`.\n" };
       return { code: 0, stdout: "T3 Code service\n  Status: installed · t3@0.9.0\n" };
     }
-    if (line === "t3 service install") return (state.service = "installed"), { code: 0, stdout: "" };
-    if (line === "systemctl --user show-environment") return machine.manager === false ? { code: 1, stdout: "", stderr: "Failed to connect to bus" } : { code: 0, stdout: "HOME=/home/octo\n" };
-    if (line === "sudo -n loginctl enable-linger octo") return machine.sudo ? { code: 0, stdout: "" } : { code: 1, stdout: "", stderr: "sudo: a password is required" };
+    if (line === "t3 service install") return (state.service = "installed"), loadUnit(), startService(), { code: 0, stdout: "" };
+    if (line === "systemctl --user show-environment") return { code: 0, stdout: "HOME=/home/octo\n" };
+    if (line === "sudo -n loginctl enable-linger octo") return machine.sudo ? ((state.lingering = true), { code: 0, stdout: "" }) : { code: 1, stdout: "", stderr: machine.sudoRefusal ?? "sudo: a password is required\n" };
     if (line === "systemctl --user daemon-reload") {
       if (systemd.reloadFailures > 0) return systemd.reloadFailures--, { code: 1, stdout: "", stderr: "Failed to reload daemon" };
-      return (systemd.loaded = true), { code: 0, stdout: "" };
+      return (systemd.loaded = true), loadUnit(), { code: 0, stdout: "" };
     }
     if (line === "systemctl --user try-restart t3code.service" || line === "systemctl --user restart t3code.service") {
       if (systemd.restartFailures > 0) return systemd.restartFailures--, { code: 1, stdout: "", stderr: "Job for t3code.service failed" };
-      return systemd.starts++, (systemd.tokenInT3 = systemd.loaded), { code: 0, stdout: "" };
+      return startService(), (systemd.tokenInT3 = systemd.loaded), { code: 0, stdout: "" };
     }
     if (line === "systemctl --user show t3code.service --property=InvocationID --value") return { code: 0, stdout: `${String(systemd.starts).padStart(32, "0")}\n` };
     if (line === "loginctl show-user octo --property=Linger --value") return { code: 0, stdout: `${machine.linger ?? "yes"}\n` };
@@ -204,20 +229,20 @@ function runner(server: ReturnType<typeof fakeServer>, machine: Machine = {}) {
     if (command[0] === "git" && command.includes("rev-parse")) return (machine.refs ?? ["refs/remotes/origin/main"]).includes(command.at(-1)!.replace(/\^\{commit\}$/, "")) ? { code: 0, stdout: "abc\n" } : { code: 1, stdout: "" };
     return { code: 127, stdout: "" };
   };
-  return { calls, state: { ...state, systemd }, run };
+  return { calls, state: Object.assign(state, { systemd }), run };
 }
 
 function setup(options: Parameters<typeof fakeServer>[0] = {}, machine: Machine = {}) {
   const server = fakeServer(options);
   const commands = runner(server, machine);
   const waits: number[] = [];
-  const adapter = t3Adapter({ run: commands.run, server: server.server, user: "octo", wait: async (ms) => void waits.push(ms), env: machine.env ?? {} });
+  const adapter = t3Adapter({ run: commands.run, server: server.server, user: "octo", uid: 1000, wait: async (ms) => void waits.push(ms), env: machine.env ?? {} });
   return { server, commands, adapter, waits };
 }
 
 function seed(target: Plan, home: string, options: { adopt?: string[] } = {}) {
   const stopped = fakeServer({ up: false });
-  return t3Adapter({ run: runner(stopped).run, server: stopped.server, user: "octo", env: {} }).apply(target, { home, dryRun: false, adopt: options.adopt ?? [] });
+  return t3Adapter({ run: runner(stopped).run, server: stopped.server, user: "octo", uid: 1000, env: {} }).apply(target, { home, dryRun: false, adopt: options.adopt ?? [] });
 }
 
 describe("T3 settings while T3 Code is stopped", () => {
@@ -800,8 +825,8 @@ describe("T3 on Linux", () => {
     const home = temp.make("home-");
     const server = fakeServer();
     const commands = runner(server, { service: "not installed" });
-    const run: CommandRunner = async (command, options) => (command.join(" ") === "t3 service install" ? { code: 1, stdout: "" } : commands.run(command, options));
-    const adapter = t3Adapter({ run, server: server.server, user: "octo", wait: async () => {}, env: {} });
+    const run: CommandRunner = async (command, options) => (withoutBus(command).join(" ") === "t3 service install" ? { code: 1, stdout: "" } : commands.run(command, options));
+    const adapter = t3Adapter({ run, server: server.server, user: "octo", uid: 1000, wait: async () => {}, env: {} });
     const report = await apply(plan("linux", []), { home, adapters: [adapter] });
     expect(report.ok).toBe(false);
     expect(report.findings.map((finding) => finding.say)).toContain("t3 service install failed (exit 1). Run it yourself to see why, then run hedge apply.");
@@ -838,17 +863,9 @@ describe("T3 on Linux", () => {
 
   test("writes Hedge's settings before it installs t3 or its service, so T3 Code's first start reads them", async () => {
     const home = temp.make("home-");
-    const { server, commands } = setup({ up: false }, { t3: false, service: "not installed" });
-    const seen: Array<{ line: string; settings: unknown }> = [];
-    const run: CommandRunner = async (command) => {
-      seen.push({ line: command.join(" "), settings: existsSync(join(home, settingsFile)) ? read(home, settingsFile) : undefined });
-      return commands.run(command);
-    };
-    const watched = t3Adapter({ run, server: server.server, user: "octo", env: {} });
-    const report = await apply(plan("linux", base), { home, adapters: [watched] });
-    const starts = seen.filter(({ line }) => line.includes("t3.codes/install.sh") || line === "t3 service install");
-    expect(starts).toHaveLength(2);
-    for (const start of starts) expect(start.settings).toEqual({ defaultThreadEnvMode: "worktree", sidebarAutoSettleAfterDays: 3, storageCleanup: { worktreeOnMerge: true, logsAfterDays: 14 } });
+    const { commands, adapter } = setup({ up: false }, { home, t3: false, service: "not installed" });
+    const report = await apply(plan("linux", base), { home, adapters: [adapter] });
+    expect(commands.state.systemd.running?.settings).toEqual({ defaultThreadEnvMode: "worktree", sidebarAutoSettleAfterDays: 3, storageCleanup: { worktreeOnMerge: true, logsAfterDays: 14 } });
     expect(report.actions.map((action) => action.target)).toEqual([settingsFile, "t3", "t3 service"]);
   });
 
@@ -957,14 +974,14 @@ describe("T3 on Linux", () => {
       for (const zone of ["Etc/UTC", "GMT"]) {
         const home = temp.make("home-");
         const commands = runner(fakeServer());
-        const adapter = t3Adapter({ run: commands.run, server: fakeServer().server, user: "octo", env: {}, zoneInfo });
+        const adapter = t3Adapter({ run: commands.run, server: fakeServer().server, user: "octo", uid: 1000, env: {}, zoneInfo });
         await apply(zoned(zone), { home, adapters: [adapter] });
         expect(readFileSync(join(home, dropInFile), "utf8")).toBe(`[Service]\nEnvironment=TZ=${zone}\n`);
       }
       for (const zone of ["etc/utc", "Etc", "Etc/../GMT"]) {
         const home = temp.make("home-");
         const commands = runner(fakeServer());
-        const adapter = t3Adapter({ run: commands.run, server: fakeServer().server, user: "octo", env: {}, zoneInfo });
+        const adapter = t3Adapter({ run: commands.run, server: fakeServer().server, user: "octo", uid: 1000, env: {}, zoneInfo });
         const report = await apply(zoned(zone), { home, adapters: [adapter] });
         expect(zoneFindings(report)).toEqual([expect.objectContaining({ say: expect.stringContaining("is not a time zone") })]);
         expect(existsSync(join(home, dropInFile))).toBe(false);
@@ -973,17 +990,19 @@ describe("T3 on Linux", () => {
 
     test("sets the zone before T3 Code's service starts and before a token restart in the same apply", async () => {
       const home = temp.make("home-");
+      const token = ["sk", "test", "claude", "zone"].join("-");
       const server = fakeServer();
-      const commands = runner(server, { service: "not installed" });
-      const zoneAt: Record<string, boolean> = {};
+      const commands = runner(server, { home, service: "not installed" });
+      let first: RunningService | undefined;
       const run: CommandRunner = async (command) => {
-        const line = command.join(" ");
-        if (line === "t3 service install" || line === "systemctl --user try-restart t3code.service") zoneAt[line] = existsSync(join(home, dropInFile));
-        return commands.run(command);
+        const result = await commands.run(command);
+        first ??= commands.state.systemd.running;
+        return result;
       };
-      const adapter = t3Adapter({ run, server: server.server, user: "octo", env: { CLAUDE_CODE_OAUTH_TOKEN: ["sk", "test", "claude", "zone"].join("-") } });
+      const adapter = t3Adapter({ run, server: server.server, user: "octo", uid: 1000, env: { CLAUDE_CODE_OAUTH_TOKEN: token } });
       await apply(zoned("Europe/Berlin"), { home, adapters: [adapter] });
-      expect(zoneAt).toEqual({ "t3 service install": true, "systemctl --user try-restart t3code.service": true });
+      const running = commands.state.systemd.running;
+      expect([first?.zone, running?.zone, running?.token]).toEqual(["Europe/Berlin", "Europe/Berlin", token]);
     });
 
     test("leaves the zone as it was when systemd does not reload, so the next apply tries again", async () => {
@@ -1096,12 +1115,16 @@ describe("T3 on Linux", () => {
 
     test("needs no second restart when you restarted T3 Code yourself after the finding", async () => {
       const home = temp.make("home-");
-      const { env, commands, adapter } = withToken({}, { T3CODE_THREAD_ID: "thread-1" });
+      const { token, env, commands, adapter } = withToken({ home }, { T3CODE_THREAD_ID: "thread-1" });
       await apply(plan("linux", []), { home, adapters: [adapter] });
-      await commands.run(["systemctl", "--user", "restart", "t3code.service"]);
+      const systemctl = (args: string[]) => commands.run(["env", "XDG_RUNTIME_DIR=/run/user/1000", "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus", "systemctl", "--user", ...args]);
+      const invocation = async () => (await systemctl(["show", "t3code.service", "--property=InvocationID", "--value"])).stdout;
+      expect((await systemctl(["restart", "t3code.service"])).code).toBe(0);
+      const restarted = await invocation();
       delete env.T3CODE_THREAD_ID;
       const report = await apply(plan("linux", []), { home, adapters: [adapter] });
-      expect(restarts(commands.calls)).toEqual(["systemctl --user restart t3code.service"]);
+      expect(commands.state.systemd.running?.token).toBe(token);
+      expect(await invocation()).toBe(restarted);
       expect(report.findings.map((item) => item.id)).not.toContain("t3:claude-token");
     });
 
@@ -1194,17 +1217,44 @@ describe("T3 on Linux", () => {
     });
   });
 
-  test("reports a missing user manager and leaves the service alone", async () => {
+  test("reports a missing user manager with sudo's own reason, and the service stays absent", async () => {
     const home = temp.make("home-");
     const { commands, adapter } = setup({}, { service: "not installed", manager: false });
     const report = await apply(plan("linux", []), { home, adapters: [adapter] });
-    expect(commands.calls).not.toContain("t3 service install");
+    expect(commands.state.service).toBe("not installed");
     expect(report.findings).toContainEqual({
       id: "t3:service",
       pack: "engine",
-      say: "T3 Code cannot run as a service: systemd's user manager does not answer (systemctl --user). Log in to this machine in a normal session, or install your system's systemd user-session support, then run hedge apply.",
+      say: "T3 Code cannot run as a service: systemd's user manager does not answer (systemctl --user). Hedge could not turn on lingering for octo: sudo -n loginctl enable-linger octo failed: sudo: a password is required. Run: sudo loginctl enable-linger octo, then run hedge apply. Without sudo, log in to this machine in a normal session, or install your system's systemd user-session support, then run hedge apply.",
       repair: "human",
     });
+  });
+
+  test("names why sudo refused lingering when it is not a password", async () => {
+    const home = temp.make("home-");
+    const { adapter } = setup({}, { service: "not installed", manager: false, sudoRefusal: "octo is not in the sudoers file.\n" });
+    const report = await apply(plan("linux", []), { home, adapters: [adapter] });
+    expect(report.findings.find((item) => item.id === "t3:service")?.say).toContain("sudo -n loginctl enable-linger octo failed: octo is not in the sudoers file.");
+  });
+
+  test("turns lingering on when the user manager does not answer, as over SSH on a cloud box with no session bus in its environment, and installs a service that answers", async () => {
+    const home = temp.make("home-");
+    const { commands, adapter } = setup({}, { service: "not installed", manager: false, sudo: true });
+    const report = await apply(plan("linux", []), { home, adapters: [adapter] });
+    const status = await commands.run(["env", "XDG_RUNTIME_DIR=/run/user/1000", "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus", "t3", "service", "status"]);
+    expect(status.stdout).toContain("Status: installed");
+    expect(commands.state.systemd.running).toBeDefined();
+    expect(report.findings.map((item) => item.id)).not.toContain("t3:service");
+    expect(report.actions.map((action) => action.target)).toContain("t3 linger");
+  });
+
+  test("keeps the runtime folder and the bus address the session already has, and starts the service on that bus", async () => {
+    const home = temp.make("home-");
+    const bus = { runtime: "/run/user/7", address: "unix:path=/tmp/bus" };
+    const { commands, adapter } = setup({}, { home, bus, service: "not installed", env: { XDG_RUNTIME_DIR: bus.runtime, DBUS_SESSION_BUS_ADDRESS: bus.address } });
+    const report = await apply(plan("linux", []), { home, adapters: [adapter] });
+    expect(commands.state.systemd.running).toBeDefined();
+    expect(report.findings.map((item) => item.id)).not.toContain("t3:service");
   });
 
   test("does not touch the service on the Mac", async () => {

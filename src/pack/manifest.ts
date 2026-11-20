@@ -58,7 +58,7 @@ export function parseManifest(raw: unknown, where: string): PackManifest {
   if (typeof raw.name !== "string" || !packName.test(raw.name)) return fail("name must be lowercase words joined by dashes");
   if (raw.title !== undefined && !filled(raw.title)) return fail("title must be the name people read");
   if (typeof raw.summary !== "string" || raw.summary === "") return fail("summary must be one plain sentence");
-  for (const field of ["requires", "guides", "skills", "config", "settings", "workflows", "jobs", "human", "steps", "checks", "files", "codexRules", "t3ProjectScripts", "handlers", "served"]) {
+  for (const field of ["aliases", "settingPrefixes", "requires", "guides", "skills", "config", "settings", "workflows", "jobs", "human", "steps", "checks", "files", "codexRules", "t3ProjectScripts", "handlers", "served"]) {
     if (raw[field] !== undefined && !Array.isArray(raw[field])) fail(`${field} must be a list`);
   }
   checkShapes(raw, fail);
@@ -128,6 +128,13 @@ function checkShapes(raw: Record<string, unknown>, fail: (message: string) => ne
     if (problem) fail(`${label}: ${problem}`);
   };
   for (const field of ["requires", "skills"]) need(raw[field] === undefined || isStrings(raw[field]), `${field} must list names`);
+  for (const name of isStrings(raw.requires) ? raw.requires : []) need(packName.test(name), `requires ${JSON.stringify(name)}: must be a pack name in lowercase words joined by dashes`);
+  need(raw.onSite === undefined || raw.onSite === false, "onSite must be false when set");
+  need(raw.settingPrefixes === undefined || (isStrings(raw.settingPrefixes) && raw.settingPrefixes.every((prefix) => packName.test(prefix))), "settingPrefixes must list pack names");
+  each("aliases", (item, label) => {
+    need(typeof item.name === "string" && packName.test(item.name) && item.name !== raw.name, `aliases ${String(item.name)}: name must be another pack name in lowercase words joined by dashes`);
+    need(isStrings(item.workflows), `${label}: workflows must list the old pack's workflow ids`);
+  });
   need(raw.subcommands === undefined || (isRecord(raw.subcommands) && Object.values(raw.subcommands).every((words) => isStrings(words) && words.every((word) => /^[a-z][a-z-]{0,23}$/.test(word)))), "subcommands must map each command to its lowercase first words");
   need(raw.instructions === undefined || typeof raw.instructions === "string", "instructions must be a path");
   need(raw.profileOrg === undefined || (typeof raw.profileOrg === "string" && /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(raw.profileOrg)), "profileOrg must be a GitHub org name");
@@ -164,6 +171,8 @@ function checkShapes(raw: Record<string, unknown>, fail: (message: string) => ne
     need(item.requires === undefined || isStrings(item.requires), `${label}: requires must list workflow ids`);
     need(item.yields === undefined || isStrings(item.yields), `${label}: yields must list workflow ids`);
     need(item.settings === undefined || isStrings(item.settings), `${label}: settings must list keys`);
+    need(item.offUntilSet === undefined || (isStrings(item.offUntilSet) && item.offUntilSet.every((key) => (item.settings as string[] | undefined)?.includes(key))), `${label}: offUntilSet must list keys of its own settings`);
+    need(item.instructions === undefined || typeof item.instructions === "string", `${label}: instructions must be a path`);
   });
   each("jobs", (item, label) => {
     need(typeof item.id === "string" && isStrings(item.command), `${label}: needs an id and a command list`);
@@ -260,8 +269,9 @@ export function isModelRow(row: unknown): row is ModelRow {
 }
 
 function checkSettings(manifest: PackManifest, fail: (message: string) => never) {
+  const prefixes = [manifest.name, ...(manifest.aliases ?? []).map((alias) => alias.name), ...(manifest.settingPrefixes ?? [])];
   for (const setting of manifest.settings ?? []) {
-    if (!setting.key?.startsWith(`${manifest.name}.`) && !engineSettings.includes(setting.key)) fail(`setting ${setting.key} must start with ${manifest.name}.`);
+    if (!prefixes.some((prefix) => setting.key?.startsWith(`${prefix}.`)) && !engineSettings.includes(setting.key)) fail(`setting ${setting.key} must start with ${prefixes.map((prefix) => `${prefix}.`).join(" or ")}`);
     if (!settingTypes.includes(setting.type)) fail(`setting ${setting.key} has unknown type ${setting.type}`);
     if (setting.type === "choice" && !setting.choices?.length) fail(`setting ${setting.key} is a choice without choices`);
   }
@@ -278,6 +288,10 @@ function checkWorkflows(manifest: PackManifest, fail: (message: string) => never
     }
   }
   checkYields(manifest.workflows ?? [], fail);
+  for (const alias of manifest.aliases ?? []) {
+    const unknown = alias.workflows.find((id) => !ids.has(id));
+    if (unknown) fail(`alias ${alias.name} names unknown workflow ${unknown}`);
+  }
   const tied = { jobs: manifest.jobs, human: manifest.human, steps: manifest.steps, checks: manifest.checks, config: manifest.config, files: manifest.files, codexRules: manifest.codexRules, t3ProjectScripts: manifest.t3ProjectScripts, handlers: manifest.handlers, served: manifest.served };
   for (const [field, items] of Object.entries(tied)) {
     for (const item of items ?? []) {

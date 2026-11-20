@@ -196,17 +196,16 @@ describe("the Hub pack", () => {
   });
 });
 
-describe("the Dream workflow", () => {
+describe("the Dream workflow of the Memory pack", () => {
   const hub: MachineFile = { schema: 1, role: "hub" };
   const dreamOn = { packs: ["hub", "memory"], workflows: { dream: true }, settings: { ...answers, "memory.repo": "me/notes" } };
   const dreamJobs = (result: Plan) => result.jobs.filter((job) => job.workflow === "dream").map((job) => `${job.id}: ${job.command.join(" ")} every ${job.schedule.every} at ${job.schedule.at}`);
 
   test("is off by default, because each run spends model tokens, and says so in its risk", () => {
-    const workflow = sources[0]!.packs.find((pack) => pack.manifest.name === "hub")!.manifest.workflows!.find((item) => item.id === "dream")!;
-    expect(workflow).toMatchObject({ name: "Dream", default: false, needs: ["hub", "gh"] });
+    const workflow = sources[0]!.packs.find((pack) => pack.manifest.name === "memory")!.manifest.workflows!.find((item) => item.id === "dream")!;
+    expect(workflow).toMatchObject({ name: "Dream", default: false, needs: ["hub", "gh"], settings: ["hub.alias", "hub.dreamSessions"] });
     expect(workflow.risk).toMatch(/model/);
-    expect(workflow.settings!.every((key) => key.startsWith("hub."))).toBe(true);
-    expect(plan({ packs: ["hub"] }, hub).workflows.find((item) => item.id === "dream")).toMatchObject({ active: false, reason: "turned off" });
+    expect(plan({ ...dreamOn, workflows: {} }, hub).workflows.find((item) => item.id === "dream")).toMatchObject({ active: false, reason: "turned off" });
   });
 
   test("plans the nightly job only on the hub, and only while Dream is on", () => {

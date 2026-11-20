@@ -16,7 +16,7 @@ export async function loadProfile(dir: string): Promise<Profile> {
   const path = profileFile(dir);
   const file = await readJson(path);
   if (!file) throw new ProfileError(`${path}: missing`);
-  const profile = checkProfile({ ...file, workflows: file.workflows ?? {}, settings: file.settings ?? {}, sources: file.sources ?? [] }, path);
+  const profile = checkProfile(withPicksOn({ ...file, workflows: file.workflows ?? {}, settings: file.settings ?? {}, sources: file.sources ?? [] }), path);
   const aboutMe = Bun.file(join(dir, "about-me.md"));
   return { ...profile, dir, ...((await aboutMe.exists()) ? { aboutMe: await aboutMe.text() } : {}) };
 }
@@ -53,10 +53,10 @@ export async function saveAnswers(dir: string, answers: Partial<ProfileFile>, op
   refuseLegacyPath(path);
   if (options.push) await pullUnder(dir, path, answers);
   refuseLegacyPath(path);
-  const current = (await readJson(path)) ?? { schema: 1 };
+  const current = withPicksOn((await readJson(path)) ?? { schema: 1, migrations: [picksTurnOn] });
   if (current.schema !== 1) throw new ProfileError(`${path}: unknown schema ${String(current.schema)}`);
   const settings = { ...(current.settings as Record<string, unknown> | undefined), ...answers.settings };
-  await writeFile(path, JSON.stringify({ ...current, ...answers, settings, schema: 1 }, null, 2) + "\n");
+  await writeFile(path, JSON.stringify(withNewPicksOn({ ...current, ...answers, settings, schema: 1 }, current.packs), null, 2) + "\n");
   const added = await run(dir, "git", "add", "--", name);
   if (!added.ok) throw new ProfileError(`${dir}: could not stage ${name}: ${added.stderr}`);
   const changed = await run(dir, "git", "diff", "--cached", "--quiet", "--", name);
@@ -66,7 +66,14 @@ export async function saveAnswers(dir: string, answers: Partial<ProfileFile>, op
     if (!committed.ok) throw new ProfileError(`${dir}: could not commit answers: ${committed.stderr}`);
   }
   if (options.push) await push(dir);
+  return changed.code === 1;
 }
+
+const bringUpToDate = (dir: string, committed: boolean) => `Commit or discard the changes in ${dir} that are not committed. Bring it up to date with git -C ${dir} pull --rebase${committed ? ", or drop setup's commit" : ""}, then run the same hedge setup command again.`;
+
+export const divergedFromOrigin = (dir: string) => `${bothChanged(dir, "origin")} ${bringUpToDate(dir, false)}`;
+
+export const pushedFirst = (dir: string, committed: boolean) => `another machine pushed to your profile before setup could. ${bringUpToDate(dir, committed)}`;
 
 async function pullUnder(dir: string, path: string, answers: Partial<ProfileFile>) {
   const before = await readJson(path);
@@ -82,29 +89,67 @@ export function bothChanged(dir: string, other: string) {
 
 async function push(dir: string) {
   const pushed = await run(dir, "git", "push", "-q");
-  if (pushed.ok) return;
-  const reason = gitReason(pushed.stderr);
-  const behind = /\((fetch first|non-fast-forward)\)/.test(pushed.stderr);
-  const recovery = behind ? ` ${bothChanged(dir, "its remote")} Run git -C ${dir} pull --rebase, then try again.` : reason ? " Fix that, then try again." : "";
-  throw new ProfileError(`${dir}: could not push answers${reason ? `: ${reason}.` : "."}${recovery}`);
+  if (!pushed.ok) throw pushFailed(dir, pushed.stderr);
 }
+
+export function pushFailed(dir: string, stderr: string) {
+  const reason = gitReason(stderr);
+  const recovery = pushedBehind(stderr) ? ` ${bothChanged(dir, "its remote")} Run git -C ${dir} pull --rebase, then try again.` : reason ? " Fix that, then try again." : "";
+  return new ProfileError(`${dir}: could not push answers${reason ? `: ${reason}.` : "."}${recovery}`);
+}
+
+export const pushedBehind = (stderr: string) => /\((fetch first|non-fast-forward)\)/.test(stderr);
 
 function gitReason(stderr: string) {
   const line = stderr.split("\n").map((text) => withoutCredentials(text).replace(/\s+/g, " ").trim()).find((text) => text && !text.startsWith("To ") && !text.startsWith("hint:"));
   return line?.replace(/\.$/, "");
 }
 
+export const picksTurnOn = "picks-turn-on";
+
+const pickedWorkflows: Array<{ workflow: string; packs: string[] }> = [
+  { workflow: "slack-thread", packs: ["slack"] },
+  { workflow: "page-owner", packs: ["incident-io"] },
+  { workflow: "context-library", packs: ["memory", "context-library"] },
+  { workflow: "shell-guards", packs: ["guards"] },
+  { workflow: "package-age", packs: ["guards"] },
+];
+
+const movedWorkflows: Array<{ workflow: string; from: string }> = [
+  { workflow: "quality-loop", from: "orchestration" },
+  { workflow: "signal-loop", from: "orchestration" },
+  { workflow: "pr-digest", from: "orchestration" },
+  { workflow: "dream", from: "hub" },
+  { workflow: "provider-recovery", from: "recovery" },
+  { workflow: "context-library", from: "context-library" },
+];
+
+const listedPicks = (packs: unknown[], workflows: Record<string, unknown>) => pickedWorkflows.filter((item) => !Object.hasOwn(workflows, item.workflow) && item.packs.some((name) => packs.includes(name)));
+
+export function withPicksOn(file: Record<string, unknown>): Record<string, unknown> {
+  const { packs, workflows = {}, migrations = [] } = file;
+  if (!Array.isArray(packs) || !isRecord(workflows) || !Array.isArray(migrations)) return file;
+  const marked = migrations.includes(picksTurnOn);
+  const moved = marked ? [] : movedWorkflows.filter((item) => workflows[item.workflow] === true && !packs.includes(item.from));
+  const off = Object.fromEntries([...listedPicks(packs, workflows), ...moved].map((item) => [item.workflow, false]));
+  return { ...file, workflows: { ...workflows, ...off }, migrations: marked ? migrations : [...migrations, picksTurnOn] };
+}
+
+function withNewPicksOn(file: Record<string, unknown>, listedBefore: unknown): Record<string, unknown> {
+  const { packs, workflows = {} } = file;
+  if (!Array.isArray(packs) || !isRecord(workflows)) return file;
+  const before = Array.isArray(listedBefore) ? listedBefore : [];
+  const on = listedPicks(packs, workflows).filter((item) => !item.packs.some((name) => before.includes(name)));
+  return withPicksOn({ ...file, workflows: { ...workflows, ...Object.fromEntries(on.map((item) => [item.workflow, true])) } });
+}
+
 export function workflowDefaults(packs: PackManifest[]): Record<string, boolean> {
   return Object.fromEntries(packs.flatMap((pack) => (pack.workflows ?? []).map((workflow) => [workflow.id, workflow.default])));
 }
 
-export function workflowOverrides(choices: Record<string, boolean>, packs: PackManifest[]): Record<string, boolean> {
+export function keptWorkflows(saved: Record<string, boolean>, changes: Record<string, boolean>, packs: PackManifest[]): Record<string, boolean> {
   const defaults = workflowDefaults(packs);
-  return Object.fromEntries(Object.entries(choices).filter(([id, on]) => id in defaults && defaults[id] !== on));
-}
-
-export function activeChoices(profile: Pick<ProfileFile, "workflows">, packs: PackManifest[]): Record<string, boolean> {
-  return { ...workflowDefaults(packs), ...profile.workflows };
+  return { ...saved, ...Object.fromEntries(Object.entries(changes).filter(([id, on]) => Object.hasOwn(saved, id) || (Object.hasOwn(defaults, id) && defaults[id] !== on))) };
 }
 
 export const validHost = (host: string) => /^[\w][\w.@-]*$/.test(host);
@@ -189,6 +234,7 @@ function checkProfile(file: Record<string, unknown>, path: string): ProfileFile 
   }
   if (!isRecord(file.settings) || !Object.values(file.settings).every((value) => ["string", "number", "boolean"].includes(typeof value))) fail("settings must map keys to text, numbers, or true and false");
   if (!isRecord(file.workflows) || !Object.values(file.workflows).every((value) => typeof value === "boolean")) fail("workflows must map ids to true or false");
+  if (file.migrations !== undefined && !(Array.isArray(file.migrations) && file.migrations.every((item) => typeof item === "string"))) fail("migrations must list names");
   if (file.hub !== undefined && !(typeof file.hub === "string" && validHost(file.hub))) fail("hub must be the SSH name of a machine");
   if (file.overrides !== undefined && !isRecord(file.overrides)) fail("overrides must be an object");
   const config = isRecord(file.overrides) ? file.overrides.config : undefined;

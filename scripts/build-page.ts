@@ -1,13 +1,14 @@
 import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { artFiles } from "../page/cast.ts";
+import { artFiles, packGroups } from "../page/cast.ts";
 import type { PageData, PagePack } from "../page/model.ts";
 import { site, type ArtSizes } from "../page/views.ts";
 import { engineSettings, loadPacks } from "../src/pack/manifest.ts";
 import type { Audience, LoadedPack, Need, PackManifest, Preset } from "../src/pack/types.ts";
 import { engineRepo, needsHubPacks } from "../src/setup/defaults.ts";
-import { choosablePacks, defaultPreset, packTitle, type Catalog } from "../src/setup/questions.ts";
+import { packNamed } from "../src/pack/aliases.ts";
+import { catalogAliases, choosablePacks, defaultPreset, packTitle, type Catalog } from "../src/setup/questions.ts";
 
 const engineRoot = join(import.meta.dir, "..");
 const artDir = join(engineRoot, "page/art");
@@ -36,19 +37,28 @@ export async function pageData({ audience, team = [] }: PageOptions): Promise<Pa
   const shown = visible(audience);
   const base = engine.filter((pack) => pack.manifest.name === "base").map((pack) => pack.manifest);
   const teamManifests = team.map((pack) => pack.manifest).filter(shown);
-  const manifests = [...base, ...choosablePacks({ presets, packs: engine } as Catalog), ...teamManifests].filter(shown);
+  const manifests = [...base, ...choosablePacks({ presets, packs: engine } as Catalog), ...teamManifests].filter(shown).filter((manifest) => manifest.onSite !== false);
+  const inEveryHedge = new Set(["base", ...presets.map((preset) => preset.hubPacks ?? []).reduce((left, right) => left.filter((name) => right.includes(name)))]);
   const names = new Set(manifests.map((manifest) => manifest.name));
+  const aliases = catalogAliases({ packs: [...engine, ...team] });
+  const loaded = new Map([...engine, ...team].map((pack) => [pack.manifest.name, pack.manifest]));
+  const needed = (names: string[], found = new Set<string>()): Set<string> => {
+    for (const name of names) if (!found.has(name)) needed(loaded.get(packNamed(aliases, name))?.requires ?? [], found.add(name));
+    return found;
+  };
   const holds = (need: Need) => !needPacks[need] || names.has(needPacks[need]!);
   const noteOn = (loaded: LoadedPack[], folder: string) => loaded.filter((pack) => existsSync(join(pack.dir, "SETUP.md"))).map((pack) => [pack.manifest.name, `${folder}/packs/${pack.manifest.name}/SETUP.md`]);
   const setupNotes: Record<string, string> = Object.fromEntries([...noteOn(engine, "~/.local/share/hedge/engine"), ...noteOn(team, "~/.local/share/hedge/sources/<source>")]);
-  const packs = manifests.map((manifest) => pagePack(manifest, holds, setupNotes[manifest.name]));
+  const grouped = packGroups.flatMap((group) => group.packs);
+  const rank = (name: string) => (inEveryHedge.has(name) ? -1 : grouped.includes(name) ? grouped.indexOf(name) : grouped.length);
+  const packs = manifests.toSorted((left, right) => rank(left.name) - rank(right.name)).map((manifest) => pagePack(manifest, holds, [...needed(manifest.requires ?? [])].filter((name) => name !== manifest.name), inEveryHedge.has(manifest.name), setupNotes[manifest.name]));
   const used = new Set(packs.flatMap((pack) => pack.workflows.flatMap((workflow) => workflow.needs)));
   const start = presets.find((preset) => preset.id === defaultPreset)!;
   const shownNames = (list: string[]) => list.filter((name) => names.has(name));
   return {
     engineRepo,
     packs,
-    teamPacks: teamManifests.map((manifest) => manifest.name),
+    teamPacks: shownNames(teamManifests.map((manifest) => manifest.name)),
     startPacks: shownNames(start.packs),
     hubStartPacks: shownNames(start.hubPacks ?? []),
     needsHubPacks: shownNames(needsHubPacks),
@@ -56,7 +66,7 @@ export async function pageData({ audience, team = [] }: PageOptions): Promise<Pa
   };
 }
 
-function pagePack(manifest: PackManifest, holds: (need: Need) => boolean, setupNote?: string): PagePack {
+function pagePack(manifest: PackManifest, holds: (need: Need) => boolean, requires: string[], always: boolean, setupNote?: string): PagePack {
   const workflows = manifest.workflows ?? [];
   const shownWorkflows = workflows.filter((workflow) => (workflow.needs ?? []).every(holds));
   const listedOnlyByHidden = (key: string) => workflows.some((workflow) => workflow.settings?.includes(key)) && !shownWorkflows.some((workflow) => workflow.settings?.includes(key));
@@ -66,8 +76,8 @@ function pagePack(manifest: PackManifest, holds: (need: Need) => boolean, setupN
     summary: manifest.summary,
     ...(manifest.cost ? { cost: manifest.cost } : {}),
     ...(manifest.risk ? { risk: manifest.risk } : {}),
-    requires: (manifest.requires ?? []).filter((name) => name !== "base"),
-    always: manifest.name === "base",
+    requires: requires.filter((name) => name !== "base"),
+    always,
     ...(setupNote ? { setupNote } : {}),
     workflows: shownWorkflows.map(({ id, name, sentence, needs = [], risk, ...workflow }) => ({ id, name, sentence, needs: needs.filter((need) => needPacks[need] !== manifest.name), default: workflow.default, ...(risk ? { risk } : {}) })),
     settings: (manifest.settings ?? []).filter((setting) => !engineSettings.includes(setting.key) && !listedOnlyByHidden(setting.key)),

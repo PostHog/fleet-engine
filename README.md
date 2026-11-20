@@ -46,13 +46,16 @@ answer its questions and do your own sign-ins.
 
 ## See what it does
 
-Open [the Hedge site](https://posthog.github.io/hedge/) to switch the Pull
-requests, Orchestration, and Communication packs on or off. The site builds
-the prompt above with your picks in it, so the agent skips those questions.
+Open [the Hedge site](https://posthog.github.io/hedge/) to switch the
+Quality gates, Orchestration, Communication, and Memory packs on or off. The
+site builds the prompt above with your picks in it, so the agent skips those
+questions.
 
-The [Packs page](https://posthog.github.io/hedge/packs/) shows every
-pack, and each pack has its own page. Select packs there, and copy one prompt
-that adds them to a Hedge you already run.
+The [Packs page](https://posthog.github.io/hedge/packs/) shows the packs in
+groups. Base and Hub are in every Hedge. Then come the packs for how your
+agents work, what they know, and what they reach. Each pack has its own page.
+Select packs there, and copy one prompt that adds them to a Hedge you already
+run.
 
 `bun scripts/build-page.ts` generates the site from the pack data into
 `site/`. To see it, open `site/index.html`.

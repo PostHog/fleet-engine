@@ -1,11 +1,14 @@
 {
   "schema": 1,
   "name": "pull-requests",
-  "title": "Pull requests",
-  "summary": "Every fix or feature ends as a proven, reviewed draft pull request, and ship words take it to merged.",
+  "settingPrefixes": [
+    "orchestration"
+  ],
+  "title": "Quality gates",
+  "summary": "Every change passes proof, a second-model review and a QA swarm before it merges, and a nightly loop you turn on improves one area.",
   "day": "You ask for a fix, and later find a draft pull request with its tests, its proof, and a review from a second model.",
-  "cost": "It needs GitHub, and setup signs you in. Each pull request spends extra usage on reviews. Expect at least one round, often two, and short final reads.",
-  "risk": "Ship words merge without asking again. Say them only for work you would merge yourself.",
+  "cost": "It needs GitHub, and setup signs you in. Each pull request spends extra usage on reviews. Expect at least one round, often two, and short final reads. The nightly loops run on an always-on devbox and spend your AI plan's usage each night, so they start off.",
+  "risk": "Ship words merge without asking again. Say them only for work you would merge yourself. The loops open draft pull requests without you in the room.",
   "instructions": "AGENTS.md",
   "guides": [
     {
@@ -33,7 +36,11 @@
     "agent-skills:pull-requests/review-lens",
     "agent-skills:pull-requests/rollout",
     "agent-skills:pull-requests/slack-pr-update",
-    "mattpocock-skills:engineering/tdd"
+    "mattpocock-skills:engineering/tdd",
+    "agent-skills:orchestration/impact",
+    "agent-skills:orchestration/quality-loop",
+    "agent-skills:orchestration/signal-loop",
+    "mattpocock-skills:engineering/codebase-design"
   ],
   "settings": [
     {
@@ -126,6 +133,34 @@
       "type": "string",
       "optional": true,
       "ask": "never"
+    },
+    {
+      "key": "orchestration.loopProject",
+      "question": "Which T3 project do the loops and the PR digest run in?",
+      "type": "string"
+    },
+    {
+      "key": "orchestration.qualityArea",
+      "question": "Which paths of the repo may the loops change, such as src/billing?",
+      "type": "string"
+    },
+    {
+      "key": "orchestration.criticalPaths",
+      "question": "Which paths need your review before a loop's pull request is ready, such as src/payments?",
+      "type": "string",
+      "optional": true
+    },
+    {
+      "key": "orchestration.ledgerRepo",
+      "question": "Which private repo holds the loops' ledger? It records production numbers, so keep it private.",
+      "type": "string"
+    },
+    {
+      "key": "orchestration.signalSource",
+      "question": "Where should the signal loop read production errors and friction? Leave it empty to use an analytics MCP when one is connected.",
+      "type": "string",
+      "optional": true,
+      "ask": "never"
     }
   ],
   "workflows": [
@@ -175,6 +210,51 @@
       "name": "PR owners",
       "default": true,
       "sentence": "A thread that still owns an open pull request cannot settle or archive itself until it hands the pull request over, and a box with such a thread is not released. A thread you pinned cannot be settled or snoozed by an agent. A settle, snooze or archive of a thread on a Hedge peer asks that machine's Hedge first, over SSH. When that Hedge does not answer, or is older, the guard reads the thread through T3."
+    },
+    {
+      "id": "quality-loop",
+      "name": "Quality loop",
+      "default": false,
+      "needs": [
+        "always-on devbox"
+      ],
+      "settings": [
+        "orchestration.loopProject",
+        "orchestration.qualityArea",
+        "orchestration.criticalPaths",
+        "orchestration.ledgerRepo"
+      ],
+      "sentence": "Each night, agents improve one area of a repo through small, proven draft pull requests that you review.",
+      "risk": "Spends your AI plan's usage every night."
+    },
+    {
+      "id": "signal-loop",
+      "name": "Signal loop",
+      "default": false,
+      "needs": [
+        "always-on devbox"
+      ],
+      "settings": [
+        "orchestration.loopProject",
+        "orchestration.qualityArea",
+        "orchestration.criticalPaths",
+        "orchestration.ledgerRepo",
+        "orchestration.signalSource"
+      ],
+      "sentence": "Each night, agents turn production errors and friction that nobody handles into small draft fix pull requests.",
+      "risk": "Reads production signals and spends your AI plan's usage every night."
+    },
+    {
+      "id": "pr-digest",
+      "name": "PR digest",
+      "default": false,
+      "needs": [
+        "always-on devbox"
+      ],
+      "settings": [
+        "orchestration.loopProject"
+      ],
+      "sentence": "Each weekday morning, one thread lists your open pull requests and what blocks each one."
     }
   ],
   "files": [
@@ -222,5 +302,73 @@
       "lift",
       "report"
     ]
-  }
+  },
+  "jobs": [
+    {
+      "id": "quality-loop",
+      "command": [],
+      "runner": "t3",
+      "schedule": {
+        "every": "1d",
+        "at": "01:00"
+      },
+      "workflow": "quality-loop",
+      "task": {
+        "prompt": "Run one coordinator round of the quality-loop skill. Read every value in ~/.agents/guides/skill-settings.md first. The code repo is this thread's project, the machine is this one, and the schedule is nightly. The scope is the paths in orchestration.qualityArea, the critical paths are in orchestration.criticalPaths, and the ledger is the private repo in orchestration.ledgerRepo. Every lane stops at a draft pull request: no lane runs stamp-pr or full-send, merges, or deploys, whatever the lane contract says, and each lane's prompt says so. Never ask a question, because nobody is watching: when a value the skill needs is missing, end with NEEDS_HUMAN: <the missing setting keys>.",
+        "projectSetting": "orchestration.loopProject",
+        "modelRole": "implementation",
+        "workspaceStrategy": "worktree",
+        "runtimeMode": "full-access"
+      },
+      "roles": [
+        "devbox",
+        "hub"
+      ],
+      "oncePerHedge": true
+    },
+    {
+      "id": "signal-loop",
+      "command": [],
+      "runner": "t3",
+      "schedule": {
+        "every": "1d",
+        "at": "02:00"
+      },
+      "workflow": "signal-loop",
+      "task": {
+        "prompt": "Run one coordinator round of the signal-loop skill. Read signals from the source in orchestration.signalSource, or, when it is not set, from an analytics MCP, such as PostHog's, when one is connected. When there is no source, end with NEEDS_HUMAN: orchestration.signalSource. Read every value in ~/.agents/guides/skill-settings.md first. The code repo is this thread's project, the machine is this one, and the schedule is nightly. The scope is the paths in orchestration.qualityArea, the critical paths are in orchestration.criticalPaths, and the ledger is the private repo in orchestration.ledgerRepo. Every lane stops at a draft pull request: no lane runs stamp-pr or full-send, merges, or deploys, whatever the lane contract says, and each lane's prompt says so. Never ask a question, because nobody is watching: when a value the skill needs is missing, end with NEEDS_HUMAN: <the missing setting keys>.",
+        "projectSetting": "orchestration.loopProject",
+        "modelRole": "implementation",
+        "workspaceStrategy": "worktree",
+        "runtimeMode": "full-access"
+      },
+      "roles": [
+        "devbox",
+        "hub"
+      ],
+      "oncePerHedge": true
+    },
+    {
+      "id": "pr-digest",
+      "command": [],
+      "runner": "t3",
+      "schedule": {
+        "every": "1d",
+        "at": "08:00"
+      },
+      "workflow": "pr-digest",
+      "task": {
+        "prompt": "On a Saturday or Sunday, stop. Otherwise list my open pull requests in every repository with gh search prs --author @me --state open --limit 200 --json url,title,repository,updatedAt. For each one, read its checks, reviews, mergeable state, and open threads, and give one line: its link as [#1234](url), its title, and the one thing it waits for, such as a review, a red check, a conflict, or my answer. Group them by repository, most recently updated first. Change nothing.",
+        "projectSetting": "orchestration.loopProject",
+        "modelRole": "lookup",
+        "workspaceStrategy": "worktree",
+        "runtimeMode": "auto"
+      },
+      "roles": [
+        "devbox",
+        "hub"
+      ],
+      "oncePerHedge": true
+    }
+  ]
 }

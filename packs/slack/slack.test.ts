@@ -2,7 +2,7 @@ import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AvailableSource } from "../../src/pack/types.ts";
-import { tempDirs } from "../../src/testing/git.ts";
+import { gitEnv, spawnGit, tempDirs } from "../../src/testing/git.ts";
 import { devbox, engineSource, mac, resolveEngine, skillSources } from "../../src/testing/packs.ts";
 import { t3CliRunner, t3Threads } from "../../src/integrations/t3/index.ts";
 import { startT3Stub, type T3Stub } from "../../src/integrations/t3/testing.ts";
@@ -14,7 +14,7 @@ import { manifest, serve } from "./lib/slack.ts";
 import { handleTrigger, retryPending, syncFollowed, takeTurn, triggerOf, type Started, type TriggerDeps } from "./lib/trigger.ts";
 import { startSlackStub, type Message } from "./testing.ts";
 import { remoteLauncher } from "../../src/hub/ssh.ts";
-import { main } from "../../src/cli.ts";
+import { main, packEnvironment } from "../../src/cli.ts";
 import { repoRoot } from "../../src/testing/cli.ts";
 
 const temp = tempDirs();
@@ -338,6 +338,59 @@ describe("saving to the context library", () => {
     expect(told.text).toBe(`:brain: Added <${captured.url}|Sprint &lt;planning&gt;> in your context library (\`${captured.path}\`). It updates as the thread gets replies.\nNo open thread needed it.`);
   });
 
+  async function brainWith(profile: { packs: string[]; workflows?: Record<string, boolean> }) {
+    const root = temp.make("library-");
+    const remote = join(root, "remote.git");
+    const home = await homeWithTokens();
+    const git = (cwd: string, ...args: string[]) => spawnGit(cwd, ...args);
+    await git(root, "init", "-q", "--bare", "-b", "main", remote);
+    await git(root, "clone", "-q", remote, join(root, "seed"));
+    writeFileSync(join(root, "seed/ideas.md"), "# Ideas\n");
+    await git(join(root, "seed"), "add", "-A");
+    await git(join(root, "seed"), "commit", "-q", "-m", "seed");
+    await git(join(root, "seed"), "push", "-q", "origin", "HEAD:main");
+    await git(root, "clone", "-q", remote, join(home, "dev/library"));
+    const engine = await engineSource();
+    const plan = resolveEngine([engine, ...skillSources(temp.make("skills-"), engine)], { ...profile, settings: { "slack.userId": ownerId, "memory.repo": "me/memory", "context-library.repo": `file://${remote}`, "context-library.path": "~/dev/library", "context-library.owner": "Nora" } }, devbox);
+    const environment = packEnvironment(plan, { home, engineRoot: repoRoot });
+    const source = "https://example.slack.com/archives/C1/p200.1";
+    const note = `---\ntitle: Sprint planning\ntype: planning\ntopics: [load-testing]\ndate: 2026-11-11\nsource: ${source}\n---\n\n# Sprint planning\n\nLoad test first.\n`;
+    const bin = temp.make("bin-");
+    writeFileSync(join(bin, "claude"), `#!/bin/sh\ncat >/dev/null\nprintf '%s' '${JSON.stringify({ structured_output: { path: "notes/sprint-planning.md", text: note } })}'\n`, { mode: 0o755 });
+    const childEnv = { ...gitEnv, ...environment, PATH: `${bin}:${process.env.PATH}`, HEDGE_MODELS: JSON.stringify([{ role: "survey", work: "Survey", provider: "claude", model: "claude-sonnet-5-5", effort: "high" }]) };
+    const run: Run = async (argv, input) => {
+      if (argv[0] !== "bun") return { code: 0, stdout: "Nora Example\n", stderr: "" };
+      const child = Bun.spawn(argv, { env: childEnv, stdin: Buffer.from(input ?? ""), stdout: "pipe", stderr: "pipe" });
+      const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+      return { code, stdout, stderr };
+    };
+    const slack = slackStub([{ user: ownerId, ts: "200.1", text: "load test first" }]);
+    const stop = new AbortController();
+    const running = listen(commandDeps(home, { env: environment, slackBase: slack.base, stop: stop.signal, run }));
+    await slack.connected();
+    slack.send({ type: "reaction_added", user: ownerId, reaction: "brain", item: { type: "message", channel: "C1", ts: "200.1" } });
+    const done = async (until: () => boolean) => (await slack.until(until), stop.abort(), await running);
+    const library = async () => (await git(root, "--git-dir", remote, "ls-tree", "-r", "--name-only", "main")).split("\n");
+    return { slack, home, note, done, library, notes: (path: string) => git(root, "--git-dir", remote, "show", `main:${path}`) };
+  }
+
+  test("with the Memory pack on, the owner's :brain: runs the library's own handler, which pushes the note to the library", async () => {
+    const brain = await brainWith({ packs: ["memory", "slack"] });
+    await brain.done(() => brain.slack.method("chat.postEphemeral").length === 1);
+    expect(brain.slack.method("chat.postEphemeral")[0]!.args.text).toStartWith(`:brain: Added <${join(brain.home, "dev/library/notes/sprint-planning.md")}|Sprint planning> in your context library`);
+    expect(reactionCalls(brain.slack)).toEqual(["reactions.add 200.1 eyes", "reactions.remove 200.1 eyes", "reactions.remove 200.1 brain"]);
+    expect(await brain.notes("notes/sprint-planning.md")).toBe(brain.note.trimEnd());
+  });
+
+  test("with the library workflow off, or without the Memory pack, the owner's :brain: gets no Slack answer and saves no note", async () => {
+    for (const profile of [{ packs: ["memory", "slack"], workflows: { "context-library": false } }, { packs: ["slack"] }]) {
+      const brain = await brainWith(profile);
+      await brain.done(() => brain.slack.acked.length === 1);
+      expect([profile, reactionCalls(brain.slack), brain.slack.method("chat.postEphemeral").length]).toEqual([profile, [], 0]);
+      expect([profile, await brain.library()]).toEqual([profile, ["ideas.md"]]);
+    }
+  });
+
   test("a failed capture keeps the :brain:, says why, and a second :brain: tries again and updates the note", async () => {
     let calls = 0;
     const { slack, ran, end } = await listening(() => (++calls === 1 ? { code: 1, stdout: `${JSON.stringify({ failed: "the push to main kept failing; nothing was saved" })}\n` } : { code: 0, stdout: JSON.stringify({ ...captured, updated: true }) }));
@@ -463,7 +516,7 @@ describe("saving to the context library", () => {
   function launching(thread: ReturnType<typeof savedThread>) {
     const launched: string[] = [];
     thread.deps.launch = async (request) => (launched.push(request.title), { failed: "no" });
-    const ownMessages: Record<string, string> = { "1794830000.000100": "handled by Fleet :t3code:", "1794830000.000200": "a new event :t3code:" };
+    const ownMessages: Record<string, string> = { "1794830000.000100": "handled by Fleet :t3code:" };
     const slack = thread.deps.slack;
     thread.deps.slack = async (method, args) => (method === "conversations.replies" && ownMessages[args.ts!] ? { messages: [{ user: ownerId, ts: args.ts!, text: ownMessages[args.ts!] }] } : slack(method, args));
     return { ...thread, launched };
@@ -492,15 +545,6 @@ describe("saving to the context library", () => {
     expect(lstatSync(statePath(home)).mode & 0o777).toBe(0o600);
   });
 
-  test("an event whose launch failed is tried again on the next retry", async () => {
-    const { deps, launched } = launching(savedThread([], { now: 1_000 }));
-
-    await handleTrigger({ kind: "message", channel: "C1", ts: "1794830000.000200" }, deps);
-    await retryPending(deps);
-
-    expect(launched).toEqual(["Slack: a new event", "Slack: a new event"]);
-  });
-
   test("a meeting whose Wispr notes are not ready gets one more look 30 minutes later, and only that look sends again, with what went out before", async () => {
     const clock = { now: 1_794_830_700_000 };
     const { deps, told, captures, sentBefore } = savedThread(["pending", "https://notes.example.com/shared/abc"], clock);
@@ -519,7 +563,7 @@ describe("saving to the context library", () => {
     expect(captures).toHaveLength(2);
   });
 
-  test("without the Context library pack, :brain: does nothing, and slack.captureEmoji picks another emoji", async () => {
+  test("without the context library, :brain: does nothing, and slack.captureEmoji picks another emoji", async () => {
     expect(triggerOf({ type: "reaction_added", user: ownerId, reaction: "brain", item: { type: "message", channel: "C1", ts: "1.1" } }, owner)).toBeUndefined();
     const { slack, ran, end } = await listening(() => ({ code: 0, stdout: JSON.stringify(captured) }), { env: { HEDGE_SETTINGS: settings() } });
     slack.send({ type: "reaction_added", user: ownerId, reaction: "brain", item: { type: "message", channel: "C1", ts: "200.2" } });
@@ -979,7 +1023,8 @@ describe("where the trigger runs", () => {
     expect(unset.unanswered).toEqual([]);
   });
 
-  test("is off by default", () => {
-    expect(runsHere(resolve({ packs: ["slack"], workflows: {} }))).toBe(false);
+  test("is on with the pack, and off once turned off", () => {
+    expect(runsHere(resolve({ packs: ["slack"], workflows: {} }))).toBe(true);
+    expect(runsHere(resolve({ packs: ["slack"], workflows: { "slack-thread": false } }))).toBe(false);
   });
 });

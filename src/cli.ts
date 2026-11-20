@@ -9,8 +9,8 @@ import { loadMachine, loadProfile, pullProfile, saveMachine, thisMachine } from 
 import { engineAdapters } from "./adapters/index.ts";
 import { apply, check, filesAdapter, type Adapter, type Issuer, type Runner } from "./reconciler/apply.ts";
 import { refresh } from "./refresh.ts";
-import { resolve } from "./reconciler/resolve.ts";
-import { undoingPack } from "./reconciler/ledger.ts";
+import { listedPack, resolve } from "./reconciler/resolve.ts";
+import { undoingPack, undoVariable } from "./reconciler/ledger.ts";
 import { readNotice, update } from "./update.ts";
 import { setup, type SetupOptions } from "./setup/setup.ts";
 import { ttyTerminal, type Terminal } from "./setup/terminal.ts";
@@ -30,7 +30,7 @@ import { spawnRunner, type CommandRunner } from "./adapters/run.ts";
 import { become, canBecome, type Become } from "./runner/become.ts";
 import { trackCommand } from "./usage/usage.ts";
 import { asHedge } from "./reconciler/engine-command.ts";
-import { adoptLegacyEnv, fleetNotice, inAnyLegacyPath, isOldJob, profileFile, renamedPath, underLegacyPath, withLegacyNames } from "./legacy.ts";
+import { adoptLegacyEnv, fleetNotice, hedgeOnMac, inAnyLegacyPath, isOldJob, profileFile, renamedPath, underLegacyPath, withLegacyNames } from "./legacy.ts";
 import { importFleet, isCopyOf } from "./import-fleet.ts";
 import { fleetAdapter, type FleetAdapter } from "./adapters/fleet/adapter.ts";
 
@@ -247,8 +247,19 @@ async function change(command: keyof typeof changes | "hub", args: string[], opt
 }
 
 async function runUpdate(options: CliOptions) {
+  if (options.platform !== "darwin") return updateEngine(options);
+  const code = await updateEngine(options).catch((error: unknown) => {
+    if (!(error instanceof Error)) throw error;
+    (options.fail ?? options.print)(`hedge: ${error.message}`);
+    return 1;
+  });
+  if (code !== 0) options.print(hedgeOnMac);
+  return code;
+}
+
+async function updateEngine(options: CliOptions) {
   const machine = await loadMachine(options.home);
-  if (!machine?.profileDir) throw new Error("no profile on this machine. Run get.sh, or hedge apply --profile <dir>.");
+  if (!machine?.profileDir) throw new Error(options.platform === "darwin" ? "no profile on this machine." : "no profile on this machine. Run get.sh, or hedge apply --profile <dir>.");
   const profileDir = hedgeProfile(options, machine.profileDir);
   const profile = await loadProfile(profileDir);
   return update({
@@ -283,8 +294,8 @@ async function runRefresh(args: string[], options: CliOptions) {
 
 async function runPackCommand(name: string, args: string[], options: CliOptions) {
   const typed = ["hedge", name, ...args];
-  const undoing = await undoingPack(options.home, options.env ?? {}, typed);
-  if (undoing) return runUndo(name, args, undoing, options);
+  const undone = options.env?.[undoVariable] ? await runUndo(name, args, options) : undefined;
+  if (undone !== undefined) return undone;
   const { plan, sources } = await loadPlan(options, undefined, { fetch: false, inherit: true });
   const command = plan.commands[name];
   if (!command) {
@@ -305,11 +316,15 @@ async function runPackCommand(name: string, args: string[], options: CliOptions)
   return exit === 0 && repairs ? applyProfile(plan.machine.profileDir!, options) : exit;
 }
 
-/** Runs the undo, check or prerequisite of a ledger step whose pack is off, with that pack's own command on this machine. When Hedge cannot run it here, it exits cannotTell, so the ledger keeps the step for a later apply. */
-async function runUndo(name: string, args: string[], pack: string, options: CliOptions) {
-  const cannot = (why: string) => (options.print(`hedge ${name}: cannot run the ${pack} pack's command to undo its step: ${why}`), cannotTell);
+/** Runs the undo, check or prerequisite of a ledger step whose pack is off, with that pack's own command on this machine, or returns undefined for another command line. When Hedge cannot run it here, it exits cannotTell, so the ledger keeps the step for a later apply. */
+async function runUndo(name: string, args: string[], options: CliOptions): Promise<number | undefined> {
+  let pack = "";
+  const cannot = (why: string) => (options.print(`hedge ${name}: cannot run ${pack ? `the ${pack} pack's command` : "the command"} to undo its step: ${why}`), cannotTell);
   let loaded: Awaited<ReturnType<typeof loadPlan>>;
   try {
+    const current = await loadPlan(options, undefined, { fetch: false, inherit: true });
+    pack = (await undoingPack(options.home, options.env ?? {}, ["hedge", name, ...args], (old) => listedPack(current.plan, old))) ?? "";
+    if (!pack) return undefined;
     loaded = await loadPlan(options, undefined, { fetch: false, inherit: true, withPack: pack });
   } catch (error) {
     return cannot((error as Error).message);
@@ -482,7 +497,7 @@ async function inPack(plan: Plan, loaded: LoadedPack, options: CliOptions, work:
   finally { assign(saved); }
 }
 
-function packEnvironment(plan: Plan, options: CliOptions): Record<string, string | undefined> {
+export function packEnvironment(plan: Plan, options: Pick<CliOptions, "home" | "engineRoot">): Record<string, string | undefined> {
   return withLegacyNames({ HOME: options.home, HEDGE_ENGINE_DIR: options.engineRoot, HEDGE_PROFILE_DIR: plan.machine.profileDir, HEDGE_SETTINGS: JSON.stringify(plan.settings), HEDGE_MODELS: JSON.stringify(plan.models), HEDGE_PLAN: plan.ai, HEDGE_HANDLERS: JSON.stringify(handlerPaths(plan)), HEDGE_HANDLER_SUBCOMMANDS: JSON.stringify(handlerSubcommands(plan)) });
 }
 

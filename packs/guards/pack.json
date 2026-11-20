@@ -53,7 +53,7 @@
     {
       "id": "shell-guards",
       "name": "Shell guards",
-      "default": false,
+      "default": true,
       "sentence": "Agents cannot pipe network code into a shell, run a package the project lacks, change how Git maps URLs, use gh outside your GitHub owners, poll in a loop of turns, hide the exit status of a push, commit, merge or gate behind a pipe, kill their own shell with pkill -f, skip Git hooks, force-push without a lease, or push to main of a repository that takes pull requests.",
       "settings": [
         "guards.owners",
@@ -91,7 +91,7 @@
     {
       "id": "package-age",
       "name": "Package age",
-      "default": false,
+      "default": true,
       "sentence": "Package installs through pnpm and Bun take only versions at least three days old, unless a project or you set another age."
     },
     {

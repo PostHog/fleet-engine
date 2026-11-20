@@ -121,10 +121,33 @@
   nonzero, the hub names only the exit code and the command to see why,
   as for a failed connect.
 - The `Connect <node>:` command that `hedge cli-proxy doctor` prints now
-  runs `hedge apply` on the node after connect, and the Recovery runbook
-  says so.
+  runs `hedge apply` on the node after connect, and the Provider recovery
+  note of the Hub pack says so.
 - The notice that a Codex plugin is yours now no longer fails
   `hedge doctor`, as for a Claude plugin.
+
+### A smaller pack set
+
+- Base and Hub are in every Hedge. The site shows them first, without a
+  switch, and then groups the picks: how your agents work, what they know,
+  and what they reach.
+- The Pull requests pack is now titled Quality gates. It also holds the QA
+  swarm, the quality loop, the signal loop, the PR digest, `impact`, and
+  `codebase-design`. Orchestration keeps maps, side threads, and parking.
+- The Context library pack is now part of Memory, and Dream moved from Hub
+  to Memory. Memory is in the Everyday preset. The library waits until you
+  set `context-library.repo`, and setup no longer asks for it.
+- The Recovery pack is now the `provider-recovery` workflow of the Hub pack.
+  It needs own-account balancing.
+- A profile that still lists `context-library` or `recovery` keeps working.
+  Hedge reads the old name as the new pack, turns on only the old pack's
+  workflows, moves the step ledger to the new name, and leaves the profile
+  as it is. `hedge packs --add` and `--remove` take the old names too.
+- Picking Slack, Paging, Memory, or Guards turns on its main workflow. A
+  profile from before keeps those workflows off: the next save writes
+  `false` for each one it never set, once.
+- The Integrations pack stays, but the site no longer shows it.
+  The Everything preset still has it.
 
 ### Hedge is cloud only
 
@@ -148,6 +171,25 @@
 - On a box without a browser, ChatGPT signs in with a device code, and
   Claude in a terminal. When device code sign-in is off, setup says how to
   turn it on, or how to sign in over an SSH port forward.
+- Setup starts a new ChatGPT sign-in only when Codex says the old one is
+  gone. When Codex cannot tell, setup keeps the sign-in and says why. It
+  reads the Codex credentials store from `config.toml` as TOML.
+- Setup takes the profile's new commits when it starts, before it reads
+  your answers, so a rerun keeps what another machine pushed before it. When
+  it cannot reach the profile's origin, it says so and goes on with the copy
+  on the machine, as it did before this fetch. When
+  another machine pushes first, setup stops and keeps its commit. It says to
+  commit or discard the changes in the checkout that are not committed, to
+  bring it up to date with `git -C <profile> pull --rebase`, or to drop its
+  commit when it made one, and then to run the same command again. Two machines that
+  save the same profile at the same time can overwrite each other's
+  answers, as before.
+- Setup takes and saves the profile only on `origin`. When the checkout's
+  branch tracks a local branch or another remote, setup stops before it
+  commits and says to point the branch at `origin`.
+- `scripts/template-parameters.sh` prints a default only for a number, a
+  `bool`, or a parameter with a fixed list of values, so no free-text
+  default, such as a key, reaches the agent's output.
 - Each page of the site carries its own script and styles, so a cached page
   always runs its own script.
 

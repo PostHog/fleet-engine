@@ -213,7 +213,7 @@ function stopwatch(here: Machine, box: string, label: string, source: "pool" | "
 
 function signInNotes(here: Machine, box: string): void {
   if (!existsSync(join(here.home, claudeTokenPath))) here.say(`Claude is not signed in on ${box}. On the hub, make a token with claude setup-token, paste it into hedge box token, and spawn again.`);
-  if (here.codex) here.say(`Codex on ${box} needs its own sign-in: hedge box run ${box} -- codex login --device-auth`);
+  if (here.codex) here.say(`Codex on ${box} needs its own sign-in: hedge box run ${box} -- codex login -c 'cli_auth_credentials_store="file"' --device-auth`);
 }
 
 export function ownership(boxes: Box[], here: Machine): { owned: Box[]; skipped: Box[] } {

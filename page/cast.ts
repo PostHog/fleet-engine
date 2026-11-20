@@ -7,20 +7,23 @@ export type Role = { art: Art; tone: Tone; line: string };
 const hog = (name: string, alt = ""): Art => ({ file: `${name}.png`, alt });
 
 export const packCast: Record<string, Role> = {
-  base: { art: hog("list-hog"), tone: "cream", line: "Every machine gets safety rules and tuned defaults." },
-  "pull-requests": { art: hog("builder-hog-03"), tone: "yellow", line: "Every fix ends as a reviewed draft pull request." },
-  orchestration: { art: hog("professor-hog"), tone: "sky", line: "A conductor thread splits big work into tickets." },
-  communication: { art: hog("microphone-hog"), tone: "peach", line: "Agents write in your voice and share plans as links." },
-  integrations: { art: hog("desk-hog"), tone: "blue", line: "Agents reach GitHub, current docs, and Convex." },
-  memory: { art: hog("reading-hog"), tone: "mint", line: "Agents on every machine share what they learn." },
-  "context-library": { art: hog("detective-hog"), tone: "lilac", line: "Agents find your plans and decisions in your notes." },
-  guards: { art: hog("police-hog"), tone: "lilac", line: "Hooks stop an agent's risky shell commands." },
-  slack: { art: hog("phone-pair-hogs"), tone: "cream", line: "Your own Slack message starts a thread." },
-  "incident-io": { art: hog("warning-hog"), tone: "red", line: "An agent pages you when a risky change goes wrong." },
-  hub: { art: hog("space-hog"), tone: "sky", line: "One always-on devbox links and watches the others." },
-  "mcp-gateway": { art: hog("hog-welder"), tone: "mint", line: "Sign in to your MCP servers once, on the hub." },
-  recovery: { art: hog("hospital-hog"), tone: "peach", line: "Threads continue after a usage limit or an outage." },
+  base: { art: hog("list-hog"), tone: "cream", line: "Every box gets safety rules, the model table, and nightly updates." },
+  "pull-requests": { art: hog("builder-hog-03"), tone: "yellow", line: "Every change passes proof, a second-model review and a QA swarm before it merges. Turn on a nightly loop, and it improves one area." },
+  orchestration: { art: hog("professor-hog"), tone: "sky", line: "Big work becomes a map of tickets, one thread each." },
+  communication: { art: hog("microphone-hog"), tone: "peach", line: "Agents write short, outcome-first updates in a voice you can make yours." },
+  memory: { art: hog("reading-hog"), tone: "mint", line: "Every box reads what your agents learn and what you save. Turn on Dream, and it tidies the notes each night." },
+  guards: { art: hog("police-hog"), tone: "lilac", line: "Hooks refuse risky shell commands and too-new packages." },
+  slack: { art: hog("phone-pair-hogs"), tone: "cream", line: "Your own Slack message or reaction starts a thread." },
+  "incident-io": { art: hog("warning-hog"), tone: "red", line: "An agent that watches a risky change rings your phone." },
+  hub: { art: hog("space-hog"), tone: "sky", line: "The hub links your boxes and keeps your pack secrets. Turn on recovery, and it continues threads after a usage limit." },
+  "mcp-gateway": { art: hog("hog-welder"), tone: "mint", line: "Sign in once on the hub. Every box reaches Slack, Gmail, and your MCP servers." },
 };
+
+export const packGroups: Array<{ title: string; packs: string[] }> = [
+  { title: "How your agents work", packs: ["pull-requests", "orchestration", "communication", "guards"] },
+  { title: "What your agents know", packs: ["memory"] },
+  { title: "What your agents reach", packs: ["slack", "incident-io", "mcp-gateway"] },
+];
 
 export const teamRole = (line: string): Role => ({ art: hog("heart-hog"), tone: "yellow", line });
 

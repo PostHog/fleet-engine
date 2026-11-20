@@ -1,18 +1,18 @@
 import { join } from "node:path";
 import { loadPacks } from "../pack/manifest.ts";
 import { cachedSource, fetchSource } from "../pack/sources.ts";
-import type { AvailableSource, FetchedSource, MachineFile, Preset, Profile, SetupProgress, SourceRef } from "../pack/types.ts";
-import { loadMachine, loadProfile, saveAnswers, saveMachine, thisMachine } from "../profile/profile.ts";
+import type { AvailableSource, FetchedSource, MachineFile, Plan, Preset, Profile, SetupProgress, SourceRef } from "../pack/types.ts";
+import { divergedFromOrigin, loadMachine, loadProfile, saveMachine, thisMachine } from "../profile/profile.ts";
 import { resolve } from "../reconciler/resolve.ts";
 import { defaultSources, engineRepo, makesOwnDevbox } from "./defaults.ts";
 import { FlagError, hasPicks, parseSetupFlags, type SetupFlags } from "./flags.ts";
 import { answered, packList, packsStep, picksFrom, title, plansStep, settingSteps, settingsFrom, waitsForTeams, type Catalog, type Draft, type QuestionContext } from "./questions.ts";
 import { realMachine, type Machine } from "./commands.ts";
-import { humanStep, packSignIn, type HumanContext } from "./human.ts";
+import { humanStep, optionalStep, packSignIn, type HumanContext, type SignIn } from "./human.ts";
 import { devboxQuestion, devboxSteps, hubSteps, notTakenByHub, profileForBox, type DevboxContext } from "./devbox.ts";
 import { doneScreen, finalCheck, repoName, runsByItself } from "./done.ts";
 import { readTimings, usableSeconds } from "../commands/triage-record.ts";
-import { existingProfile, profileStep } from "./profile.ts";
+import { existingProfile, fetchOrigin, profileStep, saveSettings, takeFetched } from "./profile.ts";
 import { runSteps, type Step } from "./runner.ts";
 import { chatgptSignIn, claudeSignIn, githubSignIn, memberSources } from "./signins.ts";
 import { Stopped, type Terminal } from "./terminal.ts";
@@ -50,10 +50,11 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
   let flags: SetupFlags;
   const machine: MachineFile = thisMachine(await loadMachine(options.home), options.platform, options.env ?? process.env);
   const unfinished = Boolean(machine.setup?.done.length) && !checked(machine.setup?.done);
+  const box: Machine = { ...realMachine, ...options.machine };
+  if (machine.profileDir) await fastForward(box, options.home, machine.profileDir, terminal.print);
   const progress = { done: machine.setup?.done ?? [], draft: machine.profileDir ? profileDraft(await loadProfile(machine.profileDir)) : withInferred(machine.setup ?? { done: [] }) };
   const catalog = await loadCatalog(options.engineRoot, teamRefs(progress.draft), options.home);
   const remember = () => saveMachine(options.home, { ...machine, setup: machine.profileDir ? { done: progress.done } : { done: progress.done, ...withoutInferred(progress.draft) } });
-  const box: Machine = { ...realMachine, ...options.machine };
   const fetchTeam = (ref: SourceRef) => (options.fetchSource ?? fetchSource)(ref, sourceCache(options.home));
   if (progress.done.includes("github")) {
     catalog.teamsKnown = true;
@@ -132,6 +133,7 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
     engineRoot: options.engineRoot,
     nonInteractive: flags.nonInteractive,
     draft: progress.draft,
+    ...(machine.profileDir ? { current: machine.profileDir } : {}),
     packs: () => catalog.packs.map((pack) => pack.manifest),
     async saved(dir) {
       machine.profileDir = dir;
@@ -185,7 +187,7 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
       ...step,
       async run() {
         const outcome = await step.run();
-        if (outcome !== "unanswered" && machine.profileDir) await saveAnswers(machine.profileDir, { settings: progress.draft.settings ?? {} }, { push: true });
+        if (outcome !== "unanswered" && machine.profileDir) await saveSettings(box, machine.profileDir, progress.draft.settings ?? {});
         return outcome;
       },
     }),
@@ -278,12 +280,27 @@ function setupSteps(context: QuestionContext, machine: MachineFile, options: Set
     ...(sshDevbox ? [devbox.question] : []),
     ...settingSteps(context, devboxAsk).map(devbox.pushed),
     ...(plan.ai === "codex" ? [] : [humanStep(claudeSignIn(box), human)]),
-    ...(plan.ai === "claude" ? [] : [humanStep(chatgptSignIn(box, plan.models), human)].map((step) => (plan.ai === "both" ? later(step) : step))),
+    ...(plan.ai === "claude" ? [] : [chatgptStep(chatgptSignIn(box, plan.models), human, plan)].map((step) => (plan.ai === "both" ? later(step) : step))),
     ...(sshDevbox ? (machine.devboxes ?? []).flatMap((host) => devbox.steps(host, plan)).map(later) : []),
   ];
 }
 
 const later = (step: Step): Step => ({ ...step, later: true });
+
+const proxyServesCodex = "With own-account balancing on, Codex goes through the proxy on the hub once it holds one of your ChatGPT subscriptions, so setup does not need this sign-in. Codex here needs it only until then.";
+
+function chatgptStep(signIn: SignIn, human: HumanContext, plan: Plan): Step {
+  const balanced = plan.workflows.some((workflow) => workflow.id === "own-account-balancing" && workflow.active);
+  return balanced ? optionalStep(signIn, human, proxyServesCodex) : humanStep(signIn, human);
+}
+
+async function fastForward(box: Machine, home: string, dir: string, print: (line: string) => void) {
+  const unreached = await fetchOrigin(box, home, dir);
+  if (unreached !== undefined) return print(`  · Your profile's origin could not be reached (${unreached}). Setup goes on with the copy in ${dir}.`);
+  const failed = await takeFetched(box, dir);
+  if (failed && Number((await box.exec(["git", "-C", dir, "rev-list", "--count", "@{upstream}..HEAD"])).output.trim()) > 0) throw new Error(divergedFromOrigin(dir));
+  if (failed) throw new Error(`could not take the new commits of your profile in ${dir}: ${failed.output.trim().split("\n").at(-1)}. Run git -C ${dir} pull, then run hedge setup again.`);
+}
 
 function withInferred({ draft, inferred }: SetupProgress): Draft {
   if (!inferred) return { ...draft } as Draft;
