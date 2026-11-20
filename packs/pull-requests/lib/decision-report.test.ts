@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { acceptGap, checkout, cleanFixtures, fakeModel, fixture, graded, markPanel, reviewHead, verdict, type Checkout } from "./proof-testing.ts";
+import { acceptGap, checkout, cleanFixtures, fakeModel, fixture, graded, markPanel, reviewHead, reviewHeadFixed, verdict, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
 
@@ -350,7 +350,7 @@ test("the report keeps the gate of HEAD when a gate of an older commit finishes 
   const pr = await checkout();
   const older = await pr.commit("feature.txt", "greet new members\n");
   pr.pullRequestState({ body: graded("non-critical", "medium") });
-  await reviewHead(pr);
+  await reviewHeadFixed(pr, "feature.txt:1", "greet new members");
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.commit("feature.txt", "greet all new members\n");
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", older)).code).toBe(0);

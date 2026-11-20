@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fold, type LedgerEvent } from "./decision-ledger.ts";
-import { acceptGap, checkout, clean, cleanFixtures, exitedPid, fakeModel, graded, hubAt, ledgerDecisions, reviewHead, settings, type Checkout } from "./proof-testing.ts";
+import { acceptGap, checkout, clean, cleanFixtures, exitedPid, fakeModel, graded, hubAt, ledgerDecisions, reviewHead, reviewHeadFixed, settings, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
 
@@ -378,7 +378,7 @@ test("a review-start for a final read in another phase refuses the final read wh
   const pr = await checkout();
   await pr.commit("feature.txt", "new\n");
   await pr.hedge("require", "--none", "--reason", "docs only");
-  const reviewed = await reviewHead(pr);
+  const reviewed = await reviewHeadFixed(pr, "feature.txt:1", "new");
   await pr.commit("feature.txt", "newer\n");
   const hub = hubAt(pr, "drops appends");
   pr.choose("Run one more round");
@@ -505,7 +505,7 @@ test("while the hub is down, a round at an older commit whose decision is not re
   const pr = await checkout();
   await pr.commit("feature.txt", "new\n");
   await pr.hedge("require", "--none", "--reason", "docs only");
-  const reviewed = await reviewHead(pr);
+  const reviewed = await reviewHeadFixed(pr, "feature.txt:1", "new");
   await pr.commit("feature.txt", "newer\n");
   const hub = hubAt(pr, "drops appends");
   pr.env.HEDGE_REVIEW_ARBITER = "cat >/dev/null; echo CONTINUE";
@@ -869,11 +869,11 @@ test("the end-of-run report prints its six sections in order: still yours, narro
     "| example/product#43 | none owed (docs only) | none | none | none yet |",
   ]);
   expect(section("### Review and skipped proofs")).toEqual([
-    "| PR | Review rounds | Production lines | Skipped proofs |",
-    "| --- | --- | --- | --- |",
-    `| example/product#41 | 1 round | 1 → 1 (×1.0) | prod-shape: No production read access (👤 the user ${users}); shadow-diff: No old output to diff (not accepted) |`,
-    "| example/product#42 | 1 round | 1 → 1 (×1.0) | prod-shape: No sandbox (not accepted); cross-version: No older client to run (not accepted) |",
-    "| example/product#43 | 1 round | 1 → 1 (×1.0) | none |",
+    "| PR | Review rounds | Production lines | Sanity pass | Skipped proofs |",
+    "| --- | --- | --- | --- | --- |",
+    `| example/product#41 | 1 round | 1 → 1 (×1.0) | not run | prod-shape: No production read access (👤 the user ${users}); shadow-diff: No old output to diff (not accepted) |`,
+    "| example/product#42 | 1 round | 1 → 1 (×1.0) | not run | prod-shape: No sandbox (not accepted); cross-version: No older client to run (not accepted) |",
+    "| example/product#43 | 1 round | 1 → 1 (×1.0) | not run | none |",
   ]);
   expect(section("### Side fixes started")).toEqual([`- Fix the flaky clock test on the side? Yes, in its own thread: t3-thread://side-fix [${side}]`]);
 

@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { startT3Stub } from "../../base/lib/t3/testing.ts";
-import { cleanFixtures, settings, lookup, checkout, fakeModel, reviewHead, finishRound, recordingModel, stalledOnQuota, blanks, ledgerDecisions, type Checkout } from "./proof-testing.ts";
+import { cleanFixtures, settings, lookup, checkout, fakeModel, reviewHead, reviewHeadFixed, finishRound, recordingModel, stalledOnQuota, blanks, ledgerDecisions, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
 
@@ -321,7 +321,7 @@ test("a diff over the prompt cap goes whole into a file in the round directory, 
 test("review checks --base before it reserves a round, and a retry recovers a reservation without a review", async () => {
   const pr = await checkout();
   await pr.commit("feature.txt", "new\n");
-  const reviewed = await reviewHead(pr);
+  const reviewed = await reviewHeadFixed(pr, "feature.txt:1", "new");
   await pr.hedge("require", "--none", "--reason", "docs only");
   fakeModel(pr, "REVIEWER", "No findings.\n");
   const head = await pr.commit("feature.txt", "fixed\n");

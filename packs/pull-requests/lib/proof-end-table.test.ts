@@ -1,23 +1,30 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { checkout, cleanFixtures, graded, markPanel, reviewHead, type Checkout } from "./proof-testing.ts";
+import { checkout, cleanFixtures, graded, markPanel, reviewHead, reviewHeadFixed, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
 
 const lines = (count: number, word: string) => Array.from({ length: count }, (_, index) => `${word} ${index}`).join("\n") + "\n";
 const block = (body: string) => /<!-- hedge-proof-receipt[\s\S]*?<!-- \/hedge-proof-receipt -->/.exec(body)?.[0] ?? "";
-const tableIn = (text: string) => text.split("\n").filter((line) => line.startsWith("| PR | Review rounds") || line.startsWith("| example/product#42 | ") && line.split(" | ").length === 4);
+function tableIn(text: string) {
+  const lines = text.split("\n");
+  const start = lines.findIndex((line) => line.startsWith("| PR | Review rounds"));
+  if (start < 0) return [];
+  const end = lines.findIndex((line, index) => index > start && !line.startsWith("|"));
+  return [lines[start]!, ...lines.slice(start + 2, end < 0 ? undefined : end)];
+}
 
 async function grownPr() {
   const pr = await checkout();
   const first = await pr.commit("feature.ts", lines(10, "greet"));
   pr.pullRequestState({ body: `## Testing\n\nThe greeting.\n\n${graded("non-critical")}` });
-  await reviewHead(pr);
+  await reviewHeadFixed(pr, "feature.ts:2", "greet 1");
   writeFileSync(join(pr.repository, "feature.test.ts"), lines(4, "check"));
   writeFileSync(join(pr.repository, "README.md"), lines(2, "explain"));
   await pr.git("add", "feature.test.ts", "README.md");
   await pr.commit("feature.ts", lines(25, "greet"));
+  expect((await pr.hedge("sanity", "--verdict", "justified", "--reason", "The greeting needs every form")).code).toBe(0);
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", first)).code).toBe(0);
   writeFileSync(join(pr.repository, "findings.md"), "No findings.\n");
   expect((await pr.hedge("review-finish", "--round", "2", "--reviewer", "gpt-6.1-sol", "findings.md")).code).toBe(0);
@@ -39,8 +46,8 @@ test("the receipt and the end-of-run report show one table: the review rounds, p
   expect((await pr.hedge("gate")).code).toBe(0);
 
   const table = [
-    "| PR | Review rounds | Production lines | Skipped proofs |",
-    `| example/product#42 | 2 rounds | 10 → 25 (×2.5); tests 0 → 4; docs 0 → 2 | ui-walk: The greeting has no page (🤖 agent ${id}) |`,
+    "| PR | Review rounds | Production lines | Sanity pass | Skipped proofs |",
+    `| example/product#42 | 2 rounds | 10 → 25 (×2.5); tests 0 → 4; docs 0 → 2 | justified at HEAD: The greeting needs every form | ui-walk: The greeting has no page (🤖 agent ${id}) |`,
   ];
   expect((await pr.hedge("receipt")).code).toBe(0);
   expect(tableIn(block(pr.githubBody()))).toEqual(table);
@@ -69,7 +76,7 @@ test("the table holds a PR once a gate ran at its HEAD", async () => {
   await reviewHead(pr);
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | not run | none |");
 });
 
 test("the lines count from where the PR branched from the base GitHub reports, so a stale local base ref does not count the base's own changes", async () => {
@@ -86,7 +93,7 @@ test("the lines count from where the PR branched from the base GitHub reports, s
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | not run | none |");
 });
 
 async function staleBaseRef(pr: Checkout, githubBase: (fresh: string) => string) {
@@ -108,7 +115,7 @@ test("a base GitHub reports that this checkout cannot fetch leaves the HEAD line
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → unknown | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → unknown | not run | none |");
 });
 
 test("round 1 counts from where it was reviewed, so a lower PR that merged into the base later does not count", async () => {
@@ -127,7 +134,7 @@ test("round 1 counts from where it was reviewed, so a lower PR that merged into 
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 20 (×2.0) | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 20 (×2.0) | not run | none |");
 });
 
 test("a renamed file counts its changed lines, not its whole content twice", async () => {
@@ -142,7 +149,7 @@ test("a renamed file counts its changed lines, not its whole content twice", asy
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | not run | none |");
 });
 
 test("a gate saved before the table existed reads as not measured, not as no review", async () => {
@@ -190,7 +197,7 @@ test("a base GitHub reports that this checkout lacks is fetched, and the lines c
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | not run | none |");
 });
 
 test("a rename counts its deleted lines on the old path and its added lines on the new one", async () => {
@@ -205,7 +212,7 @@ test("a rename counts its deleted lines on the old path and its added lines on t
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 20 (×2.0) | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 20 (×2.0) | not run | none |");
 });
 
 test("a PR gated before any review shows its lines at HEAD, tests and docs apart", async () => {
@@ -217,7 +224,7 @@ test("a PR gated before any review shows its lines at HEAD, tests and docs apart
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | 0 at HEAD; tests 4; docs 2 | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | 0 at HEAD; tests 4; docs 2 | not run | none |");
 });
 
 test("the receipt keeps the escapes its guard adds to a reason, so emphasis and links stay literal", async () => {
