@@ -212,7 +212,7 @@ test("past twice the first lines with GitHub's base commit missing here, the nex
   pr.pullRequestState({ baseSha: "0123456789abcdef0123456789abcdef01234567" });
 
   await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(
-    "Hedge cannot count the production lines at HEAD, since the base commit 0123456 that GitHub reports is not in this checkout. Run git fetch origin main, then run this command again");
+    "Hedge cannot count the production lines at HEAD, since the base commit 0123456 that GitHub reports is not in this checkout. Run git fetch origin 0123456789abcdef0123456789abcdef01234567, then run this command again");
 });
 
 test("a [base] marker on the wrapped line of a finding still keeps it from buying a round", async () => {

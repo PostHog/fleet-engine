@@ -18,7 +18,7 @@ async function growthAtHead(home: string, head: ProofIdentity, run: Run) {
   const growth = await measureGrowth(home, head, run, pull?.baseSha);
   if (growth.final || !pull || !isCommitSha(pull.baseSha) || run(["git", "cat-file", "-e", `${pull.baseSha}^{commit}`]).code === 0) return { growth };
   const remote = remotesOf(head.repository, run)[0] ?? `<a remote of ${head.repository}>`;
-  return { growth, missing: `Hedge cannot count the production lines at HEAD, since the base commit ${pull.baseSha.slice(0, 7)} that GitHub reports is not in this checkout. Run git fetch ${remote} ${pull.base}, then run this command again` };
+  return { growth, missing: `Hedge cannot count the production lines at HEAD, since the base commit ${pull.baseSha.slice(0, 7)} that GitHub reports is not in this checkout. Run git fetch ${remote} ${pull.baseSha}, then run this command again` };
 }
 
 const sanityDirectory = (home: string, identity: ProofIdentity) => join(pullRequestDirectory(home, identity), "sanity");
