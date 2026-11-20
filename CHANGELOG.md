@@ -30,9 +30,9 @@
 - Setup takes the profile's new commits when it starts, before it reads
   your answers, so a rerun keeps what another machine pushed before it. When
   another machine pushes first, setup stops and keeps its commit. It says to
-  bring the checkout up to date with
-  `git -C <profile> pull --rebase --autostash`, or to drop its commit when
-  it made one, and then to run the same command again. Two machines that
+  commit or discard the changes in the checkout that are not committed, to
+  bring it up to date with `git -C <profile> pull --rebase`, or to drop its
+  commit when it made one, and then to run the same command again. Two machines that
   save the same profile at the same time can overwrite each other's
   answers, as before.
 - Setup takes and saves the profile only on `origin`. When the checkout's

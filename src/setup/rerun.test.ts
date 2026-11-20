@@ -115,7 +115,7 @@ describe("hedge setup while another machine changes the profile", () => {
     expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""])).code).toBe(0);
     await changeOnFirstCommit(home, join(temp.make("elsewhere-"), "profile"), 'await Bun.write("about-me.md", "# Changed on another machine\\n");');
     const args = ["--non-interactive", "--remove", "pull-requests"];
-    const upToDate = `Bring ${profilePath(home)} up to date with git -C ${profilePath(home)} pull --rebase --autostash`;
+    const upToDate = `Commit or discard the changes in ${profilePath(home)} that are not committed. Bring it up to date with git -C ${profilePath(home)} pull --rebase`;
 
     const stopped = await hedgeSetup(home, args, []);
 
@@ -154,7 +154,7 @@ describe("hedge setup while another machine changes the profile", () => {
       const result = await hedgeSetup(home, ["--non-interactive", ...args], [], pushesAfterAnotherMachine(home, plan));
       return { ...result, moved: (await spawnGit(dir, "rev-parse", "HEAD")) !== before };
     };
-    const advice = (drop: boolean) => `hedge: another machine pushed to your profile before setup could. Bring ${dir} up to date with git -C ${dir} pull --rebase --autostash${drop ? ", or drop setup's commit" : ""}, then run the same hedge setup command again.`;
+    const advice = (drop: boolean) => `hedge: another machine pushed to your profile before setup could. Commit or discard the changes in ${dir} that are not committed. Bring it up to date with git -C ${dir} pull --rebase${drop ? ", or drop setup's commit" : ""}, then run the same hedge setup command again.`;
 
     const args = ["--remove", "pull-requests"];
 

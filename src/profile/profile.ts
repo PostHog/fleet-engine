@@ -69,7 +69,7 @@ export async function saveAnswers(dir: string, answers: Partial<ProfileFile>, op
   return changed.code === 1;
 }
 
-const bringUpToDate = (dir: string, committed: boolean) => `Bring ${dir} up to date with git -C ${dir} pull --rebase --autostash${committed ? ", or drop setup's commit" : ""}, then run the same hedge setup command again.`;
+const bringUpToDate = (dir: string, committed: boolean) => `Commit or discard the changes in ${dir} that are not committed. Bring it up to date with git -C ${dir} pull --rebase${committed ? ", or drop setup's commit" : ""}, then run the same hedge setup command again.`;
 
 export const divergedFromOrigin = (dir: string) => `${bothChanged(dir, "origin")} ${bringUpToDate(dir, false)}`;
 
