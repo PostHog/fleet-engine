@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { isolateGit, spawnGit, tempDirs } from "../testing/git.ts";
 import { profilePath } from "./profile.ts";
 import { overSsh } from "./devbox.ts";
-import { boxHome, coderToken, fakeMachine, machineFile, personCoderToken, running, setUpToAdd, throughSsh } from "./testing.ts";
+import { boxHome, coderToken, fakeMachine, machineFile, personCoderToken, ended, setUpToAdd, throughSsh } from "./testing.ts";
 
 isolateGit();
 const temp = tempDirs();
@@ -76,7 +76,7 @@ describe("hedge devbox add signs the workspace in to Coder", () => {
     keepsOwnSsh(home);
     const box = fakeMachine(home, { "box:coder": 1 }, { signInTimesOut: true });
     expect(await add(box)).toBe(1);
-    expect(box.stuckProcesses().map(running)).toEqual([false, false]);
+    expect(await Promise.all(box.stuckProcesses().map(ended))).toEqual([true, true]);
     expect([box.coderTokens(), sshConfig(home), coderFiles(home)]).toEqual([[], ownSshConfig, {}]);
     expect(lastLine(io.output())).toBe(`hedge: Hedge could not sign ${node} in to Coder: coder login and coder config-ssh did not finish within 2 minutes.`);
   });
