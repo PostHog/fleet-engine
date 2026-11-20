@@ -24,7 +24,7 @@ export function builtLesson(id = "tour", source = tourSource): BuiltLesson {
   const lesson = parseLesson(id, source);
   return {
     ...lesson,
-    cut: { video: `${id}.mp4`, poster: `${id}.jpg`, seconds: 150, narration: narrationHash(lesson), chapters: lesson.chapters.map((_, index) => index * 65), captions: sentences(lesson).map((_, index) => [index * 5, index * 5 + 4]) },
+    cut: { video: `${id}-take.mp4`, poster: `${id}-take.jpg`, seconds: 150, narration: narrationHash(lesson), chapters: lesson.chapters.map((_, index) => index * 65), captions: sentences(lesson).map((_, index) => [index * 5, index * 5 + 4]) },
   };
 }
 

@@ -102,19 +102,21 @@ export async function builtLessons() {
   return lessons.filter(isBuilt);
 }
 
-async function lessonFiles(lessons: BuiltLesson[], media?: string) {
+async function lessonFiles(lessons: BuiltLesson[], media: string) {
   const files: SiteFiles = Object.fromEntries(lessons.map((lesson) => [`assets/lessons/${lesson.id}.vtt`, captions(lesson)]));
-  if (!media) return files;
-  for (const file of lessons.flatMap((lesson) => [lesson.cut.video, lesson.cut.poster])) {
-    if (!existsSync(join(media, file))) throw new Error(`lesson media ${file} is missing from ${media}. Download the lessons release first`);
-    files[`assets/lessons/${file}`] = await Bun.file(join(media, file)).bytes();
+  for (const lesson of lessons) {
+    for (const [file, site] of [[lesson.cut.video, `${lesson.id}.mp4`], [lesson.cut.poster, `${lesson.id}.jpg`]] as const) {
+      if (!existsSync(join(media, file))) throw new Error(`lesson media ${file} is missing from ${media}. Download the lessons release first`);
+      files[`assets/lessons/${site}`] = await Bun.file(join(media, file)).bytes();
+    }
   }
   return files;
 }
 
 export async function buildSite(options: SiteOptions): Promise<SiteFiles> {
   const data = await pageData(options);
-  const lessons = options.lessons ?? (await builtLessons());
+  const checked = options.lessons ?? (await builtLessons());
+  const lessons = options.lessonMedia ? checked : [];
   const bundle = await Bun.build({ entrypoints: [join(engineRoot, "page/app.ts")], root: engineRoot, target: "browser", minify: true });
   if (!bundle.success) throw new AggregateError(bundle.logs, "the page script did not build");
   const art = await Promise.all(artFiles().map(async (file) => [file, await Bun.file(join(artDir, file)).bytes()] as const));
@@ -129,7 +131,7 @@ export async function buildSite(options: SiteOptions): Promise<SiteFiles> {
     ...Object.fromEntries(routes.map((route) => [route.path, route.html])),
     ...Object.fromEntries(shown.map(([file, bytes]) => [`assets/art/${file}`, bytes])),
     ...Object.fromEntries(videos.map(([file, bytes]) => [`assets/video/${file}`, bytes])),
-    ...(await lessonFiles(lessons, options.lessonMedia)),
+    ...(options.lessonMedia ? await lessonFiles(lessons, options.lessonMedia) : {}),
   };
 }
 
@@ -157,7 +159,7 @@ export async function main(args: string[]) {
     await Bun.write(join(out, path), content);
   }
   console.log(`Wrote ${Object.keys(files).length} files to ${out}`);
-  if (!lessonMedia) console.log("Lesson videos and posters were not copied. Pass --lesson-media <dir> with the files of the lessons release");
+  if (!lessonMedia) console.log("The lessons were left out. Pass --lesson-media <dir> with the files of the lessons release to include them");
 }
 
 function fail(message: string): never {

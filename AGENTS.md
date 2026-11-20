@@ -11,7 +11,10 @@ The public Hedge engine: the `hedge` CLI, `get.sh`, and the public packs.
   file is in the repository. `bun scripts/build-page.ts` writes the site to
   `site/`, which git ignores, and the Pages workflow builds it on each push to
   `main`. After you change a `pack.json`, `presets.json`, or `page/`, build the
-  site and look at each route in a browser.
+  site and look at each route in a browser. The lessons are left out unless
+  you download the `lessons` release with
+  `gh release download lessons --dir lessons/media` and add
+  `--lesson-media lessons/media`.
 - The hedgehogs and the PostHog logo in `page/art/` are PostHog's own files.
   Never draw, change, or generate one. `page/art/README.md` names the source of
   each file.

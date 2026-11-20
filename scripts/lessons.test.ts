@@ -34,13 +34,14 @@ describe("lessons", () => {
   });
 
   test("the check fails a lesson that names a hedge command, a skill, a pack, or a next lesson that does not exist", () => {
-    const known = withText("Run `hedge doctor`, then `hedge prune`. Say `/qa-swarm`. Turn on the Slack pack and the Quality gates pack.");
+    const known = withText("Run `hedge doctor`, then `hedge help`. Say `/qa-swarm`. Turn on the Slack pack and the Quality gates pack. The Memory pack keeps notes.");
     expect(lessonProblems(known, names)).toEqual([]);
-    const unknown: Lesson = { ...withText("Run `hedge teleport`. Say `/fly`. Turn on the Rocket pack."), next: "gone" };
+    const unknown: Lesson = { ...withText("Run `hedge teleport`. Say `/fly`. Turn on the Rocket pack. The Quality gaets pack checks."), next: "gone" };
     expect(lessonProblems(unknown, names)).toEqual([
       "lessons/probe.md: names hedge teleport, which no command ships",
       "lessons/probe.md: names /fly, which no pack's skill ships",
       "lessons/probe.md: names the Rocket pack, which does not exist",
+      "lessons/probe.md: names the Quality gaets pack, which does not exist",
       "lessons/probe.md: next names lesson gone, which does not exist",
     ]);
   });
@@ -52,6 +53,19 @@ describe("lessons", () => {
     expect(lessonProblems(edited, names)).toEqual(["lessons/tour.md: the narration changed after its cut. Render the lesson again"]);
     const short = { ...built, cut: { ...built.cut, chapters: [0], captions: [[0, 1] as [number, number]] } };
     expect(lessonProblems(short, names)).toEqual(["lessons/tour.md: has 2 chapters, but its cut has 1", "lessons/tour.md: has 4 sentences, but its cut has 1 captions"]);
+  });
+
+  test("the captions leave out code marks and escape the characters WebVTT reserves", () => {
+    const lesson = builtLesson("tour", tourSource.replace("Run `hedge doctor` when something looks wrong.", "Type `<login>` & go."));
+    expect(captions(lesson).split("\n\n").at(-1)).toBe("00:00:15.000 --> 00:00:19.000\nType &lt;login&gt; &amp; go.\n");
+  });
+
+  test("the check fails a cut whose chapter or caption times run backwards or past the end of the video", () => {
+    const built = builtLesson();
+    const problem = ["lessons/tour.md: its cut has chapter or caption times out of order or outside the video"];
+    expect(lessonProblems({ ...built, cut: { ...built.cut, captions: [[0, 4], [9, 5], [10, 14], [15, 19]] } }, names)).toEqual(problem);
+    expect(lessonProblems({ ...built, cut: { ...built.cut, chapters: [0, 151] } }, names)).toEqual(problem);
+    expect(lessonProblems({ ...built, cut: { ...built.cut, chapters: [65, 0] } }, names)).toEqual(problem);
   });
 
   test("a lesson source needs its front matter, a known shelf, and chapters with narration", () => {
@@ -67,7 +81,7 @@ describe("lessons", () => {
       "00:00:00.000 --> 00:00:04.000\nYou open the inbox.",
       "00:00:05.000 --> 00:00:09.000\nA card waits:",
       "00:00:10.000 --> 00:00:14.000\nyou answer it.",
-      "00:00:15.000 --> 00:00:19.000\nRun `hedge doctor` when something looks wrong.\n",
+      "00:00:15.000 --> 00:00:19.000\nRun hedge doctor when something looks wrong.\n",
     ]);
   });
 });
@@ -97,14 +111,16 @@ describe("the lessons on the site", () => {
   });
 
   test("a build ships each lesson's video, poster and captions, and refuses media it cannot find", async () => {
-    expect(Buffer.from(site["assets/lessons/tour.mp4"] as Uint8Array).equals(readFileSync(join(lessonMedia, "tour.mp4")))).toBe(true);
+    expect(Buffer.from(site["assets/lessons/tour.mp4"] as Uint8Array).equals(readFileSync(join(lessonMedia, "tour-take.mp4")))).toBe(true);
+    expect(Buffer.from(site["assets/lessons/tour.jpg"] as Uint8Array).equals(readFileSync(join(lessonMedia, "tour-take.jpg")))).toBe(true);
     expect(site["assets/lessons/tour.vtt"]).toBe(captions(builtLesson()));
-    expect(buildSite({ audience: "public", lessons: [builtLesson("gone")], lessonMedia })).rejects.toThrow(`lesson media gone.mp4 is missing from ${lessonMedia}. Download the lessons release first`);
+    expect(buildSite({ audience: "public", lessons: [builtLesson("gone")], lessonMedia })).rejects.toThrow(`lesson media gone-take.mp4 is missing from ${lessonMedia}. Download the lessons release first`);
   });
 
-  test("without a built lesson, the site has no Learn link, no lesson band, and no lesson route", async () => {
-    const bare = await buildSite({ audience: "public", lessons: [] });
-    expect(Object.keys(bare).filter((path) => path.startsWith("learn/") || path.startsWith("assets/lessons/"))).toEqual([]);
-    expect(bare["index.html"]).not.toMatch(/learn\/|learn-h/);
+  test("without a built lesson, or without the lesson media, the site has no Learn link, no lesson band, and no lesson route", async () => {
+    for (const bare of [await buildSite({ audience: "public", lessons: [], lessonMedia }), await buildSite({ audience: "public" })]) {
+      expect(Object.keys(bare).filter((path) => path.startsWith("learn/") || path.startsWith("assets/lessons/"))).toEqual([]);
+      expect(bare["index.html"]).not.toMatch(/learn\/|learn-h/);
+    }
   });
 });

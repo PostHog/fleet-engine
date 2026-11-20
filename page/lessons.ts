@@ -51,5 +51,7 @@ const stamp = (seconds: number) => {
 
 export const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
 
+const cueText = (line: string) => line.replaceAll("`", "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+
 export const captions = (lesson: BuiltLesson) =>
-  ["WEBVTT", ...sentences(lesson).map((line, index) => `${stamp(lesson.cut.captions[index]![0])} --> ${stamp(lesson.cut.captions[index]![1])}\n${line}`)].join("\n\n") + "\n";
+  ["WEBVTT", ...sentences(lesson).map((line, index) => `${stamp(lesson.cut.captions[index]![0])} --> ${stamp(lesson.cut.captions[index]![1])}\n${cueText(line)}`)].join("\n\n") + "\n";

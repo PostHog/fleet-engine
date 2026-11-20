@@ -99,7 +99,8 @@ Then show it with its full path, such as
 `![What Hedge is](/Users/<login>/.cache/hedge-setup/what-hedge-is.mp4)`,
 and under it the lesson page
 `https://posthog.github.io/hedge/learn/what-hedge-is/`, which plays it in a
-browser when the chat cannot. In a terminal, give the page link only.
+browser when the chat cannot. In a terminal, or when the download fails,
+give the page link only.
 
 At each later wait, explain one of these, in two or three lines, and do not
 repeat one. Skip a topic that does not fit their picks:

@@ -31,7 +31,7 @@ export function knownNames(packs: LoadedPack[], lessons: Lesson[]): Names {
   });
   return {
     skills: packs.flatMap((pack) => (pack.manifest.skills ?? []).map((path) => path.split("/").at(-1)!)),
-    commands: [...Object.keys(builtins), "refresh", ...packCommands],
+    commands: [...Object.keys(builtins), "help", "refresh", ...packCommands],
     packs: packs.flatMap((pack) => [pack.manifest.name, packTitle(pack.manifest).toLowerCase()]),
     lessons: lessons.map((lesson) => lesson.id),
   };
@@ -43,7 +43,7 @@ export function lessonProblems(lesson: Lesson, names: Names): string[] {
   const problems = [
     ...[...text.matchAll(/`hedge ([a-z][a-z-]*)/g)].filter(([, name]) => !names.commands.includes(name!)).map(([, name]) => `${where}: names hedge ${name}, which no command ships`),
     ...[...text.matchAll(/`\/([a-z][a-z-]*)`/g)].filter(([, name]) => !names.skills.includes(name!)).map(([, name]) => `${where}: names /${name}, which no pack's skill ships`),
-    ...[...text.matchAll(/the ([A-Z][A-Za-z.]*(?: [A-Z][A-Za-z.]*)*) pack\b/g)].filter(([, title]) => !names.packs.includes(title!.toLowerCase())).map(([, title]) => `${where}: names the ${title} pack, which does not exist`),
+    ...[...text.matchAll(/\b[Tt]he ([A-Z][\w.-]*(?: [A-Za-z][\w.-]*){0,2}) pack\b/g)].filter(([, title]) => !names.packs.includes(title!.toLowerCase())).map(([, title]) => `${where}: names the ${title} pack, which does not exist`),
     ...(lesson.next && !names.lessons.includes(lesson.next) ? [`${where}: next names lesson ${lesson.next}, which does not exist`] : []),
   ];
   if (!lesson.cut) return problems;
@@ -51,5 +51,8 @@ export function lessonProblems(lesson: Lesson, names: Names): string[] {
   if (cut.narration !== narrationHash(lesson)) problems.push(`${where}: the narration changed after its cut. Render the lesson again`);
   if (cut.chapters.length !== lesson.chapters.length) problems.push(`${where}: has ${lesson.chapters.length} chapters, but its cut has ${cut.chapters.length}`);
   if (cut.captions.length !== sentences(lesson).length) problems.push(`${where}: has ${sentences(lesson).length} sentences, but its cut has ${cut.captions.length} captions`);
+  const inVideo = (time: number) => time >= 0 && time <= cut.seconds;
+  const ordered = (times: number[]) => times.every((time, index) => inVideo(time) && (index === 0 || time > times[index - 1]!));
+  if (!ordered(cut.chapters) || !ordered(cut.captions.flat())) problems.push(`${where}: its cut has chapter or caption times out of order or outside the video`);
   return problems;
 }

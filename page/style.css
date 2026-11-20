@@ -299,7 +299,7 @@ details > summary::-webkit-details-marker { display: none; }
 .lesson-for { font-size: 0.93rem; line-height: 1.4; color: var(--muted); }
 .lesson-facts { display: grid; gap: 8px; margin: 18px 0 0; max-width: 60ch; }
 .lesson-facts div { display: flex; gap: 10px; }
-.lesson-facts dt { flex: none; width: 5.5em; font: 600 0.74rem/1.9 var(--f-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.lesson-facts dt { flex: none; width: 7em; font: 600 0.74rem/1.9 var(--f-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
 .lesson-facts dd { margin: 0; line-height: 1.45; }
 .lesson-watch { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 280px); gap: 28px; align-items: start; }
 .chapters h2 { font-size: 1.1rem; margin-bottom: 10px; }

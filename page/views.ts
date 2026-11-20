@@ -103,7 +103,7 @@ ${pageJson ? `<script id="hedge-data" type="application/json">${JSON.stringify(p
   const firstLesson = lessons.find((lesson) => lesson.shelf === "start");
 
   const lessonCard = (root: string, lesson: BuiltLesson, big = false) => `<li class="lesson-card${big ? " big" : ""}"><a href="${root}learn/${lesson.id}/">
-      <span class="poster"><img src="${lessonPath(root, lesson.cut.poster)}" width="1280" height="720" alt="" loading="lazy" decoding="async"><span class="watch">${uiIcons.play}${minutes(lesson.cut.seconds)}</span></span>
+      <span class="poster"><img src="${lessonPath(root, `${lesson.id}.jpg`)}" width="1280" height="720" alt="" loading="lazy" decoding="async"><span class="watch">${uiIcons.play}${minutes(lesson.cut.seconds)}</span></span>
       <span class="lesson-name">${esc(lesson.title)}</span>
       <span class="lesson-for">${esc(lesson.for)}</span>
     </a></li>`;
@@ -112,7 +112,7 @@ ${pageJson ? `<script id="hedge-data" type="application/json">${JSON.stringify(p
     const start = lessons.filter((lesson) => lesson.shelf === "start");
     if (!start.length) return "";
     return `<section class="band" aria-labelledby="learn-h"><div class="wrap">
-  <header class="band-head"><p class="eyebrow">Learn Hedge</p><h2 id="learn-h">Watch how Hedge works.</h2><p class="lead">Short lessons with a narrator and drawings, each with its text beside it.</p></header>
+  <header class="band-head"><p class="eyebrow">Learn Hedge</p><h2 id="learn-h">Watch how Hedge works.</h2><p class="lead">Short lessons with a narrator and drawings, each with its full text below the video.</p></header>
   <ul class="lesson-grid">${start.map((lesson) => lessonCard(root, lesson, true)).join("")}</ul>
   <p class="after"><a class="link-arrow" href="${root}learn/">All lessons${uiIcons.arrow}</a></p>
 </div></section>`;
@@ -145,7 +145,7 @@ ${shelves
   <dl class="lesson-facts"><div><dt>For</dt><dd>${esc(lesson.for)}</dd></div><div><dt>After it</dt><dd>${esc(lesson.after)}</dd></div></dl>
 </div></section>
 <section class="band band-tight" aria-label="Video"><div class="wrap lesson-watch">
-  <video id="lesson-video" class="clip" src="${lessonPath(root, lesson.cut.video)}" poster="${lessonPath(root, lesson.cut.poster)}" width="1280" height="720" controls playsinline preload="metadata"><track kind="captions" srclang="en" label="English" src="${lessonPath(root, `${lesson.id}.vtt`)}"></video>
+  <video id="lesson-video" class="clip" src="${lessonPath(root, `${lesson.id}.mp4`)}" poster="${lessonPath(root, `${lesson.id}.jpg`)}" width="1280" height="720" controls playsinline preload="metadata"><track kind="captions" srclang="en" label="English" src="${lessonPath(root, `${lesson.id}.vtt`)}"></video>
   <nav class="chapters" aria-label="Chapters"><h2>Chapters</h2><ol>${chapters.map((chapter) => `<li><button type="button" data-seek="${chapter.at}"><span class="at">${clock(chapter.at)}</span>${esc(chapter.headline)}</button></li>`).join("")}</ol></nav>
 </div></section>
 <section class="band band-tight" aria-labelledby="text-h"><div class="wrap lesson-text">
