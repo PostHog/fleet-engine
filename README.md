@@ -18,6 +18,8 @@ the agent workflows you pick as **packs**. Your answers live in your own
 private **profile** repo, so every box gets the same setup. Your Mac and
 your phone run only the T3 Code app. Hedge installs nothing on them.
 
+https://github.com/user-attachments/assets/153cb394-af22-4096-8344-2c5487af3cfe
+
 ## Getting started
 
 You need a Coder deployment where you can create workspaces. The setup agent
