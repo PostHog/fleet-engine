@@ -1051,17 +1051,17 @@ async function devObservedStatus(weigh: Weigh, cleanBaseMerge: CleanBaseMerge, d
   return { ...status("missing", { state: "waiting", dev: dev ? devText(dev.ref) : "an unrecorded dev PR", reason }), ...lapseOf(weighed) };
 }
 
-type FinishedReview = { name: string; commit: string; reviewer?: string; finishedAt: bigint; panel: boolean };
+type FinishedReview = { name: string; commit: string; reviewer?: string; finishedAt: bigint; panel: boolean; scope?: string; from?: string };
 
 export async function finishedReviews(home: string, identity: ProofIdentity) {
   const reviews = join(pullRequestDirectory(home, identity), "reviews");
   const finished: FinishedReview[] = [];
   for (const name of await reviewNames(reviews)) {
-    const reservation = await readJson<(ProofIdentity & { reviewer?: string; capturedBy?: CapturedBy }) | undefined>(join(reviews, name, "round.json"), undefined);
+    const reservation = await readJson<(ProofIdentity & { reviewer?: string; capturedBy?: CapturedBy; scope?: string; from?: string }) | undefined>(join(reviews, name, "round.json"), undefined);
     const findings = await stat(join(reviews, name, "findings.md"), { bigint: true }).catch(() => undefined);
     const panel = await panelOutcome(join(reviews, name));
     const counted = panel === "none" || (panel === "finished" && reservation?.capturedBy === "hedge");
-    if (reservation && findings && counted) finished.push({ name, commit: reservation.commit, reviewer: reservation.reviewer, finishedAt: findings.mtimeNs, panel: panel === "finished" });
+    if (reservation && findings && counted) finished.push({ name, commit: reservation.commit, reviewer: reservation.reviewer, finishedAt: findings.mtimeNs, panel: panel === "finished", scope: reservation.scope, from: reservation.from });
   }
   return finished.sort((a, b) => (a.finishedAt < b.finishedAt ? -1 : a.finishedAt > b.finishedAt ? 1 : 0));
 }

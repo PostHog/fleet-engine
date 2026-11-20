@@ -9,17 +9,17 @@ export type EndRow = { ref: PrRef; summary: ProofSummary; reason: (kind: string,
 
 const isRound = (name: string) => /^\d+$/.test(name);
 
-function sizeAt(identity: ProofIdentity, run: Run, baseSha: string | undefined): Sized | undefined {
-  const size = diffSize(identity, run, baseSha);
+function sizeAt(identity: ProofIdentity, run: Run, start: { baseSha?: string; from?: string }): Sized | undefined {
+  const size = diffSize(identity, run, start);
   return size && { ...size, commit: identity.commit };
 }
 
-export async function measureGrowth(home: string, head: ProofIdentity, run: Run, baseSha?: string): Promise<Growth | undefined> {
+export async function measureGrowth(home: string, head: ProofIdentity, run: Run, baseSha?: string): Promise<Growth> {
   const reviews = await finishedReviews(home, head);
   const rounds = reviews.filter(({ name }) => isRound(name)).sort((a, b) => Number(a.name) - Number(b.name));
-  if (!rounds.length) return undefined;
-  const first = sizeAt({ ...head, commit: rounds[0]!.commit }, run, baseSha);
-  const final = sizeAt(head, run, baseSha);
+  const opening = rounds[0];
+  const first = opening && sizeAt({ ...head, commit: opening.commit }, run, opening.scope === "full" && opening.from ? { from: opening.from } : { baseSha });
+  const final = sizeAt(head, run, { baseSha });
   return { rounds: rounds.length, finalReads: reviews.length - rounds.length, ...first ? { first } : {}, ...final ? { final } : {} };
 }
 
@@ -28,13 +28,15 @@ const figure = (lines: number | undefined) => lines === undefined ? "unknown" : 
 const span = (from: number | undefined, to: number | undefined) => `${figure(from)} → ${figure(to)}`;
 
 function roundsCell(growth: Growth | undefined) {
-  if (!growth) return "no review";
+  if (!growth) return "not measured; run hedge proof gate";
+  if (!growth.rounds && !growth.finalReads) return "no review";
   return [counted(growth.rounds, "round"), ...growth.finalReads ? [counted(growth.finalReads, "final read")] : []].join(", ");
 }
 
 function linesCell(growth: Growth | undefined) {
   if (!growth) return "not measured";
   const { first, final } = growth;
+  if (!growth.rounds) return `${figure(final?.production)} at HEAD`;
   const ratio = first && final && first.production > 0 ? ` (×${(final.production / first.production).toFixed(1)})` : "";
   const apart = (["tests", "docs"] as const).filter((part) => first?.[part] || final?.[part]).map((part) => `${part} ${span(first?.[part], final?.[part])}`);
   return [`${span(first?.production, final?.production)}${ratio}`, ...apart].join("; ");
@@ -50,7 +52,7 @@ function acceptor(gap: GapProof) {
 const skipped = ({ summary, reason }: EndRow) =>
   summaryGaps(summary).map(({ kind, gap }) => `${kind}: ${gap.reason ? reason(kind, gap.reason) : "no reason recorded"} (${acceptor(gap)})`);
 
-const cell = (text: string) => text.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
+const cell = (text: string) => text.replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/\r\n|\r|\n/g, " ");
 
 export function endTable(rows: EndRow[]) {
   return [

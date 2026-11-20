@@ -76,10 +76,7 @@ export async function finalGate(head: ProofIdentity, context: GateContext, { lan
   return gate;
 }
 
-async function grownBy(home: string, head: ProofIdentity, run: Run, baseSha: string | undefined) {
-  const growth = await measureGrowth(home, head, run, baseSha);
-  return growth ? { growth } : {};
-}
+const grownBy = async (home: string, head: ProofIdentity, run: Run, baseSha: string | undefined) => ({ growth: await measureGrowth(home, head, run, baseSha) });
 
 const pushedHeadOf = (head: ProofIdentity, run: Run, seen: (pull: PullRequest) => void = () => {}) => (): PushedHead => {
   try {
@@ -114,7 +111,7 @@ export async function receiptSummary(head: ProofIdentity, pull: PullRequest, led
     landed: pull.state === "merged", cleanBaseMerge: cleanBaseMerge(head, run), quietCommit: quietCommitIn(run, () => baseRefs(head, run)),
     ci: () => ciOf(home, head, run, now?.() ?? new Date()), pushedHead: pushedHeadOf(head, run), ledger, now: now?.(), devPull: devPullOf(run),
   });
-  return { ...live.proofSummary, code: live.code, judge: { state: "skipped", lines: [] }, ...await grownBy(home, head, run, pull.baseSha) };
+  return { ...live.proofSummary, code: live.code, judge: { state: "skipped", lines: [] } };
 }
 
 async function savedGate(home: string, ref: PrRef, pull: PullRequest, ledger: Ledger): Promise<SavedGate | undefined> {
