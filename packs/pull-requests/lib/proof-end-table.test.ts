@@ -546,3 +546,16 @@ test("round 1 counts from its fork point with GitHub's base, so base changes it 
 
   expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | none |");
 });
+
+test("round 1 keeps the count of the base GitHub reported when it started, after the PR moves to another base", async () => {
+  const pr = await checkout();
+  const reviewed = await pr.commit("feature.ts", lines(10, "greet"));
+  pr.pullRequestState({ body: graded("non-critical") });
+  await reviewHead(pr);
+  await pr.commit("more.ts", lines(15, "more"));
+  pr.pullRequestState({ body: graded("non-critical"), baseSha: reviewed });
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  await pr.hedge("gate");
+
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 15 (×1.5) | none |");
+});
