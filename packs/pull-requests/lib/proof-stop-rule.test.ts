@@ -288,6 +288,31 @@ test("a docs-only major whose location sits in a double-backtick span buys no ot
   await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(stops);
 });
 
+test("with round 1's count unknown, a sanity pass covers only the HEAD count it saw, so a retarget that shows more lines asks again", async () => {
+  const pr = await checkout();
+  const before = await pr.git("rev-parse", "refs/remotes/origin/main");
+  await pr.advanceBase("first.ts", lines(20, "first"));
+  await pr.advanceBase("second.ts", lines(20, "second"));
+  const advanced = await pr.git("rev-parse", "refs/remotes/origin/main");
+  await pr.git("merge", "-q", "--no-edit", "refs/remotes/origin/main");
+  await pr.git("config", "diff.renameLimit", "1");
+  await pr.git("mv", "first.ts", "moved-first.ts");
+  await pr.git("mv", "second.ts", "moved-second.ts");
+  writeFileSync(join(pr.repository, "moved-first.ts"), lines(19, "first") + "edited\n");
+  writeFileSync(join(pr.repository, "moved-second.ts"), lines(19, "second") + "edited\n");
+  await pr.git("add", "moved-first.ts", "moved-second.ts");
+  const reviewed = await firstRound(pr, ["- major | feature.ts:2 | the greeting drops the last name | anchor: greet 1"], ["1. fixed: the greeting keeps it"]);
+  await pr.git("mv", "moved-first.ts", "first.ts");
+  await pr.git("mv", "moved-second.ts", "second.ts");
+  await pr.commit("feature.ts", lines(11, "greet"));
+  expect((await pr.hedge("sanity", "--verdict", "justified", "--reason", "The renames move code and add none")).code).toBe(0);
+
+  pr.pullRequestState({ baseSha: before });
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow("Hedge cannot count the production lines at round 1");
+  pr.pullRequestState({ baseSha: advanced });
+  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).code).toBe(0);
+});
+
 test("a round 1 that read an empty range counts zero lines, so the next round needs no sanity pass", async () => {
   const pr = await checkout();
   pr.pullRequestState({ body: graded("non-critical") });
@@ -303,7 +328,7 @@ test("a round 1 that read an empty range counts zero lines, so the next round ne
 });
 
 test("a docs-only major whose location is a Markdown link, bold or in backticks buys no other round", async () => {
-  for (const location of ["[README.md:12](README.md#L12)", "**README.md:12**", "`README.md`:12", "`` README.md:12 ``", "[`README.md:12`](README.md#L12)", "`` README.md ``:12", "[docs/(guide)/README.md:12](docs/(guide)/README.md#L12)"]) {
+  for (const location of ["[README.md:12](README.md#L12)", "**README.md:12**", "`README.md`:12", "`` README.md:12 ``", "[`README.md:12`](README.md#L12)", "`` README.md ``:12", "[docs/(guide)/README.md:12](docs/(guide)/README.md#L12)", "**[README.md:12](README.md#L12)**"]) {
     const pr = await checkout();
     const reviewed = await firstRound(pr, [`- major | ${location} | the setting is named wrong | anchor: greet 1`], ["1. fixed: the docs name it right"]);
     await pr.commit("README.md", lines(3, "explain"));
