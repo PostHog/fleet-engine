@@ -268,7 +268,7 @@ test("a spawn without a Claude token still works and says Claude is not signed i
   const spawned = spawnCoder(0);
   expect(await spawn(spawned.coder, machine, "lane")).toBe(0);
   expect(lines.join("\n")).toContain("Claude is not signed in on box-lane");
-  expect(lines.join("\n")).toContain("hedge box run box-lane -- codex login --device-auth");
+  expect(lines.join("\n")).toContain(`hedge box run box-lane -- codex login -c 'cli_auth_credentials_store="file"' --device-auth`);
 });
 
 test("a spawn gives up when hedge apply never writes the machine file on the box, after a bounded wait on the injected clock", async () => {

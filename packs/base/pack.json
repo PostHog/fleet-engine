@@ -292,7 +292,7 @@
       "needs": [
         "devbox"
       ],
-      "sentence": "Your Mac and your devboxes see each other's threads."
+      "sentence": "Your hub and your nodes see each other's threads."
     },
     {
       "id": "worktree-cleanup",

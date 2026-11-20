@@ -150,7 +150,7 @@ describe("hedge packs", () => {
     expect((await hedge(home, ["packs", "--add", "orchestration"])).code).toBe(0);
     const result = await hedge(home, ["packs", "--remove", "pull-requests"]);
     expect(result.code).toBe(2);
-    expect(result.output).toStartWith("hedge packs: Orchestration needs Pull requests. Add pull-requests, or remove orchestration.");
+    expect(result.output).toStartWith("hedge packs: Orchestration needs Quality gates. Add pull-requests, or remove orchestration.");
     expect((await pushed()).packs).toEqual(["pull-requests", "orchestration"]);
   });
 
@@ -186,6 +186,38 @@ describe("hedge packs", () => {
       expect(result.output).toStartWith(message);
     }
     expect((await pushed()).packs).toEqual(["pull-requests"]);
+  });
+});
+
+describe("hedge packs with a profile that still names an old pack", () => {
+  test("adds or removes exactly the name given and saves an old name as written, so removing recovery leaves Hub fully on", async () => {
+    const { home, elsewhere, pushed } = await machineWithProfile();
+    await elsewhere((file) => ({ ...file, packs: ["pull-requests", "hub"] }));
+    expect((await hedge(home, ["packs", "--add", "recovery", "--add", "context-library"])).code).toBe(0);
+    expect((await pushed()).packs).toEqual(["pull-requests", "hub", "recovery", "context-library"]);
+    const listed = (await hedge(home, ["packs"])).output;
+    expect(listed).toContain("  · memory  ");
+    expect(listed).toContain("      The old name context-library selects only: context-library. Add memory for the whole pack.\n      Workflows: shared-memory off, context-library off: waits for setting context-library.repo, dream off");
+    expect(listed).not.toContain("Only part is on");
+    expect(listed).not.toContain("context-library  ");
+    expect((await hedge(home, ["packs", "--remove", "recovery"])).code).toBe(0);
+    expect((await pushed()).packs).toEqual(["pull-requests", "hub", "context-library"]);
+    expect((await hedge(home, ["packs"])).output).toContain("disk-watch on, linked-hub on");
+  });
+
+  test("keeps a workflow value the profile states when a change leaves it alone, even one that equals the default, and adds only choices that differ from it", async () => {
+    const { home, elsewhere, pushed } = await machineWithProfile();
+    await elsewhere((file) => ({ ...file, packs: ["pull-requests", "guards"], workflows: { "shell-guards": true, "package-age": true } }));
+    expect((await hedge(home, ["packs", "--add", "communication", "--workflows", "merge-gate=off"])).code).toBe(0);
+    expect((await pushed()).workflows).toEqual({ "shell-guards": true, "package-age": true });
+  });
+
+  test("says a workflow stays off for a missing setting only when the same command does not set it", async () => {
+    const { home, elsewhere } = await machineWithProfile();
+    await elsewhere((file) => ({ ...file, packs: ["pull-requests", "context-library"], workflows: { "context-library": false } }));
+    const warning = "context-library is on in your profile, but stays off: waits for setting context-library.repo.";
+    expect((await hedge(home, ["packs", "--workflows", "context-library=on"])).output).toContain(warning);
+    expect((await hedge(home, ["packs", "--workflows", "context-library=on", "--set", "context-library.repo=example/library"])).output).not.toContain(warning);
   });
 });
 

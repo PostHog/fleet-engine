@@ -80,9 +80,10 @@ export async function finalGate(head: ProofIdentity, context: GateContext, { lan
 
 
 async function grownBy(home: string, head: ProofIdentity, run: Run, landed: boolean) {
-  const kept = landed ? (await readJson<SavedGate | undefined>(savedPath(home, head, head.commit), undefined))?.gate.summary.growth : undefined;
+  const growth = await measureGrowth(home, head, run);
+  const kept = landed && !growth.final ? (await readJson<SavedGate | undefined>(savedPath(home, head, head.commit), undefined).catch(() => undefined))?.gate?.summary?.growth?.final : undefined;
   const sanity = (await readSanity(home, head)).at(-1);
-  return { ...kept ?? await measureGrowth(home, head, run), ...sanity ? { sanity } : {} };
+  return { ...growth, ...kept ? { final: kept } : {}, ...sanity ? { sanity } : {} };
 }
 
 const pushedHeadOf = (head: ProofIdentity, run: Run, seen: (pull: PullRequest) => void = () => {}) => (): PushedHead => {

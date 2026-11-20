@@ -130,7 +130,7 @@ describe("a time-zone default that setup saved before it stopped", () => {
     expect(await unattendedSetup(home, "Europe/Lisbon", { settings: [teamRegion, teamName], set: ["posthog.team=web"] })).toBe(0);
     const pushed = await pushedAnswers(home);
     expect(pushed.settings).toEqual({ "posthog.region": "eu", "posthog.team": "web" });
-    expect(Object.keys(pushed).sort()).toEqual(["engine", "packs", "plan", "schema", "settings", "sources", "workflows"]);
+    expect(Object.keys(pushed).sort()).toEqual(["engine", "migrations", "packs", "plan", "schema", "settings", "sources", "workflows"]);
   });
 
   test("gives way there too when a devbox setting is pushed after the profile is saved", async () => {
@@ -141,7 +141,7 @@ describe("a time-zone default that setup saved before it stopped", () => {
     expect(await unattendedSetup(home, "Europe/Lisbon", team)).toBe(2);
     await pushFromAnotherMachine(home, { "acme.region": "us" });
     expect(await unattendedSetup(home, "Europe/Lisbon", { ...team, set: ["acme.team=web", "orchestration.loopProject=~/code/web"] })).toBe(0);
-    expect((await pushedAnswers(home)).settings).toEqual({ "acme.region": "us", "acme.team": "web", "orchestration.loopProject": "~/code/web" });
+    expect((await pushedAnswers(home)).settings).toEqual({ "acme.region": "us", "acme.team": "web", "memory.repo": "nora/hedge-memory", "orchestration.loopProject": "~/code/web" });
   });
 
   test("stays out of the draft an older engine would resume as answers", async () => {

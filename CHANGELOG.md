@@ -14,9 +14,10 @@
 ### The review loop stops on its own
 
 - A review round runs after another review only when the latest review found
-  a bug in production code that the pull request introduced. Otherwise
-  `hedge proof review` refuses the round, and only the user's `--override`
-  runs it. Give the fixes a final read instead.
+  a blocker or major in production code that the pull request introduced.
+  Otherwise `hedge proof review` refuses the round, and only the user's
+  `--override` runs it. Give the fixes a final read instead. The first panel
+  of a pull request still runs.
 - The reviewer reads that behaviour the base has too is not a blocker or a
   major. Such a finding is a minor that starts with `[base]` and cites the
   base line.
@@ -34,6 +35,248 @@
   accepted it. `hedge proof gate` measures the lines and saves them, so the
   table holds a pull request once a gate ran at its HEAD. A gate saved by an
   older Hedge no longer counts, so run `hedge proof gate` again once.
+
+### The Security pack reads Wiz
+
+- The new **Security** pack has one workflow, `wiz`, off by default. Agents
+  on every box read Wiz issues, threats, vulnerabilities and cloud inventory
+  through the hub's MCP gateway. The hub signs in to Wiz once, with
+  `hedge mcp-gateway sign-in wiz`, and asks for read access only.
+
+### Setup never waits for proxy subscriptions
+
+- On a hub with own-account balancing, `hedge apply` and `hedge setup` no
+  longer fail while the proxy holds fewer of your own Claude or Codex
+  subscriptions than `hub.proxyAccounts`, none included. The proxy installs
+  and runs, and `hedge apply` and `hedge doctor` show a `To do:` line with
+  the login command. `hedge cli-proxy accounts` counts the subscriptions
+  that work. A subscription whose login expired still does not count, and
+  `hedge cli-proxy doctor` still warns about it.
+- Each machine keeps Claude Code and Codex on their own sign-ins until the
+  proxy serves them. While the proxy answers but holds none of an agent's
+  subscriptions, its route check is a `To do:` line, not a failure.
+  A node that holds no proxy key from the hub yet, such as one that
+  `hedge devbox add` set up, also shows one `To do:` line, not a `Fix:`.
+  It names the hub step that adds a subscription, and says that
+  `hedge cli-proxy doctor` on the hub prints the command that hands the
+  node its key. The route stays out of the node's provider files until
+  then. On the hub, a missing key is still a failure.
+  `hedge cli-proxy connect` saves the key on a node in that case, so the
+  first `hedge apply` after the proxy serves an agent sends it there.
+  When the hub hands a box over while the proxy serves none of its agents,
+  the hub says, after it runs `hedge apply` on the box, that the box keeps
+  its own sign-in until the proxy serves it. On the both plan, `hedge doctor` fails while a
+  Codex subscription works but the proxy serves no Codex model. A proxy
+  that is down, refuses the key, answers without a model list, or runs a
+  plugin Hedge did not install still fails `hedge doctor`.
+- A pack check can name a `todo`: when its command exits 4, Hedge prints
+  it as a `To do:` line, keeps the config that waits for the check out, and
+  fails neither apply nor doctor.
+- Apply now writes the provider settings, Claude plugins and MCP servers
+  once, after the steps. Just before, it runs each check with a `todo`
+  and each check that config waits for, and decides that config from
+  those results. So a hub whose proxy was stopped routes Claude Code in
+  one apply, and a route never stays at the end of an apply whose check
+  found the proxy unsafe. A route that an earlier apply wrote stays while
+  the steps run. When an adapter that runs before the steps fails, such
+  as Jobs on a job id it refuses, apply still decides and writes the
+  provider settings, then fails with that adapter's error. When the
+  provider settings fail as well, apply names both errors, that adapter's
+  first.
+- On the hub, `hedge cli-proxy check` and `hedge cli-proxy check codex`,
+  the checks that Hedge's routes wait for, fail while
+  `hedge cli-proxy doctor` finds the proxy unsafe: a plugin Hedge did not
+  install, panel files that do not match their pins, or, with the Proxy
+  panel off, a panel page or plugin that is still there. A link at either
+  panel path fails them too, and the check says to remove the link, then
+  run `hedge cli-proxy install`. Apply then leaves the route out, or takes
+  Hedge's route out. So a hub whose proxy has such a plugin never routes
+  Claude Code or Codex to it, and a route that an earlier apply wrote
+  leaves at the next apply. A route to a safe proxy stays in place, and a
+  `hedge-proxy` Codex table of your own stays.
+- `hedge cli-proxy connect` no longer writes Claude Code or Codex
+  settings, and runs nothing. It saves the proxy key and says to run
+  `hedge apply`, which writes the route and records it. So every route
+  that Hedge writes has a record, and turning balancing off takes it off
+  at the next apply. When the hub hands a box over, it runs `hedge apply`
+  on the box after connect, as one more SSH step with the same time limit
+  as the others. When that apply exits nonzero, a timeout included, the
+  hub says only the exit code and `hedge box run <box> -- hedge apply`,
+  and nothing about the box's sign-in. Only after the apply exits 0 does
+  the hub read its proxy lines: when they show that the proxy lists no
+  model for an agent, or that the agent cannot reach the proxy, the hub
+  says the agent there keeps its own sign-in.
+- Hedge removes a Claude Code or Codex setting only when its own record
+  says Hedge wrote it. It no longer removes a setting because it points
+  at the proxy port 8317. So a Codex provider table of your own, of any
+  name, stays with its selector.
+- The route to the proxy is one unit: the Claude proxy address and key
+  helper, or the Codex `hedge-proxy` selector and table. Apply writes all
+  of it or none of it, so it selects no `hedge-proxy` table of your own.
+  It removes it together too. When your profile or another pack sets a
+  key over any part of the unit, or the route check drops a part, the
+  whole unit leaves the plan, for `hedge apply` and `hedge doctor` alike.
+  So a profile that sets only its own `env.ANTHROPIC_BASE_URL` gets no
+  Hedge key helper beside its gateway, and the gateway never receives
+  the hub's proxy key.
+- Hedge's route leaves with the settings that only work through it. Each
+  time apply removes it, because balancing is off, its check fails, or
+  the pool is empty, it also removes a Claude credential beside Hedge's
+  proxy address, such as your own `ANTHROPIC_AUTH_TOKEN`, and a Codex
+  `model_provider = "hedge-proxy"` beside Hedge's table. So no key goes
+  to Anthropic, and Codex selects no table that is gone. A `To do:` line
+  names each removed setting, never its value, and says only what apply
+  removed. The backup in `~/.local/state/hedge/backups`
+  holds the file as it was. Only Hedge's own proxy values form the
+  route. The route leaves when a file holds Hedge's proxy value before
+  apply and another value or none after it, so a gateway from your
+  profile in place of Hedge's proxy address also takes a proxy token
+  beside it out, with its `To do:` line. A credential beside the route stays only while its value equals
+  the value a pack sets for it now. So a key helper your profile sets in
+  the same apply stays and is recorded. A value that differs, such as a
+  helper you edited or a proxy token you set by hand, leaves with the
+  route even when your profile sets that key, and the `To do:` names it.
+  The next apply sets your profile's value. A gateway and key helper from
+  your profile are set and removed one by one, as before.
+- Only the Hub pack may set Hedge's proxy values:
+  `model_provider = "hedge-proxy"`, the `hedge-proxy` Codex provider
+  table, `http://127.0.0.1:8317` as the Claude
+  `env.ANTHROPIC_BASE_URL`, and `cat "$HOME/.config/hedge/cli-proxy.key"`
+  as the Claude `apiKeyHelper`. When your profile or another pack sets one of
+  them, Hedge refuses the profile when it loads, and the error names the
+  pack and the setting. So no selector of yours can point at Hedge's
+  table after the table leaves, and no helper of yours sends the hub's
+  proxy key to Anthropic. T3 keys hold no proxy value, so Hedge does not
+  check them.
+- When an adapter that runs before the steps fails, or a later part of
+  the provider config step fails after the settings write, such as a
+  malformed `provider-plugins.json`, the error that apply throws holds
+  the `To do:` lines from the provider settings it wrote.
+  `hedge doctor` reads one result of each check for both the config and
+  its line.
+- When `hedge cli-proxy connect` fails on a box, the hub names the box and
+  the exit code, and the commands that hand over the same key again and
+  apply it:
+  `hedge box run <box> -- hedge cli-proxy connect < ~/.config/hedge/cli-proxy.key, then hedge box run <box> -- hedge apply`.
+  It never prints the box's output. When `hedge apply` on the box exits
+  nonzero, the hub names only the exit code and the command to see why,
+  as for a failed connect.
+- The `Connect <node>:` command that `hedge cli-proxy doctor` prints now
+  runs `hedge apply` on the node after connect, and the Provider recovery
+  note of the Hub pack says so.
+- The notice that a Codex plugin is yours now no longer fails
+  `hedge doctor`, as for a Claude plugin.
+
+### A smaller pack set
+
+- Base and Hub are in every Hedge. The site shows them first, without a
+  switch, and then groups the picks: how your agents work, what they know,
+  and what they reach.
+- The Pull requests pack is now titled Quality gates. It also holds the QA
+  swarm, the quality loop, the signal loop, the PR digest, `impact`, and
+  `codebase-design`. Orchestration keeps maps, side threads, and parking.
+- The Context library pack is now part of Memory, and Dream moved from Hub
+  to Memory. Memory is in the Everyday preset. The library waits until you
+  set `context-library.repo`, and setup no longer asks for it.
+- The Recovery pack is now the `provider-recovery` workflow of the Hub pack.
+  It needs own-account balancing.
+- A profile that still lists `context-library` or `recovery` keeps working.
+  Hedge reads the old name as the new pack, turns on only the old pack's
+  workflows, moves the step ledger to the new name, and leaves the profile
+  as it is. `hedge packs --add` and `--remove` take the old names too.
+- Picking Slack, Paging, Memory, or Guards turns on its main workflow. A
+  profile from before keeps those workflows off: the next save writes
+  `false` for each one it never set, once.
+- The Integrations pack stays, but the site no longer shows it.
+  The Everything preset still has it.
+
+### Hedge is cloud only
+
+- Hedge runs your agents on a hub and one or more nodes in the cloud. The
+  Mac and the phone run only the T3 Code app. The "Mac only" setup is gone
+  from the site, `SETUP.md`, the presets, and the docs.
+- On a Mac, `get.sh` installs nothing. It only stops and turns off the
+  launchd jobs of an earlier Fleet or Hedge there, checks that launchd keeps
+  them off at the next login, keeps their files, and points at the setup
+  page. The Fleet notice and a failed `hedge update` on a
+  Mac point there too.
+- The setup agent creates the hub and the nodes with one `coder create`
+  each, with every template parameter given and the profile repo as
+  dotfiles. `scripts/check-workspace.sh` then checks that each workspace
+  runs with no stop time, and the disk size, region, instance type, and
+  dotfiles repo of its build. It takes no private value and prints no value
+  and no token. The person changes a parameter in the workspace's
+  **Settings → Parameters** in the Coder web app, never with the Coder CLI. The agent sets Hedge up on
+  the hub over SSH, names the hub right after `hedge setup`, and adds the
+  nodes from the hub.
+- On a box without a browser, ChatGPT signs in with a device code, and
+  Claude in a terminal. When device code sign-in is off, setup says how to
+  turn it on, or how to sign in over an SSH port forward.
+- Setup starts a new ChatGPT sign-in only when Codex says the old one is
+  gone. When Codex cannot tell, setup keeps the sign-in and says why. It
+  reads the Codex credentials store from `config.toml` as TOML.
+- Setup takes the profile's new commits when it starts, before it reads
+  your answers, so a rerun keeps what another machine pushed before it. When
+  it cannot reach the profile's origin, it says so and goes on with the copy
+  on the machine, as it did before this fetch. The Git error that it prints
+  leaves out a user name and password in the origin's address. When
+  another machine pushes first, setup stops and keeps its commit. It says to
+  commit or discard the changes in the checkout that are not committed, to
+  bring it up to date with `git -C <profile> pull --rebase`, or to drop its
+  commit when it made one, and then to run the same command again. Two machines that
+  save the same profile at the same time can overwrite each other's
+  answers, as before.
+- Setup takes and saves the profile only on `origin`. When the checkout's
+  branch tracks a local branch or another remote, setup stops before it
+  commits and says to point the branch at `origin`.
+- `scripts/template-parameters.sh` prints a default only for a number, a
+  `bool`, or a parameter with a fixed list of values, so no free-text
+  default, such as a key, reaches the agent's output.
+- Each page of the site carries its own script and styles, so a cached page
+  always runs its own script.
+- `hedge devbox add` signs a node in to Coder only at the hub's own Coder
+  address, and only over HTTPS, checked with no redirect followed. The
+  node's own Coder CLI signs in with `coder login --use-token-as-session`:
+  the new token goes over SSH on standard input into the environment of
+  that one command, never into an argument. It installs a missing Coder CLI
+  only from that address over HTTPS, only from an HTTP 200 answer with no
+  redirect, and only after the downloaded CLI runs. When the node does not
+  reach that address over HTTPS, it makes no token and names the sign-in
+  the person does there.
+  Before it runs any Coder command on the node, it checks the node's Coder
+  `url` and `session` paths and its environment with the shell alone. When
+  a path is not a plain file, `CODER_URL` or `CODER_SESSION_TOKEN` is set,
+  or the node is signed in at another address as another user, it leaves
+  that sign-in alone, makes no token, installs a missing Coder CLI as
+  above, and lists the sign-in among the steps for the person. That step
+  names the paths to move aside and the variables to remove first. It
+  prints no command when the hub's Coder address is plain HTTP, and says so
+  when the Coder CLI could not be fetched from the hub's Coder address. It
+  runs `coder login` and `coder config-ssh` on the node under
+  `timeout -s KILL`. 2 minutes after the command starts on the node, it
+  kills them there, with the processes they started that are still in
+  their process group. For a connection that stops answering, the hub
+  stops its SSH call 150 seconds after it starts that call, and that time
+  includes the SSH setup. It removes the token when they fail or time out,
+  under `timeout` too: the removal gets TERM after 1 minute, and KILL 10
+  seconds after that. When the removal fails or times out, it names the
+  token and the command that removes it.
+  After the node applies the profile, it asks the node's
+  `hedge doctor --to-do` which steps are left. When the apply passed and
+  the node finds nothing but those steps, it goes on with the sign-ins,
+  T3 Connect and the link, and ends with a list of them, each with its
+  command, and a line to run `hedge apply` on the node after them. It runs
+  none of them itself. When the apply failed, or the node finds anything
+  else, it stops at the profile step, with what `hedge doctor` there
+  found. A node with an older Hedge, which has
+  no `--to-do`, finishes the step and points to `hedge doctor` there. A
+  rerun keeps a node engine that runs the hub's engine commit, when its
+  `hedge` command runs. When T3 Code on the hub reaches the node, it says
+  so, and does not ask for `hedge peers link`.
+- `hedge doctor --to-do` prints the steps left for the person as JSON, and
+  before it the other findings. It exits 1 when there are other findings.
+  A step that Hedge repairs itself is a finding, never a step for the
+  person.
 
 ### Fleet is now Hedge
 

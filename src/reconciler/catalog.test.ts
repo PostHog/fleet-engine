@@ -30,8 +30,8 @@ const hub: MachineFile = { schema: 1, role: "linux", name: "hub-1" };
 const node: MachineFile = { schema: 1, role: "devbox", coder: true, name: "node-2" };
 const mac: MachineFile = { schema: 1, role: "mac", name: "laptop" };
 
-async function plan(dir: string, machine: MachineFile, fields: { plan?: AiPlan; workflows?: Record<string, boolean>; packs?: string[]; devboxes?: string[] } = {}): Promise<Plan> {
-  const profile: Profile = { schema: 1, dir: "/profile", engine: { repo: "example/engine", ref: "main", channel: "track" }, sources: [], packs: fields.packs ?? ["served"], plan: fields.plan ?? "claude", settings: {}, workflows: fields.workflows ?? {}, hub: "hub-1", devboxes: fields.devboxes ?? ["node-2"] };
+async function plan(dir: string, machine: MachineFile, fields: { plan?: AiPlan; workflows?: Record<string, boolean>; packs?: string[]; devboxes?: string[]; settings?: Profile["settings"] } = {}): Promise<Plan> {
+  const profile: Profile = { schema: 1, dir: "/profile", engine: { repo: "example/engine", ref: "main", channel: "track" }, sources: [], packs: fields.packs ?? ["served"], plan: fields.plan ?? "claude", settings: fields.settings ?? {}, workflows: fields.workflows ?? {}, hub: "hub-1", devboxes: fields.devboxes ?? ["node-2"] };
   return resolve(profile, machine, [{ ref: { name: "engine", repo: "example/engine", ref: "main" }, dir, packs: await loadPacks(dir) }]);
 }
 
@@ -64,6 +64,12 @@ describe("the service catalog", () => {
     const choices = { packs: ["boxed"], devboxes: [] };
     expect(catalog(await plan(dir, hub, choices))).toEqual(["boxed/boxed-api 4600 /health"]);
     expect(catalog(await plan(dir, plainNode, choices))).toEqual(["boxed/boxed-api 4600 /health"]);
+  });
+
+  test("a service whose workflow waits for a setting stays out of the catalog until the setting is answered", async () => {
+    const dir = engine({ gated: packSource("gated", `const repo = hedge.setting({ key: "gated.repo", question: "Which repo?", type: "string" }); const gated = hedge.workflow({ id: "gated", name: "Gated", sentence: "Serves once set.", default: true, settings: [repo], offUntilSet: ["gated.repo"] }); hedge.service({ on: "hub", id: "gated-api", when: gated, serve: { port: 4601, health: "/health", credential: async () => "x" } });`) });
+    expect(catalog(await plan(dir, node, { packs: ["gated"] }))).toEqual([]);
+    expect(catalog(await plan(dir, node, { packs: ["gated"], settings: { "gated.repo": "example/library" } }))).toEqual(["gated/gated-api 4601 /health"]);
   });
 
   test("two packs that claim one port fail at resolve time", async () => {

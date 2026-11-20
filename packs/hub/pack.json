@@ -1,12 +1,19 @@
 {
   "schema": 1,
   "name": "hub",
-  "summary": "One always-on devbox manages the others. It keeps your devboxes linked and watches their disks.",
+  "aliases": [
+    {
+      "name": "recovery",
+      "workflows": [
+        "provider-recovery"
+      ]
+    }
+  ],
+  "summary": "The hub links your boxes, cleans their disks, and keeps your pack secrets. Turn on recovery, and threads go on after a usage limit.",
   "day": "A thread on one devbox starts work on another, and the hub cleans a devbox that fills its disk before you notice.",
   "cost": "You need one devbox that stays on, and some setup on it. Every other machine keeps working when the hub is down.",
   "risk": "The hub holds sign-ins for your MCP servers and reaches every devbox over SSH. Keep it as private as your laptop.",
   "skills": [
-    "skills/dream",
     "skills/hedge-hub"
   ],
   "settings": [
@@ -96,13 +103,6 @@
       "ask": "never"
     },
     {
-      "key": "hub.dreamSessions",
-      "question": "How many sessions may one Dream run send to an analyst model? Each one spends model tokens.",
-      "type": "number",
-      "default": 150,
-      "ask": "never"
-    },
-    {
       "key": "hub.threadFolder",
       "question": "Which folder do the hub's threads start in, such as ~/notes? The hub starts its disk alerts there. Hedge adds it as a T3 Code project when T3 does not know it yet.",
       "type": "string",
@@ -111,7 +111,7 @@
     },
     {
       "key": "hub.proxyAccounts",
-      "question": "How many of your own subscriptions must the hub's proxy hold before hedge cli-proxy doctor passes? They are Claude subscriptions, or Codex ones on the Codex plan.",
+      "question": "How many of your own subscriptions should the hub's proxy hold? Below that, hedge doctor shows a To do line, and nothing fails. They are Claude subscriptions, or Codex ones on the Codex plan.",
       "type": "number",
       "default": 2,
       "ask": "never"
@@ -195,21 +195,6 @@
       "sentence": "The hub keeps SSH tunnels and T3 links to every devbox open, so each one can start threads on the others."
     },
     {
-      "id": "dream",
-      "name": "Dream",
-      "default": false,
-      "needs": [
-        "hub",
-        "gh"
-      ],
-      "settings": [
-        "hub.alias",
-        "hub.dreamSessions"
-      ],
-      "sentence": "Each night, the hub reads the day's agent sessions from every machine and opens one draft pull request that adds to, condenses, and prunes your shared memory.",
-      "risk": "Every run sends your agent sessions to an analyst model and spends your AI plan's usage, so it starts off. Your session text stays on the hub for 14 days."
-    },
-    {
       "id": "own-account-balancing",
       "name": "Own-account balancing",
       "default": false,
@@ -238,7 +223,20 @@
         "hub.proxyHistoryDays"
       ],
       "sentence": "The hub's proxy serves its management panel on loopback, with quota history, drain forecasts, and buttons that spend a subscription's banked weekly or Fable reset.",
-      "risk": "The panel can change the proxy's settings and subscriptions, and spend banked resets, which do not come back. It also turns on CLIProxyAPI's plugins, so anyone with the management key can install and run other plugins from CLIProxyAPI's plugin store on the hub; hedge cli-proxy doctor fails on any plugin besides Hedge's pinned quota-ledger. It listens only on the hub's loopback port 8317, which the SSH tunnels also carry to your devboxes and boxes, and it asks for the management key, which stays on the hub. Every tunnelled client reaches the proxy as 127.0.0.1, so 5 wrong sign-ins from any machine ban 127.0.0.1 from the management API for 30 minutes. That also stops the hub's balancer and hedge cli-proxy doctor until the ban ends. Hedge does not route it through the hub's HTTPS."
+      "risk": "The panel can change the proxy's settings and subscriptions, and spend banked resets, which do not come back. It also turns on CLIProxyAPI's plugins, so anyone with the management key can install and run other plugins from CLIProxyAPI's plugin store on the hub; hedge cli-proxy doctor fails on any plugin besides Hedge's pinned quota-ledger, and hedge apply then keeps Claude Code and Codex on the hub off the proxy. It listens only on the hub's loopback port 8317, which the SSH tunnels also carry to your devboxes and boxes, and it asks for the management key, which stays on the hub. Every tunnelled client reaches the proxy as 127.0.0.1, so 5 wrong sign-ins from any machine ban 127.0.0.1 from the management API for 30 minutes. That also stops the hub's balancer and hedge cli-proxy doctor until the ban ends. Hedge does not route it through the hub's HTTPS."
+    },
+    {
+      "id": "provider-recovery",
+      "name": "Provider recovery",
+      "default": false,
+      "needs": [
+        "hub"
+      ],
+      "sentence": "Threads that stop on a usage limit or a provider outage continue by themselves once the provider answers again.",
+      "risk": "Sends continue messages to stopped threads without you in the room, and starts an alert thread in the hub's thread folder.",
+      "requires": [
+        "own-account-balancing"
+      ]
     }
   ],
   "config": [
@@ -391,22 +389,6 @@
       }
     },
     {
-      "id": "dream",
-      "command": [
-        "hedge",
-        "dream",
-        "run"
-      ],
-      "schedule": {
-        "every": "1d",
-        "at": "04:10"
-      },
-      "roles": [
-        "hub"
-      ],
-      "workflow": "dream"
-    },
-    {
       "id": "peers-renew",
       "command": [
         "hedge",
@@ -471,6 +453,21 @@
         "codex",
         "both"
       ]
+    },
+    {
+      "id": "recover",
+      "command": [
+        "hedge",
+        "recover"
+      ],
+      "schedule": {
+        "every": "5m"
+      },
+      "roles": [
+        "hub",
+        "devbox"
+      ],
+      "workflow": "provider-recovery"
     }
   ],
   "human": [
@@ -646,6 +643,28 @@
         "codex",
         "both"
       ]
+    },
+    {
+      "id": "claude-wrapper",
+      "run": [
+        "hedge",
+        "claude-wrapper",
+        "bind"
+      ],
+      "check": [
+        "hedge",
+        "claude-wrapper",
+        "check"
+      ],
+      "workflow": "provider-recovery",
+      "plans": [
+        "claude",
+        "both"
+      ],
+      "roles": [
+        "hub",
+        "devbox"
+      ]
     }
   ],
   "checks": [
@@ -663,13 +682,49 @@
       "workflow": "devbox-tokens"
     },
     {
+      "id": "cli-proxy-accounts",
+      "run": [
+        "hedge",
+        "cli-proxy",
+        "accounts"
+      ],
+      "say": "Hedge cannot count the subscriptions in your own-account proxy. Run hedge cli-proxy doctor on the hub to see why.",
+      "todo": "Add your own Claude subscriptions to the own-account proxy, until it holds as many that work as hub.proxyAccounts asks for (2 by default). hedge cli-proxy accounts says how many work now. Run on the hub, once for each subscription: ~/.local/share/hedge-cli-proxy/cli-proxy-api -config ~/.local/share/hedge-cli-proxy/config.yaml -claude-login -no-browser",
+      "roles": [
+        "hub"
+      ],
+      "plans": [
+        "claude",
+        "both"
+      ],
+      "workflow": "own-account-balancing"
+    },
+    {
+      "id": "cli-proxy-codex-accounts",
+      "run": [
+        "hedge",
+        "cli-proxy",
+        "accounts"
+      ],
+      "say": "Hedge cannot count the subscriptions in your own-account proxy. Run hedge cli-proxy doctor on the hub to see why.",
+      "todo": "Add your own Codex subscriptions to the own-account proxy, until it holds as many that work as hub.proxyAccounts asks for (2 by default). hedge cli-proxy accounts says how many work now. Run on the hub, once for each subscription: ~/.local/share/hedge-cli-proxy/cli-proxy-api -config ~/.local/share/hedge-cli-proxy/config.yaml -codex-login -no-browser",
+      "roles": [
+        "hub"
+      ],
+      "plans": [
+        "codex"
+      ],
+      "workflow": "own-account-balancing"
+    },
+    {
       "id": "cli-proxy-client",
       "run": [
         "hedge",
         "cli-proxy",
         "check"
       ],
-      "say": "Claude Code cannot reach your own-account proxy, so hedge apply keeps it on its own sign-in until the proxy answers. Run hedge cli-proxy check here to see why.",
+      "say": "Claude Code cannot reach your own-account proxy, or the proxy is not safe to use, so hedge apply keeps it on its own sign-in. Run hedge cli-proxy check here to see why.",
+      "todo": "Claude Code keeps its own sign-in, because the own-account proxy on the hub lists no Claude model yet, or this machine has no proxy key from the hub yet. Most often the proxy holds none of your Claude subscriptions that work. Run hedge cli-proxy doctor on the hub: it counts them, says so when one works but the proxy still lists no Claude model, and prints the command that hands a machine its proxy key. The first hedge apply after the proxy lists a Claude model sends Claude Code to the proxy. Add a subscription on the hub with: ~/.local/share/hedge-cli-proxy/cli-proxy-api -config ~/.local/share/hedge-cli-proxy/config.yaml -claude-login -no-browser",
       "roles": [
         "hub",
         "devbox"
@@ -688,7 +743,8 @@
         "check",
         "codex"
       ],
-      "say": "Codex cannot reach your own-account proxy, so hedge apply keeps it on its own sign-in until the proxy answers. Run hedge cli-proxy check codex here to see why.",
+      "say": "Codex cannot reach your own-account proxy, or the proxy is not safe to use, so hedge apply keeps it on its own sign-in. Run hedge cli-proxy check codex here to see why.",
+      "todo": "Codex keeps its own sign-in, because the own-account proxy on the hub lists no Codex model yet, or this machine has no proxy key from the hub yet. Most often the proxy holds none of your Codex subscriptions that work. Run hedge cli-proxy doctor on the hub: it counts them, says so when one works but the proxy still lists no Codex model, and prints the command that hands a machine its proxy key. The first hedge apply after the proxy lists a Codex model sends Codex to the proxy. Add a subscription on the hub with: ~/.local/share/hedge-cli-proxy/cli-proxy-api -config ~/.local/share/hedge-cli-proxy/config.yaml -codex-login -no-browser",
       "roles": [
         "hub",
         "devbox"
@@ -721,30 +777,21 @@
       "pool",
       "help"
     ],
+    "claude-wrapper": [
+      "bind",
+      "check"
+    ],
     "cli-proxy": [
       "plan",
       "install",
       "doctor",
+      "accounts",
       "catalog",
       "connect",
       "disconnect",
       "check",
       "remove",
       "left"
-    ],
-    "dream": [
-      "digest",
-      "run",
-      "collect",
-      "prepare",
-      "analyze",
-      "audit",
-      "logs",
-      "search",
-      "publish",
-      "scorecard",
-      "budget",
-      "help"
     ],
     "hub-https": [
       "plan",

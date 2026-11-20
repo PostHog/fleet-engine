@@ -20,6 +20,14 @@ _Avoid_: Module, plugin, add-on, extension, group
 The one pack every user gets.
 _Avoid_: Core, default pack
 
+**In every Hedge**:
+The packs every setup gets: Base, and Hub on the hub. The site shows them without a switch.
+_Avoid_: Required packs, core packs
+
+**Old pack name**:
+The name a pack had before it moved into another pack, such as `context-library` for Memory and `recovery` for Hub. A profile that still lists it keeps working: Hedge reads it as the new pack, with only the old pack's workflows on, and keeps the profile as it is.
+_Avoid_: Legacy pack, deprecated pack
+
 **Seed**:
 A verb only: to bring an outside pack or plugin into Hedge, such as a Claude plugin marketplace. Hedge has no seed command yet. Never call a pack a seed.
 _Avoid_: Import, install (for an outside pack), seeds (for packs)
@@ -37,7 +45,7 @@ One person's repo of what their agents learn and record: memory, dreams, notes, 
 _Avoid_: Personal repo, notes repo, knowledge base
 
 **Workflow**:
-One way of working a pack offers, described in one plain sentence. It is on when its pack is on, the profile does not turn it off, and everything it needs holds.
+One way of working a pack offers, described in one plain sentence. It is on when its pack is on, the profile does not turn it off, everything it needs holds, and every setting it waits for is set.
 _Avoid_: Feature, capability
 
 **Preset**:
@@ -64,8 +72,12 @@ _Avoid_: Local config, state file
 
 ## Machines
 
+**Cloud box**:
+A Linux machine in the cloud, such as a Coder workspace: the hub or a node. Hedge runs only on cloud boxes. The Mac and the phone run only the T3 Code app, and Hedge installs nothing on them.
+_Avoid_: Mac only, local setup
+
 **Devbox**:
-A Linux machine, local or in the cloud, where agents and T3 threads run. A Coder workspace is a devbox from its first `hedge apply`, and signs Git commits with its Coder key.
+A cloud box that Hedge set up, where agents and T3 threads run. A Coder workspace is a devbox from its first `hedge apply`, and signs Git commits with its Coder key.
 _Avoid_: Coding box, agent box
 
 **Node**:
@@ -73,7 +85,7 @@ A devbox that stays on, where T3 threads do the work. The hub links the nodes an
 _Avoid_: Worker box
 
 **Hub**:
-The one machine that the profile's `hub` names, with `hedge hub here`. It runs the items placed on the hub and manages the other machines.
+The one cloud box that the profile's `hub` names, with `hedge hub here`. Setup starts on it. It runs the items placed on the hub, keeps the pack secrets, such as the Slack, incident.io, and MCP gateway sign-ins, adds the nodes with `hedge devbox add`, and manages them.
 _Avoid_: Controller, master box
 
 ## Threads
@@ -133,11 +145,11 @@ The lines a pull request adds and deletes against the commit where it branched f
 _Avoid_: Diff size, LOC
 
 **Stop rule**:
-A review round runs after another review only when the latest finished review, a round or a final read, found a bug in production code that the pull request introduced. Such a finding is a blocker or a major on a production file, or one without a file. It is not a TESTS item, it does not start with `[base]`, and it is not answered rejected or known. Without one, `hedge proof review` refuses the round, and only the user's `--override` runs it. Fixes since the last round get a final read.
+A review round runs after another review only when the latest finished review, a round or a final read, found a bug in production code that the pull request introduced. Such a finding states its severity as blocker or major, and its location field names a production file or no file. It is not a TESTS item, none of its fields starts with `[base]`, and it is not answered rejected or known. Without one, `hedge proof review` refuses the round and prints the question that asks the user, and only the user's `--override` runs it. The first panel of a pull request still runs, since the gate needs it. Fixes since the last round get a final read.
 _Avoid_: Round limit, cutoff
 
 **Sanity pass**:
-A check that a pull request needs when its production lines at HEAD are more than twice the lines at its first reviewed commit. Before the next round, the agent cuts the pull request back to base behaviour or justifies the growth, and records the verdict with `hedge proof sanity --verdict cut|justified --reason '<why>'`. A pass covers the production lines it saw, so a head that grows again needs a new pass. A first review that saw no production lines needs none.
+A check that a pull request needs when its production lines at HEAD are more than twice the lines at its first reviewed commit. Before the next round, the agent cuts the pull request back to base behaviour or justifies the growth, and records the verdict with `hedge proof sanity --verdict cut|justified --reason '<why>'`. The latest pass covers the production lines it saw, so a head that grows again needs a new pass. A round the user's `--override` runs waits for the pass too. The reason must not hold figures. A first review that saw no production lines needs none.
 _Avoid_: Bloat check
 
 ## Secrets

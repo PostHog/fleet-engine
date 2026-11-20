@@ -400,7 +400,7 @@ export const acceptGap = (pr: Checkout, kind: string, ...more: string[]) => pr.d
 export const graded = (tier: string, grade = "low") => `## Merge risk\n\n<!-- merge-risk -->\n> [!NOTE]\n> 🔵 **Merge risk: ${grade}** · two-way door\n> - **Tier:** ${tier}\n<!-- /merge-risk -->\n`;
 
 export async function finishRound(pr: Checkout, round: string) {
-  writeFileSync(join(pr.repository, "findings.md"), `Findings of ${round}.\n`);
+  writeFileSync(join(pr.repository, "findings.md"), `- major | Findings of ${round}.\n`);
   await pr.hedge("review-finish", "--round", round, "--reviewer", "gpt-6.1-sol", "findings.md");
 }
 

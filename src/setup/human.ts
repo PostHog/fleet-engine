@@ -10,10 +10,23 @@ export const pollMs = 2000;
 /** Polls left once the sign-in command finished well, for the probe to see the new sign-in, such as a T3 Connect tunnel after its restart. */
 const graceAfterExit = 15;
 
-function ended(signIn: SignIn, code: number) {
+function ended(signIn: SignIn, code: number, rerun = "hedge setup") {
   const name = signIn.command![0];
-  if (code === 127) return `${name} is not installed here. Install it, then run hedge setup again.`;
-  return `${signIn.command!.join(" ")} ended${code ? ` with code ${code}` : ""}, but ${signIn.title} still does not pass its check. Fix what it says above, then run hedge setup again.`;
+  if (code === 127) return `${name} is not installed here. Install it, then run ${rerun} again.`;
+  return `${signIn.command!.join(" ")} ended${code ? ` with code ${code}` : ""}, but ${signIn.title} still does not pass its check. Fix what it says above, then run ${rerun} again.${signIn.whenItFails ? ` ${signIn.whenItFails} Then run ${rerun} again.` : ""}`;
+}
+
+export class SignInKept extends Error {}
+
+const kept = (signIn: SignIn) => signIn.probe().catch((error: unknown) => {
+  if (error instanceof SignInKept) return error;
+  throw error;
+});
+
+function keptNeeds(signIn: SignIn, held: SignInKept, terminal: Terminal, rerun = "hedge setup"): StepOutcome {
+  terminal.print(`  Needs you: ${signIn.title}`);
+  terminal.print(`  ${held.message} Fix that, then run ${rerun} again.`);
+  return "unanswered";
 }
 
 export type SignIn = {
@@ -29,12 +42,13 @@ export type SignIn = {
   /** The command ends by itself and may still work after the probe passes, such as a repair that applies the profile: setup waits for it instead of stopping it. */
   finishes?: true;
   url?: string;
+  whenItFails?: string;
   /** Runs once the probe passes, before the step counts as done. */
   after?(): Promise<void>;
 };
 
-/** chat: setup runs in an agent's chat, so it waits for a browser sign-in though it asks nothing. */
-export type HumanContext = { terminal: Terminal; machine: Machine; nonInteractive: boolean; chat?: boolean; waited?(): void };
+/** chat: setup runs in an agent's chat, so it waits for a browser sign-in though it asks nothing. rerun: the command that picks up where a failed sign-in stopped. */
+export type HumanContext = { terminal: Terminal; machine: Machine; nonInteractive: boolean; chat?: boolean; waited?(): void; rerun?: string };
 
 /**
  * A step that needs the person: it checks first, then starts the sign-in,
@@ -45,11 +59,13 @@ export function humanStep(signIn: SignIn, context: HumanContext): Step {
   return { id: signIn.id, title: signIn.title, minutes: signIn.minutes, kind: "human", run: () => waitForPerson(signIn, context) };
 }
 
-async function waitForPerson(signIn: SignIn, { terminal, machine, nonInteractive, chat, waited }: HumanContext): Promise<StepOutcome> {
-  if (await signIn.probe()) {
+async function waitForPerson(signIn: SignIn, { terminal, machine, nonInteractive, chat, waited, rerun }: HumanContext): Promise<StepOutcome> {
+  const first = await kept(signIn);
+  if (first === true) {
     terminal.print(`  ✓ ${signIn.title}: already done`);
     return signIn.after?.();
   }
+  if (first instanceof SignInKept) return keptNeeds(signIn, first, terminal, rerun);
   if (nonInteractive && !(chat && !signIn.interactive)) {
     terminal.print(`  Needs you: ${signIn.title}`);
     terminal.print(`  ${howToStart(signIn)}`);
@@ -58,7 +74,7 @@ async function waitForPerson(signIn: SignIn, { terminal, machine, nonInteractive
   waited?.();
   terminal.print(`▶ ${signIn.title}  (step needs you, about ${signIn.minutes} min)`);
   terminal.print(`  ${signIn.why}`);
-  if (signIn.interactive && signIn.command) return withKeyboard(signIn, { terminal, machine, nonInteractive });
+  if (signIn.interactive && signIn.command) return withKeyboard(signIn, { terminal, machine, nonInteractive, rerun });
   const started = signIn.command && (terminal.print(`  $ ${signIn.command.join(" ")}`), machine.start(signIn.command));
   if (signIn.url) {
     await machine.openUrl(signIn.url);
@@ -71,8 +87,12 @@ async function waitForPerson(signIn: SignIn, { terminal, machine, nonInteractive
     let pollsAfterExit = 0;
     for (;;) {
       await machine.sleep(pollMs);
-      if (await signIn.probe()) break;
-      if (exit !== undefined && (exit !== 0 || ++pollsAfterExit > graceAfterExit)) throw new Error(ended(signIn, exit));
+      const passed = await kept(signIn);
+      if (passed === true) break;
+      if (exit !== undefined && (exit !== 0 || ++pollsAfterExit > graceAfterExit)) {
+        if (passed instanceof SignInKept) return keptNeeds(signIn, passed, terminal, rerun);
+        throw new Error(ended(signIn, exit, rerun));
+      }
     }
   } finally {
     if (!signIn.finishes) started?.stop();
@@ -82,18 +102,35 @@ async function waitForPerson(signIn: SignIn, { terminal, machine, nonInteractive
   return signIn.after?.();
 }
 
+export function optionalStep(signIn: SignIn, { terminal, rerun = "hedge setup" }: HumanContext, notNeeded: string): Step {
+  return {
+    id: `${signIn.id}:optional`,
+    title: signIn.title,
+    minutes: signIn.minutes,
+    kind: "auto",
+    async run() {
+      const passed = await kept(signIn);
+      if (passed === true) return void terminal.print(`  ✓ ${signIn.title}: already done`);
+      const next = passed instanceof SignInKept ? `${passed.message} Fix that, then run ${rerun} again.` : `${howToStart(signIn)}.`;
+      terminal.print(`  To do: ${signIn.title}. ${notNeeded} ${next}`);
+    },
+  };
+}
+
 function howToStart({ command, interactive, url, why }: SignIn) {
   const open = url ? `open ${url}` : undefined;
   if (!command) return open ? `Open ${url}` : why;
   return `${interactive ? "In a terminal, run" : "Run"}: ${command.map(quote).join(" ")}${open ? `, and ${open}` : ""}`;
 }
 
-async function withKeyboard(signIn: SignIn, { terminal, machine }: HumanContext): Promise<StepOutcome> {
+async function withKeyboard(signIn: SignIn, { terminal, machine, rerun }: HumanContext): Promise<StepOutcome> {
   terminal.print(`  $ ${signIn.command!.join(" ")}`);
   terminal.print("  It needs your keyboard. Setup goes on when it ends.");
   terminal.release?.();
   const code = await machine.run(signIn.command!, { input: true });
-  if (!(await signIn.probe())) throw new Error(ended(signIn, code));
+  const passed = await kept(signIn);
+  if (passed instanceof SignInKept) return keptNeeds(signIn, passed, terminal, rerun);
+  if (!passed) throw new Error(ended(signIn, code, rerun));
   terminal.print(`  ✓ ${signIn.title}: done`);
   return signIn.after?.();
 }

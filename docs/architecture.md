@@ -302,12 +302,39 @@ and Hedge does not wrap it in a unit.
     pack owns only the probe, a check. The config items say `after: route`.
   - *Apply while the proxy does not answer:* the gate fails, the two items
     leave the plan, and the adapter removes its own values. Claude Code
-    uses its own sign-in. A key that holds exactly the pack's value also
-    goes when no apply recorded it, as after `hedge cli-proxy connect`,
-    and while a pack source cannot be fetched. The items that wait for
-    one check go together, so they all stay when one holds another value.
+    uses its own sign-in. The adapter removes only the keys that its
+    record names, also while a pack source cannot be fetched.
+    `hedge cli-proxy connect` writes neither key and runs nothing: it saves
+    the proxy key, and the next `hedge apply` writes the route, so every
+    route Hedge writes has a record. When the hub hands a box over, it runs
+    `hedge apply` on the box as its own SSH step after connect.
+  - *One route:* a provider's route is one unit. For Claude it is the
+    base URL and the key helper. For Codex it is `model_provider` and the
+    `hedge-proxy` table. When another pack or the profile sets a key over
+    any part of the unit, or the route check drops a part, the whole unit
+    leaves the plan. `wholeRoutes` applies this rule in resolve, after the
+    profile overrides, and in apply, after the checks, so `hedge apply`
+    and `hedge doctor` see the same plan. The adapter writes the route
+    keys of a provider together or not at all, and removes them together. Each time the route leaves,
+    for any reason, the settings beside it that only work through it leave
+    too: a Claude credential such as `ANTHROPIC_AUTH_TOKEN` beside Hedge's
+    proxy address, or a Codex `model_provider = "hedge-proxy"` beside
+    Hedge's table. Apply shows a `To do:` that names each one, never its
+    value, and says only what it removed. A credential stays
+    only while its value equals the value a pack sets for it now; a value
+    you edited leaves with the route. The route leaves when the file holds
+    Hedge's proxy value before apply and another value or none after it,
+    also when a profile gateway takes the place of Hedge's address. A gateway from your profile is not
+    Hedge's route: its keys leave one by one, as on the base.
+  - *One owner of the proxy values:* only the Hub pack may set
+    `model_provider = "hedge-proxy"`, the `hedge-proxy` table, Hedge's
+    proxy address as the Claude base URL, or Hedge's key helper as the
+    Claude `apiKeyHelper`. Resolve refuses a profile or
+    another pack that sets one, and names the pack and the setting.
   - *Until recovery:* each `hedge apply` and `hedge doctor` reports the
-    failed check. The first apply whose probe passes writes both keys
+    failed check. A node with no proxy key from the hub waits for the
+    person: its check exits 4, so apply shows the check's `To do:`, which
+    names the hub step that adds a subscription, and not a `Fix:`. The first apply whose probe passes writes both keys
     again. Between applies nothing changes the route.
   *Reason:* today the adapter writes the keys and then a step removes them
   (`route`, `packs/hub/lib/cli-proxy.ts:198-204`): two writers of one key.
@@ -593,10 +620,11 @@ what the port changes. The Hub pack is gone after step 4.
 | Today | v2 pack | Items and placement | Behavior change at the port |
 | --- | --- | --- | --- |
 | Base | `base` | Instructions, model table, the dispatcher and its hooks, T3 defaults, update and prune jobs: nodes. Disk watch: hub. | None |
-| Pull requests | `pull-requests` | Guides, settings, `hedge pr`, `hedge proof`: nodes. Owns the seam `pull-requests/review-bot`. | None |
-| Orchestration | `orchestration` | Commands: nodes. Three T3 tasks: hub. | Each task runs once, on the hub. Today it is planned on the hub and on every devbox. |
+| Quality gates | `pull-requests` | Guides, settings, `hedge pr`, `hedge proof`: nodes. The quality loop, signal loop, and PR digest tasks: hub. Owns the seam `pull-requests/review-bot`. | Each task runs once, on the hub. Today it is planned on the hub and on every devbox. |
+| Orchestration | `orchestration` | Maps, side threads, and parking: commands and skills on nodes. | None |
 | Communication | `communication` | Instructions and skills: nodes. | None |
-| Memory | `memory` | Config, sync job, memory-cap hook: nodes. Dream job and skill: hub. | Dream moves in. Placement was the only reason that it lived in the Hub pack. |
+| Memory | `memory` | Config, sync job, memory-cap hook, the context library's prompt hook and sync: nodes. Dream job and skill: hub. | None. Dream and the Context library pack moved in before the port. A profile that lists `context-library` gets only the library. |
+| Hub: provider recovery | `cli-proxy` | The recovery sweep and the `claude` wrapper step: hub and each devbox. | None. The Recovery pack moved into the Hub pack before the port, and its workflow needs own-account balancing. A profile that lists `recovery` gets only that workflow. |
 | Hub: MCP gateway | `mcp-gateway` | Served service under Docker's restart policy, install check with a Hedge repair: hub. Client check, MCP config entries with the bridge: nodes. | Each node pulls its key during apply. `hedge mcphub grant` by hand goes. The sign-in command prints the authorization URL, not a page that Caddy serves. |
 | Hub: own-account balancing | `cli-proxy` | Service with `serve`, balance job: hub. Route check, two gated config keys: Linux nodes. | A Linux node that is not a devbox also gets the route. The route step goes (D15). |
 | Hub: boxes | `boxes` | `hedge box`, sweep and nightly jobs, and a Claude token step: hub. Restore job: `os: "linux"`. | `hedge box` on a node runs on the hub over `ssh`. A plain Linux node also gets the restore job. A Mac never does. |
@@ -702,7 +730,7 @@ The real machines run the private Fleet, not the engine.
    Each devbox renders its own `ssh -L` forward with the catalog's ports, pull
    credentials with `hedge credential`, and run a hub command from a node.
    A second spare devbox joins as a node.
-4. **Finish the split.** `cli-proxy`, `boxes`, `peers`, Dream to Memory,
+4. **Finish the split.** `cli-proxy` with provider recovery, `boxes`, `peers`,
    disk watch to Base, and the other engine packs. Each port states its
    change and keeps the contracts of section 7. Finish D19. Delete the Hub
    pack.

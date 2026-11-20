@@ -88,10 +88,10 @@ async function preToolUse(home: string, provider: "claude" | "codex", call: Tool
 const bash = (command: string, cwd = "/"): ToolCall => ({ tool_name: "Bash", tool_input: { command }, cwd });
 
 describe("the Guards pack", () => {
-  test("installs no hook until the shell guards are turned on", () => {
+  test("installs the hook as soon as the pack is on, and none once the shell guards are turned off", () => {
     const hook = ".config/hedge/hooks/PreToolUse/guards.ts";
-    expect(withGuards({}).files.map((file) => file.target)).not.toContain(hook);
-    expect(withGuards().files.map((file) => file.target)).toContain(hook);
+    expect(withGuards({}).files.map((file) => file.target)).toContain(hook);
+    expect(withGuards({ "shell-guards": false }).files.map((file) => file.target)).not.toContain(hook);
   });
 
   test("installs gh stack and its pinned install step only with the gh-stack workflow", () => {
