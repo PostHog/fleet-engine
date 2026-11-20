@@ -104,7 +104,7 @@ const productionLines = (identity: ProofIdentity, run: Run) => {
 export type DiffSize = { production: number; tests: number; docs: number };
 
 export function forkPoint(identity: ProofIdentity, run: Run, baseSha: string) {
-  const found = run(["git", "merge-base", identity.commit, baseSha]);
+  const found = run(["env", "GIT_NO_LAZY_FETCH=1", "git", "merge-base", identity.commit, baseSha]);
   return found.code === 0 && found.stdout.trim() || undefined;
 }
 
