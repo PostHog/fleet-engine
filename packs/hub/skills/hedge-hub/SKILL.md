@@ -114,11 +114,14 @@ the person's own subscriptions, never for someone else's.
   `codex-pro`, because a Business seat refuses them. Upstream's own entry
   replaces the copy once it appears.
 - **Subscriptions.** The person adds each of their own Claude accounts on the
-  hub, or their Codex accounts on the `codex` plan. `hedge cli-proxy doctor`
-  prints the login command until the proxy holds `hub.proxyAccounts` of them
-  (2 by default). On the `both` plan it counts Claude subscriptions and names
-  the Codex ones beside them. Keep the login URL and callback values out of
-  logs and Git.
+  hub, or their Codex accounts on the `codex` plan. Setup never waits for
+  them: the proxy installs and runs with none. Until the proxy holds
+  `hub.proxyAccounts` of them that work (2 by default), `hedge apply` and
+  `hedge doctor` show a `To do:` line with the login command, and nothing
+  fails. `hedge cli-proxy accounts` counts them; it exits 4 while too few
+  work. On the `both` plan it counts Claude subscriptions, and
+  `hedge cli-proxy doctor` names the Codex ones beside them. Keep the login
+  URL and callback values out of logs and Git.
 - **The balancer.** Every 5 minutes, `hedge cli-proxy-balance` reads the weekly
   usage of each subscription and gives the highest priority to the one whose
   weekly quota resets first. A full or unreadable subscription gets priority
@@ -138,8 +141,7 @@ the person's own subscriptions, never for someone else's.
   on the hub finds it. When the proxy says a subscription's login expired
   (`invalid_grant`) while that subscription fails, the balancer's log line says
   so, and `hedge cli-proxy doctor` warns with the same short id and its sign-in
-  command. The doctor counts only working
-  subscriptions toward the minimum and fails when too few work. Usage that is
+  command. Only working subscriptions count toward `hub.proxyAccounts`. Usage that is
   unreadable for another reason has no such warning: it clears on a later run.
 - **Claude Code.** On the `claude` and `both` plans, on the hub and on each
   devbox, Hedge sets `env.ANTHROPIC_BASE_URL` to the proxy and `apiKeyHelper`
@@ -149,15 +151,37 @@ the person's own subscriptions, never for someone else's.
   `model_provider` to `hedge-proxy`, a provider that reads the same key file.
 - **Devboxes.** The hub's SSH tunnel to each devbox carries port 8317. On the
   hub, `hedge cli-proxy doctor` prints one connect command per devbox; it
-  sends the key on standard input. Boxes get the key and connect when the hub
-  hands them over.
+  sends the key on standard input, then runs `hedge apply` on the devbox.
+  Connect only saves the key, and `hedge apply` writes the Claude and Codex
+  settings. When the hub
+  hands a box over, it sends the key, runs connect, then runs `hedge apply`
+  on the box. When that apply exits 0, the hub says when an agent there
+  keeps its own sign-in. When it exits nonzero, a timeout included, the hub
+  says only the exit code and `hedge box run <box> -- hedge apply`.
 - **When the proxy is down.** Hedge's Claude settings wait for
   `hedge cli-proxy check`, and its Codex settings wait for
-  `hedge cli-proxy check codex`. Both checks only read. When the proxy does
-  not serve an agent with this machine's key, `hedge apply` leaves that
+  `hedge cli-proxy check codex`. Both checks only read. On the hub, both
+  also fail while `hedge cli-proxy doctor` finds the proxy unsafe: a plugin
+  Hedge did not install, or panel files that do not match their pins. When
+  the proxy is unsafe, or does not serve an agent with this machine's key,
+  `hedge apply` leaves that
   agent's settings out and removes Hedge's own values, so the agent uses its
-  own sign-in, and the next apply changes nothing. `hedge apply` and
-  `hedge doctor` name the failed check. The first apply after the proxy
+  own sign-in, and the next apply changes nothing. A Claude credential
+  beside Hedge's proxy address leaves with it, unless a pack sets that same
+  value now, and a `To do:` names it. Only the Hub pack may set Hedge's
+  proxy values; a profile that sets one fails to load and names the
+  setting. `hedge apply` and
+  `hedge doctor` name the failed check. When the proxy answers the key but
+  lists no model for the agent, the check exits 4: the agent stays on its
+  own sign-in, and the line is a `To do:` with the login command, not a
+  failure. The `To do:` names the agent whose model is missing. Most often
+  the proxy holds none of that agent's subscriptions that work. Run
+  `hedge cli-proxy doctor` on the hub to tell the two cases apart: it counts
+  the subscriptions that work, and fails when one works but the proxy lists
+  no model for it. `hedge cli-proxy connect` then saves the key, and
+  `hedge apply` keeps the agent on its own sign-in until the proxy serves
+  it. A later apply then sends the agent there. Connect still changes nothing when the proxy
+  does not answer or refuses the key. The first apply after the proxy
   answers again sends the agent back to the proxy.
 - **The panel.** The Proxy panel workflow is off by default and needs
   own-account balancing. With

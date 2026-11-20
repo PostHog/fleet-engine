@@ -131,6 +131,18 @@ describe("an engine in a Fleet path from before the rename", () => {
     expect(bothTrees(machine.home)).toEqual(before);
   });
 
+  test("on a Mac, the notice points at the setup page and at the get.sh run that stops Fleet there, since get.sh installs nothing on a Mac", async () => {
+    const machine = linuxMachine();
+    await beforeTheRename(machine);
+    const lines: string[] = [];
+    const code = await main(["prune", "--auto"], { home: machine.home, engineRoot: oldRoot(machine.home), platform: "darwin", env: {}, print: (line) => lines.push(line), run: async () => 0 });
+    expect(code).toBe(0);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toStartWith("Fleet is now Hedge. Hedge now runs on cloud boxes, not on a Mac.");
+    expect(lines[0]).toContain("Set up your hub at https://posthog.github.io/hedge/#start.");
+    expect(lines[0]).toEndWith("To stop the jobs of an earlier Fleet or Hedge on this Mac, run: curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh | sh");
+  });
+
   test("the launcher is inert when the path it was run by, or the path it resolves to, is a Fleet path", () => {
     const byName = temp.make("home-");
     mkdirSync(join(byName, ".local/share/fleet"), { recursive: true });

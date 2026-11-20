@@ -24,15 +24,15 @@ const timings = (home: string) => JSON.parse(readFileSync(timingsPath(home), "ut
 describe("hedge setup --chat", () => {
   test("asks nothing, and waits for each browser sign-in in the same run", async () => {
     const home = temp.make("home-");
-    const box = fakeMachine(home, { github: 3, claude: 2 }, { startedAt: start });
-    const result = await hedgeSetup(home, ["--chat", "--preset", "starter", "--plan", "claude", "--devbox", "skip"], [], box);
+    const box = fakeMachine(home, { github: 3, chatgpt: 2 }, { startedAt: start });
+    const result = await hedgeSetup(home, ["--chat", "--preset", "starter", "--plan", "codex", "--devbox", "skip"], [], box);
     expect(result.code).toBe(0);
     expect(result.prompts).toEqual([]);
     expect(box.opened).toEqual(["https://github.com/login/device"]);
     expect(result.output).not.toContain("Needs you");
     expect(result.output).toContain("  ✓ Sign in to GitHub: done");
-    expect(result.output).toContain("  ✓ Sign in to Claude: done");
-    expect(machineFile(home).setup.done).toContain("check");
+    expect(result.output).toContain("  ✓ Sign in to ChatGPT: done");
+    expect(result.output.indexOf("  ✓ Standalone: no proxy, hub, or tunnel")).toBeGreaterThan(result.output.indexOf("  ✓ Sign in to ChatGPT: done"));
   });
 
   test("leaves a sign-in that needs the keyboard open, and says to run it in a terminal, once the machine is usable", async () => {

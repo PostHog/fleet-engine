@@ -2,10 +2,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { PackManifest, Profile, ProfileFile, SettingValue } from "../pack/types.ts";
-import { bothChanged, loadProfile, saveAnswers } from "../profile/profile.ts";
+import { bothChanged, loadProfile, pullProfile, pushedBehind, pushedFirst, pushFailed, saveAnswers } from "../profile/profile.ts";
 import type { Machine } from "./commands.ts";
 import { defaultSources, engineRepo } from "./defaults.ts";
 import { profileFile } from "../legacy.ts";
+import { knowGitHub } from "./known-hosts.ts";
+import { withoutCredentials } from "../credentials.ts";
 import { releaseIn, releaseRefsAtHead } from "../update.ts";
 import type { Draft } from "./questions.ts";
 import type { Step } from "./runner.ts";
@@ -24,6 +26,7 @@ export type ProfileContext = {
   engineRoot: string;
   nonInteractive: boolean;
   draft: Draft;
+  current?: string;
   packs(): PackManifest[];
   /** Called once hedge.json holds every answer and is pushed: the draft is no longer needed. */
   saved(dir: string): Promise<void>;
@@ -89,19 +92,20 @@ function githubSlug(named: string, key: string) {
   return slug;
 }
 
-async function lookUp(machine: Machine, home: string, packs: PackManifest[], picked: string[]) {
+async function lookUp(machine: Machine, home: string, packs: PackManifest[], picked: string[], current?: string) {
   const { gh, exists, login: signedIn } = github(machine);
   const login = await signedIn();
   const personal = `${login}/${profileRepoName}`;
   const org = profileOrg(packs, picked);
   const team = org && `${org}/${profileRepoName}-${login}`;
-  const dir = profilePath(home);
-  const inUse = await clonedProfile(machine, dir, login);
+  const own = current ? await githubOrigin(machine, current) : undefined;
+  const dir = own && current ? current : profilePath(home);
+  const inUse = own ?? (await clonedProfile(machine, dir, login));
   const legacyTeam = org && `${org}/${legacyProfileRepoName}-${login}`;
   let found: string | undefined;
   for (const repo of [inUse, team, personal, legacyTeam, `${login}/${legacyProfileRepoName}`]) if (!found && repo && (await exists(repo))) found = repo;
   if (found && !same(found, personal)) await requirePrivate(machine, found);
-  if (found) await checkout(machine, dir, found);
+  if (found) await checkout(machine, home, dir, found);
   return { gh, login, exists, personal, org, team, dir, found };
 }
 
@@ -114,7 +118,7 @@ export async function existingProfile(machine: Machine, home: string, packs: Pac
 
 async function makeProfile(context: ProfileContext) {
   const { terminal, machine, home, draft } = context;
-  const { gh, login, exists, personal, org, team, dir, found } = await lookUp(machine, home, context.packs(), draft.packs ?? []);
+  const { gh, login, exists, personal, org, team, dir, found } = await lookUp(machine, home, context.packs(), draft.packs ?? [], context.current);
   const create = (repo: string, description: string) => machine.exec(["gh", "repo", "create", repo, "--private", "--description", description]);
   let profileRepo = found ?? team ?? personal;
   const saved = found ? savedSettings(dir) : {};
@@ -139,7 +143,8 @@ async function makeProfile(context: ProfileContext) {
     terminal.print(`      git -C ${dir} remote set-url origin https://github.com/${team}.git`);
   }
 
-  if (!found) await checkout(machine, dir, profileRepo);
+  if (!found) await checkout(machine, home, dir, profileRepo);
+  const target = await saveTarget(machine, dir);
   await git(machine, dir, "config", "user.name", login);
   await git(machine, dir, "config", "user.email", `${login}@users.noreply.github.com`);
   await startFiles(dir, context, same(profileRepo, team) ? org : undefined);
@@ -156,20 +161,93 @@ async function makeProfile(context: ProfileContext) {
     await git(machine, dir, "add", "--", ...started);
     await git(machine, dir, "commit", "-q", "-m", "Start my Hedge profile", "--", ...started);
   }
-  await saveAnswers(dir, answers);
-  await git(machine, dir, "branch", "-M", "main");
-  await git(machine, dir, "push", "-q", "-u", "origin", "main");
+  const answered = await saveAnswers(dir, answers);
+  await pushAnswers(machine, dir, target, answered || started.length > 0);
   terminal.print(`  ✓ Saved your answers in ${profileRepo}. Every machine of yours reads it.`);
   await context.saved(dir);
 }
 
+export async function saveSettings(machine: Machine, dir: string, settings: Record<string, SettingValue>) {
+  const target = await saveTarget(machine, dir);
+  await pullProfile(dir);
+  await pushAnswers(machine, dir, target, await saveAnswers(dir, { settings }));
+}
+
+export async function pushAnswers(machine: Machine, dir: string, target: string[], committed: boolean) {
+  const pushed = await machine.exec(["git", "-C", dir, "push", "-q", ...target]);
+  if (pushed.code !== 0) throw pushedBehind(pushed.output) ? new Error(pushedFirst(dir, committed)) : pushFailed(dir, pushed.output);
+}
+
 /** The profile repo this machine's clone already uses, when its name is one setup makes for this login. */
 async function clonedProfile(machine: Machine, dir: string, login: string) {
-  if (!existsSync(join(dir, ".git"))) return undefined;
-  const origin = await machine.exec(["git", "-C", dir, "config", "--get", "remote.origin.url"]);
-  const repo = githubRepoOf(origin.output.trim());
+  const repo = await githubOrigin(machine, dir);
   const ours = (name: string) => repo !== undefined && (repo.toLowerCase() === `${login}/${name}`.toLowerCase() || repo.toLowerCase().endsWith(`/${name}-${login}`.toLowerCase()));
   return ours(profileRepoName) || ours(legacyProfileRepoName) ? repo : undefined;
+}
+
+async function githubOrigin(machine: Machine, dir: string) {
+  if (!existsSync(join(dir, ".git"))) return undefined;
+  const origin = await machine.exec(["git", "-C", dir, "config", "--get", "remote.origin.url"]);
+  return origin.code === 0 ? githubRepoOf(origin.output.trim()) : undefined;
+}
+
+async function currentBranch(machine: Machine, dir: string) {
+  const head = await machine.exec(["git", "-C", dir, "symbolic-ref", "-q", "--short", "HEAD"]);
+  if (head.code !== 0) throw new Error(`${dir} is not on a branch. Check out the branch this machine uses, then run hedge setup again.`);
+  return head.output.trim();
+}
+
+async function upstreamOf(machine: Machine, dir: string, branch: string) {
+  const setting = async (key: string) => {
+    const value = await machine.exec(["git", "-C", dir, "config", "--get", `branch.${branch}.${key}`]);
+    return value.code === 0 ? value.output.trim() : undefined;
+  };
+  const remote = await setting("remote");
+  const merge = await setting("merge");
+  if (!remote || !merge) return undefined;
+  if (remote === "origin") return merge;
+  const tracked = remote === "." ? `the local branch ${merge.replace(/^refs\/heads\//, "")}` : `${remote}/${merge.replace(/^refs\/heads\//, "")}`;
+  throw new Error(`${dir} is on the branch ${branch}, which tracks ${tracked}, not origin. Setup takes and saves your answers only on origin, the repo it checks. Run git -C ${dir} branch --set-upstream-to origin/<branch>, then run hedge setup again.`);
+}
+
+async function trackedOnOrigin(machine: Machine, dir: string) {
+  const head = await machine.exec(["git", "-C", dir, "symbolic-ref", "-q", "--short", "HEAD"]);
+  return head.code === 0 ? upstreamOf(machine, dir, head.output.trim()) : undefined;
+}
+
+export async function fetchOrigin(machine: Machine, home: string, dir: string) {
+  await knowGitHub(machine, home, dir);
+  const fetched = await machine.exec(["git", "-C", dir, "fetch", "-q", "--prune", "origin"]);
+  return fetched.code === 0 ? undefined : lastLine(fetched.output);
+}
+
+export async function takeOrigin(machine: Machine, home: string, dir: string) {
+  const unreached = await fetchOrigin(machine, home, dir);
+  if (unreached !== undefined) throw new Error(`git fetch in ${dir} failed: ${unreached}`);
+  return takeFetched(machine, dir);
+}
+
+export async function takeFetched(machine: Machine, dir: string) {
+  const merge = await trackedOnOrigin(machine, dir);
+  if (!merge) return undefined;
+  const fetched = await machine.exec(["git", "-C", dir, "rev-parse", "@{upstream}"]);
+  if (fetched.code !== 0) {
+    if ((await machine.exec(["git", "-C", dir, "rev-parse", "--verify", "-q", "HEAD"])).code !== 0) return undefined;
+    throw new Error(`could not find ${merge} of origin in ${dir} after fetching origin: ${withoutCredentials(fetched.output.split("\n").find((line) => line.startsWith("fatal:")) ?? lastLine(fetched.output)).replace(/\.$/, "")}. Run git -C ${dir} pull, then run hedge setup again.`);
+  }
+  const merged = await machine.exec(["git", "-C", dir, "merge", "-q", "--ff-only", fetched.output.trim()]);
+  return merged.code === 0 ? undefined : merged;
+}
+
+export async function saveTarget(machine: Machine, dir: string) {
+  if ((await machine.exec(["git", "-C", dir, "rev-parse", "--verify", "-q", "HEAD"])).code !== 0) {
+    await git(machine, dir, "symbolic-ref", "HEAD", "refs/heads/main");
+    return ["-u", "origin", "main"];
+  }
+  const branch = await currentBranch(machine, dir);
+  const merge = await upstreamOf(machine, dir, branch);
+  if (!merge) throw new Error(`${dir} is on the branch ${branch}, which tracks no remote branch, so setup does not know where to save your answers. Run git -C ${dir} branch --set-upstream-to origin/<branch>, then run hedge setup again.`);
+  return ["origin", `HEAD:${merge}`];
 }
 
 const isPrivate = (visibility: string | undefined) => visibility === "PRIVATE" || visibility === "INTERNAL";
@@ -197,16 +275,12 @@ async function confirm({ terminal, nonInteractive }: ProfileContext, missing: st
   }
 }
 
-async function checkout(machine: Machine, dir: string, repo: string) {
+async function checkout(machine: Machine, home: string, dir: string, repo: string) {
   if (existsSync(join(dir, ".git"))) {
     const urls = (await machine.exec(["git", "-C", dir, "config", "--get-regexp", "^remote\\.origin\\.(push)?url$"])).output.trim().split("\n").map((line) => line.split(" ").slice(1).join(" "));
     const other = urls.find((url) => githubRepoOf(url)?.toLowerCase() !== repo.toLowerCase());
-    if (other !== undefined) throw new Error(`${dir} is a clone of ${other || "nothing"}, not ${repo}. Move it away, then run hedge setup again.`);
-    await git(machine, dir, "fetch", "-q", "origin");
-    const remote = await machine.exec(["git", "-C", dir, "rev-parse", "--verify", "-q", "origin/main"]);
-    if (remote.code !== 0) return;
-    const merged = await machine.exec(["git", "-C", dir, "merge", "-q", "--ff-only", "origin/main"]);
-    if (merged.code !== 0) throw new Error(`${bothChanged(dir, repo)} Move ${dir} away, then run hedge setup again: it clones ${repo} and saves your answers on top.`);
+    if (other !== undefined) throw new Error(`${dir} is a clone of ${other ? (githubRepoOf(other) ?? "another remote") : "nothing"}, not ${repo}. Move it away, then run hedge setup again.`);
+    if (await takeOrigin(machine, home, dir)) throw new Error(`${bothChanged(dir, repo)} Move ${dir} away, then run hedge setup again: it clones ${repo} and saves your answers on top.`);
     return;
   }
   if (existsSync(dir)) throw new Error(`${dir} exists and is not your profile. Move it away, then run hedge setup again.`);
@@ -259,7 +333,7 @@ async function git(machine: Machine, dir: string, ...args: string[]) {
   if (result.code !== 0) throw new Error(`git ${args[0]} in ${dir} failed: ${lastLine(result.output)}`);
 }
 
-const lastLine = (text: string) => text.trim().split("\n").at(-1) ?? "";
+const lastLine = (text: string) => withoutCredentials(text.trim().split("\n").at(-1) ?? "");
 
 export function profileGuide(packs: PackManifest[], sharedWith?: string) {
   const sections = packs

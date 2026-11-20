@@ -2,7 +2,7 @@
   {
     "id": "starter",
     "name": "Starter",
-    "blurb": "You get safe agent rules, tuned T3 defaults, and draft pull requests.",
+    "blurb": "You get safe agent rules, tuned T3 defaults, and quality gates: every change ends as a proven, reviewed draft pull request.",
     "packs": ["pull-requests"],
     "hubPacks": ["hub"],
     "workflows": {}
@@ -10,17 +10,17 @@
   {
     "id": "everyday",
     "name": "Everyday",
-    "blurb": "You get Starter, maps of tickets, side threads, and agents that write in your voice.",
-    "packs": ["pull-requests", "orchestration", "communication"],
+    "blurb": "You get Starter, maps of tickets, side threads, agents that write in your voice, and one memory that every box shares.",
+    "packs": ["pull-requests", "orchestration", "communication", "memory"],
     "hubPacks": ["hub"],
     "workflows": {}
   },
   {
     "id": "everything",
     "name": "Everything",
-    "blurb": "You get every pack that a Mac can run: Everyday, coding integrations, shared memory, a context library, guards, Slack, and incident.io paging. With a hub and a node, you also get the Hub, MCP gateway, Recovery, and Security packs, Slack threads, and the nightly loops.",
-    "packs": ["pull-requests", "orchestration", "communication", "integrations", "memory", "context-library", "guards", "slack", "incident-io"],
-    "hubPacks": ["hub", "mcp-gateway", "recovery", "security"],
-    "workflows": { "quality-loop": true, "signal-loop": true, "pr-digest": true, "shell-guards": true, "package-age": true }
+    "blurb": "You get every pack: Everyday, coding integrations, guards, Slack threads, incident.io paging, the nightly loops, and on the hub the MCP gateway and Wiz security reads.",
+    "packs": ["pull-requests", "orchestration", "communication", "integrations", "memory", "guards", "slack", "incident-io"],
+    "hubPacks": ["hub", "mcp-gateway", "security"],
+    "workflows": { "quality-loop": true, "signal-loop": true, "pr-digest": true }
   }
 ]

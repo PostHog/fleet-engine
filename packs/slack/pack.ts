@@ -34,7 +34,7 @@ export default {
       type: "string",
       default: "brain",
       ask: "never",
-      question: "Which Slack emoji saves a message and its thread to your context library? Give its name, such as brain. It works while the Context library pack is on.",
+      question: "Which Slack emoji saves a message and its thread to your context library? Give its name, such as brain. It works while the context library of the Memory pack is on.",
     });
     const nodes = hedge.setting({
       key: "slack.nodes",
@@ -46,9 +46,9 @@ export default {
     const threads = hedge.workflow({
       id: "slack-thread",
       name: "Start a thread from Slack",
-      default: false,
+      default: true,
       settings: [userId, emoji, captureEmoji, nodes],
-      sentence: "Your own Slack message or reaction with your trigger emoji (default :t3code:), or a mention of your Slack app starts a T3 thread, and Slack shows you its link. With the Context library pack on, your :brain: reaction saves the thread to your notes.",
+      sentence: "Your own Slack message or reaction with your trigger emoji (default :t3code:), or a mention of your Slack app starts a T3 thread, and Slack shows you its link. With the context library of the Memory pack on, your :brain: reaction saves the thread to your notes.",
       risk: "Your Slack messages and the threads they belong to become agent prompts. Only your own messages, reactions, and mentions start a thread.",
     });
     const hub = { on: "hub", when: threads } as const;

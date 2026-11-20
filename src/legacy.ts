@@ -48,6 +48,10 @@ export const isOldJob = (argv: string[]) => oldJob(argv) !== undefined;
 
 export const fleetIsHedge = "Fleet is now Hedge. Run: curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh | sh";
 
+export const hedgeOnMac = "Hedge now runs on cloud boxes, not on a Mac. Set up your hub at https://posthog.github.io/hedge/#start. To stop the jobs of an earlier Fleet or Hedge on this Mac, run: curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh | sh";
+
+export const fleetNotice = (platform: NodeJS.Platform) => (platform === "darwin" ? `Fleet is now Hedge. ${hedgeOnMac}` : fleetIsHedge);
+
 export const inLegacyPath = (target: string): boolean => legacyPaths.some(([before]) => target === before || target.startsWith(`${before}/`));
 
 export function renamed(target: string): string | undefined {

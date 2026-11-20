@@ -19,7 +19,7 @@ describe("hedge setup questions", () => {
     expect(result.code).toBe(0);
     expect(result.output).toContain("Hedge setup · 1 of 11 · about 16 min left");
     expect(result.output).toContain("Hedge setup · 4 of 11 · about 10 min left");
-    expect(result.output).toContain("  1) Everyday  Pull requests, Orchestration, Communication (default)");
+    expect(result.output).toContain("  1) Everyday  Quality gates, Orchestration, Communication, Memory (default)");
     expect(result.output).toContain("  ✓ Claude and ChatGPT");
     expect(machine(home)).toEqual({
       schema: 1,
@@ -29,7 +29,7 @@ describe("hedge setup questions", () => {
       devboxes: [],
       setup: { done: ["bootstrap", "github", "packs", "plans", "profile", "apply", "devbox", "claude", "apply-codex", "chatgpt", "check"] },
     });
-    expect(savedAnswers(home)).toMatchObject({ packs: ["pull-requests", "orchestration", "communication"], workflows: {}, plan: "both" });
+    expect(savedAnswers(home)).toMatchObject({ packs: ["pull-requests", "orchestration", "communication", "memory"], workflows: {}, plan: "both" });
     expect(result.applied).toEqual([profilePath(home), profilePath(home)]);
     expect(result.skipped).toEqual([["base/codex-cli"], []]);
   });
@@ -70,17 +70,17 @@ describe("hedge setup questions", () => {
   });
 
   test("keeps picks carried from the page with one key, or changes them with e", async () => {
-    const args = ["--preset", "everything", "--remove", "memory", "--workflows", "pr-digest=off", "--set", "pull-requests.freeReviews=3", "--plan", "claude"];
+    const args = ["--preset", "everything", "--remove", "slack", "--remove", "incident-io", "--workflows", "pr-digest=off", "--set", "pull-requests.freeReviews=3", "--plan", "claude"];
     const home = temp.make("home-");
     const kept = await hedgeSetup(home, args, ["", ""]);
     expect(kept.code).toBe(0);
-    expect(kept.output).toContain("  From your command: Pull requests, Orchestration, Communication, Integrations, Context library, Guards, Slack, incident.io\n");
+    expect(kept.output).toContain("  From your command: Quality gates, Orchestration, Communication, Integrations, Memory, Guards\n");
     expect(kept.output).toContain("  Workflows: pr-digest off");
     expect(kept.prompts).toEqual(["Press ↵ to keep them, or e to change them: ", "  Go ahead? (Y/n) "]);
     expect(savedAnswers(home)).toMatchObject({
       settings: { "pull-requests.freeReviews": 3 },
-      packs: ["pull-requests", "orchestration", "communication", "integrations", "context-library", "guards", "slack", "incident-io"],
-      workflows: { "quality-loop": true, "signal-loop": true, "shell-guards": true, "package-age": true },
+      packs: ["pull-requests", "orchestration", "communication", "integrations", "memory", "guards"],
+      workflows: { "quality-loop": true, "signal-loop": true },
       plan: "claude",
     });
 
@@ -92,14 +92,14 @@ describe("hedge setup questions", () => {
 
   test("picks packs one by one", async () => {
     const home = temp.make("home-");
-    const result = await hedgeSetup(home, [], ["4", "y", "n", "", "n", "y", "n", "n", "n", "n", "n", "n", "n", "n", "", ""]);
+    const result = await hedgeSetup(home, [], ["4", "y", "n", "", "y", "n", "n", "n", "n", "n", "n", "n", "", ""]);
     expect(result.code).toBe(0);
     expect(savedAnswers(home).packs).toEqual(["pull-requests", "communication", "memory"]);
-    expect(result.output).toContain("One always-on devbox manages the others");
+    expect(result.output).toContain("The hub links your boxes");
 
     const needs = temp.make("home-");
-    const picked = await hedgeSetup(needs, [], ["4", "n", "y", "n", "n", "n", "n", "n", "n", "n", "n", "n", "n", "n", "", ""]);
-    expect(picked.output).toContain("  Orchestration needs Pull requests, so it is on too.");
+    const picked = await hedgeSetup(needs, [], ["4", "n", "y", "n", "n", "n", "n", "n", "n", "n", "n", "n", "", ""]);
+    expect(picked.output).toContain("  Orchestration needs Quality gates, so it is on too.");
     expect(savedAnswers(needs).packs).toEqual(["orchestration", "pull-requests"]);
   });
 
@@ -114,16 +114,17 @@ describe("hedge setup questions", () => {
     expect(missing.output).toContain("  --set orchestration.loopProject=<value>");
     expect(missing.output).toContain("  --set orchestration.qualityArea=<value>");
     expect(missing.output).toContain("  --set orchestration.ledgerRepo=<value>");
+    expect(missing.output).toContain("  --set slack.userId=<value>");
     expect(missing.output).not.toContain("memory.repo");
     expect(machine(home).setup.done).toEqual(["bootstrap", "github", "packs", "plans", "setting:orchestration.criticalPaths"]);
     expect(machine(home).profileDir).toBeUndefined();
 
-    const sets = ["--set", "orchestration.loopProject=~/code/app", "--set", "orchestration.qualityArea=src/api", "--set", "orchestration.ledgerRepo=me/ledger"];
+    const sets = ["--set", "orchestration.loopProject=~/code/app", "--set", "orchestration.qualityArea=src/api", "--set", "orchestration.ledgerRepo=me/ledger", "--set", "slack.userId=U012ABCDEF"];
     const answered = await hedgeSetup(home, ["--non-interactive", "--preset", "everything", ...sets]);
     expect(answered.code).toBe(0);
     expect(answered.prompts).toEqual([]);
     expect(answered.output).toContain("Set up this machine");
-    expect(savedAnswers(home).settings).toEqual({ "orchestration.loopProject": "~/code/app", "orchestration.qualityArea": "src/api", "orchestration.ledgerRepo": "me/ledger", "memory.repo": "nora/hedge-memory" });
+    expect(savedAnswers(home).settings).toEqual({ "orchestration.loopProject": "~/code/app", "orchestration.qualityArea": "src/api", "orchestration.ledgerRepo": "me/ledger", "slack.userId": "U012ABCDEF", "memory.repo": "nora/hedge-memory" });
   });
 
   test("--non-interactive names the command that starts each sign-in it cannot wait for, so an agent can run it", async () => {
@@ -136,7 +137,7 @@ describe("hedge setup questions", () => {
     const claude = temp.make("home-");
     const noClaude = await hedgeSetup(claude, ["--non-interactive", "--preset", "starter", "--plan", "claude", "--devbox", "skip"], [], fakeMachine(claude, { claude: 1 }));
     expect(noClaude.code).toBe(2);
-    expect(noClaude.output).toContain("  Needs you: Sign in to Claude\n  Run: claude auth login\n");
+    expect(noClaude.output).toContain("  Needs you: Sign in to Claude\n  In a terminal, run: claude auth login\n");
   });
 
   test("a rerun keeps answers saved before Ctrl-C marked their step done", async () => {
@@ -152,7 +153,7 @@ describe("hedge setup questions", () => {
     mkdirSync(join(asked, ".config/hedge"), { recursive: true });
     writeFileSync(join(asked, ".config/hedge/machine.json"), JSON.stringify({ schema: 1, role: "linux", setup: { done: ["bootstrap"], draft: { packs: ["pull-requests"], workflows: {} } } }));
     const kept = await hedgeSetup(asked, [], ["", "", ""]);
-    expect(kept.output).toContain("  From your last answer: Pull requests");
+    expect(kept.output).toContain("  From your last answer: Quality gates");
     expect(savedAnswers(asked).packs).toEqual(["pull-requests"]);
   });
 
@@ -161,7 +162,7 @@ describe("hedge setup questions", () => {
     expect((await hedgeSetup(home, ["--non-interactive", "--preset", "starter"])).code).toBe(0);
     const changed = await hedgeSetup(home, ["--non-interactive", "--preset", "everyday", "--plan", "claude"]);
     expect(changed.code).toBe(0);
-    expect(await pushedAnswers(home)).toMatchObject({ packs: ["pull-requests", "orchestration", "communication"], plan: "claude" });
+    expect(await pushedAnswers(home)).toMatchObject({ packs: ["pull-requests", "orchestration", "communication", "memory"], plan: "claude" });
     expect(changed.output).toContain("Set up this machine");
 
     const same = await hedgeSetup(home, ["--non-interactive", "--preset", "everyday", "--plan", "claude"]);
@@ -173,7 +174,7 @@ describe("hedge setup questions", () => {
     const home = temp.make("home-");
     const result = await hedgeSetup(home, ["--non-interactive", "--remove", "pull-requests"]);
     expect(result.code).toBe(2);
-    expect(result.output).toStartWith("hedge setup: Orchestration needs Pull requests. Add pull-requests, or remove orchestration.");
+    expect(result.output).toStartWith("hedge setup: Orchestration needs Quality gates. Add pull-requests, or remove orchestration.");
   });
 
   test("refuses unknown packs, workflows, and settings before it asks anything; an unknown workflow waits for GitHub sign-in, which may find a team pack", async () => {

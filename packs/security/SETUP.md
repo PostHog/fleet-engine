@@ -1,7 +1,7 @@
 # Setup note: Security
 
-Read this when the person picks the Security pack, in step 8. It needs a
-hub with the MCP gateway.
+Read this when the person picks the Security pack with the hub packs in
+step 7. It needs a hub with the MCP gateway.
 
 Agents on every machine read the person's Wiz tenant through the hub. The
 hub signs in to Wiz once, with OAuth, and asks only for `read:all` and

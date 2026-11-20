@@ -18,7 +18,7 @@ beforeAll(async () => {
 });
 
 const workflows = () => manifests.flatMap((manifest) => (manifest.workflows ?? []).map((workflow) => ({ ...workflow, pack: manifest.name })));
-const workflowFields = ["id", "name", "sentence", "needs", "requires", "default", "settings", "risk"];
+const workflowFields = ["id", "name", "sentence", "needs", "requires", "default", "settings", "offUntilSet", "instructions", "risk"];
 
 describe("the catalog", () => {
   test("every pack says what it adds to a day and what it costs", () => {

@@ -6,6 +6,7 @@
   "day": "A Wiz threat alert lands in Slack. You hand its link to an agent, and it pulls the threat, the resource, and who touched it from Wiz, then tells you whether it looks like a teammate testing or an attack.",
   "cost": "You need a Wiz user and a hub with the MCP gateway. You sign in to Wiz once, on the hub.",
   "risk": "Agents read everything your Wiz user can see, through one sign-in on the hub, from every machine. The sign-in asks only for read access, so agents cannot resolve, assign, or file anything in Wiz.",
+  "requires": ["mcp-gateway"],
   "instructions": "AGENTS.md",
   "workflows": [
     {

@@ -7,7 +7,7 @@ import { run } from "../lib/run.ts";
 import { tunnelTargets } from "../lib/tunnels.ts";
 import { numberSetting, stringSetting } from "../../base/lib/settings.ts";
 
-const modes = ["plan", "install", "doctor", "catalog", "connect", "disconnect", "check", "remove", "left"];
+const modes = ["plan", "install", "doctor", "accounts", "catalog", "connect", "disconnect", "check", "remove", "left"];
 const plans = ["claude", "codex", "both"];
 const version = "8.0.46";
 const archives: Record<string, [string, string]> = {
@@ -39,7 +39,7 @@ function panel(historyDays: number): Panel {
 await runCommand(() => {
   const [mode = "plan", ...rest] = Bun.argv.slice(2);
   const agent = mode === "check" && rest.length === 1 && rest[0] === "codex" ? "codex" : rest.length ? undefined : "claude";
-  if (!agent || !modes.includes(mode)) return console.error("Usage: hedge cli-proxy [plan|install|doctor|catalog|check [codex]|disconnect|remove|left], or hedge cli-proxy connect < key file"), 2;
+  if (!agent || !modes.includes(mode)) return console.error("Usage: hedge cli-proxy [plan|install|doctor|accounts|catalog|check [codex]|disconnect|remove|left], or hedge cli-proxy connect < key file"), 2;
   const days = panelDays(Bun.env);
   return cliProxy(mode as ProxyMode, {
     home: homedir(), uid: process.getuid?.() ?? 0, user: userInfo().username, ...(plans.includes(Bun.env.HEDGE_PLAN ?? "") ? { plan: Bun.env.HEDGE_PLAN as AiPlan } : {}), ...(proxyOn(Bun.env) ? { accounts: numberSetting("hub.proxyAccounts") } : {}), ...(days === undefined ? {} : { panel: panel(days) }),

@@ -5,6 +5,9 @@ import { join } from "node:path";
 import { requireHubRole, stateDir, writeStateFile } from "./hub-job.ts";
 import type { Fetch } from "../../mcp-gateway/lib/client.ts";
 import { refreshCodexCatalog } from "./codex-catalog.ts";
+import { proxyUrl } from "../../../src/adapters/provider-config/proxy-route.ts";
+
+export { proxyUrl };
 
 export type UsageWindow = { id?: string; utilization: number; resetsAt?: number };
 /** `extraUsage` is true when the account keeps answering past its windows and bills the overage. */
@@ -22,7 +25,6 @@ type CodexWindow = { used_percent?: number; reset_at?: number; limit_window_seco
 type CodexLimit = { allowed?: boolean; limit_reached?: boolean; primary_window?: CodexWindow; secondary_window?: CodexWindow } | undefined;
 type Call = (path: string, init?: RequestInit) => Promise<unknown>;
 
-export const proxyUrl = "http://127.0.0.1:8317";
 export const proxyDir = (home: string) => join(home, ".local/share/hedge-cli-proxy");
 export const managementFile = (home: string) => join(proxyDir(home), "management.env");
 export const codexCatalogPath = (home: string) => join(proxyDir(home), "codex-catalog.json");
