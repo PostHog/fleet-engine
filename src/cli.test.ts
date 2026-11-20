@@ -382,3 +382,27 @@ describe("a profile source that would run code it does not ship", () => {
     expect(result.output).toContain("source team: repo and ref must not start with -");
   });
 });
+
+describe("a pack skill that its source lacks at the pinned commit", () => {
+  test("hedge apply links the other skills, says which skill is missing, and does not stop", async () => {
+    const home = temp.make("home-");
+    const repo = temp.make("source-");
+    mkdirSync(join(repo, "skills/kept"), { recursive: true });
+    writeFileSync(join(repo, "skills/kept/SKILL.md"), "---\nname: kept\n---\n");
+    await spawnGit(repo, "init", "-q", "-b", "main");
+    await spawnGit(repo, "add", ".");
+    await spawnGit(repo, "commit", "-q", "-m", "Start");
+    const root = temp.make("engine-");
+    cpSync(join(repoRoot, "packs/base"), join(root, "packs/base"), { recursive: true });
+    mkdirSync(join(root, "packs/team"), { recursive: true });
+    writeFileSync(join(root, "packs/team/pack.json"), JSON.stringify({ schema: 1, name: "team", summary: "Team pack.", skills: ["team:kept", "team:later"] }));
+    const profile = profileDir(["team"]);
+    const file = join(profile, "hedge.json");
+    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), sources: [{ name: "team", repo, ref: "main" }] }));
+    const result = await hedge(["apply", "--profile", profile], home, root);
+    expect(result.code).toBe(0);
+    expect(readFileSync(join(home, ".claude/skills/kept/SKILL.md"), "utf8")).toBe("---\nname: kept\n---\n");
+    expect(existsSync(join(home, ".claude/skills/later"))).toBe(false);
+    expect(result.output).toContain("The team pack's skill team:later is not applied: it is not at the pinned commit of its source.");
+  });
+});

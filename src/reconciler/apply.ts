@@ -6,7 +6,7 @@ import { cannotTell, waitsForPerson } from "../pack/types.ts";
 import type { Action, CatalogEntry, Finding, HumanStep, Owned, PackCheck, Plan, Report } from "../pack/types.ts";
 import { engineCommand } from "./engine-command.ts";
 import { changeLedger, currentNames, ledgerKey, readLedger, renameLedger, undoVariable, type Ledger, type LedgerStep } from "./ledger.ts";
-import { hublessReason, listedPack } from "./resolve.ts";
+import { hublessReason, listedPack, notAtPinReason } from "./resolve.ts";
 import { wholeRoutes } from "../adapters/provider-config/proxy-route.ts";
 import { withLegacyNames } from "../legacy.ts";
 
@@ -99,7 +99,7 @@ async function reconcile(plan: Plan, options: ApplyOptions): Promise<{ report: R
   const unknown = context.adopt.filter((target) => !adoptable.has(target));
   if (unknown.length) throw new Error(`nothing to adopt at ${unknown.join(", ")}: no part of your profile writes it`);
   const report: Report = { ok: true, actions: [], findings: [], humanLeft: [] };
-  report.findings.push(...packFindings(plan), ...hubFindings(plan), ...waitingFindings(plan));
+  report.findings.push(...packFindings(plan), ...pinFindings(plan), ...hubFindings(plan), ...waitingFindings(plan));
   if (plan.unanswered.length) {
     report.ok = false;
     report.findings.push(...plan.unanswered.map((setting) => ({ id: `unanswered:${setting.key}`, pack: setting.key.split(".")[0] ?? "", say: `${setting.question} Answer it with hedge set ${setting.key}=<value>.`, repair: "human" as const })));
@@ -395,6 +395,12 @@ function packFindings(plan: Plan): Finding[] {
   return plan.packs
     .filter((pack) => !pack.available || pack.reason)
     .map((pack) => ({ id: `pack:${pack.name}`, pack: pack.name, say: pack.available ? `The ${pack.name} pack uses its last fetched files: ${pack.reason}` : `The ${pack.name} pack is not applied: ${pack.reason}` }));
+}
+
+function pinFindings(plan: Plan): Finding[] {
+  return plan.dropped
+    .filter((entry) => entry.reason === notAtPinReason)
+    .map((entry) => ({ id: `pin:${entry.item}`, pack: entry.pack, say: `The ${entry.pack} pack's ${entry.item} is not applied: ${notAtPinReason}. Move that source's ref in hedge.json to a commit that has it.` }));
 }
 
 function hubFindings(plan: Plan): Finding[] {

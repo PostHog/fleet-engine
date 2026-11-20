@@ -111,12 +111,12 @@ describe("resolve", () => {
     expect(result.dropped).toContainEqual({ pack: "pull-requests", item: "skill agent-skills:communication/writing-voice", reason: "its source is unreachable" });
   });
 
-  test("drops a skill its source lacks at the pinned commit, and the rest still applies", async () => {
+  test("drops a skill its source lacks at the pinned commit, and still refuses a profile skill that is missing", () => {
     const older: FetchedSource = { ref: agentSkills.ref, dir: temp.make("agent-skills-"), packs: [] };
     const result = plan({}, mac, [engine, older]);
     expect(result.files.some((item) => item.target.endsWith("writing-voice"))).toBe(false);
     expect(result.dropped).toContainEqual({ pack: "pull-requests", item: "skill agent-skills:communication/writing-voice", reason: "it is not at the pinned commit of its source" });
-    expect((await apply(result, { home: temp.make("home-") })).actions.length).toBeGreaterThan(0);
+    expect(plan({ dir: temp.make("profile-"), overrides: { skills: ["skills/gone"] } }).files).toContainEqual(expect.objectContaining({ target: ".agents/skills/gone" }));
   });
 
   test("gives each config key one owner and throws on a clash", () => {
