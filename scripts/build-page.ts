@@ -7,7 +7,8 @@ import { site, type ArtSizes } from "../page/views.ts";
 import { engineSettings, loadPacks } from "../src/pack/manifest.ts";
 import type { Audience, LoadedPack, Need, PackManifest, Preset } from "../src/pack/types.ts";
 import { engineRepo, needsHubPacks } from "../src/setup/defaults.ts";
-import { choosablePacks, defaultPreset, packTitle, type Catalog } from "../src/setup/questions.ts";
+import { packsNamed, type PackAliases } from "../src/pack/aliases.ts";
+import { catalogAliases, choosablePacks, defaultPreset, packTitle, type Catalog } from "../src/setup/questions.ts";
 
 const engineRoot = join(import.meta.dir, "..");
 const artDir = join(engineRoot, "page/art");
@@ -39,19 +40,20 @@ export async function pageData({ audience, team = [] }: PageOptions): Promise<Pa
   const manifests = [...base, ...choosablePacks({ presets, packs: engine } as Catalog), ...teamManifests].filter(shown).filter((manifest) => manifest.onSite !== false);
   const inEveryHedge = new Set(["base", ...presets.map((preset) => preset.hubPacks ?? []).reduce((left, right) => left.filter((name) => right.includes(name)))]);
   const names = new Set(manifests.map((manifest) => manifest.name));
+  const aliases = catalogAliases({ packs: [...engine, ...team] });
   const holds = (need: Need) => !needPacks[need] || names.has(needPacks[need]!);
   const noteOn = (loaded: LoadedPack[], folder: string) => loaded.filter((pack) => existsSync(join(pack.dir, "SETUP.md"))).map((pack) => [pack.manifest.name, `${folder}/packs/${pack.manifest.name}/SETUP.md`]);
   const setupNotes: Record<string, string> = Object.fromEntries([...noteOn(engine, "~/.local/share/hedge/engine"), ...noteOn(team, "~/.local/share/hedge/sources/<source>")]);
   const grouped = packGroups.flatMap((group) => group.packs);
   const rank = (name: string) => (inEveryHedge.has(name) ? -1 : grouped.includes(name) ? grouped.indexOf(name) : grouped.length);
-  const packs = manifests.toSorted((left, right) => rank(left.name) - rank(right.name)).map((manifest) => pagePack(manifest, holds, inEveryHedge.has(manifest.name), setupNotes[manifest.name]));
+  const packs = manifests.toSorted((left, right) => rank(left.name) - rank(right.name)).map((manifest) => pagePack(manifest, holds, aliases, inEveryHedge.has(manifest.name), setupNotes[manifest.name]));
   const used = new Set(packs.flatMap((pack) => pack.workflows.flatMap((workflow) => workflow.needs)));
   const start = presets.find((preset) => preset.id === defaultPreset)!;
   const shownNames = (list: string[]) => list.filter((name) => names.has(name));
   return {
     engineRepo,
     packs,
-    teamPacks: teamManifests.map((manifest) => manifest.name),
+    teamPacks: shownNames(teamManifests.map((manifest) => manifest.name)),
     startPacks: shownNames(start.packs),
     hubStartPacks: shownNames(start.hubPacks ?? []),
     needsHubPacks: shownNames(needsHubPacks),
@@ -59,7 +61,7 @@ export async function pageData({ audience, team = [] }: PageOptions): Promise<Pa
   };
 }
 
-function pagePack(manifest: PackManifest, holds: (need: Need) => boolean, always: boolean, setupNote?: string): PagePack {
+function pagePack(manifest: PackManifest, holds: (need: Need) => boolean, aliases: PackAliases, always: boolean, setupNote?: string): PagePack {
   const workflows = manifest.workflows ?? [];
   const shownWorkflows = workflows.filter((workflow) => (workflow.needs ?? []).every(holds));
   const listedOnlyByHidden = (key: string) => workflows.some((workflow) => workflow.settings?.includes(key)) && !shownWorkflows.some((workflow) => workflow.settings?.includes(key));
@@ -69,7 +71,7 @@ function pagePack(manifest: PackManifest, holds: (need: Need) => boolean, always
     summary: manifest.summary,
     ...(manifest.cost ? { cost: manifest.cost } : {}),
     ...(manifest.risk ? { risk: manifest.risk } : {}),
-    requires: (manifest.requires ?? []).filter((name) => name !== "base"),
+    requires: packsNamed(aliases, manifest.requires ?? []).filter((name) => name !== "base"),
     always,
     ...(setupNote ? { setupNote } : {}),
     workflows: shownWorkflows.map(({ id, name, sentence, needs = [], risk, ...workflow }) => ({ id, name, sentence, needs: needs.filter((need) => needPacks[need] !== manifest.name), default: workflow.default, ...(risk ? { risk } : {}) })),

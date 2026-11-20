@@ -5,7 +5,7 @@ import type { LoadedPack, PackManifest } from "../src/pack/types.ts";
 import { tempDirs } from "../src/testing/git.ts";
 import { spawnAsync } from "../src/testing/spawn.ts";
 import { logoMark } from "../page/logo.ts";
-import { firstStart, installPrompt, startPrompt, toggleSelected, type PageData, type PromptData } from "../page/model.ts";
+import { firstStart, installPrompt, promptData, startPrompt, toggleSelected, type PageData, type PromptData } from "../page/model.ts";
 import { t3Link } from "../page/prompt.ts";
 import { buildSite, pageData, type SiteFiles } from "./build-page.ts";
 
@@ -268,6 +268,16 @@ describe("the site build", () => {
     expect(promptOn(page("packs/posthog/index.html", site), "install")).toContain("hedge packs --add posthog");
     expect(teamData.packs.flatMap((pack) => pack.workflows).map((workflow) => workflow.id)).toContain("previews");
     for (const [path, html] of pagesOf(site)) expect([path, localTargets(path, html).filter((target) => !(target in site))]).toEqual([path, []]);
+  });
+
+  test("a team pack that requires a hidden, an old or an unknown pack builds, and a hidden team pack stays off the site", async () => {
+    const team = [teamPack({ title: "PostHog", requires: ["integrations", "context-library", "gone"] }), teamPack({ name: "quiet", onSite: false, workflows: [], settings: [] })];
+    const teamData = await pageData({ audience: "posthog", team });
+    const site = await buildSite({ audience: "posthog", team });
+    expect(teamData.teamPacks).toEqual(["posthog"]);
+    expect(visibleText(page("packs/index.html", site))).toContain("Adds integrations Adds Memory Adds gone");
+    expect(toggleSelected(promptData(teamData), [], "posthog")).toEqual(["memory", "posthog"]);
+    expect(Object.keys(site)).not.toContain("packs/quiet/index.html");
   });
 
   test("a team build shows a pack by its title, and by its capitalised name without one", async () => {

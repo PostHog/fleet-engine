@@ -146,7 +146,7 @@ ${pageJson ? `<script id="hedge-data" type="application/json">${JSON.stringify(p
       pack.always ? `<span class="tag on">On in every Hedge</span>` : "",
       onByDefault(pack) ? `<span class="tag on">On by default</span>` : "",
       needsHub(pack) ? `<span class="tag">Needs a hub</span>` : "",
-      ...pack.requires.map((name) => `<span class="tag">Adds ${esc(packOf(name).title)}</span>`),
+      ...pack.requires.map((name) => `<span class="tag">Adds ${esc(data.packs.find((item) => item.name === name)?.title ?? name)}</span>`),
     ].join("");
 
   const packCard = (root: string, pack: PagePack) => {

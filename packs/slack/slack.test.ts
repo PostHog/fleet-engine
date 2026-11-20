@@ -2,7 +2,7 @@ import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AvailableSource } from "../../src/pack/types.ts";
-import { tempDirs } from "../../src/testing/git.ts";
+import { gitEnv, spawnGit, tempDirs } from "../../src/testing/git.ts";
 import { devbox, engineSource, mac, resolveEngine, skillSources } from "../../src/testing/packs.ts";
 import { t3CliRunner, t3Threads } from "../../src/integrations/t3/index.ts";
 import { startT3Stub, type T3Stub } from "../../src/integrations/t3/testing.ts";
@@ -336,6 +336,45 @@ describe("saving to the context library", () => {
     const told = slack.method("chat.postEphemeral")[0]!.args;
     expect(told).toMatchObject({ channel: "C1", user: ownerId, thread_ts: "200.1" });
     expect(told.text).toBe(`:brain: Added <${captured.url}|Sprint &lt;planning&gt;> in your context library (\`${captured.path}\`). It updates as the thread gets replies.\nNo open thread needed it.`);
+  });
+
+  test("with the Memory pack on, the owner's :brain: runs the library's own handler, which pushes the note to the library", async () => {
+    const root = temp.make("library-");
+    const remote = join(root, "remote.git");
+    const home = await homeWithTokens();
+    const git = (cwd: string, ...args: string[]) => spawnGit(cwd, ...args);
+    await git(root, "init", "-q", "--bare", "-b", "main", remote);
+    await git(root, "clone", "-q", remote, join(root, "seed"));
+    writeFileSync(join(root, "seed/ideas.md"), "# Ideas\n");
+    await git(join(root, "seed"), "add", "-A");
+    await git(join(root, "seed"), "commit", "-q", "-m", "seed");
+    await git(join(root, "seed"), "push", "-q", "origin", "HEAD:main");
+    await git(root, "clone", "-q", remote, join(home, "dev/library"));
+    const engine = await engineSource();
+    const plan = resolveEngine([engine, ...skillSources(temp.make("skills-"), engine)], { packs: ["memory", "slack"], settings: { "slack.userId": ownerId, "memory.repo": "me/memory", "context-library.repo": `file://${remote}`, "context-library.path": "~/dev/library", "context-library.owner": "Nora" } }, devbox);
+    const source = "https://example.slack.com/archives/C1/p200.1";
+    const note = `---\ntitle: Sprint planning\ntype: planning\ntopics: [load-testing]\ndate: 2026-11-11\nsource: ${source}\n---\n\n# Sprint planning\n\nLoad test first.\n`;
+    const bin = temp.make("bin-");
+    writeFileSync(join(bin, "claude"), `#!/bin/sh\ncat >/dev/null\nprintf '%s' '${JSON.stringify({ structured_output: { path: "notes/sprint-planning.md", text: note } })}'\n`, { mode: 0o755 });
+    const childEnv = { ...gitEnv, PATH: `${bin}:${process.env.PATH}`, HOME: home, HEDGE_SETTINGS: JSON.stringify(plan.settings), HEDGE_MODELS: JSON.stringify([{ role: "survey", work: "Survey", provider: "claude", model: "claude-sonnet-5-5", effort: "high" }]) };
+    const run: Run = async (argv, input) => {
+      if (argv[0] !== "bun") return { code: 0, stdout: "Nora Example\n", stderr: "" };
+      const child = Bun.spawn(argv, { env: childEnv, stdin: Buffer.from(input ?? ""), stdout: "pipe", stderr: "pipe" });
+      const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+      return { code, stdout, stderr };
+    };
+    const slack = slackStub([{ user: ownerId, ts: "200.1", text: "load test first" }]);
+    const stop = new AbortController();
+    const handlers = Object.fromEntries(Object.entries(plan.handlers).map(([seam, handler]) => [seam, handler!.path]));
+    const running = listen(commandDeps(home, { env: { HEDGE_SETTINGS: JSON.stringify(plan.settings), HEDGE_HANDLERS: JSON.stringify(handlers) }, slackBase: slack.base, stop: stop.signal, run }));
+    await slack.connected();
+    slack.send({ type: "reaction_added", user: ownerId, reaction: "brain", item: { type: "message", channel: "C1", ts: "200.1" } });
+    await slack.until(() => slack.method("chat.postEphemeral").length === 1);
+    stop.abort();
+    await running;
+    expect(slack.method("chat.postEphemeral")[0]!.args.text).toStartWith(`:brain: Added <${join(home, "dev/library/notes/sprint-planning.md")}|Sprint planning> in your context library`);
+    expect(reactionCalls(slack)).toEqual(["reactions.add 200.1 eyes", "reactions.remove 200.1 eyes", "reactions.remove 200.1 brain"]);
+    expect(await git(root, "--git-dir", remote, "show", "main:notes/sprint-planning.md")).toBe(note.trimEnd());
   });
 
   test("a failed capture keeps the :brain:, says why, and a second :brain: tries again and updates the note", async () => {

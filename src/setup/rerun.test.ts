@@ -149,18 +149,18 @@ describe("a second hedge setup", () => {
 
   test("re-picking Everything, by flag or in the picker, keeps every workflow the profile turned off", async () => {
     const sets = ["--set", "orchestration.loopProject=~/code/app", "--set", "orchestration.qualityArea=src/api", "--set", "orchestration.ledgerRepo=me/ledger", "--set", "slack.userId=U012ABCDEF"];
-    const off = { "quality-loop": false, "signal-loop": false, "pr-digest": false };
+    const kept = { "shell-guards": true, "package-age": true, "context-library": true, "quality-loop": false, "signal-loop": false, "pr-digest": false };
     const home = temp.make("home-");
     const fewer = ["--remove", "slack", "--remove", "incident-io"];
     await onMac(home, ["--non-interactive", "--preset", "everything", ...fewer, "--plan", "claude", "--devbox", "skip", ...sets]);
     const io = scripted([]);
     expect(await main(["packs", "--workflows", "quality-loop=off,signal-loop=off,pr-digest=off"], { home, engineRoot, platform: "darwin", print: io.terminal.print, terminal: io.terminal, apply: async () => 0, setup: { machine: fakeMachine(home).machine } })).toBe(0);
-    expect((await pushedAnswers(home)).workflows).toEqual(off);
+    expect((await pushedAnswers(home)).workflows).toEqual(kept);
     await onMac(home, ["--non-interactive", "--preset", "everything", ...fewer]);
-    expect((await pushedAnswers(home)).workflows).toEqual(off);
+    expect((await pushedAnswers(home)).workflows).toEqual(kept);
     const picked = await onMac(home, ["--add", "slack"], ["e", "3", ...Array(16).fill("")]);
     expect(picked.output).toContain("  3) Everything");
-    expect(await pushedAnswers(home)).toMatchObject({ packs: expect.arrayContaining(["integrations", "slack"]), workflows: off });
+    expect(await pushedAnswers(home)).toMatchObject({ packs: expect.arrayContaining(["integrations", "slack"]), workflows: kept });
   });
 
   test("with --preset picks that preset again, in place of the profile's packs", async () => {

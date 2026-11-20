@@ -1,9 +1,11 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tempDirs } from "../../src/testing/git.ts";
+import { saveAnswers } from "../../src/profile/profile.ts";
+import { isolateGit, spawnGit, tempDirs } from "../../src/testing/git.ts";
 import { spawnAsync } from "../../src/testing/spawn.ts";
 
+isolateGit();
 const temp = tempDirs();
 const stops: Array<() => void> = [];
 afterEach(() => {
@@ -263,7 +265,10 @@ test("with a hub, the hub's copy of the profile decides whether a page goes out,
 
 test("picking the pack turns paging on, with no workflow to switch on", async () => {
   const incident = fakeIncidentIo();
-  const home = machineHome(profile({ workflows: {}, migrations: ["picks-turn-on"] }), { role: "linux", name: "solo-1" });
+  const picked = temp.make("profile-");
+  await spawnGit(picked, "init", "-q", "-b", "main");
+  await saveAnswers(picked, { schema: 1, engine: { repo: "example/engine", ref: "main", channel: "track" }, sources: [], packs: ["incident-io"], plan: "claude", settings: {}, workflows: {} });
+  const home = machineHome(picked, { role: "linux", name: "solo-1" });
   const path = bunPath();
   await spawnHedge(home, path, ["page", "setup", incident.url], `${token}\n`);
   expect(await spawnHedge(home, path, fire)).toMatchObject({ code: 0 });
