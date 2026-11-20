@@ -319,9 +319,9 @@ async function startRound(home: string, identity: ProofIdentity, reviews: string
   const permitRound = async ({ round, spent }: Awaited<ReturnType<typeof snapshot>>) => {
     if (round === 1 && scope !== "full") throw new Error("Round 1 is --scope full: it reviews the whole PR diff. Drop --base");
     if (round > 1) await requireFinished(reviews, round);
-    const opened = round > 1 && await opening();
+    const opened = round > 1 && scope === "full" && await opening();
     if (round > 1 && decision?.mark !== "👤" && !opened) await requireBoughtRound(home, identity);
-    if (round > 1 && !(opened && scope === "full")) await checkLaterRound(reviews, round, scope, base, decision, cleanBaseMerge);
+    if (round > 1 && !opened) await checkLaterRound(reviews, round, scope, base, decision, cleanBaseMerge);
     if (round > 1) await sanity();
     return permitReview(home, identity, spent >= free, spent >= ceiling ? budgetSpent(permit.limits) : undefined, decision, permit);
   };
@@ -371,7 +371,7 @@ async function requireBoughtRound(home: string, identity: ProofIdentity) {
 
 type AnsweredFinding = ReturnType<typeof answeredFindings>["findings"][number];
 
-const siteField = /^(?:(`+) ?([^`]+?):\d+(?:-\d+)? ?\1|(`+) ?([^`]+?) ?\3:\d+(?:-\d+)?|([^`|]+?):\d+(?:-\d+)?)$/;
+const locationOf = (field: string) => /^([^`*]+?):\d+(?:-\d+)?$/.exec(field.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[`*]/g, "").trim())?.[1];
 const tailField = /^(?:anchor|sites):/i;
 
 function buysRound({ text, note, test, answer }: AnsweredFinding) {
@@ -381,7 +381,7 @@ function buysRound({ text, note, test, answer }: AnsweredFinding) {
   if (!fields || (severity !== "blocker" && severity !== "major")) return false;
   const tail = fields.findIndex((field) => tailField.test(field));
   if (fields.slice(0, tail < 0 ? undefined : tail).some((field) => /^\[base\]/i.test(field))) return false;
-  const site = fields.slice(0, 2).map((field) => { const match = siteField.exec(field); return match?.[2] ?? match?.[4] ?? match?.[5]; }).find(Boolean);
+  const site = fields.slice(0, 2).map(locationOf).find(Boolean);
   return site === undefined || isProductionFile(site);
 }
 

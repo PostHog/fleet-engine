@@ -300,3 +300,22 @@ test("a round 1 that read an empty range counts zero lines, so the next round ne
 
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).code).toBe(0);
 });
+
+test("a docs-only major whose location is a Markdown link, bold or in backticks buys no other round", async () => {
+  for (const location of ["[README.md:12](README.md#L12)", "**README.md:12**", "`README.md`:12", "`` README.md:12 ``", "[`README.md:12`](README.md#L12)"]) {
+    const pr = await checkout();
+    const reviewed = await firstRound(pr, [`- major | ${location} | the setting is named wrong | anchor: greet 1`], ["1. fixed: the docs name it right"]);
+    await pr.commit("README.md", lines(3, "explain"));
+
+    await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(stops);
+  }
+});
+
+test("a first panel that asks for a fixes scope after a clean single review meets the stop rule", async () => {
+  const pr = await checkout();
+  const reviewed = await firstRound(pr, ["- minor | feature.ts:1 | the word reads oddly | anchor: greet 0"], ["1. rejected: it is the domain term"]);
+  fakeModel(pr, "REVIEWER", "FINDINGS:\n(none)\nCOVERED: feature.ts\n");
+  await pr.hedge("require", "--none", "--reason", "docs only", "--author", "claude");
+
+  await expect(pr.hedge("review", "--lens", "correctness", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(stops);
+});
