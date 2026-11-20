@@ -5,6 +5,7 @@ import { peersOf, readRole } from "./machine.ts";
 import { gatewayPort, refuseLinks } from "../../mcp-gateway/lib/client.ts";
 import type { Run } from "../../mcp-gateway/lib/hub.ts";
 import { isKeptForBoxes, sshName } from "../../../src/hub/names.ts";
+import { readLedger } from "../../../src/reconciler/ledger.ts";
 import { hostPattern, must, proxyPort, relayPortOf } from "./run.ts";
 
 export type TunnelMode = "plan" | "install" | "doctor" | "remove" | "left";
@@ -13,7 +14,8 @@ export type TunnelMachine = { home: string; devboxes: string[]; dialsHub: string
 
 const marker = "# Managed by Hedge hub SSH tunnels.";
 const hostsMarker = " # hedge-hub-tunnel";
-const ownedHostsLine = (line: string) => line.endsWith(hostsMarker) || line.endsWith(" # fleet-hub-tunnel");
+const ownedHostsLine = (line: string) => line.endsWith(hostsMarker);
+const oldFleetHostsLine = (line: string) => line.endsWith(" # fleet-hub-tunnel");
 const unitName = (alias: string) => `hedge-ssh-${alias}.service`;
 const loopback = (port: number) => `-R 127.0.0.1:${port}:127.0.0.1:${port}`;
 
@@ -40,7 +42,7 @@ WantedBy=default.target
 export function hostsWith(previous: string, host: string): string {
   const lines = previous.split("\n").filter((line) => !ownedHostsLine(line));
   while (lines.at(-1) === "") lines.pop();
-  if (lines.some((line) => line.split("#", 1)[0]!.trim().split(/\s+/).slice(1).includes(host))) throw new Error(`Keep unmanaged hosts entry for ${host}.`);
+  if (lines.some((line) => !oldFleetHostsLine(line) && line.split("#", 1)[0]!.trim().split(/\s+/).slice(1).includes(host))) throw new Error(`Keep unmanaged hosts entry for ${host}.`);
   return [...lines, `127.0.0.1 ${host}${hostsMarker}`, ""].join("\n");
 }
 
@@ -82,11 +84,13 @@ async function hubTunnels(mode: TunnelMode, machine: TunnelMachine) {
   return 0;
 }
 
-/** On any role, remove takes away every tunnel unit and the hosts entry Hedge wrote, and left exits 0 while one is here. */
+const installedHere = async (home: string) => (await readLedger(home)).steps.some((step) => step.pack === "hub" && step.id === "ssh-tunnels");
+
+/** On any role, remove takes away every tunnel unit and the hosts entry Hedge wrote, and left exits 0 while one is here. The hosts file is outside this home, so both read it only while this home's step ledger holds the ssh-tunnels step. */
 async function withoutTunnels(mode: "remove" | "left", machine: TunnelMachine) {
   const directory = join(machine.home, ".config/systemd/user");
   const units = (await staleUnits(machine.home, directory, [])).sort().map((name) => join(directory, name));
-  const hosts = (await readIfThere(machine.hosts)) ?? "";
+  const hosts = (await installedHere(machine.home)) ? ((await readIfThere(machine.hosts)) ?? "") : "";
   const entry = hosts.split("\n").some(ownedHostsLine);
   if (mode === "left") return machine.print(units.length || entry ? "Hub SSH tunnels: still here." : "Hub SSH tunnels: nothing left."), units.length || entry ? 0 : 1;
   await removeUnits(machine.home, units, marker, "tunnel", machine.run);

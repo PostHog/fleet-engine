@@ -131,8 +131,7 @@
   checkout of the same repository, with the commit the old profile is at.
   The profile and machine writers also refuse a file that links into a Fleet
   path. Delete the old paths when you no longer need them.
-- Hedge still takes what Fleet wrote: the `# fleet-hub-tunnel` hosts entry,
-  the `fleet-management` key of MCPHub, the Claude key helper and the
+- Hedge still takes what Fleet wrote: the `fleet-management` key of MCPHub, the Claude key helper and the
   `fleet-proxy` Codex provider of `fleet cli-proxy connect`, a T3 Claude
   instance bound to `~/.config/fleet/recovery/claude`, a gateway upstream
   marked "Added by Fleet", Node links in `~/.local/bin` that point into
@@ -147,6 +146,11 @@
   `fleet heavy --`.
 - Crontab lines and T3 worktree scripts from before the rename are replaced
   by the new ones.
+- Hedge never edits or removes a `# fleet-hub-tunnel` line in `/etc/hosts`.
+  It adds its own `# hedge-hub-tunnel` line next to it, and removes only that
+  line. `hedge ssh-tunnels remove` and `left` read the hosts file only when
+  the step ledger in this home holds the `ssh-tunnels` step, so a run with
+  another `HOME` does not change the hosts file or call `sudo`.
 - A profile with `fleet.json` and no `hedge.json` still works. Each `FLEET_`
   variable still works while its `HEDGE_` variable is unset. A `HEDGE_`
   variable that is set, even to an empty string, wins. Setup reuses a
