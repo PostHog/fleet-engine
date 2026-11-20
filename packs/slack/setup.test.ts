@@ -132,7 +132,7 @@ describe("hedge slack-trigger setup", () => {
     expect(slack.methods).toEqual(["apps.connections.open", "auth.test", "auth.test"]);
   });
 
-  for (const form of [{ where: "on the Mac", line: /^ *(printf .* \| hedge slack-trigger setup)$/m }, { where: "over SSH on the hub", line: /^ *(printf .* \| ssh coder\.<hub> '.*; hedge slack-trigger setup')$/m }]) {
+  for (const form of [{ where: "over SSH on the hub", line: /^ *(printf .* \| ssh coder\.<hub> '.*; hedge slack-trigger setup')$/m }]) {
     test(`the setup note's command ${form.where} pipes both tokens from the secret prompt's files into setup, which saves them without printing them`, async () => {
       const slack = slackStub();
       const home = temp.make("home-");
@@ -299,7 +299,7 @@ describe("the Slack app step", () => {
   test("asks for the Slack app in the foreground, only while Start a thread from Slack is on", () => {
     const step = plan().human.find((item) => item.pack === "slack")!;
     expect(step).toMatchObject({ id: "slack-app", interactive: true, workflow: "slack-thread" });
-    expect(resolveEngine(sources, { packs: ["slack"], settings: { "slack.userId": ownerId } }, mac).human.filter((item) => item.pack === "slack")).toEqual([]);
+    expect(resolveEngine(sources, { packs: ["slack"], workflows: { "slack-thread": false }, settings: { "slack.userId": ownerId } }, mac).human.filter((item) => item.pack === "slack")).toEqual([]);
   });
 
 

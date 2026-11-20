@@ -20,6 +20,14 @@ _Avoid_: Module, plugin, add-on, extension, group
 The one pack every user gets.
 _Avoid_: Core, default pack
 
+**In every Hedge**:
+The packs every setup gets: Base, and Hub on the hub. The site shows them without a switch.
+_Avoid_: Required packs, core packs
+
+**Old pack name**:
+The name a pack had before it moved into another pack, such as `context-library` for Memory and `recovery` for Hub. A profile that still lists it keeps working: Hedge reads it as the new pack, with only the old pack's workflows on, and keeps the profile as it is.
+_Avoid_: Legacy pack, deprecated pack
+
 **Seed**:
 A verb only: to bring an outside pack or plugin into Hedge, such as a Claude plugin marketplace. Hedge has no seed command yet. Never call a pack a seed.
 _Avoid_: Import, install (for an outside pack), seeds (for packs)
@@ -37,7 +45,7 @@ One person's repo of what their agents learn and record: memory, dreams, notes, 
 _Avoid_: Personal repo, notes repo, knowledge base
 
 **Workflow**:
-One way of working a pack offers, described in one plain sentence. It is on when its pack is on, the profile does not turn it off, and everything it needs holds.
+One way of working a pack offers, described in one plain sentence. It is on when its pack is on, the profile does not turn it off, everything it needs holds, and every setting it waits for is set.
 _Avoid_: Feature, capability
 
 **Preset**:
@@ -64,8 +72,12 @@ _Avoid_: Local config, state file
 
 ## Machines
 
+**Cloud box**:
+A Linux machine in the cloud, such as a Coder workspace: the hub or a node. Hedge runs only on cloud boxes. The Mac and the phone run only the T3 Code app, and Hedge installs nothing on them.
+_Avoid_: Mac only, local setup
+
 **Devbox**:
-A Linux machine, local or in the cloud, where agents and T3 threads run. A Coder workspace is a devbox from its first `hedge apply`, and signs Git commits with its Coder key.
+A cloud box that Hedge set up, where agents and T3 threads run. A Coder workspace is a devbox from its first `hedge apply`, and signs Git commits with its Coder key.
 _Avoid_: Coding box, agent box
 
 **Node**:
@@ -73,7 +85,7 @@ A devbox that stays on, where T3 threads do the work. The hub links the nodes an
 _Avoid_: Worker box
 
 **Hub**:
-The one machine that the profile's `hub` names, with `hedge hub here`. It runs the items placed on the hub and manages the other machines.
+The one cloud box that the profile's `hub` names, with `hedge hub here`. Setup starts on it. It runs the items placed on the hub, keeps the pack secrets, such as the Slack, incident.io, and MCP gateway sign-ins, adds the nodes with `hedge devbox add`, and manages them.
 _Avoid_: Controller, master box
 
 ## Threads

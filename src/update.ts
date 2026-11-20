@@ -13,6 +13,7 @@ export type UpdateOptions = {
   engineDir: string;
   profileDir: string;
   engine: ProfileFile["engine"];
+  platform: NodeJS.Platform;
   print: (line: string) => void;
   runApply: () => Promise<number>;
 };
@@ -38,7 +39,10 @@ export async function readNotice(home: string): Promise<string | undefined> {
 }
 
 export async function update(given: UpdateOptions): Promise<number> {
-  const options = { ...given, print: (line: string) => given.print(withoutUserinfo(line)) };
+  return moveEngine({ ...given, print: (line: string) => given.print(withoutUserinfo(line)) });
+}
+
+async function moveEngine(options: UpdateOptions) {
   const origin = await ready(options);
   if (!origin) return 1;
   if (!(await stateFolderReady(options))) return 1;
@@ -162,7 +166,7 @@ async function moveToRelease(options: UpdateOptions, url: string, switched: bool
   const installed = versions.filter((version) => version.commit === head).sort(compare).at(-1);
   if (switched) return checkOutRelease(options, url, target);
   if (!installed) {
-    options.print(`Engine stays at ${head.slice(0, 7)}, which is not a release, so hedge update does not move it back. Set engine.channel to track to follow main, or run get.sh --ref ${target.tag}.`);
+    options.print(`Engine stays at ${head.slice(0, 7)}, which is not a release, so hedge update does not move it back. Set engine.channel to track to follow main${options.platform === "darwin" ? "" : `, or run get.sh --ref ${target.tag}`}.`);
     return {};
   }
   if (compare(installed, target) >= 0) return options.print(`Engine is at ${installed.tag}.`), { release: { tag: installed.tag, commit: head } };
@@ -187,8 +191,9 @@ async function installPackages(engineDir: string) {
 async function rollBack(options: UpdateOptions, before: string, installError: string) {
   const failed = `hedge update: could not install the engine's packages in ${options.engineDir}`;
   const restored = await git(options.engineDir, "checkout", "-q", "--force", "--detach", before);
-  if (!restored.ok) return options.print(`${failed}, and could not roll the engine back to ${before.slice(0, 7)}: ${restored.err}. Run get.sh again to repair it.\n${installError}`);
-  const repair = (await installPackages(options.engineDir)) === undefined ? "" : " Its packages did not install either, so run get.sh again to repair it.";
+  const repairHint = options.platform === "darwin" ? "" : ", so run get.sh again to repair it";
+  if (!restored.ok) return options.print(`${failed}, and could not roll the engine back to ${before.slice(0, 7)}: ${restored.err}${repairHint}.\n${installError}`);
+  const repair = (await installPackages(options.engineDir)) === undefined ? "" : ` Its packages did not install either${repairHint}.`;
   options.print(`${failed}, so the update was rolled back. The engine stays at ${before.slice(0, 7)}.${repair}\n${installError}`);
 }
 

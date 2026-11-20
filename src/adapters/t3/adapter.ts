@@ -7,7 +7,7 @@ import { sourceOutage } from "../provider-config/adapter.ts";
 import { withLock } from "../provider-config/store.ts";
 import { skipOtherHome, spawnRunner, type CommandRunner } from "../run.ts";
 import type { T3Rpc, T3Server } from "./port.ts";
-import { reconcileClaudeToken, reconcileService, reconcileTimeZone, timeZoneSetting, type Environment, type Wait } from "./service.ts";
+import { onUserBus, reconcileClaudeToken, reconcileService, reconcileTimeZone, timeZoneSetting, type Environment, type Wait } from "./service.ts";
 import { reconcileScripts, settingProblems, waitingScripts } from "./scripts.ts";
 import { localT3Server } from "./session.ts";
 import { desktopTarget, reconcileSettings, settingsFields, settingsTarget } from "./settings.ts";
@@ -15,7 +15,7 @@ import { activeProjects, expandHome, realPath, t3Tasks } from "./tasks.ts";
 
 export { desktopTarget, recordTarget, settingsTarget } from "./settings.ts";
 
-export type T3Options = { run?: CommandRunner; wait?: Wait; accountHome?: () => Promise<string | undefined>; server?: T3Server; user?: string; env?: Environment; zoneInfo?: string };
+export type T3Options = { run?: CommandRunner; wait?: Wait; accountHome?: () => Promise<string | undefined>; server?: T3Server; user?: string; uid?: number; env?: Environment; zoneInfo?: string };
 export type T3Adapter = Adapter & { tasks(): Promise<T3Tasks | undefined> };
 
 type Link = { environmentId: string; label: string; status: "reachable" | "unreachable" | "expired"; lastError: string | null };
@@ -23,7 +23,7 @@ type Link = { environmentId: string; label: string; status: "reachable" | "unrea
 const finding = (id: string, say: string, repair?: Finding["repair"]): Finding => ({ id: `t3:${id}`, pack: "engine", say, ...(repair ? { repair } : {}) });
 
 export function t3Adapter(options: T3Options = {}): T3Adapter {
-  const run = options.run ?? spawnRunner;
+  const run = onUserBus(options.run ?? spawnRunner, options.env ?? process.env, options.uid ?? process.getuid?.() ?? 0);
   const server = options.server ?? localT3Server;
   const user = options.user ?? userInfo().username;
   const wait = options.wait ?? Bun.sleep;

@@ -1,12 +1,11 @@
 import type { MachineFile } from "../pack/types.ts";
 import { loadProfile, pullProfile, saveAnswers, saveMachine } from "../profile/profile.ts";
 import type { Machine } from "./commands.ts";
-import { boxEnvironmentId, forgetWeight } from "./devbox-balance.ts";
+import { forgetWeight } from "./devbox-balance.ts";
+import { boxEnvironmentId, t3Links, type T3Link as Link } from "./devbox.ts";
 import type { Terminal } from "./terminal.ts";
 
 export type RemoveContext = { home: string; terminal: Terminal; machine: Machine; machineFile: MachineFile };
-
-type Link = { environmentId: string; label?: string };
 
 /** Takes a replaced hub or node out of the profile and this machine's list, unlinks it in T3 Code here, and drops its load balancing weight. It unlinks first, so a failed unlink changes nothing and a second run tries again; the profile is pushed on every run, so a push that failed before reaches the remote now. The hub stops its tunnel, disk watch and link at its next hedge update. */
 export async function removeDevbox(host: string, context: RemoveContext) {
@@ -18,7 +17,7 @@ export async function removeDevbox(host: string, context: RemoveContext) {
   const recorded = { ...machineFile.t3Environments };
   const listed = [...(profile?.devboxes ?? []), ...(machineFile.devboxes ?? []), ...Object.keys(recorded)].includes(host);
   if (!listed) throw new Error(`${host} is not one of your devboxes. hedge devbox lists them.`);
-  const links = await linksHere(context.machine);
+  const links = await t3Links(context.machine);
   const id = await environmentOf(host, recorded, links, context.machine);
   const linked = id !== undefined && links.some((link) => link.environmentId === id);
   if (linked) {
@@ -44,17 +43,6 @@ async function environmentOf(host: string, recorded: Record<string, string>, lin
   const others = Object.entries(recorded).filter(([name]) => name !== host).map(([, id]) => id);
   if (reported && !others.includes(reported)) return reported;
   return linkByLabel(links, host)?.environmentId;
-}
-
-async function linksHere(machine: Machine): Promise<Link[]> {
-  const listed = await machine.exec(["t3", "environment", "list", "--json"]);
-  if (listed.code !== 0) return [];
-  try {
-    const links: unknown = JSON.parse(listed.stdout);
-    return Array.isArray(links) ? links.filter((link): link is Link => typeof link?.environmentId === "string") : [];
-  } catch {
-    return [];
-  }
 }
 
 /** A workspace that is gone and was never recorded cannot say its id, so the one link here labelled with its name stands in, as T3 often labels a machine by its host name. */

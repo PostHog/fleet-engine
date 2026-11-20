@@ -8,10 +8,11 @@ hub, and it starts with no servers.
 
 1. Check that `ssh coder.<hub> 'docker info'` passes. When it fails, stop
    and tell them the hub's template needs Docker.
-2. Add `--add mcp-gateway` to the command in step 9, and change
+2. Add `--add mcp-gateway` to the command in item 2 of step 9, and change
    `mcp-gateway=off` to `mcp-gateway=on`.
-3. After the hub's `hedge update`, run `hedge update` on this Mac too.
-   It opens the Mac's tunnel to the hub, so agents here reach the gateway.
+3. Each node reaches the gateway through its tunnel to the hub. A node
+   added before the gateway takes it at its next `hedge update`, or run
+   `hedge update` on it now.
 4. Servers live in `~/.local/share/hedge-mcphub/data/mcp_settings.json`
    on the hub. When a server needs a sign-in, run this on the hub and open
    each address it prints:
@@ -20,10 +21,12 @@ hub, and it starts with no servers.
    ssh coder.<hub> 'export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; hedge mcp-gateway sign-in'
    ```
 
-   The Mac's hub tunnel from step 3 already forwards the gateway's port, so
-   skip the `coder port-forward` line it prints. Run that line only when
-   `hedge hub-tunnel doctor` on this Mac fails; a second forward on the same
-   port fails while the tunnel runs.
+   The browser that opens each address must reach the hub's gateway, so the
+   `coder port-forward` line it prints runs on the device whose browser opens
+   the addresses, usually the person's Mac, never on a node. When you run on
+   that device, run the line in the background. Otherwise give the person
+   the line to run in a terminal there. Start it before the person opens the
+   first address, and stop it when the sign-ins are done.
 
    `hedge mcp-gateway doctor` on the hub says what does not work.
 

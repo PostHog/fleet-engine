@@ -4,16 +4,16 @@ Read this when the person picks the Guards pack.
 
 Guards are hooks that check each shell command an agent runs and refuse the
 risky ones, such as code piped from the network into a shell. A refusal tells
-the agent whom to ask. Every guard starts off, so the pack does nothing until
-they turn one on. Ask with your question tool, in one call:
+the agent whom to ask. Two guards start on with the pack, and the others
+start off. Ask with your question tool, in one call:
 
-- **Which guards to turn on.** Recommend both of these on the Mac:
+- **Whether to keep the two guards that start on.** Recommend both:
   - `shell-guards`: refuses network code piped into a shell, packages the
     project lacks, GitHub owners outside their list, `pkill -f`, skipped Git
-    hooks, force pushes without a lease, and pushes to `main`. Add
-    `--workflows shell-guards=on`.
+    hooks, force pushes without a lease, and pushes to `main`. To leave it
+    off, add `--workflows shell-guards=off`.
   - `package-age`: installs only package versions at least three days old.
-    Add `--workflows package-age=on`.
+    To leave it off, add `--workflows package-age=off`.
 - **Their first name**, for the refusal message. Add
   `--set guards.person=<name>`.
 - **Which GitHub owners agents may use**: their login and their orgs,
@@ -28,7 +28,7 @@ they turn one on. Ask with your question tool, in one call:
 `merge-gate` makes an agent's Trunk enqueue or merge wait for a
 `hedge proof gate` pass at the head of each open layer of the PR's stack, or
 for the person's gate override at that head. Turn it on only when the person
-proves PRs with the Pull requests pack: add `--workflows merge-gate=on`.
+proves PRs with the Quality gates pack: add `--workflows merge-gate=on`.
 Repositories that merge without the gate, such as their own tooling, go in
 `--set guards.merge-gate-exempt=<owner/name or owner/*, ...>`.
 

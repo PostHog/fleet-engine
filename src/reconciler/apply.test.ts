@@ -3,8 +3,10 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync, wr
 import { join } from "node:path";
 import type { Plan } from "../pack/types.ts";
 import { tempDirs } from "../testing/git.ts";
-import { providerConfigAdapter } from "../adapters/provider-config/adapter.ts";
+import { providerConfigAdapter, type CommandRunner } from "../adapters/provider-config/adapter.ts";
+import { keyHelper } from "../adapters/provider-config/proxy-route.ts";
 import { apply, check, filesAdapter, type Adapter } from "./apply.ts";
+import { changeLedger, readLedger } from "./ledger.ts";
 
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
@@ -229,11 +231,73 @@ describe("apply", () => {
   });
 });
 
+describe("a step whose pack now has a new name", () => {
+  const marker = 'test -f "$HOME/upstream"';
+  const upstream = { id: "context-upstream", check: ["sh", "-c", marker], undo: ["sh", "-c", 'rm "$HOME/upstream"'] };
+  const packs = (...names: string[]) => names.map((name) => ({ name, source: "engine", ref: "main", available: true }));
+  const withMemory = plan({ aliases: { "context-library": "memory" }, packs: packs("base", "memory"), steps: [{ ...upstream, pack: "memory", run: ["sh", "-c", 'touch "$HOME/upstream"'] }] });
+  const withoutMemory = plan({ aliases: { "context-library": "memory" } });
+  const installed = async () => {
+    const home = temp.make("home-");
+    writeFileSync(join(home, "upstream"), "");
+    await changeLedger(home, "steps", "context-library/context-upstream", { ...upstream, pack: "context-library" });
+    return home;
+  };
+  const ledgerText = (home: string) => readFileSync(join(home, ".local/state/hedge/steps.json"), "utf8");
+
+  test("stays installed across the upgrade, and is still undone once its pack leaves the profile", async () => {
+    const home = await installed();
+    expect((await apply(withMemory, { home })).ok).toBe(true);
+    expect(existsSync(join(home, "upstream"))).toBe(true);
+    expect((await apply(withoutMemory, { home })).ok).toBe(true);
+    expect(existsSync(join(home, "upstream"))).toBe(false);
+    expect((await readLedger(home)).steps).toEqual([]);
+  });
+
+  test("a dry run reports no removal and leaves the upstream and the ledger as they were", async () => {
+    const home = await installed();
+    const before = ledgerText(home);
+    const report = await apply(withMemory, { home, dryRun: true });
+    expect(report.actions.filter((action) => action.operation === "remove")).toEqual([]);
+    expect(existsSync(join(home, "upstream"))).toBe(true);
+    expect(ledgerText(home)).toBe(before);
+  });
+
+  test("keeps the newer entry when the ledger already holds the new name too", async () => {
+    const home = await installed();
+    await changeLedger(home, "steps", "memory/context-upstream", { ...upstream, pack: "memory", undo: ["sh", "-c", 'rm "$HOME/upstream"; touch "$HOME/newer-undo"'] });
+    expect((await apply(plan({ aliases: { "context-library": "memory" }, packs: packs("base", "memory") }), { home })).ok).toBe(true);
+    expect(existsSync(join(home, "newer-undo"))).toBe(true);
+    expect((await readLedger(home)).steps).toEqual([]);
+  });
+
+  test("keeps a step of a pack named constructor installed across applies, and undoes it once the pack leaves", async () => {
+    const home = temp.make("home-");
+    const step = { ...upstream, pack: "constructor", run: ["sh", "-c", 'touch "$HOME/upstream"'] };
+    const constructorPlan = plan({ aliases: { "context-library": "memory" }, packs: packs("base", "constructor"), steps: [step] });
+    expect((await apply(constructorPlan, { home })).ok).toBe(true);
+    expect((await apply(constructorPlan, { home })).ok).toBe(true);
+    expect(existsSync(join(home, "upstream"))).toBe(true);
+    expect((await apply(plan({ aliases: { "context-library": "memory" } }), { home })).ok).toBe(true);
+    expect(existsSync(join(home, "upstream"))).toBe(false);
+  });
+});
+
+describe("a workflow that waits for a setting", () => {
+  test("is named with the command that sets it, and the apply still passes", async () => {
+    const home = temp.make("home-");
+    const report = await apply(plan({ workflows: [{ id: "context-library", pack: "memory", active: false, reason: "waits for setting context-library.repo", unset: "context-library.repo" }] }), { home });
+    expect(report.ok).toBe(true);
+    expect(report.findings).toContainEqual({ id: "waits:context-library", pack: "memory", say: "Workflow context-library stays off until you set context-library.repo. Set it with hedge set context-library.repo=<value>." });
+    expect(readFileSync(join(home, ".agents/AGENTS.md"), "utf8")).toBe("rules\n");
+  });
+});
+
 describe("a config entry that waits for a pack check", () => {
   const checks = [{ id: "proxy-up", run: ["proxy-check"], say: "The proxy is down.", pack: "base" }];
   const config = [
     { provider: "claude" as const, key: "env.ANTHROPIC_BASE_URL", value: "http://127.0.0.1:8317", after: "proxy-up", pack: "base" },
-    { provider: "claude" as const, key: "apiKeyHelper", value: "cat key", after: "proxy-up", pack: "base" },
+    { provider: "claude" as const, key: "apiKeyHelper", value: keyHelper, after: "proxy-up", pack: "base" },
   ];
   const proxy = (up: () => boolean) => async (command: string[]) => (command.join(" ") === "proxy-check" ? (up() ? 0 : 1) : 0);
   const settings = (home: string) => (existsSync(join(home, ".claude/settings.json")) ? JSON.parse(readFileSync(join(home, ".claude/settings.json"), "utf8")) : undefined);
@@ -246,7 +310,7 @@ describe("a config entry that waits for a pack check", () => {
     let up = true;
     const options = { home, adapters: [providerConfigAdapter()], run: proxy(() => up) };
     expect((await apply(plan({ files: [], checks, config }), options)).findings).toEqual([]);
-    expect(settings(home)).toEqual({ model: "opus", env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: "cat key" });
+    expect(settings(home)).toEqual({ model: "opus", env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: keyHelper });
     up = false;
     const failed = await apply(plan({ files: [], checks, config }), options);
     expect(failed.ok).toBe(true);
@@ -255,7 +319,73 @@ describe("a config entry that waits for a pack check", () => {
     expect((await apply(plan({ files: [], checks, config }), options)).actions).toEqual([]);
     up = true;
     await apply(plan({ files: [], checks, config }), options);
-    expect(settings(home)).toEqual({ model: "opus", env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: "cat key" });
+    expect(settings(home)).toEqual({ model: "opus", env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: keyHelper });
+  });
+
+  test("that is one part of Hedge's proxy route takes the other part out with it when its own check fails, in apply and in doctor", async () => {
+    const home = temp.make("home-");
+    const split = [config[0]!, { ...config[1]!, after: "helper-up" }];
+    const both = [...checks, { id: "helper-up", run: ["helper-check"], say: "The helper is down.", pack: "base" }];
+    const options = { home, adapters: [providerConfigAdapter()], run: async (command: string[]) => (command.join(" ") === "helper-check" ? 1 : 0) };
+    const applied = await apply(plan({ files: [], checks: both, config: split }), options);
+    expect(applied.findings.map((finding) => finding.id)).toEqual(["check:helper-up"]);
+    expect(settings(home)).toBeUndefined();
+    const doctor = await check(plan({ files: [], checks: both, config: split }), options);
+    expect(doctor.findings.map((finding) => finding.id)).toEqual(["check:helper-up"]);
+  });
+
+  const stepping = (codes: { before: number; after: number }) => {
+    let ran = false;
+    const seen: unknown[] = [];
+    const run = (home: string) => async ([command]: string[]) => {
+      if (command === "start-proxy") {
+        seen.push(settings(home)?.env?.ANTHROPIC_BASE_URL);
+        ran = true;
+      }
+      if (command === "proxy-check") return ran ? codes.after : codes.before;
+      return 0;
+    };
+    return { run, seen };
+  };
+  const steps = [{ id: "start-proxy", run: ["start-proxy"], pack: "base" }];
+
+  test("that exits 4 without a todo before a step and passes after it puts its config in within the same apply, and leaves no Fix", async () => {
+    const home = temp.make("home-");
+    const { run } = stepping({ before: 4, after: 0 });
+    const applied = await apply(plan({ files: [], checks, config, steps }), { home, adapters: [providerConfigAdapter()], run: run(home) });
+    expect(applied).toMatchObject({ ok: true, findings: [] });
+    expect(settings(home)).toEqual({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: keyHelper });
+  });
+
+  test("with a todo, that exits 4 before a step and passes after it puts its config in within the same apply, and leaves no To do", async () => {
+    const home = temp.make("home-");
+    const { run } = stepping({ before: 4, after: 0 });
+    const waiting = plan({ files: [], checks: [{ ...checks[0]!, todo: "Add an account to the proxy." }], config, steps });
+    const options = { home, adapters: [providerConfigAdapter()], run: run(home) };
+    expect((await check(waiting, options)).findings).toEqual([{ id: "check:proxy-up", pack: "base", say: "Add an account to the proxy.", todo: true }]);
+    const applied = await apply(waiting, options);
+    expect(applied).toMatchObject({ ok: true, findings: [] });
+    expect(settings(home)).toEqual({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: keyHelper });
+    expect(await check(waiting, options)).toMatchObject({ ok: true, findings: [] });
+  });
+
+  test("that passes before a step and fails after it never puts its config in, and apply names the failed check", async () => {
+    const home = temp.make("home-");
+    const { run, seen } = stepping({ before: 0, after: 1 });
+    const applied = await apply(plan({ files: [], checks, config, steps }), { home, adapters: [providerConfigAdapter()], run: run(home) });
+    expect(seen).toEqual([undefined]);
+    expect(applied.findings).toEqual([down]);
+    expect(settings(home)).toBeUndefined();
+  });
+
+  test("that an earlier apply wrote, and whose check fails before a step and passes after it, stays in place, and apply changes nothing", async () => {
+    const home = temp.make("home-");
+    await apply(plan({ files: [], checks, config }), { home, adapters: [providerConfigAdapter()], run: proxy(() => true) });
+    const { run, seen } = stepping({ before: 1, after: 0 });
+    const applied = await apply(plan({ files: [], checks, config, steps }), { home, adapters: [providerConfigAdapter()], run: run(home) });
+    expect(seen).toEqual(["http://127.0.0.1:8317"]);
+    expect(applied).toMatchObject({ ok: true, actions: [], findings: [] });
+    expect(settings(home)).toEqual({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: keyHelper });
   });
 
   test("doctor changes nothing, reports the failed check once, and fails", async () => {
@@ -266,7 +396,159 @@ describe("a config entry that waits for a pack check", () => {
     const report = await check(plan({ files: [], checks, config }), { home, adapters: [providerConfigAdapter()], run: flaky });
     expect(report.ok).toBe(false);
     expect(report.findings.filter((finding) => finding.id === down.id)).toEqual([down]);
-    expect(settings(home)).toEqual({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: "cat key" });
+    expect(settings(home)).toEqual({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" }, apiKeyHelper: keyHelper });
+  });
+});
+
+describe("a pack check that waits for the person", () => {
+  const checks = [{ id: "pool", run: ["pool-check"], say: "Hedge cannot read the pool.", todo: "Add an account to the pool.", pack: "base" }];
+  const config = [{ provider: "claude" as const, key: "env.ANTHROPIC_BASE_URL", value: "http://127.0.0.1:8317", after: "pool", pack: "base" }];
+  const waiting = { id: "check:pool", pack: "base", say: "Add an account to the pool.", todo: true as const };
+  const settings = (home: string) => (existsSync(join(home, ".claude/settings.json")) ? JSON.parse(readFileSync(join(home, ".claude/settings.json"), "utf8")) : undefined);
+
+  test("keeps the config that waits for it out, and apply and doctor say it as a To do that fails nothing", async () => {
+    const home = temp.make("home-");
+    const options = { home, adapters: [providerConfigAdapter()], run: exitCodes({ "pool-check": 4 }) };
+    const applied = await apply(plan({ files: [], checks, config }), options);
+    expect(applied.ok).toBe(true);
+    expect(applied.findings).toEqual([waiting]);
+    expect(settings(home)).toBeUndefined();
+    const doctor = await check(plan({ files: [], checks, config }), options);
+    expect(doctor.ok).toBe(true);
+    expect(doctor.findings).toEqual([waiting]);
+  });
+
+  const installedPool = () => {
+    let installed = false;
+    let code = 4;
+    const run = async (command: string[]) => {
+      const words = command.join(" ");
+      if (words === "install-pool") installed = true;
+      if (words === "pool-installed") return installed ? 0 : 1;
+      return words === "pool-check" ? (installed ? code : 1) : 0;
+    };
+    return { run, set: (next: number) => (code = next) };
+  };
+  const steps = [{ id: "install-pool", run: ["install-pool"], check: ["pool-installed"], pack: "base" }];
+
+  test("that nothing waits for runs after the steps, so it reads what a step installed, and apply reports what it finds then", async () => {
+    const { run, set } = installedPool();
+    const home = temp.make("home-");
+    expect(await apply(plan({ files: [], checks, steps }), { home, run })).toMatchObject({ ok: true, findings: [waiting] });
+    set(1);
+    expect(await apply(plan({ files: [], checks, steps }), { home, run })).toMatchObject({ ok: true, findings: [{ id: "check:pool", pack: "base", say: "Hedge cannot read the pool.", repair: "apply" }] });
+    expect(await check(plan({ files: [], checks, steps }), { home, run })).toMatchObject({ ok: false, findings: [{ id: "check:pool", pack: "base", say: "Hedge cannot read the pool.", repair: "apply" }] });
+    set(0);
+    expect(await apply(plan({ files: [], checks, steps }), { home, run })).toMatchObject({ ok: true, findings: [] });
+  });
+
+  test("that config waits for and that fails before a step installs what it reads becomes a To do once the step ran, and the config stays out", async () => {
+    const { run } = installedPool();
+    const home = temp.make("home-");
+    const applied = await apply(plan({ files: [], checks, steps, config }), { home, adapters: [providerConfigAdapter()], run });
+    expect(applied).toMatchObject({ ok: true, findings: [waiting] });
+    expect(settings(home)).toBeUndefined();
+  });
+
+  test("that config waits for and that fails before a step starts what it reads puts its config in once the step ran, and doctor then passes", async () => {
+    const { run, set } = installedPool();
+    set(0);
+    const home = temp.make("home-");
+    const options = { home, adapters: [providerConfigAdapter()], run };
+    const applied = await apply(plan({ files: [], checks, steps, config }), options);
+    expect(applied).toMatchObject({ ok: true, findings: [] });
+    expect(applied.actions.map((action) => [action.target, action.operation])).toEqual([[".claude/settings.json", "create"]]);
+    expect(settings(home)).toEqual({ env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" } });
+    expect(await check(plan({ files: [], checks, steps, config }), options)).toMatchObject({ ok: true, findings: [] });
+  });
+
+  const claudeCli = (ready: () => boolean) => {
+    const installed: Array<{ id: string; scope: string }> = [];
+    const run: CommandRunner = async (command) => {
+      if (!ready()) return { code: 127, stdout: "" };
+      const scope = command.includes("--scope") ? command[command.indexOf("--scope") + 1]! : "user";
+      if (!["user", "project", "local"].includes(scope)) return { code: 1, stdout: "" };
+      if (command[2] === "list") return { code: 0, stdout: JSON.stringify(installed) };
+      if (command[2] === "install") installed.push({ id: command[3]!, scope });
+      if (command[2] === "uninstall") installed.splice(installed.findIndex((entry) => entry.id === command[3] && entry.scope === scope), 1);
+      return { code: 0, stdout: "" };
+    };
+    return { run, installed };
+  };
+  const context7 = "context7@claude-plugins-official";
+  const plugin = { provider: "claude" as const, key: `enabledPlugins.${context7}`, value: true, pack: "base" };
+
+  test("that config waits for and that passes once a step ran puts its config in after the step, so a plugin that waited for the step's Claude Code leaves no Fix and is installed for the user", async () => {
+    const pool = installedPool();
+    pool.set(0);
+    let installed = false;
+    const run = async (command: string[]) => {
+      if (command.join(" ") === "install-pool") installed = true;
+      return pool.run(command);
+    };
+    const claude = claudeCli(() => installed);
+    const home = temp.make("home-");
+    const options = { home, adapters: [providerConfigAdapter({ run: claude.run })], run };
+    const applied = await apply(plan({ files: [], checks, steps, config: [...config, plugin] }), options);
+    expect(applied).toMatchObject({ ok: true, findings: [] });
+    expect(claude.installed).toEqual([{ id: context7, scope: "user" }]);
+    expect(settings(home).env).toEqual({ ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" });
+    expect(await check(plan({ files: [], checks, steps, config: [...config, plugin] }), options)).toMatchObject({ ok: true, findings: [] });
+    claude.installed.splice(0, 1, { id: context7, scope: "project" });
+    expect((await check(plan({ files: [], checks, steps, config: [...config, plugin] }), options)).findings).toEqual([{ id: `plugin:${context7}`, pack: "engine", say: `The Claude plugin ${context7} needs to be installed.`, repair: "apply" }]);
+  });
+
+  test("that config waits for and that passes once a step ran keeps the notice that an edited plugin is yours now", async () => {
+    const pool = installedPool();
+    pool.set(0);
+    const claude = claudeCli(() => true);
+    const home = temp.make("home-");
+    const options = { home, adapters: [providerConfigAdapter({ run: claude.run })], run: pool.run };
+    await apply(plan({ files: [], config: [plugin] }), options);
+    writeFileSync(join(home, ".claude/settings.json"), JSON.stringify({ enabledPlugins: { [context7]: false } }));
+    const applied = await apply(plan({ files: [], checks, steps, config }), options);
+    expect(applied.findings).toEqual([{ id: `plugin:${context7}`, pack: "engine", say: `Kept the Claude plugin ${context7}, which no pack enables any more, because it changed outside Hedge. It is yours now.` }]);
+    expect(settings(home).env).toEqual({ ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" });
+    expect(claude.installed).toEqual([{ id: context7, scope: "user" }]);
+  });
+
+  test("that config waits for and that passes once a step ran still reports a marketplace update that failed", async () => {
+    const pool = installedPool();
+    pool.set(0);
+    const installed: Array<{ id: string; scope: string }> = [];
+    const claude: CommandRunner = async (command) => {
+      const words = command.slice(2).join(" ");
+      if (words === "list --json") return { code: 0, stdout: JSON.stringify(installed) };
+      if (words === "marketplace list --json") return { code: 0, stdout: JSON.stringify([{ name: "claude-plugins-official" }]) };
+      if (words === "marketplace update claude-plugins-official") return { code: 1, stdout: "", stderr: "network down" };
+      if (command[2] === "install") installed.push({ id: command[3]!, scope: "user" });
+      return { code: 0, stdout: "" };
+    };
+    const home = temp.make("home-");
+    const applied = await apply(plan({ files: [], checks, steps, config: [...config, plugin] }), { home, adapters: [providerConfigAdapter({ run: claude })], run: pool.run });
+    expect(applied.findings).toEqual([{ id: "plugin-marketplace:claude-plugins-official", pack: "engine", say: "Could not update the Claude plugin marketplace claude-plugins-official: network down.", repair: "apply" }]);
+    expect(installed).toEqual([{ id: context7, scope: "user" }]);
+    expect(settings(home).env).toEqual({ ANTHROPIC_BASE_URL: "http://127.0.0.1:8317" });
+  });
+
+  test("doctor reads one result of a check that config waits for, for both the config and the finding", async () => {
+    const home = temp.make("home-");
+    const options = { home, adapters: [providerConfigAdapter()], run: exitCodes({}) };
+    await apply(plan({ files: [], checks, config }), options);
+    let probes = 0;
+    const emptying = async (command: string[]) => (command.join(" ") === "pool-check" ? (probes++ === 0 ? 0 : 4) : 0);
+    expect(await check(plan({ files: [], checks, config }), { ...options, run: emptying })).toMatchObject({ ok: true, findings: [] });
+    probes = 0;
+    const filling = async (command: string[]) => (command.join(" ") === "pool-check" ? (probes++ === 0 ? 4 : 0) : 0);
+    const doctor = await check(plan({ files: [], checks, config }), { ...options, run: filling });
+    expect(doctor.findings.map((finding) => [finding.id, finding.todo ?? finding.repair])).toEqual([["check:pool", true], ["config:.claude/settings.json", "apply"]]);
+  });
+
+  test("a check without a todo that exits 4 is a Fix, and a check with one stays a Fix for any other failing code", async () => {
+    const home = temp.make("home-");
+    const plain = [{ ...checks[0]!, todo: undefined }];
+    expect((await check(plan({ files: [], checks: plain }), { home, run: exitCodes({ "pool-check": 4 }) })).findings).toEqual([{ id: "check:pool", pack: "base", say: "Hedge cannot read the pool.", repair: "apply" }]);
+    expect((await check(plan({ files: [], checks, config }), { home, adapters: [providerConfigAdapter()], run: exitCodes({ "pool-check": 1 }) })).ok).toBe(false);
   });
 });
 
