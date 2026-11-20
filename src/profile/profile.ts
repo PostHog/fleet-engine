@@ -56,7 +56,7 @@ export async function saveAnswers(dir: string, answers: Partial<ProfileFile>, op
   const current = withPicksOn((await readJson(path)) ?? { schema: 1, migrations: [picksTurnOn] });
   if (current.schema !== 1) throw new ProfileError(`${path}: unknown schema ${String(current.schema)}`);
   const settings = { ...(current.settings as Record<string, unknown> | undefined), ...answers.settings };
-  await writeFile(path, JSON.stringify({ ...current, ...answers, settings, schema: 1 }, null, 2) + "\n");
+  await writeFile(path, JSON.stringify(withNewPicksOn({ ...current, ...answers, settings, schema: 1 }, current.packs), null, 2) + "\n");
   const added = await run(dir, "git", "add", "--", name);
   if (!added.ok) throw new ProfileError(`${dir}: could not stage ${name}: ${added.stderr}`);
   const changed = await run(dir, "git", "diff", "--cached", "--quiet", "--", name);
@@ -113,13 +113,23 @@ const movedWorkflows: Array<{ workflow: string; from: string }> = [
   { workflow: "context-library", from: "context-library" },
 ];
 
+const listedPicks = (packs: unknown[], workflows: Record<string, unknown>) => pickedWorkflows.filter((item) => !Object.hasOwn(workflows, item.workflow) && item.packs.some((name) => packs.includes(name)));
+
 export function withPicksOn(file: Record<string, unknown>): Record<string, unknown> {
   const { packs, workflows = {}, migrations = [] } = file;
-  if (!Array.isArray(packs) || !isRecord(workflows) || !Array.isArray(migrations) || migrations.includes(picksTurnOn)) return file;
-  const unset = pickedWorkflows.filter((item) => !Object.hasOwn(workflows, item.workflow) && item.packs.some((name) => packs.includes(name)));
-  const moved = movedWorkflows.filter((item) => workflows[item.workflow] === true && !packs.includes(item.from));
-  const off = Object.fromEntries([...unset, ...moved].map((item) => [item.workflow, false]));
-  return { ...file, workflows: { ...workflows, ...off }, migrations: [...migrations, picksTurnOn] };
+  if (!Array.isArray(packs) || !isRecord(workflows) || !Array.isArray(migrations)) return file;
+  const marked = migrations.includes(picksTurnOn);
+  const moved = marked ? [] : movedWorkflows.filter((item) => workflows[item.workflow] === true && !packs.includes(item.from));
+  const off = Object.fromEntries([...listedPicks(packs, workflows), ...moved].map((item) => [item.workflow, false]));
+  return { ...file, workflows: { ...workflows, ...off }, migrations: marked ? migrations : [...migrations, picksTurnOn] };
+}
+
+function withNewPicksOn(file: Record<string, unknown>, listedBefore: unknown): Record<string, unknown> {
+  const { packs, workflows = {} } = file;
+  if (!Array.isArray(packs) || !isRecord(workflows)) return file;
+  const before = Array.isArray(listedBefore) ? listedBefore : [];
+  const on = listedPicks(packs, workflows).filter((item) => !item.packs.some((name) => before.includes(name)));
+  return withPicksOn({ ...file, workflows: { ...workflows, ...Object.fromEntries(on.map((item) => [item.workflow, true])) } });
 }
 
 export function workflowDefaults(packs: PackManifest[]): Record<string, boolean> {

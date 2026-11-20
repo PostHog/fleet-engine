@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-import { installPrompt, startPrompt, startStatus, toggleSelected, toggleStart, type PromptData, type Start } from "./model.ts";
+import { installNames, installPrompt, startPrompt, startStatus, toggleSelected, toggleStart, type PromptData, type Start } from "./model.ts";
 import { promptHtml, t3Link } from "./prompt.ts";
 
 const selectionKey = "hedge-packs";
@@ -57,7 +57,8 @@ function picker(form: HTMLFormElement, data: PromptData) {
     storeSelection(selected);
     document.getElementById("install-empty")!.hidden = selected.length > 0;
     document.getElementById("install-full")!.hidden = selected.length === 0;
-    const count = selected.length === 1 ? "1 pack selected" : `${selected.length} packs selected`;
+    const named = installNames(data, selected).length;
+    const count = named === 1 ? "1 pack selected" : `${named} packs selected`;
     document.getElementById("install-count")!.textContent = count;
     const jump = document.getElementById("install-jump")!;
     jump.hidden = selected.length === 0;

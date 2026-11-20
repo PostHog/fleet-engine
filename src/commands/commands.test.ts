@@ -196,9 +196,10 @@ describe("hedge packs with a profile that still names an old pack", () => {
     expect((await hedge(home, ["packs", "--add", "recovery", "--add", "context-library"])).code).toBe(0);
     expect((await pushed()).packs).toEqual(["pull-requests", "hub", "recovery", "context-library"]);
     const listed = (await hedge(home, ["packs"])).output;
-    expect(listed).toContain("  ✓ memory  ");
+    expect(listed).toContain("  · memory  ");
+    expect(listed).toContain("      The old name context-library selects only: context-library. Add memory for the whole pack.\n      Workflows: shared-memory off, context-library off: waits for setting context-library.repo, dream off");
+    expect(listed).not.toContain("Only part is on");
     expect(listed).not.toContain("context-library  ");
-    expect(listed).toContain("Workflows: shared-memory off, context-library off: waits for setting context-library.repo, dream off");
     expect((await hedge(home, ["packs", "--remove", "recovery"])).code).toBe(0);
     expect((await pushed()).packs).toEqual(["pull-requests", "hub", "context-library"]);
     expect((await hedge(home, ["packs"])).output).toContain("disk-watch on, linked-hub on");

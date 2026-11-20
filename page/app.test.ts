@@ -1,7 +1,16 @@
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { Window } from "happy-dom";
+import { main } from "../src/cli.ts";
 import type { LoadedPack } from "../src/pack/types.ts";
+import { profilePath } from "../src/setup/profile.ts";
+import { engineRoot, fakeMachine, githubRepo, hedgeSetup, pushedAnswers, scripted } from "../src/setup/testing.ts";
+import { cachedCheckout, isolateGit, spawnGit, tempDirs } from "../src/testing/git.ts";
 import { buildSite, type SiteFiles } from "../scripts/build-page.ts";
+
+isolateGit();
+const temp = tempDirs();
 
 const teamPack: LoadedPack = { dir: "/team/packs/acme", manifest: { schema: 1, name: "acme", summary: "A team pack." } };
 
@@ -15,7 +24,30 @@ beforeAll(async () => {
 const open: Window[] = [];
 afterEach(async () => {
   for (const window of open.splice(0)) await window.happyDOM.close();
+  temp.cleanup();
 });
+
+async function namedHubWithTeam(packs: LoadedPack[]) {
+  const home = temp.make("home-");
+  expect((await hedgeSetup(home, ["--non-interactive", "--preset", "starter", "--plan", "claude"], [], fakeMachine(home))).code).toBe(0);
+  const io = scripted([]);
+  const hedge = (args: string[]) => main(args, { home, engineRoot, platform: "linux", print: io.terminal.print, terminal: io.terminal, apply: async () => 0, setup: { machine: fakeMachine(home).machine } });
+  expect(await hedge(["hub", "here", "coder.hedge-hub"])).toBe(0);
+  const source = join(home, ".local/share/hedge/sources/team");
+  await cachedCheckout(source, { name: "team", repo: "team/packs", ref: "main" });
+  for (const { manifest } of packs) {
+    mkdirSync(join(source, "packs", manifest.name), { recursive: true });
+    writeFileSync(join(source, "packs", manifest.name, "pack.json"), JSON.stringify(manifest));
+  }
+  const dir = profilePath(home);
+  const file = JSON.parse(readFileSync(join(dir, "hedge.json"), "utf8"));
+  writeFileSync(join(dir, "hedge.json"), JSON.stringify({ ...file, sources: [...file.sources, { name: "team", repo: "team/packs", ref: "main" }] }, null, 2) + "\n");
+  await spawnGit(dir, "commit", "-q", "-am", "Team");
+  await spawnGit(dir, "push", "-q");
+  return { home, hedge, output: io.output };
+}
+
+const run = (hedge: (args: string[]) => Promise<number>, command: string) => hedge(command.split(" ").slice(1));
 
 type Visit = { from?: Window; files?: SiteFiles; url?: string; motion?: "reduce" | "no-preference"; inView?: boolean };
 
@@ -62,6 +94,10 @@ const switches = (window: Window) => ["pull-requests", "orchestration", "communi
 const selected = (window: Window) => [...window.document.querySelectorAll('input[name="pack"]')].flatMap((box) => ((box as unknown as HTMLInputElement).checked ? [(box as unknown as HTMLInputElement).value] : []));
 const command = (window: Window) => text(window, "install-text").match(/^ {3}(hedge packs .*)$/m)?.[1];
 const shown = (window: Window, id: string) => !(window.document.getElementById(id) as unknown as HTMLElement).hidden;
+const copied = async (window: Window) => {
+  (window.document.querySelector('[data-copy="install-text"]') as unknown as HTMLButtonElement).click();
+  return window.navigator.clipboard.readText();
+};
 const t3Prompt = (window: Window, id: string) => new URL((window.document.getElementById(`${id}-t3`) as unknown as HTMLAnchorElement).href).searchParams.get("prompt");
 
 describe("the landing page in a browser", () => {
@@ -168,6 +204,48 @@ describe("the Packs page in a browser", () => {
     expect(selected(packs)).toEqual(["communication", "memory"]);
     input(packs, "#pick-guards").click();
     expect(command(packs)).toBe("hedge packs --add communication --add guards --add memory");
+  });
+
+  test("ticking a team pack adds to the command each pack its card says it adds, also a pack with no card, and unticking it takes them back", async () => {
+    const needy: LoadedPack = { dir: "/team/packs/acme", manifest: { schema: 1, name: "acme", summary: "A team pack.", requires: ["integrations", "context-library", "gone"] } };
+    const team = visit("packs/index.html", { files: await buildSite({ audience: "posthog", team: [needy] }) });
+    input(team, "#pick-acme").click();
+    expect(selected(team)).toEqual(["acme"]);
+    expect([text(team, "install-count"), command(team)]).toEqual(["4 packs selected", "hedge packs --add integrations --add context-library --add gone --add acme"]);
+    input(team, "#pick-acme").click();
+    expect([shown(team, "install-empty"), shown(team, "install-full")]).toEqual([true, false]);
+  });
+
+  test("a pack that requires Hub through a hidden helper adds hub to the command a visitor copies from the packs page and from its own page, and hedge packs on a named hub without Hub takes that command", async () => {
+    const acme: LoadedPack = { dir: "/team/packs/acme", manifest: { schema: 1, name: "acme", summary: "A team pack.", requires: ["helper"] } };
+    const helper: LoadedPack = { dir: "/team/packs/helper", manifest: { schema: 1, name: "helper", summary: "A hidden helper.", onSite: false, requires: ["hub"] } };
+    const files = await buildSite({ audience: "posthog", team: [acme, helper] });
+    const picker = visit("packs/index.html", { files });
+    input(picker, "#pick-acme").click();
+    const expected = "hedge packs --add helper --add hub --add acme";
+    expect([selected(picker), text(picker, "install-count"), command(picker)]).toEqual([["acme"], "3 packs selected", expected]);
+    const own = visit("packs/acme/index.html", { files });
+    expect([command(own), (await copied(own)).match(/^ {3}(hedge packs .*)$/m)?.[1], t3Prompt(own, "install")]).toEqual([expected, expected, text(own, "install-text")]);
+    const hub = await namedHubWithTeam([acme, helper]);
+    expect((await pushedAnswers(hub.home)).packs).not.toContain("hub");
+    expect(await run(hub.hedge, "hedge packs --add helper --add acme")).toBe(2);
+    expect(await run(hub.hedge, expected)).toBe(0);
+    expect((await pushedAnswers(hub.home)).packs).toEqual(expect.arrayContaining(["helper", "hub", "acme"]));
+  });
+
+  test("a hidden helper that requires context-library adds context-library by that name, so the command leaves shared memory off and makes no memory repo", async () => {
+    const acme: LoadedPack = { dir: "/team/packs/acme", manifest: { schema: 1, name: "acme", summary: "A team pack.", requires: ["helper"] } };
+    const helper: LoadedPack = { dir: "/team/packs/helper", manifest: { schema: 1, name: "helper", summary: "A hidden helper.", onSite: false, requires: ["context-library"] } };
+    const files = await buildSite({ audience: "posthog", team: [acme, helper] });
+    const picker = visit("packs/index.html", { files });
+    input(picker, "#pick-acme").click();
+    const expected = "hedge packs --add helper --add context-library --add acme";
+    expect([selected(picker), command(picker)]).toEqual([["acme"], expected]);
+    expect(command(visit("packs/acme/index.html", { files }))).toBe(expected);
+    const hub = await namedHubWithTeam([acme, helper]);
+    expect(await run(hub.hedge, expected)).toBe(0);
+    const { packs } = await pushedAnswers(hub.home);
+    expect([packs.includes("context-library"), packs.includes("memory"), existsSync(githubRepo(hub.home, "nora/hedge-memory"))]).toEqual([true, false, false]);
   });
 
   test("leaves out a remembered pack that this site does not have", () => {

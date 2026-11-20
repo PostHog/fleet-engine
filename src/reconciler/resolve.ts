@@ -97,7 +97,7 @@ export function resolve(profile: Profile, saved: MachineFile, sources: FetchedSo
     return !reason;
   };
 
-  plan.catalog = serviceCatalog(order, profile, activeIds(settledWorkflows(profile, { ...machine, role: "hub" }, order, names, byOldName)), machine.role === "hub" ? os : "linux");
+  plan.catalog = serviceCatalog(order, profile, activeIds(settledWorkflows(profile, { ...machine, role: "hub" }, order, names, byOldName)), byOldName, machine.role === "hub" ? os : "linux");
   const packFiles: DesiredFile[] = [];
   for (const { manifest, dir } of order) {
     const pack = manifest.name;
@@ -163,11 +163,11 @@ export function resolve(profile: Profile, saved: MachineFile, sources: FetchedSo
 }
 
 /** Every served service of the profile, judged the same way on every node: plans and workflows from the profile, the os of the hub (Linux off the hub), and no gate, which only the hub can test. Two services that claim one port fail. */
-function serviceCatalog(order: Candidate[], profile: Profile, active: Set<string>, hubOs: Os) {
+function serviceCatalog(order: Candidate[], profile: Profile, active: Set<string>, byOldName: ByOldName, hubOs: Os) {
   const ports = new Map<number, string>();
   return order.flatMap(({ manifest }) =>
     (manifest.served ?? []).flatMap(({ id, port, health, after, ...scope }) => {
-      if ((scope.on && !scope.on.includes(hubOs)) || (scope.plans && !scope.plans.includes(profile.plan)) || (scope.workflow && !active.has(scope.workflow))) return [];
+      if ((scope.on && !scope.on.includes(hubOs)) || (scope.plans && !scope.plans.includes(profile.plan)) || (byOldName.has(manifest.name) && !scope.workflow) || (scope.workflow && !active.has(scope.workflow))) return [];
       const name = `${manifest.name}/${id}`;
       const other = ports.get(port);
       if (other) throw new ResolveError(`port ${port} is claimed by both ${other} and ${name}`);
@@ -303,16 +303,20 @@ function activateWorkflows(profile: Profile, machine: MachineFile, order: Candid
 
 function settledWorkflows(profile: Profile, machine: MachineFile, order: Candidate[], names: Set<string>, byOldName: ByOldName) {
   const held = new Map<string, string>();
+  const released = new Set<string>();
   for (;;) {
     const states = workflowStates(profile, machine, order, names, byOldName, held);
-    const waiting = unsetGates(profile, machine, order, activeIds(states), held);
-    if (!waiting.size) return states;
-    for (const [id, key] of waiting) held.set(id, key);
+    const waiting = unsetGates(profile, machine, order, activeIds(states));
+    const freed = [...held.keys()].filter((id) => !waiting.has(id) && !released.has(id));
+    const added = [...waiting].filter(([id, key]) => held.get(id) !== key);
+    if (!freed.length && !added.length) return states;
+    for (const id of freed) held.delete(id), released.add(id);
+    for (const [id, key] of added) held.set(id, key);
   }
 }
 
-function unsetGates(profile: Profile, machine: MachineFile, order: Candidate[], active: Set<string>, held: Map<string, string>) {
-  const gated = order.flatMap(({ manifest }) => manifest.workflows ?? []).filter((workflow) => workflow.offUntilSet && !held.has(workflow.id));
+function unsetGates(profile: Profile, machine: MachineFile, order: Candidate[], active: Set<string>) {
+  const gated = order.flatMap(({ manifest }) => manifest.workflows ?? []).filter((workflow) => workflow.offUntilSet);
   return new Map(gated.flatMap((workflow) => {
     const settings = machineDefaults(activeSettings(order, new Set([...active, workflow.id])), machine);
     const values = settingValues(settings, answersOf(profile, settings));

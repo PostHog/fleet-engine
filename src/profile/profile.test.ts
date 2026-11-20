@@ -63,8 +63,8 @@ describe("a pick that turns its main workflow on", () => {
     expect(JSON.parse(readFileSync(join(dir, "hedge.json"), "utf8"))).toEqual(older);
     await saveAnswers(dir, { plan: "claude" });
     expect(JSON.parse(readFileSync(join(dir, "hedge.json"), "utf8"))).toMatchObject({ plan: "claude", workflows: kept, migrations: [picksTurnOn] });
-    await saveAnswers(dir, { workflows: { "shell-guards": true } });
-    expect((await loadProfile(dir)).workflows).toEqual({ "shell-guards": true });
+    await saveAnswers(dir, { workflows: { ...kept, "slack-thread": true } });
+    expect((await loadProfile(dir)).workflows).toEqual({ ...kept, "slack-thread": true });
   });
 
   test("leaves a workflow the profile already set, and a pack it does not list, as they are", async () => {
@@ -79,6 +79,19 @@ describe("a pick that turns its main workflow on", () => {
     expect((await loadProfile(await profileRepo(listed))).workflows).toEqual(listed.workflows);
   });
 
+  test("keeps every choice when the base engine saves the profile in between, which drops off values and keeps the migration mark", async () => {
+    const dir = temp.make("profile-");
+    await spawnGit(dir, "init", "-q", "-b", "main");
+    await saveAnswers(dir, { ...profile, packs: ["slack", "guards"] });
+    await saveAnswers(dir, { workflows: { ...(await loadProfile(dir)).workflows, "shell-guards": false } });
+    const file = JSON.parse(readFileSync(join(dir, "hedge.json"), "utf8"));
+    const baseSave = { ...file, packs: [...file.packs, "incident-io"], workflows: Object.fromEntries(Object.entries(file.workflows).filter(([, on]) => on)) };
+    writeFileSync(join(dir, "hedge.json"), JSON.stringify(baseSave, null, 2) + "\n");
+    expect((await loadProfile(dir)).workflows).toEqual({ "slack-thread": true, "shell-guards": false, "package-age": true, "page-owner": false });
+    await saveAnswers(dir, { workflows: { ...(await loadProfile(dir)).workflows, "page-owner": true } });
+    expect(JSON.parse(readFileSync(join(dir, "hedge.json"), "utf8")).workflows).toEqual({ "slack-thread": true, "shell-guards": false, "package-age": true, "page-owner": true });
+  });
+
   test("leaves a damaged profile for the check to refuse", async () => {
     expect(loadProfile(await profileRepo({ ...profile, packs: ["guards"], workflows: [] }))).rejects.toThrow("workflows must map ids to true or false");
     expect(loadProfile(await profileRepo({ ...profile, packs: ["guards"], migrations: "picks-turn-on" }))).rejects.toThrow("migrations must list names");
@@ -88,7 +101,14 @@ describe("a pick that turns its main workflow on", () => {
     const dir = temp.make("profile-");
     await spawnGit(dir, "init", "-q", "-b", "main");
     await saveAnswers(dir, { ...profile, packs: ["slack", "guards"] });
-    expect(await loadProfile(dir)).toMatchObject({ packs: ["slack", "guards"], workflows: {}, migrations: [picksTurnOn] });
+    expect(await loadProfile(dir)).toMatchObject({ packs: ["slack", "guards"], workflows: { "slack-thread": true, "shell-guards": true, "package-age": true }, migrations: [picksTurnOn] });
+  });
+
+  test("turns the workflow on in a profile whose first save names packs and no workflows", async () => {
+    const dir = temp.make("profile-");
+    await spawnGit(dir, "init", "-q", "-b", "main");
+    await saveAnswers(dir, { schema: 1, engine: profile.engine, sources: [], packs: ["slack", "guards"], plan: "both", settings: {} });
+    expect(await loadProfile(dir)).toMatchObject({ packs: ["slack", "guards"], workflows: { "slack-thread": true, "shell-guards": true, "package-age": true }, migrations: [picksTurnOn] });
   });
 });
 

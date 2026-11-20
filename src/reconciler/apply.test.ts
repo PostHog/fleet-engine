@@ -5,7 +5,7 @@ import type { Plan } from "../pack/types.ts";
 import { tempDirs } from "../testing/git.ts";
 import { providerConfigAdapter } from "../adapters/provider-config/adapter.ts";
 import { apply, check, filesAdapter, type Adapter } from "./apply.ts";
-import { changeLedger, ledgerKey, readLedger } from "./ledger.ts";
+import { changeLedger, readLedger } from "./ledger.ts";
 
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
@@ -270,14 +270,15 @@ describe("a step whose pack now has a new name", () => {
     expect((await readLedger(home)).steps).toEqual([]);
   });
 
-  test("keeps a step of a pack named constructor under its own name", async () => {
+  test("keeps a step of a pack named constructor installed across applies, and undoes it once the pack leaves", async () => {
     const home = temp.make("home-");
-    writeFileSync(join(home, "upstream"), "");
-    const step = { ...upstream, pack: "constructor", run: ["true"] };
+    const step = { ...upstream, pack: "constructor", run: ["sh", "-c", 'touch "$HOME/upstream"'] };
     const constructorPlan = plan({ aliases: { "context-library": "memory" }, packs: packs("base", "constructor"), steps: [step] });
     expect((await apply(constructorPlan, { home })).ok).toBe(true);
     expect((await apply(constructorPlan, { home })).ok).toBe(true);
-    expect((await readLedger(home)).steps.map(ledgerKey)).toEqual(["constructor/context-upstream"]);
+    expect(existsSync(join(home, "upstream"))).toBe(true);
+    expect((await apply(plan({ aliases: { "context-library": "memory" } }), { home })).ok).toBe(true);
+    expect(existsSync(join(home, "upstream"))).toBe(false);
   });
 });
 

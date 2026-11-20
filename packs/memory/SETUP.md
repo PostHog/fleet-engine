@@ -35,16 +35,6 @@ Ask with your question tool which repo to use:
 To leave the context library off, add `context-library=off` to `--workflows`.
 To turn Dream on, add `dream=on`.
 
-- **Their context repo**: when they have one, add
-  `--set context.repo=<owner/name>`. The checkout is then `context.path`,
-  `~/dev/context` unless they set it.
-- **A repo they already have**: add `--set context-library.repo=<owner/name>`.
-  When the checkout should live somewhere other than `~/dev/context-library`,
-  also add `--set context-library.path=<folder>`.
-- **New repo**: create a private repo first, such as
-  `gh repo create <their login>/context-library --private --add-readme`, then
-  add `--set context-library.repo=<their login>/context-library`.
-
 With the MCP gateway on, the hub also serves the library's search as the
 `context_search` tool. It mounts the hub's checkout read-only and logs no
 search. Until the hub's first sync clones the library, the gateway runs

@@ -497,7 +497,7 @@ async function inPack(plan: Plan, loaded: LoadedPack, options: CliOptions, work:
   finally { assign(saved); }
 }
 
-function packEnvironment(plan: Plan, options: CliOptions): Record<string, string | undefined> {
+export function packEnvironment(plan: Plan, options: Pick<CliOptions, "home" | "engineRoot">): Record<string, string | undefined> {
   return withLegacyNames({ HOME: options.home, HEDGE_ENGINE_DIR: options.engineRoot, HEDGE_PROFILE_DIR: plan.machine.profileDir, HEDGE_SETTINGS: JSON.stringify(plan.settings), HEDGE_MODELS: JSON.stringify(plan.models), HEDGE_PLAN: plan.ai, HEDGE_HANDLERS: JSON.stringify(handlerPaths(plan)), HEDGE_HANDLER_SUBCOMMANDS: JSON.stringify(handlerSubcommands(plan)) });
 }
 
