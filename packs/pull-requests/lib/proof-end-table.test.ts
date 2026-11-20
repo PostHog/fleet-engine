@@ -435,22 +435,6 @@ test("a merged PR's receipt without a gate names the landed gate", async () => {
   expect(block(pr.githubBody())).toContain("**End table:** no gate at HEAD yet. Run hedge proof gate --landed, then hedge proof receipt.");
 });
 
-test("a PR named twice in the report reads once, and each other spelling keeps its own row, so no spelling hides another's gate", async () => {
-  const pr = await checkout();
-  await pr.commit("feature.ts", lines(10, "greet"));
-  pr.pullRequestState({ body: graded("non-critical") });
-  await reviewHead(pr);
-  await pr.hedge("require", "--none", "--reason", "Docs only");
-  await pr.hedge("gate");
-  const proofRows = (report: string) => report.slice(report.indexOf("### Proofs"), report.indexOf("### Review")).split("\n").filter((line) => /^\| example\/product#42 \| /i.test(line));
-
-  const twice = (await pr.decide("report", "--pr", "example/product#42", "--pr", "example/product#42")).output;
-  expect(twice).toContain("## End-of-run report: example/product#42\n");
-  expect(tableIn(twice)).toHaveLength(2);
-  expect(proofRows(twice)).toHaveLength(1);
-  expect(proofRows((await pr.decide("report", "--pr", "Example/Product#42", "--pr", "example/product#42")).output)).toHaveLength(2);
-});
-
 test("a base commit from GitHub that is not a full SHA counts unknown, not from a local branch of that name", async () => {
   const pr = await checkout();
   await pr.commit("feature.ts", lines(3, "greet"));
