@@ -17,9 +17,9 @@ function pullOf(head: ProofIdentity, run: Run): PullRequest | undefined {
 async function growthAtHead(home: string, head: ProofIdentity, run: Run) {
   const pull = pullOf(head, run);
   const growth = await measureGrowth(home, head, run, pull?.baseSha);
-  if (growth.final || !pull || !isCommitSha(pull.baseSha) || run(["env", "GIT_NO_LAZY_FETCH=1", "git", "cat-file", "-e", `${pull.baseSha}^{commit}`]).code === 0) return { growth };
+  if (growth.final || !pull || !isCommitSha(pull.baseSha) || run(["env", "GIT_NO_LAZY_FETCH=1", "git", "cat-file", "-e", `${pull.baseSha}^{commit}`]).code === 0) return { growth, body: pull?.body ?? "" };
   const remote = remotesOf(head.repository, run)[0] ?? `<a remote of ${head.repository}>`;
-  return { growth, missing: `Hedge cannot count the production lines at HEAD, since the base commit ${pull.baseSha.slice(0, 7)} that GitHub reports is not in this checkout. Run git fetch ${remote} ${pull.baseSha}, then run this command again` };
+  return { growth, body: pull.body ?? "", missing: `Hedge cannot count the production lines at HEAD, since the base commit ${pull.baseSha.slice(0, 7)} that GitHub reports is not in this checkout. Run git fetch ${remote} ${pull.baseSha}, then run this command again` };
 }
 
 const sanityDirectory = (home: string, identity: ProofIdentity) => join(pullRequestDirectory(home, identity), "sanity");
@@ -46,7 +46,7 @@ export async function recordSanity(home: string, head: ProofIdentity, run: Run, 
 }
 
 export async function requireSanity(home: string, head: ProofIdentity, run: Run, judge: () => Promise<BloatJudge>) {
-  const { growth, missing } = await growthAtHead(home, head, run);
+  const { growth, missing, body } = await growthAtHead(home, head, run);
   const [first, final] = [growth.first?.production, growth.final?.production];
   if (first === 0) return;
   if (missing) throw new Error(missing);
@@ -58,6 +58,6 @@ export async function requireSanity(home: string, head: ProofIdentity, run: Run,
   }
   if (final <= 2 * first) return;
   if ((last?.production ?? -1) >= final) return;
-  const score = await scoreBloat(home, head, run, growth.first!, growth.final!, judge);
+  const score = await scoreBloat(home, head, run, { first: growth.first!, final: growth.final!, body }, judge);
   throw new Error(`Production lines grew from ${first} at round 1 to ${final} at HEAD, past twice the first. ${bloatSentence(score)}`);
 }

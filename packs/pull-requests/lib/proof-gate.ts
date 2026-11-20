@@ -36,7 +36,7 @@ export const arbiterOf = ({ env, cwd }: Pick<GateContext, "env" | "cwd">): Arbit
 };
 
 const savedPath = (home: string, ref: PrRef, commit: string) => join(pullRequestDirectory(home, { ...ref, commit }), "gate-outcome", `${commit}.json`);
-const unhashed = new Set(["gate-outcome", "gate-record", "judge", "carried", "receipt.json", displayEntry]);
+const unhashed = new Set(["gate-outcome", "gate-record", "judge", "bloat", "carried", "receipt.json", displayEntry]);
 
 async function proofFiles(home: string, ref: PrRef) {
   const root = prDirectory(home, ref);

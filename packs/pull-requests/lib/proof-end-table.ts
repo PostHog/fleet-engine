@@ -50,7 +50,7 @@ function linesCell(growth: Growth | undefined) {
 function sanityCell({ summary, reason }: EndRow) {
   const { sanity: pass, bloat } = summary.growth ?? {};
   const verdict = pass ? `${pass.verdict} at ${pass.commit === summary.commit ? "HEAD" : pass.commit.slice(0, 7)}: ${reason("sanity", pass.reason)}` : "not run";
-  return bloat ? `${bloatFigure(bloat)}; ${verdict}` : verdict;
+  return bloat ? `${bloatFigure(bloat, summary.commit)}; ${verdict}` : verdict;
 }
 
 function acceptor(gap: GapProof) {

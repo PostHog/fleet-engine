@@ -35,6 +35,7 @@ test("past twice the first lines, a fresh judge scores the cuttable share once p
   expect(prompts[0]).toContain("+greet 9");
   expect(prompts[0]).toContain("+retry 10");
   expect(prompts[0]).not.toContain("the greeting keeps it");
+  expect(prompts[0]).toContain(": 21 production lines");
 
   expect((await pr.hedge("sanity", "--verdict", "justified", "--reason", "Retries are the fix")).code).toBe(0);
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).code).toBe(0);
@@ -54,29 +55,57 @@ test("a judge that gives no score leaves the growth to be read by hand and is as
 
   await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(
     "past twice the first. Read the growth by hand: the bloat judge bloat-judge-under-test gave no score: its answer is not the JSON asked for. Before another round");
-  judge.answer(JSON.stringify({ cuttable: 101, hunks: [] }));
-  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow("Read the growth by hand");
+  for (const answer of [{ cuttable: 101, hunks: [] }, { cuttable: 30, hunks: [] }, { cuttable: 30, hunks: [{ citation: " ", reason: "not needed" }] }]) {
+    judge.answer(JSON.stringify(answer));
+    await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow("Read the growth by hand");
+  }
   judge.answer(JSON.stringify({ cuttable: 0, hunks: [] }));
   await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(
     "A fresh judge, bloat-judge-under-test, reads 0% of HEAD's production lines as more than the problem needs and names no hunk.");
   const prompts = judge.prompts();
-  expect(prompts).toHaveLength(3);
+  expect(prompts).toHaveLength(5);
   expect(prompts[0]).toContain("The PR description has no Problem section.");
 });
 
-test("a later HEAD gets its own score, and the end table shows the latest", async () => {
+test("a later HEAD or an edited Problem section gets its own score, and the end table names the commit of an older score", async () => {
   const pr = await checkout();
-  const judge = fakeModel(pr, "BLOAT_JUDGE", JSON.stringify({ cuttable: 52, hunks: [] }));
+  const hunk = { citation: "retry.ts:1-11", reason: "the problem never retries" };
+  const judge = fakeModel(pr, "BLOAT_JUDGE", JSON.stringify({ cuttable: 52, hunks: [hunk] }));
   const reviewed = await grownPastTwice(pr, problem);
   await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow("reads 52%");
+  pr.pullRequestState({ body: "## Problem\n\nThe greeting drops the last name, and a slow store times it out.\n\n" + graded("non-critical") });
+  judge.answer(JSON.stringify({ cuttable: 40, hunks: [hunk] }));
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow("reads 40%");
+  expect(judge.prompts()[1]).toContain("a slow store times it out");
   await pr.commit("retry.ts", lines(13, "retry"));
-  judge.answer(JSON.stringify({ cuttable: 56, hunks: [] }));
+  judge.answer(JSON.stringify({ cuttable: 56, hunks: [hunk] }));
+  pr.clock.now = new Date("2026-10-25T13:00:00Z");
   await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow("from 10 at round 1 to 23 at HEAD, past twice the first. A fresh judge, bloat-judge-under-test, reads 56%");
-  expect(judge.prompts()).toHaveLength(2);
+  const scored = await pr.git("rev-parse", "HEAD");
+  await pr.commit("retry.ts", lines(5, "retry"));
+  expect((await pr.hedge("sanity", "--verdict", "cut", "--reason", "Dropped most retries")).code).toBe(0);
+  expect(judge.prompts()).toHaveLength(3);
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
   const report = (await pr.decide("report", "--pr", "example/product#42")).output.split("\n");
-  expect(report.find((line) => /^\| example\/product#42 \| \d+ rounds? \|/.test(line))).toBe("| example/product#42 | 1 round | 10 → 23 (×2.3) | ×2.3, 56% cuttable; not run | none |");
+  expect(report.find((line) => /^\| example\/product#42 \| \d+ rounds? \|/.test(line))).toBe(
+    `| example/product#42 | 1 round | 10 → 15 (×1.5) | ×2.3, 56% cuttable at ${scored.slice(0, 7)}; cut at HEAD: Dropped most retries | none |`);
+});
+
+test("diffs past the judge's cap are read by hand, and a score saved after a gate leaves that gate standing", async () => {
+  const pr = await checkout();
+  const judge = fakeModel(pr, "BLOAT_JUDGE", JSON.stringify({ cuttable: 0, hunks: [] }));
+  const reviewed = await grownPastTwice(pr, problem);
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  await pr.hedge("gate");
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow("reads 0%");
+  const report = (await pr.decide("report", "--pr", "example/product#42")).output.split("\n");
+  expect(report.find((line) => /^\| example\/product#42 \| \d+ rounds? \|/.test(line))).toBe("| example/product#42 | 1 round | 10 → 21 (×2.1) | not run | none |");
+
+  await pr.commit("README.md", "x".repeat(300_001));
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(
+    "Read the growth by hand: the diffs pass the bloat judge's cap of 300000 characters. Before another round, cut the PR back to base behaviour");
+  expect(judge.prompts()).toHaveLength(1);
 });
 
 test("with no reviewer row in the model table, the growth is read by hand and the round still waits for the sanity pass", async () => {
