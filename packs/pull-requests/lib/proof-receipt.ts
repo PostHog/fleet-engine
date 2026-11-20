@@ -4,7 +4,8 @@ import { riskCalloutOf, type DecisionState } from "./decision-ledger.ts";
 import type { Plan } from "./proof-panel.ts";
 import type { Display } from "./proof-display.ts";
 import type { ReviewDisplay } from "./proof-review-display.ts";
-import { summaryGaps, type GapProof, type KindProof, type ProofSummary } from "./proof.ts";
+import { endTable, oneLine } from "./proof-end-table.ts";
+import type { KindProof, ProofSummary } from "./proof.ts";
 
 export const receiptOpen = "<!-- hedge-proof-receipt";
 export const receiptClose = "<!-- /hedge-proof-receipt -->";
@@ -47,14 +48,39 @@ function views(text: string) {
 
 const holdsFigure = (seen: string) => figures.some((pattern) => pattern.test(kept.reduce((value, exempt) => value.replace(exempt, " "), seen)));
 
-const codeSpan = /(`+)(?!`)[\s\S]*?[^`]\1(?!`)/g;
+function codeSpans(text: string) {
+  const runs = Array.from(text.matchAll(/`+/g), (match) => ({ at: match.index, size: match[0].length }));
+  const bySize = new Map<number, number[]>();
+  runs.forEach(({ size }, index) => { const same = bySize.get(size); if (same) same.push(index); else bySize.set(size, [index]); });
+  const cursors = new Map<number, number>();
+  const closer = (size: number, after: number) => {
+    const later = bySize.get(size) ?? [];
+    let cursor = cursors.get(size) ?? 0;
+    while (cursor < later.length && later[cursor]! <= after) cursor++;
+    cursors.set(size, cursor);
+    return later[cursor];
+  };
+  const spans: { start: number; end: number }[] = [];
+  for (let index = 0; index < runs.length; index++) {
+    const { at, size } = runs[index]!;
+    for (let open = size; open > 0; open--) {
+      const close = closer(open, index);
+      if (close === undefined) continue;
+      spans.push({ start: at + size - open, end: runs[close]!.at + open });
+      index = close;
+      break;
+    }
+  }
+  return spans;
+}
+
 const escapeMarkup = (text: string) => text.replace(/[\\`*_~[\]<>&!]/g, "\\$&");
-function literal(text: string) {
+export function literal(text: string) {
   let out = "";
   let last = 0;
-  for (const span of text.matchAll(codeSpan)) {
-    out += escapeMarkup(text.slice(last, span.index)) + span[0];
-    last = span.index + span[0].length;
+  for (const { start, end } of codeSpans(text)) {
+    out += escapeMarkup(text.slice(last, start)) + text.slice(start, end);
+    last = end;
   }
   return out + escapeMarkup(text.slice(last));
 }
@@ -67,6 +93,11 @@ export function guardField(field: string, text: string) {
     throw new GuardRefusal(`receipt refused: the ${field} looks like a production figure or an email address. Move the detail into an evidence note, which only the full receipt shows.`);
   }
   return literal(text);
+}
+
+function guardedReason(kind: string, reason: string) {
+  guardField(`gap reason of ${kind}`, reason.replace(/\s+/g, " "));
+  return literal(oneLine(reason));
 }
 
 const modelSnapshot = /-20\d{6}$/;
@@ -83,7 +114,7 @@ export const prodShapeResult = "measured on production; details in the receipt";
 
 export type ReceiptReview = ReviewDisplay & { lenses?: Plan["lenses"] };
 export type ReceiptInput = {
-  summary: ProofSummary; decisions: DecisionState[]; display: Display; notChecked: string[]; reviews: ReceiptReview[];
+  summary: ProofSummary; gated: boolean; landed: boolean; display: Display; notChecked: string[]; reviews: ReceiptReview[];
   screenshots: { commit: string; names: string[] }[];
 };
 
@@ -126,21 +157,10 @@ function reviewRow(reviews: ReceiptReview[]) {
 const judgeResults: Record<ProofSummary["judge"]["state"], string> = { pass: "✅ passed at", fail: "❌ failed at", unavailable: "unavailable at", skipped: "not yet run at" };
 const judgeRow = ({ judge, commit, code }: ProofSummary) => row(["Proof judge", "an independent model reads the evidence against the diff", `${judgeResults[judge.state]} ${at(commit)}${judge.state === "pass" && code !== 0 ? ", but the gate fails now" : ""}`, ""]);
 
-function acceptedBy(gap: GapProof, decisions: DecisionState[]) {
-  const accepted = gap.accepted;
-  if (!accepted) return "not accepted";
-  if (accepted.by === "standing rule") return "accepted by a standing rule";
-  const decision = decisions.find((candidate) => candidate.id === accepted.id);
-  return `accepted by ${accepted.mark ? `${accepted.mark} ` : ""}${accepted.by}${decision ? ` ${decision.at.slice(0, 10)}` : ""}`;
-}
-
-const gapLines = (input: ReceiptInput) => summaryGaps(input.summary).map(({ kind, gap }) => `${kind}: ${gap.reason ? guardField(`gap reason of ${kind}`, gap.reason) : "no reason recorded"}, ${acceptedBy(gap, input.decisions)}`);
-
 export function renderSection(input: ReceiptInput) {
   const warnings: string[] = [];
   const rows = input.summary.kinds.map((kind) => kindRow(kind, input, warnings));
   const notChecked = input.notChecked.map((item, index) => guardField(`not-checked item ${index + 1}`, item));
-  const gaps = gapLines(input);
   const captioned = new Set(input.display.screenshots.map((shot) => `${shot.commit}/${shot.name}`));
   for (const { commit, names } of input.screenshots) for (const name of names) {
     if (!captioned.has(`${commit}/${name}`)) warnings.push(`warning: screenshot ${name} at ${short(commit)} has no caption. Run hedge proof save --commit ${commit} --kind ui-walk --caption '<what it shows>' <the screenshot>`);
@@ -150,8 +170,11 @@ export function renderSection(input: ReceiptInput) {
   }
   const section = [
     "| Proof | What ran | Result | Commit |", "| --- | --- | --- | --- |", ...rows, reviewRow(input.reviews), judgeRow(input.summary), "",
+    ...input.gated
+      ? endTable([{ ref: input.summary, summary: input.summary, reason: (kind, reason) => guardedReason(kind, reason) }])
+      : [`**End table:** no gate at HEAD yet. Run hedge proof gate${input.landed ? " --landed" : ""}, then hedge proof receipt.`],
+    "",
     `**Not checked:** ${notChecked.join("; ") || "none recorded"}`,
-    ...gaps.length ? [`**Gaps:** ${gaps.join("; ")}`] : [],
   ].join("\n");
   return { section, warnings };
 }

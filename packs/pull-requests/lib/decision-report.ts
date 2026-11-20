@@ -4,7 +4,9 @@ import { optionalStringSetting } from "../../base/lib/settings.ts";
 import { findThread, questionCard, withT3Session } from "../../base/lib/t3/index.ts";
 import { covers, decisionLine, refText, type DecisionState, type Env, type Ledger, type Mark, type PrRef, type Ssh } from "./decision-ledger.ts";
 import { readPullRequest, runIn, type PullRequest } from "./pr-ci.ts";
-import { receiptOf, summaryGaps, type GapProof, type ProofSummary } from "./proof.ts";
+import { receiptOf, summaryGaps, type ProofSummary } from "./proof.ts";
+import { endTable } from "./proof-end-table.ts";
+import { literal } from "./proof-receipt.ts";
 import { currentSummary } from "./proof-gate.ts";
 import type { LaneReport } from "../../hub/lib/secret-store.ts";
 
@@ -39,12 +41,6 @@ async function lanePr(ref: PrRef, ledger: Ledger, context: ReportContext): Promi
 
 const t3PendingCard = (home: string) => async (thread: string) =>
   questionCard(await withT3Session((client) => findThread(client, thread), { home })) !== undefined;
-
-function acceptedBy(gap: GapProof) {
-  const by = gap.accepted;
-  if (!by) return "not accepted";
-  return by.id ? `accepted by ${by.mark ?? by.by} ${by.id}` : `accepted by ${by.by}`;
-}
 
 function stillYours(rows: Row[], card: string | undefined) {
   const lane = rows.filter(gated);
@@ -92,17 +88,13 @@ function proofRow(pr: Row, decisions: DecisionState[]) {
     : kind.state === "reused" ? [`${kind.kind} reused from ${short(kind.from)}`]
     : kind.state === "carried" ? [`${kind.kind} carried from ${short(kind.from)}`] : []);
   if (summary.owed.state === "none") ran.push(`none owed (${summary.owed.reason ?? "no reason recorded"})`);
-  const deferredGap = (kind: string, gap: GapProof) => `${kind}: ${gap.reason ?? "no reason recorded"} (${acceptedBy(gap)})`;
   const deferred = [
     ...summary.owed.state === "unrecorded" ? ["owed proofs: not recorded"] : [],
     ...summary.kinds.flatMap((kind) =>
       kind.state === "missing" ? [`${kind.kind}: missing`]
       : kind.state === "pending" ? [`${kind.kind}: pending until the PR lands`]
-      : kind.state === "waiting" ? [`${kind.kind}: waiting on the dev result of ${kind.dev}`]
-      : kind.state === "gap" ? [deferredGap(kind.kind, kind.gap)] : []),
-    ...summary.review.panelGap ? [deferredGap("panel", summary.review.panelGap)] : [],
-    ...summary.ci.gap ? [deferredGap("ci", summary.ci.gap)] : [],
-    ...summary.judge.gap ? [deferredGap("judge", summary.judge.gap)] : summary.judge.state === "pass" ? [] : [summary.judge.state === "skipped" ? "judge: not run at HEAD" : `judge: ${summary.judge.state}`],
+      : kind.state === "waiting" ? [`${kind.kind}: waiting on the dev result of ${kind.dev}`] : []),
+    ...summary.judge.gap || summary.judge.state === "pass" ? [] : [summary.judge.state === "skipped" ? "judge: not run at HEAD" : `judge: ${summary.judge.state}`],
   ];
   const voided = [
     ...summary.lapsed.map((id) => `${id} lapsed`),
@@ -118,6 +110,7 @@ export async function renderReport({ prs, thread, lane }: { prs: PrRef[]; thread
   const card = thread && await (context.pendingCard ?? t3PendingCard(context.home))(thread) ? thread : undefined;
   const ours = decisions.filter((decision) => prs.some((ref) => covers(decision, ref)) || (thread !== undefined && sameThread(decision.where.thread, thread)));
   const sorted = [...ours].sort((a, b) => markOrder.indexOf(a.mark) - markOrder.indexOf(b.mark));
+  const gatedRows = rows.filter(gated);
   const sideFixes = ours.filter((decision) => decision.class === "scope" && decision.where.link)
     .map((decision) => `- ${decision.question} ${decision.answer}: ${decision.where.link} [${decision.id}]`);
   return [
@@ -127,6 +120,7 @@ export async function renderReport({ prs, thread, lane }: { prs: PrRef[]; thread
     "### Merged under the narrow grant", ...listed(await grantMerges(prs, context)), "",
     "### Decisions", ...listed(sorted.map(decisionLine)), "",
     "### Proofs", "| PR | Ran | Deferred | Voided | Receipt |", "| --- | --- | --- | --- | --- |", ...rows.map((pr) => proofRow(pr, decisions)), "",
+    "### Review and skipped proofs", ...gatedRows.length ? endTable(gatedRows.map(({ ref, summary }) => ({ ref, summary, reason: (_kind, reason) => literal(reason) }))) : ["None gated at HEAD."], "",
     "### Side fixes started", ...listed(sideFixes),
   ].join("\n");
 }

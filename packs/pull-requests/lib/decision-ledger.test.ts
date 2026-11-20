@@ -792,7 +792,7 @@ async function reviewPr(pr: Checkout, n: number) {
   expect((await pr.hedge("review", "--wait", ...target)).code).toBe(0);
 }
 
-test("the end-of-run report prints its five sections in order: still yours, narrow-grant merges, decisions, proofs, side fixes", async () => {
+test("the end-of-run report prints its six sections in order: still yours, narrow-grant merges, decisions, proofs, review and skipped proofs, side fixes", async () => {
   const pr = await checkout();
   const head = await pr.commit("feature.txt", "new\n");
   const rollouts = join(pr.home, "rollouts.jsonl");
@@ -846,7 +846,7 @@ test("the end-of-run report prints its five sections in order: still yours, narr
   expect(printed.code).toBe(0);
   const report = printed.output.split("\n");
   expect(report[0]).toBe("## End-of-run report: example/product#41, example/product#42, example/product#43");
-  expect(report.filter((line) => line.startsWith("### "))).toEqual(["### Still yours", "### Merged under the narrow grant", "### Decisions", "### Proofs", "### Side fixes started"]);
+  expect(report.filter((line) => line.startsWith("### "))).toEqual(["### Still yours", "### Merged under the narrow grant", "### Decisions", "### Proofs", "### Review and skipped proofs", "### Side fixes started"]);
   const section = (heading: string) => { const from = report.indexOf(heading) + 1; const to = report.findIndex((line, index) => index >= from && line.startsWith("### ")); return report.slice(from, to < 0 ? undefined : to).filter(Boolean); };
 
   expect(section("### Still yours")).toEqual([
@@ -864,9 +864,16 @@ test("the end-of-run report prints its five sections in order: still yours, narr
   expect(section("### Proofs")).toEqual([
     "| PR | Ran | Deferred | Voided | Receipt |",
     "| --- | --- | --- | --- | --- |",
-    `| example/product#41 | live-run at ${short} | prod-shape: No production read access (accepted by 👤 ${users}); shadow-diff: No old output to diff (not accepted); judge: not run at HEAD | none | [receipt](https://github.com/example/product/pull/41#issuecomment-9) |`,
-    `| example/product#42 | none | prod-shape: No sandbox (not accepted); cross-version: No older client to run (not accepted); judge: not run at HEAD | ${lapsed} lapsed; ${reversed} reversed | none yet |`,
+    `| example/product#41 | live-run at ${short} | judge: not run at HEAD | none | [receipt](https://github.com/example/product/pull/41#issuecomment-9) |`,
+    `| example/product#42 | none | judge: not run at HEAD | ${lapsed} lapsed; ${reversed} reversed | none yet |`,
     "| example/product#43 | none owed (docs only) | none | none | none yet |",
+  ]);
+  expect(section("### Review and skipped proofs")).toEqual([
+    "| PR | Review rounds | Production lines | Skipped proofs |",
+    "| --- | --- | --- | --- |",
+    `| example/product#41 | 1 round | 1 → 1 (×1.0) | prod-shape: No production read access (👤 the user ${users}); shadow-diff: No old output to diff (not accepted) |`,
+    "| example/product#42 | 1 round | 1 → 1 (×1.0) | prod-shape: No sandbox (not accepted); cross-version: No older client to run (not accepted) |",
+    "| example/product#43 | 1 round | 1 → 1 (×1.0) | none |",
   ]);
   expect(section("### Side fixes started")).toEqual([`- Fix the flaky clock test on the side? Yes, in its own thread: t3-thread://side-fix [${side}]`]);
 
@@ -961,7 +968,7 @@ test("report --lane reads the lane's revoke lines and late puts from the hub's s
     put("p-000000000004", "other-test", "2026-10-25T11:00:00.000Z", "missed", "example/tickets#402", "https://example.com/revoke/b"),
   ].map((event) => JSON.stringify(event)).join("\n") + "\n");
   const report = (await pr.decide("report", "--pr", "example/product#43", "--lane", "example/tickets#401")).output.split("\n");
-  expect(report.filter((line) => line.startsWith("### "))).toEqual(["### Still yours", "### Late secret puts", "### Merged under the narrow grant", "### Decisions", "### Proofs", "### Side fixes started"]);
+  expect(report.filter((line) => line.startsWith("### "))).toEqual(["### Still yours", "### Late secret puts", "### Merged under the narrow grant", "### Decisions", "### Proofs", "### Review and skipped proofs", "### Side fixes started"]);
   const section = (heading: string) => { const from = report.indexOf(heading) + 1; return report.slice(from, report.findIndex((line, index) => index >= from && line.startsWith("### "))).filter(Boolean); };
   expect(section("### Still yours").at(-1)).toBe("- Revoke stripe-test (lane example/tickets#401): https://example.com/revoke/new");
   expect(section("### Late secret puts")).toEqual(["- stripe-test put 2026-10-25 09:00 UTC, why expired.", "- **Miss:** mail-test put 2026-10-25 11:00 UTC, why missed."]);

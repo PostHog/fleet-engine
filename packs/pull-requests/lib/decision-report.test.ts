@@ -13,6 +13,12 @@ async function reportOf(pr: Checkout, cwd = pr.repository, ...prs: string[]) {
   return { stillYours: section("### Still yours"), proofs: section("### Proofs").slice(2) };
 }
 
+async function skippedOf(pr: Checkout) {
+  const report = (await pr.decide("report", "--pr", "example/product#42")).output.split("\n");
+  const from = report.indexOf("### Review and skipped proofs") + 3;
+  return report.slice(from, report.indexOf("", from)).map((row) => row.split(" | ").at(-1)!.replace(/ \|$/, ""));
+}
+
 const notGated = (short: string, landed = "") => ({
   stillYours: [`- example/product#42: the gate has not run at HEAD ${short} with these proofs, so they are not known to pass. Run hedge proof gate${landed}.`],
   proofs: [`| example/product#42 | none | gate: not run at HEAD ${short} with these proofs | none | none yet |`],
@@ -40,8 +46,9 @@ test("the report prints the gate's last summary at HEAD, and sends the user to t
   expect((await pr.hedge("gate")).code).toBe(3);
   expect(await reportOf(pr)).toEqual({
     stillYours: ["- **Blocker:** example/product#42 is critical at HEAD and its judge gap is not accepted: The judge reads feature.txt as code."],
-    proofs: ["| example/product#42 | none owed (Docs only) | judge: The judge reads feature.txt as code (not accepted) | none | none yet |"],
+    proofs: ["| example/product#42 | none owed (Docs only) | none | none | none yet |"],
   });
+  expect(await skippedOf(pr)).toEqual(["judge: The judge reads feature.txt as code (not accepted)"]);
 
   pr.chooseGap("judge", "The judge reads feature.txt as code");
   const accepted = idIn((await acceptGap(pr, "judge")).output);
@@ -51,8 +58,9 @@ test("the report prints the gate's last summary at HEAD, and sends the user to t
   expect(JSON.parse(passed.output)).toMatchObject({ code: 0, judge: { state: "fail", gap: { commit: head, reason: "The judge reads feature.txt as code", accepted: { by: "the user", mark: "👤", id: accepted } } } });
   expect(await reportOf(pr)).toEqual({
     stillYours: ["- Merge example/product#42: its proofs pass, and it waits on your merge word."],
-    proofs: [`| example/product#42 | none owed (Docs only) | judge: The judge reads feature.txt as code (accepted by 👤 ${accepted}) | none | none yet |`],
+    proofs: ["| example/product#42 | none owed (Docs only) | none | none | none yet |"],
   });
+  expect(await skippedOf(pr)).toEqual([`judge: The judge reads feature.txt as code (👤 the user ${accepted})`]);
 });
 
 test("a closed critical PR with a gap the user has not accepted is no blocker of the user's", async () => {
@@ -69,8 +77,9 @@ test("a closed critical PR with a gap the user has not accepted is no blocker of
   pr.pullRequestState({ closed: true });
   expect(await reportOf(pr)).toEqual({
     stillYours: ["None."],
-    proofs: ["| example/product#42 | none owed (Docs only) | judge: The judge reads feature.txt as code (not accepted) | none | none yet |"],
+    proofs: ["| example/product#42 | none owed (Docs only) | none | none | none yet |"],
   });
+  expect(await skippedOf(pr)).toEqual(["judge: The judge reads feature.txt as code (not accepted)"]);
 });
 
 test("the report shows a merged PR's post-deploy watch once the gate weighed it as landed", async () => {
@@ -103,8 +112,9 @@ test("the report shows the gate's outcome when the judge was unavailable and the
   expect((await pr.hedge("gate")).code).toBe(0);
   expect(await reportOf(pr)).toEqual({
     stillYours: ["- Merge example/product#42: its proofs pass, and it waits on your merge word."],
-    proofs: [`| example/product#42 | none owed (Docs only) | judge: The judge is down (accepted by 👤 ${accepted}) | none | none yet |`],
+    proofs: ["| example/product#42 | none owed (Docs only) | none | none | none yet |"],
   });
+  expect(await skippedOf(pr)).toEqual([`judge: The judge is down (👤 the user ${accepted})`]);
 
   judge.answer(verdict());
   expect(JSON.parse((await pr.hedge("gate", "--json")).output)).toMatchObject({ code: 0, judge: { state: "pass" } });
@@ -244,7 +254,7 @@ test("the report never offers the merge when GitHub moves the PR to a new base w
   expect((await reportOf(pr)).stillYours).toEqual(["- Merge example/product#42: its proofs pass, and it waits on your merge word."]);
 
   const movedBase = await pr.git("commit-tree", "main^{tree}", "-p", "main", "-m", "Change the base");
-  pr.whileGithubReadsPull(`printf '%s' ${movedBase} > "$(dirname "$0")/base-sha"`);
+  pr.whileGithubReadsPull(`printf '"%s"' ${movedBase} > "$(dirname "$0")/base-sha"`);
   expect((await reportOf(pr)).stillYours).toEqual([`- example/product#42: its proofs are not shown to pass at HEAD ${head.slice(0, 7)} as read now (gate exit 1). Run hedge proof gate in its checkout to see why.`]);
 });
 

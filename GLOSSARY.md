@@ -129,8 +129,16 @@ The proof state of a pull request at HEAD that the gate builds: each owed kind, 
 _Avoid_: Proof status, gate result
 
 **End-of-run report**:
-The Markdown that `hedge decision report` prints when a lane ends: what is still the user's, merges under the narrow grant, the lane's decisions, one proofs row per pull request, and the side fixes it started. It never runs the judge. It builds the proof summary again at HEAD, so CI, the standing rules, the decisions and the tier are read as they are now, and it takes the judge's verdict from the summary the gate saved at HEAD. When a decision was recorded after the gate, or the head, base, merge-risk callout or proofs changed, it says the gate has not run at HEAD with these proofs. When the summary it builds does not pass, such as after a check fails, outside the checkout where a review carried across commits cannot be checked, when an accepted gap now rests on a condition the saved judge did not weigh, when CI shows other checks than the ones the judge weighed, or when the head, base or tier moves while the report reads it, it sends the user to the gate and offers no merge. This holds for a merged pull request too, which it sends to `hedge proof gate --landed`. A pull request whose proofs Hedge cannot read is still the user's, with the reason, and the other rows still print.
+The Markdown that `hedge decision report` prints when a lane ends: what is still the user's, merges under the narrow grant, the lane's decisions, one proofs row per pull request, the end table, and the side fixes it started. It never runs the judge. It builds the proof summary again at HEAD, so CI, the standing rules, the decisions and the tier are read as they are now, and it takes the judge's verdict from the summary the gate saved at HEAD. When a decision was recorded after the gate, or the head, base, merge-risk callout or proofs changed, it says the gate has not run at HEAD with these proofs. When the summary it builds does not pass, such as after a check fails, outside the checkout where a review carried across commits cannot be checked, when an accepted gap now rests on a condition the saved judge did not weigh, when CI shows other checks than the ones the judge weighed, or when the head, base or tier moves while the report reads it, it sends the user to the gate and offers no merge. This holds for a merged pull request too, which it sends to `hedge proof gate --landed`. A pull request whose proofs Hedge cannot read is still the user's, with the reason, and the other rows still print.
 _Avoid_: Summary, wrap-up
+
+**End table**:
+One row per pull request: its review rounds and final reads, its production lines at the first reviewed commit and at HEAD with the growth between them, and each skipped proof with its reason and who accepted it. The proof receipt in the pull request and the end-of-run report print the same table. The gate measures the lines at HEAD, so the table holds a pull request only once a gate ran at its HEAD.
+_Avoid_: Summary table, scorecard
+
+**Production lines**:
+The lines a pull request adds and deletes against the commit where it branched from its base, without tests, docs, lock files and generated files. Tests and docs are counted apart.
+_Avoid_: Diff size, LOC
 
 ## Secrets
 
