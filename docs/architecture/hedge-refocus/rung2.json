@@ -6,7 +6,7 @@
      "id": "mac",
      "name": "T3 Code app on the Mac",
      "external": true,
-     "note": "T3 Connect sign-in",
+     "note": "reaches each box through T3 Connect",
      "seam": []
     },
     {
@@ -22,7 +22,7 @@
      "chips": [
       {
        "id": "setup-add",
-       "text": "add a box: boxes.add(host)",
+       "text": "first node: boxes.create(name)",
        "change": "added"
       },
       {
@@ -75,19 +75,17 @@
      "flex": 2.4,
      "used": 14,
      "seam": [
-      "add(host)",
       "create(name)",
       "wake",
       "release",
       "sweep",
       "list",
-      "exec",
-      "pairing"
+      "exec"
      ],
      "chips": [
       {
        "id": "b-pool",
-       "text": "pool and claims"
+       "text": "pool and claims, by box id"
       },
       {
        "id": "b-lock",
@@ -95,16 +93,7 @@
       },
       {
        "id": "b-life",
-       "text": "lifecycle, idle sweep"
-      },
-      {
-       "id": "b-link",
-       "text": "T3 link, Claude handover"
-      },
-      {
-       "id": "b-fwd",
-       "text": "forwards: ssh -L",
-       "change": "changed"
+       "text": "lifecycle, idle sweep, keep awake"
       },
       {
        "id": "b-ssh",
@@ -115,13 +104,15 @@
     },
     {
      "id": "peers",
-     "name": "Peers",
-     "note": "hub links nodes in T3",
+     "name": "Hub pack: links",
+     "note": "stays in the Hub pack",
      "used": 2,
      "seam": [
       "link",
-      "renew"
-     ]
+      "handover",
+      "forwards"
+     ],
+     "todayName": "Peers"
     }
    ]
   },
@@ -131,23 +122,23 @@
     {
      "id": "backend",
      "name": "Box backend",
-     "note": "box-backend handler seam",
+     "note": "one per profile, box-backend handler",
      "change": "added",
      "flex": 2.4,
      "seam": [
-      "capabilities",
       "list",
-      "exec",
-      "sshTarget",
-      "create?",
-      "start?",
+      "create",
+      "start",
       "stop?",
-      "delete?"
+      "delete?",
+      "keepAwake?",
+      "exec",
+      "forwardCommand"
      ],
      "chips": [
       {
        "id": "fork-a",
-       "text": "adapter is a pack: export backend(settings, process)",
+       "text": "adapter is a pack: export backend(settings)",
        "change": "added"
       }
      ]
@@ -155,7 +146,7 @@
     {
      "id": "proc",
      "name": "Process",
-     "note": "run, capture",
+     "note": "shared helpers",
      "change": "added",
      "seam": [
       "capture",
@@ -177,41 +168,26 @@
      "used": 10,
      "flex": 1.3,
      "seam": [
+      "list",
       "create",
       "start",
       "stop",
       "delete",
-      "list",
+      "keepAwake",
       "exec",
-      "sshTarget"
+      "forwardCommand"
      ],
      "chips": [
       {
        "text": "session, scoped tokens"
       },
       {
-       "text": "extend: autostop"
+       "text": "template, source workspace"
       },
       {
        "id": "c-cap",
        "text": "capture, Env, Result: used by 13 files, move to Process",
        "change": "removed"
-      }
-     ]
-    },
-    {
-     "id": "sshhost",
-     "name": "SSH host adapter",
-     "note": "any Linux box",
-     "change": "added",
-     "seam": [
-      "list",
-      "exec",
-      "sshTarget"
-     ],
-     "chips": [
-      {
-       "text": "no lifecycle"
       }
      ]
     },
@@ -247,21 +223,10 @@
  ],
  "wires": [
   {
-   "from": "mac",
-   "to": "boxes-seam",
-   "toAt": 0.04,
-   "label": "T3 Connect",
-   "labelAt": 0.45,
-   "labelOffset": [
-    -6,
-    0
-   ]
-  },
-  {
    "from": "setup-add",
    "to": "boxes-seam",
    "change": "added",
-   "toAt": 0.3,
+   "toAt": 0.15,
    "label": "",
    "labelAt": 0.5
   },
@@ -297,17 +262,10 @@
   },
   {
    "from": "backend",
-   "to": "sshhost-seam",
-   "change": "added",
-   "fromAt": 0.6,
-   "label": ""
-  },
-  {
-   "from": "backend",
    "to": "team-seam",
    "followUp": true,
    "change": "added",
-   "fromAt": 0.8,
+   "fromAt": 0.6,
    "label": ""
   },
   {

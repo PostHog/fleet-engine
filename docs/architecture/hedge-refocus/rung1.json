@@ -25,7 +25,7 @@
     },
     {
      "id": "others",
-     "name": "Vercel Sandbox, ECS, SSH host",
+     "name": "Vercel Sandbox, ECS, a team's devbox tool",
      "external": true,
      "note": "bring your own",
      "change": "added",
@@ -128,7 +128,7 @@
        "change": "removed"
       },
       {
-       "name": "1Password signer",
+       "name": "1Password signer, Mac path",
        "change": "removed"
       },
       {
@@ -176,18 +176,18 @@
     {
      "id": "seam",
      "name": "Box backend",
-     "note": "one interface; Coder and SSH host first",
+     "note": "one per profile; Coder first",
      "change": "added",
      "flex": 2,
      "seam": [
-      "capabilities",
       "list",
-      "exec",
-      "sshTarget",
-      "create?",
-      "start?",
+      "create",
+      "start",
       "stop?",
-      "delete?"
+      "delete?",
+      "keepAwake?",
+      "exec",
+      "forwardCommand"
      ]
     },
     {

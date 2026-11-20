@@ -1,6 +1,6 @@
 # Hedge refocus: cloud boxes only, and a Box backend seam
 
-Status: accepted, 2026-11-20. The cloud-only part ships in
+Status: proposed, 2026-11-20. The cloud-only part ships in
 [#284](https://github.com/PostHog/hedge/pull/284). This spec adds the Box
 backend seam and the slices that build it.
 
@@ -10,26 +10,27 @@ Hedge must do one thing well: run coding agents on Linux boxes that stay on,
 and let a person steer them from T3 Code on a Mac or a phone. Two parts of
 the engine work against that focus:
 
-1. **The Mac path.** About 80 lines of `get.sh`, the `mac` role, launchd,
-   Homebrew, the 1Password signer, T3 desktop settings, and the hub tunnel
-   exist only to set up a Mac. Each one is a second way to do the same
-   thing, and each one slows down setup and tests.
-2. **Coder is wired in.** The box pool on the hub, setup, and the links
-   call the Coder CLI directly: 19 `coder.ssh` calls outside `coder.ts`, 6
-   Coder CLI operations in 3 setup files, and `capture`, `Env`, and
-   `Result` imported from `coder.ts` by 13 files. A person who has their
-   own machines, or a Vercel Sandbox, ECS, or a team devbox tool, cannot
-   use Hedge.
+1. **The Mac path.** The `mac` role, the launchd adapter, the hub tunnel, the
+   Mac path of the 1Password signer, and T3 desktop settings exist only to
+   set up a Mac. #284 stops `get.sh` from installing on a Mac, but this code
+   is still there.
+2. **Boxes come only from Coder.** `hedge devbox add <ssh host>` already
+   adds any Linux machine that a person brings. But a box that Hedge
+   creates, starts, stops, and sweeps comes only from Coder. The box pool,
+   setup, and the links call the Coder CLI directly: 19 `coder.ssh` calls
+   outside `coder.ts`, 6 Coder CLI operations in 3 setup files, and
+   `capture`, `Env`, and `Result` imported from `coder.ts` by 13 files. A
+   team with Vercel Sandbox, ECS, or its own devbox tool cannot plug it in.
 
 The decisions:
 
 - The Mac runs nothing from Hedge. It runs only the T3 Code app and reaches
   the boxes through T3 Connect ([ADR 0001](../adr/0001-mac-runs-only-t3-code.md)).
-- Boxes is one engine module. It is the only caller of a Box backend
+- A profile selects one Box backend: a pack that provides the `box-backend`
+  handler ([ADR 0002](../adr/0002-box-backends-are-packs.md)). The `coder`
+  pack ships with the engine.
+- Boxes is one engine module, and the only caller of the backend
   ([ADR 0003](../adr/0003-boxes-is-the-only-backend-caller.md)).
-- A Box backend adapter is a pack behind a `box-backend` handler seam, with
-  a capability set ([ADR 0002](../adr/0002-box-backends-are-packs.md)).
-  The `coder` and `ssh-host` packs ship with the engine.
 - A backend failure is never retried in silence
   ([ADR 0004](../adr/0004-no-silent-backend-retry.md)).
 - The target is a first thread in under 10 minutes on a fresh account,
@@ -37,7 +38,17 @@ The decisions:
 - It ships as one breaking release. Profiles drop their Mac machine, and
   team packs drop their darwin items.
 
-Out of scope: a Mac workstation setup, and a Cursor adapter.
+### Out of scope
+
+- A Mac workstation setup, and a Cursor adapter.
+- More than one backend in a profile, or a pool that mixes backends.
+- A backend without SSH access, or one whose boxes expire while a thread
+  runs, such as a short-lived sandbox. The Vercel Sandbox and ECS follow-ups
+  must solve this first.
+- Image or template choice across backends. Each adapter keeps its own, such
+  as the Coder template and source workspace.
+- Moving worktree boxes onto Boxes, and splitting the Hub pack. Both are
+  follow-ups.
 
 ## Rung 1: the system
 
@@ -55,91 +66,98 @@ plus what it removes, and Today. "Today" is `main` before #284.
 
 [rung2.html](hedge-refocus/rung2.html) is the full page.
 
-![Rung 2: Setup, hedge box and worktree boxes call Boxes; Boxes calls one Box backend; Coder and SSH host are the first adapters](hedge-refocus/rung2-target.png)
+![Rung 2: Setup, hedge box and worktree boxes call Boxes; Boxes calls one Box backend; Coder is the first adapter](hedge-refocus/rung2-target.png)
 
-- **Boxes** takes the box pool, the claims, the box lock, the lifecycle and
-  idle sweep, the T3 link, and the Claude handover from the Hub pack. It
-  becomes an engine module with one interface.
-- **Box backend** is the seam. Each adapter is a pack that exports one
+- **Boxes** takes the box pool, the claims, the box lock, the lifecycle,
+  the idle sweep, and keep-awake from the Hub pack. These are the parts that
+  setup and `hedge box` both use.
+- The T3 link, the Claude handover, the gateway setup, and the peer
+  forwards stay in the Hub pack. They call Boxes.
+- **Box backend** is the seam. The adapter is a pack that exports one
   `backend` function.
 - **Process** holds `capture`, `Env`, and `Result`, which move out of
-  `coder.ts`.
-- Orange frames are follow-ups that the target needs and a later change
-  builds.
+  `coder.ts` with their deadlines.
+- Orange frames are follow-ups.
 
 ## Contracts
 
 ```ts
-type Capability = "create" | "start" | "stop" | "delete" | "image";
-type BoxState = "running" | "starting" | "stopped" | "failed" | "missing";
+type BoxState = "running" | "starting" | "stopped" | "failed";
 
 class BackendError extends Error {
-  kind: "quota" | "timeout" | "auth" | "refused" | "unavailable";
   next?: string;
 }
 
 type BoxBackend = {
-  name: string;
-  capabilities: ReadonlySet<Capability>;
-  list(): Promise<Array<{ name: string; state: BoxState; lastUsedAt?: number }>>;
-  exec(box: string, command: string, options?: { stdin?: string; signal?: AbortSignal }): Promise<Result>;
-  sshTarget(box: string): Promise<string>;
-  create?(spec: { name: string; diskGigabytes: number; image?: string }, signal: AbortSignal): Promise<void>;
-  start?(box: string, signal: AbortSignal): Promise<void>;
-  stop?(box: string, signal: AbortSignal): Promise<void>;
-  delete?(box: string, signal: AbortSignal): Promise<void>;
+  list(): Promise<Array<{ id: string; name: string; state: BoxState; lastUsedAt?: number }>>;
+  create(spec: { name: string; diskGigabytes: number }, signal: AbortSignal): Promise<{ id: string }>;
+  start(id: string, signal: AbortSignal): Promise<void>;
+  stop?(id: string, signal: AbortSignal): Promise<void>;
+  delete?(id: string, signal: AbortSignal): Promise<void>;
+  keepAwake?(id: string, until: number): Promise<void>;
+  exec(id: string, command: string, options?: { stdin?: string; inherit?: boolean; afterStartup?: boolean; signal?: AbortSignal }): Promise<Result>;
+  forwardCommand(id: string, forward: { remote?: number[]; local?: Array<[number, number]> }): { argv: string[]; env: Env };
 };
 
-export function backend(settings: unknown, process: Process): BoxBackend;
+export function backend(settings: unknown): BoxBackend;
 
 type Boxes = {
-  add(host: string): Promise<Box>;
   create(name: string): Promise<Box>;
   wake(name: string): Promise<Box>;
   release(name: string, options?: { force?: boolean }): Promise<void>;
   list(): Promise<Box[]>;
   sweep(): Promise<SweepReport>;
-  exec(name: string, command: string): Promise<Result>;
-  pairing(name: string): Promise<{ url: string; code: string }>;
+  exec(name: string, command: string, options?: { inherit?: boolean }): Promise<Result>;
 };
 ```
 
-`backend` is the export of a `box-backend` handler module. The pack lists it
-in its handlers, as the `secret-rows` and `secret-providers` handlers do
-today. `Boxes.pairing` runs `t3 connect link --headless` on the box and
-returns the sign-in URL and code that the person approves.
+- `backend` is the export of the `box-backend` handler module. The pack
+  lists it in its handlers, as the `secret-rows` handler does today. The
+  resolver already allows one handler for each seam, so one profile has one
+  backend. Setup and the pack commands read the same resolved handler.
+- The pool keeps each box's `id` from `create` and `list`, and calls the
+  backend by `id`. A box that a backend replaced under the same name has a
+  new `id`, and Boxes sees it.
+- `exec` with `inherit` runs `hedge box run` with the person's terminal.
+  `afterStartup` waits for the box's startup scripts, as
+  `coder ssh --wait=yes` does today.
+- `forwardCommand` returns the command and the environment for a forward
+  that runs as a systemd user unit, such as the reverse forwards to the hub
+  and the T3 forward. It replaces `startUnit`'s use of `binary` and `env`.
+- `keepAwake` replaces the Coder deadline extension that the sweep uses for
+  a busy box.
+- A machine that `hedge devbox add` added has no backend. Boxes reaches it
+  over SSH and never creates, starts, or stops it.
 
 ### Invariants
 
 - The hub holds one lock per box name.
-- A failed `create` leaves no claim. When the backend has `delete`, it also
-  leaves no half-made box.
-- A command calls the backend's `list` at most once.
-- `create` and `start` run under the start limit of 5 minutes.
-- An optional operation is present only when its name is in
-  `capabilities`. The engine checks this when it loads the pack.
-- An error that is not a `BackendError` reads as `unavailable`.
-- No command retries a backend call in silence.
+- A failed `create` or `wake` drops the forwards that the attempt made and
+  settles its claim. The box stays for diagnosis.
+- `hedge box list` calls the backend's `list` once. A command that changes a
+  box reads its state fresh before it acts.
+- Each call keeps today's Coder deadline, such as the 10 minutes for a
+  Coder request and the 5 minutes for a start.
+- The engine checks at pack load that the handler exports `backend`, and
+  that the backend has the required operations.
+- No command repeats a backend call in silence.
 
-### Error modes
+### Errors
 
-| Kind | What Boxes does |
-| --- | --- |
-| `quota` | Prints the idle boxes that `sweep` would stop, and the command to run. |
-| `timeout` | Deletes the half-made box when the backend has `delete`. Prints `next`. |
-| `auth` | Prints the sign-in command from `next`. |
-| `refused`, `unavailable` | Prints the cause and `next`, and exits 1. |
+A backend throws a `BackendError` with the cause in its message and, where
+one exists, the command that fixes it in `next`. Boxes prints both and
+exits 1. When the cause is a quota, `next` names `hedge box sweep`. When a
+create or a start fails, Boxes keeps the box for diagnosis, as it does
+today, and names `hedge box release <name> --delete`.
 
-Each outcome, success or failure, adds one line to
-`~/.local/state/hedge/box-spawn.jsonl`.
+The spawn stopwatch keeps logging each spawn to
+`~/.local/state/hedge/box-spawn.jsonl`, as it does today.
 
 ### Limits
 
-- T3 Connect links up to 3 machines on a free account: the hub, one node,
-  and the Mac. Past that, Boxes still creates the box, and `pairing` says the
-  limit is reached and names the paid T3 plan or the machine to remove.
-- The SSH host adapter has no lifecycle. Boxes probes each known host with
-  `exec("true")` in place of `list`.
+- T3 Connect limits how many machines one account links. When setup links a
+  box and T3 Code reports that the limit is reached, setup prints the reason
+  that T3 Code gives and how to free a machine, as it does today.
 
 ## Call paths
 
@@ -156,20 +174,16 @@ sequenceDiagram
   participant M as T3 Code on the Mac
   P->>G: curl | sh on the first Linux box
   G->>S: hedge setup
-  S->>B: add(self) as the hub, through ssh-host
   S->>P: which backend makes nodes? sign in
   S->>B: create("node-1")
   B->>B: lock the box, claim a pool slot
-  B->>K: create(spec), then wait for running
-  K-->>B: running
+  B->>K: create(spec) returns id
+  B->>K: list() until running, within the start limit
   B->>N: exec: get.sh, hedge apply
-  B->>N: T3 link, Claude handover, forwards
-  B->>N: t3 connect link --headless
-  N-->>B: sign-in URL and code
-  B-->>S: pairing
-  S->>P: approve this sign-in in T3 Code
-  P->>M: approve, first thread on node-1
-  S->>S: record the time to the first thread
+  S->>N: t3 up --connect --yes --headless
+  N-->>P: T3 Connect sign-in
+  S->>N: check the linked status
+  P->>M: open T3 Code, first thread on node-1
 ```
 
 ### Read: `hedge box list`
@@ -183,9 +197,9 @@ sequenceDiagram
   participant K as Box backend
   P->>C: hedge box list
   C->>B: list()
-  B->>L: read claims and idle times
+  B->>L: read claims, ids, and idle times
   B->>K: list(), once
-  K-->>B: name, state, last use
+  K-->>B: id, name, state, last use
   B-->>C: boxes with claim, state, and idle time
 ```
 
@@ -196,15 +210,13 @@ sequenceDiagram
   participant S as Setup or hedge box
   participant B as Boxes
   participant K as Box backend
-  participant L as box-spawn log
   S->>B: create("node-2")
   B->>K: create(spec, signal)
-  K--xB: BackendError quota, with next
-  B->>K: delete, when created and supported
-  B->>B: free the claim, unlock
-  B->>L: one line: ok false, kind quota, seconds
-  B-->>S: the error and its next step
-  S->>S: print the cause and the command, exit 1
+  K--xB: BackendError, with next
+  B->>B: drop this attempt's forwards, settle the claim, unlock
+  B-->>S: the cause and the next command
+  S->>S: print them, exit 1
+  Note over B,K: a box the backend made stays for diagnosis
 ```
 
 ## Thin slices
@@ -212,25 +224,38 @@ sequenceDiagram
 Each slice is one PR that a person can use on its own.
 
 1. **Cloud only.** Done in [#284](https://github.com/PostHog/hedge/pull/284):
-   `get.sh` installs nothing on a Mac, the site promises cloud boxes only,
-   and setup signs the hub in to T3 Connect.
+   `get.sh` installs nothing on a Mac and stops old Mac jobs, the site
+   promises cloud boxes only, and setup signs the hub in to T3 Connect.
 2. **Delete the dead Mac code.** The `mac` role and the `darwin` OS, the
-   launchd adapter, the hub tunnel and `hub-https-trust`, the 1Password
-   signer, T3 desktop settings, the Codex darwin step, the Mac branch of
-   `balanceThreads`, the hub pull for a Mac, and `docs/mac-path.md`.
+   launchd install code, the hub tunnel and `hub-https-trust`, the Mac path
+   of the 1Password signer, T3 desktop settings, the Codex darwin step, the
+   Mac branch of `balanceThreads`, the hub pull for a Mac, and the Mac setup
+   parts of `docs/mac-path.md`. Keep the Linux 1Password signer and the
+   stop-only cleanup of old Mac installs in `get.sh`.
 3. **Process, the Box backend seam, and the `coder` pack.** No change in
-   behavior. The box tests run through the seam.
-4. **The `ssh-host` pack and `hedge box add <host>`.** `hedge devbox add`
-   goes through Boxes, and its Coder CLI calls move into the Coder adapter.
-5. **Setup makes the first node through a backend.** The `image`
-   capability for Coder, `Boxes.pairing` on each new node, and a setup
-   timing for the time to the first thread.
+   behavior. The box tests run through the seam, with a fake backend beside
+   the Coder one.
+4. **`hedge devbox add` through Boxes.** Its Coder CLI calls move into the
+   Coder adapter, and plain SSH hosts keep working as they do today.
+5. **Setup makes the first node through the backend.** Setup's usable
+   milestone and the spawn stopwatch measure it. A fresh-account proof
+   measures the time to the first thread.
 
 ## Follow-ups
 
 | Follow-up | Strength |
 | --- | --- |
-| A team backend pack for a team's own devbox tool, which replaces that team pack's darwin steps | Strong: the first outside user of the seam |
+| A team backend pack for a team's own devbox tool, which replaces that team pack's darwin steps. When the tool has its own sign-in and setup check commands, the pack calls them in place of Hedge's sign-in steps | Strong: the second adapter of the seam |
 | Worktree boxes on Boxes | Strong: one lifecycle and one sweep for all boxes |
-| Vercel Sandbox and ECS adapters | Medium: wait for a person who asks |
-| Dissolve the Hub pack into engine modules | Bold: the hub becomes an engine concept, as `docs/architecture.md` proposes |
+| Vercel Sandbox and ECS adapters | Medium: wait for a person who asks, and solve the SSH and expiry limits first |
+| Split the Hub pack into engine modules | Bold: the hub becomes an engine concept, as `docs/architecture.md` proposes |
+
+## Further notes
+
+### Complexity
+
+- `forwardCommand` and `exec` with `inherit` and `afterStartup` stay in the
+  seam: the hub forwards, `hedge box run`, and the post-start checks use
+  them today.
+- `stop`, `delete`, and `keepAwake` are optional. Method presence is the
+  capability, so the seam has no capability set.
