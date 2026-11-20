@@ -94,6 +94,20 @@ test("on end, the gate tells the agent to decide an open judge gap alone", async
   expect(gate.output).toContain("judge gap: not accepted: The judge reads feature.txt as code. Decide the gap yourself: run hedge decision record --mark 🤖 --class proof-gap --kind judge --pr example/product#42");
 });
 
+test("on a one-way door, the gate's first judge failure tells the agent to ask the user, never to decide alone", async () => {
+  const pr = await checkout();
+  decideAtEnd(pr);
+  pr.pullRequestState({ body: graded("non-critical").replace("two-way door", "one-way door") });
+  await pr.commit("feature.txt", "greet new members\n");
+  await reviewHead(pr);
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  fakeModel(pr, "JUDGE", verdict({ owed: { verdict: "fail", reason: "feature.txt is code, not docs", citations: ["feature.txt"] } }));
+
+  const gate = await pr.hedge("gate");
+  expect(gate.output).toContain("judge gap: when the judge is wrong, record hedge proof gap --kind judge --reason <why> and ask the user; an agent never decides on a one-way door");
+  expect(gate.output).not.toContain("--mark 🤖");
+});
+
 test("on end, the printed decision command quotes a gap reason so the shell passes it whole", async () => {
   const pr = await checkout();
   decideAtEnd(pr);
