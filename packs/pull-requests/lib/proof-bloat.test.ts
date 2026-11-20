@@ -63,8 +63,12 @@ test("a judge that gives no score leaves the growth to be read by hand and is as
   judge.answer(JSON.stringify({ cuttable: 0, hunks: [] }));
   await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(
     "A fresh judge, bloat-judge-under-test, reads 0% of HEAD's production lines as more than the problem needs and names no hunk.");
+  pr.env.HEDGE_PROOF_BLOAT_JUDGE_MODEL = undefined;
+  await pr.commit("retry.ts", lines(12, "retry"));
+  judge.answer("{}");
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow("Read the growth by hand: the bloat judge a replacement command gave no score");
   const prompts = judge.prompts();
-  expect(prompts).toHaveLength(5);
+  expect(prompts).toHaveLength(6);
   expect(prompts[0]).toContain("The PR description has no Problem section.");
 });
 
@@ -78,6 +82,13 @@ test("a later HEAD or an edited Problem section gets its own score, and the end 
   judge.answer(JSON.stringify({ cuttable: 40, hunks: [hunk] }));
   await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow("reads 40%");
   expect(judge.prompts()[1]).toContain("a slow store times it out");
+  pr.pullRequestState({ body: problem + graded("non-critical") });
+  judge.answer("no score");
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow("Read the growth by hand");
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  await pr.hedge("gate");
+  const unscored = (await pr.decide("report", "--pr", "example/product#42")).output.split("\n");
+  expect(unscored.find((line) => /^\| example\/product#42 \| \d+ rounds? \|/.test(line))).toBe("| example/product#42 | 1 round | 10 → 21 (×2.1) | not run | none |");
   await pr.commit("retry.ts", lines(13, "retry"));
   judge.answer(JSON.stringify({ cuttable: 56, hunks: [hunk] }));
   pr.clock.now = new Date("2026-10-25T13:00:00Z");
@@ -85,8 +96,7 @@ test("a later HEAD or an edited Problem section gets its own score, and the end 
   const scored = await pr.git("rev-parse", "HEAD");
   await pr.commit("retry.ts", lines(5, "retry"));
   expect((await pr.hedge("sanity", "--verdict", "cut", "--reason", "Dropped most retries")).code).toBe(0);
-  expect(judge.prompts()).toHaveLength(3);
-  await pr.hedge("require", "--none", "--reason", "Docs only");
+  expect(judge.prompts()).toHaveLength(4);
   await pr.hedge("gate");
   const report = (await pr.decide("report", "--pr", "example/product#42")).output.split("\n");
   expect(report.find((line) => /^\| example\/product#42 \| \d+ rounds? \|/.test(line))).toBe(

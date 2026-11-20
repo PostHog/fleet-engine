@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readdir } from "node:fs/promises";
+import { readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { Run } from "./pr-ci.ts";
 import { diffOf } from "./proof-checkout.ts";
@@ -7,13 +7,13 @@ import type { Sized } from "./proof-end-table.ts";
 import { untrusted } from "./proof-judge.ts";
 import type { ModelAnswer, ModelRequest } from "./proof-models.ts";
 import { diffCap } from "./proof-review.ts";
-import { pullRequestDirectory, readJson, writeJson, type ProofIdentity } from "./proof.ts";
+import { judgeDirectory, readJson, writeJson, type ProofIdentity } from "./proof.ts";
 
 export type BloatHunk = { citation: string; reason: string };
 export type BloatScore = { commit: string; first: number; production: number; cuttable: number; hunks: BloatHunk[]; model: string; recordedAt: string; digest: string };
 export type BloatJudge = { model: string; cwd: string; now: () => Date; ask: (request: ModelRequest) => Promise<ModelAnswer> };
 
-const bloatDirectory = (home: string, identity: ProofIdentity) => join(pullRequestDirectory(home, identity), "bloat");
+const bloatDirectory = (home: string, identity: ProofIdentity) => join(judgeDirectory(home, identity), "bloat");
 
 const schema = {
   type: "object", additionalProperties: false, required: ["cuttable", "hunks"],
@@ -82,13 +82,15 @@ export async function scoreBloat(home: string, head: ProofIdentity, run: Run, gr
   const path = join(bloatDirectory(home, head), `${head.commit}.json`);
   const saved = await readJson<BloatScore | undefined>(path, undefined).catch(() => undefined);
   if (shaped(saved) && saved.digest === digest) return saved;
+  if (saved) await rm(path, { force: true });
   const judge = await judgeOf().catch((error: Error) => error.message);
   if (typeof judge === "string") return `the bloat judge has no model: ${judge}`;
+  const named = judge.model.startsWith("command: ") ? "a replacement command" : judge.model;
   const answer = await judge.ask({ prompt, cwd: judge.cwd, schema }).catch((error: Error) => ({ ok: false as const, cause: error.message, model: judge.model }));
-  if (!answer.ok) return `the bloat judge ${judge.model} gave no score: ${answer.cause}`;
+  if (!answer.ok) return `the bloat judge ${named} gave no score: ${answer.cause}`;
   const score = scoreOf(answer.text);
-  if (!score) return `the bloat judge ${judge.model} gave no score: its answer is not the JSON asked for`;
-  const recorded: BloatScore = { commit: head.commit, first: first.production, production: final.production, ...score, model: answer.model, recordedAt: judge.now().toISOString(), digest };
+  if (!score) return `the bloat judge ${named} gave no score: its answer is not the JSON asked for`;
+  const recorded: BloatScore = { commit: head.commit, first: first.production, production: final.production, ...score, model: named, recordedAt: judge.now().toISOString(), digest };
   await writeJson(path, recorded);
   return recorded;
 }
