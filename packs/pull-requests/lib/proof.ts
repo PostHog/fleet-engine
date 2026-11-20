@@ -369,7 +369,7 @@ async function requireBoughtRound(home: string, identity: ProofIdentity) {
 
 type AnsweredFinding = ReturnType<typeof answeredFindings>["findings"][number];
 
-const locationOf = (field: string) => /^([^`*]+?):\d+(?:-\d+)?$/.exec(field.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[`*]/g, "").trim())?.[1];
+const locationOf = (field: string) => /^([^`*]+?)\s*:\d+(?:-\d+)?$/.exec(field.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[`*]/g, "").trim())?.[1];
 const tailField = /^(?:anchor|sites):/i;
 
 function buysRound({ text, note, test, answer }: AnsweredFinding) {
