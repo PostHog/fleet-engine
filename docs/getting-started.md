@@ -37,7 +37,8 @@ team's org, change the dotfiles parameter of each workspace to
 When the template has a secret parameter, do not run `coder create` for it:
 a value you pass with `--parameter` stays in your shell history, and Coder
 can print the default of one you leave out. Create that workspace in the
-create form of the Coder web app. Pick the preset None when the form shows a
+create form of the Coder web app, with the name that the commands below use:
+`hedge-hub` or `hedge-node-1`. Pick the preset None when the form shows a
 preset picker, and leave a secret that has a default as it is. Coder keeps
 each value of that form with the build, so anyone who can see the workspace
 can read it. Then run the other lines of the block below: `coder login`, the
