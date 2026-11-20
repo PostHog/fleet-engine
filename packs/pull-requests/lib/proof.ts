@@ -369,7 +369,7 @@ async function requireBoughtRound(home: string, identity: ProofIdentity) {
 
 type AnsweredFinding = ReturnType<typeof answeredFindings>["findings"][number];
 
-const locationOf = (field: string) => /^([^`*]+?)\s*:\d+(?:-\d+)?$/.exec(field.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[`*]/g, "").trim())?.[1];
+const locationOf = (field: string) => /^([^`*]+?)\s*:\d+(?:-\d+)?$/.exec(field.replace(/\[([^\]]*)\]\((?:[^()]|\([^()]*\))*\)/g, "$1").replace(/[`*]/g, "").trim())?.[1];
 const tailField = /^(?:anchor|sites):/i;
 
 function buysRound({ text, note, test, answer }: AnsweredFinding) {
@@ -580,7 +580,7 @@ function splitOutsideCode(line: string) {
 }
 
 const fieldsOutsideCode = (text: string) => {
-  const item = listItem.exec(text.replace(/\s*\n\s*/g, " "))?.[1];
+  const item = listItem.exec(text.split("\n").map((line) => line.trim()).join(" "))?.[1];
   return item === undefined ? undefined : splitOutsideCode(item);
 };
 
