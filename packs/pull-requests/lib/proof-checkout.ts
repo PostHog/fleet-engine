@@ -20,11 +20,10 @@ export function mergeBase(identity: ProofIdentity, run: Run) {
   const base = pullRequestDetails(identity, run).baseRefName;
   const remotes = remotesOf(identity.repository, run);
   const found = () => {
-    for (const remote of remotes) {
-      const result = run(["git", "merge-base", `refs/remotes/${remote}/${base}`, identity.commit]);
-      if (result.code === 0) return result.stdout.trim();
-    }
-    return undefined;
+    const refs = remotes.map((remote) => `refs/remotes/${remote}/${base}`).filter((ref) => run(["git", "rev-parse", "--verify", "--quiet", `${ref}^{commit}`]).code === 0);
+    if (!refs.length) return undefined;
+    const result = run(["git", "merge-base", identity.commit, ...refs]);
+    return result.code === 0 && result.stdout.trim() || undefined;
   };
   const before = found();
   if (before) return before;
