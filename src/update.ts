@@ -24,8 +24,10 @@ export const recordedReleasesAtHead = (engineDir: string) => ["git", "-C", engin
 export const releaseRefsAtHead = (engineDir: string) => ["git", "-C", engineDir, "for-each-ref", "--points-at", "HEAD", "--format=%(refname)", releaseRefs, "refs/tags"];
 export const releaseIn = (refs: string) => refs.split("\n").map((ref) => ref.trim().replace(/^refs\/(?:hedge\/releases|tags)\//, "")).find((tag) => parse(tag)?.tag === tag);
 
+const noticeFile = ".local/state/hedge/update.json";
+
 export function noticePath(home: string) {
-  return join(home, ".local", "state", "hedge", "update.json");
+  return join(home, noticeFile);
 }
 
 export async function readNotice(home: string): Promise<string | undefined> {
@@ -55,7 +57,7 @@ export async function update(given: UpdateOptions): Promise<number> {
 
 async function stateFolderReady(options: UpdateOptions) {
   try {
-    await checkParents(options.home, ".local/state/hedge/update.json");
+    await checkParents(options.home, noticeFile);
     return true;
   } catch (error) {
     options.print(`hedge update: ${(error as Error).message}. hedge apply keeps its state in ${dirname(noticePath(options.home))} and stops when a folder on that path is a link or not a folder, so hedge update changed nothing. Make each one a real folder, then run hedge update again.`);
@@ -193,6 +195,7 @@ async function rollBack(options: UpdateOptions, before: string, installError: st
 async function saveNotice(options: UpdateOptions, newMajor: string | undefined) {
   const path = noticePath(options.home);
   try {
+    await checkParents(options.home, noticeFile);
     refuseLegacyPath(path);
     if (lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink()) throw new Error(`${path} is a link, so Hedge does not write the update notice there.`);
     if (!newMajor) return await rm(path, { force: true });

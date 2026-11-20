@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { closeSync, constants, copyFileSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, constants, copyFileSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, writeFileSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ProfileFile } from "./pack/types.ts";
 import { isolateGit, spawnGit, template, tempDirs } from "./testing/git.ts";
@@ -531,25 +531,47 @@ describe("hedge update", () => {
     return `${path} ${entry.isSymbolicLink() ? `-> ${readlinkSync(path)}` : entry.isFile() ? readFileSync(path, "utf8") : "folder"}`;
   }).sort();
 
-  async function releaseThatReadsState(remote: string, version: string) {
-    const install = join(engineRoot, "src/files/install.ts");
-    writeFileSync(join(remote, "hedge"), `[ "$1" = apply ] || exit 64\n"${process.execPath}" -e 'const { checkParents } = await import("${install}"); await checkParents(process.env.HOME, ".local/state/hedge/state.json")' || exit 1\ncat "$(dirname "$0")/VERSION" > "$HOME/applied"\n`);
+  const applyThatWritesState = `[ "$1" = apply ] || exit 64
+for folder in .local .local/state .local/state/hedge; do
+  [ ! -L "$HOME/$folder" ] || exit 1
+  [ ! -e "$HOME/$folder" ] || [ -d "$HOME/$folder" ] || exit 1
+done
+mkdir -p "$HOME/.local/state/hedge" || exit 1
+cat "$(dirname "$0")/VERSION" > "$HOME/.local/state/hedge/state.json" || exit 1
+cat "$(dirname "$0")/VERSION" > "$HOME/applied"
+`;
+
+  async function releaseThatReadsState(remote: string, version: string, scripts?: Record<string, string>) {
+    writeFileSync(join(remote, "hedge"), applyThatWritesState);
+    if (scripts) writeFileSync(join(remote, "package.json"), JSON.stringify({ name: "engine", scripts }));
     writeFileSync(join(remote, "VERSION"), version);
     await spawnGit(remote, "add", ".");
     await spawnGit(remote, "commit", "-q", "-m", version);
     await spawnGit(remote, "tag", version);
   }
 
-  const stateFolderCases: Array<[string, (home: string) => void]> = [
+  const stateFolderCases: Array<[string, (home: string) => string]> = [
     ["links into Fleet's, and Fleet's notice is a file", (home) => {
       writeFileSync(join(home, ".local/state/fleet/update.json"), fleetsOwn);
       symlinkSync(join(home, ".local/state/fleet"), join(home, ".local/state/hedge"));
+      return join(home, ".local/state/hedge");
     }],
     ["links into Fleet's, and Fleet's notice links out of that folder", (home) => {
       symlinkSync(join(temp.make("outside-"), "notice.json"), join(home, ".local/state/fleet/update.json"));
       symlinkSync(join(home, ".local/state/fleet"), join(home, ".local/state/hedge"));
+      return join(home, ".local/state/hedge");
     }],
-    ["is a file", (home) => writeFileSync(join(home, ".local/state/hedge"), "not a folder\n")],
+    ["is a file", (home) => {
+      writeFileSync(join(home, ".local/state/hedge"), "not a folder\n");
+      return join(home, ".local/state/hedge");
+    }],
+    ["is a real folder behind a link at .local/state", (home) => {
+      const elsewhere = join(temp.make("state-elsewhere-"), "state");
+      renameSync(join(home, ".local/state"), elsewhere);
+      mkdirSync(join(elsewhere, "hedge"));
+      symlinkSync(elsewhere, join(home, ".local/state"));
+      return join(home, ".local/state");
+    }],
   ];
 
   test.each(stateFolderCases)("refuses before the engine moves when Hedge's state folder %s, which the new engine's apply cannot read, and exits 1, applies nothing and writes no file in Fleet's state", async (_kind, arrange) => {
@@ -558,14 +580,14 @@ describe("hedge update", () => {
     await releaseThatReadsState(remote, "v0.1.1");
     const home = temp.make("home-");
     mkdirSync(join(home, ".local/state/fleet"), { recursive: true });
-    arrange(home);
+    const notReal = arrange(home);
     const state = stateUnder(home);
     const before = state();
 
     const result = await cliUpdate(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" }, home);
 
     expect(result).toMatchObject({ code: 1, applied: false, version: "v0.1.0" });
-    expect(result.output).toContain(`hedge update: Parent is not a real directory: ${join(home, ".local/state/hedge")}. hedge apply keeps its state in ${join(home, ".local/state/hedge")}`);
+    expect(result.output).toContain(`hedge update: Parent is not a real directory: ${notReal}. hedge apply keeps its state in ${join(home, ".local/state/hedge")}`);
     expect(result.output).toContain("so hedge update changed nothing.");
     expect(state()).toEqual(before);
   });
@@ -575,9 +597,35 @@ describe("hedge update", () => {
     const engineDir = await engineCheckout(remote, "v0.1.0");
     await releaseThatReadsState(remote, "v0.1.1");
 
-    const result = await cliUpdate(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" });
+    const home = temp.make("home-");
+
+    const result = await cliUpdate(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" }, home);
 
     expect(result).toMatchObject({ code: 0, applied: true, version: "v0.1.1" });
+    expect(readFileSync(join(home, ".local/state/hedge/state.json"), "utf8")).toBe("v0.1.1");
+  });
+
+  const swaps: Array<[string, (home: string, other: string) => string]> = [
+    ["Hedge's state folder with a link to another folder", (home, other) => `rm -rf '${home}/.local/state/hedge' && ln -s '${other}' '${home}/.local/state/hedge'`],
+    [".local/state with a link to another folder that holds a hedge folder", (home, other) => `mkdir -p '${other}/hedge' && rm -rf '${home}/.local/state' && ln -s '${other}' '${home}/.local/state'`],
+  ];
+
+  test.each(swaps)("skips the update notice with a warning when something replaces %s after the early check, and leaves that folder's update.json as it was", async (_kind, swap) => {
+    const remote = await engineRemote(["v0.1.0", "v1.0.0"]);
+    const engineDir = await engineCheckout(remote, "v0.1.0");
+    const home = temp.make("home-");
+    const other = temp.make("other-");
+    writeFileSync(join(other, "update.json"), fleetsOwn);
+    mkdirSync(join(other, "hedge"));
+    writeFileSync(join(other, "hedge/update.json"), fleetsOwn);
+    mkdirSync(join(home, ".local/state/hedge"), { recursive: true });
+    await releaseThatReadsState(remote, "v0.1.1", { postinstall: swap(home, other) });
+
+    const result = await cliUpdate(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" }, home);
+
+    expect(result.version).toBe("v0.1.1");
+    expect(result.output).toContain(`hedge update: warning: could not save the new major notice in ${noticePath(home)}, so hedge doctor may name the wrong release: Parent is not a real directory: `);
+    expect([readFileSync(join(other, "update.json"), "utf8"), readFileSync(join(other, "hedge/update.json"), "utf8")]).toEqual([fleetsOwn, fleetsOwn]);
   });
 
   const noticeCases: Array<[string, string[], (home: string, outside: string) => string]> = [

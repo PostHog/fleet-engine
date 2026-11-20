@@ -660,7 +660,7 @@ describe("hedge retire-fleet", () => {
     if (target === "a checkout") mkdirSync(checkout, { recursive: true });
     rmSync(link, { recursive: true });
     symlinkSync(checkout, link);
-    const refusal = `Hedge: ${link} is a link, and Hedge finds and stops only a Fleet engine that sits in ${link} itself, so Hedge changed nothing. Run ls -l ${link} to see where it points.`;
+    const refusal = `Hedge: ${link} is a link, and Hedge finds and stops only a Fleet engine that sits in ${link} itself, so Hedge changed nothing. Run ls -l "${link}" to see where it points.`;
     const files = () => readdirSync(linked.home, { recursive: true }).map(String).sort();
     return { ...linked, refusal, files };
   };

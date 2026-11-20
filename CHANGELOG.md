@@ -27,7 +27,8 @@
   again. A `~/.local/bin/fleet` without the `# Fleet` line is not Fleet's,
   and Hedge ignores it. When `~/.local/share/fleet/engine` itself is a link,
   `get.sh`, `hedge retire-fleet`, its dry run, and `hedge apply` refuse the
-  same way and name the link. Run `ls -l` on the link to see where it points.
+  same way and name the link. The message gives the `ls -l` command with the
+  path in quotes, so it also works when the path has spaces.
   Stop Fleet by hand and delete the link, or move the engine into its place.
 - On the first run, `get.sh` first runs `hedge retire-fleet`, also with
   `--install-only`. When it cannot show that each piece of Fleet stopped, it
@@ -105,9 +106,10 @@
   checks `~/.local/state/hedge`, where `hedge apply` keeps its state. When
   that folder or a folder above it is a link, a file or anything else that is
   not a real folder, `hedge update` names the path, moves nothing and exits 1.
-  When only `update.json` is a link, leads into Fleet's state folder or cannot
-  be written, it skips the notice with a warning and the update goes on. It
-  never writes Fleet's state.
+  It checks those folders again just before it writes the notice. When a
+  folder changed into a link in between, or only `update.json` is a link,
+  leads into Fleet's state folder or cannot be written, it skips the notice
+  with a warning and the update goes on. It never writes Fleet's state.
 - `hedge update` runs apply with the profile it pulled.
 - `hedge update` and `hedge refresh` use the Hedge copy of a profile that the
   machine file still names in a Fleet path, or refuse, before they pull.
@@ -147,10 +149,13 @@
 - Crontab lines and T3 worktree scripts from before the rename are replaced
   by the new ones.
 - Hedge never edits or removes a `# fleet-hub-tunnel` line in `/etc/hosts`.
-  It adds its own `# hedge-hub-tunnel` line next to it, and removes only that
-  line. `hedge ssh-tunnels remove` and `left` read the hosts file only when
-  the step ledger in this home holds the `ssh-tunnels` step, so a run with
-  another `HOME` does not change the hosts file or call `sudo`.
+  Hedge's own line is `127.0.0.1 <host> # hedge-hub-tunnel <home>`, where
+  `<home>` is the `HOME` that installed it. `hedge ssh-tunnels install`,
+  `remove`, `left` and `doctor` act only on the line that ends with this
+  `HOME`. So a run with another `HOME` does not change the hosts file or call
+  `sudo`. Install keeps a Fleet line, or a line of another home, that maps the
+  host to `127.0.0.1`. When such a line maps the host to another address,
+  install stops, as it does for a line the person wrote.
 - A profile with `fleet.json` and no `hedge.json` still works. Each `FLEET_`
   variable still works while its `HEDGE_` variable is unset. A `HEDGE_`
   variable that is set, even to an empty string, wins. Setup reuses a

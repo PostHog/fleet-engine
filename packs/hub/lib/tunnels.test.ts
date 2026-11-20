@@ -1,10 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { changeLedger } from "../../../src/reconciler/ledger.ts";
 import { tempDirs } from "../../../src/testing/git.ts";
 import { fakeRun, modeOf, roleHome } from "./run-testing.ts";
-import { hostsWith, sshTunnels, tunnelTargets, tunnelUnit, type TunnelMachine } from "./tunnels.ts";
+import { sshTunnels, tunnelTargets, tunnelUnit, type TunnelMachine } from "./tunnels.ts";
 
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
@@ -20,9 +19,18 @@ function machine(role: string, fields: Partial<TunnelMachine> = {}) {
   return { deps, home, hosts, calls: fake.calls, inputs: fake.inputs, printed };
 }
 
-const installed = (home: string) => changeLedger(home, "steps", "hub/ssh-tunnels", { pack: "hub", id: "ssh-tunnels", check: ["hedge", "ssh-tunnels", "left"], undo: ["hedge", "ssh-tunnels", "remove"] });
+const base = "127.0.0.1 localhost\n10.0.0.1 unrelated.example\n";
 const fleetLine = `127.0.0.1 ${host} # fleet-hub-tunnel`;
-const hedgeLine = `127.0.0.1 ${host} # hedge-hub-tunnel`;
+const lineOf = (home: string, name = host) => `127.0.0.1 ${name} # hedge-hub-tunnel ${home}`;
+
+function devbox(fields: Partial<TunnelMachine> = {}) {
+  const fake = fakeRun((command, input) => {
+    if (command.slice(0, 3).join(" ") === "sudo -n tee" && input !== undefined) writeFileSync(command[3]!, input);
+    return undefined;
+  });
+  const made = machine("devbox", { run: fake.run, ...fields });
+  return { ...made, calls: fake.calls, read: () => readFileSync(made.hosts, "utf8"), write: (text: string) => writeFileSync(made.hosts, text) };
+}
 
 const unitPath = (home: string, alias: string) => join(home, `.config/systemd/user/hedge-ssh-${alias}.service`);
 
@@ -98,24 +106,36 @@ test("install keeps a dangling linked unit and a unit Hedge did not write", asyn
   expect(readFileSync(unitPath(other, "devbox-2"), "utf8")).toBe("[Service]\nExecStart=/bin/true\n");
 });
 
-test("on a devbox, install maps hub.httpsHost to loopback in the hosts file once, through sudo, and keeps every other entry", async () => {
-  const { deps, hosts, calls, inputs } = machine("devbox");
+test("on a devbox, install maps hub.httpsHost to loopback in the hosts file once, through sudo, marks the line with this home, and keeps every other entry", async () => {
+  const { deps, hosts, calls, read } = devbox();
   expect(await sshTunnels("install", deps)).toBe(0);
   expect(calls).toEqual([`sudo -n tee ${hosts}`]);
-  expect(inputs[0]).toBe(`127.0.0.1 localhost\n10.0.0.1 unrelated.example\n127.0.0.1 ${host} # hedge-hub-tunnel\n`);
-  writeFileSync(hosts, inputs[0]!);
-  const again = machine("devbox", { home: deps.home, hosts });
+  expect(read()).toBe(`${base}${lineOf(deps.home)}\n`);
+  const again = devbox({ home: deps.home, hosts });
   expect(await sshTunnels("install", again.deps)).toBe(0);
   expect(again.calls).toEqual([]);
   expect(await sshTunnels("doctor", again.deps)).toBe(0);
 });
 
-test("the hosts entry replaces its own old line, keeps an entry the person wrote, and the devbox doctor fails until it is there", async () => {
-  expect(hostsWith("127.0.0.1 localhost\n127.0.0.1 old.example # hedge-hub-tunnel\n", host)).toBe(`127.0.0.1 localhost\n127.0.0.1 ${host} # hedge-hub-tunnel\n`);
-  expect(hostsWith(`127.0.0.1 localhost\n${fleetLine}\n`, host)).toBe(`127.0.0.1 localhost\n${fleetLine}\n${hedgeLine}\n`);
-  expect(() => hostsWith(`10.1.2.3 ${host}\n`, host)).toThrow("Keep unmanaged hosts entry");
-  const { deps } = machine("devbox");
+test("install replaces only this home's old line, keeps an old Fleet line and another home's line that map the host to loopback, and the devbox doctor fails until this home's line is there", async () => {
+  const { deps, read, write } = devbox();
+  const other = `${deps.home}-other`;
   await expect(sshTunnels("doctor", deps)).rejects.toThrow(`does not map ${host}`);
+  write(`${base}${lineOf(deps.home, "old.example")}\n${fleetLine}\n${lineOf(other)}\n`);
+  await expect(sshTunnels("doctor", deps)).rejects.toThrow(`does not map ${host}`);
+  expect(await sshTunnels("install", deps)).toBe(0);
+  expect(read()).toBe(`${base}${fleetLine}\n${lineOf(other)}\n${lineOf(deps.home)}\n`);
+  expect(await sshTunnels("doctor", deps)).toBe(0);
+});
+
+test("install refuses an entry the person wrote, and an old Fleet line or another home's line that maps the host to another address, and changes nothing", async () => {
+  for (const line of [`10.1.2.3 ${host}`, `10.1.2.3 ${host} # fleet-hub-tunnel`, `10.1.2.3 ${host} # hedge-hub-tunnel /home/other`]) {
+    const { deps, calls, read, write } = devbox();
+    write(`${base}${line}\n`);
+    await expect(sshTunnels("install", deps)).rejects.toThrow(`Keep unmanaged hosts entry for ${host}`);
+    expect(calls).toEqual([]);
+    expect(read()).toBe(`${base}${line}\n`);
+  }
 });
 
 test("on a devbox, a symlinked hosts file stays, and an empty hub.httpsHost needs no entry", async () => {
@@ -196,16 +216,16 @@ test("remove on the hub stops and deletes every tunnel unit Hedge wrote, and lef
   expect(await sshTunnels("left", removing.deps)).toBe(1);
 });
 
-test("remove on a devbox takes its hosts entry out through sudo, and left then reports nothing left", async () => {
-  const { deps, hosts } = machine("devbox");
-  await installed(deps.home);
-  writeFileSync(hosts, hostsWith(readFileSync(hosts, "utf8"), host));
+test("on a devbox, install then remove in the same home leaves the hosts file as it was, with the old Fleet line and another home's line kept, and left then reports nothing left", async () => {
+  const { deps, hosts, read, write } = devbox();
+  const before = `${base}${fleetLine}\n${lineOf(`${deps.home}-other`)}\n`;
+  write(before);
+  expect(await sshTunnels("install", deps)).toBe(0);
   expect(await sshTunnels("left", deps)).toBe(0);
-  const removing = machine("devbox", { home: deps.home, hosts, httpsHost: undefined });
+  const removing = devbox({ home: deps.home, hosts, httpsHost: undefined });
   expect(await sshTunnels("remove", removing.deps)).toBe(0);
   expect(removing.calls).toEqual([`sudo -n tee ${hosts}`]);
-  expect(removing.inputs).toEqual(["127.0.0.1 localhost\n10.0.0.1 unrelated.example\n"]);
-  writeFileSync(hosts, removing.inputs[0]!);
+  expect(read()).toBe(before);
   expect(await sshTunnels("left", removing.deps)).toBe(1);
   expect(await sshTunnels("remove", removing.deps)).toBe(0);
   expect(removing.calls).toHaveLength(1);
@@ -220,41 +240,20 @@ test("the hub treats every name hedge devbox add keeps for pool boxes as a box, 
   expect(printed).toContain("box-7.old: skipped: a box gets the gateway and relay ports from its own box forward");
 });
 
-test("without Hedge's record of the step in this home, remove and left leave the hosts file alone and run no sudo", async () => {
-  const { deps, hosts, calls } = machine("devbox", { httpsHost: undefined });
-  const before = `127.0.0.1 localhost\n${fleetLine}\n${hedgeLine}\n`;
-  writeFileSync(hosts, before);
+test("with no hosts line of this home, remove and left leave the old Fleet line and every other home's line alone and run no sudo", async () => {
+  const { deps, calls, read, write } = devbox({ httpsHost: undefined });
+  const before = `${base}${fleetLine}\n${lineOf(`${deps.home}-other`)}\n${lineOf(`/x${deps.home}`)}\n${lineOf(deps.home)} extra\n`;
+  write(before);
   expect(await sshTunnels("left", deps)).toBe(1);
   expect(await sshTunnels("remove", deps)).toBe(0);
   expect(calls).toEqual([]);
-  expect(readFileSync(hosts, "utf8")).toBe(before);
+  expect(read()).toBe(before);
 });
 
-test("with Hedge's record of the step, remove takes out only Hedge's hosts line and keeps the line old Fleet wrote", async () => {
-  const { deps, hosts, calls, inputs } = machine("devbox", { httpsHost: undefined });
-  await installed(deps.home);
-  writeFileSync(hosts, `127.0.0.1 localhost\n${fleetLine}\n${hedgeLine}\n`);
-  expect(await sshTunnels("left", deps)).toBe(0);
-  expect(await sshTunnels("remove", deps)).toBe(0);
-  expect(calls).toEqual([`sudo -n tee ${hosts}`]);
-  expect(inputs).toEqual([`127.0.0.1 localhost\n${fleetLine}\n`]);
-  writeFileSync(hosts, inputs[0]!);
-  expect(await sshTunnels("left", deps)).toBe(1);
-});
-
-test("the ssh-tunnels command, in a home without Hedge's record, runs no sudo or systemctl for remove and left", async () => {
-  const home = roleHome(temp.make("hedge-tunnels-"), "devbox");
-  const bin = temp.make("hedge-standins-");
-  const log = join(bin, "calls.log");
-  for (const tool of ["sudo", "systemctl", "crontab", "ssh"]) writeFileSync(join(bin, tool), `#!/bin/sh\necho "${tool} $*" >> '${log}'\nexit 1\n`, { mode: 0o755 });
-  const command = join(import.meta.dir, "../commands/ssh-tunnels.ts");
-  const env = { ...Bun.env, HOME: home, PATH: `${bin}:${Bun.env.PATH}`, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0" };
-  const runCommand = async (mode: string) => {
-    const child = Bun.spawn([process.execPath, command, mode], { env, stdout: "pipe", stderr: "pipe" });
-    const [stdout, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
-    return { stdout, code };
-  };
-  expect(await runCommand("left")).toEqual({ stdout: "Hub SSH tunnels: nothing left.\n", code: 1 });
-  expect(await runCommand("remove")).toEqual({ stdout: "Hub SSH tunnels: removed.\n", code: 0 });
-  expect(existsSync(log)).toBe(false);
+test("install refuses a home path with a line break, which would split the hosts line, and changes nothing", async () => {
+  const home = roleHome(temp.make("hedge-tunnels-\n10.9.9.9 evil.example-"), "devbox");
+  const { deps, calls, read } = devbox({ home });
+  await expect(sshTunnels("install", deps)).rejects.toThrow("line break");
+  expect(calls).toEqual([]);
+  expect(read()).toBe(base);
 });

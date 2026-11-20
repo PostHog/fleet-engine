@@ -86,7 +86,7 @@ custom_fleet_engine() {
 }
 
 if [ -L "$fleet_engine" ]; then
-  fail "$fleet_engine is a link, and Hedge finds and stops only a Fleet engine that sits in $fleet_engine itself, so Hedge changed nothing. Run ls -l $fleet_engine to see where it points. Stop Fleet's services, cron jobs and fleet: tasks in T3 Code by hand and delete the link $fleet_engine, or move the engine to $fleet_engine in place of the link. Then run get.sh again."
+  fail "$fleet_engine is a link, and Hedge finds and stops only a Fleet engine that sits in $fleet_engine itself, so Hedge changed nothing. Run ls -l \"$fleet_engine\" to see where it points. Stop Fleet's services, cron jobs and fleet: tasks in T3 Code by hand and delete the link $fleet_engine, or move the engine to $fleet_engine in place of the link. Then run get.sh again."
 fi
 
 if custom_fleet_engine; then

@@ -5,7 +5,6 @@ import { peersOf, readRole } from "./machine.ts";
 import { gatewayPort, refuseLinks } from "../../mcp-gateway/lib/client.ts";
 import type { Run } from "../../mcp-gateway/lib/hub.ts";
 import { isKeptForBoxes, sshName } from "../../../src/hub/names.ts";
-import { readLedger } from "../../../src/reconciler/ledger.ts";
 import { hostPattern, must, proxyPort, relayPortOf } from "./run.ts";
 
 export type TunnelMode = "plan" | "install" | "doctor" | "remove" | "left";
@@ -13,9 +12,10 @@ export type TunnelMode = "plan" | "install" | "doctor" | "remove" | "left";
 export type TunnelMachine = { home: string; devboxes: string[]; dialsHub: string[]; relayPort: number; httpsHost?: string; proxy?: boolean; hosts: string; run: Run; print(line: string): void };
 
 const marker = "# Managed by Hedge hub SSH tunnels.";
-const hostsMarker = " # hedge-hub-tunnel";
-const ownedHostsLine = (line: string) => line.endsWith(hostsMarker);
-const oldFleetHostsLine = (line: string) => line.endsWith(" # fleet-hub-tunnel");
+const tunnelAddress = "127.0.0.1";
+const hostsMarker = (home: string) => ` # hedge-hub-tunnel ${home}`;
+const ownedHostsLine = (home: string) => (line: string) => line.endsWith(hostsMarker(home));
+const markedHostsLine = (line: string) => line.endsWith(" # fleet-hub-tunnel") || line.includes(" # hedge-hub-tunnel ");
 const unitName = (alias: string) => `hedge-ssh-${alias}.service`;
 const loopback = (port: number) => `-R 127.0.0.1:${port}:127.0.0.1:${port}`;
 
@@ -39,11 +39,16 @@ WantedBy=default.target
 `;
 }
 
-export function hostsWith(previous: string, host: string): string {
-  const lines = previous.split("\n").filter((line) => !ownedHostsLine(line));
+function hostsWith(previous: string, host: string, home: string): string {
+  if (/[\r\n]/.test(home)) throw new Error("Keep the hosts file: the home path holds a line break.");
+  const lines = previous.split("\n").filter((line) => !ownedHostsLine(home)(line));
   while (lines.at(-1) === "") lines.pop();
-  if (lines.some((line) => !oldFleetHostsLine(line) && line.split("#", 1)[0]!.trim().split(/\s+/).slice(1).includes(host))) throw new Error(`Keep unmanaged hosts entry for ${host}.`);
-  return [...lines, `127.0.0.1 ${host}${hostsMarker}`, ""].join("\n");
+  const conflicts = (line: string) => {
+    const [address, ...names] = line.split("#", 1)[0]!.trim().split(/\s+/);
+    return names.includes(host) && !(markedHostsLine(line) && address === tunnelAddress);
+  };
+  if (lines.some(conflicts)) throw new Error(`Keep unmanaged hosts entry for ${host}.`);
+  return [...lines, `${tunnelAddress} ${host}${hostsMarker(home)}`, ""].join("\n");
 }
 
 export async function sshTunnels(mode: TunnelMode, machine: TunnelMachine): Promise<number> {
@@ -84,19 +89,17 @@ async function hubTunnels(mode: TunnelMode, machine: TunnelMachine) {
   return 0;
 }
 
-const installedHere = async (home: string) => (await readLedger(home)).steps.some((step) => step.pack === "hub" && step.id === "ssh-tunnels");
-
-/** On any role, remove takes away every tunnel unit and the hosts entry Hedge wrote, and left exits 0 while one is here. The hosts file is outside this home, so both read it only while this home's step ledger holds the ssh-tunnels step. */
 async function withoutTunnels(mode: "remove" | "left", machine: TunnelMachine) {
   const directory = join(machine.home, ".config/systemd/user");
   const units = (await staleUnits(machine.home, directory, [])).sort().map((name) => join(directory, name));
-  const hosts = (await installedHere(machine.home)) ? ((await readIfThere(machine.hosts)) ?? "") : "";
-  const entry = hosts.split("\n").some(ownedHostsLine);
+  const owned = ownedHostsLine(machine.home);
+  const hosts = (await readIfThere(machine.hosts)) ?? "";
+  const entry = hosts.split("\n").some(owned);
   if (mode === "left") return machine.print(units.length || entry ? "Hub SSH tunnels: still here." : "Hub SSH tunnels: nothing left."), units.length || entry ? 0 : 1;
   await removeUnits(machine.home, units, marker, "tunnel", machine.run);
   if (entry) {
     if ((await lstat(machine.hosts)).isSymbolicLink()) throw new Error(`Keep linked hosts file: ${machine.hosts}`);
-    await must(machine.run, ["sudo", "-n", "tee", machine.hosts], hosts.split("\n").filter((line) => !ownedHostsLine(line)).join("\n"));
+    await must(machine.run, ["sudo", "-n", "tee", machine.hosts], hosts.split("\n").filter((line) => !owned(line)).join("\n"));
   }
   machine.print("Hub SSH tunnels: removed.");
   return 0;
@@ -119,7 +122,7 @@ async function devboxHosts(mode: TunnelMode, machine: TunnelMachine) {
   if (!hostPattern.test(host)) throw new Error(`hub.httpsHost is not a host name: ${JSON.stringify(host)}`);
   if ((await lstat(machine.hosts)).isSymbolicLink()) throw new Error(`Keep linked hosts file: ${machine.hosts}`);
   const previous = await readFile(machine.hosts, "utf8");
-  const wanted = hostsWith(previous, host);
+  const wanted = hostsWith(previous, host, machine.home);
   if (mode === "doctor" && previous !== wanted) throw new Error(`${machine.hosts} does not map ${host} to the hub tunnel. Run hedge ssh-tunnels install.`);
   if (mode === "install" && previous !== wanted) await must(machine.run, ["sudo", "-n", "tee", machine.hosts], wanted);
   machine.print(`${host}: hosts entry ${mode === "plan" ? "planned" : "present"}`);
