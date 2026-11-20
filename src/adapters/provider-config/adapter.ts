@@ -170,7 +170,8 @@ function merge(target: Target, text: string | undefined, previous: Field[], want
       if (onRoute(field)) routeLeft.push(field.path);
     }
   }
-  const beside = (route?.beside(current, routeLeft) ?? []).filter((path) => !wanted.some((field) => overlaps(field.path, path)));
+  const setByPack = (path: string[]) => wanted.some((field) => overlaps(field.path, path) && same(get(current, path), get({ value: field.value }, ["value", ...path.slice(field.path.length)])));
+  const beside = (route?.beside(current, routeLeft) ?? []).filter((path) => !setByPack(path));
   for (const path of beside) {
     remove(current, path);
     removed.push(path.join("."));
@@ -178,7 +179,7 @@ function merge(target: Target, text: string | undefined, previous: Field[], want
   const reason = [changed.length ? `set ${changed.join(", ")}` : "", removed.length ? `remove ${removed.join(", ")}` : ""].filter(Boolean).join("; ");
   const after = target.format.encode(current);
   const todo = beside.length ? `Took Hedge's proxy route out of ${target.path}, and with it your ${beside.map((path) => path.join(".")).join(", ")}, which only worked through that route. ${route!.agent} now uses its own sign-in: sign in there if it asks.` : undefined;
-  return { record: record.filter((field) => !beside.some((path) => overlaps(path, field.path))), kept, reason, after: after === original ? undefined : after, document: current, ...(todo ? { todo } : {}) };
+  return { record: record.filter((field) => !beside.some((path) => overlaps(path, field.path))), kept: kept.filter((path) => !beside.some((item) => item.join(".") === path)), reason, after: after === original ? undefined : after, document: current, ...(todo ? { todo } : {}) };
 }
 
 function acceptedPlugins(document: Document) {

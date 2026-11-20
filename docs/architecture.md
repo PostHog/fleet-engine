@@ -314,8 +314,14 @@ and Hedge does not wrap it in a unit.
     too: a Claude credential such as `ANTHROPIC_AUTH_TOKEN` beside Hedge's
     proxy address, or a Codex `model_provider = "hedge-proxy"` beside
     Hedge's table. Apply shows a `To do:` that names each one, never its
-    value, and says the agent now uses its own sign-in. A gateway from your
-    profile is not Hedge's route: its keys leave one by one, as on the base.
+    value, and says the agent now uses its own sign-in. A credential stays
+    only while its value equals the value a pack sets for it now; a value
+    you edited leaves with the route. A gateway from your profile is not
+    Hedge's route: its keys leave one by one, as on the base.
+  - *One owner of the proxy values:* only the Hub pack may set
+    `model_provider = "hedge-proxy"`, the `hedge-proxy` table, or Hedge's
+    proxy address as the Claude base URL. Resolve refuses a profile or
+    another pack that sets one, and names the pack and the setting.
   - *Until recovery:* each `hedge apply` and `hedge doctor` reports the
     failed check. The first apply whose probe passes writes both keys
     again. Between applies nothing changes the route.

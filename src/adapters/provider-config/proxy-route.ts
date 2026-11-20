@@ -1,5 +1,5 @@
 import type { Provider } from "../../pack/types.ts";
-import { get, samePath, type Document } from "./fields.ts";
+import { get, keyPath, same, samePath, type Document } from "./fields.ts";
 
 export const proxyUrl = "http://127.0.0.1:8317";
 export const keyHelper = 'cat "$HOME/.config/hedge/cli-proxy.key"';
@@ -25,3 +25,21 @@ export const proxyRoute: Partial<Record<Provider, Route>> = {
     beside: (document, leaving) => (leaves(leaving, codexTable) && get(document, ["model_provider"]) === codexProvider ? [["model_provider"]] : []),
   },
 };
+
+const hubOnly: Partial<Record<Provider, Array<{ path: string[]; value?: unknown; name: string }>>> = {
+  claude: [{ path: baseUrl, value: proxyUrl, name: `env.ANTHROPIC_BASE_URL = ${proxyUrl}` }],
+  codex: [
+    { path: ["model_provider"], value: codexProvider, name: `model_provider = "${codexProvider}"` },
+    { path: codexTable, name: `the ${codexProvider} provider table` },
+  ],
+};
+
+export function hubOnlySetting(provider: Provider, key: string, value: unknown) {
+  const path = keyPath(key);
+  return hubOnly[provider]?.find((item) => {
+    if (path.length > item.path.length) return item.value === undefined && samePath(path.slice(0, item.path.length), item.path);
+    if (!samePath(item.path.slice(0, path.length), path)) return false;
+    const held = get({ value }, ["value", ...item.path.slice(path.length)]);
+    return item.value === undefined ? held !== undefined : same(held, item.value);
+  })?.name;
+}

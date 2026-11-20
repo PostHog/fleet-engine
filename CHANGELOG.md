@@ -76,11 +76,20 @@
   names each removed setting, never its value, and says the agent now
   uses its own sign-in. The backup in `~/.local/state/hedge/backups`
   holds the file as it was. Only Hedge's own proxy values form the
-  route. The cleanup removes only settings that no pack sets, so a key
-  helper your profile sets in the same apply stays and is recorded, and
-  a helper you edited at that key stays by the usual rules. A gateway
-  and key helper from your profile are set and removed one by one, as
-  before.
+  route. A credential beside the route stays only while its value equals
+  the value a pack sets for it now. So a key helper your profile sets in
+  the same apply stays and is recorded. A value that differs, such as a
+  helper you edited or a proxy token you set by hand, leaves with the
+  route even when your profile sets that key, and the `To do:` names it.
+  The next apply sets your profile's value. A gateway and key helper from
+  your profile are set and removed one by one, as before.
+- Only the Hub pack may set Hedge's proxy values:
+  `model_provider = "hedge-proxy"`, the `hedge-proxy` Codex provider
+  table, and `http://127.0.0.1:8317` as the Claude
+  `env.ANTHROPIC_BASE_URL`. When your profile or another pack sets one of
+  them, Hedge refuses the profile when it loads, and the error names the
+  pack and the setting. So no selector of yours can point at Hedge's
+  table after the table leaves.
 - When an adapter that runs before the steps fails, or a later part of
   the provider config step fails after the settings write, such as a
   malformed `provider-plugins.json`, the error that apply throws holds
@@ -92,8 +101,8 @@
   apply it:
   `hedge box run <box> -- hedge cli-proxy connect < ~/.config/hedge/cli-proxy.key, then hedge box run <box> -- hedge apply`.
   It never prints the box's output. When `hedge apply` on the box exits
-  nonzero, the hub still reads its proxy `To do:` and `Fix:` lines, then
-  names the exit code.
+  nonzero, the hub names only the exit code and the command to see why,
+  as for a failed connect.
 - The `Connect <node>:` command that `hedge cli-proxy doctor` prints now
   runs `hedge apply` on the node after connect, and the Recovery runbook
   says so.

@@ -99,7 +99,7 @@ describe("provider config", () => {
     expect((await apply(plan(), { home, adapters: adapters() })).actions).toEqual([]);
   });
 
-  test("switching from Hedge's Claude proxy to a profile's own key helper in one apply sets that helper and records it, and a helper you edited stays by the usual rules", async () => {
+  test("switching from Hedge's Claude proxy to a profile's own key helper in one apply sets that helper and owns it, so dropping it later removes it, and a helper you edited leaves with the route", async () => {
     const home = temp.make("home-");
     const route = [{ provider: "claude" as const, key: "env.ANTHROPIC_BASE_URL", value: "http://127.0.0.1:8317", pack: "hub" }, { provider: "claude" as const, key: "apiKeyHelper", value: 'cat "$HOME/.config/hedge/cli-proxy.key"', pack: "hub" }];
     const helper = [{ provider: "claude" as const, key: "apiKeyHelper", value: "team-helper", pack: "team" }];
@@ -108,19 +108,41 @@ describe("provider config", () => {
     const switched = await apply(plan(helper), { home, adapters: adapters() });
 
     expect(read(home, claude)).toEqual({ apiKeyHelper: "team-helper" });
-    expect(read(home, record)[claude]).toEqual([{ path: ["apiKeyHelper"], value: "team-helper", pack: "team" }]);
     expect(switched.findings.map((finding) => finding.id)).not.toContain(`route:${claude}`);
     expect((await apply(plan(helper), { home, adapters: adapters() })).actions).toEqual([]);
+    const dropped = await apply(plan(), { home, adapters: adapters() });
+    expect(read(home, claude)).toEqual({});
+    expect(dropped.actions).toContainEqual({ target: claude, operation: "replace", reason: "remove apiKeyHelper" });
 
     const edited = temp.make("home-");
     await apply(plan(route), { home: edited, adapters: adapters() });
     write(edited, claude, { ...read(edited, claude), apiKeyHelper: "my-helper", env: { ...read(edited, claude).env, ANTHROPIC_AUTH_TOKEN: "my-token" } });
 
-    const kept = await apply(plan(helper), { home: edited, adapters: adapters() });
+    const taken = await apply(plan(helper), { home: edited, adapters: adapters() });
 
-    expect(read(edited, claude)).toEqual({ apiKeyHelper: "my-helper" });
-    expect(kept.findings.map((finding) => finding.say)).toContain(`Kept your apiKeyHelper in ${claude}. Run hedge apply --adopt ${claude} to take Hedge's value.`);
-    expect(kept.findings.map((finding) => finding.say)).toContain(`Took Hedge's proxy route out of ${claude}, and with it your env.ANTHROPIC_AUTH_TOKEN, which only worked through that route. Claude Code now uses its own sign-in: sign in there if it asks.`);
+    expect(read(edited, claude)).toEqual({});
+    expect(taken.findings.map((finding) => finding.say)).not.toContain(`Kept your apiKeyHelper in ${claude}. Run hedge apply --adopt ${claude} to take Hedge's value.`);
+    expect(taken.findings).toContainEqual({ id: `route:${claude}`, pack: "engine", say: `Took Hedge's proxy route out of ${claude}, and with it your apiKeyHelper, env.ANTHROPIC_AUTH_TOKEN, which only worked through that route. Claude Code now uses its own sign-in: sign in there if it asks.`, todo: true });
+    expect(JSON.stringify(taken.findings)).not.toContain("my-helper");
+    await apply(plan(helper), { home: edited, adapters: adapters() });
+    expect(read(edited, claude)).toEqual({ apiKeyHelper: "team-helper" });
+  });
+
+  test("a proxy token you set by hand leaves with Hedge's route even when a profile sets a token of its own, and the next apply sets the profile's token", async () => {
+    const home = temp.make("home-");
+    const route = [{ provider: "claude" as const, key: "env.ANTHROPIC_BASE_URL", value: "http://127.0.0.1:8317", pack: "hub" }, { provider: "claude" as const, key: "apiKeyHelper", value: 'cat "$HOME/.config/hedge/cli-proxy.key"', pack: "hub" }];
+    const token = [{ provider: "claude" as const, key: "env.ANTHROPIC_AUTH_TOKEN", value: "team-token", pack: "profile" }];
+    await apply(plan(route), { home, adapters: adapters() });
+    write(home, claude, { ...read(home, claude), env: { ...read(home, claude).env, ANTHROPIC_AUTH_TOKEN: "proxy-token" } });
+
+    const taken = await apply(plan(token), { home, adapters: adapters() });
+
+    expect(read(home, claude)).toEqual({});
+    expect(taken.findings).toContainEqual({ id: `route:${claude}`, pack: "engine", say: `Took Hedge's proxy route out of ${claude}, and with it your env.ANTHROPIC_AUTH_TOKEN, which only worked through that route. Claude Code now uses its own sign-in: sign in there if it asks.`, todo: true });
+    expect(taken.findings.map((finding) => finding.say).join("\n")).not.toContain("Kept your");
+    expect(JSON.stringify(taken.findings)).not.toContain("proxy-token");
+    await apply(plan(token), { home, adapters: adapters() });
+    expect(read(home, claude)).toEqual({ env: { ANTHROPIC_AUTH_TOKEN: "team-token" } });
   });
 
   test("takes an ANTHROPIC_API_KEY and a key helper you edited out with Hedge's proxy URL, and names both without their values", async () => {

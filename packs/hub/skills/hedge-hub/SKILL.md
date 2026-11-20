@@ -166,7 +166,11 @@ the person's own subscriptions, never for someone else's.
   the proxy is unsafe, or does not serve an agent with this machine's key,
   `hedge apply` leaves that
   agent's settings out and removes Hedge's own values, so the agent uses its
-  own sign-in, and the next apply changes nothing. `hedge apply` and
+  own sign-in, and the next apply changes nothing. A Claude credential
+  beside Hedge's proxy address leaves with it, unless a pack sets that same
+  value now, and a `To do:` names it. Only the Hub pack may set Hedge's
+  proxy values; a profile that sets one fails to load and names the
+  setting. `hedge apply` and
   `hedge doctor` name the failed check. When the proxy answers the key but
   lists no model for the agent, the check exits 4: the agent stays on its
   own sign-in, and the line is a `To do:` with the login command, not a

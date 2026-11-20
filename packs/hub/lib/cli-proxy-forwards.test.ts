@@ -153,7 +153,7 @@ test("a box handed over on the Codex plan sends Codex through the proxy with the
   expect(await cliProxy("check", box.machine, "codex")).toBe(0);
 });
 
-test("a box apply that exits nonzero makes the hub say only the exit code and the command to see why, never a proxy line from its output", async () => {
+test("a box apply that exits nonzero makes the hub say only the exit code and the command to see why, never a proxy line or other text from its output", async () => {
   const proxy: Proxy = { models: ["claude-sonnet-5-5"] };
   const box = proxyBox("claude", proxy);
   const claudePlan = await balancingPlan((prefix) => temp.make(prefix), "claude");
@@ -162,12 +162,28 @@ test("a box apply that exits nonzero makes the hub say only the exit code and th
   expect((await applyNow()).code).toBe(0);
   proxy.models = [];
   writeHome(box.home, { ".config/hedge/provider-plugins.json": "{", ".claude/settings.json": JSON.stringify({ env: { ANTHROPIC_BASE_URL: proxyUrl, ANTHROPIC_AUTH_TOKEN: "my-token" }, apiKeyHelper: keyHelper }) });
-  const thrown = await applyNow();
-  expect(thrown.stderr).toContain("\nTo do: Took Hedge's proxy route out of .claude/settings.json");
-  const exit = (code: number) => [`box-lane: hedge apply exited ${code} there. To see why, run on the hub: hedge box run box-lane -- hedge apply`];
-  const said = async (run: () => Promise<{ code: number; stdout: string; stderr: string }>) => (await handOverTo(box, run)).lines.filter((line) => line.startsWith("box-lane"));
-  expect(await said(applyNow)).toEqual(exit(1));
-  expect(await said(async () => ({ ...ok, code: 1, stdout: `Fix: Step jobs of the base pack failed.\n${checkLine("cli-proxy-client", "todo")}\n` }))).toEqual(exit(1));
+  const exit = (code: number) => `box-lane: hedge apply exited ${code} there. To see why, run on the hub: hedge box run box-lane -- hedge apply`;
+  const seen: Array<{ code: number; stderr: string }> = [];
+  const real = await handOverTo(box, async () => {
+    const result = await applyNow();
+    seen.push(result);
+    return result;
+  });
+  expect(seen).toHaveLength(1);
+  expect(seen[0]!.code).toBe(1);
+  expect(seen[0]!.stderr).toContain("\nTo do: Took Hedge's proxy route out of .claude/settings.json");
+  expect(real.lines.filter((line) => line.startsWith("box-lane"))).toEqual([exit(1)]);
+  expect(real.lines.join("\n")).not.toContain("Took Hedge's proxy route");
+
+  const sentinel = "sentinel-7f3a";
+  const checks = [checkLine("cli-proxy-client", "todo"), checkLine("cli-proxy-client", "say"), checkLine("cli-proxy-codex", "todo"), checkLine("cli-proxy-codex", "say")];
+  const output = `${checks.join("\n")}\n${sentinel}\n`;
+  const failed = await handOverTo(box, async () => ({ code: 2, stdout: output, stderr: output }));
+  const said = failed.lines.join("\n");
+  expect(failed.lines.filter((line) => line.startsWith("box-lane"))).toEqual([exit(2)]);
+  expect(failed.lines).toEqual(real.lines.map((line) => (line === exit(1) ? exit(2) : line)));
+  expect(said).not.toContain(sentinel);
+  for (const line of checks) expect(said).not.toContain(line.replace(/^(To do|Fix): /, ""));
 });
 
 test("a box apply that times out after it printed a proxy line makes the hub say only exit 124 and the command to see why", async () => {
