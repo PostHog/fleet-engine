@@ -71,16 +71,17 @@ export async function finalGate(head: ProofIdentity, context: GateContext, { lan
     reason: judged.code === 0 ? "pass" : judged.reason ?? `exit ${judged.code}`,
     lines: [...checked.lines, ...judged.lines, ...stale],
     verdict: judged.code === 0 ? `gate: pass (${checked.summary}; judge: ${judged.covered})` : `gate: fail (exit ${judged.code})`,
-    summary: { ...checked.proofSummary, code: judged.code, judge: judged.judge, growth: await grownBy(home, head, run, landed) },
+    summary: { ...checked.proofSummary, code: judged.code, judge: judged.judge, growth: await grownBy(home, head, run, landed, (pull as PullRequest | undefined)?.base) },
   };
   if (pull) await writeJson(savedPath(home, head, head.commit), { key: keyOf(pull, landed, await fingerprintOf(home, head, files, checked.decisions)), gate, conditions: checked.conditions } satisfies SavedGate);
   return gate;
 }
 
 
-async function grownBy(home: string, head: ProofIdentity, run: Run, landed: boolean) {
+async function grownBy(home: string, head: ProofIdentity, run: Run, landed: boolean, base: string | undefined) {
   const growth = await measureGrowth(home, head, run);
-  const kept = landed && !growth.final ? (await readJson<SavedGate | undefined>(savedPath(home, head, head.commit), undefined).catch(() => undefined))?.gate?.summary?.growth?.final : undefined;
+  const saved = landed && !growth.final ? await readJson<SavedGate | undefined>(savedPath(home, head, head.commit), undefined).catch(() => undefined) : undefined;
+  const kept = saved?.key?.base === base ? saved?.gate?.summary?.growth?.final : undefined;
   const sanity = (await readSanity(home, head)).at(-1);
   return { ...growth, ...kept ? { final: kept } : {}, ...sanity ? { sanity } : {} };
 }

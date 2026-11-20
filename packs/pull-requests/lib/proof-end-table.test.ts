@@ -259,6 +259,19 @@ test("a gate after the PR merged keeps the counts it saved before, not the lines
   expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | not run | none |");
 });
 
+test("a gate after the PR merged into another base keeps no count measured against the old base", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.ts", lines(10, "greet"));
+  pr.pullRequestState({ body: graded("non-critical") });
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  await pr.hedge("gate");
+  await pr.git("update-ref", "refs/remotes/origin/parent", "HEAD");
+  pr.pullRequestState({ base: "parent", baseSha: await pr.git("rev-parse", "HEAD"), merged: true });
+  await pr.hedge("gate", "--landed");
+
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | unknown at HEAD | not run | none |");
+});
+
 test("a gate after the PR merged counts the review that finished after the last gate before it", async () => {
   const pr = await checkout();
   await pr.commit("feature.ts", lines(10, "greet"));
@@ -276,7 +289,7 @@ test("a gate after the PR merged counts the review that finished after the last 
   expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | not run | none |");
 });
 
-test("a landed gate with a damaged saved gate still counts the PR", async () => {
+test("a landed gate whose base holds HEAD reads a damaged saved gate as no count", async () => {
   const pr = await checkout();
   await pr.commit("feature.ts", lines(10, "greet"));
   pr.pullRequestState({ body: graded("non-critical") });
@@ -285,10 +298,14 @@ test("a landed gate with a damaged saved gate still counts the PR", async () => 
   const head = await pr.git("rev-parse", "HEAD");
   mkdirSync(join(pr.pullRequest, "gate-outcome"), { recursive: true });
   writeFileSync(join(pr.pullRequest, "gate-outcome", `${head}.json`), "{\"gate\":");
+  await pr.git("checkout", "-q", "main");
+  await pr.git("merge", "-q", "--no-ff", "--no-edit", "feature");
+  await pr.git("update-ref", "refs/remotes/origin/main", "HEAD");
+  await pr.git("checkout", "-q", "feature");
   pr.pullRequestState({ merged: true });
 
   expect((await pr.hedge("gate", "--landed")).output).not.toContain("SyntaxError");
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | not run | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → unknown | not run | none |");
 });
 
 test("a gap reason with a long run of backslashes prints in the table at once", async () => {
