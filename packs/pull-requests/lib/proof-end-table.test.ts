@@ -549,5 +549,5 @@ test("a round 1 that read an empty range shows zero lines at round 1, not unknow
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 0 → 30 | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 0 → 30 | not run | none |");
 });
