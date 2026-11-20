@@ -136,6 +136,25 @@ test("on end, a judge gap the user keeps owed goes back to the user, not to anot
   expect((await pr.hedge("gap", "--kind", "judge", "--reason", "The judge reads feature.txt as code")).output).toContain("Decide the gap yourself");
 });
 
+test("on end, the gap prompt follows the gate when the user accepts a gap and later keeps it owed", async () => {
+  const pr = await checkout();
+  decideAtEnd(pr);
+  pr.pullRequestState({ body: graded("non-critical") });
+  await pr.commit("feature.txt", "greet new members\n");
+  await reviewHead(pr);
+  await pr.hedge("require", "--kinds", "prod-shape");
+  await pr.hedge("gap", "--kind", "prod-shape", "--reason", "No production read access");
+  pr.chooseGap("prod-shape", "No production read access", "Accept the gap");
+  expect((await acceptGap(pr, "prod-shape")).code).toBe(0);
+  pr.clock.now = new Date("2026-10-25T12:30:00Z");
+  pr.chooseGap("prod-shape", "No production read access", "Keep the gap open");
+  expect((await acceptGap(pr, "prod-shape", "--keep-owed")).code).toBe(0);
+
+  expect((await pr.hedge("gate")).output).toContain("accepted by 👤 decision");
+  const again = await pr.hedge("gap", "--kind", "prod-shape", "--reason", "No production read access");
+  expect(again.output).toContain("Decide the gap yourself");
+});
+
 test("on ask, a gap reads no merge-risk grade from GitHub", async () => {
   const pr = await checkout();
   pr.pullRequestState({ body: graded("non-critical"), unreadable: "stalled" });

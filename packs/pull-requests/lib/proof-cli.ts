@@ -378,9 +378,8 @@ command instead, unless the PR is a one-way door or its tier keeps the gap the u
       const autonomy = autonomyOf(context.env, () => gradeAt(identity(), context), "proof-gap", [kind]);
       const decisions = autonomy === "end" ? await readDecisions(ledgerOf(context)) : [];
       const afterGap = Array.isArray(decisions) ? decisions.filter((decision) => kind !== "judge" || decision.at >= gap.recordedAt) : undefined;
-      const kept = afterGap && keptOwed(afterGap, identity(), kind);
-      const lifted = kept && afterGap.indexOf(usersAcceptance(afterGap, identity(), kind)!) > afterGap.indexOf(kept);
-      context.print(askGap(identity(), kind, reason, afterGap && (!kept || lifted) ? autonomy : "ask"));
+      const owed = afterGap && keptOwed(afterGap, identity(), kind) && !usersAcceptance(afterGap, identity(), kind);
+      context.print(askGap(identity(), kind, reason, afterGap && !owed ? autonomy : "ask"));
       return 0;
     },
   },
