@@ -74,8 +74,13 @@ function gradeOf(body: string | undefined) {
   return grade ?? (/merge[- ]risk/i.test(body) ? "unreadable" : "none");
 }
 
-function changedLines(identity: ProofIdentity, run: Run) {
-  const stat = run(["git", "diff", "--numstat", "-z", "--no-renames", "--no-relative", mergeBase(identity, run), identity.commit]);
+function branchPoint(identity: ProofIdentity, run: Run, baseSha?: string) {
+  const fromBase = baseSha ? run(["git", "merge-base", baseSha, identity.commit]) : undefined;
+  return fromBase?.code === 0 ? fromBase.stdout.trim() : mergeBase(identity, run);
+}
+
+function changedLines(identity: ProofIdentity, run: Run, baseSha?: string) {
+  const stat = run(["git", "diff", "--numstat", "-z", "--no-renames", "--no-relative", branchPoint(identity, run, baseSha), identity.commit]);
   if (stat.code !== 0) return undefined;
   return stat.stdout.split("\0").filter(Boolean).map((entry) => {
     const [added = "", deleted = "", ...path] = entry.split("\t");
@@ -94,9 +99,9 @@ const productionLines = (identity: ProofIdentity, run: Run) => {
 
 export type DiffSize = { production: number; tests: number; docs: number };
 
-export function diffSize(identity: ProofIdentity, run: Run): DiffSize | undefined {
+export function diffSize(identity: ProofIdentity, run: Run, baseSha?: string): DiffSize | undefined {
   try {
-    const changed = changedLines(identity, run)?.filter(({ lines }) => Number.isFinite(lines));
+    const changed = changedLines(identity, run, baseSha)?.filter(({ lines }) => Number.isFinite(lines));
     return changed && { production: linesOf(changed, authored), tests: linesOf(changed, isTestFile), docs: linesOf(changed, (path) => docsFile.test(path)) };
   } catch { return undefined; }
 }

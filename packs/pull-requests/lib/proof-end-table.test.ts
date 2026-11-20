@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { writeFileSync } from "node:fs";
+import { utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { checkout, cleanFixtures, graded, markPanel, reviewHead, type Checkout } from "./proof-testing.ts";
 
@@ -69,5 +69,31 @@ test("the table holds a PR once a gate ran at its HEAD", async () => {
   await reviewHead(pr);
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | none |");
+});
+
+test("the first reviewed commit is round 1's, whatever order the rounds' files were last written in", async () => {
+  const pr = await grownPr();
+  const later = new Date(Date.now() + 60_000);
+  utimesSync(join(pr.pullRequest, "reviews/1/findings.md"), later, later);
+  await pr.hedge("gate");
+
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toContain("| 2 rounds | 10 → 25 (×2.5);");
+});
+
+test("the lines count from where the PR branched from the base GitHub reports, so a stale local base ref does not count the base's own changes", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.ts", lines(10, "greet"));
+  pr.pullRequestState({ body: graded("non-critical") });
+  await reviewHead(pr);
+  const stale = await pr.git("rev-parse", "refs/remotes/origin/main");
+  await pr.advanceBase("base.ts", lines(50, "base"));
+  const fresh = await pr.git("rev-parse", "refs/remotes/origin/main");
+  await pr.git("merge", "-q", "--no-edit", "main");
+  writeFileSync(join(pr.home, "../github/base-sha"), fresh);
+  await pr.git("update-ref", "refs/remotes/origin/main", stale);
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  await pr.hedge("gate");
+
   expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | none |");
 });

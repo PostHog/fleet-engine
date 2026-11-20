@@ -70,14 +70,14 @@ export async function finalGate(head: ProofIdentity, context: GateContext, { lan
     reason: judged.code === 0 ? "pass" : judged.reason ?? `exit ${judged.code}`,
     lines: [...checked.lines, ...judged.lines, ...stale],
     verdict: judged.code === 0 ? `gate: pass (${checked.summary}; judge: ${judged.covered})` : `gate: fail (exit ${judged.code})`,
-    summary: { ...checked.proofSummary, code: judged.code, judge: judged.judge, ...await grownBy(home, head, run) },
+    summary: { ...checked.proofSummary, code: judged.code, judge: judged.judge, ...await grownBy(home, head, run, (pull as PullRequest | undefined)?.baseSha) },
   };
   if (pull) await writeJson(savedPath(home, head, head.commit), { key: keyOf(pull, landed, await fingerprintOf(home, head, files, checked.decisions)), gate, conditions: checked.conditions } satisfies SavedGate);
   return gate;
 }
 
-async function grownBy(home: string, head: ProofIdentity, run: Run) {
-  const growth = await measureGrowth(home, head, run);
+async function grownBy(home: string, head: ProofIdentity, run: Run, baseSha: string | undefined) {
+  const growth = await measureGrowth(home, head, run, baseSha);
   return growth ? { growth } : {};
 }
 
@@ -114,7 +114,7 @@ export async function receiptSummary(head: ProofIdentity, pull: PullRequest, led
     landed: pull.state === "merged", cleanBaseMerge: cleanBaseMerge(head, run), quietCommit: quietCommitIn(run, () => baseRefs(head, run)),
     ci: () => ciOf(home, head, run, now?.() ?? new Date()), pushedHead: pushedHeadOf(head, run), ledger, now: now?.(), devPull: devPullOf(run),
   });
-  return { ...live.proofSummary, code: live.code, judge: { state: "skipped", lines: [] }, ...await grownBy(home, head, run) };
+  return { ...live.proofSummary, code: live.code, judge: { state: "skipped", lines: [] }, ...await grownBy(home, head, run, pull.baseSha) };
 }
 
 async function savedGate(home: string, ref: PrRef, pull: PullRequest, ledger: Ledger): Promise<SavedGate | undefined> {

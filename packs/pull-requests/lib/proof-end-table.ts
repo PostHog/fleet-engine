@@ -9,17 +9,17 @@ export type EndRow = { ref: PrRef; summary: ProofSummary; reason: (kind: string,
 
 const isRound = (name: string) => /^\d+$/.test(name);
 
-function sizeAt(identity: ProofIdentity, run: Run): Sized | undefined {
-  const size = diffSize(identity, run);
+function sizeAt(identity: ProofIdentity, run: Run, baseSha: string | undefined): Sized | undefined {
+  const size = diffSize(identity, run, baseSha);
   return size && { ...size, commit: identity.commit };
 }
 
-export async function measureGrowth(home: string, head: ProofIdentity, run: Run): Promise<Growth | undefined> {
+export async function measureGrowth(home: string, head: ProofIdentity, run: Run, baseSha?: string): Promise<Growth | undefined> {
   const reviews = await finishedReviews(home, head);
-  const rounds = reviews.filter(({ name }) => isRound(name));
+  const rounds = reviews.filter(({ name }) => isRound(name)).sort((a, b) => Number(a.name) - Number(b.name));
   if (!rounds.length) return undefined;
-  const first = sizeAt({ ...head, commit: rounds[0]!.commit }, run);
-  const final = sizeAt(head, run);
+  const first = sizeAt({ ...head, commit: rounds[0]!.commit }, run, baseSha);
+  const final = sizeAt(head, run, baseSha);
   return { rounds: rounds.length, finalReads: reviews.length - rounds.length, ...first ? { first } : {}, ...final ? { final } : {} };
 }
 
