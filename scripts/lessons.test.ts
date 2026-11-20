@@ -25,6 +25,14 @@ describe("lessons", () => {
     expect(lessons.flatMap((lesson) => lessonProblems(lesson, names))).toEqual([]);
   });
 
+  test("the setup guide shows the first lesson at its first wait, from the site, and names only lessons that have a cut", () => {
+    const guide = readFileSync(join(root, "SETUP.md"), "utf8");
+    const named = [...guide.matchAll(/posthog\.github\.io\/hedge\/(?:learn|assets\/lessons)\/([a-z-]+)[/.]/g)].map(([, id]) => id!);
+    expect(named).toContain("what-hedge-is");
+    const built = loadLessons(root).filter((lesson) => lesson.cut).map((lesson) => lesson.id);
+    expect(named.filter((id) => !built.includes(id))).toEqual([]);
+  });
+
   test("the check fails a lesson that names a hedge command, a skill, a pack, or a next lesson that does not exist", () => {
     const known = withText("Run `hedge doctor`, then `hedge prune`. Say `/qa-swarm`. Turn on the Slack pack and the Quality gates pack.");
     expect(lessonProblems(known, names)).toEqual([]);
