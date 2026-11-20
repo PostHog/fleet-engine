@@ -250,3 +250,30 @@ test("a code span that holds a longer backtick run keeps its pipes, so a [base] 
 
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).code).toBe(0);
 });
+
+test("a docs-only major whose location sits in backticks before its line buys no other round", async () => {
+  const pr = await checkout();
+  const reviewed = await firstRound(pr, ["- major | `README.md`:12 | the setting is named wrong | anchor: greet 1"], ["1. fixed: the docs name it right"]);
+  await pr.commit("README.md", lines(3, "explain"));
+
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(stops);
+});
+
+test("a round-one count git could not read waits for a sanity pass at HEAD before another round, as an unknown HEAD count does", async () => {
+  const pr = await checkout();
+  await pr.advanceBase("first.ts", lines(20, "first"));
+  await pr.advanceBase("second.ts", lines(20, "second"));
+  await pr.git("merge", "-q", "--no-edit", "refs/remotes/origin/main");
+  await pr.git("config", "diff.renameLimit", "1");
+  await pr.git("mv", "first.ts", "moved-first.ts");
+  await pr.git("mv", "second.ts", "moved-second.ts");
+  writeFileSync(join(pr.repository, "moved-first.ts"), lines(19, "first") + "edited\n");
+  await pr.git("add", "moved-first.ts");
+  const reviewed = await firstRound(pr, ["- major | feature.ts:2 | the greeting drops the last name | anchor: greet 1"], ["1. fixed: the greeting keeps it"]);
+  await pr.commit("feature.ts", lines(11, "greet"));
+
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(
+    "Hedge cannot count the production lines at round 1, so it cannot tell whether they grew past twice those of round 1. Before another round, read the growth since round 1 by hand");
+  expect((await pr.hedge("sanity", "--verdict", "justified", "--reason", "The renames move code and add none")).code).toBe(0);
+  expect((await pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).code).toBe(0);
+});

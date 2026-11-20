@@ -47,12 +47,13 @@ export async function recordSanity(home: string, head: ProofIdentity, run: Run, 
 export async function requireSanity(home: string, head: ProofIdentity, run: Run) {
   const { growth, missing } = await growthAtHead(home, head, run);
   const [first, final] = [growth.first?.production, growth.final?.production];
-  if (!first) return;
+  if (first === 0) return;
   if (missing) throw new Error(missing);
   const last = (await readSanity(home, head)).at(-1);
-  if (final === undefined) {
+  if (first === undefined || final === undefined) {
     if (last?.commit === head.commit) return;
-    throw new Error(`Hedge cannot count the production lines at HEAD, so it cannot tell whether they grew past twice the ${first} of round 1. Before another round, read the growth since round 1 by hand, then cut it back to base behaviour or justify it: hedge proof sanity --verdict cut|justified --reason '<why>'`);
+    const unknown = first === undefined ? "at round 1, so it cannot tell whether they grew past twice those of round 1" : `at HEAD, so it cannot tell whether they grew past twice the ${first} of round 1`;
+    throw new Error(`Hedge cannot count the production lines ${unknown}. Before another round, read the growth since round 1 by hand, then cut it back to base behaviour or justify it: hedge proof sanity --verdict cut|justified --reason '<why>'`);
   }
   if (final <= 2 * first) return;
   if ((last?.production ?? -1) >= final) return;
