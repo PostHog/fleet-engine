@@ -77,7 +77,7 @@ function gradeOf(body: string | undefined) {
 
 function changedLines(identity: ProofIdentity, run: Run, start: string, renames: boolean) {
   const stat = run(["git", "diff", "--numstat", "-z", renames ? "--find-renames" : "--no-renames", "--no-relative", start, identity.commit]);
-  if (stat.code !== 0) return undefined;
+  if (stat.code !== 0 || stat.stderr.trim()) return undefined;
   const fields = stat.stdout.split("\0");
   const changed: { lines: number; path: string }[] = [];
   for (let index = 0; index < fields.length; index++) {
@@ -104,9 +104,13 @@ const productionLines = (identity: ProofIdentity, run: Run) => {
 
 export type DiffSize = { production: number; tests: number; docs: number };
 
-export function diffSize(identity: ProofIdentity, run: Run, from?: string): DiffSize | undefined {
+export function forkPoint(identity: ProofIdentity, run: Run, baseSha: string) {
+  const found = run(["git", "merge-base", identity.commit, baseSha]);
+  return found.code === 0 && found.stdout.trim() || undefined;
+}
+
+export function diffSize(identity: ProofIdentity, run: Run, start: string): DiffSize | undefined {
   try {
-    const start = from ?? mergeBase(identity, run);
     if (start === identity.commit) return undefined;
     const changed = changedLines(identity, run, start, true)?.filter(({ lines }) => Number.isFinite(lines));
     return changed && { production: linesOf(changed, authored), tests: linesOf(changed, isTestFile), docs: linesOf(changed, (path) => docsFile.test(path)) };

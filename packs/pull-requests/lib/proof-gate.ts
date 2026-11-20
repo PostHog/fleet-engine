@@ -8,9 +8,9 @@ import { ciOf, readPullRequest, type PullRequest, type Run } from "./pr-ci.ts";
 import { askGap, authorOf, judgeDirectory, judgeGap, judgeGapProof, listStanding, parseVerdict, prDirectory, proofGate, pullRequestDirectory, readDecisions, readJson, receiptOf, reviewRecords, withBrokenConditions, writeJson, type Arbiter, type Decisions, type JudgeSummary, type ProofIdentity, type ProofSummary, type PushedHead } from "./proof.ts";
 import { displayEntry } from "./proof-display.ts";
 import { receiptMarker } from "./proof-receipt.ts";
-import { baseRefs, cleanBaseMerge, devPullOf, diffOf, mergeBase, pullRequestDetails, topLevel } from "./proof-checkout.ts";
+import { baseRefs, cleanBaseMerge, devPullOf, diffOf, mergeBase, pullRequestDetails, remotesOf, topLevel } from "./proof-checkout.ts";
 import { quietCommitIn } from "./proof-delta.ts";
-import { measureGrowth } from "./proof-end-table.ts";
+import { measureGrowth, type Growth } from "./proof-end-table.ts";
 import { autonomyOf } from "./proof-autonomy.ts";
 import { readSanity } from "./proof-sanity.ts";
 import { judge, readCriticalPaths, type JudgeInput } from "./proof-judge.ts";
@@ -67,23 +67,29 @@ export async function finalGate(head: ProofIdentity, context: GateContext, { lan
   const judged: Judged = checked.code === 0 ? await judgeHead(head, checked, context) : { code: checked.code, lines: [], covered: "", judge: { state: "skipped", lines: [] }, reason: checked.failure };
   const shown = pull === undefined ? undefined : receiptMarker((pull as PullRequest).body);
   const stale = shown && shown.head !== head.commit ? [`receipt: the PR body shows the receipt of ${shown.head.slice(0, 7)}, not HEAD ${head.commit.slice(0, 7)}. Refresh it with hedge proof receipt`] : [];
+  const growth = await grownBy(home, head, run, pull?.baseSha);
   const gate = {
     code: judged.code,
     reason: judged.code === 0 ? "pass" : judged.reason ?? `exit ${judged.code}`,
-    lines: [...checked.lines, ...judged.lines, ...stale],
+    lines: [...checked.lines, ...judged.lines, ...stale, ...unmeasured(head, run, pull, growth, landed)],
     verdict: judged.code === 0 ? `gate: pass (${checked.summary}; judge: ${judged.covered})` : `gate: fail (exit ${judged.code})`,
-    summary: { ...checked.proofSummary, code: judged.code, judge: judged.judge, growth: await grownBy(home, head, run, landed) },
+    summary: { ...checked.proofSummary, code: judged.code, judge: judged.judge, growth },
   };
   if (pull) await writeJson(savedPath(home, head, head.commit), { key: keyOf(pull, landed, await fingerprintOf(home, head, files, checked.decisions)), gate, conditions: checked.conditions } satisfies SavedGate);
   return gate;
 }
 
 
-async function grownBy(home: string, head: ProofIdentity, run: Run, landed: boolean) {
-  const growth = await measureGrowth(home, head, run);
-  const kept = landed && !growth.final ? (await readJson<SavedGate | undefined>(savedPath(home, head, head.commit), undefined).catch(() => undefined))?.gate?.summary?.growth?.final : undefined;
+function unmeasured(head: ProofIdentity, run: Run, pull: PullRequest | undefined, growth: Growth, landed: boolean) {
+  if (growth.final || !pull?.baseSha || run(["git", "cat-file", "-e", `${pull.baseSha}^{commit}`]).code === 0) return [];
+  const remote = remotesOf(head.repository, run)[0] ?? `<a remote of ${head.repository}>`;
+  return [`growth: unknown at HEAD, since the base commit ${pull.baseSha.slice(0, 7)} that GitHub reports is not in this checkout. Run git fetch ${remote} ${pull.base}, then hedge proof gate${landed ? " --landed" : ""} again`];
+}
+
+async function grownBy(home: string, head: ProofIdentity, run: Run, baseSha: string | undefined): Promise<Growth> {
+  const growth = await measureGrowth(home, head, run, baseSha);
   const sanity = (await readSanity(home, head)).at(-1);
-  return { ...growth, ...kept ? { final: kept } : {}, ...sanity ? { sanity } : {} };
+  return sanity ? { ...growth, sanity } : growth;
 }
 
 const pushedHeadOf = (head: ProofIdentity, run: Run, seen: (pull: PullRequest) => void = () => {}) => (): PushedHead => {
