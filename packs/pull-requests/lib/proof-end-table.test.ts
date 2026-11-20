@@ -273,7 +273,10 @@ test("the receipt keeps the escapes its guard adds to a reason, so emphasis and 
   await pr.hedge("gate");
   expect((await pr.hedge("receipt")).code).toBe(0);
 
-  expect(tableIn(block(pr.githubBody()))[1]).toContain("| ui-walk: Walk it \\*later\\* with \\[the plan\\](https://plan.example) (🤖 agent ");
+  const cells = rendered(tableIn(block(pr.githubBody()))[1]!);
+  expect(cells[3]).toStartWith("ui-walk: Walk it *later* with [the plan](https://plan.example) (🤖 agent ");
+  expect(cells[3]).not.toContain("<a ");
+  expect(cells[3]).not.toContain("<em>");
 });
 
 test("the receipt guard reads a reason the way the table prints it, so a line break cannot split a figure past it", async () => {
@@ -429,7 +432,7 @@ test("a merged PR's receipt without a gate names the landed gate", async () => {
   expect(block(pr.githubBody())).toContain("**End table:** no gate at HEAD yet. Run hedge proof gate --landed, then hedge proof receipt.");
 });
 
-test("a PR named twice in the report shows one table row", async () => {
+test("a PR named twice in the report, in any letter case, reads once and shows one row in each table", async () => {
   const pr = await checkout();
   await pr.commit("feature.ts", lines(10, "greet"));
   pr.pullRequestState({ body: graded("non-critical") });
@@ -437,7 +440,10 @@ test("a PR named twice in the report shows one table row", async () => {
   await pr.hedge("require", "--none", "--reason", "Docs only");
   await pr.hedge("gate");
 
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42", "--pr", "example/product#42")).output)).toHaveLength(2);
+  const report = (await pr.decide("report", "--pr", "example/product#42", "--pr", "Example/Product#42")).output;
+  expect(tableIn(report)).toHaveLength(2);
+  expect(report).toContain("## End-of-run report: example/product#42\n");
+  expect(report.split("\n").filter((line) => /^\| example\/product#42 \| /i.test(line) && line.split(" | ").length === 5)).toHaveLength(1);
 });
 
 test("a base commit from GitHub that is not a full SHA counts unknown, not from a local branch of that name", async () => {
