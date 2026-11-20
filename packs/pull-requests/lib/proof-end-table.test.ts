@@ -529,3 +529,35 @@ test("a round 1 that read an empty range shows zero lines at round 1, not unknow
 
   expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 0 → 30 | not run | none |");
 });
+
+test("after GitHub moves the PR to another base, the report shows no saved growth until the gate runs again", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.ts", lines(10, "greet"));
+  pr.pullRequestState({ body: graded("non-critical") });
+  await reviewHead(pr);
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  await pr.hedge("gate");
+  const moved = await pr.git("commit-tree", "main^{tree}", "-p", "main", "-m", "Another base");
+  pr.pullRequestState({ body: graded("non-critical"), baseSha: moved });
+
+  const report = (await pr.decide("report", "--pr", "example/product#42")).output;
+  expect(report).toContain("### Review and skipped proofs\nNone gated at HEAD.");
+  expect(tableIn(report)).toEqual([]);
+});
+
+test("round 1 counts from its fork point with GitHub's base, so base changes it merged past a stale local base ref stay out", async () => {
+  const pr = await checkout();
+  const stale = await pr.git("rev-parse", "refs/remotes/origin/main");
+  await pr.advanceBase("base.ts", lines(50, "landed"));
+  await pr.git("merge", "-q", "--no-edit", "refs/remotes/origin/main");
+  const landed = await pr.git("rev-parse", "refs/remotes/origin/main");
+  await pr.commit("feature.ts", lines(10, "greet"));
+  await pr.git("update-ref", "refs/remotes/origin/main", stale);
+  pr.pullRequestState({ body: graded("non-critical"), baseSha: landed });
+  await reviewHead(pr);
+  await pr.git("update-ref", "refs/remotes/origin/main", landed);
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  await pr.hedge("gate");
+
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | 1 round | 10 → 10 (×1.0) | not run | none |");
+});

@@ -371,7 +371,7 @@ async function requireBoughtRound(home: string, identity: ProofIdentity) {
 
 type AnsweredFinding = ReturnType<typeof answeredFindings>["findings"][number];
 
-const locationOf = (field: string) => /^([^`*]+?):\d+(?:-\d+)?$/.exec(field.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[`*]/g, "").trim())?.[1];
+const locationOf = (field: string) => /^([^`*]+?)\s*:\d+(?:-\d+)?$/.exec(field.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[`*]/g, "").trim())?.[1];
 const tailField = /^(?:anchor|sites):/i;
 
 function buysRound({ text, note, test, answer }: AnsweredFinding) {
@@ -380,7 +380,7 @@ function buysRound({ text, note, test, answer }: AnsweredFinding) {
   const severity = fields && statedSeverity(fields);
   if (!fields || (severity !== "blocker" && severity !== "major")) return false;
   const tail = fields.findIndex((field) => tailField.test(field));
-  if (fields.slice(0, tail < 0 ? undefined : tail).some((field) => /^\[base\]/i.test(field))) return false;
+  if (fields.slice(0, tail < 0 ? undefined : tail).some((field) => /^[*_]*\[base\]/i.test(field))) return false;
   const site = fields.slice(0, 2).map(locationOf).find(Boolean);
   return site === undefined || isProductionFile(site);
 }
