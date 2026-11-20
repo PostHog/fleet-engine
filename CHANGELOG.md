@@ -295,6 +295,9 @@ packs, and your answers live in your own private profile repo.
 - **incident.io** (off): an agent that watches a risky change pages you, and
   only you, through your own incident.io alert source with `fleet page`. With
   a hub, the token lives on the hub and every other machine pages through it.
+- **Security** (off): agents on every machine read your Wiz issues, threats,
+  vulnerabilities and cloud inventory through the hub's MCP gateway. The hub
+  signs in to Wiz once, with OAuth, and asks for read access only.
 
 Team packs plug in as pack sources. The presets are Starter, Everyday, and
 Everything.

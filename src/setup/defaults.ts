@@ -4,7 +4,7 @@ export const engineRepo = "PostHog/hedge";
 
 export const ownDevboxPacks = ["posthog"];
 
-export const needsHubPacks = ["hub", "mcp-gateway", "recovery"];
+export const needsHubPacks = ["hub", "mcp-gateway", "recovery", "security"];
 
 export const prefersHubPacks = ["slack", "incident-io"];
 

@@ -301,6 +301,7 @@ all the notes together, in one call, before step 7.
 | `incident-io` | An agent that watches a risky change pages you, and only you, through incident.io when it goes wrong. | With Mac only, or in step 9 | `packs/incident-io/SETUP.md` |
 | `hub` | One always-on devbox manages the others. It keeps your devboxes linked and watches their disks. | Step 9 | `packs/hub/SETUP.md` |
 | `mcp-gateway` | The hub signs in to your MCP servers once, and agents on every machine reach them through it. | Step 9 | `packs/mcp-gateway/SETUP.md` |
+| `security` | Agents on every machine read your Wiz findings, threats and inventory through the hub, and cannot change them. | Step 9 | `packs/security/SETUP.md` |
 
 ## 7. Run setup with their answers
 
@@ -589,6 +590,8 @@ made, replace the early workspaces: see "Clean up what you replace".
      `packs/mcp-gateway/SETUP.md`
    - **Recovery**: threads that stop on a usage limit go on by themselves.
      `packs/recovery/SETUP.md`
+   - **Security**: agents read their Wiz findings through the MCP gateway,
+     read-only. `packs/security/SETUP.md`
    - **Slack**, when they did not pick it in step 6: their own Slack
      message starts a thread. `packs/slack/SETUP.md`
    - **incident.io**, when they did not pick it in step 6: an agent that

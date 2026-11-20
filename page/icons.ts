@@ -17,6 +17,7 @@ export const packIcons: Record<string, string> = {
   "context-library": drawn(`<path d="M4 4h6v16H4z"/><path d="M10 6h5v14h-5"/><circle cx="17.5" cy="15.5" r="3"/><path d="m19.7 17.7 2.3 2.3"/>`),
   guards: drawn(`<path d="M12 3 5 5.5v5.8c0 4.3 2.9 7.9 7 9.7 4.1-1.8 7-5.4 7-9.7V5.5L12 3Z"/><path d="m9 11.8 2.2 2.2 3.8-4.2"/>`),
   hub: drawn(`<circle cx="12" cy="12.4" r="2.7" fill="currentColor"/><rect x="9.25" y="2" width="5.5" height="4.6" rx="1.3"/><rect x="1.75" y="16.6" width="5.5" height="4.6" rx="1.3"/><rect x="16.75" y="16.6" width="5.5" height="4.6" rx="1.3"/><path d="M12 6.6v3.1"/><path d="m9.8 14.2-3 2.4"/><path d="m14.2 14.2 3 2.4"/>`),
+  security: drawn(`<path d="M12 3 5 6v5c0 4.5 3 8.5 7 10 4-1.5 7-5.5 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/>`),
   "mcp-gateway": drawn(`<path d="M9 3v5"/><path d="M15 3v5"/><path d="M6.5 8h11v3.5a5.5 5.5 0 0 1-11 0V8Z"/><path d="M12 17v4"/>`),
   recovery: drawn(`<path d="M4 12a8 8 0 1 0 2.6-5.9"/><path d="M4 4.5V9h4.5"/><path d="M12 8v4l2.8 1.8"/>`),
   slack: slackLogo,

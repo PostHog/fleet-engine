@@ -20,6 +20,7 @@ export const packCast: Record<string, Role> = {
   hub: { art: hog("space-hog"), tone: "sky", line: "One always-on devbox links and watches the others." },
   "mcp-gateway": { art: hog("hog-welder"), tone: "mint", line: "Sign in to your MCP servers once, on the hub." },
   recovery: { art: hog("hospital-hog"), tone: "peach", line: "Threads continue after a usage limit or an outage." },
+  security: { art: hog("x-ray-hog"), tone: "blue", line: "Agents read your Wiz findings, and change nothing." },
 };
 
 export const teamRole = (line: string): Role => ({ art: hog("heart-hog"), tone: "yellow", line });
