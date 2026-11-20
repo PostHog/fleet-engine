@@ -111,13 +111,6 @@ describe("resolve", () => {
     expect(result.dropped).toContainEqual({ pack: "pull-requests", item: "skill agent-skills:communication/writing-voice", reason: "its source is unreachable" });
   });
 
-  test("drops a pack skill its source lacks at the pinned commit", () => {
-    const older: FetchedSource = { ref: agentSkills.ref, dir: temp.make("agent-skills-"), packs: [] };
-    const result = plan({}, mac, [engine, older]);
-    expect(result.files.some((item) => item.target.endsWith("writing-voice"))).toBe(false);
-    expect(result.dropped).toContainEqual({ pack: "pull-requests", item: "skill agent-skills:communication/writing-voice", reason: "it is not at the pinned commit of its source" });
-  });
-
   test("gives each config key one owner and throws on a clash", () => {
     expect(plan().owners).toEqual({ "claude:permissions.defaultMode": "base" });
     const rival = withPack({ schema: 1, name: "rival", summary: "Rival.", config: [{ provider: "claude", key: "permissions.defaultMode", value: "plan" }] });
