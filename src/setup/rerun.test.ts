@@ -66,15 +66,17 @@ describe("hedge setup after a stop", () => {
     expect(stopped.code).toBe(1);
     const profile = profilePath(home);
     await spawnGit(profile, "remote", "set-url", "origin", join(home, "gone.git"));
+    writeFileSync(join(profile, "about-me.md"), "# Only on this machine\n");
+    await spawnGit(profile, "commit", "-q", "-am", "change on this machine");
 
-    let applied = false;
-    const resumed = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""], undefined, undefined, 0, "linux", () => {
-      applied = true;
+    let applied = "";
+    const resumed = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""], undefined, undefined, 0, "linux", (dir) => {
+      applied = readFileSync(join(dir, "about-me.md"), "utf8");
     });
 
     expect(resumed.output).toContain(`Your profile's origin could not be reached (`);
     expect(resumed.output).toContain(`Setup goes on with the copy in ${profile}.`);
-    expect(applied).toBe(true);
+    expect(applied).toBe("# Only on this machine\n");
     expect(resumed.code).toBe(0);
   });
 });
