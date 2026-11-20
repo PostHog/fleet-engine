@@ -21,13 +21,14 @@ export function mergeBase(identity: ProofIdentity, run: Run) {
   const remotes = remotesOf(identity.repository, run);
   const present = (commit: string) => run(["git", "rev-parse", "--verify", "--quiet", `${commit}^{commit}`]).code === 0;
   const fetchBase = () => { for (const remote of remotes) run(["git", "fetch", "--quiet", remote, `+refs/heads/${base}:refs/remotes/${remote}/${base}`]); };
+  const descends = (ref: string, from: string) => run(["git", "merge-base", "--is-ancestor", from, ref]).code === 0;
   const found = () => {
-    const tips = [...remotes.map((remote) => `refs/remotes/${remote}/${base}`), ...baseSha ? [baseSha] : []].filter(present);
+    const refs = remotes.map((remote) => `refs/remotes/${remote}/${base}`).filter(present);
+    const tips = baseSha && present(baseSha) ? [baseSha, ...refs.filter((ref) => descends(ref, baseSha))] : refs;
     if (!tips.length) return undefined;
     const result = run(["git", "merge-base", identity.commit, ...tips]);
     return result.code === 0 && result.stdout.trim() || undefined;
   };
-  if (baseSha && !present(baseSha)) fetchBase();
   const before = found();
   if (before) return before;
   fetchBase();
