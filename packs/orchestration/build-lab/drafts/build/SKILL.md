@@ -13,10 +13,10 @@ Read the request, the thread so far, and the code it touches. Take the first siz
 
 | Size | Test | Path |
 | --- | --- | --- |
-| `none` | A question, a status check, a lookup, an explanation, or a review of someone else's work. | Answer it. The build ends. |
-| `one-off` | One session finishes it in one pull request of at most about 400 changed production lines, or in a change with no pull request, and the human has no decision to make first. | **One-off** below |
-| `issue` | One stack of at most 3 pull requests, or a decision the human must make before the code. | [ISSUE.md](ISSUE.md) |
-| `map` | Several stacks, several repositories, or a destination still in fog: you cannot yet list the decisions. | [MAP.md](MAP.md) |
+| `none` | A question, a status check, a lookup, an explanation, or a review of someone else's work. Also more work inside an open pull request or a lane that another skill started, such as a review fix, a map ticket, or a loop lane: that skill carries it. A running build judges again instead. | Answer it, or go on with that skill. The build ends. |
+| `one-off` | One session finishes it in one pull request of at most about 400 changed production lines, or in a change with no pull request, and the human has no decision to make first. | [ONE-OFF.md](ONE-OFF.md) |
+| `issue` | At most 3 pull requests in one stack, or a decision the human must make before the code. | [ISSUE.md](ISSUE.md) |
+| `map` | More than 3 pull requests, several repositories, or a destination still in fog: you cannot yet list the decisions. | [MAP.md](MAP.md) |
 
 Then add each **first step** whose test holds. A first step other than `research` makes the size at least `issue`.
 
@@ -26,20 +26,12 @@ Then add each **first step** whose test holds. A first step other than `research
 
 When two sizes fit, take the smaller one: judging again catches growth.
 
-Done when you said the **verdict line** to the human, before any other work: `Build: issue + research. <one reason>.`
+Done when, for every size but `none`, you said the **verdict line** to the human before the first change: `Build: issue + research. <one reason>.`
 
 ## Judge again
 
-Judge again when the work outgrows its size: the diff passes about 400 production lines or needs a second pull request, a decision for the human appears, the work reaches another repository, or the human adds scope. Say the new verdict line, read the new size's file, and carry the work you have: a one-off becomes the first slice of the issue, and an issue becomes the destination of the map. A running build only grows; when scope shrinks, finish at the current size.
+Judge again when the work outgrows its size's test: a one-off passes about 400 production lines, needs a second pull request, or meets a decision for the human; an issue needs a fourth pull request or a second stack; any build reaches another repository; or the human adds scope. Say the new verdict line, read the new size's file, and carry the work you have: a one-off becomes the first slice of the issue, and an issue becomes the destination of the map. A running build only grows; when scope shrinks, finish at the current size.
 
 ## Start
 
-Before the first change, run the **Start** decision of the `impact` skill, and its **Worth** check for a fix, when the skill is installed. A park ends the build with its park line.
-
-## One-off
-
-1. With `research`, read the source first and cite it in the pull request.
-2. Build the change test-first.
-3. When it ends in a pull request, run the `full-stop` skill.
-
-Done when the change is in a draft pull request that passes the gate of `full-stop`, or, without a pull request, when the change is applied and checked.
+Right after the verdict line, before any first step or change of a one-off or an issue, run the `impact` skill when it is installed: its **Worth** check first for a bug fix or a performance change, then its **Start** decision. A park ends the build with its park line. A map runs **Start** for its proposal question in [MAP.md](MAP.md), and the rest of `impact` while it charts.

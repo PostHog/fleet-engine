@@ -82,6 +82,7 @@ type Part = { name: string; text: string };
 async function parts(): Promise<Record<string, Part>> {
   const entries: [string, Promise<string>][] = [
     ["build/SKILL.md", read(join(draft, "SKILL.md"))],
+    ["build/ONE-OFF.md", read(join(draft, "ONE-OFF.md"))],
     ["build/ISSUE.md", read(join(draft, "ISSUE.md"))],
     ["build/MAP.md", read(join(draft, "MAP.md"))],
     ["orchestration-wayfinder/SKILL.md", skillFile("orchestration-wayfinder")],
@@ -108,7 +109,7 @@ async function parts(): Promise<Record<string, Part>> {
 }
 
 const flatSkill = (all: Record<string, Part>) =>
-  [all["build/SKILL.md"]!.text, body(all["build/ISSUE.md"]!.text), "# Build: map\n", body(all["orchestration-wayfinder/SKILL.md"]!.text)].join("\n");
+  [all["build/SKILL.md"]!.text, body(all["build/ONE-OFF.md"]!.text), body(all["build/ISSUE.md"]!.text), "# Build: map\n", body(all["orchestration-wayfinder/SKILL.md"]!.text)].join("\n");
 
 async function measure() {
   const all = await parts();
@@ -134,7 +135,7 @@ async function measure() {
     ["today: a map until its first ticket", [...conductorInT3, ...charting]],
     ["today: a one-off with a pull request, no orchestration", ["impact/SKILL.md", ...pullRequest]],
     ["layered: the judge only (a question)", ["build/SKILL.md"]],
-    ["layered: one-off up to its draft pull request", ["build/SKILL.md", "impact/SKILL.md", ...pullRequest]],
+    ["layered: one-off up to its draft pull request", ["build/SKILL.md", "build/ONE-OFF.md", "impact/SKILL.md", ...pullRequest]],
     ["layered: issue up to its plan question", ["build/SKILL.md", "build/ISSUE.md", "impact/SKILL.md"]],
     ["layered: map before its first act, in T3 Code", ["build/SKILL.md", "build/MAP.md", ...conductorInT3]],
     ["flat: the judge only (a question)", ["flat build/SKILL.md"]],
@@ -188,7 +189,7 @@ async function judge(variant: string) {
     const inputTokens = usage.input_tokens + (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0);
     const texts = replies.map((reply) => reply.content.filter((part) => part.type === "text").map((part) => part.text).join(""));
     if (options.verbose) for (const text of texts) console.log(`  ${sample.id}: ${text.trim().split("\n")[0]}`);
-    return { sample, verdicts: texts.map(parseVerdict), inputTokens };
+    return { sample, verdicts: texts.map((text) => (text.trim() ? parseVerdict(text) ?? { size: "none" as const, steps: [] } : undefined)), inputTokens };
   });
 
   console.log(`\nJudge: ${variant} skill, ${options.model}, ${reps} runs per request`);
