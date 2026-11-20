@@ -199,17 +199,17 @@ describe("saving answers", () => {
       await spawnGit(dir, "pull", "-q");
       await elsewhere((file) => ({ ...file, plan: "claude" }));
       const before = await spawnGit(dir, "rev-parse", "HEAD");
-      const error = await pushSetting(dir, "orchestration.loopProject", value, "~/code/app", ["origin", "HEAD:main"], readProfileFile(dir)).catch((caught: Error) => caught);
+      const error = await pushSetting(dir, "orchestration.loopProject", value, ["origin", "HEAD:main"], readProfileFile(dir)).catch((caught: Error) => caught);
       return { dir, error: (error as Error).message, made: (await spawnGit(dir, "rev-parse", "HEAD")) !== before };
     };
 
     const unchanged = await pushAfterElsewhere("~/code/app");
     expect(unchanged.made).toBe(false);
-    expect(unchanged.error).toBe(`${unchanged.dir}: another machine pushed to your profile before setup could. ${unchanged.dir} and origin both have changes the other lacks. Bring it up to date with git -C ${unchanged.dir} pull --rebase --autostash, then run the same hedge setup command again.`);
+    expect(unchanged.error).toBe(`${unchanged.dir}: another machine pushed to your profile before setup could. Bring ${unchanged.dir} up to date with git -C ${unchanged.dir} pull --rebase --autostash, then run the same hedge setup command again.`);
 
     const changed = await pushAfterElsewhere("~/code/other");
     expect(changed.made).toBe(true);
-    expect(changed.error).toBe(`${changed.dir}: another machine pushed to your profile before setup could. ${changed.dir} and origin both have changes the other lacks. Bring it up to date with git -C ${changed.dir} pull --rebase --autostash, or drop setup's commit, then run the same hedge setup command again.`);
+    expect(changed.error).toBe(`${changed.dir}: another machine pushed to your profile before setup could. Bring ${changed.dir} up to date with git -C ${changed.dir} pull --rebase --autostash, or drop setup's commit, then run the same hedge setup command again.`);
   });
 
   test("a failed push never shows the credentials in the remote's URL", async () => {

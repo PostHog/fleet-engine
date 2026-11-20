@@ -30,12 +30,16 @@
 - Setup saves your answers as changes on top of what your other machines
   pushed: a pack another machine added stays when a rerun removes another
   pack, and a node's setting never overwrites a setting saved meanwhile.
-  Setup stops before a save when the profile file it read changed on
-  another machine, or when the other machine moved it between `fleet.json`
-  and `hedge.json`. When another machine pushes first, setup stops and
-  keeps its commit. It says to run
-  `git -C <profile> pull --rebase --autostash`, or to drop its commit when
-  it made one, and then to run the same command again.
+  Setup reads the profile file once, when it starts. Every save checks,
+  just before it writes, that the file has the same name and text as then,
+  or as setup's own last save wrote it.
+  When another machine changed it, or moved it between `fleet.json` and
+  `hedge.json`, setup stops and says to run the same command again. Setup
+  also stops when its own fetch before apply took a change. When another
+  machine pushes first, setup stops and keeps its commit. It says to bring
+  the checkout up to date with `git -C <profile> pull --rebase --autostash`,
+  or to drop its commit when it made one, and then to run the same command
+  again.
 - Setup takes and saves the profile only on `origin`. When the checkout's
   branch tracks a local branch or another remote, setup stops before it
   commits and says to point the branch at `origin`.

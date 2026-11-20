@@ -51,9 +51,9 @@ export async function saveAnswers(dir: string, answers: Partial<ProfileFile>, op
   const path = profileFile(dir);
   refuseLegacyPath(path);
   if (options.push) await pullUnder(dir, path, answers);
-  const committed = await commitAnswers(dir, answers);
+  const saved = await commitAnswers(dir, answers);
   if (options.push) await push(dir);
-  return committed;
+  return saved;
 }
 
 export type ProfileRead = { name: string; text: string };
@@ -68,46 +68,47 @@ export function checkUnchanged(dir: string, seen: ProfileRead) {
   if (basename(profileFile(dir)) !== seen.name || readFileSync(join(dir, seen.name), "utf8") !== seen.text) throw new ProfileError(changedMeanwhile(dir));
 }
 
-export async function pushSetting(dir: string, key: string, value: SettingValue, seen: SettingValue | undefined, target: string[], read: ProfileRead) {
+export async function pushSetting(dir: string, key: string, value: SettingValue, target: string[], snapshot: ProfileRead): Promise<ProfileRead> {
   refuseLegacyPath(dir);
-  const { name } = read;
+  const { name } = snapshot;
   const path = join(dir, name);
   refuseLegacyPath(path);
   const edited = await run(dir, "git", "status", "--porcelain", "--", name);
   if (!edited.ok) throw new ProfileError(`${dir}: could not check ${name}: ${edited.stderr}`);
   if (edited.stdout) throw new ProfileError(`${dir}: ${name} has changes that are not committed. Commit or discard them, then try again.`);
-  checkUnchanged(dir, read);
-  const saved = ((await readJson(path))?.settings as Record<string, unknown> | undefined)?.[key];
-  if (JSON.stringify(saved) !== JSON.stringify(seen)) throw new ProfileError(changedMeanwhile(dir));
-  const committed = await commitAnswers(dir, { settings: { [key]: value } }, path);
+  checkUnchanged(dir, snapshot);
+  const { committed, written } = await commitAnswers(dir, { settings: { [key]: value } }, path);
   const pushed = await run(dir, "git", "push", "-q", ...target);
-  if (pushed.ok) return;
+  if (pushed.ok) return written;
   throw pushedBehind(pushed.stderr) ? new ProfileError(`${dir}: ${pushedFirst(dir, committed)}`) : pushFailed(dir, pushed.stderr);
 }
 
-export const behindOrigin = (dir: string, committed = false) => `${bothChanged(dir, "origin")} Bring it up to date with git -C ${dir} pull --rebase --autostash${committed ? ", or drop setup's commit" : ""}, then run the same hedge setup command again.`;
+const bringUpToDate = (dir: string, committed: boolean) => `Bring ${dir} up to date with git -C ${dir} pull --rebase --autostash${committed ? ", or drop setup's commit" : ""}, then run the same hedge setup command again.`;
 
-export const pushedFirst = (dir: string, committed: boolean) => `another machine pushed to your profile before setup could. ${behindOrigin(dir, committed)}`;
+export const divergedFromOrigin = (dir: string) => `${bothChanged(dir, "origin")} ${bringUpToDate(dir, false)}`;
+
+export const pushedFirst = (dir: string, committed: boolean) => `another machine pushed to your profile before setup could. ${bringUpToDate(dir, committed)}`;
 
 export const changedMeanwhile = (dir: string) => `another machine saved your profile in ${dir} while setup ran. Run the same hedge setup command again: it starts from the profile as it is now.`;
 
 export const removedOnOrigin = (dir: string, name: string) => `${dir}: your profile's ${name} was removed on origin. Restore it there, then run the same hedge setup command again.`;
 
-async function commitAnswers(dir: string, answers: Partial<ProfileFile>, path = profileFile(dir)) {
+async function commitAnswers(dir: string, answers: Partial<ProfileFile>, path = profileFile(dir)): Promise<{ committed: boolean; written: ProfileRead }> {
   const name = basename(path);
   refuseLegacyPath(path);
   const current = (await readJson(path)) ?? { schema: 1 };
   if (current.schema !== 1) throw new ProfileError(`${path}: unknown schema ${String(current.schema)}`);
   const settings = { ...(current.settings as Record<string, unknown> | undefined), ...answers.settings };
-  await writeFile(path, JSON.stringify({ ...current, ...answers, settings, schema: 1 }, null, 2) + "\n");
+  const written = { name, text: JSON.stringify({ ...current, ...answers, settings, schema: 1 }, null, 2) + "\n" };
+  await writeFile(path, written.text);
   const added = await run(dir, "git", "add", "--", name);
   if (!added.ok) throw new ProfileError(`${dir}: could not stage ${name}: ${added.stderr}`);
   const changed = await run(dir, "git", "diff", "--cached", "--quiet", "--", name);
   if (changed.code !== 0 && changed.code !== 1) throw new ProfileError(`${dir}: could not compare ${name}: ${changed.stderr}`);
-  if (changed.code === 0) return false;
+  if (changed.code === 0) return { committed: false, written };
   const committed = await run(dir, "git", "commit", "-q", "-m", "Save Hedge answers", "--", name);
   if (!committed.ok) throw new ProfileError(`${dir}: could not commit answers: ${committed.stderr}`);
-  return true;
+  return { committed: true, written };
 }
 
 async function pullUnder(dir: string, path: string, answers: Partial<ProfileFile>) {

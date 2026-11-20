@@ -67,7 +67,7 @@ describe("hedge setup with a devbox", () => {
     const stopped = await hedgeSetup(home, devboxArgs, ["~/code/app"], fakeMachine(home));
 
     expect(stopped.code).toBe(1);
-    expect(stopped.output).toContain(`hedge: ${profilePath(home)}: another machine pushed to your profile before setup could. ${profilePath(home)} and origin both have changes the other lacks. Bring it up to date with git -C ${profilePath(home)} pull --rebase --autostash, or drop setup's commit, then run the same hedge setup command again.`);
+    expect(stopped.output).toContain(`hedge: ${profilePath(home)}: another machine pushed to your profile before setup could. Bring ${profilePath(home)} up to date with git -C ${profilePath(home)} pull --rebase --autostash, or drop setup's commit, then run the same hedge setup command again.`);
     expect(JSON.parse(await spawnGit(profilePath(home), "show", "HEAD:hedge.json")).settings).toEqual({ "orchestration.loopProject": "~/code/app" });
     expect((await pushedAnswers(home)).settings).toEqual({});
     await spawnGit(profilePath(home), "pull", "-q", "--rebase");
@@ -207,6 +207,48 @@ describe("hedge setup with a devbox", () => {
     expect(stopped.code).toBe(1);
     expect(stopped.output).toContain(`hedge: another machine saved your profile in ${profilePath(home)} while setup ran. Run the same hedge setup command again: it starts from the profile as it is now.`);
     const origin = githubRepo(home, "nora/hedge-profile");
+    for (const name of ["fleet.json", "hedge.json"]) {
+      expect(JSON.parse(await spawnGit(home, "--git-dir", origin, "show", `main:${name}`)).settings).toEqual({});
+      expect(JSON.parse(readFileSync(join(profilePath(home), name), "utf8")).settings).toEqual({});
+    }
+  });
+
+  test("stops before it saves a devbox setting when the fetch before apply already brought hedge.json beside the fleet.json setup read, and keeps the other machine's hedge.json", async () => {
+    const home = temp.make("home-");
+    const applyStopped = () => {
+      throw new Error("apply stopped");
+    };
+    expect((await hedgeSetup(home, devboxArgs, ["", ""], fakeMachine(home), undefined, 0, "linux", applyStopped)).code).toBe(1);
+    const elsewhere = join(temp.make("elsewhere-"), "profile");
+    await spawnGit(home, "clone", "-q", githubRepo(home, "nora/hedge-profile"), elsewhere);
+    await spawnGit(elsewhere, "mv", "hedge.json", "fleet.json");
+    await spawnGit(elsewhere, "commit", "-q", "-m", "Keep only a fleet.json from before the rename");
+    await spawnGit(elsewhere, "push", "-q");
+    const addElsewhere = async () => {
+      const legacy = JSON.parse(readFileSync(join(elsewhere, "fleet.json"), "utf8"));
+      writeFileSync(join(elsewhere, "hedge.json"), `${JSON.stringify({ ...legacy, packs: [...legacy.packs, "guards"] }, null, 2)}\n`);
+      await spawnGit(elsewhere, "add", "hedge.json");
+      await spawnGit(elsewhere, "commit", "-q", "-m", "Add hedge.json on another machine");
+      await spawnGit(elsewhere, "push", "-q");
+    };
+    const box = fakeMachine(home);
+    const exec = box.machine.exec;
+    let fetches = 0;
+    box.machine.exec = async (command, options) => {
+      if (command.includes("fetch") && command.includes(profilePath(home)) && ++fetches === 2) await addElsewhere();
+      return exec(command, options);
+    };
+    let appliedWith: string[] = [];
+
+    const stopped = await hedgeSetup(home, devboxArgs, ["~/code/app"], box, undefined, 0, "linux", (dir) => void (appliedWith = ["fleet.json", "hedge.json"].filter((name) => existsSync(join(dir, name)))));
+
+    expect(appliedWith).toEqual(["fleet.json", "hedge.json"]);
+    expect(stopped.prompts).toEqual(["Type a value: "]);
+    expect(stopped.output).toContain("? Which T3 project do the loops and the PR digest run in?");
+    expect(stopped.code).toBe(1);
+    expect(stopped.output).toContain(`hedge: another machine saved your profile in ${profilePath(home)} while setup ran. Run the same hedge setup command again: it starts from the profile as it is now.`);
+    const origin = githubRepo(home, "nora/hedge-profile");
+    expect(JSON.parse(await spawnGit(home, "--git-dir", origin, "show", "main:hedge.json")).packs).toContain("guards");
     for (const name of ["fleet.json", "hedge.json"]) {
       expect(JSON.parse(await spawnGit(home, "--git-dir", origin, "show", `main:${name}`)).settings).toEqual({});
       expect(JSON.parse(readFileSync(join(profilePath(home), name), "utf8")).settings).toEqual({});

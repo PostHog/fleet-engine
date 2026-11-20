@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { loadPacks } from "../pack/manifest.ts";
 import { cachedSource, fetchSource } from "../pack/sources.ts";
 import type { AvailableSource, FetchedSource, MachineFile, Plan, Preset, Profile, SetupProgress, SourceRef } from "../pack/types.ts";
-import { behindOrigin, loadMachine, loadProfile, pushSetting, readProfileFile, saveMachine, thisMachine } from "../profile/profile.ts";
+import { divergedFromOrigin, loadMachine, loadProfile, pushSetting, readProfileFile, saveMachine, thisMachine } from "../profile/profile.ts";
 import { resolve } from "../reconciler/resolve.ts";
 import { defaultSources, engineRepo, makesOwnDevbox } from "./defaults.ts";
 import { FlagError, hasPicks, parseSetupFlags, type SetupFlags } from "./flags.ts";
@@ -52,8 +52,8 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
   const unfinished = Boolean(machine.setup?.done.length) && !checked(machine.setup?.done);
   const box: Machine = { ...realMachine, ...options.machine };
   if (machine.profileDir) await fastForward(box, options.home, machine.profileDir);
+  let snapshot = machine.profileDir ? readProfileFile(machine.profileDir) : undefined;
   const progress = { done: machine.setup?.done ?? [], draft: machine.profileDir ? profileDraft(await loadProfile(machine.profileDir)) : withInferred(machine.setup ?? { done: [] }) };
-  let loaded = machine.profileDir ? readProfileFile(machine.profileDir) : undefined;
   const catalog = await loadCatalog(options.engineRoot, teamRefs(progress.draft), options.home);
   const remember = () => saveMachine(options.home, { ...machine, setup: machine.profileDir ? { done: progress.done } : { done: progress.done, ...withoutInferred(progress.draft) } });
   const fetchTeam = (ref: SourceRef) => (options.fetchSource ?? fetchSource)(ref, sourceCache(options.home));
@@ -121,10 +121,11 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
     if (Object.keys(fromFlags).length) await context.answer(answered(progress.draft, fromFlags));
   };
   const startFromExisting = async () => {
-    const existing = await existingProfile(box, options.home, catalog.packs.map((pack) => pack.manifest), progress.draft.packs ?? catalog.teamPacks);
-    if (!existing) return;
+    const found = await existingProfile(box, options.home, catalog.packs.map((pack) => pack.manifest), progress.draft.packs ?? catalog.teamPacks);
+    if (!found) return;
+    const existing = found.profile;
     const saved = profileDraft(existing);
-    loaded = readProfileFile(existing.dir);
+    snapshot = found.snapshot;
     const sources = [...existing.sources, ...(progress.draft.sources ?? []).filter((ref) => !existing.sources.some((kept) => kept.name === ref.name))];
     await context.answer({ ...saved, ...(hasPicks(flags) ? picksFrom(flags, catalog, saved) : {}), plan: flags.plan ?? progress.draft.plan ?? saved.plan, sources, settings: { ...existing.settings, ...progress.draft.settings } });
   };
@@ -136,10 +137,11 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
     nonInteractive: flags.nonInteractive,
     draft: progress.draft,
     ...(machine.profileDir ? { current: machine.profileDir } : {}),
-    loaded: () => loaded,
+    snapshot: () => snapshot,
     packs: () => catalog.packs.map((pack) => pack.manifest),
-    async saved(dir) {
+    async saved(dir, written) {
       machine.profileDir = dir;
+      snapshot = written;
       await remember();
     },
   });
@@ -191,13 +193,11 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
       ...step,
       async run() {
         const key = step.id.slice("setting:".length);
-        const seen = progress.draft.settings?.[key];
         const outcome = await step.run();
         const value = progress.draft.settings?.[key];
-        if (outcome !== "unanswered" && machine.profileDir && value !== undefined) {
-          const read = readProfileFile(machine.profileDir);
+        if (outcome !== "unanswered" && machine.profileDir && snapshot && value !== undefined) {
           await fastForward(box, options.home, machine.profileDir);
-          await pushSetting(machine.profileDir, key, value, seen, await saveTarget(box, machine.profileDir), read);
+          snapshot = await pushSetting(machine.profileDir, key, value, await saveTarget(box, machine.profileDir), snapshot);
         }
         return outcome;
       },
@@ -307,7 +307,7 @@ function chatgptStep(signIn: SignIn, human: HumanContext, plan: Plan): Step {
 
 async function fastForward(box: Machine, home: string, dir: string) {
   const failed = await takeOrigin(box, home, dir);
-  if (failed && Number((await box.exec(["git", "-C", dir, "rev-list", "--count", "@{upstream}..HEAD"])).output.trim()) > 0) throw new Error(behindOrigin(dir));
+  if (failed && Number((await box.exec(["git", "-C", dir, "rev-list", "--count", "@{upstream}..HEAD"])).output.trim()) > 0) throw new Error(divergedFromOrigin(dir));
   if (failed) throw new Error(`could not take the new commits of your profile in ${dir}: ${failed.output.trim().split("\n").at(-1)}. Run git -C ${dir} pull, then run hedge setup again.`);
 }
 
