@@ -39,15 +39,6 @@ describe("hedge on the PATH", () => {
     expect(existsSync(join(box.home, ".profile"))).toBe(false);
   });
 
-  onLinuxHost("on macOS adds the PATH line, with Homebrew's bin, to ~/.zprofile once", () => {
-    const box = sandbox("Darwin");
-    box.stub("brew", "exit 0");
-    expect(getSh(box, ["--ref", "v0.1.0", "--install-only"]).code).toBe(0);
-    expect(getSh(box, ["--ref", "v0.1.0", "--install-only"]).code).toBe(0);
-    expect(readFileSync(join(box.home, ".zprofile"), "utf8")).toBe('export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:$PATH" # Added by Hedge\n');
-    expect(existsSync(join(box.home, ".profile"))).toBe(false);
-  });
-
   test("replaces its own hedge in ~/.local/bin and leaves another hedge there alone", () => {
     const box = sandbox("Linux");
     const hedge = join(box.home, ".local/bin/hedge");

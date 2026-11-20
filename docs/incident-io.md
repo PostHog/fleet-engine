@@ -13,8 +13,8 @@ source. The alert route on that source escalates to your user directly.
 knows no people. When someone changes the route, `hedge page` pages whoever
 the route names. Check the route before you rely on it.
 
-The workflow, `page-owner`, starts off. Turn it on with
-`hedge packs --add incident-io --workflows page-owner=on`. Its
+The workflow, `page-owner`, starts on with the pack. Turn it on with
+`hedge packs --add incident-io`. Its
 [setup note](../packs/incident-io/SETUP.md) walks through the incident.io
 side. While the workflow is off, `hedge page` refuses to send, and the
 saved source stays. With a hub, the hub's copy of your profile decides. To
@@ -69,12 +69,10 @@ source id, also not in an error that incident.io sends back.
 ## With a hub
 
 `hedge page` is a hub command. With a hub, it always runs on the hub, so the
-token lives in one place. On a node or a Mac, `hedge page <flags>` runs on
+token lives in one place. On a node, `hedge page <flags>` runs on
 the hub over SSH and prints the hub's answer. `hedge page setup` sends the
 token to the hub on SSH standard input, never on a command line. Rotating
 the token changes one file. A hub never forwards the command again.
-
-With Mac only, the command and the token stay on the Mac.
 
 **The hub is a single point of failure.** When SSH cannot reach the hub,
 `hedge page` exits 1 and says that ssh to the hub exited 255. When the hub

@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "name": "security",
+  "title": "Security",
+  "summary": "Agents on every machine read your Wiz findings, threats and inventory through the hub, and cannot change them.",
+  "day": "A Wiz threat alert lands in Slack. You hand its link to an agent, and it pulls the threat, the resource, and who touched it from Wiz, then tells you whether it looks like a teammate testing or an attack.",
+  "cost": "You need a Wiz user and a hub with the MCP gateway. You sign in to Wiz once, on the hub.",
+  "risk": "Agents read everything your Wiz user can see, through one sign-in on the hub, from every machine. The sign-in asks only for read access, so agents cannot resolve, assign, or file anything in Wiz.",
+  "requires": ["mcp-gateway"],
+  "instructions": "AGENTS.md",
+  "workflows": [
+    {
+      "id": "wiz",
+      "name": "Wiz through the hub",
+      "default": false,
+      "requires": ["mcp-gateway"],
+      "sentence": "Agents on every machine read Wiz issues, threats, vulnerabilities and cloud inventory through the hub's MCP gateway, with a read-only sign-in.",
+      "risk": "Every machine reads what your Wiz user can see, and security findings name weak spots in your cloud. Keep them out of public places."
+    }
+  ],
+  "files": [
+    {
+      "path": "mcp-upstreams/wiz.json",
+      "target": ".config/hedge/mcp-gateway/upstreams/wiz.json",
+      "roles": ["hub", "solo"],
+      "workflow": "wiz"
+    }
+  ]
+}

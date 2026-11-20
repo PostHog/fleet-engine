@@ -153,7 +153,7 @@ async function reconcileCodex(plan: Plan, home: string, dryRun: boolean, run: Co
       continue;
     }
     if (!mine.pending && found.enabled !== mine.enabled) {
-      findings.push(codexFinding(mine.id, `Kept the Codex plugin ${mine.id}, which no pack enables any more, because it changed outside Hedge. It is yours now.`));
+      findings.push({ id: `plugin:codex:${mine.id}`, pack: "engine", say: `Kept the Codex plugin ${mine.id}, which no pack enables any more, because it changed outside Hedge. It is yours now.` });
       if (!dryRun) record.delete(mine.id);
       continue;
     }

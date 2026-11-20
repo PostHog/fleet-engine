@@ -281,6 +281,8 @@ EOF
 home_files() {
   find . \( -path ./.t3 -o -path ./.cache -o -path ./.bun -o -path ./.npm -o -path ./.proof \
     -o -path ./.local/share/hedge/sources -o -path ./.local/share/hedge/engine/.git -o -path ./.local/state/hedge/logs \
+    -o -path ./.local/share/hedge/profile/.git/FETCH_HEAD -o -path ./.local/share/hedge/profile/.git/ORIG_HEAD \
+    -o -path ./.local/share/hedge/profile/.git/logs -o -path ./.local/share/hedge/profile/.git/refs/remotes/origin/HEAD \
     -o -path ./.local/state/hedge/jobs -o -path ./.local/state/hedge/worktree-prune.last -o -path './.local/state/hedge/worktree-sightings.json*' \
     -o -path ./.local/share/claude -o -path ./.local/share/t3code -o -path ./.claude/statsig -o -path ./.claude/todos -o -path ./.codex/tmp \) -prune \
     -o "$@"

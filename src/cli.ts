@@ -4,13 +4,13 @@ import { join, resolve as resolvePath } from "node:path";
 import { loadPacks } from "./pack/manifest.ts";
 import { cachedSource, fetchSource, sourceCache, withoutUserinfo } from "./pack/sources.ts";
 import { cannotTell } from "./pack/types.ts";
-import type { AvailableSource, CatalogEntry, FetchedSource, Finding, LoadedPack, MachineFile, PackCode, Plan, Report, SourceRef } from "./pack/types.ts";
+import type { AvailableSource, CatalogEntry, FetchedSource, Finding, LoadedPack, MachineFile, Plan, Report, SourceRef } from "./pack/types.ts";
 import { loadMachine, loadProfile, pullProfile, saveMachine, thisMachine } from "./profile/profile.ts";
 import { engineAdapters } from "./adapters/index.ts";
 import { apply, check, filesAdapter, type Adapter, type Issuer, type Runner } from "./reconciler/apply.ts";
 import { refresh } from "./refresh.ts";
-import { resolve } from "./reconciler/resolve.ts";
-import { undoingPack } from "./reconciler/ledger.ts";
+import { listedPack, resolve } from "./reconciler/resolve.ts";
+import { undoingPack, undoVariable } from "./reconciler/ledger.ts";
 import { readNotice, update } from "./update.ts";
 import { setup, type SetupOptions } from "./setup/setup.ts";
 import { ttyTerminal, type Terminal } from "./setup/terminal.ts";
@@ -18,7 +18,7 @@ import { FlagError } from "./setup/flags.ts";
 import type { ChangeContext } from "./commands/change.ts";
 import { packsCommand } from "./commands/packs.ts";
 import { setCommand, settingsCommand } from "./commands/settings.ts";
-import { devboxCommand } from "./commands/devbox.ts";
+import { asksAddress, devboxCommand, printAddress } from "./commands/devbox.ts";
 import { hubCommand } from "./commands/hub.ts";
 import { triageCommand } from "./commands/triage.ts";
 import { recordSetup } from "./commands/triage-record.ts";
@@ -30,7 +30,7 @@ import { spawnRunner, type CommandRunner } from "./adapters/run.ts";
 import { become, canBecome, type Become } from "./runner/become.ts";
 import { trackCommand } from "./usage/usage.ts";
 import { asHedge } from "./reconciler/engine-command.ts";
-import { adoptLegacyEnv, customFleetEngine, fleetIsHedge, inAnyLegacyPath, isOldJob, profileFile, renamedPath, underLegacyPath, withLegacyNames } from "./legacy.ts";
+import { adoptLegacyEnv, customFleetEngine, fleetNotice, hedgeOnMac, inAnyLegacyPath, isOldJob, profileFile, renamedPath, underLegacyPath, withLegacyNames } from "./legacy.ts";
 import { importFleet, isCopyOf } from "./import-fleet.ts";
 import { fleetAdapter, type FleetAdapter } from "./adapters/fleet/adapter.ts";
 
@@ -45,8 +45,9 @@ const usage = `Hedge: one setup for T3 Code, agents, and your workflows
                      Answer a few questions and set up this machine
   hedge apply [--profile <dir>] [--adopt <path>]... [--adopt-from <name>]... [--skip <pack>/<step>]... [--dry-run]
                      Put your profile's packs onto this machine
-  hedge doctor [--profile <dir>]
-                     Check this machine against your profile without changing it
+  hedge doctor [--profile <dir>] [--to-do]
+                     Check this machine against your profile without changing it,
+                     or print the steps left for you as JSON
   hedge update       Move the engine and your profile forward, then apply
   hedge refresh      Fetch the pack sources that follow a branch, and when one moved,
                      update the files, skills, guides, and instructions of your packs
@@ -57,6 +58,8 @@ const usage = `Hedge: one setup for T3 Code, agents, and your workflows
                      Change settings
   hedge devbox [add|remove <ssh host>]
                      List your devboxes, make an SSH host one, or remove one you replaced
+  hedge devbox address
+                     Print this machine's T3 Connect address
   hedge hub here [<ssh name>]
                      Make this machine the hub of your profile
   hedge hub status   Show this machine's name and the hub
@@ -69,7 +72,7 @@ const usage = `Hedge: one setup for T3 Code, agents, and your workflows
   hedge <command>    Run a command that one of your packs ships`;
 
 const changes = { packs: packsCommand, settings: settingsCommand, set: setCommand };
-const builtins: Record<string, string[]> = { apply: [], doctor: [], update: [], packs: [], settings: [], set: [], hub: ["here", "status"], devbox: ["add", "remove"], run: [], credential: [], setup: [], triage: [] };
+const builtins: Record<string, string[]> = { apply: [], doctor: [], update: [], packs: [], settings: [], set: [], hub: ["here", "status"], devbox: ["add", "remove", "address"], run: [], credential: [], setup: [], triage: [] };
 
 
 export async function main(argv: string[], options: CliOptions): Promise<number> {
@@ -100,7 +103,7 @@ export async function main(argv: string[], options: CliOptions): Promise<number>
 }
 
 function inert(argv: string[], options: CliOptions) {
-  (options.fail ?? options.print)(fleetIsHedge);
+  (options.fail ?? options.print)(fleetNotice(options.platform));
   return isOldJob(argv) ? 0 : 1;
 }
 
@@ -176,6 +179,7 @@ async function triage(args: string[], options: CliOptions) {
 async function reconcile(command: "apply" | "doctor", args: string[], options: CliOptions) {
   const flags = parseFlags(args);
   const doctor = command === "doctor";
+  if (flags.toDo && !doctor) throw new Error("unknown option --to-do");
   const preview = doctor || flags.dryRun;
   const holds = () => fleetOf(options).holds(options.home, options.platform);
   const held = await holds();
@@ -190,6 +194,7 @@ async function reconcile(command: "apply" | "doctor", args: string[], options: C
   const adapters = (options.adapters ?? engineAdapters)();
   const issue: Issuer = (entries, node) => issueCredentials(entries, node, plan, sources, options);
   const report = doctor ? await check(plan, { home: options.home, adapters, run: options.run }) : await apply(plan, { home: options.home, adopt: flags.adopt, adoptFrom: flags.adoptFrom, skip: flags.skip, dryRun: flags.dryRun, adapters, run: options.run, issue, progress: options.print });
+  if (flags.toDo) return printToDo(report, held, options.print);
   if (doctor) {
     const drifted = await drift(plan, report.humanLeft);
     report.findings.push(...drifted);
@@ -203,10 +208,12 @@ async function reconcile(command: "apply" | "doctor", args: string[], options: C
 }
 
 async function devbox(args: string[], options: CliOptions) {
-  const { plan } = await loadPlan(options, undefined, { fetch: false });
   const terminal = options.terminal ?? { ...ttyTerminal(), print: options.print };
+  const machine = { ...realMachine, ...options.setup?.machine };
+  if (asksAddress(args)) return await printAddress({ terminal, machine });
+  const { plan } = await loadPlan(options, undefined, { fetch: false });
   try {
-    return await devboxCommand(args, { home: options.home, terminal, machine: { ...realMachine, ...options.setup?.machine }, machineFile: plan.machine, plan });
+    return await devboxCommand(args, { home: options.home, terminal, machine, machineFile: plan.machine, plan });
   } catch (error) {
     if (!(error instanceof FlagError)) throw error;
     options.print(`hedge devbox: ${error.message}`);
@@ -246,8 +253,19 @@ async function change(command: keyof typeof changes | "hub", args: string[], opt
 }
 
 async function runUpdate(options: CliOptions) {
+  if (options.platform !== "darwin") return updateEngine(options);
+  const code = await updateEngine(options).catch((error: unknown) => {
+    if (!(error instanceof Error)) throw error;
+    (options.fail ?? options.print)(`hedge: ${error.message}`);
+    return 1;
+  });
+  if (code !== 0) options.print(hedgeOnMac);
+  return code;
+}
+
+async function updateEngine(options: CliOptions) {
   const machine = await loadMachine(options.home);
-  if (!machine?.profileDir) throw new Error("no profile on this machine. Run get.sh, or hedge apply --profile <dir>.");
+  if (!machine?.profileDir) throw new Error(options.platform === "darwin" ? "no profile on this machine." : "no profile on this machine. Run get.sh, or hedge apply --profile <dir>.");
   const profileDir = hedgeProfile(options, machine.profileDir);
   const profile = await loadProfile(profileDir);
   return update({
@@ -255,6 +273,7 @@ async function runUpdate(options: CliOptions) {
     engineDir: options.engineRoot,
     profileDir,
     engine: profile.engine,
+    platform: options.platform,
     print: options.print,
     runApply: () => Bun.spawn(["sh", join(options.engineRoot, "hedge"), "apply", "--profile", profileDir], { stdio: ["inherit", "inherit", "inherit"], env: { ...Bun.env, HOME: options.home } }).exited,
   });
@@ -281,8 +300,8 @@ async function runRefresh(args: string[], options: CliOptions) {
 
 async function runPackCommand(name: string, args: string[], options: CliOptions) {
   const typed = ["hedge", name, ...args];
-  const undoing = await undoingPack(options.home, options.env ?? {}, typed);
-  if (undoing) return runUndo(name, args, undoing, options);
+  const undone = options.env?.[undoVariable] ? await runUndo(name, args, options) : undefined;
+  if (undone !== undefined) return undone;
   const { plan, sources } = await loadPlan(options, undefined, { fetch: false, inherit: true });
   const command = plan.commands[name];
   if (!command) {
@@ -303,11 +322,15 @@ async function runPackCommand(name: string, args: string[], options: CliOptions)
   return exit === 0 && repairs ? applyProfile(plan.machine.profileDir!, options) : exit;
 }
 
-/** Runs the undo, check or prerequisite of a ledger step whose pack is off, with that pack's own command on this machine. When Hedge cannot run it here, it exits cannotTell, so the ledger keeps the step for a later apply. */
-async function runUndo(name: string, args: string[], pack: string, options: CliOptions) {
-  const cannot = (why: string) => (options.print(`hedge ${name}: cannot run the ${pack} pack's command to undo its step: ${why}`), cannotTell);
+/** Runs the undo, check or prerequisite of a ledger step whose pack is off, with that pack's own command on this machine, or returns undefined for another command line. When Hedge cannot run it here, it exits cannotTell, so the ledger keeps the step for a later apply. */
+async function runUndo(name: string, args: string[], options: CliOptions): Promise<number | undefined> {
+  let pack = "";
+  const cannot = (why: string) => (options.print(`hedge ${name}: cannot run ${pack ? `the ${pack} pack's command` : "the command"} to undo its step: ${why}`), cannotTell);
   let loaded: Awaited<ReturnType<typeof loadPlan>>;
   try {
+    const current = await loadPlan(options, undefined, { fetch: false, inherit: true });
+    pack = (await undoingPack(options.home, options.env ?? {}, ["hedge", name, ...args], (old) => listedPack(current.plan, old))) ?? "";
+    if (!pack) return undefined;
     loaded = await loadPlan(options, undefined, { fetch: false, inherit: true, withPack: pack });
   } catch (error) {
     return cannot((error as Error).message);
@@ -480,7 +503,7 @@ async function inPack(plan: Plan, loaded: LoadedPack, options: CliOptions, work:
   finally { assign(saved); }
 }
 
-function packEnvironment(plan: Plan, options: CliOptions): Record<string, string | undefined> {
+export function packEnvironment(plan: Plan, options: Pick<CliOptions, "home" | "engineRoot">): Record<string, string | undefined> {
   return withLegacyNames({ HOME: options.home, HEDGE_ENGINE_DIR: options.engineRoot, HEDGE_PROFILE_DIR: plan.machine.profileDir, HEDGE_SETTINGS: JSON.stringify(plan.settings), HEDGE_MODELS: JSON.stringify(plan.models), HEDGE_PLAN: plan.ai, HEDGE_HANDLERS: JSON.stringify(handlerPaths(plan)), HEDGE_HANDLER_SUBCOMMANDS: JSON.stringify(handlerSubcommands(plan)) });
 }
 
@@ -534,7 +557,7 @@ async function loadPlan(options: CliOptions, profileFlag: string | undefined, mo
 }
 
 function parseFlags(args: string[]) {
-  const flags: { profile?: string; adopt: string[]; adoptFrom: string[]; skip: string[]; dryRun: boolean } = { adopt: [], adoptFrom: [], skip: [], dryRun: false };
+  const flags: { profile?: string; adopt: string[]; adoptFrom: string[]; skip: string[]; dryRun: boolean; toDo: boolean } = { adopt: [], adoptFrom: [], skip: [], dryRun: false, toDo: false };
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     const value = () => {
@@ -547,6 +570,7 @@ function parseFlags(args: string[]) {
     else if (arg === "--adopt-from") flags.adoptFrom.push(value());
     else if (arg === "--skip") flags.skip.push(value());
     else if (arg === "--dry-run") flags.dryRun = true;
+    else if (arg === "--to-do") flags.toDo = true;
     else throw new Error(`unknown option ${arg}`);
   }
   return flags;
@@ -556,13 +580,23 @@ function printReport(report: Report, command: string, print: (line: string) => v
   const changes = report.actions.filter((action) => action.operation !== "keep" && action.operation !== "conflict");
   if (command === "apply") for (const action of changes) print(`${action.operation} ${action.target}`);
   printFindings(report.findings, print);
-  if (command === "doctor") print(report.ok ? "Everything matches your profile." : "Run hedge apply to fix what Hedge can fix.");
+  const waits = report.findings.some((finding) => finding.todo);
+  if (command === "doctor") print(!report.ok ? "Run hedge apply to fix what Hedge can fix." : waits ? "Everything Hedge sets matches your profile. The To do lines above wait for you." : "Everything matches your profile.");
   else if (dryRun) print(report.ok ? `Preview: ${changes.length} change${changes.length === 1 ? "" : "s"} to apply. Nothing was written.` : "Preview: Hedge could not apply your profile. Nothing was written.");
   else print(report.ok ? `Applied ${changes.length} change${changes.length === 1 ? "" : "s"}.` : "Hedge could not apply your profile.");
 }
 
+function printToDo(report: Report, held: Report["findings"], print: (line: string) => void) {
+  const asks = (finding: Report["findings"][number], step: Report["humanLeft"][number]) => finding.repair === "human" && finding.id === `human:${step.id}` && finding.pack === step.pack;
+  const others = [...held, ...report.findings.filter((finding) => (finding.repair || finding.id.startsWith("kept:")) && !report.humanLeft.some((step) => asks(finding, step)))];
+  const steps = report.humanLeft.filter((step) => report.findings.some((finding) => asks(finding, step)));
+  printFindings(others, print);
+  print(JSON.stringify(steps.map(({ pack, id, say, command }) => ({ pack, id, say, ...(command ? { command } : {}) }))));
+  return others.length ? 1 : 0;
+}
+
 function printFindings(findings: Report["findings"], print: (line: string) => void) {
-  for (const finding of findings) print(`${finding.repair === "human" ? "To do" : finding.repair ? "Fix" : "Note"}: ${finding.say}`);
+  for (const finding of findings) print(`${finding.repair === "human" || finding.todo ? "To do" : finding.repair ? "Fix" : "Note"}: ${finding.say}`);
 }
 
 if (import.meta.main) {

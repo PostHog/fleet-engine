@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { tempDirs } from "../../../src/testing/git.ts";
 import { cliProxy, panelUrl, proxyUrl, type Panel, type ProxyMachine } from "./cli-proxy.ts";
 import { fakeRun, modeOf, roleHome } from "./run-testing.ts";
@@ -190,4 +190,75 @@ test("turning the panel off removes only the pinned plugin and names the plugins
   expect(await cliProxy("install", off.machine)).toBe(0);
   expect([existsSync(files(home).plugin), readFileSync(other, "utf8")]).toEqual([false, "someone else's plugin"]);
   expect(off.printed).toContain(`Kept plugins Hedge did not install: ${other}. Remove them: hedge cli-proxy doctor fails while they are there.`);
+});
+
+test("the route check on the hub fails, for Claude Code and Codex, while doctor finds the proxy unsafe, and passes with Hedge's own panel files", async () => {
+  const { machine, home } = hub({ panel, plan: "both" });
+  await cliProxy("install", machine);
+  const check = async (agent: "claude" | "codex") => {
+    const run = hub({ home, panel, plan: "both" });
+    return [await cliProxy("check", run.machine, agent), run.printed.join("\n")] as const;
+  };
+  expect((await check("claude"))[0]).toBe(0);
+  const other = join(dataDir(home), "plugins/other.so");
+  writeFileSync(other, "someone else's plugin");
+  for (const agent of ["claude", "codex"] as const) {
+    const [code, printed] = await check(agent);
+    expect(code).toBe(1);
+    expect(printed).toContain(`Remove the plugins Hedge did not install: ${other}.`);
+  }
+  rmSync(other);
+  writeFileSync(files(home).plugin, "tampered");
+  const [code, printed] = await check("claude");
+  expect(code).toBe(1);
+  expect(printed).toContain(`${files(home).plugin} does not match the pinned quota-ledger plugin 0.1.0.`);
+});
+
+test("once the profile turns the panel off, the route check on the hub fails while the panel's page or plugin is still there, whatever it holds, and passes once install removed them", async () => {
+  const { machine, home } = hub({ panel });
+  await cliProxy("install", machine);
+  writeFileSync(files(home).plugin, "tampered");
+  const check = async () => {
+    const run = hub({ home });
+    return [await cliProxy("check", run.machine), run.printed.join("\n")] as const;
+  };
+  const [code, printed] = await check();
+  expect(code).toBe(1);
+  expect(printed).toContain(`The Proxy panel is off, but ${files(home).page} and ${files(home).plugin} are still there, so the proxy may still serve or run them. Run hedge cli-proxy install.`);
+  rmSync(files(home).page);
+  expect((await check())[0]).toBe(1);
+  await cliProxy("install", hub({ home }).machine);
+  expect((await check())[0]).toBe(0);
+});
+
+test("once the profile turns the panel off, the route check on the hub fails while a dangling link sits at the panel's page or plugin, and passes once you remove the link and run install as it says", async () => {
+  for (const at of ["page", "plugin"] as const) {
+    const { machine, home } = hub();
+    await cliProxy("install", machine);
+    mkdirSync(dirname(files(home)[at]), { recursive: true });
+    symlinkSync(join(home, "nowhere"), files(home)[at]);
+    const run = hub({ home });
+    expect(await cliProxy("check", run.machine)).toBe(1);
+    expect(run.printed.join("\n")).toContain(`${files(home)[at]} is a link, which Hedge does not follow or replace. Remove it, then run hedge cli-proxy install.`);
+    rmSync(files(home)[at]);
+    expect(await cliProxy("install", hub({ home }).machine)).toBe(0);
+    expect(await cliProxy("check", hub({ home }).machine)).toBe(0);
+  }
+});
+
+test("with the panel on, the route check on the hub fails while the panel's page or plugin is a link, even to a file with the pinned bytes, and passes once you remove the link and run install", async () => {
+  for (const at of ["page", "plugin"] as const) {
+    const { machine, home } = hub({ panel });
+    expect(await cliProxy("install", machine)).toBe(0);
+    const elsewhere = join(home, `pinned-${at}`);
+    writeFileSync(elsewhere, readFileSync(files(home)[at]));
+    rmSync(files(home)[at]);
+    symlinkSync(elsewhere, files(home)[at]);
+    const run = hub({ home, panel });
+    expect(await cliProxy("check", run.machine)).toBe(1);
+    expect(run.printed.join("\n")).toContain(`${files(home)[at]} is a link, which Hedge does not follow or replace. Remove it, then run hedge cli-proxy install.`);
+    rmSync(files(home)[at]);
+    expect(await cliProxy("install", hub({ home, panel }).machine)).toBe(0);
+    expect(await cliProxy("check", hub({ home, panel }).machine)).toBe(0);
+  }
 });

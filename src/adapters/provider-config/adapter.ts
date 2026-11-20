@@ -1,12 +1,12 @@
 import { join } from "node:path";
 import { inside } from "../../files/install.ts";
 import type { Action, Finding, Plan, Provider } from "../../pack/types.ts";
-import type { Adapter, AdapterResult } from "../../reconciler/apply.ts";
+import { todoLines, type Adapter, type AdapterResult } from "../../reconciler/apply.ts";
 import { spawnRunner, type CommandRunner } from "../run.ts";
 import { codexHookTrust, isTrustOf } from "./codex-hooks.ts";
 import { checkPath, get, json, keyPath, overlaps, remove, same, samePath, set, toml, type Document, type Field, type Format } from "./fields.ts";
 import { declaredMarketplaces, reconcilePlugins } from "./plugins.ts";
-import { staleKeys } from "./stale.ts";
+import { proxyRoute } from "./proxy-route.ts";
 import { claudeJson, isMcpServer, reconcileServers, wantedServers } from "./claude-servers.ts";
 import { linkOnPath, optional, readState, withLock, writeWithBackups, type Write } from "./store.ts";
 
@@ -15,7 +15,7 @@ export type { CommandRunner } from "../run.ts";
 /** owns says which of the provider's keys live in this file. */
 type Target = { provider: Provider; path: string; format: Format; owns(path: string[]): boolean };
 export type FieldRecord = { [target: string]: Field[] };
-type Merged = { record: Field[]; kept: string[]; reason: string; after?: string; document: Document };
+type Merged = { record: Field[]; kept: string[]; reason: string; after?: string; document: Document; todo?: string };
 type FilesResult = AdapterResult & { plugins?: string[]; claudeEnabled?: Record<string, boolean>; marketplaces?: Record<string, string | null>; codexPlugins?: string[] };
 
 export const recordTarget = ".config/hedge/provider-fields.json";
@@ -39,10 +39,15 @@ export function providerConfigAdapter(options: { run?: CommandRunner } = {}): Ad
       const gated = gatedKeys(plan);
       const reconcile = async () => {
         const { plugins, claudeEnabled, marketplaces, codexPlugins, ...result } = await reconcileFiles(plan, context.home, context.dryRun, context.adopt, outage, gated);
-        result.findings.push(...(await reconcilePlugins(plan, context.home, context.dryRun, run, { outage, accepted: plugins, claudeEnabled, marketplaces, acceptedCodex: codexPlugins })));
-        const servers = await reconcileServers(plan, context.home, { dryRun: context.dryRun, adopt: context.adopt.includes(claudeJson), outage, gated: gatedPath(gated, "claude"), run });
-        result.actions.push(...servers.actions);
-        result.findings.push(...servers.findings);
+        const written = result.findings.filter((finding) => finding.todo);
+        try {
+          result.findings.push(...(await reconcilePlugins(plan, context.home, context.dryRun, run, { outage, accepted: plugins, claudeEnabled, marketplaces, acceptedCodex: codexPlugins })));
+          const servers = await reconcileServers(plan, context.home, { dryRun: context.dryRun, adopt: context.adopt.includes(claudeJson), outage, gated: gatedPath(gated, "claude"), run });
+          result.actions.push(...servers.actions);
+          result.findings.push(...servers.findings);
+        } catch (error) {
+          throw written.length ? new Error(`${(error as Error)?.message ?? error}${todoLines(written)}`) : error;
+        }
         return result;
       };
       const result = context.dryRun ? await reconcile() : await withLock(context.home, reconcile);
@@ -65,7 +70,7 @@ async function reconcileFiles(plan: Plan, home: string, dryRun: boolean, adopt: 
     const fields = owned(plan, target);
     let merged: Merged;
     try {
-      merged = merge(target, before, old, fields, adopt.includes(target.path), { outage, gated: gatedPath(gated, target.provider), dropped: gatedFields(plan, target), configPath: join(home, target.path) });
+      merged = merge(target, before, old, fields, adopt.includes(target.path), { outage, gated: gatedPath(gated, target.provider), configPath: join(home, target.path) });
     } catch (error) {
       keepOld();
       result.findings.push({ id: `kept:${target.path}`, pack: "engine", say: `Kept ${target.path} as it is: Hedge cannot read it (${(error as Error).message}). Fix the file, then run hedge apply.`, repair: "human" });
@@ -83,6 +88,7 @@ async function reconcileFiles(plan: Plan, home: string, dryRun: boolean, adopt: 
       result.marketplaces = declaredMarketplaces(merged.document);
     }
     if (target.provider === "codex" && !link) result.codexPlugins = acceptedCodexPlugins(merged.document);
+    if (merged.todo && !dryRun) result.findings.push({ id: `route:${target.path}`, pack: "engine", say: merged.todo, todo: true });
     if (merged.kept.length) result.findings.push({ id: `kept:${target.path}`, pack: "engine", say: `Kept your ${merged.kept.join(", ")} in ${target.path}. Run hedge apply --adopt ${target.path} to take Hedge's value.` });
     if (merged.after !== undefined) writes.push({ target: target.path, before, after: merged.after, action: { target: target.path, operation: before === undefined ? "create" : "replace", reason: merged.reason } });
   }
@@ -106,25 +112,33 @@ function owned(plan: Plan, target: Target): Field[] {
   return fields;
 }
 
-function merge(target: Target, text: string | undefined, previous: Field[], wanted: Field[], adopt: boolean, options: { outage: boolean; gated: (path: string[]) => boolean; dropped: GatedField[]; configPath: string }): Merged {
+function merge(target: Target, text: string | undefined, previous: Field[], wanted: Field[], adopt: boolean, options: { outage: boolean; gated: (path: string[]) => boolean; configPath: string }): Merged {
   const current: Document = text === undefined ? {} : target.format.decode(text);
   const original = target.format.encode(current);
-  const edited = previous.filter((field) => get(current, field.path) !== undefined && !same(get(current, field.path), field.value));
-  const stale = options.outage ? [] : staleKeys(target.provider, current, (path) => target.owns(path) && !wanted.some((field) => overlaps(field.path, path)) && !edited.some((field) => overlaps(field.path, path)));
   const record: Field[] = [];
   const kept: string[] = [];
   const changed: string[] = [];
   const removed: string[] = [];
+  const route = proxyRoute[target.provider];
+  const routeOnDisk = (route?.fields ?? []).filter((item) => same(get(current, item.path), item.value));
+  const onRoute = (field: Field) => route?.fields.some((item) => samePath(item.path, field.path) && same(item.value, field.value)) ?? false;
+  const oldOf = (field: Field) => previous.find((item) => samePath(item.path, field.path));
+  const keeps = (field: Field) => {
+    const value = get(current, field.path);
+    const old = oldOf(field);
+    return !same(value, field.value) && value !== undefined && !(old && same(value, old.value)) && !adopt;
+  };
+  const routeHeld = wanted.some((field) => onRoute(field) && keeps(field));
   const reconcile = (fields: Field[]) => {
     const applied: Field[] = [];
     for (const field of fields) {
-      const value = get(current, field.path);
-      const old = previous.find((item) => samePath(item.path, field.path));
-      if (!same(value, field.value) && value !== undefined && !(old && same(value, old.value)) && !adopt) {
-        kept.push(field.path.join("."));
+      const old = oldOf(field);
+      if (keeps(field) || (routeHeld && onRoute(field))) {
+        if (keeps(field)) kept.push(field.path.join("."));
         if (old) record.push(old);
         continue;
       }
+      const value = get(current, field.path);
       if (!same(value, field.value)) {
         set(current, field.path, field.value);
         changed.push(field.path.join("."));
@@ -155,19 +169,17 @@ function merge(target: Target, text: string | undefined, previous: Field[], want
       removed.push(field.path.join("."));
     }
   }
-  const untouched = (field: GatedField) => get(current, field.path) === undefined || same(get(current, field.path), field.value);
-  const unrecorded = options.dropped
-    .filter((field) => options.dropped.every((other) => other.check !== field.check || other.pack !== field.pack || untouched(other)))
-    .filter((field) => !all.some((item) => overlaps(item.path, field.path)))
-    .map((field) => field.path);
-  for (const path of [...stale, ...unrecorded]) {
-    if (get(current, path) === undefined) continue;
+  const routeLeft = routeOnDisk.filter((item) => !same(get(current, item.path), item.value)).map((item) => item.path);
+  const setByPack = (path: string[]) => wanted.some((field) => overlaps(field.path, path) && same(get(current, path), get({ value: field.value }, ["value", ...path.slice(field.path.length)])));
+  const beside = (route?.beside(current, routeLeft) ?? []).filter((path) => !setByPack(path));
+  for (const path of beside) {
     remove(current, path);
     removed.push(path.join("."));
   }
   const reason = [changed.length ? `set ${changed.join(", ")}` : "", removed.length ? `remove ${removed.join(", ")}` : ""].filter(Boolean).join("; ");
   const after = target.format.encode(current);
-  return { record, kept, reason, after: after === original ? undefined : after, document: current };
+  const todo = beside.length ? `Took Hedge's proxy route out of ${target.path}, and with it your ${beside.map((path) => path.join(".")).join(", ")}, which only worked through that route.` : undefined;
+  return { record: record.filter((field) => !beside.some((path) => overlaps(path, field.path))), kept: kept.filter((path) => !beside.some((item) => item.join(".") === path)), reason, after: after === original ? undefined : after, document: current, ...(todo ? { todo } : {}) };
 }
 
 function acceptedPlugins(document: Document) {
@@ -190,17 +202,6 @@ const isHookTrust = (field: Field) => field.path[0] === "hooks" && field.path[1]
 /** The provider:key of each config entry the gate dropped because its check fails. An outage never keeps these. */
 function gatedKeys(plan: Plan) {
   return plan.dropped.flatMap((entry) => (entry.check && entry.item.startsWith("config ") ? [entry.item.slice("config ".length)] : []));
-}
-
-type GatedField = Field & { check: string };
-
-/** The config entries of this target that the gate dropped, with Hedge's value. Entries that wait for the same check leave together, even during an outage and without a record, unless one of them holds another value. */
-function gatedFields(plan: Plan, target: Target): GatedField[] {
-  return plan.dropped.flatMap((entry) => {
-    if (!entry.check || entry.value === undefined || !entry.item.startsWith(`config ${target.provider}:`)) return [];
-    const path = keyPath(entry.item.slice(`config ${target.provider}:`.length));
-    return target.owns(path) ? [{ path, value: entry.value, pack: entry.pack, check: entry.check }] : [];
-  });
 }
 
 /** Whether a path overlaps a config key of this provider that the gate dropped, so an outage does not keep it. */

@@ -35,6 +35,8 @@ export type Workflow = {
   yields?: string[];
   default: boolean;
   settings?: string[];
+  offUntilSet?: string[];
+  instructions?: string;
   risk?: string;
 };
 
@@ -132,9 +134,14 @@ export type ModelRow = { role: string; work: string; provider: "claude" | "codex
 
 export type GuideEntry = { guide: string; section?: string; path: string };
 
+export type PackAlias = { name: string; workflows: string[] };
+
 export type PackManifest = {
   schema: 1;
   name: string;
+  aliases?: PackAlias[];
+  settingPrefixes?: string[];
+  onSite?: false;
   title?: string;
   summary: string;
   audience?: Audience;
@@ -163,7 +170,9 @@ export type PackManifest = {
   subcommands?: Record<string, string[]>;
 };
 
-export type PackCheck = Scope & { id: string; run: string[]; say: string };
+export const waitsForPerson = 4;
+
+export type PackCheck = Scope & { id: string; run: string[]; say: string; todo?: string };
 
 export const handlerSeams = ["review-bot", "heavy-route", "pr-command", "slack-capture", "secret-rows", "secret-providers", "proof-receipt"] as const;
 export type HandlerSeam = (typeof handlerSeams)[number];
@@ -197,6 +206,7 @@ export type ProfileFile = {
   plan: AiPlan;
   settings: Record<string, SettingValue>;
   workflows: Record<string, boolean>;
+  migrations?: string[];
   devboxes?: string[];
   /** The SSH name of the machine that runs the hub's items. */
   hub?: string;
@@ -234,7 +244,8 @@ export type Plan = {
   os: Os;
   ai: AiPlan;
   packs: ResolvedPack[];
-  workflows: Array<{ id: string; pack: string; active: boolean; reason?: string }>;
+  aliases?: Record<string, string>;
+  workflows: Array<{ id: string; pack: string; active: boolean; reason?: string; unset?: string }>;
   files: DesiredFile[];
   config: Array<Owned<ConfigEntry>>;
   owners: Record<string, string>;
@@ -252,9 +263,9 @@ export type Plan = {
   settings: Record<string, SettingValue>;
   unanswered: PackSetting[];
   ask: PackSetting[];
-  dropped: Array<{ pack: string; item: string; reason: string; check?: string; value?: unknown }>;
+  dropped: Array<{ pack: string; item: string; reason: string; check?: string }>;
 };
 
-export type Finding = { id: string; pack: string; say: string; repair?: "apply" | "human" };
+export type Finding = { id: string; pack: string; say: string; repair?: "apply" | "human"; todo?: true };
 
 export type Report = { ok: boolean; actions: Action[]; findings: Finding[]; humanLeft: Array<Owned<HumanStep>> };
