@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { main } from "../cli.ts";
 import type { FetchedSource, SourceRef } from "../pack/types.ts";
@@ -102,7 +102,7 @@ export const onBox = (command: string[]) => (command[0] === "ssh" ? command.at(-
  * takes every curl request which does not turn proxies off. The box's tunnel answers only after tunnelStartsAfter lookups, and the tunnel here only after hereTunnelStartsAfter.
  * Each box's T3 environment id is env-<host>, except on the hosts withoutT3, where T3 never ran.
  * T3 here lists hereLinks as its linked environments, and unlink forgets one, or fails with unlinkFails. T3 on the hub lists hubLinks. ssh never reaches the hosts named unreachable.
- * This machine is signed in to Coder at coderAt, https://coder.example.com unless set. A box answers Coder's build info, and serves the Coder CLI, only at boxReachesCoderAt, this machine's address unless set; coderRedirects makes the build info or the CLI answer with a redirect instead, which its curl follows when told to on the command line or in ~/.curlrc, unless -q comes first or --max-redirs is 0. Its curl refuses any other protocol than HTTPS when told --proto =https. coderCli makes the CLI download answer with another status than 200, with no body, or with a CLI whose version fails. Every shell command on the box runs with boxEnv, and one that dies of a signal exits 255, as ssh does when the remote command dies of one, since it ignores exit-signal. Its Coder sign-in runs in bash -c, as sshd runs it in a bash login shell, which runs the last command in place of itself. Its Coder CLI signs in with CODER_SESSION_TOKEN and CODER_URL from boxEnv, or else the session and url files in ~/.config/coderv2, when they hold a token this machine made and has not removed, and an address it reaches, or personCoderToken at any address, as another Coder user unless boxCoderSameUser. Without them a box is signed in as this machine's user while its box:coder sign-in passes. It waits for ever on a url or session FIFO, so it fails there. The Coder CLI it downloads runs coder login as the real one does: it takes CODER_SESSION_TOKEN as the session only with --use-token-as-session, else it makes a new one, and without the variable the person pastes one; it signs in only at an address the box reaches, with a token the server knows, and writes session, then url, for only their owner to read; like the real one, it keeps the mode of a session file that is there and logs the mode each session file has as it writes the token, which sessionModes returns. With coderLoginKilled, its coder login is killed with SIGKILL as it starts. Its coder config-ssh needs a known token too, fails with coderConfigSshFails, and writes ~/.ssh/config for CODER_URL, or else for the address in the url file, as the coder config-ssh of a signed-in box does. Here, coder tokens create and remove keep the list coderTokens returns, coderTokenRemoveFails makes a removal fail, and coderTokenRemoveHangs makes it wait for ever, unless timeout runs it with a limit above 0, which then exits 124. timeout on the box takes only -s KILL and a limit above 0, and runs its command. With signInTimesOut, coder login on the box starts and the deadline kills it, and timeout then dies of the same SIGKILL, as the real one does when it kills its process group. timeoutLimits returns each limit timeout got, here or on the box. With signInConnectionStalls, the SSH connection to the box stops answering after the sign-in ran there: it waits for ever unless the exec has a timeoutMs above the box's own limit, and then gives what realMachine.exec gives when it kills ssh, exit 137. hedge peers link on the hub renews the node's link in the list T3 on the hub returns.
+ * This machine is signed in to Coder at coderAt, https://coder.example.com unless set. A box answers Coder's build info, and serves the Coder CLI, only at boxReachesCoderAt, this machine's address unless set; coderRedirects makes the build info or the CLI answer with a redirect instead, which its curl follows when told to on the command line or in ~/.curlrc, unless -q comes first or --max-redirs is 0. Its curl refuses any other protocol than HTTPS when told --proto =https. coderCli makes the CLI download answer with another status than 200, with no body, or with a CLI whose version fails. Every shell command on the box runs with boxEnv, and one that dies of a signal exits 255, as ssh does when the remote command dies of one, since it ignores exit-signal. Its Coder sign-in runs in bash -c, as sshd runs it in a bash login shell, which runs the last command in place of itself. Its Coder CLI signs in with CODER_SESSION_TOKEN and CODER_URL from boxEnv, or else the session and url files in ~/.config/coderv2, when they hold a token this machine made and has not removed, and an address it reaches, or personCoderToken at any address, as another Coder user unless boxCoderSameUser. Without them a box is signed in as this machine's user while its box:coder sign-in passes. It waits for ever on a url or session FIFO, so it fails there. The Coder CLI it downloads runs coder login as the real one does: it takes CODER_SESSION_TOKEN as the session only with --use-token-as-session, else it makes a new one, and without the variable the person pastes one; it signs in only at an address the box reaches, with a token the server knows, and writes session, then url, for only their owner to read; like the real one, it keeps the mode of a session file that is there and logs the mode each session file has as it writes the token, which sessionModes returns. With coderLoginKilled, its coder login is killed with SIGKILL as it starts. Its coder config-ssh needs a known token too, fails with coderConfigSshFails, and writes ~/.ssh/config for CODER_URL, or else for the address in the url file, as the coder config-ssh of a signed-in box does. Here, coder tokens create and remove keep the list coderTokens returns, coderTokenRemoveFails makes a removal fail, and coderTokenRemoveHangs makes it wait for ever, unless timeout runs it with a limit above 0, which then exits 124. timeout on the box is the real one, and a limit above 0 arms its deadline. With signInTimesOut, coder login on the box ignores SIGTERM, starts a child, and stays alive with it until the deadline fires: it fires the armed deadline at once with SIGALRM, as the timer does when the limit runs out, so no real time passes, and fails when no deadline is armed. stuckProcesses returns the pids of that login and its child, and running says whether a pid still runs. With signInConnectionStalls, coder login on the box prints a line as it starts, and the SSH connection stays open after the sign-in ran there. signInAnnounced resolves when that line comes through the connection. passTime moves this machine's clock on, and ends a connection by its process group when the exec's timeoutMs has passed, as realMachine.exec does, which gives exit 137. openConnections counts the connections still open. hedge peers link on the hub renews the node's link in the list T3 on the hub returns.
  * With node set, every other command on a box runs on a Node.
  */
 export function fakeMachine(home: string, polls: Partial<Record<SignInName, number>> = {}, options: { org?: boolean; createFails?: string; createFailsAfterMaking?: string; lookupFails?: string; publicRepos?: string[]; scopes?: string; failRun?: boolean; exits?: Partial<Record<SignInName, number>>; connectHere?: boolean; boxFiles?: Record<string, string>; hubDown?: boolean; hubUpdateFails?: string; boxCoderSameUser?: boolean; boxEnv?: Record<string, string>; coderRedirects?: Array<"probe" | "binary">; coderCli?: "non-200" | "empty" | "broken"; claude?: Partial<Record<"claude" | "box:claude", ClaudeSignedIn>>; startedAt?: number; cliPrintsTunnel?: boolean; serverWithoutLinkState?: Array<"box" | "here">; runtimeOrigin?: string; runtimePid?: unknown; serverGone?: boolean; boxConnect?: { authenticated: unknown; linked: unknown }; hereConnect?: { desired?: unknown; authenticated?: unknown; linked?: unknown }; t3Home?: string; devServerUrl?: string; tunnelStartsAfter?: number; hereTunnelStartsAfter?: number; withoutT3?: string[]; hereLinks?: HereLink[]; unreachable?: string[]; unlinkFails?: string; hereStatusFailures?: number; installers?: Record<string, string>; installerEnv?: Record<string, string>; hubLinks?: HereLink[]; boxReachesCoderAt?: string; coderAt?: string; coderTokenRemoveFails?: boolean; coderConfigSshFails?: boolean; coderLoginKilled?: boolean; signInTimesOut?: boolean; signInConnectionStalls?: boolean; coderTokenRemoveHangs?: boolean; node?: Node } = {}) {
@@ -113,9 +113,9 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
   const serverTokens = join(home, "coder-server-tokens");
   const coderArgv = join(home, "coder-argv");
   const sessionModes = join(home, "coder-session-modes");
-  const timeoutLimits = join(home, "timeout-limits");
+  const armedDeadline = join(home, "box-deadline-pid");
+  const stuckPids = join(home, "box-stuck-pids");
   const readLines = (path: string) => (existsSync(path) ? readFileSync(path, "utf8").split("\n").filter(Boolean) : []);
-  const limits = () => readLines(timeoutLimits).map(Number);
   const keepTokens = () => writeFileSync(serverTokens, [...coderTokens].map((token) => `${token}\n`).join(""));
   keepTokens();
   const tokenNames = new Map<string, string>();
@@ -234,10 +234,34 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
     hubLinks.splice(0, hubLinks.length, ...hubLinks.filter((link) => link.environmentId !== renewed.environmentId), renewed);
     return result(true, `linked ${linked}`);
   };
+  const onBoxEnv = (host: string, bin?: string, env: Record<string, string> = {}) => ({ PATH: [bin, process.env.PATH ?? ""].filter(Boolean).join(":"), ...options.boxEnv, ...env, HOME: boxHome(home, host) });
+  const signInEnv = (host: string) => onBoxEnv(host, undefined, { PATH: [boxTimeout(home, armedDeadline), join(boxHome(home, host), ".local/bin"), "/usr/bin:/bin"].join(":") });
   const forReal = async (line: string, host: string, input?: string, bin?: string, env: Record<string, string> = {}, shell = "sh"): Promise<ExecResult> => {
-    const child = Bun.spawn([shell, "-c", line], { env: { PATH: [bin, process.env.PATH ?? ""].filter(Boolean).join(":"), ...options.boxEnv, ...env, HOME: boxHome(home, host) }, stdin: input === undefined ? "ignore" : new Blob([input]), stdout: "pipe", stderr: "pipe" });
+    const child = Bun.spawn([shell, "-c", line], { env: onBoxEnv(host, bin, env), stdin: input === undefined ? "ignore" : new Blob([input]), stdout: "pipe", stderr: "pipe" });
     const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
     return { code: child.signalCode ? sshLostExit : code, output: `${stdout}${stderr}`, stdout };
+  };
+  const connections: Array<{ endsAt: number; ended: boolean; end: () => void }> = [];
+  let announced = () => {};
+  const signInAnnounced = new Promise<void>((resolve) => (announced = resolve));
+  const stalledConnection = async (line: string, host: string, run: { input?: string; timeoutMs?: number }): Promise<ExecResult> => {
+    const child = Bun.spawn(["sh", "-c", 'bash -c "$1"; exec sleep 30', "ssh", line], { detached: true, env: signInEnv(host), stdin: new Blob([run.input ?? ""]), stdout: "pipe", stderr: "pipe" });
+    const connection = { endsAt: run.timeoutMs === undefined ? Infinity : now + run.timeoutMs, ended: false, end: () => ((connection.ended = true), process.kill(-child.pid, "SIGKILL")) };
+    connections.push(connection);
+    const stderr = new Response(child.stderr).text();
+    const decoder = new TextDecoder();
+    let stdout = "";
+    for await (const chunk of child.stdout) {
+      stdout += decoder.decode(chunk, { stream: true });
+      if (stdout.includes(signInStartedLine)) announced();
+    }
+    const code = await child.exited;
+    connection.ended = true;
+    return { code, output: `${stdout}${await stderr}`, stdout };
+  };
+  const passTime = (ms: number) => {
+    now += ms;
+    for (const connection of connections) if (!connection.ended && connection.endsAt <= now) connection.end();
   };
   const prepared = new Set<string>();
   const onNode = (line: string, host: string) => {
@@ -267,10 +291,11 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
       writeSshConfig(boxHome(home, host), signedIn.at);
       return result(true, "Updated \"~/.ssh/config\"");
     }
-    const network = () => coderNetwork(home, reachesCoderAt, options.coderRedirects ?? [], options.coderCli, serverTokens, { configSsh: Boolean(options.coderConfigSshFails), loginKilled: Boolean(options.coderLoginKilled || options.signInTimesOut) }, coderArgv, sessionModes);
+    const login = options.coderLoginKilled ? "killed" : options.signInTimesOut ? "stuck" : options.signInConnectionStalls ? "announces" : undefined;
+    const network = () => coderNetwork(home, reachesCoderAt, options.coderRedirects ?? [], options.coderCli, serverTokens, { configSsh: Boolean(options.coderConfigSshFails), login }, { argv: coderArgv, modes: sessionModes, deadline: armedDeadline, stuck: stuckPids });
     if (line.includes("/api/v2/buildinfo")) return forReal(line, host, input, network());
     if (line.includes("/bin/coder-linux-")) return forReal(line, host, input, undefined, { PATH: `${network()}:/usr/bin:/bin` });
-    if (line.includes("/coderv2")) return forReal(line, host, input, undefined, { PATH: [boxTimeout(home, timeoutLimits, Boolean(options.signInTimesOut)), join(boxHome(home, host), ".local/bin"), "/usr/bin:/bin"].join(":") }, "bash");
+    if (line.includes("/coderv2")) return forReal(line, host, input, undefined, signInEnv(host), "bash");
     if (!options.node && line.includes(" doctor --profile ") && line.endsWith(" --to-do'")) return result(true, "[]\n");
     if (line === "t3 environment list --json") return result(true, JSON.stringify(hubLinks.map((link) => ({ urls: [], access: "full-access", status: "reachable", ...link }))));
     if (line.startsWith("gh auth status")) return ghStatus("box:github", scopes);
@@ -291,11 +316,8 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
       if (remote !== undefined) {
         const host = command.at(-2)!;
         if (options.unreachable?.includes(host)) return { code: 255, output: `ssh: Could not resolve hostname ${host}`, stdout: "" };
+        if (options.signInConnectionStalls && remote.includes("--use-token-as-session")) return stalledConnection(remote, host, run);
         const answer = await box(remote, run.input, host);
-        if (options.signInConnectionStalls && remote.includes("--use-token-as-session")) {
-          if (!run.timeoutMs || run.timeoutMs <= Math.max(...limits()) * 1000) throw new Error("ssh waits for ever on a connection that stopped answering");
-          return { code: 137, output: "", stdout: "" };
-        }
         const firstContact = !host.startsWith("coder.") && !reached.has(host);
         reached.add(host);
         return firstContact ? { ...answer, output: `${answer.output}${hostKeyAdded(host)}` } : answer;
@@ -311,7 +333,6 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
       if (line === "coder whoami -o json") return passes("coder") ? result(true, coderWhoamiJson(coderAt, coderUserId)) : result(false, "You are not logged in");
       if (line.startsWith("coder tokens create --name ")) return passes("coder") ? (tokenNames.set(command[4]!, coderToken), coderTokens.add(coderToken), keepTokens(), result(true, `${coderToken}\n`)) : result(false, "You are not logged in");
       const timed = underTimeout(command);
-      if (timed.limit) appendFileSync(timeoutLimits, `${timed.limit}\n`);
       const removed = timed.command.join(" ").match(/^coder tokens remove (\S+)$/)?.[1];
       if (removed !== undefined && options.coderTokenRemoveHangs) {
         if (!timed.limit) throw new Error("coder tokens remove waits for ever");
@@ -370,14 +391,27 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
     },
     has: () => true,
   };
-  return { machine, clock, calls, starts, runs, sleeps, opened, coderTokens: () => [...tokenNames.keys()], coderArgv: () => (existsSync(coderArgv) ? readFileSync(coderArgv, "utf8") : ""), sessionModes: () => readLines(sessionModes), timeoutLimits: limits, hubUpdates, credentials, hubLinked, sessions: () => [...hereSessions, ...boxSessions], hereLinks: () => hereLinks, peerLinks };
+  return { machine, clock, calls, starts, runs, sleeps, opened, coderTokens: () => [...tokenNames.keys()], coderArgv: () => (existsSync(coderArgv) ? readFileSync(coderArgv, "utf8") : ""), sessionModes: () => readLines(sessionModes), stuckProcesses: () => readLines(stuckPids).map(Number), signInAnnounced, passTime, openConnections: () => connections.filter((connection) => !connection.ended).length, hubUpdates, credentials, hubLinked, sessions: () => [...hereSessions, ...boxSessions], hereLinks: () => hereLinks, peerLinks };
 }
 
 const renewedUntil = "2099-01-01T00:00:00.000Z";
 
 const sshLostExit = 255;
 
-type CoderFails = { configSsh: boolean; loginKilled: boolean };
+type CoderFails = { configSsh: boolean; login: "killed" | "stuck" | "announces" | undefined };
+
+type CoderLogs = { argv: string; modes: string; deadline: string; stuck: string };
+
+const signInStartedLine = "coder login: signing in";
+
+/** True while the process runs; a zombie has ended. */
+export const running = (pid: number) => {
+  try {
+    return !/^\d+ \(.*\) Z /.test(readFileSync(`/proc/${pid}/stat`, "utf8"));
+  } catch {
+    return false;
+  }
+};
 
 const positiveSeconds = /^[1-9]\d*$/;
 
@@ -388,16 +422,17 @@ const underTimeout = (command: string[]) => {
   return { limit: positiveSeconds.test(command[at] ?? "") ? Number(command[at]) : undefined, command: command.slice(at + 1) };
 };
 
-const boxTimeout = (home: string, limitsLog: string, deadline: boolean) => {
+const realTimeout = Bun.which("timeout");
+
+const boxTimeout = (home: string, armed: string) => {
   const bin = join(home, "box-timeout");
   mkdirSync(bin, { recursive: true });
   const lines = [
     "#!/bin/sh",
-    `[ "$1 $2" = "-s KILL" ] || { echo "timeout: the deadline must kill with -s KILL" >&2; exit 125; }`,
-    `case "$3" in "" | 0* | *[!0-9]*) echo "timeout: $3 sets no deadline" >&2; exit 125 ;; esac`,
-    `printf '%s\n' "$3" >> '${limitsLog}'`,
-    "shift 3",
-    deadline ? '"$@"\nkill -9 $$' : 'exec "$@"',
+    "n=0; prev=; limit=",
+    `for a; do n=$((n + 1)); case "$prev" in -k | -s) prev=; continue ;; esac; case "$a" in -k | -s) prev=$a ;; -*) ;; *) limit=$a; break ;; esac; done`,
+    `case "$limit" in "" | 0* | *[!0-9]*) ;; *) echo $$ > '${armed}' ;; esac`,
+    realTimeout ? `exec '${realTimeout}' "$@"` : 'shift "$n"; exec "$@"',
   ];
   writeFileSync(join(bin, "timeout"), `${lines.join("\n")}\n`, { mode: 0o755 });
   return bin;
@@ -405,21 +440,28 @@ const boxTimeout = (home: string, limitsLog: string, deadline: boolean) => {
 
 const writeSshConfig = (boxHomeDir: string, address: string) => (mkdirSync(join(boxHomeDir, ".ssh"), { recursive: true }), writeFileSync(join(boxHomeDir, ".ssh/config"), `# coder ${address}\n`));
 
-const downloadedCoder = (reach: string, serverTokens: string, fails: CoderFails, argvLog: string, modeLog: string) => `#!/bin/sh
-printf '%s\\n' "$*" >> '${argvLog}'
+const loginStart = (login: CoderFails["login"], logs: CoderLogs) => {
+  if (login === "killed") return "kill -9 $$";
+  if (login === "announces") return `echo '${signInStartedLine}'`;
+  if (login !== "stuck") return ":";
+  return [`[ -s '${logs.deadline}' ] || { echo "coder login waits for ever, as nothing on the workspace stops it" >&2; exit 1; }`, "trap '' TERM", `sleep 30 & echo $! >> '${logs.stuck}'`, `echo $$ >> '${logs.stuck}'`, `kill -ALRM "$(cat '${logs.deadline}')"`, "exec sleep 30"].join("\n  ");
+};
+
+const downloadedCoder = (reach: string, serverTokens: string, fails: CoderFails, logs: CoderLogs) => `#!/bin/sh
+printf '%s\\n' "$*" >> '${logs.argv}'
 d="\${CODER_CONFIG_DIR:-\${XDG_CONFIG_HOME:-$HOME/.config}/coderv2}"
 valid() { case "$1" in ${personCoderToken} | person-login | coder-made-session) return 0 ;; esac; grep -qxF -- "$1" '${serverTokens}'; }
 case "$1" in
 version) ;;
 login)
   shift; u=; own=
-  ${fails.loginKilled ? "kill -9 $$" : ":"}
+  ${loginStart(fails.login, logs)}
   for a; do case "$a" in --use-token-as-session) own=1 ;; --token=*) CODER_SESSION_TOKEN=\${a#--token=} ;; -*) echo "error: unknown flag $a" >&2; exit 2 ;; *) u=$a ;; esac; done
   [ "$u" = '${reach}' ] || { echo "error: dial $u: connection timed out" >&2; exit 1; }
   t=\${CODER_SESSION_TOKEN:-person-login}
   valid "$t" || { echo "error: get user: unauthorized" >&2; exit 1; }
   [ -z "$CODER_SESSION_TOKEN" ] || [ -n "$own" ] || t=coder-made-session
-  umask 077 && mkdir -p "$d" && printf %s "$t" > "$d/session" && ls -ln "$d/session" | cut -c1-10 >> '${modeLog}' && printf %s "$u" > "$d/url" ;;
+  umask 077 && mkdir -p "$d" && printf %s "$t" > "$d/session" && ls -ln "$d/session" | cut -c1-10 >> '${logs.modes}' && printf %s "$u" > "$d/url" ;;
 config-ssh)
   t=\${CODER_SESSION_TOKEN:-$(cat "$d/session" 2>/dev/null)}
   valid "$t" || { echo "You are not logged in" >&2; exit 1; }
@@ -429,10 +471,10 @@ config-ssh)
 esac
 `;
 
-function coderNetwork(home: string, reach: string, redirects: Array<"probe" | "binary">, cli: "non-200" | "empty" | "broken" | undefined, serverTokens: string, fails: CoderFails, argvLog: string, modeLog: string) {
+function coderNetwork(home: string, reach: string, redirects: Array<"probe" | "binary">, cli: "non-200" | "empty" | "broken" | undefined, serverTokens: string, fails: CoderFails, logs: CoderLogs) {
   const bin = join(home, "coder-network");
   mkdirSync(bin, { recursive: true });
-  writeFileSync(join(bin, "coder-cli"), cli === "empty" ? "" : cli === "broken" ? "#!/bin/sh\nexit 1\n" : downloadedCoder(reach, serverTokens, fails, argvLog, modeLog), { mode: 0o755 });
+  writeFileSync(join(bin, "coder-cli"), cli === "empty" ? "" : cli === "broken" ? "#!/bin/sh\nexit 1\n" : downloadedCoder(reach, serverTokens, fails, logs), { mode: 0o755 });
   const lines = [
     "#!/bin/sh",
     `out=; url=; prev=; https=; w=; hops=; follow=`,
