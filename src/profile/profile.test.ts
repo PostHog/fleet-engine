@@ -3,7 +3,9 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { PackManifest, ProfileFile } from "../pack/types.ts";
 import { isolateGit, spawnGit, template, tempDirs } from "../testing/git.ts";
-import { activeChoices, loadMachine, loadProfile, ProfileError, pushSetting, readProfileFile, saveAnswers, saveMachine, thisMachine, workflowOverrides } from "./profile.ts";
+import { activeChoices, loadMachine, loadProfile, ProfileError, saveAnswers, saveMachine, thisMachine, workflowOverrides } from "./profile.ts";
+import { realMachine } from "../setup/commands.ts";
+import { pushAnswers } from "../setup/profile.ts";
 
 isolateGit();
 const temp = tempDirs();
@@ -192,24 +194,25 @@ describe("saving answers", () => {
     expect(readFileSync(join(dir, "hedge.json"), "utf8")).toBe(edited);
   });
 
-  test("a devbox setting whose push comes after another machine's always says to bring the checkout up to date, and to drop setup's commit only when setup made one", async () => {
+  test("a setup save whose push comes after another machine's always says to bring the checkout up to date, and to drop setup's commit only when setup made one", async () => {
     const pushAfterElsewhere = async (value: string) => {
       const { dir, elsewhere } = await profileBehind();
       await elsewhere((file) => ({ ...file, settings: { "orchestration.loopProject": "~/code/app" } }));
       await spawnGit(dir, "pull", "-q");
       await elsewhere((file) => ({ ...file, plan: "claude" }));
       const before = await spawnGit(dir, "rev-parse", "HEAD");
-      const error = await pushSetting(dir, "orchestration.loopProject", value, ["origin", "HEAD:main"], readProfileFile(dir)).catch((caught: Error) => caught);
+      const committed = await saveAnswers(dir, { settings: { "orchestration.loopProject": value } });
+      const error = await pushAnswers(realMachine, dir, ["origin", "HEAD:main"], committed).catch((caught: Error) => caught);
       return { dir, error: (error as Error).message, made: (await spawnGit(dir, "rev-parse", "HEAD")) !== before };
     };
 
     const unchanged = await pushAfterElsewhere("~/code/app");
     expect(unchanged.made).toBe(false);
-    expect(unchanged.error).toBe(`${unchanged.dir}: another machine pushed to your profile before setup could. Bring ${unchanged.dir} up to date with git -C ${unchanged.dir} pull --rebase --autostash, then run the same hedge setup command again.`);
+    expect(unchanged.error).toBe(`another machine pushed to your profile before setup could. Bring ${unchanged.dir} up to date with git -C ${unchanged.dir} pull --rebase --autostash, then run the same hedge setup command again.`);
 
     const changed = await pushAfterElsewhere("~/code/other");
     expect(changed.made).toBe(true);
-    expect(changed.error).toBe(`${changed.dir}: another machine pushed to your profile before setup could. Bring ${changed.dir} up to date with git -C ${changed.dir} pull --rebase --autostash, or drop setup's commit, then run the same hedge setup command again.`);
+    expect(changed.error).toBe(`another machine pushed to your profile before setup could. Bring ${changed.dir} up to date with git -C ${changed.dir} pull --rebase --autostash, or drop setup's commit, then run the same hedge setup command again.`);
   });
 
   test("a failed push never shows the credentials in the remote's URL", async () => {

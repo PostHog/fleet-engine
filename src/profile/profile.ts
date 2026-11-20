@@ -1,8 +1,8 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import type { MachineFile, PackManifest, Profile, ProfileFile, SettingValue, SourceRef } from "../pack/types.ts";
+import type { MachineFile, PackManifest, Profile, ProfileFile, SourceRef } from "../pack/types.ts";
 import { configEntryProblem, isModelRow } from "../pack/manifest.ts";
 import { sourceName } from "../pack/sources.ts";
 import { withoutCredentials } from "../credentials.ts";
@@ -49,38 +49,24 @@ async function rebasing(dir: string) {
 export async function saveAnswers(dir: string, answers: Partial<ProfileFile>, options: { push?: boolean } = {}) {
   refuseLegacyPath(dir);
   const path = profileFile(dir);
+  const name = basename(path);
   refuseLegacyPath(path);
   if (options.push) await pullUnder(dir, path, answers);
-  const saved = await commitAnswers(dir, answers);
-  if (options.push) await push(dir);
-  return saved;
-}
-
-export type ProfileRead = { name: string; text: string };
-
-export function readProfileFile(dir: string): ProfileRead {
-  const path = profileFile(dir);
-  return { name: basename(path), text: readFileSync(path, "utf8") };
-}
-
-export function checkUnchanged(dir: string, seen: ProfileRead) {
-  if (!existsSync(join(dir, seen.name))) throw new ProfileError(removedOnOrigin(dir, seen.name));
-  if (basename(profileFile(dir)) !== seen.name || readFileSync(join(dir, seen.name), "utf8") !== seen.text) throw new ProfileError(changedMeanwhile(dir));
-}
-
-export async function pushSetting(dir: string, key: string, value: SettingValue, target: string[], snapshot: ProfileRead): Promise<ProfileRead> {
-  refuseLegacyPath(dir);
-  const { name } = snapshot;
-  const path = join(dir, name);
   refuseLegacyPath(path);
-  const edited = await run(dir, "git", "status", "--porcelain", "--", name);
-  if (!edited.ok) throw new ProfileError(`${dir}: could not check ${name}: ${edited.stderr}`);
-  if (edited.stdout) throw new ProfileError(`${dir}: ${name} has changes that are not committed. Commit or discard them, then try again.`);
-  checkUnchanged(dir, snapshot);
-  const { committed, written } = await commitAnswers(dir, { settings: { [key]: value } }, path);
-  const pushed = await run(dir, "git", "push", "-q", ...target);
-  if (pushed.ok) return written;
-  throw pushedBehind(pushed.stderr) ? new ProfileError(`${dir}: ${pushedFirst(dir, committed)}`) : pushFailed(dir, pushed.stderr);
+  const current = (await readJson(path)) ?? { schema: 1 };
+  if (current.schema !== 1) throw new ProfileError(`${path}: unknown schema ${String(current.schema)}`);
+  const settings = { ...(current.settings as Record<string, unknown> | undefined), ...answers.settings };
+  await writeFile(path, JSON.stringify({ ...current, ...answers, settings, schema: 1 }, null, 2) + "\n");
+  const added = await run(dir, "git", "add", "--", name);
+  if (!added.ok) throw new ProfileError(`${dir}: could not stage ${name}: ${added.stderr}`);
+  const changed = await run(dir, "git", "diff", "--cached", "--quiet", "--", name);
+  if (changed.code !== 0 && changed.code !== 1) throw new ProfileError(`${dir}: could not compare ${name}: ${changed.stderr}`);
+  if (changed.code === 1) {
+    const committed = await run(dir, "git", "commit", "-q", "-m", "Save Hedge answers", "--", name);
+    if (!committed.ok) throw new ProfileError(`${dir}: could not commit answers: ${committed.stderr}`);
+  }
+  if (options.push) await push(dir);
+  return changed.code === 1;
 }
 
 const bringUpToDate = (dir: string, committed: boolean) => `Bring ${dir} up to date with git -C ${dir} pull --rebase --autostash${committed ? ", or drop setup's commit" : ""}, then run the same hedge setup command again.`;
@@ -88,28 +74,6 @@ const bringUpToDate = (dir: string, committed: boolean) => `Bring ${dir} up to d
 export const divergedFromOrigin = (dir: string) => `${bothChanged(dir, "origin")} ${bringUpToDate(dir, false)}`;
 
 export const pushedFirst = (dir: string, committed: boolean) => `another machine pushed to your profile before setup could. ${bringUpToDate(dir, committed)}`;
-
-export const changedMeanwhile = (dir: string) => `another machine saved your profile in ${dir} while setup ran. Run the same hedge setup command again: it starts from the profile as it is now.`;
-
-export const removedOnOrigin = (dir: string, name: string) => `${dir}: your profile's ${name} was removed on origin. Restore it there, then run the same hedge setup command again.`;
-
-async function commitAnswers(dir: string, answers: Partial<ProfileFile>, path = profileFile(dir)): Promise<{ committed: boolean; written: ProfileRead }> {
-  const name = basename(path);
-  refuseLegacyPath(path);
-  const current = (await readJson(path)) ?? { schema: 1 };
-  if (current.schema !== 1) throw new ProfileError(`${path}: unknown schema ${String(current.schema)}`);
-  const settings = { ...(current.settings as Record<string, unknown> | undefined), ...answers.settings };
-  const written = { name, text: JSON.stringify({ ...current, ...answers, settings, schema: 1 }, null, 2) + "\n" };
-  await writeFile(path, written.text);
-  const added = await run(dir, "git", "add", "--", name);
-  if (!added.ok) throw new ProfileError(`${dir}: could not stage ${name}: ${added.stderr}`);
-  const changed = await run(dir, "git", "diff", "--cached", "--quiet", "--", name);
-  if (changed.code !== 0 && changed.code !== 1) throw new ProfileError(`${dir}: could not compare ${name}: ${changed.stderr}`);
-  if (changed.code === 0) return { committed: false, written };
-  const committed = await run(dir, "git", "commit", "-q", "-m", "Save Hedge answers", "--", name);
-  if (!committed.ok) throw new ProfileError(`${dir}: could not commit answers: ${committed.stderr}`);
-  return { committed: true, written };
-}
 
 async function pullUnder(dir: string, path: string, answers: Partial<ProfileFile>) {
   const before = await readJson(path);
@@ -123,18 +87,18 @@ export function bothChanged(dir: string, other: string) {
   return `${dir} and ${other} both have changes the other lacks.`;
 }
 
-async function push(dir: string, target: string[] = []) {
-  const pushed = await run(dir, "git", "push", "-q", ...target);
+async function push(dir: string) {
+  const pushed = await run(dir, "git", "push", "-q");
   if (!pushed.ok) throw pushFailed(dir, pushed.stderr);
 }
 
-export const pushedBehind = (stderr: string) => /\((fetch first|non-fast-forward)\)/.test(stderr);
-
-function pushFailed(dir: string, stderr: string) {
+export function pushFailed(dir: string, stderr: string) {
   const reason = gitReason(stderr);
   const recovery = pushedBehind(stderr) ? ` ${bothChanged(dir, "its remote")} Run git -C ${dir} pull --rebase, then try again.` : reason ? " Fix that, then try again." : "";
   return new ProfileError(`${dir}: could not push answers${reason ? `: ${reason}.` : "."}${recovery}`);
 }
+
+export const pushedBehind = (stderr: string) => /\((fetch first|non-fast-forward)\)/.test(stderr);
 
 function gitReason(stderr: string) {
   const line = stderr.split("\n").map((text) => withoutCredentials(text).replace(/\s+/g, " ").trim()).find((text) => text && !text.startsWith("To ") && !text.startsWith("hint:"));

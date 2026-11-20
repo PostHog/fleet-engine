@@ -27,19 +27,14 @@
 - Setup starts a new ChatGPT sign-in only when Codex says the old one is
   gone. When Codex cannot tell, setup keeps the sign-in and says why. It
   reads the Codex credentials store from `config.toml` as TOML.
-- Setup saves your answers as changes on top of what your other machines
-  pushed: a pack another machine added stays when a rerun removes another
-  pack, and a node's setting never overwrites a setting saved meanwhile.
-  Setup reads the profile file once, when it starts. Every save checks,
-  just before it writes, that the file has the same name and text as then,
-  or as setup's own last save wrote it.
-  When another machine changed it, or moved it between `fleet.json` and
-  `hedge.json`, setup stops and says to run the same command again. Setup
-  also stops when its own fetch before apply took a change. When another
-  machine pushes first, setup stops and keeps its commit. It says to bring
-  the checkout up to date with `git -C <profile> pull --rebase --autostash`,
-  or to drop its commit when it made one, and then to run the same command
-  again.
+- Setup takes the profile's new commits when it starts, before it reads
+  your answers, so a rerun keeps what another machine pushed before it. When
+  another machine pushes first, setup stops and keeps its commit. It says to
+  bring the checkout up to date with
+  `git -C <profile> pull --rebase --autostash`, or to drop its commit when
+  it made one, and then to run the same command again. Two machines that
+  save the same profile at the same time can overwrite each other's
+  answers, as before.
 - Setup takes and saves the profile only on `origin`. When the checkout's
   branch tracks a local branch or another remote, setup stops before it
   commits and says to point the branch at `origin`.

@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { copyFile, mkdir, writeFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import type { PackManifest, Profile, ProfileFile, SettingValue } from "../pack/types.ts";
-import { bothChanged, checkUnchanged, loadProfile, pushedBehind, pushedFirst, readProfileFile, saveAnswers, type ProfileRead } from "../profile/profile.ts";
+import { bothChanged, loadProfile, pullProfile, pushedBehind, pushedFirst, pushFailed, saveAnswers } from "../profile/profile.ts";
 import type { Machine } from "./commands.ts";
 import { defaultSources, engineRepo } from "./defaults.ts";
 import { profileFile } from "../legacy.ts";
@@ -27,9 +27,8 @@ export type ProfileContext = {
   draft: Draft;
   current?: string;
   packs(): PackManifest[];
-  snapshot?(): ProfileRead | undefined;
   /** Called once hedge.json holds every answer and is pushed: the draft is no longer needed. */
-  saved(dir: string, written: ProfileRead): Promise<void>;
+  saved(dir: string): Promise<void>;
 };
 
 export function profileStep(context: ProfileContext): Step {
@@ -111,17 +110,14 @@ async function lookUp(machine: Machine, home: string, packs: PackManifest[], pic
 
 const same = (a: string | undefined, b: string | undefined) => a !== undefined && b !== undefined && a.toLowerCase() === b.toLowerCase();
 
-export async function existingProfile(machine: Machine, home: string, packs: PackManifest[], picked: string[]): Promise<{ profile: Profile; snapshot: ProfileRead } | undefined> {
+export async function existingProfile(machine: Machine, home: string, packs: PackManifest[], picked: string[]): Promise<Profile | undefined> {
   const { found, dir } = await lookUp(machine, home, packs, picked);
-  if (!found || !existsSync(profileFile(dir))) return undefined;
-  const snapshot = readProfileFile(dir);
-  return { profile: await loadProfile(dir), snapshot };
+  return found && existsSync(profileFile(dir)) ? loadProfile(dir) : undefined;
 }
 
 async function makeProfile(context: ProfileContext) {
   const { terminal, machine, home, draft } = context;
   const { gh, login, exists, personal, org, team, dir, found } = await lookUp(machine, home, context.packs(), draft.packs ?? [], context.current);
-  if (found && (await machine.exec(["git", "-C", dir, "status", "--porcelain", "--", basename(profileFile(dir))])).output.trim()) throw new Error(`${dir}: ${basename(profileFile(dir))} has changes that are not committed. Commit or discard them, then try again.`);
   const create = (repo: string, description: string) => machine.exec(["gh", "repo", "create", repo, "--private", "--description", description]);
   let profileRepo = found ?? team ?? personal;
   const saved = found ? savedSettings(dir) : {};
@@ -150,8 +146,6 @@ async function makeProfile(context: ProfileContext) {
   const target = await saveTarget(machine, dir);
   await git(machine, dir, "config", "user.name", login);
   await git(machine, dir, "config", "user.email", `${login}@users.noreply.github.com`);
-  const seen = found ? context.snapshot?.() : undefined;
-  if (seen) checkUnchanged(dir, seen);
   await startFiles(dir, context, same(profileRepo, team) ? org : undefined);
   const started = await untracked(machine, dir, startFileNames);
   const answeredElsewhere = (draft.inferred ?? []).filter((key) => Object.hasOwn(saved, key));
@@ -166,13 +160,21 @@ async function makeProfile(context: ProfileContext) {
     await git(machine, dir, "add", "--", ...started);
     await git(machine, dir, "commit", "-q", "-m", "Start my Hedge profile", "--", ...started);
   }
-  const { committed: answered, written } = await saveAnswers(dir, answers);
-  const committed = answered || started.length > 0;
-  const pushed = await machine.exec(["git", "-C", dir, "push", "-q", ...target]);
-  if (pushed.code !== 0 && pushedBehind(pushed.output)) throw new Error(pushedFirst(dir, committed));
-  if (pushed.code !== 0) throw new Error(`git push in ${dir} failed: ${lastLine(pushed.output)}`);
+  const answered = await saveAnswers(dir, answers);
+  await pushAnswers(machine, dir, target, answered || started.length > 0);
   terminal.print(`  ✓ Saved your answers in ${profileRepo}. Every machine of yours reads it.`);
-  await context.saved(dir, written);
+  await context.saved(dir);
+}
+
+export async function saveSettings(machine: Machine, dir: string, settings: Record<string, SettingValue>) {
+  const target = await saveTarget(machine, dir);
+  await pullProfile(dir);
+  await pushAnswers(machine, dir, target, await saveAnswers(dir, { settings }));
+}
+
+export async function pushAnswers(machine: Machine, dir: string, target: string[], committed: boolean) {
+  const pushed = await machine.exec(["git", "-C", dir, "push", "-q", ...target]);
+  if (pushed.code !== 0) throw pushedBehind(pushed.output) ? new Error(pushedFirst(dir, committed)) : pushFailed(dir, pushed.output);
 }
 
 /** The profile repo this machine's clone already uses, when its name is one setup makes for this login. */
