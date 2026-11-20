@@ -555,7 +555,7 @@ const listItem = /^\s*(?:[-*]|\d+[.)])\s+(.*)/;
 const severityField = /^\**(blocker|major|minor|nit)\**$/i;
 const severityShorthand = /^\**(?:minor|nit)(?:[,:]\**|\**[,:])\s/i;
 
-const fieldsOutsideCode = (text: string) => listItem.exec(text.split("\n")[0]!)?.[1]
+const fieldsOutsideCode = (text: string) => listItem.exec(text.replace(/\s*\n\s*/g, " "))?.[1]
   ?.replace(/(`+)[^`][\s\S]*?\1(?!`)/g, (span) => span.replace(/\|/g, "\u0000")).split("|").map((field) => field.replace(/\u0000/g, "|").trim());
 
 const itemFields = (text: string) => listItem.exec(text.split("\n")[0]!)?.[1]?.split("|").map((field) => field.trim());

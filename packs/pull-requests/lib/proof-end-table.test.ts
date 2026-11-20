@@ -478,5 +478,5 @@ test("a base commit from GitHub that is not a string counts unknown, and the gat
   const gate = await pr.hedge("gate");
 
   expect(gate.output).not.toContain("TypeError");
-  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | unknown at HEAD | none |");
+  expect(tableIn((await pr.decide("report", "--pr", "example/product#42")).output)[1]).toBe("| example/product#42 | no review | unknown at HEAD | not run | none |");
 });

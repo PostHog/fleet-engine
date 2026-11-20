@@ -204,3 +204,29 @@ test("a pipe inside code in a finding stays in its field, so a docs file buys no
   await code.commit("feature.ts", lines(11, "greet"));
   expect((await code.hedge("review-start", "--scope", "fixes", "--base", codeReviewed)).code).toBe(0);
 });
+
+test("past twice the first lines with GitHub's base commit missing here, the next round waits for the fetch, not a skipped sanity pass", async () => {
+  const pr = await checkout();
+  const reviewed = await firstRound(pr, ["- major | feature.ts:2 | the greeting drops the last name | anchor: greet 1"], ["1. fixed: the greeting keeps it"]);
+  await pr.commit("feature.ts", lines(21, "greet"));
+  pr.pullRequestState({ baseSha: "0123456789abcdef0123456789abcdef01234567" });
+
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(
+    "Hedge cannot count the production lines at HEAD, since the base commit 0123456 that GitHub reports is not in this checkout. Run git fetch origin main, then run this command again");
+});
+
+test("a [base] marker on the wrapped line of a finding still keeps it from buying a round", async () => {
+  const pr = await checkout();
+  const reviewed = await firstRound(pr, ["- major | feature.ts:2 |", "  [base] the base drops an empty name too, base feature.ts:2 | anchor: greet 1"], ["1. fixed: an empty name is kept now"]);
+  await pr.commit("feature.ts", lines(11, "greet"));
+
+  await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(stops);
+});
+
+test("a sanity reason the receipt would read as a figure is refused when it is recorded", async () => {
+  const pr = await checkout();
+  await firstRound(pr, ["- major | feature.ts:2 | the greeting drops the last name | anchor: greet 1"], ["1. fixed: the greeting keeps it"]);
+  await pr.commit("feature.ts", lines(21, "greet"));
+
+  await expect(pr.hedge("sanity", "--verdict", "justified", "--reason", "Compare 48   213 rows")).rejects.toThrow("looks like a production figure");
+});
