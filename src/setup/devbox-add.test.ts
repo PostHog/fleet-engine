@@ -58,7 +58,7 @@ describe("hedge devbox add", () => {
 
     const box = fakeMachine(home);
     expect(await main(["devbox", "add", "node-2"], { ...options, setup: { machine: box.machine } })).toBe(0);
-    expect(io.output()).toEndWith("node-2 is your devbox now. It runs your profile, and T3 Code here and there can reach each other.\nWhen ssh node-2 shows a Coder startup log with a ✘, that log is from when node-2 started, before Hedge set it up. It clears when node-2 restarts.");
+    expect(io.output()).toEndWith("node-2 is your devbox now. It runs your profile, and T3 Code here and there can reach each other.");
     expect(machineFile(home).devboxes).toEqual(["node-2"]);
     expect(machineFile(home).setup.done).toContain("devbox:node-2:link");
 
@@ -186,6 +186,7 @@ describe("hedge devbox add", () => {
     const box = fakeMachine(home, { "box:coder": 1 });
     expect(await main(["devbox", "add", "coder.hedge-node-1"], { ...options, setup: { machine: box.machine } })).toBe(0);
     expect(io.output()).toContain("  ✓ Sign in to Coder on coder.hedge-node-1: done");
+    expect(io.output()).toEndWith("coder.hedge-node-1 is your devbox now. It runs your profile, and T3 Code here and there can reach each other.\nWhen ssh coder.hedge-node-1 shows a Coder startup log with a ✘, that log is from when coder.hedge-node-1 last started, before Hedge set it up. The startup script runs again when coder.hedge-node-1 restarts.");
     const sshConfig = (host: string) => readFileSync(join(boxHome(home, host), ".ssh/config"), "utf8");
     expect(sshConfig("coder.hedge-node-1")).toBe("# coder https://coder.example.com\n");
     const coderFile = (name: string) => join(boxHome(home, "coder.hedge-node-1"), ".config/coderv2", name);
