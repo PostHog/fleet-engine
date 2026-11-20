@@ -59,6 +59,7 @@ export const scenes = {
   hub: hog("space-hog"),
   packs: hog("explorer-hog"),
   empty: hog("detective-hog"),
+  lessons: hog("laptop-hog-02"),
 };
 
 export const logos = { light: "posthog-logo-light.svg", dark: "posthog-logo-dark.svg" };
@@ -68,7 +69,7 @@ export const artFiles = () => [
     ...Object.values(packCast).map((role) => role.art.file),
     teamRole("").art.file,
     ...scenes.problems.map((problem) => problem.art.file),
-    ...[scenes.hedge, scenes.hub, scenes.packs, scenes.empty].map((art) => art.file),
+    ...[scenes.hedge, scenes.hub, scenes.packs, scenes.empty, scenes.lessons].map((art) => art.file),
     logos.light,
     logos.dark,
   ]),

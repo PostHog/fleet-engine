@@ -72,7 +72,7 @@ const usage = `Hedge: one setup for T3 Code, agents, and your workflows
   hedge <command>    Run a command that one of your packs ships`;
 
 const changes = { packs: packsCommand, settings: settingsCommand, set: setCommand };
-const builtins: Record<string, string[]> = { apply: [], doctor: [], update: [], packs: [], settings: [], set: [], hub: ["here", "status"], devbox: ["add", "remove", "address"], run: [], credential: [], setup: [], triage: [] };
+export const builtins: Record<string, string[]> = { apply: [], doctor: [], update: [], packs: [], settings: [], set: [], hub: ["here", "status"], devbox: ["add", "remove", "address"], run: [], credential: [], setup: [], triage: [] };
 
 
 export async function main(argv: string[], options: CliOptions): Promise<number> {

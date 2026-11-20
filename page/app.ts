@@ -127,12 +127,27 @@ function player(dialog: HTMLDialogElement) {
   dialog.addEventListener("close", () => video.pause());
 }
 
+function chapters(video: HTMLVideoElement) {
+  const buttons = [...document.querySelectorAll<HTMLButtonElement>("button[data-seek]")];
+  for (const button of buttons)
+    button.addEventListener("click", () => {
+      video.currentTime = Number(button.dataset.seek);
+      video.play().catch(() => {});
+    });
+  video.addEventListener("timeupdate", () => {
+    const current = buttons.filter((button) => Number(button.dataset.seek) <= video.currentTime + 0.05).at(-1);
+    for (const button of buttons) button.setAttribute("aria-current", String(button === current));
+  });
+}
+
 const chooserForm = document.getElementById("chooser") as HTMLFormElement | null;
 const pickerForm = document.getElementById("picker") as HTMLFormElement | null;
 if (chooserForm && data) chooser(chooserForm, data);
 if (pickerForm && data) picker(pickerForm, data);
 const playerDialog = document.querySelector<HTMLDialogElement>("dialog.player");
 if (playerDialog) player(playerDialog);
+const lessonVideo = document.getElementById("lesson-video") as HTMLVideoElement | null;
+if (lessonVideo) chapters(lessonVideo);
 copyButtons();
 selectLinks();
 linksFromDisk();

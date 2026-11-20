@@ -1,6 +1,7 @@
 import { crew, logos, packCast, packGroups, packVideos, scenes, teamRole, type Art, type Role, type Tone } from "./cast.ts";
 import { packFlows } from "./flows.ts";
 import { brandIcons, packIcon, uiIcons } from "./icons.ts";
+import { clock, minutes, shelves, type BuiltLesson } from "./lessons.ts";
 import { logoMark } from "./logo.ts";
 import { firstStart, installPrompt, promptData, startPacksOn, startPrompt, type PageData, type PagePack } from "./model.ts";
 import { esc, fmt, promptHtml, t3Link } from "./prompt.ts";
@@ -11,7 +12,7 @@ export type Route = { path: string; html: string };
 
 export type Assets = { script: string; styles: string };
 
-type Frame = { root: string; title: string; description: string; current?: "packs"; body: string; data?: unknown };
+type Frame = { root: string; title: string; description: string; current?: "packs" | "learn"; body: string; data?: unknown };
 
 const pitch = [
   { head: "Always on.", line: "Agents keep working when you close your Mac or go to sleep." },
@@ -20,7 +21,7 @@ const pitch = [
   { head: "Grows with your work.", line: "Add a node when you need more agents at once." },
 ];
 
-export function site(data: PageData, sizes: ArtSizes, assets: Assets): Route[] {
+export function site(data: PageData, sizes: ArtSizes, assets: Assets, lessons: BuiltLesson[] = []): Route[] {
   const repoUrl = `https://github.com/${data.engineRepo}`;
   const packOf = (name: string) => data.packs.find((pack) => pack.name === name)!;
   const roleOf = (pack: PagePack): Role => packCast[pack.name] ?? teamRole(pack.summary);
@@ -56,14 +57,14 @@ export function site(data: PageData, sizes: ArtSizes, assets: Assets): Route[] {
 <header class="top"><div class="wrap top-in">
   <a class="brand" href="${root}"><span class="mark" aria-hidden="true">${logoMark}</span><span>Hedge</span></a>
   <span class="byline"><span>a side project at</span>${posthogLogo(root)}</span>
-  <nav aria-label="Site"><a href="${root}packs/"${current === "packs" ? ' aria-current="page"' : ""}>Packs</a><a href="${repoUrl}">GitHub</a><a class="btn btn-yellow small" href="${root}#start">Get started</a></nav>
+  <nav aria-label="Site">${lessons.length ? `<a href="${root}learn/"${current === "learn" ? ' aria-current="page"' : ""}>Learn</a>` : ""}<a href="${root}packs/"${current === "packs" ? ' aria-current="page"' : ""}>Packs</a><a href="${repoUrl}">GitHub</a><a class="btn btn-yellow small" href="${root}#start">Get started</a></nav>
 </div></header>
 <main id="main">
 ${body}
 </main>
 <footer class="foot"><div class="wrap foot-in">
   <div class="foot-brand"><a class="brand" href="${root}"><span class="mark" aria-hidden="true">${logoMark}</span><span>Hedge</span></a><p>Your coding agents, in the cloud.</p></div>
-  <nav aria-label="More"><a href="${root}#start">Get started</a><a href="${root}packs/">Packs</a><a href="${repoUrl}">GitHub</a><a href="${repoUrl}#set-it-up-by-hand">Set it up by hand</a></nav>
+  <nav aria-label="More"><a href="${root}#start">Get started</a>${lessons.length ? `<a href="${root}learn/">Learn</a>` : ""}<a href="${root}packs/">Packs</a><a href="${repoUrl}">GitHub</a><a href="${repoUrl}#set-it-up-by-hand">Set it up by hand</a></nav>
   <p class="foot-note"><span>A side project at</span>${posthogLogo(root)}<span>The hedgehogs and the PostHog logo belong to PostHog.</span><a href="${repoUrl}/tree/main/page/art">Credits</a></p>
 </div></footer>
 ${pageJson ? `<script id="hedge-data" type="application/json">${JSON.stringify(pageJson).replaceAll("<", "\\u003c")}</script>\n` : ""}<script>${assets.script.replace(/<\/script/gi, "<\\/script")}</script>
@@ -97,6 +98,64 @@ ${pageJson ? `<script id="hedge-data" type="application/json">${JSON.stringify(p
     </section>`;
   };
 
+  const lessonPath = (root: string, file: string) => `${root}assets/lessons/${file}`;
+  const lessonOf = (id: string) => lessons.find((lesson) => lesson.id === id);
+  const firstLesson = lessons.find((lesson) => lesson.shelf === "start");
+
+  const lessonCard = (root: string, lesson: BuiltLesson, big = false) => `<li class="lesson-card${big ? " big" : ""}"><a href="${root}learn/${lesson.id}/">
+      <span class="poster"><img src="${lessonPath(root, lesson.cut.poster)}" width="1280" height="720" alt="" loading="lazy" decoding="async"><span class="watch">${uiIcons.play}${minutes(lesson.cut.seconds)}</span></span>
+      <span class="lesson-name">${esc(lesson.title)}</span>
+      <span class="lesson-for">${esc(lesson.for)}</span>
+    </a></li>`;
+
+  const learnBand = (root: string) => {
+    const start = lessons.filter((lesson) => lesson.shelf === "start");
+    if (!start.length) return "";
+    return `<section class="band" aria-labelledby="learn-h"><div class="wrap">
+  <header class="band-head"><p class="eyebrow">Learn Hedge</p><h2 id="learn-h">Watch how Hedge works.</h2><p class="lead">Short lessons with a narrator and drawings, each with its text beside it.</p></header>
+  <ul class="lesson-grid">${start.map((lesson) => lessonCard(root, lesson, true)).join("")}</ul>
+  <p class="after"><a class="link-arrow" href="${root}learn/">All lessons${uiIcons.arrow}</a></p>
+</div></section>`;
+  };
+
+  const library = () => {
+    const root = "../";
+    const body = `<section class="hero hero-small"><div class="wrap hero-in">
+  <div class="hero-text">
+    <h1>Learn <mark>Hedge</mark>.</h1>
+    <p class="lead">Start with what Hedge is. Each lesson has its full text below the video, so you can read it too.</p>
+  </div>
+  ${stage(root, scenes.lessons, "sky", true)}
+</div></section>
+${shelves
+  .map((shelf) => ({ ...shelf, lessons: lessons.filter((lesson) => lesson.shelf === shelf.id) }))
+  .filter((shelf) => shelf.lessons.length)
+  .map((shelf) => `<section class="band band-tight" aria-labelledby="shelf-${shelf.id}"><div class="wrap"><h2 class="group-head" id="shelf-${shelf.id}">${shelf.title}</h2><ul class="lesson-grid">${shelf.lessons.map((lesson) => lessonCard(root, lesson)).join("")}</ul></div></section>`)
+  .join("\n")}`;
+    return frame({ root, current: "learn", title: "Learn Hedge: lessons with a narrator", description: "Video lessons that show how Hedge works: the hub, the nodes, and the T3 Code inbox. Each lesson has its full text.", body });
+  };
+
+  const lessonPage = (lesson: BuiltLesson) => {
+    const root = "../../";
+    const next = lesson.next ? lessonOf(lesson.next) : undefined;
+    const chapters = lesson.chapters.map((chapter, index) => ({ ...chapter, at: lesson.cut.chapters[index]!, anchor: `chapter-${index + 1}` }));
+    const body = `<section class="hero hero-small"><div class="wrap">
+  <a class="back" href="../">${uiIcons.arrow}All lessons</a>
+  <h1>${esc(lesson.title)}</h1>
+  <dl class="lesson-facts"><div><dt>For</dt><dd>${esc(lesson.for)}</dd></div><div><dt>After it</dt><dd>${esc(lesson.after)}</dd></div></dl>
+</div></section>
+<section class="band band-tight" aria-label="Video"><div class="wrap lesson-watch">
+  <video id="lesson-video" class="clip" src="${lessonPath(root, lesson.cut.video)}" poster="${lessonPath(root, lesson.cut.poster)}" width="1280" height="720" controls playsinline preload="metadata"><track kind="captions" srclang="en" label="English" src="${lessonPath(root, `${lesson.id}.vtt`)}"></video>
+  <nav class="chapters" aria-label="Chapters"><h2>Chapters</h2><ol>${chapters.map((chapter) => `<li><button type="button" data-seek="${chapter.at}"><span class="at">${clock(chapter.at)}</span>${esc(chapter.headline)}</button></li>`).join("")}</ol></nav>
+</div></section>
+<section class="band band-tight" aria-labelledby="text-h"><div class="wrap lesson-text">
+  <h2 id="text-h">The lesson as text</h2>
+  ${chapters.map((chapter) => `<h3 id="${chapter.anchor}">${esc(chapter.headline)}</h3><p>${fmt(chapter.text)}</p>`).join("\n  ")}
+  ${next ? `<p class="after"><a class="link-arrow" href="../${next.id}/">Next lesson: ${esc(next.title)}${uiIcons.arrow}</a></p>` : ""}
+</div></section>`;
+    return frame({ root, current: "learn", title: `${lesson.title}: a Hedge lesson`, description: `${lesson.for} ${lesson.after}`, body });
+  };
+
   const landing = () => {
     const root = "./";
     const crewHtml = crew.map(({ pack, says }) => `<figure class="mate"><span class="bubble">${esc(says)}</span>${image(root, roleOf(packOf(pack)).art, true)}</figure>`).join("");
@@ -125,12 +184,14 @@ ${pageJson ? `<script id="hedge-data" type="application/json">${JSON.stringify(p
     </ul>
   </div>
 </div></section>
+${learnBand(root)}
 <section class="band band-pick" id="start" aria-labelledby="start-h"><div class="wrap">
   <header class="band-head"><p class="eyebrow">Get started</p><h2 id="start-h">Start your hub and a node.</h2><p class="lead">Switch packs on or off. The prompt changes as you choose. Paste it into T3 Code on your Mac. The first setup runs from there, because it creates the cloud boxes and reaches them over SSH. The agent sets up the cloud boxes, and installs nothing from Hedge on your Mac. Once the boxes are linked, read and steer them from your phone too.</p></header>
   <form id="chooser" class="chooser" autocomplete="off">
     ${box(root)}
     ${promptCard("start", "Your Getting started prompt", startPrompt(data, firstStart), startSteps)}
   </form>
+  ${firstLesson ? `<p class="after"><a class="link-arrow" href="learn/${firstLesson.id}/">Watch while it runs: ${esc(firstLesson.title)} · ${minutes(firstLesson.cut.seconds)}${uiIcons.arrow}</a></p>` : ""}
 </div></section>`;
     return frame({
       root,
@@ -271,5 +332,6 @@ ${add}`;
     return frame({ root, current: "packs", title: `${pack.title}: a Hedge pack`, description: pack.summary, body });
   };
 
-  return [{ path: "index.html", html: landing() }, { path: "packs/index.html", html: packs() }, ...data.packs.map((pack) => ({ path: `packs/${pack.name}/index.html`, html: packPage(pack) }))];
+  const learn = lessons.length ? [{ path: "learn/index.html", html: library() }, ...lessons.map((lesson) => ({ path: `learn/${lesson.id}/index.html`, html: lessonPage(lesson) }))] : [];
+  return [{ path: "index.html", html: landing() }, { path: "packs/index.html", html: packs() }, ...data.packs.map((pack) => ({ path: `packs/${pack.name}/index.html`, html: packPage(pack) })), ...learn];
 }
