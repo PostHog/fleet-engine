@@ -35,9 +35,9 @@ const hubAlias = "hub.alias";
 
 export const engineCommands = ["setup", "apply", "doctor", "update", "packs", "settings", "set", "devbox", "hub", "run", "credential"];
 
-/** Why a machine leaves out an item of the hub while a profile with devboxes names no hub. */
 export const notAtPinReason = "it is not at the pinned commit of its source";
 
+/** Why a machine leaves out an item of the hub while a profile with devboxes names no hub. */
 export const hublessReason = "your profile names no hub. Run hedge hub here on the machine that should be the hub.";
 
 /** Guide names the engine writes itself. */
@@ -533,7 +533,7 @@ function skillFiles(order: Candidate[], profile: Profile, sources: FetchedSource
   const add = (pack: string, packDir: string, path: string) => {
     const dir = skillDir(pack, packDir, path, sources);
     if (!dir) return plan.dropped.push({ pack, item: `skill ${path}`, reason: "its source is unreachable" });
-    if (path.includes(":") && !existsSync(dir)) return plan.dropped.push({ pack, item: `skill ${path}`, reason: notAtPinReason });
+    if (pack !== "profile" && path.includes(":") && !existsSync(dir)) return plan.dropped.push({ pack, item: `skill ${path}`, reason: notAtPinReason });
     const name = basename(dir);
     const other = links.get(name);
     if (other && (pack !== "profile" || other.pack === "profile")) throw new ResolveError(`skill ${name} comes from both ${other.pack} and ${pack}`);

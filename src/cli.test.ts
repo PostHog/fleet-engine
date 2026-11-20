@@ -383,9 +383,8 @@ describe("a profile source that would run code it does not ship", () => {
   });
 });
 
-describe("a pack skill that its source lacks at the pinned commit", () => {
-  test("hedge apply links the other skills, says which skill is missing, and does not stop", async () => {
-    const home = temp.make("home-");
+describe("a skill that its source lacks at the pinned commit", () => {
+  const teamSetup = async (overrides: string[] = []) => {
     const repo = temp.make("source-");
     mkdirSync(join(repo, "skills/kept"), { recursive: true });
     writeFileSync(join(repo, "skills/kept/SKILL.md"), "---\nname: kept\n---\n");
@@ -398,11 +397,23 @@ describe("a pack skill that its source lacks at the pinned commit", () => {
     writeFileSync(join(root, "packs/team/pack.json"), JSON.stringify({ schema: 1, name: "team", summary: "Team pack.", skills: ["team:kept", "team:later"] }));
     const profile = profileDir(["team"]);
     const file = join(profile, "hedge.json");
-    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), sources: [{ name: "team", repo, ref: "main" }] }));
+    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), sources: [{ name: "team", repo, ref: "main" }], overrides: { skills: overrides } }));
+    return { home: temp.make("home-"), root, profile };
+  };
+
+  test("hedge apply links the other skills of a pack, says which skill is missing and how to fix it, and does not stop", async () => {
+    const { home, root, profile } = await teamSetup();
     const result = await hedge(["apply", "--profile", profile], home, root);
     expect(result.code).toBe(0);
     expect(readFileSync(join(home, ".claude/skills/kept/SKILL.md"), "utf8")).toBe("---\nname: kept\n---\n");
     expect(existsSync(join(home, ".claude/skills/later"))).toBe(false);
-    expect(result.output).toContain("The team pack's skill team:later is not applied: it is not at the pinned commit of its source.");
+    expect(result.output).toContain("The team pack's skill team:later is not applied: it is not at the pinned commit of its source. Move that source's ref in hedge.json to a commit that has it.");
+  });
+
+  test("hedge apply stops on a skill the profile itself names", async () => {
+    const { home, root, profile } = await teamSetup(["team:gone"]);
+    const result = await hedge(["apply", "--profile", profile], home, root);
+    expect(result.code).not.toBe(0);
+    expect(result.output).toContain("skills/gone");
   });
 });
