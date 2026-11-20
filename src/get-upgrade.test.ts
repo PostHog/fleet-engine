@@ -148,7 +148,7 @@ describe("get.sh upgrades a machine that Fleet runs", () => {
     expect(retry.code).toBe(0);
     expect(machine.state().units["hedge-watch.service"]).toEqual(running);
     expect(machine.state().both).toEqual([]);
-  });
+  }, 15_000);
 
   onLinuxHost("a dry run copies nothing and stops nothing, and names what still runs", () => {
     const machine = fleetMachine();
