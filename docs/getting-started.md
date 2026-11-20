@@ -33,6 +33,14 @@ team's org, change the dotfiles parameter of each workspace to
 `git@github.com:<repo>.git` in the Coder web app: open the workspace, go to
 **Settings → Parameters**, set it, and submit.
 
+When the template has a secret parameter, do not run `coder create` for it:
+a value you pass with `--parameter` stays in your shell history, and Coder
+can print the default of one you leave out. Create that workspace in the
+create form of the Coder web app. Pick the preset None when the form shows a
+preset picker, and leave a secret that has a default as it is. Coder keeps
+each value of that form with the build, so anyone who can see the workspace
+can read it. Then run only the `coder schedule` and `coder config-ssh` lines.
+
 ```sh
 coder login <your Coder URL>
 coder create hedge-hub --template <template> --preset none --parameter <disk parameter>=200 --parameter <dotfiles parameter>=git@github.com:<login>/hedge-profile.git --yes
@@ -45,11 +53,6 @@ coder config-ssh --yes
 Add one `--parameter` for each other parameter of the template. Do not use
 `--copy-parameters-from`: Coder then takes the copied workspace's values
 over every `--parameter` you pass.
-
-When the template has a secret parameter, do not pass it with `--parameter`:
-the value would stay in your shell history. Create that workspace in the
-create form of the Coder web app, and pick the preset None when the form
-shows a preset picker.
 
 `coder schedule stop <workspace> manual` turns off the stop schedule, but a
 build that is already running can keep a stop time from its template.

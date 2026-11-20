@@ -58,8 +58,8 @@ Base and Hub are in every Hedge. You pick the rest.
 - [MCP gateway](https://posthog.github.io/hedge/packs/mcp-gateway/): the hub signs in to your MCP servers once, and agents on every box reach them through it.
 
 Switch Quality gates, Orchestration, Communication, and Memory on
-[the Hedge site](https://posthog.github.io/hedge/), and the prompt above takes
-your picks. [The Packs page](https://posthog.github.io/hedge/packs/) builds a
+[the Hedge site](https://posthog.github.io/hedge/), and it builds the prompt
+above with your picks in it. [The Packs page](https://posthog.github.io/hedge/packs/) builds a
 prompt that adds packs to a Hedge you already run. Five pack pages have a
 short video.
 
@@ -82,8 +82,9 @@ On the hub or a node:
 
 Hedge was named Fleet before. Run the `get.sh` line below once on each box
 that ran Fleet: it stops Fleet, copies your setup, and starts Hedge. On a
-Mac, it only stops Fleet's jobs. `fleet` still runs the same command. To
-undo the move, see [Go back to Fleet](SETUP.md#go-back-to-fleet).
+Mac, it only stops Fleet's jobs, so run it there after your hub works.
+`fleet` still runs the same command. To undo the move, see
+[Go back to Fleet](SETUP.md#go-back-to-fleet).
 
 ## Status
 
