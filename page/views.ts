@@ -2,7 +2,7 @@ import { crew, logos, packCast, packGroups, scenes, teamRole, type Art, type Rol
 import { packFlows } from "./flows.ts";
 import { brandIcons, packIcon, uiIcons } from "./icons.ts";
 import { logoMark } from "./logo.ts";
-import { firstStart, installPrompt, promptData, startPacksOn, startPrompt, toggleSelected, type PageData, type PagePack } from "./model.ts";
+import { firstStart, installPrompt, promptData, startPacksOn, startPrompt, type PageData, type PagePack } from "./model.ts";
 import { esc, fmt, promptHtml, t3Link } from "./prompt.ts";
 
 export type ArtSizes = Record<string, { width: number; height: number }>;
@@ -218,7 +218,7 @@ ${pageJson ? `<script id="hedge-data" type="application/json">${JSON.stringify(p
     const root = "../../";
     const role = roleOf(pack);
     const flow = packFlows[pack.name];
-    const prompt = installPrompt(data, pack.always ? [...pack.requires, pack.name] : toggleSelected(data, [], pack.name));
+    const prompt = installPrompt(data, [pack.name]);
     const add = pack.name === "base"
       ? `<section class="band band-tight" id="add"><div class="wrap"><p class="note">Every Hedge has this pack. You add nothing.</p></div></section>`
       : `<section class="band band-pick band-tight" id="add" aria-labelledby="add-h"><div class="wrap">

@@ -60,8 +60,8 @@ function listPacks(context: ChangeContext) {
   for (const manifest of manifests(context)) {
     const mark = manifest.name === "base" || (on.has(manifest.name) && !partly.has(manifest.name)) ? "✓" : "·";
     context.print(`  ${mark} ${manifest.name}  ${manifest.summary}`);
-    const kept = partly.get(manifest.name);
-    if (on.has(manifest.name) && kept) context.print(`      Only part is on, through the old name ${context.profile.packs.filter((name) => aliases.get(name)?.pack === manifest.name).join(", ")}: ${[...kept].join(", ")}. Add ${manifest.name} for the whole pack.`);
+    if (on.has(manifest.name) && partly.has(manifest.name))
+      for (const name of context.profile.packs.filter((name) => aliases.get(name)?.pack === manifest.name)) context.print(`      The old name ${name} selects only: ${aliases.get(name)!.workflows.join(", ")}. Add ${manifest.name} for the whole pack.`);
     const workflows = context.plan.workflows.filter((workflow) => workflow.pack === manifest.name);
     if (on.has(manifest.name) && workflows.length) context.print(`      Workflows: ${workflows.map((workflow) => `${workflow.id} ${workflow.active ? "on" : workflow.reason && workflow.reason !== "turned off" ? `off: ${workflow.reason}` : "off"}`).join(", ")}`);
     if (on.has(manifest.name)) for (const workflow of manifest.workflows ?? []) if (workflow.risk) context.print(`      Terms note for ${workflow.id}: ${workflow.risk}`);

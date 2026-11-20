@@ -7,7 +7,7 @@ import { site, type ArtSizes } from "../page/views.ts";
 import { engineSettings, loadPacks } from "../src/pack/manifest.ts";
 import type { Audience, LoadedPack, Need, PackManifest, Preset } from "../src/pack/types.ts";
 import { engineRepo, needsHubPacks } from "../src/setup/defaults.ts";
-import { packsNamed } from "../src/pack/aliases.ts";
+import { packNamed } from "../src/pack/aliases.ts";
 import { catalogAliases, choosablePacks, defaultPreset, packTitle, type Catalog } from "../src/setup/questions.ts";
 
 const engineRoot = join(import.meta.dir, "..");
@@ -43,7 +43,7 @@ export async function pageData({ audience, team = [] }: PageOptions): Promise<Pa
   const aliases = catalogAliases({ packs: [...engine, ...team] });
   const loaded = new Map([...engine, ...team].map((pack) => [pack.manifest.name, pack.manifest]));
   const needed = (names: string[], found = new Set<string>()): Set<string> => {
-    for (const name of packsNamed(aliases, names)) if (!found.has(name)) needed(loaded.get(name)?.requires ?? [], found.add(name));
+    for (const name of names) if (!found.has(name)) needed(loaded.get(packNamed(aliases, name))?.requires ?? [], found.add(name));
     return found;
   };
   const holds = (need: Need) => !needPacks[need] || names.has(needPacks[need]!);

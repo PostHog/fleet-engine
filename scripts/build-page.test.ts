@@ -6,7 +6,6 @@ import { tempDirs } from "../src/testing/git.ts";
 import { spawnAsync } from "../src/testing/spawn.ts";
 import { logoMark } from "../page/logo.ts";
 import { firstStart, installPrompt, promptData, startPrompt, toggleSelected, type PageData, type PromptData } from "../page/model.ts";
-import { t3Link } from "../page/prompt.ts";
 import { buildSite, pageData, type SiteFiles } from "./build-page.ts";
 
 const root = join(import.meta.dir, "..");
@@ -133,8 +132,9 @@ describe("the site build", () => {
     ]);
     const hub = page("packs/hub/index.html");
     expect([visibleText(hub).includes("You add nothing"), visibleText(hub).includes("Add to your Hedge")]).toEqual([false, true]);
-    expect(promptOn(hub, "install")).toBe(installPrompt(data, ["hub"]));
-    expect(promptOn(hub, "install")).toContain("\n   hedge packs --add hub\n");
+    const copied = promptOn(hub, "install");
+    expect(hub).toContain('<button type="button" class="btn btn-yellow" data-copy="install-text">Copy prompt</button>');
+    expect([copied.split("\n")[0], copied.match(/^ {3}(hedge packs .*)$/m)?.[1], new URL(t3LinkOn(hub, "install")).searchParams.get("prompt")]).toEqual(["Add this Hedge pack to my setup with me: Hub.", "hedge packs --add hub", copied]);
     expect(Object.keys(files)).not.toContain("packs/integrations/index.html");
     const team = await buildSite({ audience: "posthog", team: [teamPack()] });
     expect(groupsOf(page("packs/index.html", team)).at(-1)).toEqual(["Your team's packs", ["Posthog (switch)"]]);
@@ -151,16 +151,26 @@ describe("the site build", () => {
     expect(html).toContain('id="install-t3"');
   });
 
-  test("each pack's page carries the prompt that adds that pack and the packs it requires", () => {
-    for (const pack of data.packs.filter((item) => !item.always)) {
-      const html = page(`packs/${pack.name}/index.html`);
-      const prompt = installPrompt(data, toggleSelected(data, [], pack.name));
-      expect([pack.name, promptOn(html, "install")]).toEqual([pack.name, prompt]);
-      expect([pack.name, t3LinkOn(html, "install")]).toEqual([pack.name, t3Link(prompt)]);
-      expect(html).toContain(`data-select="${pack.name}"`);
-      expect(visibleText(html)).toContain(pack.summary);
+  test("each pack's page carries the prompt that adds that pack and the packs it requires, in its copy box and its T3 Code link", () => {
+    const commands: Record<string, string> = {
+      hub: "hedge packs --add hub",
+      "pull-requests": "hedge packs --add pull-requests",
+      orchestration: "hedge packs --add pull-requests --add orchestration",
+      communication: "hedge packs --add communication",
+      guards: "hedge packs --add guards",
+      memory: "hedge packs --add memory",
+      slack: "hedge packs --add slack",
+      "incident-io": "hedge packs --add incident-io",
+      "mcp-gateway": "hedge packs --add mcp-gateway",
+    };
+    expect(data.packs.filter((pack) => pack.name !== "base").map((pack) => pack.name)).toEqual(Object.keys(commands));
+    for (const [name, command] of Object.entries(commands)) {
+      const html = page(`packs/${name}/index.html`);
+      const copied = promptOn(html, "install");
+      expect([name, copied.match(/^ {3}(hedge packs .*)$/m)?.[1], new URL(t3LinkOn(html, "install")).searchParams.get("prompt")]).toEqual([name, command, copied]);
+      expect(html).toContain(name === "hub" ? "" : `data-select="${name}"`);
+      expect(visibleText(html)).toContain(data.packs.find((pack) => pack.name === name)!.summary);
     }
-    expect(promptOn(page("packs/orchestration/index.html"), "install")).toContain("hedge packs --add pull-requests --add orchestration");
     const base = page("packs/base/index.html");
     expect(base).toContain("Every Hedge has this pack. You add nothing.");
     expect(base).not.toContain('id="install-text"');
@@ -278,8 +288,8 @@ describe("the site build", () => {
     const teamData = await pageData({ audience: "posthog", team });
     const site = await buildSite({ audience: "posthog", team });
     expect(teamData.teamPacks).toEqual(["posthog"]);
-    expect(visibleText(page("packs/index.html", site))).toContain("Adds integrations Adds Memory Adds gone");
-    expect(promptOn(page("packs/posthog/index.html", site), "install")).toContain("hedge packs --add integrations --add gone --add memory --add posthog\n");
+    expect(visibleText(page("packs/index.html", site))).toContain("Adds integrations Adds context-library Adds gone");
+    expect(promptOn(page("packs/posthog/index.html", site), "install")).toContain("hedge packs --add integrations --add context-library --add gone --add posthog\n");
     expect(Object.keys(site)).not.toContain("packs/quiet/index.html");
   });
 

@@ -44,21 +44,26 @@ function inPageOrder(data: PromptData, names: Iterable<string>) {
 
 export function toggleSelected(data: PromptData, selected: string[], name: string): string[] {
   const packs = new Set(selected);
+  const card = (target: string) => data.packs.find((pack) => pack.name === target && !pack.always);
   const drop = (target: string) => {
     packs.delete(target);
     for (const pack of data.packs) if (packs.has(pack.name) && pack.requires.includes(target)) drop(pack.name);
   };
-  const onPage = (target: string) => data.packs.find((item) => item.name === target);
   const add = (target: string) => {
-    const pack = onPage(target);
-    if (pack?.always || packs.has(target)) return;
+    const pack = card(target);
+    if (!pack || packs.has(target)) return;
     packs.add(target);
-    pack?.requires.forEach(add);
+    pack.requires.forEach(add);
   };
   if (packs.has(name)) drop(name);
   else add(name);
-  const required = new Set(data.packs.filter((pack) => packs.has(pack.name)).flatMap((pack) => pack.requires));
-  return [...[...packs].filter((target) => !onPage(target) && required.has(target)), ...inPageOrder(data, packs)];
+  return inPageOrder(data, packs);
+}
+
+export function installNames(data: PromptData, picks: string[]): string[] {
+  const names = new Set([...picks.flatMap((name) => data.packs.find((pack) => pack.name === name)?.requires ?? []), ...picks]);
+  const onPage = new Set(data.packs.map((pack) => pack.name));
+  return [...[...names].filter((name) => !onPage.has(name)), ...inPageOrder(data, names)];
 }
 
 export const startPacksOn = (data: PromptData, start: Start) => data.startPacks.filter((name) => !start.off.includes(name));
@@ -105,9 +110,9 @@ function noteStep(notes: PromptPack[]) {
   ].join("\n");
 }
 
-export function installPrompt(data: PromptData, selected: string[]) {
-  const packs = data.packs.filter((pack) => selected.includes(pack.name));
-  const named = [...selected.filter((name) => !packs.some((pack) => pack.name === name)), ...packs.map((pack) => pack.name)];
+export function installPrompt(data: PromptData, picks: string[]) {
+  const named = installNames(data, picks);
+  const packs = data.packs.filter((pack) => named.includes(pack.name));
   if (!named.length) return "";
   const guide = `https://raw.githubusercontent.com/${data.engineRepo}/main/SETUP.md`;
   const notes = packs.filter((pack) => pack.setupNote);
