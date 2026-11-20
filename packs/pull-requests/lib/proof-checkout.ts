@@ -12,14 +12,14 @@ export function topLevel(run: Run) {
   return result.code === 0 ? result.stdout.trim() : undefined;
 }
 
-/**
- * Where the PR branched from its base. A base branch this checkout has not fetched is fetched from the repository's
- * remote once; without such a remote, or without the commit, the error names the commands that fix it.
- */
 const fetchBase = (run: Run, base: string, remotes: string[]) => {
   for (const remote of remotes) run(["git", "fetch", "--quiet", remote, `+refs/heads/${base}:refs/remotes/${remote}/${base}`]);
 };
 
+/**
+ * Where the PR branched from its base. A base branch this checkout has not fetched is fetched from the repository's
+ * remote once; without such a remote, or without the commit, the error names the commands that fix it.
+ */
 export function mergeBase(identity: ProofIdentity, run: Run) {
   const base = pullRequestDetails(identity, run).baseRefName;
   const remotes = remotesOf(identity.repository, run);
@@ -99,10 +99,13 @@ function changedLines(identity: ProofIdentity, run: Run, start: string, renames:
   for (let index = 0; index < fields.length; index++) {
     if (!fields[index]) continue;
     const [added = "", deleted = "", ...named] = fields[index]!.split("\t");
-    let path = named.join("\t");
-    if (!path) { path = fields[index + 2] ?? ""; index += 2; }
     const binary = added === "-" || deleted === "-";
-    changed.push({ lines: binary ? Number.POSITIVE_INFINITY : (Number(added) || 0) + (Number(deleted) || 0), path });
+    const path = named.join("\t");
+    if (path) changed.push({ lines: binary ? Number.POSITIVE_INFINITY : (Number(added) || 0) + (Number(deleted) || 0), path });
+    else {
+      changed.push({ lines: binary ? Number.POSITIVE_INFINITY : Number(deleted) || 0, path: fields[index + 1] ?? "" }, { lines: binary ? Number.POSITIVE_INFINITY : Number(added) || 0, path: fields[index + 2] ?? "" });
+      index += 2;
+    }
   }
   return changed;
 }
@@ -110,8 +113,8 @@ function changedLines(identity: ProofIdentity, run: Run, start: string, renames:
 const linesOf = (changed: { lines: number; path: string }[], kept: (path: string) => boolean) =>
   changed.filter(({ path }) => kept(path)).reduce((sum, { lines }) => sum + lines, 0);
 
-const productionLines = (identity: ProofIdentity, run: Run, baseSha: string | undefined) => {
-  const changed = changedLines(identity, run, branchPoint(identity, run, baseSha), false);
+const productionLines = (identity: ProofIdentity, run: Run) => {
+  const changed = changedLines(identity, run, mergeBase(identity, run), false);
   return changed && linesOf(changed, authored);
 };
 
@@ -124,11 +127,11 @@ export function diffSize(identity: ProofIdentity, run: Run, { baseSha, from }: {
   } catch { return undefined; }
 }
 
-export function reviewTier(identity: ProofIdentity, run: Run, body: string | undefined, baseSha?: string): ReviewTier {
+export function reviewTier(identity: ProofIdentity, run: Run, body: string | undefined): ReviewTier {
   const grade = gradeOf(body);
   if (grade === "high") return { name: "panel", why: "merge-risk grade high" };
   let lines: number | undefined;
-  try { lines = productionLines(identity, run, baseSha); } catch { lines = undefined; }
+  try { lines = productionLines(identity, run); } catch { lines = undefined; }
   const size = lines === undefined || Number.isNaN(lines) ? "size unknown" : `${lines} authored production lines`;
   const read = ["low", "none"].includes(grade) && lines !== undefined && lines < readLines;
   return { name: read ? "read" : "pair", why: `merge-risk grade ${grade}, ${size}` };
@@ -136,8 +139,8 @@ export function reviewTier(identity: ProofIdentity, run: Run, body: string | und
 
 export function pullRequestDetails(identity: ProofIdentity, run: Run) {
   try {
-    const { title, body, base, baseSha } = readPullRequest(identity, run);
-    return { title, body, baseRefName: base, baseSha };
+    const { title, body, base } = readPullRequest(identity, run);
+    return { title, body, baseRefName: base };
   } catch (error) {
     throw new Error(`Cannot read ${identity.repository}#${identity.pr} over GitHub's REST API (${(error as Error).message})`);
   }

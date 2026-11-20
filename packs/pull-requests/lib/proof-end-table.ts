@@ -37,10 +37,10 @@ function roundsCell(growth: Growth | undefined) {
 function linesCell(growth: Growth | undefined) {
   if (!growth) return "not measured";
   const { first, final } = growth;
-  if (!growth.rounds) return `${figure(final?.production)} at HEAD`;
+  const parts = (["tests", "docs"] as const).filter((part) => first?.[part] || final?.[part]);
+  if (!growth.rounds) return [`${figure(final?.production)} at HEAD`, ...parts.map((part) => `${part} ${figure(final?.[part])}`)].join("; ");
   const ratio = first && final && first.production > 0 ? ` (×${(final.production / first.production).toFixed(1)})` : "";
-  const apart = (["tests", "docs"] as const).filter((part) => first?.[part] || final?.[part]).map((part) => `${part} ${span(first?.[part], final?.[part])}`);
-  return [`${span(first?.production, final?.production)}${ratio}`, ...apart].join("; ");
+  return [`${span(first?.production, final?.production)}${ratio}`, ...parts.map((part) => `${part} ${span(first?.[part], final?.[part])}`)].join("; ");
 }
 
 function sanityCell({ summary, reason }: EndRow) {
@@ -59,7 +59,7 @@ function acceptor(gap: GapProof) {
 const skipped = ({ summary, reason }: EndRow) =>
   summaryGaps(summary).map(({ kind, gap }) => `${kind}: ${gap.reason ? reason(kind, gap.reason) : "no reason recorded"} (${acceptor(gap)})`);
 
-const cell = (text: string) => text.replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/\r\n|\r|\n/g, " ");
+const cell = (text: string) => text.replace(/(\\*)\|/g, (pipe, slashes: string) => slashes.length % 2 ? pipe : `${slashes}\\|`).replace(/\r\n|\r|\n/g, " ");
 
 export function endTable(rows: EndRow[]) {
   return [
