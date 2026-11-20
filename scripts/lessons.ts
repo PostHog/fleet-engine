@@ -43,7 +43,7 @@ export function lessonProblems(lesson: Lesson, names: Names): string[] {
   const problems = [
     ...[...text.matchAll(/`hedge ([a-z][a-z-]*)/g)].filter(([, name]) => !names.commands.includes(name!)).map(([, name]) => `${where}: names hedge ${name}, which no command ships`),
     ...[...text.matchAll(/`\/([a-z][a-z-]*)`/g)].filter(([, name]) => !names.skills.includes(name!)).map(([, name]) => `${where}: names /${name}, which no pack's skill ships`),
-    ...[...text.matchAll(/\b[Tt]he ([A-Z][^.,:;!?\n]*?) pack\b/g)].filter(([, title]) => !names.packs.includes(title!.toLowerCase())).map(([, title]) => `${where}: names the ${title} pack, which does not exist`),
+    ...[...text.matchAll(/\b[Tt]he ([A-Z][\w.]*(?: [A-Z][\w.]*)*) pack\b/g)].filter(([, title]) => !names.packs.includes(title!.toLowerCase())).map(([, title]) => `${where}: names the ${title} pack, which does not exist`),
     ...(lesson.next && !names.lessons.includes(lesson.next) ? [`${where}: next names lesson ${lesson.next}, which does not exist`] : []),
   ];
   if (!lesson.cut) return problems;

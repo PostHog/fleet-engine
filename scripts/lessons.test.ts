@@ -36,14 +36,13 @@ describe("lessons", () => {
   test("the check fails a lesson that names a hedge command, a skill, a pack, or a next lesson that does not exist", () => {
     const known = withText("Run `hedge doctor`, then `hedge help`. Say `/qa-swarm`. Turn on the Slack pack and the Quality gates pack. The Memory pack keeps notes.");
     expect(lessonProblems(known, names)).toEqual([]);
-    const unknown: Lesson = { ...withText("Run `hedge teleport`. Say `/fly`. Turn on the Rocket pack. The Quality gaets pack checks. Use the Made Up Rocket Science pack. Add the Quality gates Plus pack."), next: "gone" };
+    const unknown: Lesson = { ...withText("Run `hedge teleport`. Say `/fly`. Turn on the Rocket pack. Use the Made Up Rocket Science pack. Enable the Node.js pack. The Mac opens T3 Code to set up the Slack pack."), next: "gone" };
     expect(lessonProblems(unknown, names)).toEqual([
       "lessons/probe.md: names hedge teleport, which no command ships",
       "lessons/probe.md: names /fly, which no pack's skill ships",
       "lessons/probe.md: names the Rocket pack, which does not exist",
-      "lessons/probe.md: names the Quality gaets pack, which does not exist",
       "lessons/probe.md: names the Made Up Rocket Science pack, which does not exist",
-      "lessons/probe.md: names the Quality gates Plus pack, which does not exist",
+      "lessons/probe.md: names the Node.js pack, which does not exist",
       "lessons/probe.md: next names lesson gone, which does not exist",
     ]);
   });
@@ -69,10 +68,14 @@ describe("lessons", () => {
     expect(lessonProblems({ ...built, cut: { ...built.cut, chapters: [0, 151] } }, names)).toEqual(problem);
     expect(lessonProblems({ ...built, cut: { ...built.cut, chapters: [65, 0] } }, names)).toEqual(problem);
     expect(lessonProblems({ ...built, cut: { ...built.cut, chapters: [null, 65] as unknown as number[] } }, names)).toEqual(problem);
-    expect(lessonProblems({ ...built, cut: { ...built.cut, captions: [[0, 4], [5] as unknown as [number, number], [10, 14], [15, 19]] } }, names)).toEqual(problem);
     expect(lessonProblems({ ...built, cut: { ...built.cut, captions: [[0, 4], [3, 9], [10, 14], [15, 19]] } }, names)).toEqual(problem);
-    for (const cue of [null, { 0: 5, 1: 9, length: 2 }]) expect(lessonProblems({ ...built, cut: { ...built.cut, captions: [[0, 4], cue as unknown as [number, number], [10, 14], [15, 19]] } }, names)).toEqual(problem);
     expect(lessonProblems({ ...built, cut: { ...built.cut, captions: [[0, 4], [4, 9], [9, 14], [15, 19]] } }, names)).toEqual([]);
+  });
+
+  test("the check fails a cut whose time or caption is not a number or a pair of numbers", () => {
+    const built = builtLesson();
+    const withCue = (cue: unknown) => lessonProblems({ ...built, cut: { ...built.cut, captions: [[0, 4], cue as [number, number], [10, 14], [15, 19]] } }, names);
+    for (const cue of [null, [5], { 0: 5, 1: 9, length: 2 }]) expect(withCue(cue)).toEqual(["lessons/tour.md: its cut has chapter or caption times out of order or outside the video"]);
   });
 
   test("a lesson source needs its front matter, a known shelf, and chapters with narration", () => {
