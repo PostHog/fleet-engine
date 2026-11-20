@@ -52,7 +52,7 @@ test("past twice the production lines of the first review, the next round waits 
   await pr.commit("feature.ts", lines(21, "greet"));
 
   await expect(pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).rejects.toThrow(
-    "Production lines grew from 10 at round 1 to 21 at HEAD, past twice the first. Before another round, cut the PR back to base behaviour, or justify the growth: hedge proof sanity --verdict cut|justified --reason '<why>'");
+    "Production lines grew from 10 at round 1 to 21 at HEAD, past twice the first. A fresh judge, bloat-judge-under-test, reads 0% of HEAD's production lines as more than the problem needs and names no hunk. Before another round, cut the PR back to base behaviour, or justify the growth: hedge proof sanity --verdict cut|justified --reason '<why>'");
   expect((await pr.hedge("sanity", "--verdict", "justified", "--reason", "The fix needs its own parser")).code).toBe(0);
   expect((await pr.hedge("review-start", "--scope", "fixes", "--base", reviewed)).code).toBe(0);
 
@@ -63,7 +63,7 @@ test("past twice the production lines of the first review, the next round waits 
   const report = (await pr.decide("report", "--pr", "example/product#42")).output.split("\n");
   expect(report.filter((line) => line.startsWith("| PR | Review rounds") || line.startsWith("| example/product#42 | 2 rounds"))).toEqual([
     "| PR | Review rounds | Production lines | Sanity pass | Skipped proofs |",
-    "| example/product#42 | 2 rounds | 10 → 21 (×2.1) | justified at HEAD: The fix needs its own parser | none |",
+    "| example/product#42 | 2 rounds | 10 → 21 (×2.1) | ×2.1, 0% cuttable; justified at HEAD: The fix needs its own parser | none |",
   ]);
 });
 

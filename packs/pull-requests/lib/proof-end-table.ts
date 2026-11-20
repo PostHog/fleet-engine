@@ -2,19 +2,20 @@ import { refText, type PrRef } from "./decision-ledger.ts";
 import type { Run } from "./pr-ci.ts";
 import { diffSize, forkPoint, type DiffSize } from "./proof-checkout.ts";
 import { finishedReviews, summaryGaps, type GapProof, type ProofIdentity, type ProofSummary } from "./proof.ts";
+import { bloatFigure, type BloatScore } from "./proof-bloat.ts";
 import type { SanityPass } from "./proof-sanity.ts";
 
 export const isCommitSha = (value: unknown): value is string => typeof value === "string" && /^[0-9a-f]{40}$/.test(value);
 
-type Sized = DiffSize & { commit: string };
-export type Growth = { rounds: number; finalReads: number; first?: Sized; final?: Sized; sanity?: SanityPass };
+export type Sized = DiffSize & { commit: string; from: string };
+export type Growth = { rounds: number; finalReads: number; first?: Sized; final?: Sized; sanity?: SanityPass; bloat?: BloatScore };
 export type EndRow = { ref: PrRef; summary: ProofSummary; reason: (kind: string, reason: string) => string };
 
 const isRound = (name: string) => /^\d+$/.test(name);
 
 function sizeAt(identity: ProofIdentity, run: Run, from: string | undefined): Sized | undefined {
   const size = from === undefined ? undefined : diffSize(identity, run, from);
-  return size && { ...size, commit: identity.commit };
+  return size && from !== undefined ? { ...size, commit: identity.commit, from } : undefined;
 }
 
 export async function measureGrowth(home: string, head: ProofIdentity, run: Run, baseSha: string | undefined): Promise<Growth> {
@@ -22,7 +23,7 @@ export async function measureGrowth(home: string, head: ProofIdentity, run: Run,
   const rounds = reviews.filter(({ name }) => isRound(name)).sort((a, b) => Number(a.name) - Number(b.name));
   const opening = rounds[0];
   const start = opening?.scope !== "full" ? undefined : isCommitSha(opening.forkBase) ? forkPoint({ ...head, commit: opening.commit }, run, opening.forkBase) : opening.from;
-  const first = !opening || !start ? undefined : start === opening.commit ? { production: 0, tests: 0, docs: 0, commit: start } : sizeAt({ ...head, commit: opening.commit }, run, start);
+  const first = !opening || !start ? undefined : start === opening.commit ? { production: 0, tests: 0, docs: 0, commit: start, from: start } : sizeAt({ ...head, commit: opening.commit }, run, start);
   const final = sizeAt(head, run, isCommitSha(baseSha) ? forkPoint(head, run, baseSha) : undefined);
   return { rounds: rounds.length, finalReads: reviews.length - rounds.length, ...first ? { first } : {}, ...final ? { final } : {} };
 }
@@ -47,9 +48,9 @@ function linesCell(growth: Growth | undefined) {
 }
 
 function sanityCell({ summary, reason }: EndRow) {
-  const pass = summary.growth?.sanity;
-  if (!pass) return "not run";
-  return `${pass.verdict} at ${pass.commit === summary.commit ? "HEAD" : pass.commit.slice(0, 7)}: ${reason("sanity", pass.reason)}`;
+  const { sanity: pass, bloat } = summary.growth ?? {};
+  const verdict = pass ? `${pass.verdict} at ${pass.commit === summary.commit ? "HEAD" : pass.commit.slice(0, 7)}: ${reason("sanity", pass.reason)}` : "not run";
+  return bloat ? `${bloatFigure(bloat, summary.commit)}; ${verdict}` : verdict;
 }
 
 function acceptor(gap: GapProof) {
