@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ProfileFile } from "../pack/types.ts";
+import { defaultSources } from "../setup/defaults.ts";
 import { isolateGit, spawnGit, template, tempDirs } from "../testing/git.ts";
 import { loadMachine, loadProfile, picksTurnOn, ProfileError, saveAnswers, saveMachine, thisMachine } from "./profile.ts";
 
@@ -50,6 +51,23 @@ describe("profile", () => {
     await saveAnswers(dir, { plan: "claude" });
     const saved = JSON.parse(readFileSync(join(dir, "hedge.json"), "utf8"));
     expect(saved).toMatchObject({ plan: "claude", settings: { "orchestration.tracker": "me/hedge-profile" } });
+  });
+});
+
+describe("a source pinned by an older engine default", () => {
+  const retired = { name: "agent-skills", repo: "Silthus/agent-skills", ref: "997eb88e03cb322941f387ab577207335d77c414" };
+  const current = defaultSources.find((source) => source.name === "agent-skills")!;
+
+  test("follows the current default pin", async () => {
+    const dir = await profileRepo({ ...profile, sources: [retired] });
+    expect((await loadProfile(dir)).sources).toEqual([current]);
+  });
+
+  test("keeps a pin the person chose, and a source of the same name from another repo", async () => {
+    const chosen = { ...retired, ref: "main" };
+    const fork = { ...retired, repo: "someone/agent-skills" };
+    expect((await loadProfile(await profileRepo({ ...profile, sources: [chosen] }))).sources).toEqual([chosen]);
+    expect((await loadProfile(await profileRepo({ ...profile, sources: [fork] }))).sources).toEqual([fork]);
   });
 });
 

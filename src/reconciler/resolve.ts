@@ -531,6 +531,7 @@ function skillFiles(order: Candidate[], profile: Profile, sources: FetchedSource
   const add = (pack: string, packDir: string, path: string) => {
     const dir = skillDir(pack, packDir, path, sources);
     if (!dir) return plan.dropped.push({ pack, item: `skill ${path}`, reason: "its source is unreachable" });
+    if (!existsSync(dir)) return plan.dropped.push({ pack, item: `skill ${path}`, reason: "it is not at the pinned commit of its source" });
     const name = basename(dir);
     const other = links.get(name);
     if (other && (pack !== "profile" || other.pack === "profile")) throw new ResolveError(`skill ${name} comes from both ${other.pack} and ${pack}`);

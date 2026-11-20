@@ -9,6 +9,7 @@ import { withoutCredentials } from "../credentials.ts";
 import { writePrivateFile } from "../files/private.ts";
 import { isKeptForBoxes } from "../hub/names.ts";
 import { profileFile, refuseLegacyPath } from "../legacy.ts";
+import { followCurrentDefaults } from "../setup/defaults.ts";
 
 export class ProfileError extends Error {}
 
@@ -18,7 +19,7 @@ export async function loadProfile(dir: string): Promise<Profile> {
   if (!file) throw new ProfileError(`${path}: missing`);
   const profile = checkProfile(withPicksOn({ ...file, workflows: file.workflows ?? {}, settings: file.settings ?? {}, sources: file.sources ?? [] }), path);
   const aboutMe = Bun.file(join(dir, "about-me.md"));
-  return { ...profile, dir, ...((await aboutMe.exists()) ? { aboutMe: await aboutMe.text() } : {}) };
+  return { ...profile, sources: followCurrentDefaults(profile.sources), dir, ...((await aboutMe.exists()) ? { aboutMe: await aboutMe.text() } : {}) };
 }
 
 /** Takes what other machines pushed before a change here, so the change lands on top of theirs. A profile without a remote has nothing to take. */
