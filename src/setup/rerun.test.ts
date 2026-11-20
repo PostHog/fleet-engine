@@ -132,6 +132,56 @@ describe("hedge setup while another machine changes the profile", () => {
     expect(await spawnGit(home, "--git-dir", githubRepo(home, "nora/hedge-profile"), "show", "main:about-me.md")).toBe("# Changed on another machine");
   });
 
+  function pushesAfterAnotherMachine(home: string, plan: string) {
+    const box = fakeMachine(home);
+    let published = false;
+    const exec: typeof box.machine.exec = async (command, options) => {
+      if (!published && command[0] === "git" && command[3] === "push") {
+        published = true;
+        await changeElsewhere(home, (profile) => void (profile.plan = plan));
+      }
+      return box.machine.exec(command, options);
+    };
+    return { ...box, machine: { ...box.machine, exec } };
+  }
+
+  test("a rerun whose profile push comes after another machine's says to drop setup's commit only when it made one", async () => {
+    const home = temp.make("home-");
+    expect((await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""])).code).toBe(0);
+    const dir = profilePath(home);
+    const pushAfterElsewhere = async (args: string[], plan: string) => {
+      const before = await spawnGit(dir, "rev-parse", "HEAD");
+      const result = await hedgeSetup(home, ["--non-interactive", ...args], [], pushesAfterAnotherMachine(home, plan));
+      return { ...result, moved: (await spawnGit(dir, "rev-parse", "HEAD")) !== before };
+    };
+    const advice = (drop: boolean) => `hedge: another machine pushed to your profile before setup could. Bring ${dir} up to date with git -C ${dir} pull --rebase --autostash${drop ? ", or drop setup's commit" : ""}, then run the same hedge setup command again.`;
+
+    const args = ["--remove", "pull-requests"];
+
+    const changed = await pushAfterElsewhere(args, "both");
+
+    expect(changed.code).toBe(1);
+    expect(changed.output).toContain(advice(true));
+    expect(changed.moved).toBe(true);
+    expect(JSON.parse(await spawnGit(dir, "show", "HEAD:hedge.json")).packs).toEqual([]);
+    expect(await pushedAnswers(home)).toMatchObject({ plan: "both", packs: ["pull-requests"] });
+
+    await spawnGit(dir, "pull", "-q", "--rebase");
+    const rejecting = join(githubRepo(home, "nora/hedge-profile"), "hooks/pre-receive");
+    writeFileSync(rejecting, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    expect((await hedgeSetup(home, ["--non-interactive", ...args], [])).output).toContain("pre-receive hook declined");
+    rmSync(rejecting);
+
+    const unchanged = await pushAfterElsewhere(args, "codex");
+
+    expect(unchanged.code).toBe(1);
+    expect(unchanged.output).toContain(advice(false));
+    expect(unchanged.output).not.toContain("drop setup's commit");
+    expect(unchanged.moved).toBe(false);
+    expect(await spawnGit(dir, "status", "--porcelain")).toBe("");
+    expect(await pushedAnswers(home)).toMatchObject({ plan: "codex", packs: ["pull-requests"] });
+  });
+
   test("an apply-only resume runs the steps of the plan that another machine saved after the stop", async () => {
     const home = temp.make("home-");
     const stopped = await hedgeSetup(home, ["--preset", "starter", "--plan", "claude"], ["", ""], undefined, undefined, 0, "linux", () => {
