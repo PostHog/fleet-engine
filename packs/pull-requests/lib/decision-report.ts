@@ -105,12 +105,8 @@ function proofRow(pr: Row, decisions: DecisionState[]) {
 }
 
 export async function renderReport({ prs: named, thread, lane }: { prs: PrRef[]; thread?: string; lane?: string }, ledger: Ledger, decisions: DecisionState[], context: ReportContext): Promise<string> {
-  const spelled = named.filter((ref, index) => named.findIndex((other) => refText(other) === refText(ref)) === index);
-  const read = await Promise.all(spelled.map((ref) => lanePr(ref, ledger, context)));
-  const sameAs = (row: Row) => (other: Row) => refText(other.ref).toLowerCase() === refText(row.ref).toLowerCase();
-  const chosen = (row: Row) => { const same = read.filter(sameAs(row)); return same.find((other) => gated(other) && other.summary.code !== 0) ?? same.find(gated) ?? same[0]; };
-  const rows = read.filter((row) => chosen(row) === row);
-  const prs = rows.map(({ ref }) => ref);
+  const prs = named.filter((ref, index) => named.findIndex((other) => refText(other) === refText(ref)) === index);
+  const rows = await Promise.all(prs.map((ref) => lanePr(ref, ledger, context)));
   const secrets = lane === undefined ? undefined : await context.laneSecrets(lane);
   const card = thread && await (context.pendingCard ?? t3PendingCard(context.home))(thread) ? thread : undefined;
   const ours = decisions.filter((decision) => prs.some((ref) => covers(decision, ref)) || (thread !== undefined && sameThread(decision.where.thread, thread)));
