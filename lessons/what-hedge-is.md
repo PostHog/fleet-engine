@@ -19,11 +19,11 @@ Every thread you start runs on a node, in its own copy of the repository, so fou
 
 ## The hub holds the keys
 
-The hub is the box in the middle. It holds your Claude and Codex subscriptions in one proxy, and spends the one whose weekly quota resets first. It keeps the sign-ins for Slack and your other tools, so no node holds a secret, and it links the nodes and watches their disks.
+The hub is the box in the middle. It keeps the sign-ins for Slack and your other tools, links the nodes, and watches their disks. With own-account balancing on, it also holds your Claude subscriptions in one proxy, and spends the one whose weekly quota resets first.
 
 ## The hub listens while you are away
 
-The hub also runs small services. When you react to a Slack message with the T3 Code emoji, a thread starts on it. When a thread stops at a usage limit, the hub continues it once the quota is back. And each night, every box updates itself.
+The hub also runs small services. With the Slack pack, a Slack message you react to with the T3 Code emoji starts a thread. With recovery on, a thread that stops at a usage limit continues once the quota is back. And each night, every box updates itself.
 
 ## Threads come to you
 
@@ -35,4 +35,4 @@ Every thread ends with one next step for you. When it waits on someone else, it 
 
 ## Next: build your first feature
 
-So that is Hedge: nodes do the work, the hub holds the keys and listens, and the inbox brings you only what needs you. Your boxes are ready now, so next, you build your first feature.
+So that is Hedge: nodes do the work, the hub holds the keys and listens, and the inbox brings you only what needs you. When your setup is done, the next lesson shows you how to build your first feature.
