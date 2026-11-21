@@ -85,3 +85,18 @@ test("when one remote of the repository cannot be fetched, the judge reads the b
   expect(prompt).toContain("+greet the new member");
   expect(prompt).not.toContain("the base moves on");
 });
+
+test("fetching the base keeps local tags and other remote refs in a checkout that prunes on fetch", async () => {
+  const pr = await checkout();
+  const stale = await mergeBaseBehindStaleRef(pr);
+  await publishBase(pr);
+  await pr.git("update-ref", "refs/remotes/origin/main", stale);
+  await pr.git("update-ref", "refs/remotes/origin/gone", stale);
+  await pr.git("tag", "unpublished");
+  await pr.git("config", "fetch.prune", "true");
+  await pr.git("config", "fetch.pruneTags", "true");
+
+  await judgePrompt(pr);
+  expect(await pr.git("tag", "--list")).toBe("unpublished");
+  expect(await pr.git("for-each-ref", "--format=%(refname)", "refs/remotes/origin/gone")).toBe("refs/remotes/origin/gone");
+});
