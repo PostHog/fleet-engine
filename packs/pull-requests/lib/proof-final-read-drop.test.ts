@@ -62,6 +62,20 @@ test("a final read that never got an answer gives way to a final read of the new
   expect(`${gate.output}${judge.prompts().join("")}`).not.toContain("the guard blocked");
 });
 
+test("show redacts a token that crosses the cut of a long failure cause", async () => {
+  const { pr, reviewed } = await reviewedPr();
+  pr.env.HEDGE_PROOF_REVIEWER = `cat >/dev/null; printf '${"p".repeat(200)}\\n${"q".repeat(70)} ${token}\\n' >&2; exit 1`;
+  await expect(finalRead(pr, reviewed)).rejects.toThrow("gave no findings");
+  await pr.commit("feature.txt", "greet the new member\n");
+  fakeModel(pr, "REVIEWER", "No findings.");
+  expect((await finalRead(pr, reviewed)).code).toBe(0);
+
+  const show = (await pr.hedge("show")).output;
+
+  expect(show).toContain(`${"q".repeat(70)} [redacted`);
+  expect(show).not.toContain("ghp_a1a1");
+});
+
 test("a final read that hedge refuses at the new HEAD drops nothing", async () => {
   const { pr, older } = await blockedFinalRead();
   await pr.commit("feature.txt", "greet the new member\n");

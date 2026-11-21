@@ -7,6 +7,7 @@ import type { Family, Usage } from "./proof-models.ts";
 import { quietReason, type DeltaKind, type QuietStep } from "./proof-delta.ts";
 import { isProductionFile } from "./proof-checkout.ts";
 import { panelOutcome, unansweredPanelCause } from "./proof-panel.ts";
+import { redactSecrets } from "../../base/hooks/secret-guard.ts";
 import { anchorHeading } from "./finding-anchors.ts";
 import type { Growth } from "./proof-end-table.ts";
 import { endTableNote, gradeOf, shellQuoted, type Autonomy } from "./proof-autonomy.ts";
@@ -506,7 +507,7 @@ export async function droppedFinalReads(home: string, identity: ProofIdentity) {
     const reservation = await readReservation(join(dropped, entry));
     const drop = await readJson<DroppedRead | undefined>(join(dropped, entry, "dropped.json"), undefined);
     const line = `${reviewLabel(droppedName(entry))} on ${short(reservation?.commit ?? "unknown")} dropped at ${short(drop?.head ?? "unknown")}: no reviewer answer was captured`;
-    return { line, droppedAt: drop?.droppedAt ?? "", ...drop?.cause ? { cause: drop.cause.replace(/\s+/g, " ").trim().slice(0, causeCap) } : {} };
+    return { line, droppedAt: drop?.droppedAt ?? "", ...drop?.cause ? { cause: redactSecrets(drop.cause.replace(/\s+/g, " ").trim()).slice(0, causeCap) } : {} };
   }));
   return reads.sort((a, b) => a.droppedAt.localeCompare(b.droppedAt) || a.line.localeCompare(b.line));
 }

@@ -10,7 +10,6 @@ import { readComment, readPullRequest, runIn } from "./pr-ci.ts";
 import { isCommitSha } from "./proof-end-table.ts";
 import { askModel, family, familyOf, isQuotaExhausted, modelLabel, quotaExitCode, readRubric, reviewerRow, sessionFamily, skillReferences, type Family } from "./proof-models.ts";
 import { runProof, type RunIO } from "./proof-run.ts";
-import { redactSecrets } from "../../base/hooks/secret-guard.ts";
 import { combinedLens, parseGuide, lensBrief, lensIdle, lensLog, panelGuideText, panelLines, publishPanel, readPanelGuide, readPlan, recordWorker, requeueFailed, resolveLens, runLens, stagedPlan, stagePanel, waitForPanel, withRoundLock, withSlot, lockNewRound, processStart, roundLock, RoundBusy, RoundGone, type Lens, type LockOwner, type PanelGuide, type PanelIO, type Plan, type RoundLock, type StartTime } from "./proof-panel.ts";
 import { evalsPath, promptTemplateHash, readRuns, reportLines, saveRun, scoreCases, type EvalIO } from "./proof-eval.ts";
 import { hashOf, missesPath, missSource, missSources, readMisses, recordMiss } from "./proof-misses.ts";
@@ -313,7 +312,7 @@ its log while it runs. Then print each final read that hedge dropped unanswered,
     options: ["--round"],
     run: async ({ options }, identity, context) => {
       const directory = await reviewDirectory(context.home, identity(), roundOption(options));
-      const dropped = (await droppedFinalReads(context.home, identity())).map(({ line, cause }) => cause ? `${line}; cause: ${redactSecrets(cause)}` : line);
+      const dropped = (await droppedFinalReads(context.home, identity())).map(({ line, cause }) => cause ? `${line}; cause: ${cause}` : line);
       for (const line of [...await roundLines(directory, context), ...dropped]) context.print(line);
       return 0;
     },
