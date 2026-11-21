@@ -288,6 +288,7 @@ export function mergeIntent(call: ToolCall, command: string, exempt: string[], i
     const cwdIn = (scope: Scope | undefined): string | undefined => scope === undefined ? call.cwd : dirs.get(scope)?.at(-1) ?? cwdIn(scope.parent);
     for (const found of commands) {
       const name = basename(found.name);
+      const wrote = found.writes.map((path) => resolve(cwdIn(found.scope) ?? ".", found.chdir ?? ".", home(path)));
       if (name === "cd" || name === "pushd" || name === "popd") {
         const stack = dirs.get(found.scope) ?? [cwdIn(found.scope) ?? "."];
         const to = found.args.find((arg) => !arg.startsWith("-") && !arg.startsWith("+"));
@@ -295,11 +296,11 @@ export function mergeIntent(call: ToolCall, command: string, exempt: string[], i
         else if (name === "pushd") stack.push(resolve(stack.at(-1)!, home(to ?? "~")));
         else stack.splice(-1, 1, resolve(stack.at(-1)!, home(to ?? "~")));
         dirs.set(found.scope, stack);
-        continue;
+      } else {
+        const one = commandIntent(found, command, cwdIn(found.scope), unwritten);
+        intent = { targets: [...intent.targets, ...one.targets], refusal: intent.refusal ?? one.refusal };
       }
-      const one = commandIntent(found, command, cwdIn(found.scope), unwritten);
-      for (const path of found.writes) written.add(resolve(cwdIn(found.scope) ?? ".", found.chdir ?? ".", home(path)));
-      intent = { targets: [...intent.targets, ...one.targets], refusal: intent.refusal ?? one.refusal };
+      for (const path of wrote) written.add(path);
     }
   } else if (/github/i.test(tool)) intent = mcpIntent(tool, call.tool_input ?? {});
   return { ...intent, targets: intent.targets.filter((target) => !isExempt(target.repository, exempt)) };

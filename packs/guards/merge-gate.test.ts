@@ -498,6 +498,7 @@ describe("the hook against GitHub, faked at the gh boundary, and real checkouts,
     ["gh api -X PATCH repos/example/product/pulls/9 --input <(make-body)"],
     ["f=$(mktemp); gh api -X PATCH repos/example/product/pulls/9 --input \"$f\""],
     ["gh pr review 9 --repo example/product --comment --body-file missing.md"],
+    ["pushd sub > body.json && popd && gh api -X PATCH repos/example/product/issues/comments/1 --input body.json"],
   ])("a body edit whose payload the gate cannot read now, such as a file the same command writes, is refused and told to write it first: %s", async (command) => {
     const { dir, hook } = bodyEdits();
     const reason = await hook(command, dir);
@@ -525,6 +526,12 @@ describe("the hook against GitHub, faked at the gh boundary, and real checkouts,
     expect(await hook("gh api -X PATCH repos/example/product/pulls/9 -F body=@enqueue.md", dir)).toBe(otherEndpointReason);
     expect(await hook("gh pr review 9 --repo example/product --comment --body-file enqueue.md", dir)).toBe(otherEndpointReason);
     expect(await hook("gh api graphql -F query=@enqueue.json", dir)).toBe(graphqlReason);
+  });
+
+  test("curl sending a payload file that an earlier command in the call rewrites is refused, though the old copy is clean", async () => {
+    const { dir, hook } = bodyEdits();
+    expect(await hook("curl -X PATCH https://api.github.com/repos/example/product/pulls/9 -d @body.json", dir)).toBeUndefined();
+    expect(await hook("printf '{\"body\":\"/trunk merge\"}' > body.json && curl -X PATCH https://api.github.com/repos/example/product/pulls/9 -d @body.json", dir)).toBe(rawReason);
   });
 
   test("the run that started last decides, even when an earlier run took a higher record number", async () => {
