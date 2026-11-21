@@ -53,7 +53,7 @@ A named choice of packs and workflows, such as Starter or Everyday, that setup a
 _Avoid_: Template, bundle
 
 **Model table**:
-The model and effort agents use for each kind of work, one table for each AI plan. The Base pack declares it, and a profile can replace any row.
+The model and effort agents use for each kind of work, one table for each AI plan. The Base pack declares it, and a profile can replace any row. Each row names its provider: `claude` and `codex` stand for T3's `claudeAgent` and `codex` instances, and any other value is the id of a T3 provider instance, such as `antigravity`.
 _Avoid_: Model policy, casting
 
 **T3 provider instance**:

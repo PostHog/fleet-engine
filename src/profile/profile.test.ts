@@ -265,6 +265,12 @@ describe("saving answers", () => {
     expect(loadProfile(await profileRepo({ ...profile, overrides: { config: [{ provider: "t3", key: "providerInstances.muse", value: { driver: "muse", enabled: "yes" } }] } }))).rejects.toThrow("overrides.config[0]: a T3 provider instance needs a driver and enabled");
   });
 
+  test("takes a model row of any T3 provider instance in its overrides", async () => {
+    const neon = { role: "survey", work: "Read docs", provider: "antigravity", model: "gemini-4-neon", effort: "high" as const };
+    expect((await loadProfile(await profileRepo({ ...profile, overrides: { models: [neon] } }))).overrides?.models).toEqual([neon]);
+    expect(loadProfile(await profileRepo({ ...profile, overrides: { models: [{ ...neon, provider: "-x" }] } }))).rejects.toThrow("overrides.models must list rows with a role, work, a provider that names a T3 provider instance, a model, and an effort");
+  });
+
   test("takes a T3 provider instance in its overrides", async () => {
     const muse = { provider: "t3" as const, key: "providerInstances.muse", value: { driver: "muse", enabled: true, config: { binaryPath: "~/.local/bin/muse" } } };
     expect((await loadProfile(await profileRepo({ ...profile, overrides: { config: [muse] } }))).overrides?.config).toEqual([muse]);

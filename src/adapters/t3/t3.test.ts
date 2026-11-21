@@ -873,6 +873,7 @@ describe("T3 tasks client", () => {
   test.each([
     ["claude", { instanceId: "claudeAgent", model: "claude-opus-5-5", options: [{ id: "effort", value: "high" }] }],
     ["codex", { instanceId: "codex", model: "claude-opus-5-5", options: [{ id: "reasoningEffort", value: "high" }] }],
+    ["antigravity", { instanceId: "antigravity", model: "claude-opus-5-5" }],
   ] as const)("runs a task on the %s model and effort the plan's model table gives its role", async (provider, selection) => {
     const home = temp.make("home-");
     const server = fakeServer({ projects: [project] });

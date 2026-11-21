@@ -267,7 +267,7 @@ function checkModels(models: unknown, fail: (message: string) => never) {
     if (!Array.isArray(rows)) fail(`models ${plan} must list rows`);
     const roles = new Set<string>();
     for (const row of rows as unknown[]) {
-      if (!isModelRow(row)) fail(`models ${plan}: each row needs a role, work, a claude or codex provider, a model, and an effort`);
+      if (!isModelRow(row)) fail(`models ${plan}: each row needs a role, work, a provider that names a T3 provider instance, a model, and an effort`);
       const { role } = row as ModelRow;
       if (roles.has(role)) fail(`models ${plan}: role ${role} is listed twice`);
       roles.add(role);
@@ -276,7 +276,7 @@ function checkModels(models: unknown, fail: (message: string) => never) {
 }
 
 export function isModelRow(row: unknown): row is ModelRow {
-  return isRecord(row) && ["role", "work", "model"].every((key) => typeof row[key] === "string") && (row.provider === "claude" || row.provider === "codex") && efforts.includes(row.effort as string)
+  return isRecord(row) && ["role", "work", "model"].every((key) => typeof row[key] === "string") && typeof row.provider === "string" && t3InstanceId.test(row.provider) && efforts.includes(row.effort as string)
     && (row.serviceTier === undefined || (typeof row.serviceTier === "string" && row.serviceTier !== ""));
 }
 

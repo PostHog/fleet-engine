@@ -28,6 +28,7 @@ test("a thread starts with the T3 provider and the model of its HEDGE_MODELS row
   expect(readFileSync(join(dir, "stdin"), "utf8")).toBe("the task");
   expect(threadModel("implementation", "fallback-model", { HEDGE_MODELS: row("claude", "big-model") })).toEqual({ provider: "claudeAgent", model: "big-model" });
   expect(threadModel("implementation", "fallback-model", {})).toEqual({ provider: "claudeAgent", model: "fallback-model" });
+  expect(threadModel("implementation", "fallback-model", { HEDGE_MODELS: row("antigravity", "gemini-4-neon") })).toEqual({ provider: "antigravity", model: "gemini-4-neon" });
 });
 
 test("the folder is registered as a project first, and a thread start that creates the thread but exits 1 is never tried again", () => {
