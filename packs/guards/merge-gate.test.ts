@@ -522,6 +522,13 @@ describe("the hook against GitHub, faked at the gh boundary, and real checkouts,
     expect(await hook("gh api graphql -F query=@enqueue.json", dir)).toBe(graphqlReason);
   });
 
+  test("a call that sends a readable /trunk merge beside a file the gate cannot read keeps the /trunk merge refusal", async () => {
+    const { dir, hook } = bodyEdits();
+    writeFileSync(join(dir, "enqueue.md"), "Ready.\n/trunk merge\n");
+    expect(await hook("gh api -X PATCH repos/example/product/pulls/9 -F body=@enqueue.md -F title=@missing.md", dir)).toBe(otherEndpointReason);
+    expect(await hook("gh pr review 9 --repo example/product --comment --body '/trunk merge' --body-file missing.md", dir)).toBe(otherEndpointReason);
+  });
+
   test("the run that started last decides, even when an earlier run took a higher record number", async () => {
     const hook = machine({ "repos/example/product/pulls/9": pull(head) });
     const identity = { repository: "example/product", pr: 9, commit: head };
