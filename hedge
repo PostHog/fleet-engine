@@ -11,4 +11,9 @@ in_fleet_path() {
   return 1
 }
 if in_fleet_path "$launched_from" || in_fleet_path "$hedge_root"; then export HEDGE_INERT=1; else unset HEDGE_INERT; fi
+bun_version=$(bun --version)
+case "$bun_version" in 0.* | 1.[0-2].* | 1.3.[0-2] | 1.3.[0-2]-*)
+  echo "Hedge needs Bun 1.3.3 or newer, and this is Bun $bun_version. Run: bun upgrade" >&2
+  exit 1 ;;
+esac
 exec bun --no-env-file --config=/dev/null "$hedge_root/src/cli.ts" "$@"

@@ -129,6 +129,17 @@ describe("hedge routing", () => {
     expect(checkout.preloaded()).toBe(false);
   });
 
+  test("refuses to start on a Bun that ignores --no-env-file, and says how to upgrade", async () => {
+    const engine = engineWithCommands();
+    cpSync(join(repoRoot, "hedge"), join(engine, "hedge"));
+    const bin = temp.make("bin-");
+    const ran = join(bin, "cli-ran");
+    writeFileSync(join(bin, "bun"), `#!/bin/sh\n[ "$1" = --version ] && { echo 1.3.2; exit 0; }\n: > "${ran}"\n`, { mode: 0o755 });
+    const child = Bun.spawn(["sh", join(engine, "hedge"), "help"], { env: { HOME: temp.make("home-"), PATH: `${bin}:/usr/bin:/bin` }, stdout: "pipe", stderr: "pipe" });
+    const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    expect({ code, stdout, stderr, ran: existsSync(ran) }).toEqual({ code: 1, stdout: "", stderr: "Hedge needs Bun 1.3.3 or newer, and this is Bun 1.3.2. Run: bun upgrade\n", ran: false });
+  });
+
   test("runs a leading hedge in a pack step with this engine's launcher, not one on PATH", async () => {
     const home = temp.make("home-");
     const engine = engineWithCommands();

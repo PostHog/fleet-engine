@@ -187,7 +187,7 @@ test("a devbox sweep runs in a login shell, so the engine launcher finds the Bun
   const remote = temp.make("disk-remote-");
   writeHome(remote, {
     ".profile": 'PATH="$HOME/.bun/bin:$PATH"\n',
-    ".bun/bin/bun": `echo "bun $*" >> "${hub.bin}/calls.log"`,
+    ".bun/bin/bun": `[ "$1" = --version ] && { echo 1.4.4; exit 0; }\necho "bun $*" >> "${hub.bin}/calls.log"`,
     ".local/share/hedge/engine/hedge": readFileSync(join(import.meta.dir, "../../../hedge"), "utf8"),
   });
   chmodSync(join(remote, ".bun/bin/bun"), 0o755);
