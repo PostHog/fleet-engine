@@ -112,6 +112,9 @@ setup creates the repo with the same name in that org instead, private to the
 org, where teammates may read it. Setup shows the name before it creates the
 repo, and you can type another. It marks the repo with the GitHub topic
 `hedge-for-<login>`, so setup on your next machine finds it without the name.
+In an org, setup uses a new profile only when it has this topic and you
+administer the repo. When setup cannot add the topic, it prints the command
+that adds it.
 Setup first looks for a profile you already have, also with an older name
 such as `hedge-profile`, `hedge-profile-<login>` or `fleet-profile`, and
 keeps it with its name. If you already have a personal profile, setup keeps it
