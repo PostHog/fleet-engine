@@ -15,6 +15,8 @@ const separators = new Set([undefined, ";", "\n"]);
 const readsStatus = (text: string) => /\$(?:\?|\{\?\})/.test(text);
 const arithmeticIndex = (index: string) => (/^0[0-7]*$/.test(index) ? parseInt(index, 8) : /^[1-9]\d*$/.test(index) ? Number(index) : undefined);
 const readsPipeStatusAt = (place: number) => (text: string) => [...text.matchAll(/\$\{PIPESTATUS\[(\d+|@|\*)\]\}/g)].some(([, index]) => index === "@" || index === "*" || arithmeticIndex(index) === place);
+const isStatus = (text: string) => /^\s*\$(?:\?|\{\?\})\s*$/.test(text);
+const isPipeStatusAt = (place: number) => (text: string) => arithmeticIndex(text.match(/^\s*\$\{PIPESTATUS\[(\d+)\]\}\s*$/)?.[1] ?? "") === place;
 const failingCode = /^(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-5])$/;
 const printsToTheAgent = /^(?:2>&1|1?>&2)$/;
 
@@ -77,7 +79,7 @@ function setting({ commands, depths }: Program, before: number, read: (args: str
     if (command.name !== "set" || parens(command.scope) > 0) return;
     const alwaysRuns = depths[index] === 0 && command.keywords.length === 0 && !["|", "&&", "||"].includes(commands[index - 1]?.after ?? "");
     const value = read(command.args);
-    if (alwaysRuns && !["|", "&"].includes(command.after ?? "")) on = value ?? on;
+    if (alwaysRuns && command.redirects.length === 0 && !["|", "&"].includes(command.after ?? "")) on = value ?? on;
     else if (value === false) on = false;
   });
   return on;
@@ -118,7 +120,7 @@ function expanded(raw: string): string {
   return text;
 }
 
-type Reads = { status: (text: string) => boolean; bareExit: boolean; failingExit: boolean };
+type Reads = { status: (text: string) => boolean; exitCode: (text: string) => boolean; bareExit: boolean; failingExit: boolean };
 
 function printsStatus({ name, args, rawArgs }: Command, reads: (text: string) => boolean): boolean {
   return name === "echo" && !args.some((arg) => arg.includes("\\")) && rawArgs.some((raw) => reads(expanded(raw)));
@@ -129,7 +131,7 @@ function reporter(command: Command | undefined, sameLevel: boolean, reads: Reads
   if (command.name === "exit") {
     const [code, ...more] = command.args;
     if (more.length > 0) return undefined;
-    const readsIt = command.rawArgs.some((raw) => reads.status(expanded(raw)));
+    const readsIt = command.rawArgs.some((raw) => reads.exitCode(expanded(raw)));
     return (code === undefined && reads.bareExit) || readsIt || (reads.failingExit && failingCode.test(code ?? "")) ? "exit" : undefined;
   }
   return printsStatus(command, reads.status) && command.redirects.every((redirect) => printsToTheAgent.test(redirect)) ? "printed" : undefined;
@@ -197,7 +199,7 @@ function reachOf(program: Program, start: number): Reach {
   if (end !== start && !setting(program, start, setsOption("pipefail"))) {
     const place = placeInPipe(program, start);
     const readable = depth === 0 && place !== undefined && (separators.has(commands[end].after) || commands[end].after === "&&");
-    const reads = { status: readsPipeStatusAt(place ?? -1), bareExit: false, failingExit: false };
+    const reads = { status: readsPipeStatusAt(place ?? -1), exitCode: isPipeStatusAt(place ?? -1), bareExit: false, failingExit: false };
     return (readable && reporter(commands[end + 1], sameLevel(end + 1), reads)) || { how: "a pipe" };
   }
   if (depth > 0) return closesOnly(program, end, depth) ? "exit" : { how: "the group or loop it runs in" };
@@ -210,9 +212,9 @@ function reachOf(program: Program, start: number): Reach {
   const next = end + 1;
   if (after === undefined) return "exit";
   if (after === "&") return { how: "running it in the background with `&`" };
-  if (after === "||") return reporter(commands[next], sameLevel(next), { status: readsStatus, bareExit: true, failingExit: true }) ?? { how: "the `||` after it" };
+  if (after === "||") return reporter(commands[next], sameLevel(next), { status: readsStatus, exitCode: isStatus, bareExit: true, failingExit: true }) ?? { how: "the `||` after it" };
   if (!chained && separators.has(after) && setting(program, start, setsErrexit)) return "exit";
-  return reporter(commands[next], sameLevel(next), { status: readsStatus, bareExit: true, failingExit: false }) ?? { how: separatorName(after) };
+  return reporter(commands[next], sameLevel(next), { status: readsStatus, exitCode: isStatus, bareExit: true, failingExit: false }) ?? { how: separatorName(after) };
 }
 
 function hiddenIn(text: string, nesting: number): { found?: Finding; carries?: string } {
