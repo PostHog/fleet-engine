@@ -10,7 +10,7 @@ import { asksForDecision } from "../lib/prose-question.ts";
 import type { ShellThread } from "../../base/lib/t3/index.ts";
 import { settleWhenRunEnds, stillParks } from "../lib/closing-line.ts";
 import { startT3Stub } from "../../../src/integrations/t3/testing.ts";
-import { guardBackground, guardSend, guardStop, hiddenIn, hook, hookWith, spawnSettle, type IsHidden, type SendEvent, type SendGuardOptions, type StopEvent } from "./ask-guard.ts";
+import { guardBackground, guardCard, guardSend, guardStop, hiddenIn, hook, hookWith, spawnSettle, type IsHidden, type SendEvent, type SendGuardOptions, type StopEvent } from "./ask-guard.ts";
 
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
@@ -33,14 +33,16 @@ function transcript(...lines: object[]) {
   return path;
 }
 
-function home(person?: string) {
+function home(person?: string, settings: Record<string, unknown> = {}) {
   const dir = temp.make("home-");
   if (person) {
     mkdirSync(join(dir, ".local/state/hedge"), { recursive: true });
-    writeFileSync(join(dir, ".local/state/hedge/settings.json"), JSON.stringify({ "guards.person": person }));
+    writeFileSync(join(dir, ".local/state/hedge/settings.json"), JSON.stringify({ "guards.person": person, ...settings }));
   }
   return dir;
 }
+
+const proseTitles = { "orchestration.proseTitles": "⚠️, 🚨 , ✅ Workflows night" };
 
 const stop = (event: StopEvent, threadId: string | undefined = "top", where = home("Robin")) => guardStop(event, where, threadId, topLevel);
 
@@ -197,6 +199,20 @@ describe("the hidden thread check", () => {
     const blocked = await check({ pendingBackgroundTasks: [delegated] });
     expect(blocked?.reason).toContain("complete reply again");
     expect(blocked?.reason).toContain("shows only the last message");
+  });
+
+  test.each(["⚠️ Hog worker crash loop", "⚠ Hog worker crash loop", "🚨 EU email send failures", "✅ Workflows night to Mon 23.11."])(
+    "lets a prose question through in a thread whose title starts with a prose title, %s", async (title) => {
+      const threads = [{ id: asker, title, projectId: "p", status: "running", snoozedUntil: "2999-01-01T00:00:00Z" }] as ShellThread[];
+      const ends = (where: string) => guardStop({ transcript_path: transcript(claudePrompt("Triage it"), claudeSays(question)) }, where, "rfc-1", hiddenIn(async () => ({ threads })));
+      expect(await ends(home("Robin", proseTitles))).toBeUndefined();
+      expect(await ends(home("Robin"))).toMatchObject({ decision: "block" });
+    });
+
+  test("still blocks a prose question in a thread whose title only contains a prose title", async () => {
+    const threads = [{ id: asker, title: "Fix the ⚠️ banner", projectId: "p", status: "running", snoozedUntil: "2999-01-01T00:00:00Z" }] as ShellThread[];
+    const path = transcript(claudePrompt("Fix it"), claudeSays(question));
+    expect(await guardStop({ transcript_path: path }, home("Robin", proseTitles), "rfc-1", hiddenIn(async () => ({ threads })))).toMatchObject({ decision: "block" });
   });
 
   test("lets the stop through when T3 cannot be read", async () => {
@@ -368,6 +384,41 @@ const started = (id: string) => [
   { type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: `toolu_${id}`, content: `Command running in background with ID: ${id}. Output is being written to: /tmp/tasks/${id}.output.` }] }, toolUseResult: { backgroundTaskId: id } },
 ];
 const running = (id: string, type = "shell") => ({ id, type, status: "running" });
+
+describe("the card guard", () => {
+  const alertThread = { id: "mcp:alert-1", title: "🚨 EU email send failures", projectId: "p", status: "running" };
+  const t3 = (...threads: Partial<ShellThread>[]) => async () => ({ threads: threads as ShellThread[] });
+  const card = (tool = "AskUserQuestion"): SendEvent => ({ session_id: "s", tool_name: tool, tool_input: { questions: [] } });
+  const guard = (event: SendEvent, where: string, threadId: string | undefined = "alert-1", shell = t3(alertThread)) => guardCard(event, { home: where, shell }, threadId);
+
+  test.each(["AskUserQuestion", "request_user_input"])("denies %s in a thread whose title starts with a prose title, and says to ask in the last message", async (tool) => {
+    const answer = await guard(card(tool), home("Robin", proseTitles));
+    expect(answer?.hookSpecificOutput).toMatchObject({ hookEventName: "PreToolUse", permissionDecision: "deny" });
+    expect(answer!.hookSpecificOutput.permissionDecisionReason).toContain("last message");
+  });
+
+  test("lets a card through in any other thread, without the setting, outside T3, or when T3 cannot be read", async () => {
+    const where = home("Robin", proseTitles);
+    expect(await guard(card(), where, "alert-1", t3({ ...alertThread, title: "RFC" }))).toBeUndefined();
+    expect(await guard(card(), home("Robin"))).toBeUndefined();
+    expect(await guardCard(card(), { home: where, shell: t3(alertThread) }, undefined)).toBeUndefined();
+    expect(await guard(card(), where, "alert-1", async () => { throw new Error("T3 down"); })).toBeUndefined();
+    expect(await guard(card("Bash"), where)).toBeUndefined();
+  });
+
+  test("lets every card through while the kill switch file exists", async () => {
+    const where = home("Robin", proseTitles);
+    mkdirSync(join(where, ".config/hedge"), { recursive: true });
+    writeFileSync(join(where, ".config/hedge/ask-guard.off"), "");
+    expect(await guard(card(), where)).toBeUndefined();
+  });
+
+  test("the installed hook sends a question card to the card guard", async () => {
+    const routed = hookWith(() => t3(alertThread), { threadId: "alert-1" });
+    const denied = await routed("claude", async () => JSON.stringify(card()), home("Robin", proseTitles));
+    expect(JSON.parse(denied.stdout).hookSpecificOutput.permissionDecision).toBe("deny");
+  });
+});
 
 describe("the background work guard", () => {
   const waitOn = (...taskIds: string[]) => ({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "toolu_wait", name: "mcp__t3-code__t3_background_wait", input: { taskIds } }] } });

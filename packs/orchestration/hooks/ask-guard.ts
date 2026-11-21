@@ -8,7 +8,7 @@ import { type Hook, printing, runHook } from "../../base/lib/hook.ts";
 import { matchThread, questionCard, type ShellThread, t3CliRunner, t3UserData, type T3HttpClient, withT3Session } from "../../base/lib/t3/index.ts";
 import { backgroundReason, unwaitedBackgroundTasks } from "../lib/background-stop.ts";
 import { parkStop, type ParkT3, realSettleClock, settleWhenRunEnds, stillParks } from "../lib/closing-line.ts";
-import { closesOn, closingSettings, killSwitch } from "../lib/closing-marks.ts";
+import { asksInProse, closesOn, closingSettings, killSwitch, proseTitles } from "../lib/closing-marks.ts";
 import { checksRun, claudeTaskRuns, proofStop, realProcesses, waits, type ProofStopEvent, type ProofStopOptions } from "../lib/proof-stop.ts";
 import { asksForDecision, personName } from "../lib/prose-question.ts";
 
@@ -89,7 +89,7 @@ export const hiddenIn = (shell: ReadShell, now = Date.now): IsHidden => async (t
   try {
     const { threads } = await shell();
     const thread = matchThread(threads, threadId, (item) => item.id);
-    if (!thread || thread.lineage?.parentThreadId) return false;
+    if (!thread || thread.lineage?.parentThreadId || asksInProse(thread.title, proseTitles(home))) return false;
     return (Boolean(thread.snoozedUntil) && Date.parse(thread.snoozedUntil!) > now()) || closesOnPark(message, home) || claudeTaskRuns(event)
       || waits(threads, thread) || (thread.pullRequests ?? []).some(awaitsChecks);
   } catch {
@@ -180,6 +180,18 @@ export async function guardSend(event: SendEvent, options: SendGuardOptions): Pr
   return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: pendingCardReason(threadId, personName(options.home)) } };
 }
 
+export const proseCardReason = "Hedge blocked this card: this thread's title marks it as one that asks in prose, because a job queues messages into it, and a pending card would hold them. "
+  + "Write the questions in your last message instead, numbered, each with your recommendation first.";
+
+export async function guardCard(event: SendEvent, options: SendGuardOptions, threadId: string | undefined): Promise<SendDenial | undefined> {
+  if (!questionTool.test(event.tool_name ?? "") || !threadId || existsSync(join(options.home, killSwitch))) return undefined;
+  const starts = proseTitles(options.home);
+  if (!starts.length) return undefined;
+  const thread = matchThread((await readThreads(options.shell)) ?? [], threadId, (item) => item.id);
+  if (!asksInProse(thread?.title, starts)) return undefined;
+  return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: proseCardReason } };
+}
+
 const t3CallMs = 3_000;
 const parkStartsWithinMs = 6_000;
 const t3Scopes = ["orchestration:read", "orchestration:operate", "access:read"];
@@ -255,7 +267,10 @@ async function guardStopAndProof(event: StopEvent & ProofStopEvent, home: string
 export const hookWith = (shell: (home: string) => ReadShell, stop: StopDeps = {}): Hook => async (_provider, readInput, home) => {
   try {
     const event = JSON.parse(await readInput()) as StopEvent & ProofStopEvent & SendEvent;
-    if (event.tool_name !== undefined) return printing(await guardSend(event, { home, shell: shell(home) }));
+    if (event.tool_name !== undefined) {
+      const options = { home, shell: shell(home) };
+      return printing((await guardSend(event, options)) ?? (await guardCard(event, options, "threadId" in stop ? stop.threadId : process.env.T3CODE_THREAD_ID)));
+    }
     return printing(await guardStopAndProof(event, home, shell(home), stop));
   } catch {
     return printing(undefined);

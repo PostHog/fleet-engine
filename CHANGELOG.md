@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Threads that ask in prose
+
+- The setting `orchestration.proseTitles` names title starts, such as `⚠️, 🚨`,
+  of threads that a job queues messages into. Such a thread may end its turn
+  with a decision in prose, and the question guard denies its question cards,
+  so a pending card never holds the queued messages.
+
 ### A fresh judge scores the growth
 
 - When the production lines at HEAD pass twice the lines at round 1, a fresh
