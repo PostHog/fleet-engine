@@ -43,6 +43,14 @@ test("a failing judge names the question it failed on the gate's last line", asy
   expect(lastLine(gate.output)).toBe("gate: fail (exit 1): judge proof: fail: No evidence shows the greeting");
 });
 
+test("a judge reason with a line break still ends the gate in one verdict line", async () => {
+  const { pr } = await reviewed();
+  pr.env.HEDGE_PROOF_JUDGE = `cat >/dev/null; echo '${verdict({ proof: { verdict: "fail", reason: "No evidence shows the greeting\\nnor its reply", citations: [] } })}'`;
+  const gate = await pr.hedge("gate");
+  expect(gate.code).toBe(1);
+  expect(lastLine(gate.output)).toBe("gate: fail (exit 1): judge proof: fail: No evidence shows the greeting nor its reply");
+});
+
 test("an unavailable judge names its cause on the gate's last line", async () => {
   const { pr } = await reviewed();
   pr.env.HEDGE_PROOF_JUDGE = "cat >/dev/null; echo 'not json'";

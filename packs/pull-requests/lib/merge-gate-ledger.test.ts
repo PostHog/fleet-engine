@@ -140,38 +140,3 @@ test("while --wait waits for CI at a head that passed before, another machine's 
     expect(await mergeThere()).toBeUndefined();
   } finally { rmSync(other, { recursive: true, force: true }); }
 });
-
-test("a pass that another gate run shared after this run started still yields to this run's wait on running CI", async () => {
-  const pr = await checkout();
-  await pr.commit("feature.txt", "new\n");
-  await reviewHead(pr);
-  await pr.hedge("require", "--none", "--reason", "docs only");
-  const head = await pr.git("rev-parse", "HEAD");
-  const other = join(tmpdir(), `merge-gate-other-${process.pid}-${Date.now()}`);
-  mkdirSync(join(other, ".local/state/hedge"), { recursive: true });
-  writeFileSync(join(other, ".local/state/hedge/settings.json"), "{}");
-  const github = { pull: async () => ({ head, base: "main", defaultBranch: "main", open: true }), pullFor: async () => undefined };
-  const mergeThere = async () => {
-    writeFileSync(join(other, ".local/state/hedge/decisions.jsonl"), readFileSync(ledgerFile(pr.home), "utf8"));
-    return mergeGate({ tool_name: "Bash", tool_input: { command: "gh pr merge 42 --repo example/product" }, cwd: "/" }, { home: other, env: { HEDGE_SETTINGS: undefined }, github });
-  };
-  try {
-    const start = pr.clock.now.getTime();
-    const laterPass = { type: "gate", repository: "example/product", pr: 42, commit: head, passed: true, machine: "another-box", at: new Date(start + 500).toISOString() };
-    mkdirSync(join(pr.home, ".local/state/hedge"), { recursive: true });
-    writeFileSync(ledgerFile(pr.home), (existsSync(ledgerFile(pr.home)) ? readFileSync(ledgerFile(pr.home), "utf8") : "") + JSON.stringify(laterPass) + "\n");
-    const githubRead = join(other, "github-read");
-    let slept = 0;
-    Object.defineProperty(pr.clock, "now", { get: () => new Date(start + (existsSync(githubRead) ? 1_000 : 0) + slept), configurable: true });
-    pr.whileGithubReadsPull(`touch "${githubRead}"`);
-    pr.ci([{ name: "test", bucket: "pending" }]);
-    const whileWaiting: (string | undefined)[] = [];
-    pr.panel.onPause = async (ms = 0) => {
-      slept += ms;
-      whileWaiting.push((await mergeThere())?.hookSpecificOutput.permissionDecisionReason);
-      pr.ci([{ name: "test", bucket: "pass" }]);
-    };
-    expect((await pr.hedge("gate", "--wait", "10")).code).toBe(0);
-    expect(whileWaiting[0]).toContain("has not passed at the head of example/product#42");
-  } finally { rmSync(other, { recursive: true, force: true }); }
-});

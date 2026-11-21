@@ -69,7 +69,7 @@ export async function finalGate(head: ProofIdentity, context: GateContext, { lan
   const shown = pull === undefined ? undefined : receiptMarker((pull as PullRequest).body);
   const stale = shown && shown.head !== head.commit ? [`receipt: the PR body shows the receipt of ${shown.head.slice(0, 7)}, not HEAD ${head.commit.slice(0, 7)}. Refresh it with hedge proof receipt`] : [];
   const growth = await grownBy(home, head, run, pull);
-  const reason = judged.code === 0 ? "pass" : judged.reason ?? `exit ${judged.code}`;
+  const reason = judged.code === 0 ? "pass" : (judged.reason ?? `exit ${judged.code}`).replace(/\s*[\r\n]+\s*/g, " ");
   const gate = {
     code: judged.code,
     reason,
