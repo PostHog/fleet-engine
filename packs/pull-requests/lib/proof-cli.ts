@@ -20,7 +20,7 @@ import { runReceipt } from "./proof-receipt-command.ts";
 import { receiptBudget } from "./proof-receipt-page.ts";
 import { publisherSeam } from "./proof-receipt-publisher.ts";
 import { reviewPrompt } from "./proof-review.ts";
-import { leftOutNote, reviewRange } from "./proof-range.ts";
+import { leftOutNote, rangeIsEmpty, reviewRange } from "./proof-range.ts";
 import { quietCommitIn } from "./proof-delta.ts";
 import { baseRefs, baseTip, cleanBaseMerge, mergeBase, pullRequestDetails, remotesOf, reviewTier, tierCeiling, tierLenses, topLevel, type ReviewTier } from "./proof-checkout.ts";
 import { arbiterOf, finalGate, reviewLimit, type FinalGate } from "./proof-gate.ts";
@@ -685,7 +685,8 @@ async function reserveRound(options: Map<string, string>, head: ProofIdentity, c
   const limits = firstPanel ? permit.limits : { ...permit.limits, ceiling: tierCeiling(tier, permit.limits.ceiling) };
   const now = context.now ?? (() => new Date());
   const dropUnanswered = (directory: string) => roundStep(directory, context, () => dropFinalRead(directory, head, now()));
-  const reserved = await startReview(context.home, head, { dropUnanswered, onHistory: onHistoryOf(head, context.run), opening: async () => panel && !await panelCommit(context.home, head), sanity: () => requireSanity(context.home, head, context.run, () => bloatJudge(head, context)), scope, base, from, ...isCommitSha(pull?.baseSha) ? { forkBase: pull.baseSha } : {}, ...permit, limits, decision, phase: options.get("--phase"), cleanBaseMerge: cleanBaseMerge(head, context.run), quietCommit: quietCommitIn(context.run, () => baseRefs(head, context.run)), capturedBy, lock: async (directory) => lockNewRound(directory, await context.lock()), lockBudget: async (reviews, step) => withRoundLock(reviews, await context.lock(), step), now });
+  const emptyRange = () => from !== undefined && rangeIsEmpty(context.run, from, head.commit, mergeBase(head, context.run));
+  const reserved = await startReview(context.home, head, { dropUnanswered, emptyRange, onHistory: onHistoryOf(head, context.run), opening: async () => panel && !await panelCommit(context.home, head), sanity: () => requireSanity(context.home, head, context.run, () => bloatJudge(head, context)), scope, base, from, ...isCommitSha(pull?.baseSha) ? { forkBase: pull.baseSha } : {}, ...permit, limits, decision, phase: options.get("--phase"), cleanBaseMerge: cleanBaseMerge(head, context.run), quietCommit: quietCommitIn(context.run, () => baseRefs(head, context.run)), capturedBy, lock: async (directory) => lockNewRound(directory, await context.lock()), lockBudget: async (reviews, step) => withRoundLock(reviews, await context.lock(), step), now });
   return { ...reserved, scope, base, from, phase: options.get("--phase") };
 }
 
