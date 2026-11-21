@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { spawnAsync } from "../../../src/testing/spawn.ts";
 import { checkout, cleanFixtures, fakeModel, fixture, reviewHead, verdict, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
@@ -104,4 +105,38 @@ test("fetching the base writes no ref but the base's remote ref, even in a check
   await judgePrompt(pr);
   expect(await pr.git("for-each-ref", "--format=%(refname) %(objectname)", "--exclude=refs/remotes/origin/main")).toBe(refsBefore);
   expect(existsSync(join(pr.repository, ".git/FETCH_HEAD"))).toBe(false);
+});
+
+test("fetching the base leaves a populated submodule as it was, even when the new base points it at a commit it lacks", async () => {
+  const pr = await checkout();
+  const library = join(fixture("hedge-proof-library-"), "library.git");
+  const elsewhere = fixture("hedge-proof-library-work-");
+  const there = (...args: string[]) => spawnAsync(["git", ...args], { cwd: elsewhere, env: pr.env });
+  await there("init", "-q", "--bare", "-b", "main", library);
+  await there("clone", "-q", library, ".");
+  await there("commit", "-q", "--allow-empty", "-m", "First library commit");
+  await there("push", "-q", "origin", "HEAD:refs/heads/main");
+  await pr.git("checkout", "-q", "main");
+  await pr.git("submodule", "add", "-q", library, "library");
+  await pr.git("commit", "-q", "-m", "Add the library");
+  await pr.git("update-ref", "refs/remotes/origin/main", "HEAD");
+  await pr.git("checkout", "-q", "feature");
+  await pr.git("merge", "-q", "--no-edit", "main");
+  await pr.git("submodule", "update", "-q", "--init");
+  await pr.commit("feature.txt", "greet the new member\n");
+  await there("commit", "-q", "--allow-empty", "-m", "Second library commit");
+  await there("push", "-q", "origin", "HEAD:refs/heads/main");
+  const unfetched = (await there("rev-parse", "HEAD")).stdout.trim();
+  await pr.git("checkout", "-q", "main");
+  await pr.git("update-index", "--cacheinfo", `160000,${unfetched},library`);
+  await pr.git("commit", "-q", "-m", "Move the library");
+  const moved = await pr.git("rev-parse", "HEAD");
+  await pr.git("reset", "-q", "--hard", "refs/remotes/origin/main");
+  await pr.git("checkout", "-q", "feature");
+  const bare = await publishBase(pr);
+  await pr.git("push", "-q", bare, `${moved}:refs/heads/main`);
+  await pr.hedge("require", "--none", "--reason", "docs only");
+
+  await judgePrompt(pr);
+  expect((await spawnAsync(["git", "cat-file", "-e", `${unfetched}^{commit}`], { cwd: join(pr.repository, "library"), env: pr.env })).exitCode).not.toBe(0);
 });
