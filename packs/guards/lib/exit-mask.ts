@@ -117,7 +117,7 @@ type Reads = { status: (text: string) => boolean; bareExit: boolean; failingExit
 function printsStatus({ name, args, rawArgs }: Command, reads: (text: string) => boolean): boolean {
   const readsArg = (raw: string) => reads(expanded(raw));
   if (name === "echo") return !args.some((arg) => /^-[nE]*e/.test(arg)) && rawArgs.some(readsArg);
-  if (name !== "printf" || args.some((arg) => arg.startsWith("-v"))) return false;
+  if (name !== "printf") return false;
   const skip = args[0] === "--" ? 1 : 0;
   const [format = "", ...values] = args.slice(skip);
   const [rawFormat = "", ...rawValues] = rawArgs.slice(skip);
