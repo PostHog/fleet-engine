@@ -124,9 +124,12 @@ function sentTexts(found: Command, cwd: string | undefined, io: IntentIO, inline
   const paths = files.map((path) => stdinPath.test(path) ? "-" : path);
   const piped = paths.includes("-") && !found.stdin;
   const read = paths.map((path) => path === "-" ? found.stdin?.body ?? "" : io.readText(resolve(cwd ?? ".", found.chdir ?? ".", home(path))));
-  const texts = [...inline, ...read.filter((text) => text !== undefined), found.stdin?.body ?? ""];
-  return { texts: [...texts, ...texts.flatMap(jsonStrings)], unread: read.includes(undefined), piped };
+  const typed = [...inline, found.stdin?.body ?? ""];
+  const texts = [...typed, ...read.filter((text) => text !== undefined)];
+  return { texts: withJsonStrings(texts), typed: withJsonStrings(typed), unread: read.includes(undefined), piped };
 }
+
+const withJsonStrings = (texts: string[]) => [...texts, ...texts.flatMap(jsonStrings)];
 
 function jsonStrings(text: string): string[] {
   if (!/^\s*[{[]/.test(text)) return [];
@@ -134,8 +137,8 @@ function jsonStrings(text: string): string[] {
 }
 
 const builtAtRunTime = /[$`]/;
-type Sent = { texts: string[]; unread: boolean };
-const readsEnqueue = ({ texts }: Sent, raw: string) => texts.some((text) => enqueueLine.test(text)) || (texts.some((text) => builtAtRunTime.test(text)) && mentionsEnqueue.test(raw));
+type Sent = { texts: string[]; typed: string[]; unread: boolean };
+const readsEnqueue = ({ texts, typed }: Sent, raw: string) => texts.some((text) => enqueueLine.test(text)) || (typed.some((text) => builtAtRunTime.test(text)) && mentionsEnqueue.test(raw));
 const sendsEnqueue = (sent: Sent, raw: string) => sent.unread || readsEnqueue(sent, raw);
 const elsewhere = (sent: Sent, raw: string): MergeIntent => ({ targets: [], refusal: readsEnqueue(sent, raw) ? otherEndpointReason : unreadPayloadReason });
 
