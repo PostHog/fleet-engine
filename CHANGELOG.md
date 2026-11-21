@@ -31,8 +31,14 @@
   names `constructor`, `prototype` and `__proto__` are refused.
 - Hedge compares the whole instance. A field the pack drops leaves the
   instance, and a field the user adds is kept and reported as drift.
+- An instance holds only `driver`, `enabled` and `config`, with `enabled`
+  outside `config`, because T3 rewrites the other fields when it stores the
+  instance. The ids `claude` and `codex` and the driver `claudeAgent` are
+  refused: model rows and Claude recovery own them.
 - When a pack turns an instance back on, Hedge turns it on again in T3, also
-  when T3 was stopped. A failed upsert still saves the instances T3 took.
+  when T3 was stopped. When T3 refuses an upsert, `hedge apply` fails, names
+  the instances T3 took, and saves only those as Hedge's. Hedge never removes
+  the whole `providerInstances` map that an older engine recorded.
 - Claude recovery binds T3's implicit `claudeAgent` instance also when the
   settings list only other instances.
 

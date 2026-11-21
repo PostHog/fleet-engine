@@ -1,4 +1,4 @@
-import { get, isDocument, overlaps, remove, same, samePath, set, type Document, type Field } from "../provider-config/fields.ts";
+import { get, isDocument, remove, same, samePath, set, type Document, type Field } from "../provider-config/fields.ts";
 
 export type Reconciled = { document: Document; record: Field[]; applied: Field[]; kept: string[]; changed: string[]; removed: string[]; disabled: Field[] };
 
@@ -27,7 +27,7 @@ export function reconcileKeys(current: Document, previous: Field[], wanted: Fiel
     result.applied.push(field);
   }
   for (const field of previous) {
-    if (wanted.some((item) => samePath(item.path, field.path) || (item.path.length > field.path.length && overlaps(item.path, field.path)))) continue;
+    if (samePath(field.path, ["providerInstances"]) || wanted.some((item) => samePath(item.path, field.path))) continue;
     const matches = matchesOf(field);
     const value = get(document, field.path);
     if (options.outage || (value !== undefined && !matches(value, field.value))) {

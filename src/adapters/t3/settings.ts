@@ -48,7 +48,6 @@ export async function reconcileSettings(plan: Plan, home: string, options: Optio
   const previous = await readFieldRecord(home, recordTarget);
   const next: FieldRecord = {};
   const writes: Array<Write & { reason: string }> = [];
-  let failure: { error: unknown } | undefined;
   for (const [target, fields] of [[settingsTarget, settingsFields(plan).map((field) => underHome(field, home))], [desktopTarget, desktopFields(plan)]] as const) {
     const old = previous[target] ?? [];
     let before: string | undefined;
@@ -71,9 +70,8 @@ export async function reconcileSettings(plan: Plan, home: string, options: Optio
       const merged = reconcileKeys(effectiveView(current, old, effective), old, fields, { adopt, outage: options.outage, matches: holds });
       keptFinding(target, merged, result);
       const sent = await throughServer(options.rpc, merged, effective, options.dryRun, result);
-      const record = merged.record.flatMap((field) => (sent.refused.includes(field) ? heldBefore(field, effective) : [sent.stillOn.find((item) => samePath(item.path, field.path)) ?? field]));
+      const record = merged.record.flatMap((field) => (sent.refused.includes(field) ? heldBefore(field, effective, old) : [sent.stillOn.find((item) => samePath(item.path, field.path)) ?? field]));
       if (record.length) next[target] = record;
-      if (sent.failure) failure = sent.failure;
       continue;
     }
     const merged = reconcileKeys(current, old, fields, { adopt, outage: options.outage });
@@ -90,7 +88,6 @@ export async function reconcileSettings(plan: Plan, home: string, options: Optio
   const recordText = `${JSON.stringify(next, null, 2)}\n`;
   const recordChanged = recordBefore !== recordText && !(recordBefore === undefined && !Object.keys(next).length);
   await writeWithBackups(home, recordChanged ? [...writes, { target: recordTarget, before: recordBefore, after: recordText }] : writes);
-  if (failure) throw failure.error;
   result.actions.push(...writes.map((write) => ({ target: write.target, operation: write.before === undefined ? ("create" as const) : ("replace" as const), reason: write.reason })));
   return result;
 }
@@ -104,7 +101,8 @@ const name = (field: Field) => field.path.join(".");
 const instanceId = (field: Field) => field.path[1]!;
 const off = { enabled: false };
 
-function heldBefore(field: Field, effective: Document): Field[] {
+function heldBefore(field: Field, effective: Document, old: Field[]): Field[] {
+  if (isProviderInstance(field.path)) return old.filter((item) => samePath(item.path, field.path));
   const value = get(effective, field.path);
   return value === undefined ? [] : [{ ...field, value }];
 }
@@ -113,7 +111,7 @@ function keptFinding(target: string, merged: Reconciled, result: AdapterResult) 
   if (merged.kept.length) result.findings.push(finding(`kept:${target}`, `Kept your ${merged.kept.join(", ")} in ${target}. Run hedge apply --adopt ${target} to take Hedge's value.`));
 }
 
-type Sent = { refused: Field[]; stillOn: Field[]; failure?: { error: unknown } };
+type Sent = { refused: Field[]; stillOn: Field[] };
 
 const takes = (field: Field, actual: unknown) => (isProviderInstance(field.path) ? same : holds)(actual, field.value);
 
@@ -129,6 +127,7 @@ async function throughServer(rpc: T3Rpc, merged: Reconciled, effective: Document
   if (!changed.length && !disabling.length) return { refused: [], stillOn: [] };
   const patch = changed.filter((field) => !isProviderInstance(field.path));
   const sent: Field[] = [];
+  let failure: unknown;
   try {
     if (patch.length) {
       await rpc.call("server.updateSettings", { patch: Object.fromEntries(patch.map((field) => [name(field), field.value])) });
@@ -143,17 +142,21 @@ async function throughServer(rpc: T3Rpc, merged: Reconciled, effective: Document
       sent.push(field);
     }
   } catch (error) {
-    return { refused: changed.filter((field) => !sent.includes(field)), stillOn: disabling.filter((field) => !sent.includes(field)), failure: { error } };
+    failure = error;
   }
-  const after = await readT3Settings(rpc);
-  const refused = changed.filter((field) => !takes(field, get(after, field.path)));
-  const stillOn = disabling.filter((field) => !holds(get(after, field.path), off));
+  const after = failure === undefined ? await readT3Settings(rpc) : undefined;
+  const refused = changed.filter((field) => (after ? !takes(field, get(after, field.path)) : !sent.includes(field)));
+  const stillOn = disabling.filter((field) => (after ? !holds(get(after, field.path), off) : !sent.includes(field)));
   const taken = changed.filter((field) => !refused.includes(field));
   const turnedOff = disabling.filter((field) => !stillOn.includes(field));
   if (taken.length) result.actions.push({ target: "t3 settings", operation: "replace", reason: `set ${taken.map(name).join(", ")}` });
   if (turnedOff.length) result.actions.push({ target: "t3 settings", operation: "replace", reason: `turn off ${turnedOff.map(name).join(", ")}` });
   if (refused.length) result.findings.push(finding("t3:settings", `T3 Code did not take ${refused.map(name).join(", ")}. Run hedge apply again; if it stays, set it in T3 Code's settings.`, "apply"));
   if (stillOn.length) result.findings.push(finding("t3:instances", `T3 Code did not turn off ${stillOn.map(instanceId).join(", ")}. Run hedge apply again; if it stays, turn it off in T3 Code's settings.`, "apply"));
+  if (failure !== undefined) {
+    result.failed = true;
+    result.findings.push(finding("t3:server", `T3 Code refused a settings write (${(failure as Error).message}). Run hedge apply again.`, "apply"));
+  }
   return { refused, stillOn };
 }
 

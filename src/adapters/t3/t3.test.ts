@@ -90,7 +90,15 @@ function withLegacyView(settings: Record<string, unknown>) {
 
 const t3Slug = (value: unknown) => typeof value === "string" && value.length <= 64 && /^[a-zA-Z][a-zA-Z0-9_-]*$/.test(value);
 
-function fakeServer(options: { up?: boolean; settings?: Record<string, unknown>; links?: Link[]; projects?: string[]; ignorePatch?: boolean } = {}) {
+/** As T3 Code stores an upserted instance: it keeps the fields its schema knows, and folds config.enabled into enabled. */
+function storedInstance({ driver, displayName, accentColor, environment, enabled, config }: Record<string, unknown>) {
+  const known = Object.fromEntries(Object.entries({ driver, displayName, accentColor, environment, enabled, config }).filter(([, value]) => value !== undefined));
+  if (typeof config !== "object" || config === null || typeof (config as { enabled?: unknown }).enabled !== "boolean") return known;
+  const { enabled: configEnabled, ...rest } = config as Record<string, unknown>;
+  return { ...known, enabled: enabled === false || configEnabled === false ? false : (enabled ?? configEnabled), config: rest };
+}
+
+function fakeServer(options: { up?: boolean; settings?: Record<string, unknown>; links?: Link[]; projects?: string[]; ignorePatch?: boolean; refuseInstances?: string[] } = {}) {
   const defaults = { defaultThreadEnvMode: "local", sidebarAutoSettleAfterDays: 7, storageCleanup: { worktreeOnMerge: false, logsAfterDays: 30, browserArtifactsAfterDays: 7 }, defaultModelSelection: fastModel };
   const state = {
     up: options.up ?? true,
@@ -99,6 +107,7 @@ function fakeServer(options: { up?: boolean; settings?: Record<string, unknown>;
     tasks: new Map<string, StoredTask>(),
     links: options.links ?? [],
     ignorePatch: options.ignorePatch ?? false,
+    refuseInstances: options.refuseInstances ?? [],
   };
   const calls: Array<{ tag: string; payload: unknown }> = [];
   const rpc: T3Rpc = {
@@ -108,9 +117,10 @@ function fakeServer(options: { up?: boolean; settings?: Record<string, unknown>;
       if (tag === "server.updateSettings") {
         const { patch: { projectSettingsOverrides: entries, ...patch }, providerInstanceMutation: mutation } = payload as { patch: Record<string, unknown>; providerInstanceMutation?: { operation: "upsert"; instanceId: string; instance: Record<string, unknown> } };
         if (mutation && !(t3Slug(mutation.instanceId) && t3Slug(mutation.instance.driver))) throw new Error("T3 RPC request failed: providerInstanceMutation is not a valid provider instance");
+        if (mutation && state.refuseInstances.includes(mutation.instanceId)) throw new Error(`T3 RPC request failed: write-managed-setting providerInstances.${mutation.instanceId}`);
         if (state.ignorePatch) return structuredClone(state.settings) as T;
         Object.assign(state.settings, patch);
-        if (mutation?.operation === "upsert") state.settings.providerInstances = { ...(state.settings.providerInstances as object), [mutation.instanceId]: mutation.instance };
+        if (mutation?.operation === "upsert") state.settings.providerInstances = { ...(state.settings.providerInstances as object), [mutation.instanceId]: storedInstance(mutation.instance) };
         if (entries) {
           const merged = { ...(state.settings.projectSettingsOverrides as Record<string, object>), ...(entries as Record<string, object>) };
           state.settings.projectSettingsOverrides = Object.fromEntries(Object.entries(merged).filter(([, entry]) => Object.keys(entry).length));
@@ -542,14 +552,30 @@ describe("T3 provider instances", () => {
     expect(instancesOf(server)).toEqual({ muse: instance(home, "muse", "muse", false) });
   });
 
-  test("keeps an instance T3 took in its record when T3 refuses the next one, so it turns it off once it leaves the plan", async () => {
+  test("fails the apply when T3 refuses an instance, reports the one it took, and turns that one off once it leaves the plan", async () => {
     const home = temp.make("home-");
-    const { server, adapter } = setup();
-    const refusedId = entry(`providerInstances.${"a".repeat(65)}`, { driver: "antigravity", enabled: true }, "agents");
-    const failed = await apply(plan("linux", [muse, refusedId]), { home, adapters: [adapter] });
-    expect(failed.findings).toContainEqual(expect.objectContaining({ id: "t3:server", say: expect.stringContaining("not a valid provider instance") }));
+    const { server, adapter } = setup({ refuseInstances: ["muse"] });
+    const failed = await apply(plan("linux", [agy, muse]), { home, adapters: [adapter] });
+    expect(failed.ok).toBe(false);
+    expect(failed.actions).toContainEqual({ target: "t3 settings", operation: "replace", reason: "set providerInstances.antigravity" });
+    expect(failed.findings).toContainEqual({ id: "t3:settings", pack: "engine", say: "T3 Code did not take providerInstances.muse. Run hedge apply again; if it stays, set it in T3 Code's settings.", repair: "apply" });
+    expect(failed.findings).toContainEqual(expect.objectContaining({ id: "t3:server", say: expect.stringContaining("write-managed-setting providerInstances.muse") }));
     await apply(plan("linux", []), { home, adapters: [adapter] });
-    expect(instancesOf(server)).toEqual({ muse: instance(home, "muse", "muse", false) });
+    expect(instancesOf(server)).toEqual({ antigravity: instance(home, "antigravity", "agy", false) });
+  });
+
+  test("leaves an instance the user set up alone when T3 refuses Hedge's adopted value, also once the pack leaves the plan", async () => {
+    for (const refusal of [{ refuseInstances: ["antigravity"] }, { ignorePatch: true }]) {
+      const home = temp.make("home-");
+      const mine = { driver: "antigravity", enabled: true, config: { binaryPath: "/opt/agy/bin/agy" } };
+      const { server, adapter } = setup({ settings: { providerInstances: { antigravity: mine } }, ...refusal });
+      const refused = await apply(plan("linux", [agy]), { home, adapters: [adapter], adopt: [settingsFile] });
+      expect(refused.findings).toContainEqual(expect.objectContaining({ id: "t3:settings", say: expect.stringContaining("did not take providerInstances.antigravity") }));
+      server.state.refuseInstances = [];
+      server.state.ignorePatch = false;
+      await apply(plan("linux", []), { home, adapters: [adapter] });
+      expect(instancesOf(server)).toEqual({ antigravity: mine });
+    }
   });
 
   test("a dry run says what it would turn on and off, and changes nothing in T3", async () => {
@@ -605,7 +631,19 @@ describe("T3 provider instances", () => {
     const result = await seed(plan("linux", [entry("providerInstances.antigravity", { driver: "antigravity", enabled: true }, "agents")]), home);
     expect(read(home, settingsFile).providerInstances).toEqual(map);
     expect(result).toEqual({ actions: [], findings: [] });
-    expect(read(home, ".config/hedge/t3-settings.json")[settingsFile].map((field: { path: string[] }) => field.path)).toEqual([["providerInstances", "antigravity"]]);
+    await seed(plan("linux", []), home);
+    expect(read(home, settingsFile).providerInstances).toEqual({ antigravity: { driver: "antigravity", enabled: false }, claudeAgent: recovered });
+  });
+
+  test("never removes the instance map for a whole-map record from an older engine, though no instance is left in the plan", async () => {
+    const home = temp.make("home-");
+    const map = { antigravity: { driver: "antigravity", enabled: true }, claudeAgent: recovered };
+    write(home, settingsFile, { providerInstances: map, sidebarAutoSettleAfterDays: 3 });
+    write(home, ".config/hedge/t3-settings.json", { [settingsFile]: [{ path: ["providerInstances"], value: map, pack: "agents" }] });
+    await seed(plan("linux", []), home);
+    expect(read(home, settingsFile)).toEqual({ providerInstances: map, sidebarAutoSettleAfterDays: 3 });
+    await seed(plan("linux", []), home);
+    expect(read(home, settingsFile)).toEqual({ providerInstances: map, sidebarAutoSettleAfterDays: 3 });
   });
 });
 
