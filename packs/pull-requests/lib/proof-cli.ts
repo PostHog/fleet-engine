@@ -491,7 +491,7 @@ code and the reason. The gate's lines and hedge decision report come from the sa
           waited = await untilCiFinishes(head, context, wait);
           gatedAt = clock();
           gate = await gateHead();
-          if (gate.code === ciRunningCode && waited.ranOut) gate = { ...gate, verdict: `gate: pending (exit ${gate.code}): ${gate.reason}. CI still ran after --wait ${wait}. Open the checks it waits on: a required check that has not reported may never start, such as when a check it needs failed. Wait again only while they run` };
+          if (gate.code === ciRunningCode && waited.ranOut) gate = { ...gate, reason: `${gate.reason}. CI still ran after --wait ${wait}`, verdict: `gate: pending (exit ${gate.code}): ${gate.reason}. CI still ran after --wait ${wait}. Open the checks it waits on: a required check that has not reported may never start, such as when a check it needs failed. Wait again only while they run` };
         }
       } catch (error) {
         const message = `${String((error as Error).message ?? error)}${waited?.failedRead ? ` (--wait stopped early at a failed read of GitHub: ${waited.failedRead})` : ""}`;
@@ -1180,7 +1180,7 @@ async function shareGateResult(head: ProofIdentity, passed: boolean, startedAt: 
     await ledgerOf(context).append({ type: "gate", repository: head.repository, pr: head.pr, commit: head.commit, passed, machine: thisMachine(context.env), at: startedAt.toISOString() });
     return passed ? { line: "merge gate: pass recorded in the decision ledger", failed: false } : undefined;
   } catch (failure) {
-    const error = String((failure as Error).message ?? failure).split("\n")[0]!;
+    const error = String((failure as Error).message ?? failure).split(/[\r\n]/)[0]!;
     const reach = passed ? "an enqueue from another machine is refused until the gate passes there" : "another machine may still count an earlier pass at this head";
     return { line: `merge gate: ${result} recorded on this machine only (${error}); ${reach}`, failed: true, error };
   }

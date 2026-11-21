@@ -153,7 +153,9 @@ test("--wait stops at its limit, exits 75, and names only the checks that still 
   const gate = await pr.hedge("gate", "--wait", "2");
   expect(gate.code).toBe(75);
   expect(lastLine(gate.output)).toBe("gate: pending (exit 75): CI is still running: waiting on: test. CI still ran after --wait 2. Open the checks it waits on: a required check that has not reported may never start, such as when a check it needs failed. Wait again only while they run");
-  expect(await lastGateRun(pr.home, { repository: "example/product", pr: 42, commit: head })).toEqual({ code: 75, reason: "CI is still running: waiting on: test" });
+  expect(await lastGateRun(pr.home, { repository: "example/product", pr: 42, commit: head })).toEqual({ code: 75, reason: "CI is still running: waiting on: test. CI still ran after --wait 2" });
+  const json = await pr.hedge("gate", "--wait", "2", "--json");
+  expect(JSON.parse(json.output)).toMatchObject({ code: 75, reason: "CI is still running: waiting on: test. CI still ran after --wait 2" });
 });
 
 test("--wait sleeps no longer than its limit", async () => {
