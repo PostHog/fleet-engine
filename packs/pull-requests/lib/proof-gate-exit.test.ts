@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { lastGateRun } from "./proof.ts";
 import { checkout, cleanFixtures, reviewHead, verdict } from "./proof-testing.ts";
 
@@ -16,7 +16,7 @@ async function reviewed() {
 
 const lastLine = (output: string) => output.split("\n").at(-1);
 
-test("a gate that misses a proof names the missing check on its last line", async () => {
+test("a gate that misses its review names the missing check on its last line", async () => {
   const pr = await checkout();
   await pr.commit("feature.txt", "new\n");
   await pr.hedge("require", "--none", "--reason", "docs only");
@@ -164,6 +164,20 @@ test("--wait sleeps no longer than its limit", async () => {
   const gate = await pr.hedge("gate", "--wait", "0.1");
   expect(gate.code).toBe(75);
   expect(pr.clock.now.getTime() - started).toBe(6_000);
+});
+
+test("a wait that a failed read of GitHub ended early says so, though CI still runs", async () => {
+  const { pr } = await reviewed();
+  pr.ci([{ name: "test", bucket: "pending" }]);
+  const github = join(dirname(pr.home), "github");
+  pr.panel.onPause = async () => {
+    pr.pullRequestState({ unreadable: "gh: Bad Gateway (HTTP 502)" });
+    pr.whileGithubReadsPull(`echo 'rm -f "${github}/pull-error-42"' > "${github}/while-reading"`);
+  };
+  const gate = await pr.hedge("gate", "--wait", "10");
+  expect(gate.code).toBe(75);
+  expect(gate.output).toContain("ci: --wait stopped early at a failed read of GitHub: gh api repos/example/product/pulls/42 failed (gh: Bad Gateway (HTTP 502))");
+  expect(lastLine(gate.output)).toStartWith("gate: pending (exit 75): ");
 });
 
 test("while --wait waits, the gate record says CI is still running", async () => {
