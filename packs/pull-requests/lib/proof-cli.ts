@@ -421,8 +421,8 @@ on any other exit it names the check that held the gate, also when the gate itse
 <minutes>, at most 120, waits up to that long for running CI to finish, reading CI every 30 seconds, and stops early
 when a read of GitHub fails, with a "ci: --wait stopped early" line that names the error. Then it runs the gate
 again, and still exits 75 when CI runs past the limit. The limit bounds the waiting; a read of GitHub that has started
-still finishes. While it waits, the gate record holds exit 75 and the decision ledger holds a failure at the head, so
-no merge gate counts an earlier pass; the result after the wait is shared with the time the wait ended. A run longer than your shell's limit belongs in the background. hedge reads the PR and its CI over GitHub's REST API. Only finding the PR of the
+still finishes. While it waits, the gate record holds exit 75 and the decision ledger holds a failure at the head, dated
+when the gate read CI as running, so no merge gate counts a pass shared before that read; the result after the wait is shared with the time the wait ended. A run longer than your shell's limit belongs in the background. hedge reads the PR and its CI over GitHub's REST API. Only finding the PR of the
 checkout without --repo and --pr uses gh pr view; pass both when GraphQL is out. A check that ran more than once
 counts with its newest run from each app, as GitHub's required checks do. The
 required checks of the base branch, from its rulesets and branch protection, decide CI; other checks print as not
@@ -481,7 +481,7 @@ code and the reason. The gate's lines and hedge decision report come from the sa
         gate = await gateHead();
         if (gate.code === ciRunningCode && wait) {
           await record({ code: gate.code, reason: gate.reason });
-          await shareGateResult(head, false, startedAt, context);
+          await shareGateResult(head, false, context.now?.() ?? new Date(), context);
           stoppedEarly = await untilCiFinishes(head, context, wait);
           gatedAt = context.now?.() ?? new Date();
           gate = await gateHead();
