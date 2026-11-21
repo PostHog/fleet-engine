@@ -28,18 +28,6 @@ test("a final read of a HEAD that only merges the base is refused, because it wo
   expect((await pr.hedge("gate")).output).toContain(`review: HEAD carried forward from the review of ${reviewed.slice(0, 7)} across 1 clean merge(s) of the base`);
 });
 
-test("a final read after a clean merge of a base that landed the PR's own edit and more is refused, because the PR changed nothing since the read", async () => {
-  const { pr, reviewed } = await reviewedPr();
-  await pr.advanceBase("shared.txt", "the base adds a heading\none\nand the member's name\n");
-  await pr.git("merge", "-q", "--no-edit", "main");
-  const reviewer = fakeModel(pr, "REVIEWER", "No findings.");
-
-  const refused = await pr.hedge("review", "--scope", "final", "--base", reviewed).then(() => "", (error: Error) => error.message);
-
-  expect(refused).toStartWith(`HEAD needs no final read: the commits since ${reviewed.slice(0, 7)} change no file of the PR`);
-  expect(reviewer.prompts()).toEqual([]);
-});
-
 test("a final read of a commit that puts a PR file back to the base's text reads that change", async () => {
   const { pr, reviewed } = await reviewedPr();
   await pr.commit("shared.txt", "one\n");
@@ -108,47 +96,27 @@ test("a final read reads a commit that puts a PR file back to the base's text af
   expect(await revertedAfterBaseRename((guide) => `${guide}greet the member by name\n`)).toContain("-greet the member by name");
 });
 
-test("a final read reads the PR's rewrite of a file that the base renamed and the PR then put back to the base's text", async () => {
-  const read = await revertedAfterBaseRename(() => "welcome the member\nshow the rules\npoint to the help page\n");
-
-  expect(read).toContain("-welcome the member");
-  expect(read).toContain("+step 1");
+test("a final read reads the PR taking back its rewrite of a file that the base renamed", async () => {
+  expect(await revertedAfterBaseRename(() => "welcome the member\nshow the rules\npoint to the help page\n")).toContain("-welcome the member");
 });
 
-async function mergedBaseCopyThenRename() {
+test("a final read reads a PR edit made before a clean merge of a base that renamed the file", async () => {
   const pr = await checkout();
   const guide = Array.from({ length: 10 }, (_, line) => `step ${line + 1}\n`).join("");
-  await pr.commit("guide.txt", guide);
+  await pr.advanceBase("guide.txt", guide);
+  await pr.git("merge", "-q", "--no-edit", "main");
+  await pr.commit("feature.txt", "greet\n");
   await pr.hedge("require", "--none", "--reason", "docs only");
   const reviewed = await reviewHead(pr);
   pr.env.HEDGE_REVIEW_ARBITER = "cat >/dev/null; echo CONTINUE";
-  await pr.advanceBase("base.md", "the base moves on\n");
-  await pr.advanceBase("guide.txt", guide);
-  await pr.git("merge", "-q", "--no-edit", "main");
+  await pr.commit("guide.txt", `${guide}greet the member by name\n`);
+  await pr.commit("feature.txt", "greet by name\n");
   await mergeBaseRename(pr);
-  return { pr, reviewed };
-}
-
-test("a final read after two clean merges of a base that added the PR's new file and then renamed it is refused, because the PR changed nothing since the read", async () => {
-  const { pr, reviewed } = await mergedBaseCopyThenRename();
-  const reviewer = fakeModel(pr, "REVIEWER", "No findings.");
-
-  const refused = await pr.hedge("review", "--scope", "final", "--base", reviewed).then(() => "", (error: Error) => error.message);
-
-  expect(refused).toStartWith(`HEAD needs no final read: the commits since ${reviewed.slice(0, 7)} change no file of the PR`);
-  expect(reviewer.prompts()).toEqual([]);
-});
-
-test("a final read after the base added the PR's new file and renamed it reads the PR's later commit and not the old path", async () => {
-  const { pr, reviewed } = await mergedBaseCopyThenRename();
-  await pr.commit("feature.txt", "greet\n");
   const reviewer = fakeModel(pr, "REVIEWER", "No findings.");
 
   expect((await pr.hedge("review", "--scope", "final", "--base", reviewed)).code).toBe(0);
 
-  const read = reviewer.prompts().at(-1)!;
-  expect(read).toContain("+greet");
-  expect(read).not.toContain("guide.txt");
+  expect(reviewer.prompts().at(-1)).toContain("+greet the member by name");
 });
 
 test("when the judge finds a standing rule's condition broken, the gate names the rule and asks for no void of a decision it is not", async () => {

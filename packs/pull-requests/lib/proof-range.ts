@@ -7,43 +7,16 @@ export type ReviewRange = { files: string[]; leftOut: string[]; diff: string };
 
 export function reviewRange(run: Run, from: string, head: string, branched: string): ReviewRange {
   const changed = changedFiles(run, from, head);
-  if (from === branched) return { files: changed.map(last), leftOut: [], diff: changed.length ? diffOf(run, from, head) : "" };
-  const merged = cleanMerge(run, from, branched);
-  return merged === undefined ? ownedRange(run, from, head, branched, changed) : rangeFromMerge(run, merged, from, head, branched, changed);
+  const own = from === branched ? undefined : new Set([...changedFiles(run, branched, head), ...changedFiles(run, forkOf(run, from, branched), from)].flat());
+  const kept = changed.filter((paths) => !own || paths.some((path) => own.has(path)));
+  const files = kept.map(last);
+  const leftOut = changed.filter((paths) => !kept.includes(paths)).map(last);
+  const diff = files.length ? diffOf(run, from, head, leftOut.length ? kept.flat() : undefined) : "";
+  return { files, leftOut, diff };
 }
 
 export const leftOutNote = (leftOut: string[]) =>
   leftOut.length ? `This diff holds only the files the PR changes against its base. It leaves out ${leftOut.length} file(s) that a merge of the base brought in.` : "";
-
-function rangeFromMerge(run: Run, merged: string, from: string, head: string, branched: string, changed: string[][]): ReviewRange {
-  const touched = touchedSince(run, from, head, branched);
-  const differing = changedFiles(run, merged, head);
-  const authored = differing.filter((entry) => entry.some((path) => touched.has(path)));
-  const paths = new Set(authored.flat());
-  const leftOut = changed.filter((entry) => !entry.some((path) => paths.has(path))).map(last);
-  return { files: authored.map(last), leftOut, diff: authored.length ? diffOf(run, merged, head, authored.length < differing.length ? authored.flat() : undefined) : "" };
-}
-
-function touchedSince(run: Run, from: string, head: string, branched: string) {
-  const result = run(["git", "log", "--remerge-diff", "--no-renames", "--name-only", "-z", "--format=", "--no-relative", head, `^${from}`, `^${branched}`]);
-  if (result.code !== 0) throw new Error(`Cannot list the files the commits since ${short(from)} touch here (${firstLine(result.stderr)})`);
-  return new Set(result.stdout.split("\0").filter(Boolean));
-}
-
-function ownedRange(run: Run, from: string, head: string, branched: string, changed: string[][]): ReviewRange {
-  const own = new Set([...changedFiles(run, branched, head), ...changedFiles(run, forkOf(run, from, branched), from)].flat());
-  const kept = changed.filter((paths) => paths.some((path) => own.has(path)));
-  const files = kept.map(last);
-  const leftOut = changed.filter((paths) => !kept.includes(paths)).map(last);
-  return { files, leftOut, diff: files.length ? diffOf(run, from, head, leftOut.length ? kept.flat() : undefined) : "" };
-}
-
-function cleanMerge(run: Run, from: string, branched: string) {
-  const result = run(["git", "merge-tree", "--write-tree", "--no-messages", from, branched]);
-  if (result.code === 1) return undefined;
-  if (result.code !== 0) throw new Error(`Cannot merge ${short(branched)} into ${short(from)} here (${firstLine(result.stderr)})`);
-  return result.stdout.trim().split("\n")[0]!;
-}
 
 function forkOf(run: Run, from: string, branched: string) {
   const result = run(["git", "merge-base", from, branched]);
