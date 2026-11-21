@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { cleanFixtures, checkout, clean, fakeModel, lockHolder, reviewHeadFixed, type Checkout } from "./proof-testing.ts";
+import { cleanFixtures, checkout, clean, fakeModel, lockHolder, reviewHeadFixed, verdict, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
 
@@ -49,9 +49,11 @@ test("a final read that never got an answer gives way to a final read of the new
   expect(reviewer.prompts().at(-1)).toContain("+greet the new member");
   const line = `final read 1 on ${older.slice(0, 7)} dropped at ${newer.slice(0, 7)}: no reviewer answer was captured; cause: exit 1: the guard blocked the model call (after a retry)`;
   expect((await pr.hedge("show")).output).toContain(line);
+  const judge = fakeModel(pr, "JUDGE", verdict());
   const gate = await pr.hedge("gate");
   expect(gate.output).toContain("review: HEAD reviewed in final read 2");
   expect(gate.output).toContain(`review: ${line}`);
+  expect(judge.prompts().at(-1)).toContain(`review: ${line}`);
 });
 
 test("a second final read that never got an answer gives way too, and both drops stay on record", async () => {
@@ -136,6 +138,19 @@ test("a panel final read whose lenses have not run yet is never dropped", async 
   pr.panel.lostWorkers = true;
   expect((await finalRead(pr, reviewed, "--lens", "correctness")).code).toBe(0);
   pr.panel.lostWorkers = false;
+  await pr.commit("feature.txt", "greet the new member\n");
+
+  await expect(finalRead(pr, reviewed)).rejects.toThrow(unfinished);
+  expect(anyDropped(pr)).toBe(false);
+});
+
+test("a panel final read that stopped before it started its lenses is never dropped", async () => {
+  const { pr, reviewed } = await reviewedPr();
+  pr.panel.lostWorkers = true;
+  expect((await finalRead(pr, reviewed, "--lens", "correctness")).code).toBe(0);
+  pr.panel.lostWorkers = false;
+  const read = join(reviews(pr), "final-1");
+  renameSync(join(read, "panel.json"), join(read, "panel.staged.json"));
   await pr.commit("feature.txt", "greet the new member\n");
 
   await expect(finalRead(pr, reviewed)).rejects.toThrow(unfinished);
