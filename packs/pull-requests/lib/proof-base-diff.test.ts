@@ -94,7 +94,7 @@ test("after the base is rewritten past a tip the branch merged, the judge still 
   expect(prompt).not.toContain("the rewritten base");
 });
 
-test("when the base was reset back past a tip the branch merged, the judge fetches the base and reads that tip's lines, which the branch now carries", async () => {
+test("when the base was reset back past a tip the branch merged, the judge reads that tip's lines, which the branch now carries", async () => {
   const pr = await checkout();
   await pr.commit("feature.txt", "greet the new member\n");
   await pr.advanceBase("base.md", "a base change that is later reset away\n");
@@ -122,4 +122,25 @@ test("when the base moved on after GitHub last read it and the branch merged it,
   const prompt = await judgePrompt(pr);
   expect(prompt).toContain("+greet the new member");
   expect(prompt).not.toContain("the base moves on");
+});
+
+test("when the base was force-pushed to a sibling of GitHub's base commit and the branch merged it, the judge fetches the base and reads only the branch's lines", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.txt", "greet the new member\n");
+  await pr.advanceBase("base.md", "the base before the force-push\n");
+  const lastRead = await pr.git("rev-parse", "main");
+  await pr.git("checkout", "-q", "main");
+  await pr.git("reset", "-q", "--hard", "HEAD^");
+  await pr.commit("forced.md", "the force-pushed base\n");
+  await pr.git("update-ref", "refs/remotes/origin/main", "HEAD");
+  await pr.git("checkout", "-q", "feature");
+  await pr.git("merge", "-q", "--no-edit", "main");
+  await publishBase(pr, "main");
+  await pr.hedge("require", "--none", "--reason", "docs only");
+  pr.pullRequestState({ baseSha: lastRead });
+
+  const prompt = await judgePrompt(pr);
+  expect(prompt).toContain("+greet the new member");
+  expect(prompt).not.toContain("the force-pushed base");
+  expect(prompt).not.toContain("the base before the force-push");
 });

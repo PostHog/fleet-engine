@@ -18,24 +18,20 @@ export function mergeBase(identity: ProofIdentity, run: Run) {
   const { baseRefName: base, baseSha } = pullRequestDetails(identity, run);
   const remotes = remotesOf(identity.repository, run);
   const present = (tip: string) => offline(run)(["git", "cat-file", "-e", `${tip}^{commit}`]).code === 0;
-  const refs = () => remotes.map((remote) => `refs/remotes/${remote}/${base}`).filter(present);
-  let fetched = false;
-  const fetchBase = () => {
-    if (fetched) return;
-    fetched = true;
-    for (const remote of remotes) run(["git", "fetch", "--quiet", remote, `+refs/heads/${base}:refs/remotes/${remote}/${base}`]);
-  };
-  const branchedFrom = (tips: string[]) => {
-    const result = run(["git", "merge-base", identity.commit, ...tips]);
+  const refOf = (remote: string) => `refs/remotes/${remote}/${base}`;
+  const refs = () => remotes.map(refOf).filter(present);
+  let fetched: string[] | undefined;
+  const fetchBase = () => fetched ??= remotes.filter((remote) => run(["git", "fetch", "--quiet", remote, `+refs/heads/${base}:${refOf(remote)}`]).code === 0).map(refOf);
+  const branchedFrom = (tip: string) => {
+    const result = run(["git", "merge-base", identity.commit, tip]);
     return result.code === 0 ? result.stdout.trim() : undefined;
   };
-  const sinceGithub = (sha: string) => branchedFrom([sha, ...refs().filter((ref) => run(["git", "merge-base", "--is-ancestor", sha, ref]).code === 0)]);
-  const firstRef = () => refs().map((ref) => branchedFrom([ref])).find(Boolean);
+  const firstOf = (tips: string[]) => tips.map(branchedFrom).find(Boolean);
+  const firstRef = () => firstOf(refs());
   const fromGithub = (sha: string) => {
-    const pushed = branchedFrom([sha]);
-    if (sinceGithub(sha) === pushed) return pushed;
-    fetchBase();
-    return sinceGithub(sha);
+    const pushed = branchedFrom(sha);
+    if (refs().every((ref) => branchedFrom(ref) === pushed)) return pushed;
+    return firstOf(fetchBase().filter(present)) ?? pushed;
   };
   const githubBase = () => {
     if (!isCommitSha(baseSha)) return undefined;
