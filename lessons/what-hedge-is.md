@@ -3,6 +3,7 @@ title: What Hedge is
 shelf: start
 for: Your first setup, while your hub and node start.
 after: You know what the hub and the nodes do, and you can answer, snooze, settle, and schedule a thread.
+next: build-your-first-feature
 ---
 
 ## Two boxes are starting for you

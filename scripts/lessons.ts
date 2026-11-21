@@ -9,10 +9,17 @@ export const loadVoice = (root: string) => JSON.stringify(JSON.parse(readFileSyn
 
 export const narrationHash = (lesson: Lesson, voice: string) => new Bun.CryptoHasher("sha256").update(voice).update("\n\n").update(narration(lesson)).digest("hex");
 
+const inNextOrder = (lessons: Lesson[]) => {
+  const pointedAt = new Set(lessons.map((lesson) => lesson.next));
+  const chain = (lesson: Lesson | undefined, seen: Lesson[]): Lesson[] => (!lesson || seen.includes(lesson) ? seen : chain(lessons.find((other) => other.id === lesson.next), [...seen, lesson]));
+  const ordered = lessons.filter((lesson) => !pointedAt.has(lesson.id)).reduce((seen, head) => chain(head, seen), [] as Lesson[]);
+  return [...ordered, ...lessons.filter((lesson) => !ordered.includes(lesson))];
+};
+
 export function loadLessons(root: string): Lesson[] {
   const dir = join(root, "lessons");
   if (!existsSync(dir)) return [];
-  return readdirSync(dir)
+  return inNextOrder(readdirSync(dir)
     .filter((file) => file.endsWith(".md"))
     .sort()
     .map((file) => {
@@ -20,7 +27,7 @@ export function loadLessons(root: string): Lesson[] {
       const lesson = parseLesson(id, readFileSync(join(dir, file), "utf8"));
       const cutFile = join(dir, `${id}.cut.json`);
       return existsSync(cutFile) ? { ...lesson, cut: JSON.parse(readFileSync(cutFile, "utf8")) as Cut } : lesson;
-    });
+    }));
 }
 
 export type Names = { skills: string[]; commands: string[]; packs: string[]; lessons: string[] };

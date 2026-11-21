@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { captions, parseLesson, type Lesson } from "../page/lessons.ts";
 import { loadPacks } from "../src/pack/manifest.ts";
@@ -23,6 +24,15 @@ describe("lessons", () => {
     const lessons = loadLessons(root);
     expect(lessons.map((lesson) => lesson.id)).toContain("what-hedge-is");
     expect(lessons.flatMap((lesson) => lessonProblems(lesson, names, loadVoice(root)))).toEqual([]);
+  });
+
+  test("lessons come in the order of their next links, starting with the lessons that no link names, and a lesson in a loop still comes", () => {
+    expect(loadLessons(root).map((lesson) => lesson.id)).toEqual(["what-hedge-is", "build-your-first-feature"]);
+    const probe = mkdtempSync(join(tmpdir(), "lessons-"));
+    mkdirSync(join(probe, "lessons"));
+    const source = (next?: string) => `---\ntitle: Probe\nshelf: start\nfor: Tests.\nafter: Nothing.\n${next ? `next: ${next}\n` : ""}---\n\n## One\n\nA line.\n`;
+    for (const [id, next] of [["a-second", undefined], ["m-alone", undefined], ["z-first", "a-second"], ["loop-one", "loop-two"], ["loop-two", "loop-one"]] as const) writeFileSync(join(probe, "lessons", `${id}.md`), source(next));
+    expect(loadLessons(probe).map((lesson) => lesson.id)).toEqual(["m-alone", "z-first", "a-second", "loop-one", "loop-two"]);
   });
 
   test("the setup guide shows the first lesson at its first wait, from the site, and names only lessons that have a cut", () => {
