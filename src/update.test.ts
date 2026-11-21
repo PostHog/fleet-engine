@@ -125,13 +125,13 @@ async function cliUpdate(engineDir: string, engine: ProfileFile["engine"], home 
 }
 
 describe("hedge update", () => {
-  test.each([["--help", 0], ["-h", 0], ["--dry-run", 2]])("hedge update %s prints the usage, exits %d, and neither moves the engine nor applies", async (flag, exitCode) => {
+  test.each([["--help", 0], ["-h", 0], ["--dry-run", 2], ["--help --dry-run", 2]])("hedge update %s prints the usage, exits %d, and neither moves the engine nor applies", async (flags, exitCode) => {
     const remote = await engineRemote(["v0.1.0", "v0.1.1"]);
     const engineDir = await engineCheckout(remote, "v0.1.0");
     const head = await spawnGit(engineDir, "rev-parse", "HEAD");
     const newer = await spawnGit(remote, "rev-parse", "v0.1.1^{commit}");
 
-    const result = await cliUpdate(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" }, undefined, [flag]);
+    const result = await cliUpdate(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" }, undefined, flags.split(" "));
 
     expect(result).toMatchObject({ code: exitCode, applied: false, version: "v0.1.0" });
     expect(result.output).toContain("Usage: hedge update");
