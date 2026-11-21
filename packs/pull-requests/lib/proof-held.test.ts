@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { guard } from "../../base/hooks/secret-guard.ts";
+import { placeholderRule } from "./proof-prompt-guard.ts";
 import { cleanFixtures, checkout, fakeModel, graded, reviewHead, verdict, acceptGap, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
@@ -202,8 +203,32 @@ test("a review prompt Hedge cannot fully redact is never sent, and the error nam
   expect(reviewer.prompts()).toEqual([]);
 });
 
+test("a lens brief Hedge cannot fully redact is never written or sent, and the lens fails with the kind", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.txt", "greet new members\n");
+  await pr.hedge("require", "--none", "--reason", "docs only");
+  pr.pullRequestState({ body: `Greets new members. Merge risk: medium.\n\n${unredactable}\n` });
+  const reviewer = fakeModel(pr, "REVIEWER", "FINDINGS:\nCOVERED: feature.txt\n");
 
-test("a verdict that an older Hedge cached for the prompt as built is not reused, since the model now gets the guarded prompt", async () => {
+  await pr.hedge("review", "--lens", "correctness");
+  const wait = await pr.hedge("review", "--wait");
+  expect(wait.output).toContain("Hedge did not send the prompt to the model: Hedge's secret guard blocks a prompt that holds a GitHub token, and Hedge could not redact it.");
+  expect(reviewer.prompts()).toEqual([]);
+  expect(leaksIn(pr, wait.output, [], [token()], ["reviews"])).toEqual([]);
+  const lenses = readdirSync(join(pr.pullRequest, "reviews"), { recursive: true }).map(String);
+  expect(lenses.filter((name) => name.endsWith(".prompt.md"))).toEqual([]);
+});
+
+const keyOf = (...parts: string[]) => parts.reduce((hash, part, index) => (index ? hash.update("\0") : hash).update(part), createHash("sha256")).digest("hex");
+
+function judgeRecord(pr: Checkout) {
+  const directory = join(pr.pullRequest, "judge");
+  const [saved] = readdirSync(directory);
+  const record = JSON.parse(readFileSync(join(directory, saved!), "utf8")) as { model: string };
+  return { directory, saved: saved!.replace(/\.json$/, ""), model: record.model };
+}
+
+test("a verdict cached for a prompt with nothing to redact keeps the key an older Hedge wrote, so the gate reuses it", async () => {
   const pr = await checkout();
   await pr.commit("feature.txt", "greet new members\n");
   await reviewHead(pr);
@@ -211,11 +236,27 @@ test("a verdict that an older Hedge cached for the prompt as built is not reused
   const judge = fakeModel(pr, "JUDGE", verdict());
   expect((await pr.hedge("gate")).code).toBe(0);
 
-  const directory = join(pr.pullRequest, "judge");
-  const [saved] = readdirSync(directory);
-  const record = JSON.parse(readFileSync(join(directory, saved!), "utf8")) as { model: string };
-  const olderKey = createHash("sha256").update(record.model).update("\0").update(judge.prompts()[0]!).digest("hex");
-  renameSync(join(directory, saved!), join(directory, `${olderKey}.json`));
+  const { saved, model } = judgeRecord(pr);
+  expect(saved).toBe(keyOf(model, judge.prompts()[0]!));
+  expect((await pr.hedge("gate")).code).toBe(0);
+  expect(judge.prompts()).toHaveLength(1);
+});
+
+test("a verdict an older Hedge cached for a prompt that held a value is not reused, since the model now gets the redacted prompt", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.txt", "greet new members\n");
+  await reviewHead(pr, "- minor | feature.txt:1 | the log prints a token\n");
+  writeFileSync(join(pr.repository, "responses.md"), `1. fixed: removed ${token()} from the log.\n`);
+  await pr.hedge("respond", "--round", "1", "responses.md");
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  const judge = fakeModel(pr, "JUDGE", verdict());
+  expect((await pr.hedge("gate")).code).toBe(0);
+
+  const sent = judge.prompts()[0]!;
+  const asBuilt = sent.slice(0, -`\n\n${placeholderRule}\n`.length).replaceAll("[redacted GitHub token]", token());
+  const { directory, saved, model } = judgeRecord(pr);
+  expect(saved).toBe(keyOf(model, asBuilt, sent));
+  renameSync(join(directory, `${saved}.json`), join(directory, `${keyOf(model, asBuilt)}.json`));
 
   expect((await pr.hedge("gate")).code).toBe(0);
   expect(judge.prompts()).toHaveLength(2);

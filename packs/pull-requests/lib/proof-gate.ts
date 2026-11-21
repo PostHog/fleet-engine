@@ -182,7 +182,7 @@ async function judgeDiff(head: ProofIdentity, known: Omit<JudgeInput, "cwd" | "f
 }
 
 const heldBackNote = "an agent never decides a judge gap for a judge that saw no prompt";
-const heldBackHint = `judge gap: remove the value from the diff and run the gate again; when it is no secret, record hedge proof gap --kind judge --reason <why> and ask the user: ${heldBackNote}`;
+const heldBackHint = `judge gap: remove the value from the text that holds it, such as the diff, the PR description, a finding, an answer or proof evidence, and run the gate again; when it is no secret, record hedge proof gap --kind judge --reason <why> and ask the user: ${heldBackNote}`;
 
 function withoutAgent<Gap extends JudgeGap>(gap: Gap): Gap {
   return gap.acceptance?.by === "agent" ? { ...gap, acceptance: undefined, line: `not accepted (${heldBackNote})` } : gap;
