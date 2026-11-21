@@ -329,7 +329,8 @@ says what to do with a template parameter that holds one.
    `<login>/<login>-hedge`, then for the older names `<login>/hedge-profile`
    and `<login>/fleet-profile`, and use the first that answers. A profile
    with a name the person typed has the GitHub topic `hedge-for-<login>`:
-   `gh repo list <login> --json nameWithOwner,repositoryTopics` shows it.
+   `gh repo list <login> --limit 10000 --json nameWithOwner,repositoryTopics`
+   shows it.
    Otherwise use `<login>/<login>-hedge`, with the login in lower case:
    `hedge setup` makes it in step 7. Until then,
    the workspace's dotfiles script finds no repo and says so in its start

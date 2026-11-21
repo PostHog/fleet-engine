@@ -22,7 +22,7 @@ function teamSource(): (ref: SourceRef) => Promise<FetchedSource> {
   return async (ref) => ({ ref, dir, packs: await loadPacks(dir) });
 }
 
-const teamSetup = (home: string, args: string[], replies: string[], options: { createFails?: string; createFailsAfterMaking?: string; lookupFails?: string; publicRepos?: string[] } = {}) => hedgeSetup(home, args, replies, fakeMachine(home, {}, { org: true, ...options }), teamSource());
+const teamSetup = (home: string, args: string[], replies: string[], options: { createFails?: string; createFailsAfterMaking?: string; madeMeanwhileBy?: string; topicFails?: boolean; notAdmin?: string[]; lookupFails?: string; publicRepos?: string[] } = {}) => hedgeSetup(home, args, replies, fakeMachine(home, {}, { org: true, ...options }), teamSource());
 
 describe("hedge setup profile", () => {
   test("asks once, creates the private profile repo, and pushes the answers, the shim, about me, and the guide", async () => {
@@ -288,14 +288,15 @@ describe("hedge setup profile", () => {
     expect(existsSync(githubRepo(home, "nora/nora-hedge"))).toBe(false);
   });
 
-  test("treats a clone of the personal profile as personal whatever the case of its owner, and keeps a public one", async () => {
+  test("treats a clone of the old personal profile as personal whatever the case of its owner, and keeps a public one", async () => {
     const home = temp.make("home-");
-    expect((await hedgeSetup(home, starter, ["", ""])).code).toBe(0);
-    symlinkSync(githubRepo(home, "nora/nora-hedge").replace(/nora\/nora-hedge\.git$/, "nora"), join(home, "github-remotes", "NORA"));
-    await spawnGit(profilePath(home), "remote", "set-url", "origin", "https://github.com/NORA/nora-hedge.git");
-    const rerun = await teamSetup(home, ["--set", "pull-requests.freeReviews=2"], [""], { publicRepos: ["NORA/nora-hedge", "nora/nora-hedge"] });
+    await spawnGit(home, "init", "-q", "--bare", "-b", "main", githubRepo(home, "nora/hedge-profile"));
+    expect((await hedgeSetup(home, starter, [""])).code).toBe(0);
+    symlinkSync(githubRepo(home, "nora/hedge-profile").replace(/nora\/hedge-profile\.git$/, "nora"), join(home, "github-remotes", "NORA"));
+    await spawnGit(profilePath(home), "remote", "set-url", "origin", "https://github.com/NORA/hedge-profile.git");
+    const rerun = await teamSetup(home, ["--set", "pull-requests.freeReviews=2"], [""], { publicRepos: ["NORA/hedge-profile", "nora/hedge-profile"] });
     expect(rerun.code).toBe(0);
-    expect(rerun.output).toContain("  ✓ Reusing your repo NORA/nora-hedge");
+    expect(rerun.output).toContain("  ✓ Reusing your repo NORA/hedge-profile");
   });
 
   test("heads a pack's section in the profile guide with its title", () => {
@@ -507,6 +508,74 @@ describe("hedge setup finds the profile before it makes one", () => {
     expect(result.output).toContain("  Hedge creates the private repo nora/hedge-memory in your GitHub account and pushes your answers there.");
     expect(result.prompts.at(-1)).toBe("  Go ahead? (Y/n) ");
     expect(ownedRepos(home, "nora")).toEqual(["nora/nora-hedge"]);
+  });
+
+  test.each([
+    { name: "the new name in the account", repo: "nora/nora-hedge", marked: false, team: false },
+    { name: "a typed name in the account", repo: "nora/my-setup", marked: true, team: false },
+    { name: "a typed name in the team org", repo: "acme/tools", marked: true, team: true },
+  ])("refuses a public profile under $name, and makes no second one", async ({ repo, marked, team }) => {
+    const home = temp.make("home-");
+    await spawnGit(home, "init", "-q", "--bare", "-b", "main", githubRepo(home, repo));
+    if (marked) markRepo(home, repo, "hedge-for-nora");
+    const args = ["--non-interactive", ...starter];
+    const result = team ? await teamSetup(home, args, [], { publicRepos: [repo] }) : await hedgeSetup(home, args, [], fakeMachine(home, {}, { publicRepos: [repo] }));
+    expect(result.code).toBe(1);
+    expect(result.output).toContain(`hedge: ${repo} is not private. Make it private, then run hedge setup again.`);
+    expect(allRepos(home)).toEqual([repo]);
+  });
+
+  test("in the org, takes a marked repo only when the person administers it", async () => {
+    const home = temp.make("home-");
+    await spawnGit(home, "init", "-q", "--bare", "-b", "main", githubRepo(home, "acme/planted"));
+    markRepo(home, "acme/planted", "hedge-for-nora");
+    const result = await teamSetup(home, ["--non-interactive", ...starter], [], { notAdmin: ["acme/planted"] });
+    expect(result.code).toBe(0);
+    expect(result.output).toContain("✓ Created the private repo acme/nora-hedge");
+    expect(await spawnGit(githubRepo(home, "acme/planted"), "rev-list", "--all", "--count")).toBe("0");
+  });
+
+  test("skips a repo with the new name that is a teammate's profile, and asks for another name", async () => {
+    const home = temp.make("home-");
+    await spawnGit(home, "init", "-q", "--bare", "-b", "main", githubRepo(home, "acme/nora-hedge"));
+    markRepo(home, "acme/nora-hedge", "hedge-for-lena");
+    const refused = await teamSetup(home, ["--non-interactive", ...starter], []);
+    expect(refused.code).toBe(1);
+    expect(refused.output).toContain("hedge: acme/nora-hedge is another person's Hedge profile. Run hedge setup in a terminal and type another name for yours.");
+    const typed = await teamSetup(home, starter, ["", "", "nora-tools", ""]);
+    expect(typed.code).toBe(0);
+    expect(typed.output).toContain("  acme/nora-hedge is another person's Hedge profile. Type another name for yours.");
+    expect(typed.output).toContain("  ✓ Created the private repo acme/nora-tools in the acme org");
+    expect(repoTopics(home, "acme/nora-hedge")).toEqual(["hedge-for-lena"]);
+  });
+
+  test("stops when a teammate made the typed name in the org meanwhile, and leaves their repo alone", async () => {
+    const home = temp.make("home-");
+    const result = await teamSetup(home, starter, ["", "tools", ""], { madeMeanwhileBy: "lena" });
+    expect(result.code).toBe(1);
+    expect(result.output).toContain("hedge: acme/tools is another person's Hedge profile. Run hedge setup again and type another name for yours.");
+    expect(repoTopics(home, "acme/tools")).toEqual(["hedge-for-lena"]);
+    expect(allRepos(home)).toEqual(["acme/tools"]);
+  });
+
+  test("refuses a typed name that the memory repo takes", async () => {
+    const home = temp.make("home-");
+    const result = await hedgeSetup(home, ["--preset", "starter", "--add", "memory", "--plan", "claude"], ["", "hedge-memory", ""]);
+    expect(result.code).toBe(0);
+    expect(result.output).toContain("  nora/hedge-memory is the memory repo. Type another name, or press ↵ for nora/nora-hedge.");
+    expect(ownedRepos(home, "nora")).toEqual(["nora/hedge-memory", "nora/nora-hedge"]);
+  });
+
+  test("when it cannot mark a new profile, says how, and a later setup finds the marked repo", async () => {
+    const home = temp.make("home-");
+    const failed = await hedgeSetup(home, starter, ["", "my-setup", ""], fakeMachine(home, {}, { topicFails: true }));
+    expect(failed.code).toBe(1);
+    expect(failed.output).toContain("hedge: Hedge made nora/my-setup but could not mark it as your profile (HTTP 403: Resource not accessible by integration). Run gh repo edit nora/my-setup --add-topic hedge-for-nora, then run hedge setup again.");
+    markRepo(home, "nora/my-setup", "hedge-for-nora");
+    const rerun = await hedgeSetup(home, ["--non-interactive", ...starter]);
+    expect(rerun.code).toBe(0);
+    expect(rerun.output).toContain("  ✓ Reusing your repo nora/my-setup");
+    expect(ownedRepos(home, "nora")).toEqual(["nora/my-setup"]);
   });
 
   test("refuses a typed name that a repo already has, and takes another", async () => {
