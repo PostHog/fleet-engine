@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { cleanFixtures, checkout, fakeModel, reviewHead, verdict, type Checkout } from "./proof-testing.ts";
+import { acceptGap, cleanFixtures, checkout, fakeModel, reviewHead, verdict, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
 
@@ -77,4 +77,40 @@ test("a single review still sends a prompt the secret guard does not match", asy
 
   expect((await pr.hedge("review", "--single")).code).toBe(0);
   expect(reviewer.prompts()).toHaveLength(1);
+});
+
+async function heldWithAcceptedGaps(condition: string[]) {
+  const pr = await checkout();
+  await pr.commit("feature.txt", "greet new members\n");
+  await reviewHead(pr, "- minor | feature.txt:1 | the log prints a token\n");
+  writeFileSync(join(pr.repository, "responses.md"), `1. fixed: removed ${token} from the log.\n`);
+  await pr.hedge("respond", "--round", "1", "responses.md");
+  await pr.hedge("require", "--kinds", "prod-shape");
+  await pr.hedge("gap", "--kind", "prod-shape", "--reason", "No production read access");
+  pr.chooseGap("prod-shape", "No production read access");
+  const id = /\[(d-[0-9a-f]+)\]/.exec((await acceptGap(pr, "prod-shape", ...condition)).output)![1]!;
+  const judge = fakeModel(pr, "JUDGE", verdict());
+  await pr.hedge("gap", "--kind", "judge", "--reason", "The judge prompt quotes a test token");
+  pr.chooseGap("judge", "The judge prompt quotes a test token");
+  await acceptGap(pr, "judge");
+  return { pr, judge, id };
+}
+
+test("an accepted judge gap does not pass a gate whose held judge could not check the condition of an accepted gap", async () => {
+  const { pr, judge, id } = await heldWithAcceptedGaps(["--condition", "feature.txt reads no stored rows"]);
+
+  const gate = await pr.hedge("gate");
+  expect(gate.code).toBe(3);
+  expect(gate.output).toContain(`judge gap: not accepted (the secret guard held the judge prompt, so no judge checked the condition of decision ${id})`);
+  expect(gate.output).toContain(`hedge decision void <id>`);
+  expect(judge.prompts()).toEqual([]);
+});
+
+test("an accepted judge gap still passes a gate whose held judge had no condition to check", async () => {
+  const { pr, judge } = await heldWithAcceptedGaps([]);
+
+  const gate = await pr.hedge("gate");
+  expect(gate.code).toBe(0);
+  expect(gate.output).toContain("judge: unavailable (the secret guard matches this prompt: GitHub token)");
+  expect(judge.prompts()).toEqual([]);
 });

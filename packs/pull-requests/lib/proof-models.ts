@@ -38,7 +38,7 @@ export function securityRow(env: Record<string, string | undefined>): ModelRow |
 }
 
 export type Usage = { input?: number; cacheRead?: number; cacheWrite?: number; output?: number; total?: number; costUsd?: number };
-export type ModelAnswer = { ok: true; text: string; model: string; usage?: Usage } | { ok: false; cause: string; model: string };
+export type ModelAnswer = { ok: true; text: string; model: string; usage?: Usage } | { ok: false; cause: string; model: string; held?: true };
 export type ModelRequest = { prompt: string; cwd: string; readable?: string[]; images?: string[]; schema?: object; started?: (pid: number) => Promise<void> };
 export type Role = "arbiter" | "reviewer" | "judge" | "bloat-judge" | "eval-judge";
 
@@ -56,7 +56,7 @@ export async function askModel(role: Role, row: ModelRow, request: ModelRequest,
   const model = modelLabel(role, row, env, pinned);
   const timeout = Number(env[`${prefix}_TIMEOUT_MS`]) || limit;
   const matched = secretKinds(request.prompt);
-  if (matched.length) return { ok: false, cause: `the secret guard matches this prompt: ${matched.join(", ")}`, model };
+  if (matched.length) return { ok: false, cause: `the secret guard matches this prompt: ${matched.join(", ")}`, model, held: true };
   const scratch = await mkdtemp(join(tmpdir(), "hedge-proof-model-"));
   try {
     const output = join(scratch, "answer.txt");

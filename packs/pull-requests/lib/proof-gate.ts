@@ -155,6 +155,12 @@ async function judgeHead(head: ProofIdentity, checked: Checked, context: GateCon
   const reason = outcome.lines.find((line) => /^judge [a-z]+: fail\b/.test(line)) ?? outcome.lines[0];
   if (outcome.state === "pass") return { code: 0, lines: outcome.lines, covered: `pass by ${outcome.model}`, judge: verdict(outcome.lines) };
   const gap = weighedGap && withBrokenConditions(weighedGap, outcome.broken);
+  const unchecked = outcome.held ? [...new Set(known.conditions.map(({ id }) => id))] : [];
+  if (gap?.acceptance && unchecked.length) {
+    const line = `not accepted (the secret guard held the judge prompt, so no judge checked the condition of ${unchecked.map((id) => `decision ${id}`).join(" and ")})`;
+    const lines = [...outcome.lines, `judge gap: ${line}: ${gap.reason}. ${voidBroken(unchecked)}`];
+    return { code: 3, lines, covered: "", judge: verdict(lines, judgeGapProof(head.commit, gap)), reason: `judge gap: ${line}` };
+  }
   if (gap?.acceptance) {
     const lines = [...outcome.lines, `judge gap: ${gap.acceptance.line}: ${gap.reason}`];
     return { code: 0, lines, covered: `${outcome.state} accepted by ${gap.acceptance.by}`, judge: verdict(lines, judgeGapProof(head.commit, gap)) };
