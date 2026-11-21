@@ -88,15 +88,20 @@ test("a gap record whose latest answer asks another question refuses, says how t
   expect(lineOf((await pr.decide("list", "--pr", "example/product#43")).output, "- 👍")).toContain("Accept the panel gap? example/product#43: A prune lane runs no QA swarm");
 });
 
-test("a record without --message says how to list the ids also when no answer names the PR, or the answer is already recorded", async () => {
+test("a record without --message says how to list the ids when no answer names the PR", async () => {
   const pr = await checkout();
   pr.chooseGap("panel", "A prune lane runs no QA swarm");
-  const record = (ref: string) => pr.decide("record", "--mark", "👍", "--class", "proof-gap", "--kind", "panel", "--pr", ref);
-  const listIds = "To record another answer, name it with --message <id>; hedge thread read thread-1 --words lists the ids";
 
-  await expect(record("example/product#44")).rejects.toThrow(`names example/product#44, the panel gap. Ask them with the question tool and name each PR in the question. Only answers they gave in the T3 app count. ${listIds}`);
-  const id = idIn((await record("example/product#42")).output);
-  await expect(record("example/product#42")).rejects.toThrow(`That answer is already recorded as decision ${id}. One answer records one decision; it covers the PRs its question named. Ask the user again. ${listIds}`);
+  await expect(pr.decide("record", "--mark", "👍", "--class", "proof-gap", "--kind", "panel", "--pr", "example/product#44")).rejects.toThrow("names example/product#44, the panel gap. Ask them with the question tool and name each PR in the question. Only answers they gave in the T3 app count. To record another answer, name it with --message <id>; hedge thread read thread-1 --words lists the ids");
+});
+
+test("a record without --message says how to list the ids when its answer is already recorded", async () => {
+  const pr = await checkout();
+  pr.chooseGap("panel", "A prune lane runs no QA swarm");
+  const record = () => pr.decide("record", "--mark", "👍", "--class", "proof-gap", "--kind", "panel", "--pr", "example/product#42");
+  const id = idIn((await record()).output);
+
+  await expect(record()).rejects.toThrow(`That answer is already recorded as decision ${id}. One answer records one decision; it covers the PRs its question named. Ask the user again. To record another answer, name it with --message <id>; hedge thread read thread-1 --words lists the ids`);
 });
 
 test("one answer records one decision: the same message twice is refused", async () => {
