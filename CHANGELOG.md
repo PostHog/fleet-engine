@@ -30,7 +30,9 @@
   it off in T3 Code's settings.
 - A pack that declared the whole `providerInstances` key must move to one
   `providerInstances.<id>` entry per instance: Hedge refuses the whole key,
-  and never removes the map that an older engine recorded.
+  and never removes the map that an older engine recorded. After the move,
+  Hedge keeps each instance of that map as the user's until
+  `hedge apply --adopt .t3/userdata/settings.json`.
 - An instance id, its driver, and a model row's provider follow T3's slug
   rule: a letter, then letters, digits, `-` or `_`, 64 at most. The names
   `constructor`, `prototype` and `__proto__` are refused. The ids
