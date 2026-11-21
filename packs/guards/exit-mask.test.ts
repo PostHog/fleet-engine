@@ -72,6 +72,10 @@ describe("the exit-status mask guard", () => {
     "if true; then echo main; fi | xargs git push origin | cat; echo \"${PIPESTATUS[1]}\"",
     "label='<(input)' out=$(git push); echo \"exit=$?\"",
     'git push | cat; exit "${PIPESTATUS[0]}"',
+    'true | git push; echo "${PIPESTATUS[1]}"',
+    'true | git push || echo "${PIPESTATUS[1]}"',
+    'git push | cat; echo "${PIPESTATUS[0]}" "$?"',
+    "git push; echo exit=\"$?\" 'done'",
     'git push; exit "${?}"',
     'echo y | ( echo x ); ( echo a ) | git push | cat; echo "${PIPESTATUS[1]}"',
     'echo y | ( echo x ); { echo a; } | git push | cat; echo "${PIPESTATUS[1]}"',
@@ -80,7 +84,6 @@ describe("the exit-status mask guard", () => {
     'echo y | ( echo a; echo b ) | git push | cat; echo "${PIPESTATUS[2]}"',
     'echo y | for i in 1; do echo main; done | xargs git push origin | cat; echo "${PIPESTATUS[2]}"',
     'echo a | { echo c; { echo b; }; } | git push | cat; echo "${PIPESTATUS[2]}"',
-    'git push; echo "pid $$$?"',
     'echo y | ( echo a; ( echo b ) ) | git push | cat; echo "${PIPESTATUS[2]}"',
     ': | : | : | : | : | : | : | : | git push | cat; echo "${PIPESTATUS[010]}"',
     "git push > push.log 2>&1; exit $?",
@@ -162,6 +165,14 @@ describe("the exit-status mask guard", () => {
     'git push | cat; exit ${PIPESTATUS[*]}; true',
     'git push | cat; exit "${PIPESTATUS[1]}"',
     'git push; exit $(( $? * 0 ))',
+    'label=ok; git push > push.log 2>&1; echo "${label:-$?}"',
+    'git push > push.log 2>&1; exit "$?" > /dev/null/status; true',
+    'git push 2>&1 | grep -q pushed && echo "${PIPESTATUS[0]}"; echo done',
+    'git push && ( exit 3 ); echo "${PIPESTATUS[@]}"',
+    'git push && ( exit 3 ); echo "${PIPESTATUS[0]}"',
+    "git push; exit $? now",
+    "git push; exit 1",
+    "git push; echo \"'\"'$?'\"'\"",
     'set -o pipefail >&9; git push | cat',
     'echo y | ( echo x ); ( echo a ) | git push | cat; echo "${PIPESTATUS[2]}"',
     'echo y | ( echo x ); { echo a; } | git push | cat; echo "${PIPESTATUS[2]}"',
@@ -229,6 +240,9 @@ describe("the exit-status mask guard", () => {
     "git push origin --help | head",
     "git push; echo \"exit $?\" &",
     'out=$(git push) > >(cat); echo "exit=$?"',
+    'git push; echo "pid $$$?"',
+    'git push; echo "$?" "$(true)"',
+    'git push; x=$(true) echo "exit=$?"',
     'git push | cat; echo "${PIPESTATUS[0x0]}"',
   ])("refuses a form it cannot read, though the shell may show the status: %s", (command) => {
     expect(refused(command)).toBe(true);
@@ -263,6 +277,10 @@ describe("the exit-status mask guard", () => {
   });
 
   test.each(['git push; echo "$$?"', "git push; echo $$'x'?", 'git push; echo "$$"\'x\'"?"'])("refuses a $$ that prints the process id, not the status: %s", (command) => {
+    expect(refused(command)).toBe(true);
+  });
+
+  test.each(["git push > push.log 2>&1; exit \"$?\"'0'", "git push > push.log 2>&1; exit $?0"])("refuses an exit code built from the status, which wraps to 0 for code 128: %s", (command) => {
     expect(refused(command)).toBe(true);
   });
 

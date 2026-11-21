@@ -12,11 +12,9 @@ const openers = new Set(["{", "if", "while", "until"]);
 const headers = new Set(["for", "select", "case"]);
 const closers = new Set(["}", "fi", "done", "esac"]);
 const separators = new Set([undefined, ";", "\n"]);
-const readsStatus = (text: string) => /\$(?:\?|\{\?\})/.test(text);
 const arithmeticIndex = (index: string) => (/^0[0-7]*$/.test(index) ? parseInt(index, 8) : /^[1-9]\d*$/.test(index) ? Number(index) : undefined);
-const readsPipeStatusAt = (place: number) => (text: string) => [...text.matchAll(/\$\{PIPESTATUS\[(\d+|@|\*)\]\}/g)].some(([, index]) => index === "@" || index === "*" || arithmeticIndex(index) === place);
-const isStatus = (text: string) => /^\s*\$(?:\?|\{\?\})\s*$/.test(text);
-const isPipeStatusAt = (place: number) => (text: string) => arithmeticIndex(text.match(/^\s*\$\{PIPESTATUS\[(\d+)\]\}\s*$/)?.[1] ?? "") === place;
+const statusRead = String.raw`\$(?:\?|\{\?\}|\{PIPESTATUS\[(\d+|@|\*)\]\})`;
+const plainWord = new RegExp(String.raw`^(?:[\w=:,./+%@-]|'[^'\\]*'|"(?:[^$\\"']|${statusRead})*"|${statusRead})*$`);
 const failingCode = /^(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-5])$/;
 const printsToTheAgent = /^(?:2>&1|1?>&2)$/;
 
@@ -100,41 +98,34 @@ const setsErrexit = (args: string[]) => {
   return on;
 };
 
-function expanded(raw: string): string {
-  let text = "";
-  let inDoubleQuotes = false;
-  for (let index = 0; index < raw.length; index++) {
-    const char = raw[index];
-    if (char === "\\") index++;
-    else if (char === '"') {
-      inDoubleQuotes = !inDoubleQuotes;
-      text += " ";
-    } else if (char === "'" && !inDoubleQuotes) {
-      index = raw.indexOf("'", index + 1);
-      if (index < 0) break;
-    } else if (char === "$" && raw[index + 1] === "'" && !inDoubleQuotes) {
-      for (index += 2; index < raw.length && raw[index] !== "'"; index++) if (raw[index] === "\\") index++;
-    } else if (char === "$" && raw[index + 1] === "$") index++;
-    else text += char;
-  }
-  return text;
+type Reads = { dollarQuestion: boolean; place: number | undefined; bareExit: boolean; failingExit: boolean };
+
+function statusReads(raw: string): string[] | undefined {
+  if (!plainWord.test(raw)) return undefined;
+  return [...raw.replace(/'[^']*'/g, "").matchAll(new RegExp(statusRead, "g"))].map(([, index]) => index ?? "?");
 }
 
-type Reads = { status: (text: string) => boolean; exitCode: (text: string) => boolean; bareExit: boolean; failingExit: boolean };
-
-function printsStatus({ name, args, rawArgs }: Command, reads: (text: string) => boolean): boolean {
-  return name === "echo" && !args.some((arg) => arg.includes("\\")) && rawArgs.some((raw) => reads(expanded(raw)));
+function readsTheStatus(index: string, reads: Reads, echo: boolean): boolean {
+  if (index === "?") return reads.dollarQuestion;
+  if (reads.place === undefined) return false;
+  return (echo && (index === "@" || index === "*")) || arithmeticIndex(index) === reads.place;
 }
 
 function reporter(command: Command | undefined, sameLevel: boolean, reads: Reads): Reach | undefined {
   if (!command || !sameLevel || command.keywords.length > 0 || command.after === "|" || command.after === "&" || command.substitutions.length > 0) return undefined;
+  const words = command.rawArgs.map(statusReads);
+  if (words.some((word) => word === undefined)) return undefined;
+  const indexes = words.flatMap((word) => word ?? []);
   if (command.name === "exit") {
-    const [code, ...more] = command.args;
-    if (more.length > 0) return undefined;
-    const readsIt = command.rawArgs.some((raw) => reads.exitCode(expanded(raw)));
-    return (code === undefined && reads.bareExit) || readsIt || (reads.failingExit && failingCode.test(code ?? "")) ? "exit" : undefined;
+    if (command.redirects.length > 0 || words.length > 1) return undefined;
+    const [raw] = command.rawArgs;
+    if (raw === undefined) return reads.bareExit ? "exit" : undefined;
+    if (reads.failingExit && failingCode.test(raw)) return "exit";
+    const alone = indexes.length === 1 && ["", '""'].includes(raw.replace(new RegExp(statusRead), ""));
+    return alone && readsTheStatus(indexes[0], reads, false) ? "exit" : undefined;
   }
-  return printsStatus(command, reads.status) && command.redirects.every((redirect) => printsToTheAgent.test(redirect)) ? "printed" : undefined;
+  const printed = command.name === "echo" && indexes.length > 0 && indexes.some((index) => readsTheStatus(index, reads, true));
+  return printed && command.redirects.every((redirect) => printsToTheAgent.test(redirect)) ? "printed" : undefined;
 }
 
 const insideOf = (scope: Scope | undefined, group: Scope): boolean => scope !== undefined && (scope === group || insideOf(scope.parent, group));
@@ -198,9 +189,8 @@ function reachOf(program: Program, start: number): Reach {
   let end = pipelineEnd(program, start, depth);
   if (end !== start && !setting(program, start, setsOption("pipefail"))) {
     const place = placeInPipe(program, start);
-    const readable = depth === 0 && place !== undefined && (separators.has(commands[end].after) || commands[end].after === "&&");
-    const reads = { status: readsPipeStatusAt(place ?? -1), exitCode: isPipeStatusAt(place ?? -1), bareExit: false, failingExit: false };
-    return (readable && reporter(commands[end + 1], sameLevel(end + 1), reads)) || { how: "a pipe" };
+    const readable = depth === 0 && separators.has(commands[end].after);
+    return (readable && reporter(commands[end + 1], sameLevel(end + 1), { dollarQuestion: false, place, bareExit: false, failingExit: false })) || { how: "a pipe" };
   }
   if (depth > 0) return closesOnly(program, end, depth) ? "exit" : { how: "the group or loop it runs in" };
   let chained = false;
@@ -210,11 +200,12 @@ function reachOf(program: Program, start: number): Reach {
   }
   const after = commands[end].after;
   const next = end + 1;
+  const place = chained ? undefined : placeInPipe(program, start);
   if (after === undefined) return "exit";
   if (after === "&") return { how: "running it in the background with `&`" };
-  if (after === "||") return reporter(commands[next], sameLevel(next), { status: readsStatus, exitCode: isStatus, bareExit: true, failingExit: true }) ?? { how: "the `||` after it" };
+  if (after === "||") return reporter(commands[next], sameLevel(next), { dollarQuestion: true, place, bareExit: true, failingExit: true }) ?? { how: "the `||` after it" };
   if (!chained && separators.has(after) && setting(program, start, setsErrexit)) return "exit";
-  return reporter(commands[next], sameLevel(next), { status: readsStatus, exitCode: isStatus, bareExit: true, failingExit: false }) ?? { how: separatorName(after) };
+  return reporter(commands[next], sameLevel(next), { dollarQuestion: true, place, bareExit: true, failingExit: false }) ?? { how: separatorName(after) };
 }
 
 function hiddenIn(text: string, nesting: number): { found?: Finding; carries?: string } {
