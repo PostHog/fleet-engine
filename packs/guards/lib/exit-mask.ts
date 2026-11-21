@@ -107,8 +107,6 @@ function statusReads(raw: string): string[] | undefined {
   return [...raw.replace(/'[^']*'/g, "").matchAll(new RegExp(statusRead, "g"))].map(([, index]) => index ?? "?");
 }
 
-const validRead = (index: string) => index === "?" || index === "@" || index === "*" || arithmeticIndex(index) !== undefined;
-
 function readsTheStatus(index: string, reads: Reads, echo: boolean): boolean {
   if (index === "?") return reads.dollarQuestion;
   if (reads.place === undefined) return false;
@@ -128,7 +126,7 @@ function reporter(command: Command | undefined, sameLevel: boolean, reads: Reads
     const alone = indexes.length === 1 && ["", '""'].includes(raw.replace(new RegExp(statusRead), ""));
     return alone && readsTheStatus(indexes[0], reads, false) ? "exit" : undefined;
   }
-  const printed = command.name === "echo" && indexes.every(validRead) && indexes.some((index) => readsTheStatus(index, reads, true));
+  const printed = command.name === "echo" && indexes.every((index) => index === "?" || readsTheStatus(index, reads, true)) && indexes.some((index) => readsTheStatus(index, reads, true));
   return printed && command.redirects.every((redirect) => printsToTheAgent.test(redirect)) ? "printed" : undefined;
 }
 
