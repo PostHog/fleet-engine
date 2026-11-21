@@ -50,12 +50,12 @@ test("a final read of a commit that puts a PR file back to the base's text reads
   expect(reviewer.prompts().at(-1)).toContain("-and the member's name");
 });
 
-test("a final read reads a commit that puts a PR file back to the base's text after the base renamed that file", async () => {
+async function revertedAfterBaseRename(rewritten: (guide: string) => string) {
   const pr = await checkout();
   const guide = Array.from({ length: 10 }, (_, line) => `step ${line + 1}\n`).join("");
   await pr.advanceBase("guide.txt", guide);
   await pr.git("merge", "-q", "--no-edit", "main");
-  await pr.commit("guide.txt", `${guide}greet the member by name\n`);
+  await pr.commit("guide.txt", rewritten(guide));
   await pr.commit("feature.txt", "greet\n");
   await pr.hedge("require", "--none", "--reason", "docs only");
   const reviewed = await reviewHead(pr);
@@ -68,10 +68,19 @@ test("a final read reads a commit that puts a PR file back to the base's text af
   await pr.git("merge", "-q", "--no-edit", "main");
   await pr.commit("handbook.txt", guide);
   const reviewer = fakeModel(pr, "REVIEWER", "No findings.");
-
   expect((await pr.hedge("review", "--scope", "final", "--base", reviewed)).code).toBe(0);
+  return reviewer.prompts().at(-1)!;
+}
 
-  expect(reviewer.prompts().at(-1)).toContain("-greet the member by name");
+test("a final read reads a commit that puts a PR file back to the base's text after the base renamed that file", async () => {
+  expect(await revertedAfterBaseRename((guide) => `${guide}greet the member by name\n`)).toContain("-greet the member by name");
+});
+
+test("a final read reads the PR's rewrite of a file that the base renamed and the PR then put back to the base's text", async () => {
+  const read = await revertedAfterBaseRename(() => "welcome the member\nshow the rules\npoint to the help page\n");
+
+  expect(read).toContain("-welcome the member");
+  expect(read).toContain("+step 1");
 });
 
 test("when the judge finds a standing rule's condition broken, the gate names the rule and asks for no void of a decision it is not", async () => {
