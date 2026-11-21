@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
+import { mkdir, readdir, readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import { modelFor, type ModelRow } from "../../base/lib/models.ts";
 import { numberSetting } from "../../base/lib/settings.ts";
@@ -15,9 +15,11 @@ import { autonomyOf } from "./proof-autonomy.ts";
 import { readSanity } from "./proof-sanity.ts";
 import { inputsDigest, readBloat } from "./proof-bloat.ts";
 import { judge, readCriticalPaths, type JudgeInput } from "./proof-judge.ts";
+import { withRoundLock, type RoundLock } from "./proof-panel.ts";
 import { askModel, familyOf, modelLabel, readRiskRubric, readRubric, reviewerRow, skillReferences } from "./proof-models.ts";
 
 export type GateContext = { home: string; cwd: string; env: Env; run: Run; now?: () => Date; ssh?: Ssh };
+export type JudgingContext = GateContext & { lock: () => Promise<RoundLock> };
 export type FinalGate = { code: number; reason: string; lines: string[]; verdict: string; summary: ProofSummary };
 
 type Checked = Awaited<ReturnType<typeof proofGate>>;
@@ -56,7 +58,7 @@ async function fingerprintOf(home: string, ref: PrRef, files: string, decisions:
 const keyOf = (pull: PullRequest, landed: boolean, fingerprint: string): GateKey =>
   ({ head: pull.head, base: pull.base, baseSha: pull.baseSha, tier: tierOf(pull.body), callout: createHash("sha256").update(riskCalloutOf(pull.body) ?? "").digest("hex"), landed, fingerprint, endTable: true });
 
-export async function finalGate(head: ProofIdentity, context: GateContext, { landed = false }: { landed?: boolean } = {}): Promise<FinalGate> {
+export async function finalGate(head: ProofIdentity, context: JudgingContext, { landed = false }: { landed?: boolean } = {}): Promise<FinalGate> {
   const { home, env, run, now, ssh } = context;
   let pull: PullRequest | undefined;
   const pushedHead = pushedHeadOf(head, run, (read) => { pull ??= read; });
@@ -136,7 +138,7 @@ async function savedGate(home: string, ref: PrRef, pull: PullRequest, ledger: Le
   return JSON.stringify(saved.key) === JSON.stringify(key) ? saved : undefined;
 }
 
-async function judgeHead(head: ProofIdentity, checked: Checked, context: GateContext): Promise<Judged> {
+async function judgeHead(head: ProofIdentity, checked: Checked, context: JudgingContext): Promise<Judged> {
   const { home, env, run, now } = context;
   const author = await authorOf(home, head);
   const row = reviewerRow(author, env);
@@ -154,6 +156,13 @@ async function judgeHead(head: ProofIdentity, checked: Checked, context: GateCon
   if (riskRubric === undefined) outcome.lines.push("judge risk: not asked; ~/.agents/skills/merge-risk/SKILL.md is not installed");
   const reason = outcome.lines.find((line) => /^judge [a-z]+: fail\b/.test(line)) ?? outcome.lines[0];
   if (outcome.state === "pass") return { code: 0, lines: outcome.lines, covered: `pass by ${outcome.model}`, judge: verdict(outcome.lines) };
+  const unchecked = outcome.unchecked ?? [];
+  if (unchecked.length) {
+    const line = `judge gap: the judge budget is spent, so no judge checks the condition of ${unchecked.map(conditionName).join(" or ")}, and no judge gap passes the gate while it rests on one. ${endUnchecked(unchecked)}`;
+    const lines = [...outcome.lines, line];
+    const open = weighedGap && { ...weighedGap, acceptance: undefined, line: `not accepted (the judge budget is spent, so no judge checks the condition of ${unchecked.map(conditionName).join(" or ")})` };
+    return { code: open ? 3 : 1, lines, covered: "", judge: verdict(lines, open && judgeGapProof(head.commit, open)), reason: line };
+  }
   const gap = weighedGap && withBrokenConditions(weighedGap, outcome.broken);
   if (gap?.acceptance) {
     const lines = [...outcome.lines, `judge gap: ${gap.acceptance.line}: ${gap.reason}`];
@@ -170,13 +179,24 @@ async function judgeHead(head: ProofIdentity, checked: Checked, context: GateCon
   return { code: 1, lines, covered: "", judge: verdict(lines), reason };
 }
 
-async function judgeDiff(head: ProofIdentity, known: Omit<JudgeInput, "cwd" | "from" | "diff">, row: ModelRow, context: GateContext) {
-  const { home, cwd, env, run, now } = context;
+async function judgeDiff(head: ProofIdentity, known: Omit<JudgeInput, "cwd" | "from" | "diff">, row: ModelRow, context: JudgingContext) {
+  const { home, cwd, env, run, now, lock } = context;
   const from = mergeBase(head, run);
+  const directory = judgeDirectory(home, head);
   return judge({ ...known, cwd: topLevel(run) ?? cwd, from, diff: diffOf(from, known.commit, run) }, {
     ask: (request) => askModel("judge", row, request, env, reviewLimit(env)), model: modelLabel("judge", row, env), arbiter: arbiterOf(context),
-    directory: judgeDirectory(home, head), commit: known.commit, now: now?.() ?? new Date(),
+    directory, commit: known.commit, now: now?.() ?? new Date(), failLimit: numberSetting("pull-requests.reviewCeiling", env),
+    serialize: async (step) => { await mkdir(directory, { recursive: true, mode: 0o700 }); return withRoundLock(directory, await lock(), step); },
   });
+}
+
+function endUnchecked(ids: string[]) {
+  const decisions = ids.filter((id) => !isStandingCondition(id));
+  const rules = ids.filter(isStandingCondition);
+  return [
+    ...decisions.length ? [`End ${decisions.map(conditionName).join(" and ")} with hedge decision void <id> --reason <why>, then decide it again without a condition`] : [],
+    ...rules.length ? [`Only the user can raise pull-requests.reviewCeiling, so the judge runs again and checks ${rules.join(" and ")}`] : [],
+  ].join(". ");
 }
 
 function endBroken(ids: string[]) {
