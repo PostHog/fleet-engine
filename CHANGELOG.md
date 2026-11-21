@@ -26,7 +26,15 @@
   the `claudeAgent` instance that recovery binds. When an instance leaves the
   plan, Hedge turns it off and keeps it in T3.
 - The whole `providerInstances` key and the `claudeAgent` instance are
-  refused.
+  refused. An instance id, its driver, and a model row's provider follow T3's
+  slug rule: a letter, then letters, digits, `-` or `_`, 64 at most. The
+  names `constructor`, `prototype` and `__proto__` are refused.
+- Hedge compares the whole instance. A field the pack drops leaves the
+  instance, and a field the user adds is kept and reported as drift.
+- When a pack turns an instance back on, Hedge turns it on again in T3, also
+  when T3 was stopped. A failed upsert still saves the instances T3 took.
+- Claude recovery binds T3's implicit `claudeAgent` instance also when the
+  settings list only other instances.
 
 ### A fresh judge scores the growth
 

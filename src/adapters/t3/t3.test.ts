@@ -88,6 +88,8 @@ function withLegacyView(settings: Record<string, unknown>) {
   return { ...copy, projectScriptOverrides: Object.fromEntries(Object.entries(entries).flatMap(([id, entry]) => (entry.defaultProjectScripts === undefined ? [] : [[id, entry.defaultProjectScripts]]))) };
 }
 
+const t3Slug = (value: unknown) => typeof value === "string" && value.length <= 64 && /^[a-zA-Z][a-zA-Z0-9_-]*$/.test(value);
+
 function fakeServer(options: { up?: boolean; settings?: Record<string, unknown>; links?: Link[]; projects?: string[]; ignorePatch?: boolean } = {}) {
   const defaults = { defaultThreadEnvMode: "local", sidebarAutoSettleAfterDays: 7, storageCleanup: { worktreeOnMerge: false, logsAfterDays: 30, browserArtifactsAfterDays: 7 }, defaultModelSelection: fastModel };
   const state = {
@@ -105,6 +107,7 @@ function fakeServer(options: { up?: boolean; settings?: Record<string, unknown>;
       if (tag === "server.getConfig") return { settings: withLegacyView(state.settings) } as T;
       if (tag === "server.updateSettings") {
         const { patch: { projectSettingsOverrides: entries, ...patch }, providerInstanceMutation: mutation } = payload as { patch: Record<string, unknown>; providerInstanceMutation?: { operation: "upsert"; instanceId: string; instance: Record<string, unknown> } };
+        if (mutation && !(t3Slug(mutation.instanceId) && t3Slug(mutation.instance.driver))) throw new Error("T3 RPC request failed: providerInstanceMutation is not a valid provider instance");
         if (state.ignorePatch) return structuredClone(state.settings) as T;
         Object.assign(state.settings, patch);
         if (mutation?.operation === "upsert") state.settings.providerInstances = { ...(state.settings.providerInstances as object), [mutation.instanceId]: mutation.instance };
@@ -495,36 +498,36 @@ describe("T3 provider instances", () => {
   const muse = entry("providerInstances.muse", { driver: "muse", enabled: true, config: { binaryPath: "~/.local/bin/muse" } }, "agents");
   const recovered = { driver: "claudeAgent", displayName: "Claude", config: { binaryPath: "/wrapper/claude" } };
   const instance = (home: string, driver: string, binary: string, enabled = true) => ({ driver, enabled, config: { binaryPath: join(home, ".local/bin", binary) } });
-  const upserts = (server: ReturnType<typeof fakeServer>) => server.calls.filter((call) => call.tag === "server.updateSettings").map((call) => call.payload);
+  const instancesOf = (server: ReturnType<typeof fakeServer>) => server.state.settings.providerInstances as Record<string, Record<string, unknown>>;
 
-  test("turns on each declared instance with one upsert each, with ~/ under the user's home, and leaves the instances it did not declare", async () => {
+  test("turns on each declared instance with its own upsert, with ~/ under the user's home, and leaves the instances it did not declare", async () => {
     const home = temp.make("home-");
     const { server, adapter } = setup({ settings: { providerInstances: { claudeAgent: recovered } } });
     const report = await apply(plan("linux", [agy, muse]), { home, adapters: [adapter] });
     const antigravity = instance(home, "antigravity", "agy");
     const museOn = instance(home, "muse", "muse");
-    expect(upserts(server)).toEqual([
+    expect(server.calls.filter((call) => call.tag === "server.updateSettings").map((call) => call.payload)).toEqual([
       { patch: {}, providerInstanceMutation: { operation: "upsert", instanceId: "antigravity", instance: antigravity } },
       { patch: {}, providerInstanceMutation: { operation: "upsert", instanceId: "muse", instance: museOn } },
     ]);
-    expect(server.state.settings.providerInstances).toEqual({ claudeAgent: recovered, antigravity, muse: museOn });
+    expect(instancesOf(server)).toEqual({ claudeAgent: recovered, antigravity, muse: museOn });
     expect(report.actions).toContainEqual({ target: "t3 settings", operation: "replace", reason: "set providerInstances.antigravity, providerInstances.muse" });
     const again = await apply(plan("linux", [agy, muse]), { home, adapters: [adapter] });
-    expect(upserts(server)).toHaveLength(2);
-    expect(again.actions).toEqual([]);
+    expect(again).toMatchObject({ ok: true, actions: [], findings: [] });
+    expect(instancesOf(server)).toEqual({ claudeAgent: recovered, antigravity, muse: museOn });
   });
 
-  test("turns off an instance that leaves the plan, and keeps it in T3", async () => {
+  test("turns off an instance that leaves the plan, keeps it in T3, and turns it back on when its pack comes back", async () => {
     const home = temp.make("home-");
     const { server, adapter } = setup({ settings: { providerInstances: { claudeAgent: recovered } } });
     await apply(plan("linux", [agy, muse]), { home, adapters: [adapter] });
-    const report = await apply(plan("linux", [agy]), { home, adapters: [adapter] });
-    const museOff = instance(home, "muse", "muse", false);
-    expect(upserts(server).at(-1)).toEqual({ patch: {}, providerInstanceMutation: { operation: "upsert", instanceId: "muse", instance: museOff } });
-    expect(server.state.settings.providerInstances).toEqual({ claudeAgent: recovered, antigravity: instance(home, "antigravity", "agy"), muse: museOff });
-    expect(report.actions).toContainEqual({ target: "t3 settings", operation: "replace", reason: "turn off providerInstances.muse" });
-    await apply(plan("linux", [agy]), { home, adapters: [adapter] });
-    expect(upserts(server)).toHaveLength(3);
+    const off = await apply(plan("linux", [agy]), { home, adapters: [adapter] });
+    expect(instancesOf(server)).toEqual({ claudeAgent: recovered, antigravity: instance(home, "antigravity", "agy"), muse: instance(home, "muse", "muse", false) });
+    expect(off.actions).toContainEqual({ target: "t3 settings", operation: "replace", reason: "turn off providerInstances.muse" });
+    expect(await apply(plan("linux", [agy]), { home, adapters: [adapter] })).toMatchObject({ actions: [], findings: [] });
+    const back = await apply(plan("linux", [agy, muse]), { home, adapters: [adapter] });
+    expect(instancesOf(server).muse).toEqual(instance(home, "muse", "muse"));
+    expect(back).toMatchObject({ actions: [{ target: "t3 settings", operation: "replace", reason: "set providerInstances.muse" }], findings: [] });
   });
 
   test("tries again to turn off an instance that T3 did not turn off", async () => {
@@ -536,39 +539,73 @@ describe("T3 provider instances", () => {
     expect(refused.findings).toContainEqual({ id: "t3:instances", pack: "engine", say: "T3 Code did not turn off muse. Run hedge apply again; if it stays, turn it off in T3 Code's settings.", repair: "apply" });
     server.state.ignorePatch = false;
     await apply(plan("linux", []), { home, adapters: [adapter] });
-    expect(server.state.settings.providerInstances).toEqual({ muse: instance(home, "muse", "muse", false) });
+    expect(instancesOf(server)).toEqual({ muse: instance(home, "muse", "muse", false) });
   });
 
-  test("a dry run says what it would turn on and off, and sends nothing", async () => {
+  test("keeps an instance T3 took in its record when T3 refuses the next one, so it turns it off once it leaves the plan", async () => {
+    const home = temp.make("home-");
+    const { server, adapter } = setup();
+    const refusedId = entry(`providerInstances.${"a".repeat(65)}`, { driver: "antigravity", enabled: true }, "agents");
+    const failed = await apply(plan("linux", [muse, refusedId]), { home, adapters: [adapter] });
+    expect(failed.findings).toContainEqual(expect.objectContaining({ id: "t3:server", say: expect.stringContaining("not a valid provider instance") }));
+    await apply(plan("linux", []), { home, adapters: [adapter] });
+    expect(instancesOf(server)).toEqual({ muse: instance(home, "muse", "muse", false) });
+  });
+
+  test("a dry run says what it would turn on and off, and changes nothing in T3", async () => {
     const home = temp.make("home-");
     const { server, adapter } = setup();
     await apply(plan("linux", [muse]), { home, adapters: [adapter] });
     const report = await apply(plan("linux", [agy]), { home, adapters: [adapter], dryRun: true });
     expect(report.findings).toContainEqual({ id: "t3:settings", pack: "engine", say: "T3 Code needs these settings: providerInstances.antigravity.", repair: "apply" });
     expect(report.findings).toContainEqual({ id: "t3:instances", pack: "engine", say: "T3 Code needs these provider instances turned off: muse.", repair: "apply" });
-    expect(upserts(server)).toHaveLength(1);
+    expect(instancesOf(server)).toEqual({ muse: instance(home, "muse", "muse") });
   });
 
-  test("keeps an instance the user turned off in T3 after Hedge turned it on", async () => {
+  test("takes a field a pack drops out of the live instance", async () => {
     const home = temp.make("home-");
     const { server, adapter } = setup();
     await apply(plan("linux", [agy]), { home, adapters: [adapter] });
-    const instances = server.state.settings.providerInstances as Record<string, Record<string, unknown>>;
-    instances.antigravity = { ...instances.antigravity, enabled: false };
-    const report = await apply(plan("linux", [agy]), { home, adapters: [adapter] });
-    expect(instances.antigravity!.enabled).toBe(false);
-    expect(report.findings).toContainEqual({ id: `kept:${settingsFile}`, pack: "engine", say: `Kept your providerInstances.antigravity in ${settingsFile}. Run hedge apply --adopt ${settingsFile} to take Hedge's value.` });
+    const report = await apply(plan("linux", [entry("providerInstances.antigravity", { driver: "antigravity", enabled: true }, "agents")]), { home, adapters: [adapter] });
+    expect(instancesOf(server).antigravity).toEqual({ driver: "antigravity", enabled: true });
+    expect(report.actions).toContainEqual({ target: "t3 settings", operation: "replace", reason: "set providerInstances.antigravity" });
   });
 
-  test("writes the instance into the settings file while T3 Code is stopped, and turns it off there once it leaves the plan", async () => {
+  test("keeps an instance the user changed in T3 after Hedge set it, a field they added included", async () => {
+    const home = temp.make("home-");
+    const { server, adapter } = setup();
+    await apply(plan("linux", [agy, muse]), { home, adapters: [adapter] });
+    const instances = instancesOf(server);
+    instances.antigravity = { ...instances.antigravity, enabled: false };
+    instances.muse = { ...instances.muse, displayName: "Muse" };
+    const report = await apply(plan("linux", [agy, muse]), { home, adapters: [adapter] });
+    expect(instancesOf(server)).toEqual({ antigravity: instance(home, "antigravity", "agy", false), muse: { ...instance(home, "muse", "muse"), displayName: "Muse" } });
+    expect(report.findings).toContainEqual({ id: `kept:${settingsFile}`, pack: "engine", say: `Kept your providerInstances.antigravity, providerInstances.muse in ${settingsFile}. Run hedge apply --adopt ${settingsFile} to take Hedge's value.` });
+  });
+
+  test("writes the instance into the settings file while T3 Code is stopped, turns it off there once it leaves the plan, and back on when it returns", async () => {
     const home = temp.make("home-");
     write(home, settingsFile, { providerInstances: { claudeAgent: recovered } });
     await seed(plan("linux", [agy, muse]), home);
     const antigravity = instance(home, "antigravity", "agy");
     expect(read(home, settingsFile).providerInstances).toEqual({ claudeAgent: recovered, antigravity, muse: instance(home, "muse", "muse") });
-    const result = await seed(plan("linux", [agy]), home);
+    const off = await seed(plan("linux", [agy]), home);
     expect(read(home, settingsFile).providerInstances).toEqual({ claudeAgent: recovered, antigravity, muse: instance(home, "muse", "muse", false) });
-    expect(result.actions).toEqual([{ target: settingsFile, operation: "replace", reason: "turn off providerInstances.muse" }]);
+    expect(off.actions).toEqual([{ target: settingsFile, operation: "replace", reason: "turn off providerInstances.muse" }]);
+    const back = await seed(plan("linux", [agy, muse]), home);
+    expect(read(home, settingsFile).providerInstances).toEqual({ claudeAgent: recovered, antigravity, muse: instance(home, "muse", "muse") });
+    expect(back).toEqual({ actions: [{ target: settingsFile, operation: "replace", reason: "set providerInstances.muse" }], findings: [] });
+  });
+
+  test("keeps the instance map when a whole-map record from an older engine gives way to keys of single instances", async () => {
+    const home = temp.make("home-");
+    const map = { antigravity: { driver: "antigravity", enabled: true }, claudeAgent: recovered };
+    write(home, settingsFile, { providerInstances: map });
+    write(home, ".config/hedge/t3-settings.json", { [settingsFile]: [{ path: ["providerInstances"], value: map, pack: "agents" }] });
+    const result = await seed(plan("linux", [entry("providerInstances.antigravity", { driver: "antigravity", enabled: true }, "agents")]), home);
+    expect(read(home, settingsFile).providerInstances).toEqual(map);
+    expect(result).toEqual({ actions: [], findings: [] });
+    expect(read(home, ".config/hedge/t3-settings.json")[settingsFile].map((field: { path: string[] }) => field.path)).toEqual([["providerInstances", "antigravity"]]);
   });
 });
 
