@@ -1149,9 +1149,10 @@ test("at the ceiling a merge of the base that resolves a conflict with an unread
   const pr = await checkout();
   const { fix, after } = await finalReadSpendsTheCeiling(pr);
   await pr.git("reset", "-q", "--hard", fix);
-  const merged = await spawnAsync(["sh", "-c", `git checkout -q main && echo "greet base" > feature.txt && git add feature.txt && git commit -qm "Base greeting" && git update-ref refs/remotes/origin/main HEAD && git checkout -q feature && ! git merge -q main && echo "greet every member" > feature.txt && git add feature.txt && git commit -q --no-edit`], { cwd: pr.repository, env: pr.env });
+  const merged = await spawnAsync(["sh", "-c", `git checkout -q main && echo "greet base" > feature.txt && git add feature.txt && git commit -qm "Base greeting" && git update-ref refs/remotes/origin/main HEAD && git checkout -q feature && ! git merge -q main && test -n "$(git diff --name-only --diff-filter=U)" && echo "greet every member" > feature.txt && git add feature.txt && git commit -q --no-edit`], { cwd: pr.repository, env: pr.env });
   expect(merged.exitCode).toBe(0);
   expect(await pr.git("rev-parse", "HEAD^1")).toBe(fix);
+  expect(await pr.git("rev-parse", "HEAD^2")).toBe(await pr.git("rev-parse", "main"));
   expect(await pr.git("rev-parse", "HEAD")).not.toBe(after);
 
   const stopped = await refusal(pr.hedge("review-start", "--scope", "final", "--base", fix));
