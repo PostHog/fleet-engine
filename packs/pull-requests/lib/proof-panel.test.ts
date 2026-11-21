@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync,
 import { join } from "node:path";
 import { cleanFixtures, settings, checkout, clean, verdict, fakeModel, recordingModel, fixture, stalledOnQuota, panelGuide, acceptGap, answerFixed, hubAt, exitedPid, productionMajor, reviewHead, reviewHeadFixed, models, type Checkout } from "./proof-testing.ts";
 import { askModel } from "./proof-models.ts";
-import { combinedLens, processStart, readPlan, withSlot, type Lens, type PanelIO } from "./proof-panel.ts";
+import { processStart, readPlan, withSlot, type PanelIO } from "./proof-panel.ts";
 
 afterEach(cleanFixtures);
 
@@ -956,10 +956,16 @@ test("a Security lane lens runs on the security row of the model table at its ef
   expect((await pr.hedge("review", "--wait")).code).toBe(0);
 });
 
-test("a combined review never casts a lens whose row has no model family, whichever order the lenses come in", () => {
-  const lens = (name: string, provider: string, family?: "gpt"): Lens => ({ name, title: name, ...(family ? { family } : {}), row: { role: "review", work: "Review", provider, model: `${provider}-model`, effort: "high" }, security: false, text: name, knowledge: "", context: true });
-  const risk = lens("risk", "antigravity");
-  const correctness = lens("correctness", "codex", "gpt");
-  expect(combinedLens([risk, correctness], "gpt").row.provider).toBe("codex");
-  expect(combinedLens([correctness, risk], "gpt").row.provider).toBe("codex");
+test("a Read tier review of Codex's PR casts its combined lens on the Codex row, not on a review-codex row of another T3 provider", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: "Greets new members." });
+  await pr.commit("README.md", "Greet new members.\n");
+  pr.env.CLAUDE_CODE_SESSION_ID = undefined;
+  pr.env.CODEX_THREAD_ID = "codex-thread";
+  await pr.hedge("require", "--none", "--reason", "docs only");
+  pr.env.HEDGE_MODELS = JSON.stringify([models[0], models[1], { role: "review-codex", work: "Review Codex's code", provider: "antigravity", model: "gemini-4-neon", effort: "high" }]);
+  recordingModel(pr, "codex", "FINDINGS:\n(none)\nCOVERED: README.md\n");
+
+  await pr.hedge("review", "--lens", "correctness:same");
+  expect((await readPlan(join(pr.pullRequest, "reviews/1")))!.lenses.map(({ name, family, model }) => ({ name, family, model }))).toEqual([{ name: "combined", family: "gpt", model: "review-model" }]);
 });
