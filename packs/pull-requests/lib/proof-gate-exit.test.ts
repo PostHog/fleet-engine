@@ -232,6 +232,21 @@ test("a usage error with a carriage return still ends in one verdict line", asyn
   expect(lastLine(gate.output)).toStartWith("gate: fail (exit 1): --wait takes a number of minutes");
 });
 
+test("the gate record keeps the same reason as the last line when the gate fails after a wait that a failed read ended", async () => {
+  const { pr, head } = await reviewed();
+  pr.ci([{ name: "test", bucket: "pending" }]);
+  const github = join(dirname(pr.home), "github");
+  pr.panel.onPause = async () => {
+    pr.pullRequestState({ unreadable: "gh: Bad Gateway (HTTP 502)\nretry later" });
+    pr.whileGithubReadsPull(`echo 'rm -f "${github}/pull-error-42"' > "${github}/while-reading"`);
+    pr.ci([{ name: "test", bucket: "pass" }]);
+    rmSync(join(pr.home, ".agents/guides/coding-standards.md"));
+  };
+  const gate = await pr.hedge("gate", "--wait", "10");
+  expect(gate.code).toBe(1);
+  expect(`gate: fail (exit 1): ${(await lastGateRun(pr.home, { repository: "example/product", pr: 42, commit: head }))?.reason}`).toBe(lastLine(gate.output)!);
+});
+
 test("while --wait waits, the gate record says CI is still running", async () => {
   const { pr, head } = await reviewed();
   pr.ci([{ name: "test", bucket: "pending" }]);

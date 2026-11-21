@@ -492,7 +492,7 @@ code and the reason. The gate's lines and hedge decision report come from the sa
         }
       } catch (error) {
         const message = `${String((error as Error).message ?? error)}${waited?.failedRead ? ` (--wait stopped early at a failed read of GitHub: ${waited.failedRead})` : ""}`;
-        await record({ code: 1, reason: message.split("\n")[0]! }).catch(() => {});
+        await record({ code: 1, reason: message.replace(/\s*[\r\n]+\s*/g, " ") }).catch(() => {});
         await shareGateResult(head, false, gatedAt, context);
         throw waited?.failedRead ? new Error(message) : error;
       }

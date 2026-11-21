@@ -160,11 +160,14 @@ test("a pass that another gate run shared after this run started still yields to
     const laterPass = { type: "gate", repository: "example/product", pr: 42, commit: head, passed: true, machine: "another-box", at: new Date(start + 500).toISOString() };
     mkdirSync(join(pr.home, ".local/state/hedge"), { recursive: true });
     writeFileSync(ledgerFile(pr.home), (existsSync(ledgerFile(pr.home)) ? readFileSync(ledgerFile(pr.home), "utf8") : "") + JSON.stringify(laterPass) + "\n");
-    let reads = 0;
-    Object.defineProperty(pr.clock, "now", { get: () => new Date(start + 1_000 * reads++), configurable: true });
+    const githubRead = join(other, "github-read");
+    let slept = 0;
+    Object.defineProperty(pr.clock, "now", { get: () => new Date(start + (existsSync(githubRead) ? 1_000 : 0) + slept), configurable: true });
+    pr.whileGithubReadsPull(`touch "${githubRead}"`);
     pr.ci([{ name: "test", bucket: "pending" }]);
     const whileWaiting: (string | undefined)[] = [];
-    pr.panel.onPause = async () => {
+    pr.panel.onPause = async (ms = 0) => {
+      slept += ms;
       whileWaiting.push((await mergeThere())?.hookSpecificOutput.permissionDecisionReason);
       pr.ci([{ name: "test", bucket: "pass" }]);
     };
