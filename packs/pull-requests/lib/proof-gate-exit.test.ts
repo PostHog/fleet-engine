@@ -262,6 +262,7 @@ test("--wait does not wait when it cannot share the failure first, writes the le
   expect(gate.output.split("\n").filter((line) => line.includes("recorded on this machine only"))).toEqual([expect.stringMatching(/^merge gate: failure recorded on this machine only \(/)]);
   expect(lastLine(gate.output)).toStartWith("gate: pending (exit 75): CI is still running: waiting on: test. --wait did not wait: the decision ledger did not take the failure (");
   expect(lastLine(gate.output)).toEndWith("). Fix the ledger's reach, such as the hub connection, then run the gate again");
+  expect((await lastGateRun(pr.home, { repository: "example/product", pr: 42, commit: (await pr.git("rev-parse", "HEAD")) }))?.reason).toContain("--wait did not wait: the decision ledger did not take the failure (");
   const json = await pr.hedge("gate", "--wait", "10", "--json");
   expect(JSON.parse(json.output)).toMatchObject({ code: 75, ledger: expect.stringMatching(/^merge gate: failure recorded on this machine only \(/) });
 });
