@@ -886,7 +886,7 @@ describe("Codex plugins", () => {
 
   test("doctor keeps a missing plugin a Fix when codex login status fails, or Codex is signed in another way, and gives the status a time limit", async () => {
     const needs = { id: `plugin:codex:${github}`, pack: "engine", say: `The Codex plugin ${github} needs to be installed.`, repair: "apply" as const };
-    for (const status of [{ code: 124, stderr: "Error: could not read the keyring\n" }, { code: 0, stderr: "Logged in using an API key - sk-***\n" }]) {
+    for (const status of [{ code: 124, stderr: "Error: could not read the keyring\n" }, { code: 143, stderr: "Not logged in\n" }, { code: 0, stderr: "Logged in using an API key - sk-***\n" }]) {
       const cli = codexCli({}, { status });
       expect((await check(plan([wants()]), { home: temp.make("home-"), adapters: [cli.adapter] })).findings.filter((finding) => finding.id.startsWith("plugin"))).toEqual([needs]);
       expect(cli.limited).toEqual([["codex", "login", "status"]]);

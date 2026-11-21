@@ -100,10 +100,10 @@ async function reconcileClaude(plan: Plan, home: string, dryRun: boolean, run: C
 }
 
 const codexFinding = (id: string, say: string): Finding => ({ id: `plugin:codex:${id}`, pack: "engine", say, repair: "apply" });
-export const chatGptSignIn = "plugins:codex:chatgpt";
+const chatGptSignIn = "plugins:codex:chatgpt";
 const waitsForChatGpt = (ids: string[]): Finding => ({ id: chatGptSignIn, pack: "engine", say: `Sign Codex in to ChatGPT with codex login. Hedge installs the Codex plugin${ids.length === 1 ? "" : "s"} ${ids.join(", ")} at the next hedge apply.`, todo: true });
 const needsChatGpt = (result: { stdout: string; stderr?: string }) => /chatgpt authentication required/i.test(`${result.stderr ?? ""}${result.stdout}`);
-const notLoggedIn = (status: { code: number; stdout: string; stderr?: string }) => status.code !== 0 && `${status.stdout}\n${status.stderr ?? ""}`.split("\n").some((line) => line.trim() === "Not logged in");
+const notLoggedIn = (status: { code: number; stdout: string; stderr?: string }) => status.code === 1 && `${status.stdout}\n${status.stderr ?? ""}`.split("\n").some((line) => line.trim() === "Not logged in");
 const statusLimitMs = 10_000;
 
 async function reconcileCodex(plan: Plan, home: string, dryRun: boolean, run: CommandRunner, settings: PluginSettings, owned: CodexOwned[], save: (next: CodexOwned[]) => Promise<void>): Promise<Finding[]> {
