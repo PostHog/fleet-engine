@@ -121,6 +121,7 @@ test("a final read with captured findings is never dropped", async () => {
   await pr.commit("feature.txt", "greet the new member\n");
 
   await expect(finalRead(pr, reviewed)).rejects.toThrow(`Final read base must be the latest reviewed commit ${older}`);
+  expect((await finalRead(pr, older)).code).toBe(0);
   expect(readFileSync(join(reviews(pr), "final-1/findings.md"), "utf8")).toContain("the greeting names no member");
   expect(anyDropped(pr)).toBe(false);
 });
@@ -131,6 +132,9 @@ test("a final read whose findings file exists but is empty is never dropped", as
   await pr.commit("feature.txt", "greet the new member\n");
 
   await expect(finalRead(pr, reviewed)).rejects.toThrow(`Final read base must be the latest reviewed commit ${older}`);
+  fakeModel(pr, "REVIEWER", "No findings.");
+  expect((await finalRead(pr, older)).code).toBe(0);
+  expect(existsSync(join(reviews(pr), "final-1/findings.md"))).toBe(true);
   expect(anyDropped(pr)).toBe(false);
 });
 
