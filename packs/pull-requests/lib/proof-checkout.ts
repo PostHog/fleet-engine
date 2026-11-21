@@ -14,19 +14,27 @@ export function topLevel(run: Run) {
 }
 
 /**
- * Where the PR branched from its base as the base is now: the newest of the base branch on each remote and the base
- * commit GitHub reports. A base branch or base commit this checkout lacks is fetched from the repository's remote once;
- * without such a remote, or without the commit, the error names the commands that fix it.
+ * Where the PR branched from its base as the base is now: GitHub's base commit, or a remote base branch that has moved
+ * past it. Without a base commit from GitHub, the first remote base branch. A base branch or base commit this checkout
+ * lacks is fetched from the repository's remote once; without such a remote, or without the commit, the error names
+ * the commands that fix it.
  */
 export function mergeBase(identity: ProofIdentity, run: Run) {
   const { baseRefName: base, baseSha } = pullRequestDetails(identity, run);
   const remotes = remotesOf(identity.repository, run);
   const present = (tip: string) => offline(run)(["git", "cat-file", "-e", `${tip}^{commit}`]).code === 0;
-  const tips = () => [...remotes.map((remote) => `refs/remotes/${remote}/${base}`), ...isCommitSha(baseSha) ? [baseSha] : []].filter(present);
+  const branchedFrom = (tips: string[]) => {
+    const result = run(["git", "merge-base", identity.commit, ...tips]);
+    return result.code === 0 ? result.stdout.trim() : undefined;
+  };
   const found = () => {
-    const known = tips();
-    const result = known.length ? run(["git", "merge-base", identity.commit, ...known]) : undefined;
-    return result?.code === 0 ? result.stdout.trim() : undefined;
+    const refs = remotes.map((remote) => `refs/remotes/${remote}/${base}`).filter(present);
+    if (isCommitSha(baseSha) && present(baseSha)) return branchedFrom([baseSha, ...refs.filter((ref) => run(["git", "merge-base", "--is-ancestor", baseSha, ref]).code === 0)]);
+    for (const ref of refs) {
+      const from = branchedFrom([ref]);
+      if (from) return from;
+    }
+    return undefined;
   };
   const before = !isCommitSha(baseSha) || present(baseSha) ? found() : undefined;
   if (before) return before;

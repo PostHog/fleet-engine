@@ -70,3 +70,21 @@ test("when GitHub's base commit is not in the checkout yet, the judge fetches th
   expect(prompt).toContain("+greet the new member");
   expect(prompt).not.toContain("the base moves on");
 });
+
+test("after the base is rewritten past a tip the branch merged, the judge still reads that tip's lines, which the branch now carries", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.txt", "greet the new member\n");
+  await pr.advanceBase("base.md", "a base change that is later discarded\n");
+  await pr.git("merge", "-q", "--no-edit", "main");
+  await pr.git("checkout", "-q", "main");
+  await pr.git("reset", "-q", "--hard", "HEAD^");
+  const rewritten = await pr.commit("rewritten.md", "the rewritten base\n");
+  await pr.git("checkout", "-q", "feature");
+  await pr.hedge("require", "--none", "--reason", "docs only");
+  pr.pullRequestState({ baseSha: rewritten });
+
+  const prompt = await judgePrompt(pr);
+  expect(prompt).toContain("+greet the new member");
+  expect(prompt).toContain("+a base change that is later discarded");
+  expect(prompt).not.toContain("the rewritten base");
+});
