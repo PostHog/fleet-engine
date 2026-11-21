@@ -93,6 +93,22 @@ describe("loadPacks", () => {
     expect(loadPacks(sourceWith({ base: { ...base, config: [{ provider: "claude", key: "a", value: 1, unless: "bridge" }] } }))).rejects.toThrow("config a: unless must list workflow ids");
   });
 
+  test("accepts a T3 provider instance by its id, and refuses the whole map, a malformed instance, and the claudeAgent instance that recovery binds", async () => {
+    const instance = (key: string, value: unknown) => [{ provider: "t3" as const, key, value }];
+    const agy = { driver: "antigravity", enabled: true, config: { binaryPath: "~/.local/bin/agy" } };
+    const [pack] = await loadPacks(sourceWith({ base: { ...base, config: instance("providerInstances.antigravity", agy) } }));
+    expect(pack!.manifest.config).toEqual(instance("providerInstances.antigravity", agy));
+    const cases: Array<[unknown[], string]> = [
+      [instance("providerInstances", { antigravity: agy }), "config providerInstances: a T3 provider instance key names one instance, such as providerInstances.<id>"],
+      [instance("providerInstances.agy cli", agy), "config providerInstances.agy cli: a T3 provider instance key names one instance, such as providerInstances.<id>"],
+      [instance("providerInstances.claudeAgent", { driver: "claudeAgent", enabled: true }), "config providerInstances.claudeAgent: Hedge's Claude recovery binds the claudeAgent instance, so give this instance another id"],
+      [instance("providerInstances.antigravity", { driver: "antigravity" }), 'config providerInstances.antigravity: a T3 provider instance needs a driver and enabled, such as { "driver": "antigravity", "enabled": true }'],
+      [instance("providerInstances.antigravity", { driver: "", enabled: true }), "a T3 provider instance needs a driver and enabled"],
+      [instance("providerInstances.antigravity", { ...agy, config: { binaryPath: 3 } }), "config providerInstances.antigravity: config must be an object, and its binaryPath a path"],
+    ];
+    for (const [config, message] of cases) await expect(loadPacks(sourceWith({ base: { ...base, config } }))).rejects.toThrow(message);
+  });
+
   test("rejects a workflow need outside the closed set", async () => {
     const workflows = [{ ...base.workflows[0], needs: ["laptop"] }];
     expect(loadPacks(sourceWith({ base: { ...base, workflows } }))).rejects.toThrow("workflow heavy has unknown need laptop");

@@ -1,13 +1,15 @@
 import { get, isDocument, remove, same, samePath, set, type Document, type Field } from "../provider-config/fields.ts";
 
-export type Reconciled = { document: Document; record: Field[]; applied: Field[]; kept: string[]; changed: string[]; removed: string[] };
+export type Reconciled = { document: Document; record: Field[]; applied: Field[]; kept: string[]; changed: string[]; removed: string[]; disabled: Field[] };
+
+export const isProviderInstance = (path: string[]) => path.length === 2 && path[0] === "providerInstances";
 
 const name = (field: Field) => field.path.join(".");
 
 export function reconcileKeys(current: Document, previous: Field[], wanted: Field[], options: { adopt: boolean; outage: boolean; matches?: (actual: unknown, wanted: unknown) => boolean }): Reconciled {
   const matches = options.matches ?? same;
   const document = structuredClone(current);
-  const result: Reconciled = { document, record: [], applied: [], kept: [], changed: [], removed: [] };
+  const result: Reconciled = { document, record: [], applied: [], kept: [], changed: [], removed: [], disabled: [] };
   for (const field of wanted) {
     const value = get(document, field.path);
     const old = previous.find((item) => samePath(item.path, field.path));
@@ -31,6 +33,12 @@ export function reconcileKeys(current: Document, previous: Field[], wanted: Fiel
       continue;
     }
     if (value === undefined) continue;
+    if (isProviderInstance(field.path)) {
+      if (!isDocument(value) || value.enabled === false) continue;
+      set(document, field.path, { ...value, enabled: false });
+      result.disabled.push(field);
+      continue;
+    }
     remove(document, field.path);
     result.removed.push(name(field));
   }

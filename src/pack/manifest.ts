@@ -97,7 +97,19 @@ export function configEntryProblem(item: unknown) {
   if (item.provider === "t3" && t3ProjectKeys.includes(item.key)) return "T3 project settings hold Hedge's worktree scripts, so set those with t3ProjectScripts";
   if (item.provider === "claude" && item.key === "mcpServers") return "a Claude MCP server key names one server, such as mcpServers.<name>";
   if (item.provider === "claude" && item.key.startsWith("mcpServers.") && !isRecord(item.value)) return 'a Claude MCP server must be an object, such as { "type": "stdio", "command": ... }';
+  if (item.provider === "t3" && item.key.startsWith("providerInstances")) return providerInstanceProblem(item.key, item.value) ?? scopeProblem(item);
   return scopeProblem(item);
+}
+
+export const t3InstanceId = /^[A-Za-z][A-Za-z0-9_-]*$/;
+
+function providerInstanceProblem(key: string, value: unknown) {
+  const id = key.match(/^providerInstances\.(.+)$/)?.[1];
+  if (!id || !t3InstanceId.test(id)) return "a T3 provider instance key names one instance, such as providerInstances.<id>";
+  if (id === "claudeAgent") return "Hedge's Claude recovery binds the claudeAgent instance, so give this instance another id";
+  if (!isRecord(value) || !filled(value.driver) || typeof value.enabled !== "boolean") return 'a T3 provider instance needs a driver and enabled, such as { "driver": "antigravity", "enabled": true }';
+  if (value.config !== undefined && !(isRecord(value.config) && (value.config.binaryPath === undefined || filled(value.config.binaryPath)))) return "config must be an object, and its binaryPath a path";
+  return undefined;
 }
 
 /** Checks every nested item's shape before the manifest is trusted as a PackManifest. */

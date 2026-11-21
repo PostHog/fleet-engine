@@ -56,6 +56,10 @@ _Avoid_: Template, bundle
 The model and effort agents use for each kind of work, one table for each AI plan. The Base pack declares it, and a profile can replace any row.
 _Avoid_: Model policy, casting
 
+**T3 provider instance**:
+One agent provider that T3 Code runs, such as `claudeAgent`, `codex`, or `antigravity`: an id, a driver, on or off, and its config. A pack or a profile turns one on with a `t3` config entry whose key is `providerInstances.<id>`. Hedge changes only the instances it declares.
+_Avoid_: Agent, backend
+
 ## Applying
 
 **Plan**:

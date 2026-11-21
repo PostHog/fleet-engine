@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Packs and profiles turn on T3 provider instances
+
+- A `t3` config entry whose key is `providerInstances.<id>` turns on one T3
+  provider instance, such as `antigravity` or `muse`. Its value holds the
+  `driver`, `enabled`, and an optional `config`, such as a `binaryPath`. A
+  `binaryPath` that starts with `~/` is under the user's home. T3 Code does
+  the install and the sign-in of the provider, or a human step of the pack
+  does.
+- Hedge sends each instance to T3 Code as one upsert, and only when T3 does
+  not hold it yet. It never changes an instance it did not declare, such as
+  the `claudeAgent` instance that recovery binds. When an instance leaves the
+  plan, Hedge turns it off and keeps it in T3.
+- The whole `providerInstances` key and the `claudeAgent` instance are
+  refused.
+
 ### A fresh judge scores the growth
 
 - When the production lines at HEAD pass twice the lines at round 1, a fresh

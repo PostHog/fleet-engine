@@ -104,9 +104,10 @@ function fakeServer(options: { up?: boolean; settings?: Record<string, unknown>;
       calls.push({ tag, payload });
       if (tag === "server.getConfig") return { settings: withLegacyView(state.settings) } as T;
       if (tag === "server.updateSettings") {
-        const { projectSettingsOverrides: entries, ...patch } = (payload as { patch: Record<string, unknown> }).patch;
+        const { patch: { projectSettingsOverrides: entries, ...patch }, providerInstanceMutation: mutation } = payload as { patch: Record<string, unknown>; providerInstanceMutation?: { operation: "upsert"; instanceId: string; instance: Record<string, unknown> } };
         if (state.ignorePatch) return structuredClone(state.settings) as T;
         Object.assign(state.settings, patch);
+        if (mutation?.operation === "upsert") state.settings.providerInstances = { ...(state.settings.providerInstances as object), [mutation.instanceId]: mutation.instance };
         if (entries) {
           const merged = { ...(state.settings.projectSettingsOverrides as Record<string, object>), ...(entries as Record<string, object>) };
           state.settings.projectSettingsOverrides = Object.fromEntries(Object.entries(merged).filter(([, entry]) => Object.keys(entry).length));
@@ -486,6 +487,88 @@ describe("T3 adapter with a running server", () => {
       { id: "t3:link:env-2", pack: "engine", say: "The link to devbox-2 has expired. Link it again in T3 Code: Settings, Environments, Link environment.", repair: "human" },
       { id: "t3:link:env-3", pack: "engine", say: "T3 Code cannot reach devbox-3 (connect timeout). Check that it is on and online. If it stays unreachable, link it again in T3 Code." },
     ]);
+  });
+});
+
+describe("T3 provider instances", () => {
+  const agy = entry("providerInstances.antigravity", { driver: "antigravity", enabled: true, config: { binaryPath: "~/.local/bin/agy" } }, "agents");
+  const muse = entry("providerInstances.muse", { driver: "muse", enabled: true, config: { binaryPath: "~/.local/bin/muse" } }, "agents");
+  const recovered = { driver: "claudeAgent", displayName: "Claude", config: { binaryPath: "/wrapper/claude" } };
+  const instance = (home: string, driver: string, binary: string, enabled = true) => ({ driver, enabled, config: { binaryPath: join(home, ".local/bin", binary) } });
+  const upserts = (server: ReturnType<typeof fakeServer>) => server.calls.filter((call) => call.tag === "server.updateSettings").map((call) => call.payload);
+
+  test("turns on each declared instance with one upsert each, with ~/ under the user's home, and leaves the instances it did not declare", async () => {
+    const home = temp.make("home-");
+    const { server, adapter } = setup({ settings: { providerInstances: { claudeAgent: recovered } } });
+    const report = await apply(plan("linux", [agy, muse]), { home, adapters: [adapter] });
+    const antigravity = instance(home, "antigravity", "agy");
+    const museOn = instance(home, "muse", "muse");
+    expect(upserts(server)).toEqual([
+      { patch: {}, providerInstanceMutation: { operation: "upsert", instanceId: "antigravity", instance: antigravity } },
+      { patch: {}, providerInstanceMutation: { operation: "upsert", instanceId: "muse", instance: museOn } },
+    ]);
+    expect(server.state.settings.providerInstances).toEqual({ claudeAgent: recovered, antigravity, muse: museOn });
+    expect(report.actions).toContainEqual({ target: "t3 settings", operation: "replace", reason: "set providerInstances.antigravity, providerInstances.muse" });
+    const again = await apply(plan("linux", [agy, muse]), { home, adapters: [adapter] });
+    expect(upserts(server)).toHaveLength(2);
+    expect(again.actions).toEqual([]);
+  });
+
+  test("turns off an instance that leaves the plan, and keeps it in T3", async () => {
+    const home = temp.make("home-");
+    const { server, adapter } = setup({ settings: { providerInstances: { claudeAgent: recovered } } });
+    await apply(plan("linux", [agy, muse]), { home, adapters: [adapter] });
+    const report = await apply(plan("linux", [agy]), { home, adapters: [adapter] });
+    const museOff = instance(home, "muse", "muse", false);
+    expect(upserts(server).at(-1)).toEqual({ patch: {}, providerInstanceMutation: { operation: "upsert", instanceId: "muse", instance: museOff } });
+    expect(server.state.settings.providerInstances).toEqual({ claudeAgent: recovered, antigravity: instance(home, "antigravity", "agy"), muse: museOff });
+    expect(report.actions).toContainEqual({ target: "t3 settings", operation: "replace", reason: "turn off providerInstances.muse" });
+    await apply(plan("linux", [agy]), { home, adapters: [adapter] });
+    expect(upserts(server)).toHaveLength(3);
+  });
+
+  test("tries again to turn off an instance that T3 did not turn off", async () => {
+    const home = temp.make("home-");
+    const { server, adapter } = setup();
+    await apply(plan("linux", [muse]), { home, adapters: [adapter] });
+    server.state.ignorePatch = true;
+    const refused = await apply(plan("linux", []), { home, adapters: [adapter] });
+    expect(refused.findings).toContainEqual({ id: "t3:instances", pack: "engine", say: "T3 Code did not turn off muse. Run hedge apply again; if it stays, turn it off in T3 Code's settings.", repair: "apply" });
+    server.state.ignorePatch = false;
+    await apply(plan("linux", []), { home, adapters: [adapter] });
+    expect(server.state.settings.providerInstances).toEqual({ muse: instance(home, "muse", "muse", false) });
+  });
+
+  test("a dry run says what it would turn on and off, and sends nothing", async () => {
+    const home = temp.make("home-");
+    const { server, adapter } = setup();
+    await apply(plan("linux", [muse]), { home, adapters: [adapter] });
+    const report = await apply(plan("linux", [agy]), { home, adapters: [adapter], dryRun: true });
+    expect(report.findings).toContainEqual({ id: "t3:settings", pack: "engine", say: "T3 Code needs these settings: providerInstances.antigravity.", repair: "apply" });
+    expect(report.findings).toContainEqual({ id: "t3:instances", pack: "engine", say: "T3 Code needs these provider instances turned off: muse.", repair: "apply" });
+    expect(upserts(server)).toHaveLength(1);
+  });
+
+  test("keeps an instance the user turned off in T3 after Hedge turned it on", async () => {
+    const home = temp.make("home-");
+    const { server, adapter } = setup();
+    await apply(plan("linux", [agy]), { home, adapters: [adapter] });
+    const instances = server.state.settings.providerInstances as Record<string, Record<string, unknown>>;
+    instances.antigravity = { ...instances.antigravity, enabled: false };
+    const report = await apply(plan("linux", [agy]), { home, adapters: [adapter] });
+    expect(instances.antigravity!.enabled).toBe(false);
+    expect(report.findings).toContainEqual({ id: `kept:${settingsFile}`, pack: "engine", say: `Kept your providerInstances.antigravity in ${settingsFile}. Run hedge apply --adopt ${settingsFile} to take Hedge's value.` });
+  });
+
+  test("writes the instance into the settings file while T3 Code is stopped, and turns it off there once it leaves the plan", async () => {
+    const home = temp.make("home-");
+    write(home, settingsFile, { providerInstances: { claudeAgent: recovered } });
+    await seed(plan("linux", [agy, muse]), home);
+    const antigravity = instance(home, "antigravity", "agy");
+    expect(read(home, settingsFile).providerInstances).toEqual({ claudeAgent: recovered, antigravity, muse: instance(home, "muse", "muse") });
+    const result = await seed(plan("linux", [agy]), home);
+    expect(read(home, settingsFile).providerInstances).toEqual({ claudeAgent: recovered, antigravity, muse: instance(home, "muse", "muse", false) });
+    expect(result.actions).toEqual([{ target: settingsFile, operation: "replace", reason: "turn off providerInstances.muse" }]);
   });
 });
 

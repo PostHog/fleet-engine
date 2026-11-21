@@ -262,6 +262,12 @@ describe("saving answers", () => {
     expect(loadProfile(await profileRepo({ ...profile, overrides: { config: [{ provider: "claude", key: "model", value: "x", plans: {} }] } }))).rejects.toThrow("overrides.config[0]: plans must list claude, codex, or both");
     expect(loadProfile(await profileRepo({ ...profile, overrides: { config: [{ provider: "nope", key: "model", value: "x" }] } }))).rejects.toThrow("overrides.config[0]: needs a provider and a key");
     expect(loadProfile(await profileRepo({ ...profile, overrides: { config: [{ provider: "claude", key: "model", value: "x", after: "ready" }] } }))).rejects.toThrow("overrides.config[0]: after names a pack's check, so only a pack's own config item can wait for one");
+    expect(loadProfile(await profileRepo({ ...profile, overrides: { config: [{ provider: "t3", key: "providerInstances.muse", value: { driver: "muse", enabled: "yes" } }] } }))).rejects.toThrow("overrides.config[0]: a T3 provider instance needs a driver and enabled");
+  });
+
+  test("takes a T3 provider instance in its overrides", async () => {
+    const muse = { provider: "t3" as const, key: "providerInstances.muse", value: { driver: "muse", enabled: true, config: { binaryPath: "~/.local/bin/muse" } } };
+    expect((await loadProfile(await profileRepo({ ...profile, overrides: { config: [muse] } }))).overrides?.config).toEqual([muse]);
   });
 });
 
