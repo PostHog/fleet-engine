@@ -12,8 +12,9 @@ const openers = new Set(["{", "if", "while", "until"]);
 const headers = new Set(["for", "select", "case"]);
 const closers = new Set(["}", "fi", "done", "esac"]);
 const separators = new Set([undefined, ";", "\n"]);
-const readsStatus = /\$\{?\?/;
-const readsPipeStatus = /\$\{PIPESTATUS\b/;
+const readsStatus = (text: string) => /\$\{?\?/.test(text);
+const readsPipeStatusAt = (place: number) => (text: string) => [...text.matchAll(/\$\{PIPESTATUS\[(\d+|@|\*)\]/g)].some(([, index]) => index === String(place) || index === "@" || index === "*");
+const printfStatusConversions = new Set(["%s", "%d", "%i"]);
 const failingCode = /^(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-5])$/;
 const printsToTheAgent = /^(?:2>&1|1?>&2)$/;
 
@@ -70,9 +71,12 @@ function depthsOf(commands: Command[]): number[] {
   });
 }
 
-function setting(commands: Command[], before: number, read: (args: string[]) => boolean | undefined): boolean {
+function setting({ commands, depths }: Program, before: number, read: (args: string[]) => boolean | undefined): boolean {
   let on = false;
-  for (const command of commands.slice(0, before)) if (command.name === "set" && parens(command.scope) === 0) on = read(command.args) ?? on;
+  commands.slice(0, before).forEach((command, index) => {
+    const alwaysRuns = depths[index] === 0 && command.keywords.length === 0 && !["|", "&&", "||"].includes(commands[index - 1]?.after ?? "");
+    if (command.name === "set" && alwaysRuns && !["|", "&"].includes(command.after ?? "")) on = read(command.args) ?? on;
+  });
   return on;
 }
 
@@ -98,24 +102,60 @@ function expanded(raw: string): string {
     const char = raw[index];
     if (char === "\\") index++;
     else if (char === '"') inDoubleQuotes = !inDoubleQuotes;
-    else if (char === "'" && !inDoubleQuotes) index = raw.indexOf("'", index + 1);
-    else if (char === "$" && raw[index + 1] === "'" && !inDoubleQuotes) {
-      for (index += 2; raw[index] !== "'"; index++) if (raw[index] === "\\") index++;
+    else if (char === "'" && !inDoubleQuotes) {
+      index = raw.indexOf("'", index + 1);
+      if (index < 0) break;
+    } else if (char === "$" && raw[index + 1] === "'" && !inDoubleQuotes) {
+      for (index += 2; index < raw.length && raw[index] !== "'"; index++) if (raw[index] === "\\") index++;
     } else text += char;
   }
   return text;
 }
 
-function reporter(command: Command | undefined, sameLevel: boolean, reads: RegExp, orBranch: boolean): Reach | undefined {
+type Reads = { status: (text: string) => boolean; bareExit: boolean; failingExit: boolean };
+
+function printsStatus({ name, args, rawArgs }: Command, reads: (text: string) => boolean): boolean {
+  const readsArg = (raw: string) => reads(expanded(raw));
+  if (name === "echo") return !args.some((arg) => /^-[nE]*e/.test(arg)) && rawArgs.some(readsArg);
+  if (name !== "printf" || args.some((arg) => arg.startsWith("-v"))) return false;
+  const skip = args[0] === "--" ? 1 : 0;
+  const [format = "", ...values] = args.slice(skip);
+  const [rawFormat = "", ...rawValues] = rawArgs.slice(skip);
+  const conversions = format.replaceAll("%%", "").match(/%[^A-Za-z]*[A-Za-z]/g) ?? [];
+  const printsValue = conversions.length === 1 && printfStatusConversions.has(conversions[0]) && values.length === 1 && readsArg(rawValues[0]);
+  return readsArg(rawFormat) || printsValue;
+}
+
+function reporter(command: Command | undefined, sameLevel: boolean, reads: Reads): Reach | undefined {
   if (!command || !sameLevel || command.keywords.length > 0 || command.after === "|" || command.substitutions.length > 0) return undefined;
-  const readsIt = command.rawArgs.some((raw) => reads.test(expanded(raw)));
   if (command.name === "exit") {
     const [code, ...more] = command.args;
     if (more.length > 0) return undefined;
-    return code === undefined || readsIt || (orBranch && failingCode.test(code)) ? "exit" : undefined;
+    const readsIt = command.rawArgs.some((raw) => reads.status(expanded(raw)));
+    return (code === undefined && reads.bareExit) || readsIt || (reads.failingExit && failingCode.test(code ?? "")) ? "exit" : undefined;
   }
-  const prints = command.name === "echo" || (command.name === "printf" && !command.args.some((arg) => arg.startsWith("-v")));
-  return prints && readsIt && command.redirects.every((redirect) => printsToTheAgent.test(redirect)) ? "printed" : undefined;
+  return printsStatus(command, reads.status) && command.redirects.every((redirect) => printsToTheAgent.test(redirect)) ? "printed" : undefined;
+}
+
+function exitsInGroup({ commands, depths }: Program, start: number, depth: number): Reach | undefined {
+  if (!commands[start]?.keywords.includes("{") || depths[start] !== depth + 1) return undefined;
+  const close = depths.findIndex((each, index) => index > start && each <= depth);
+  const closer = commands[close];
+  if (closer?.name !== "}" || !separators.has(closer.after)) return undefined;
+  const body = commands.slice(start, close);
+  const last = body.at(-1)!;
+  const exitsOnce = body.filter((command) => command.name === "exit").length === 1 && last.name === "exit";
+  const flat = depths.slice(start, close).every((each) => each === depth + 1);
+  return exitsOnce && flat && last.args.length === 1 && failingCode.test(last.args[0]) ? "exit" : undefined;
+}
+
+function placeInPipe({ commands, depths }: Program, start: number): number | undefined {
+  let place = 0;
+  for (let index = start - 1; index >= 0 && commands[index].after === "|"; index--) {
+    if (depths[index] !== depths[start] || closers.has(commands[index].name)) return undefined;
+    place++;
+  }
+  return place;
 }
 
 function statementEnd({ commands, depths }: Program, start: number, depth: number): number {
@@ -143,9 +183,11 @@ function reachOf(program: Program, start: number): Reach {
   const depth = depths[start];
   const sameLevel = (index: number) => depths[index] === depth;
   let end = pipelineEnd(program, start, depth);
-  if (end !== start && !setting(commands, start, setsOption("pipefail"))) {
-    const piped = separators.has(commands[end].after) || commands[end].after === "&&";
-    return (piped && reporter(commands[end + 1], sameLevel(end + 1), readsPipeStatus, false)) || { how: "a pipe" };
+  if (end !== start && !setting(program, start, setsOption("pipefail"))) {
+    const place = placeInPipe(program, start);
+    const readable = depth === 0 && place !== undefined && (separators.has(commands[end].after) || commands[end].after === "&&");
+    const reads = { status: readsPipeStatusAt(place ?? -1), bareExit: false, failingExit: false };
+    return (readable && reporter(commands[end + 1], sameLevel(end + 1), reads)) || { how: "a pipe" };
   }
   if (depth > 0) return closesOnly(program, end, depth) ? "exit" : { how: "the group or loop it runs in" };
   let chained = false;
@@ -157,9 +199,9 @@ function reachOf(program: Program, start: number): Reach {
   const next = end + 1;
   if (after === undefined) return "exit";
   if (after === "&") return { how: "running it in the background with `&`" };
-  if (after === "||") return reporter(commands[next], sameLevel(next), readsStatus, true) ?? { how: "the `||` after it" };
-  if (!chained && separators.has(after) && setting(commands, start, setsErrexit)) return "exit";
-  return reporter(commands[next], sameLevel(next), readsStatus, false) ?? { how: separatorName(after) };
+  if (after === "||") return reporter(commands[next], sameLevel(next), { status: readsStatus, bareExit: true, failingExit: true }) ?? exitsInGroup(program, next, depth) ?? { how: "the `||` after it" };
+  if (!chained && separators.has(after) && setting(program, start, setsErrexit)) return "exit";
+  return reporter(commands[next], sameLevel(next), { status: readsStatus, bareExit: true, failingExit: false }) ?? { how: separatorName(after) };
 }
 
 function hiddenIn(text: string, nesting: number): { found?: Finding; carries?: string } {
@@ -173,7 +215,8 @@ function hiddenIn(text: string, nesting: number): { found?: Finding; carries?: s
         const { found, carries } = hiddenIn(inner.program, nesting + 1);
         if (found) return { found };
         if (!carries) continue;
-        const passesOn = !inner.substituted || (command.name === "" && command.substitutions.length === 1);
+        const assignsProcess = [...command.env.values()].some((value) => /[<>]\(/.test(value));
+        const passesOn = !inner.substituted || (command.name === "" && command.substitutions.length === 1 && !assignsProcess);
         if (!passesOn) return { found: { what: carries, how: "the `$(…)` substitution it runs in" } };
         what ??= carries;
       }
@@ -196,8 +239,8 @@ function hiddenIn(text: string, nesting: number): { found?: Finding; carries?: s
 
 export const exitMaskReason = (what: string, how: string, person: string) => `Hedge blocked this command: ${how} hides the exit status of \`${what}\`, `
   + "so a failure reads as a success. These forms pass: run it alone or as the last command; chain the next step with `&&`; "
-  + `print its status on the next command, as in \`${what} > /tmp/out.log 2>&1; echo "exit=$?"; cat /tmp/out.log\`; `
-  + "for a pipe, start with `set -o pipefail;` or print `${PIPESTATUS[0]}` right after it. "
+  + `print its status on the next command, as in \`${what} … > /tmp/out.log 2>&1; echo "exit=$?"; cat /tmp/out.log\`; `
+  + "for a pipe, start with `set -o pipefail;`, or print `${PIPESTATUS[n]}` right after it, where n is its place in the pipe, counted from 0. "
   + "A call with only `--help` or `-h` after the command passes too. "
   + `If you are not sure, stop and ask ${person}.`;
 

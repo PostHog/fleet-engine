@@ -61,6 +61,10 @@ describe("the exit-status mask guard", () => {
     "git push && { echo pushed; }; echo \"exit $?\"",
     'git push > push.log 2>&1 || echo "push failed: $?"; cat push.log',
     "git push || exit 1",
+    'git push || { echo "push failed"; exit 1; }',
+    "git push > push.log 2>&1; printf \"exit $?\\n\"",
+    'echo main | xargs git push origin | tail -3; echo "exit ${PIPESTATUS[1]}"',
+    'git push | tail -3; echo "${PIPESTATUS[@]}"',
     "git push > push.log 2>&1; exit $?",
     "git commit -F - <<'EOF'\nFix the gate\nEOF\necho \"exit $?\"",
     "( git push )",
@@ -111,6 +115,19 @@ describe("the exit-status mask guard", () => {
     "git push & wait",
     "git push & echo \"exit $?\"",
     "git push; echo \"exit $?\" | grep -c x",
+    "git push | cat; exit",
+    "git push; printf 'done\\n' \"$?\"",
+    "git push; printf '%.0s' \"$?\"",
+    "git push; echo -e 'exit \\c' $?",
+    "set -o errexit | cat; git push; echo done",
+    "false && set -e; git push; echo done",
+    "if false; then set -e; fi; git push; echo done",
+    'out=<(git push); echo "exit=$?"',
+    'echo main | xargs git push origin | tail -3; echo "exit ${PIPESTATUS[0]}"',
+    '{ git push 2>&1 | tail -3; echo "exit ${PIPESTATUS[0]}"; } > /dev/null',
+    "git push || { true; exit 0; }",
+    "git push || { true; exit $?; }",
+    "git push || { true; exit 1; } | cat",
     "git push 2>&1 | tee push.log; echo \"exit $?\"",
     "git push | cat; true; echo \"${PIPESTATUS[0]}\"",
     "git push > push.log 2>&1; cat push.log; echo \"exit $?\"",
@@ -149,14 +166,6 @@ describe("the exit-status mask guard", () => {
     "bash <<'EOF'\ngit push | cat\nEOF",
     "echo 'git push; true' | bash",
     "echo main | xargs git push origin | cat",
-    "git commit -m --help | cat",
-    "git commit -m \"--help\" | cat",
-    "git commit --message=--help | cat",
-    "hedge proof gate --reason --help | cat",
-    "hedge proof review -- --help | cat",
-    "git push --help=foo | cat",
-    "git push -- --help | cat",
-    "git push --help origin | cat",
   ])("refuses a status the shell hides: %s", (command) => {
     expect(exitMaskRisk(command, "Robin")).toContain("hides the exit status");
     expect(shellShowsEveryFailure(command)).toBe(false);
@@ -191,6 +200,23 @@ describe("the exit-status mask guard", () => {
     expect(exitMaskRisk(command, "Robin")).toBeUndefined();
   });
 
+  test.each([
+    "git commit -m --help | cat",
+    "git commit -m \"--help\" | cat",
+    "git commit --message=--help | cat",
+    "hedge proof gate --reason --help | cat",
+    "hedge proof review -- --help | cat",
+    "git push --help=foo | cat",
+    "git push -- --help | cat",
+    "git push --help origin | cat",
+  ])("keeps guarding a --help that is not the only word after the command: %s", (command) => {
+    expect(refused(command)).toBe(true);
+  });
+
+  test("refuses a quote it cannot close instead of hanging", () => {
+    expect(refused("git push; echo $(( 1 ' ))")).toBe(true);
+  });
+
   test.each(["~/.local/bin/hedge proof review --pr 1 | tee review.log", "/usr/bin/git push | tail -3", "\\git push | tail -3"])("refuses a guarded command named by its path or escaped: %s", (command) => {
     expect(refused(command)).toBe(true);
   });
@@ -206,7 +232,7 @@ describe("the exit-status mask guard", () => {
   ])("names a rewrite that passes: %s", (command, what) => {
     const reason = exitMaskRisk(command, "Robin") ?? "";
     const rewrite = [...reason.matchAll(/`([^`]+)`/g)].map(([, form]) => form).find((form) => form.startsWith(what) && form.includes("echo"));
-    expect(rewrite).toBeDefined();
+    expect(rewrite).toContain(`${what} …`);
     expect(exitMaskRisk(rewrite!, "Robin")).toBeUndefined();
     expect(reason).toContain("--help");
   });

@@ -545,8 +545,6 @@ function nestedPrograms(command: Command, piped?: string): { program: string; sc
   ];
 }
 
-/** The programs the command at `index` of a pipeline runs inside it; `substituted` marks a `$(...)`, backtick or
- * process substitution, whose status the command does not pass on. */
 export const nestedProgramsAt = (pipeline: Command[], index: number) => nestedPrograms(pipeline[index], output(pipeline, index - 1));
 
 /** Every pipeline a command line runs, including those in `sh -c` programs, `$(...)` and backtick substitutions, `eval`,
