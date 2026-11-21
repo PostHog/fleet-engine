@@ -79,11 +79,11 @@ test("a single review still sends a prompt the secret guard does not match", asy
   expect(reviewer.prompts()).toHaveLength(1);
 });
 
-async function heldWithAcceptedGaps(condition: string[]) {
+async function heldWithAcceptedGaps(condition: string[], answer = `removed ${token} from the log.`) {
   const pr = await checkout();
   await pr.commit("feature.txt", "greet new members\n");
   await reviewHead(pr, "- minor | feature.txt:1 | the log prints a token\n");
-  writeFileSync(join(pr.repository, "responses.md"), `1. fixed: removed ${token} from the log.\n`);
+  writeFileSync(join(pr.repository, "responses.md"), `1. fixed: ${answer}\n`);
   await pr.hedge("respond", "--round", "1", "responses.md");
   await pr.hedge("require", "--kinds", "prod-shape");
   await pr.hedge("gap", "--kind", "prod-shape", "--reason", "No production read access");
@@ -104,6 +104,16 @@ test("an accepted judge gap does not pass a gate whose held judge could not chec
   expect(gate.output).toContain(`judge gap: not accepted (the secret guard held the judge prompt, so no judge checked the condition of decision ${id})`);
   expect(gate.output).toContain(`hedge decision void <id>`);
   expect(judge.prompts()).toEqual([]);
+});
+
+test("an accepted judge gap still passes a conditional gap when the judge is unavailable for a cause other than the guard", async () => {
+  const { pr, judge } = await heldWithAcceptedGaps(["--condition", "feature.txt reads no stored rows"], "removed the token from the log.");
+  judge.answer("");
+
+  const gate = await pr.hedge("gate");
+  expect(gate.output).toContain("judge: unavailable (empty answer)");
+  expect(gate.code).toBe(0);
+  expect(judge.prompts()).toHaveLength(1);
 });
 
 test("an accepted judge gap still passes a gate whose held judge had no condition to check", async () => {
