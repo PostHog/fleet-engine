@@ -560,6 +560,23 @@ describe("the hook against GitHub, faked at the gh boundary, and real checkouts,
   });
 
   test.each([
+    ["printf '/trunk merge\\n' > body.md && gh api -X PATCH repos/example/product/pulls/9 -F body=@body.md"],
+    ["printf '/trunk merge\\n' >> ./body.md; gh api -X PATCH repos/example/product/pulls/9 --field body=@body.md"],
+    ["jq -n '{body: \"/trunk merge\"}' > body.json && gh api -X PATCH repos/example/product/pulls/9 --input body.json"],
+    ["printf '/trunk merge' | tee body.md && gh pr review 9 --repo example/product --comment --body-file body.md"],
+    ["sed -i 's/^## Problem/\\/trunk merge/' body.md && gh api -X PATCH repos/example/product/issues/comments/1 -F body=@body.md"],
+  ])("a payload file the same line names again, so it may rewrite it first, keeps the base's run-time check: %s", async (command) => {
+    const { dir, hook } = bodyEdits();
+    expect(await hook(command, dir)).toBe(otherEndpointReason);
+  });
+
+  test("a comment file the same line may rewrite to /trunk merge first is gated like an enqueue", async () => {
+    const { dir, hook } = bodyEdits();
+    expect(await hook("printf '/trunk merge' > body.md && gh pr comment 9 --repo example/product --body-file body.md", dir)).toContain("has not passed at the head of example/product#9");
+    expect(await hook("printf '/trunk merge' > body.md && gh api repos/example/product/issues/9/comments -F body=@body.md", dir)).toContain("has not passed at the head of example/product#9");
+  });
+
+  test.each([
     ["gh api -X PATCH repos/example/product/pulls/9 -f body=\"$(cat body.md)\"", mention],
     ["gh api -X PATCH repos/example/product/pulls/9 -f body=\"`cat body.md`\"", python],
     ["gh api -X PATCH repos/example/product/pulls/9 -f body=\"$BODY\"", mention],

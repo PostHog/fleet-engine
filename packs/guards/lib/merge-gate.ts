@@ -120,13 +120,15 @@ function repositoryOf(gh: Gh, found: Command, cwd: string | undefined, io: Inten
 const stdinPath = /^(?:-|\/dev\/stdin|\/dev\/fd\/\d+|\/proc\/(?:self|\d+)\/fd\/\d+)$/;
 const home = (path: string) => path === "~" ? homedir() : path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
 
-function sentTexts(found: Command, cwd: string | undefined, io: IntentIO, inline: string[], files: string[]) {
+function sentTexts(found: Command, cwd: string | undefined, io: IntentIO, inline: string[], files: string[], raw: string) {
   const paths = files.map((path) => stdinPath.test(path) ? "-" : path);
   const piped = paths.includes("-") && !found.stdin;
   const read = paths.map((path) => path === "-" ? found.stdin?.body ?? "" : io.readText(resolve(cwd ?? ".", found.chdir ?? ".", home(path))));
-  const typed = [...inline, found.stdin?.body ?? ""];
-  const texts = [...typed, ...read.filter((text) => text !== undefined)];
-  return { texts: withJsonStrings(texts), typed: withJsonStrings(typed), unread: read.includes(undefined), piped };
+  const namedAgain = (path: string) => raw.split(basename(path)).length > 2;
+  const payloads = paths.flatMap((path, index) => read[index] === undefined ? [] : [{ text: read[index]!, rewritable: namedAgain(path) }]);
+  const unsettled = withJsonStrings([...inline, found.stdin?.body ?? "", ...payloads.filter((payload) => payload.rewritable).map((payload) => payload.text)]);
+  const settled = withJsonStrings(payloads.filter((payload) => !payload.rewritable).map((payload) => payload.text));
+  return { texts: [...unsettled, ...settled], unsettled, unread: read.includes(undefined), piped };
 }
 
 const withJsonStrings = (texts: string[]) => [...texts, ...texts.flatMap(jsonStrings)];
@@ -137,8 +139,8 @@ function jsonStrings(text: string): string[] {
 }
 
 const builtAtRunTime = /[$`]/;
-type Sent = { texts: string[]; typed: string[]; unread: boolean };
-const readsEnqueue = ({ texts, typed }: Sent, raw: string) => texts.some((text) => enqueueLine.test(text)) || (typed.some((text) => builtAtRunTime.test(text)) && mentionsEnqueue.test(raw));
+type Sent = { texts: string[]; unsettled: string[]; unread: boolean };
+const readsEnqueue = ({ texts, unsettled }: Sent, raw: string) => texts.some((text) => enqueueLine.test(text)) || (unsettled.some((text) => builtAtRunTime.test(text)) && mentionsEnqueue.test(raw));
 const sendsEnqueue = (sent: Sent, raw: string) => sent.unread || readsEnqueue(sent, raw);
 const elsewhere = (sent: Sent, raw: string): MergeIntent => ({ targets: [], refusal: readsEnqueue(sent, raw) ? otherEndpointReason : unreadPayloadReason });
 
@@ -211,13 +213,13 @@ function commandIntent(found: Command, raw: string, cwd: string | undefined, io:
   if (!args) return { targets: [], refusal: shellAliasReason };
   const gh = parseGh(inOrder(args));
   if ((gh.group === "pr" || gh.group === "issue") && gh.action === "comment") {
-    const sent = sentTexts(found, cwd, io, values(gh, "-b", "--body"), values(gh, "-F", "--body-file"));
+    const sent = sentTexts(found, cwd, io, values(gh, "-b", "--body"), values(gh, "-F", "--body-file"), raw);
     if (!sent.piped && !sendsEnqueue(sent, raw)) return { targets: [] };
     const named = namedPr(gh, found, cwd, io);
     return named ? { targets: [{ ...named, via: `gh ${gh.group} comment${sent.piped ? pipedVia : ""}` }] } : { targets: [], refusal: unnamedReason("posts `/trunk merge`") };
   }
   if (gh.group === "pr" && gh.action === "review") {
-    const sent = sentTexts(found, cwd, io, values(gh, "-b", "--body"), values(gh, "-F", "--body-file"));
+    const sent = sentTexts(found, cwd, io, values(gh, "-b", "--body"), values(gh, "-F", "--body-file"), raw);
     return sendsEnqueue(sent, raw) ? elsewhere(sent, raw) : { targets: [] };
   }
   if (gh.group === "pr" && gh.action === "merge") {
@@ -229,7 +231,7 @@ function commandIntent(found: Command, raw: string, cwd: string | undefined, io:
   const fields = values(gh, "-f", "--raw-field", "-F", "--field");
   const inline = [...fields, ...fields.map((field) => field.replace(/^[^=]*=/, ""))];
   const fieldFiles = values(gh, "-F", "--field").flatMap((field) => field.match(/^[^=]*=@(.+)$/s)?.[1] ?? []);
-  const sent = sentTexts(found, cwd, io, inline, [...values(gh, "--input"), ...fieldFiles]);
+  const sent = sentTexts(found, cwd, io, inline, [...values(gh, "--input"), ...fieldFiles], raw);
   const enqueues = sendsEnqueue(sent, raw);
   let endpoint = endpointOf(gh).replace(/[?#].*$/s, "").replace(/\/$/, "");
   if (endpoint === "graphql") return sent.piped || sent.unread || sent.texts.some((text) => mentionsEnqueue.test(text) || graphqlMerge.test(text)) || mentionsEnqueue.test(raw) ? { targets: [], refusal: graphqlReason } : { targets: [] };
