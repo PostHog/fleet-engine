@@ -38,6 +38,12 @@ describe("hedge setup with a devbox", () => {
     expect(waiting.output).toContain("  --set orchestration.loopProject=<value>   Which T3 project do the loops and the PR digest run in?");
   });
 
+  test("goes on to link T3 Code when hedge doctor on the devbox finds only to-dos that wait for the person's sign-ins", async () => {
+    const home = temp.make("home-");
+    const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "both", "--add", "integrations", "--devbox", "node-1"], ["", ""], fakeMachine(home, {}, { node: { signedOut: true } }));
+    expect(result.output).toContain("  ✓ Link T3 Code here and on node-1: done");
+  });
+
   test("a devbox setting whose push failed is pushed on the next run before the box is installed", async () => {
     const args = ["--preset", "everyday", "--plan", "claude", "--workflows", "pr-digest=on", "--devbox", "node-1"];
     const home = temp.make("home-");

@@ -621,7 +621,7 @@ function coderNetwork(home: string, reach: string, redirects: Array<"probe" | "b
   return bin;
 }
 
-export type Node = { engineAt?: string; installs?: string; installFails?: boolean; olderEngine?: boolean; stepsFail?: boolean; oldSystemd?: boolean; allowlist?: boolean };
+export type Node = { engineAt?: string; installs?: string; installFails?: boolean; olderEngine?: boolean; stepsFail?: boolean; oldSystemd?: boolean; allowlist?: boolean; signedOut?: boolean };
 
 const thisCommit = () => Bun.spawnSync(["git", "-C", engineRoot, "rev-parse", "HEAD"]).stdout.toString().trim();
 
@@ -643,6 +643,7 @@ function prepareNode(home: string, host: string, node: Node) {
   flag("install-fails", node.installFails);
   flag("steps-fail", node.stepsFail);
   flag("old-systemd", node.oldSystemd);
+  flag("signed-out", node.signedOut);
   if (node.allowlist) writeFileSync(join(state, "allowlist"), "");
   writeFileSync(join(state, "installs-commit"), `${node.installs ?? thisCommit()}\n`);
   if (node.engineAt) {

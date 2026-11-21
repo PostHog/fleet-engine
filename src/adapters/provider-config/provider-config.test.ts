@@ -781,12 +781,14 @@ describe("Codex plugins", () => {
   const wants = (id = github) => ({ provider: "codex" as const, key: `plugins.${id}.enabled`, value: true });
   type Entry = { version: string; enabled: boolean };
 
-  function codexCli(start: Record<string, Entry> = {}, faults: { addFails?: "before" | "after"; onAdd?: () => void; listFailsAfterAdd?: boolean } = {}) {
+  function codexCli(start: Record<string, Entry> = {}, faults: { addFails?: "before" | "after" | "chatgpt"; onAdd?: () => void; listFailsAfterAdd?: boolean; status?: { code: number; stderr: string } } = {}) {
     const installed = new Map(Object.entries(start));
     const calls: string[][] = [];
+    const limited: string[][] = [];
     let added = false;
-    const run: CommandRunner = async (command) => {
+    const run: CommandRunner = async (command, options) => {
       calls.push(command);
+      if (options?.signal) limited.push(command);
       const words = command.join(" ");
       if (words === "claude plugin list --json") return { code: 0, stdout: "[]" };
       if (words === "codex plugin list --json") return added && faults.listFailsAfterAdd ? { code: 1, stdout: "", stderr: "Codex app server stopped\n" } : { code: 0, stdout: JSON.stringify({ installed: [...installed].map(([pluginId, entry]) => ({ pluginId, ...entry })) }) };
@@ -794,13 +796,15 @@ describe("Codex plugins", () => {
         added = true;
         faults.onAdd?.();
         if (faults.addFails === "before") return { code: 1, stdout: "", stderr: "sign in to ChatGPT first\n" };
+        if (faults.addFails === "chatgpt") return { code: 1, stdout: "", stderr: "Error: chatgpt authentication required for remote plugin catalog\n" };
         installed.set(command[3]!, { version: "1.0.0", enabled: true });
         return { code: faults.addFails === "after" ? 1 : 0, stdout: "{}" };
       }
+      if (words === "codex login status") return { stdout: "", ...(faults.status ?? { code: 0, stderr: "Logged in using ChatGPT\n" }) };
       if (command[0] === "codex" && command[2] === "remove") installed.delete(command[3]!);
       return { code: 0, stdout: "{}" };
     };
-    return { calls, installed, run, adapter: providerConfigAdapter({ run }), changes: () => calls.filter((call) => call[0] === "codex" && call[2] !== "list") };
+    return { calls, limited, installed, run, adapter: providerConfigAdapter({ run }), changes: () => calls.filter((call) => call[0] === "codex" && call[1] === "plugin" && call[2] !== "list") };
   }
 
   test("installs an enabled plugin once, records Hedge's ownership, and removes it when no pack enables it", async () => {
@@ -864,6 +868,29 @@ describe("Codex plugins", () => {
     await apply(plan([]), { home, adapters: [user.adapter] });
     expect(user.changes()).toEqual([]);
     expect([...user.installed.keys()]).toEqual([github]);
+  });
+
+  test("leaves the plugins that need Codex's ChatGPT sign-in to the person as one step, in apply and in doctor, until Codex is signed in to ChatGPT", async () => {
+    const home = temp.make("home-");
+    const convex = "convex@openai-curated-remote";
+    const both = plan([wants(), wants(convex)]);
+    const waits = { id: "plugins:codex:chatgpt", pack: "engine", say: `Sign Codex in to ChatGPT with codex login. Hedge installs the Codex plugins ${github}, ${convex} at the next hedge apply.`, todo: true as const };
+    const signedOut = codexCli({}, { addFails: "chatgpt", status: { code: 1, stderr: "Not logged in\n" } });
+    const applied = await apply(both, { home, adapters: [signedOut.adapter] });
+    expect(applied.findings.filter((finding) => finding.id.includes("codex"))).toEqual([waits]);
+    const doctor = await check(both, { home, adapters: [signedOut.adapter] });
+    expect([doctor.findings, doctor.ok]).toEqual([[waits], true]);
+    const signedIn = await check(both, { home, adapters: [codexCli().adapter] });
+    expect([signedIn.findings.map((finding) => finding.say), signedIn.ok]).toEqual([[`The Codex plugin ${github} needs to be installed.`, `The Codex plugin ${convex} needs to be installed.`], false]);
+  });
+
+  test("doctor keeps a missing plugin a Fix when codex login status fails, or Codex is signed in another way, and gives the status a time limit", async () => {
+    const needs = { id: `plugin:codex:${github}`, pack: "engine", say: `The Codex plugin ${github} needs to be installed.`, repair: "apply" as const };
+    for (const status of [{ code: 124, stderr: "Error: could not read the keyring\n" }, { code: 143, stderr: "Not logged in\n" }, { code: 0, stderr: "Logged in using an API key - sk-***\n" }]) {
+      const cli = codexCli({}, { status });
+      expect((await check(plan([wants()]), { home: temp.make("home-"), adapters: [cli.adapter] })).findings.filter((finding) => finding.id.startsWith("plugin"))).toEqual([needs]);
+      expect(cli.limited).toEqual([["codex", "login", "status"]]);
+    }
   });
 
   test("keeps a plugin id with dots as one key", async () => {
