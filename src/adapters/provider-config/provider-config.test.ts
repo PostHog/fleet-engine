@@ -781,7 +781,7 @@ describe("Codex plugins", () => {
   const wants = (id = github) => ({ provider: "codex" as const, key: `plugins.${id}.enabled`, value: true });
   type Entry = { version: string; enabled: boolean };
 
-  function codexCli(start: Record<string, Entry> = {}, faults: { addFails?: "before" | "after"; onAdd?: () => void; listFailsAfterAdd?: boolean } = {}) {
+  function codexCli(start: Record<string, Entry> = {}, faults: { addFails?: "before" | "after" | "chatgpt"; onAdd?: () => void; listFailsAfterAdd?: boolean; chatGpt?: boolean } = {}) {
     const installed = new Map(Object.entries(start));
     const calls: string[][] = [];
     let added = false;
@@ -794,13 +794,15 @@ describe("Codex plugins", () => {
         added = true;
         faults.onAdd?.();
         if (faults.addFails === "before") return { code: 1, stdout: "", stderr: "sign in to ChatGPT first\n" };
+        if (faults.addFails === "chatgpt") return { code: 1, stdout: "", stderr: "Error: chatgpt authentication required for remote plugin catalog\n" };
         installed.set(command[3]!, { version: "1.0.0", enabled: true });
         return { code: faults.addFails === "after" ? 1 : 0, stdout: "{}" };
       }
+      if (words === "codex login status") return faults.chatGpt ? { code: 0, stdout: "", stderr: "Logged in using ChatGPT\n" } : { code: 1, stdout: "", stderr: "Not logged in\n" };
       if (command[0] === "codex" && command[2] === "remove") installed.delete(command[3]!);
       return { code: 0, stdout: "{}" };
     };
-    return { calls, installed, run, adapter: providerConfigAdapter({ run }), changes: () => calls.filter((call) => call[0] === "codex" && call[2] !== "list") };
+    return { calls, installed, run, adapter: providerConfigAdapter({ run }), changes: () => calls.filter((call) => call[0] === "codex" && call[1] === "plugin" && call[2] !== "list") };
   }
 
   test("installs an enabled plugin once, records Hedge's ownership, and removes it when no pack enables it", async () => {
@@ -864,6 +866,18 @@ describe("Codex plugins", () => {
     await apply(plan([]), { home, adapters: [user.adapter] });
     expect(user.changes()).toEqual([]);
     expect([...user.installed.keys()]).toEqual([github]);
+  });
+
+  test("leaves a plugin that needs Codex's ChatGPT sign-in to the person, in apply and in doctor, until Codex is signed in to ChatGPT", async () => {
+    const home = temp.make("home-");
+    const waits = { id: `plugin:codex:${github}`, pack: "engine", say: `Sign Codex in to ChatGPT with codex login. Hedge installs the Codex plugin ${github} at the next hedge apply.`, todo: true as const };
+    const signedOut = codexCli({}, { addFails: "chatgpt" });
+    const applied = await apply(plan([wants()]), { home, adapters: [signedOut.adapter] });
+    expect(applied.findings.filter((finding) => finding.id === waits.id)).toEqual([waits]);
+    const doctor = await check(plan([wants()]), { home, adapters: [signedOut.adapter] });
+    expect([doctor.findings, doctor.ok]).toEqual([[waits], true]);
+    const signedIn = await check(plan([wants()]), { home, adapters: [codexCli({}, { chatGpt: true }).adapter] });
+    expect([signedIn.findings, signedIn.ok]).toEqual([[{ id: waits.id, pack: "engine", say: `The Codex plugin ${github} needs to be installed.`, repair: "apply" }], false]);
   });
 
   test("keeps a plugin id with dots as one key", async () => {

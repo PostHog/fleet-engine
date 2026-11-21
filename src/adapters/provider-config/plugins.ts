@@ -100,6 +100,8 @@ async function reconcileClaude(plan: Plan, home: string, dryRun: boolean, run: C
 }
 
 const codexFinding = (id: string, say: string): Finding => ({ id: `plugin:codex:${id}`, pack: "engine", say, repair: "apply" });
+const waitsForChatGpt = (id: string): Finding => ({ id: `plugin:codex:${id}`, pack: "engine", say: `Sign Codex in to ChatGPT with codex login. Hedge installs the Codex plugin ${id} at the next hedge apply.`, todo: true });
+const needsChatGpt = (result: { stdout: string; stderr?: string }) => /chatgpt authentication required/i.test(`${result.stderr ?? ""}${result.stdout}`);
 
 async function reconcileCodex(plan: Plan, home: string, dryRun: boolean, run: CommandRunner, settings: PluginSettings, owned: CodexOwned[], save: (next: CodexOwned[]) => Promise<void>): Promise<Finding[]> {
   const planned = wantedCodexPlugins(plan);
@@ -113,8 +115,10 @@ async function reconcileCodex(plan: Plan, home: string, dryRun: boolean, run: Co
   const record = new Map(owned.map((entry) => [entry.id, entry]));
   const commit = () => save([...record.values()].sort((a, b) => a.id.localeCompare(b.id)));
   const present = (id: string) => installed.find((entry) => entry.id === id);
+  let chatGpt: Promise<boolean> | undefined;
+  const signedInToChatGpt = () => (chatGpt ??= run(["codex", "login", "status"], { home, clearEnv: ["CODEX_HOME"] }).then((status) => `${status.stdout}${status.stderr ?? ""}`.includes("Logged in using ChatGPT")));
   const install = async (id: string) => {
-    if (dryRun) return void findings.push(codexFinding(id, `The Codex plugin ${id} needs to be installed.`));
+    if (dryRun) return void findings.push((await signedInToChatGpt()) ? codexFinding(id, `The Codex plugin ${id} needs to be installed.`) : waitsForChatGpt(id));
     record.set(id, { id, version: "", enabled: false, pending: true });
     await commit();
     const added = await codex(["add", id, "--json"]);
@@ -123,7 +127,8 @@ async function reconcileCodex(plan: Plan, home: string, dryRun: boolean, run: Co
     if (after) record.set(id, after);
     else if (listed) record.delete(id);
     await commit();
-    if (added.code !== 0 || !after) findings.push(codexFinding(id, `Could not install the Codex plugin ${id}: ${added.code !== 0 ? reasonOf(added) : listed ? "Codex does not list it afterwards" : "Codex cannot list its plugins afterwards"}. Hedge tries again at the next apply.`));
+    if (added.code !== 0 && needsChatGpt(added)) findings.push(waitsForChatGpt(id));
+    else if (added.code !== 0 || !after) findings.push(codexFinding(id, `Could not install the Codex plugin ${id}: ${added.code !== 0 ? reasonOf(added) : listed ? "Codex does not list it afterwards" : "Codex cannot list its plugins afterwards"}. Hedge tries again at the next apply.`));
   };
   for (const id of wanted) {
     const found = present(id);

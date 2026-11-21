@@ -49,6 +49,16 @@ describe("hedge devbox add applies the profile on the node", () => {
     expect([nodeHas(home, node, "allowlist"), nodeHas(home, node, "earlyoom")]).toEqual([true, true]);
   });
 
+  test("goes on to the link step when only the person's sign-ins are left, and lists each one at the end", async () => {
+    const { home, io, add } = await signedUp(["--add", "integrations", "--plan", "both"]);
+    const box = fakeMachine(home, {}, { node: { signedOut: true } });
+    expect(await add(box)).toBe(0);
+    expect(box.peerLinks.here).toEqual(linkedHere);
+    const left = endList(io.output());
+    expect(listed(left, "Sign Codex in to ChatGPT with codex login. Hedge installs the Codex plugin github@openai-curated-remote at the next hedge apply.")).toBe(1);
+    expect([listed(left, "Claude's GitHub plugin cannot reach GitHub."), listed(left, "Claude's Context7 plugin is not signed in."), listed(left, "Codex cannot reach Context7.")]).toEqual([1, 1, 1]);
+  });
+
   test("still lists the steps left for the person when a later step fails", async () => {
     const { home, io, add } = await signedUp(guarded);
     expect(await add(fakeMachine(home, {}, { node: {}, serverWithoutLinkState: ["box"] }))).toBe(1);

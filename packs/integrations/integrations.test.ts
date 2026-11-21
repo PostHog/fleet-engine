@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "smol-toml";
 import { providerConfigAdapter, type CommandRunner } from "../../src/adapters/provider-config/adapter.ts";
@@ -71,9 +71,19 @@ async function applyPack(plan: AiPlan, workflows: Record<string, boolean> = {}) 
 }
 
 async function doctor(plan: AiPlan, workflows: Record<string, boolean>, machine: Machine) {
+  return signInsOf(await doctorFindings(plan, workflows, machine));
+}
+
+async function doctorFindings(plan: AiPlan, workflows: Record<string, boolean>, machine: Machine) {
   const home = temp.make("home-");
   const resolved = resolve(plan, workflows);
-  return signInsOf((await check(resolved, { home, adapters: [], run: checkRunner(home, machine, resolved) })).findings);
+  return (await check(resolved, { home, adapters: [], run: checkRunner(home, machine, resolved) })).findings.filter((finding) => finding.pack === "integrations");
+}
+
+function withoutProviders() {
+  const bin = temp.make("bare-bin-");
+  for (const tool of ["sh", "grep", "awk", "test"]) symlinkSync(Bun.which(tool)!, join(bin, tool));
+  return bin;
 }
 
 describe("the Integrations pack", () => {
@@ -109,6 +119,12 @@ describe("the Integrations pack", () => {
   test("doctor passes each sign-in once its provider reports it, and lists only the ones still missing", async () => {
     expect(await doctor("both", { convex: true }, { claude: signedIn.claude, codexAuth: "OAuth", convex: true })).toEqual([]);
     expect(await doctor("both", { convex: true }, { codexAuth: "OAuth" })).toEqual(["context7-claude", "convex-login", "github-token"]);
+  });
+
+  test("doctor leaves each missing sign-in to the person, and fails a check only when its provider does not run", async () => {
+    const waits = (findings: Array<{ id: string; todo?: true; repair?: string }>) => findings.map(({ id, todo, repair }) => [id, todo ?? repair]).toSorted();
+    expect(waits(await doctorFindings("both", { convex: true }, {}))).toEqual([["check:context7-claude", true], ["check:context7-codex", true], ["check:convex-login", true], ["check:github-token", true]]);
+    expect(waits(await doctorFindings("both", { convex: true }, { env: { PATH: withoutProviders() } }))).toEqual([["check:context7-claude", "apply"], ["check:context7-codex", "apply"], ["check:convex-login", true], ["check:github-token", "apply"]]);
   });
 
   test("doctor accepts a Context7 API key in place of Codex's OAuth sign-in", async () => {
