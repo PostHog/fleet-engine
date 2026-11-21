@@ -538,6 +538,27 @@ test("after a valid panel, a later panel round whose findings the author saved n
   expect(gate.output).toContain("review: HEAD not reviewed");
 });
 
+test("a finished panel round that Fleet captured does not hold a later final read as unfinished", async () => {
+  const pr = await checkout();
+  const reviewed = await pr.commit("feature.txt", "greet\n");
+  await pr.hedge("require", "--none", "--reason", "docs only");
+  const reviewer = fakeModel(pr, "REVIEWER", lensMajor("greet"));
+  await pr.hedge("review", "--lens", "correctness");
+  expect((await pr.hedge("review", "--wait")).code).toBe(0);
+  await answerFixed(pr, "1", 3);
+  reviewer.answer(clean);
+  const fixed = await pr.commit("feature.txt", "greet the member\n");
+  await pr.hedge("review", "--lens", "correctness", "--scope", "fixes", "--base", reviewed);
+  expect((await pr.hedge("review", "--wait")).code).toBe(0);
+  const path = join(pr.pullRequest, "reviews/1/round.json");
+  writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, "utf8")), capturedBy: "fleet" }));
+  await pr.commit("feature.txt", "greet the new member\n");
+
+  const read = JSON.parse((await pr.hedge("review-start", "--scope", "final", "--base", fixed)).output) as { id: string };
+  expect(read.id).toBe("final-1");
+  expect(readdirSync(join(pr.pullRequest, "reviews")).sort()).toEqual(["1", "2", "final-1"]);
+});
+
 test("a panel gap holds the gate until the user accepts it, and still needs a review at HEAD", async () => {
   const pr = await checkout();
   await pr.commit("feature.txt", "greet\n");
