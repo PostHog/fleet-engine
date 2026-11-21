@@ -75,7 +75,10 @@ function setting({ commands, depths }: Program, before: number, read: (args: str
   let on = false;
   commands.slice(0, before).forEach((command, index) => {
     const alwaysRuns = depths[index] === 0 && command.keywords.length === 0 && !["|", "&&", "||"].includes(commands[index - 1]?.after ?? "");
-    if (command.name === "set" && alwaysRuns && !["|", "&"].includes(command.after ?? "")) on = read(command.args) ?? on;
+    if (command.name !== "set") return;
+    const value = read(command.args);
+    if (alwaysRuns && !["|", "&"].includes(command.after ?? "")) on = value ?? on;
+    else if (value === false) on = false;
   });
   return on;
 }
@@ -116,8 +119,11 @@ type Reads = { status: (text: string) => boolean; bareExit: boolean; failingExit
 
 function printsStatus({ name, args, rawArgs }: Command, reads: (text: string) => boolean): boolean {
   const readsArg = (raw: string) => reads(expanded(raw));
-  if (name === "echo") return !args.some((arg) => /^-[nE]*e/.test(arg)) && rawArgs.some(readsArg);
-  if (name !== "printf") return false;
+  if (name === "echo") {
+    const options = args.slice(0, Math.max(0, args.findIndex((arg) => !/^-[neE]+$/.test(arg))));
+    return !options.some((option) => option.includes("e")) && rawArgs.some(readsArg);
+  }
+  if (name !== "printf" || args[0]?.startsWith("-v")) return false;
   const skip = args[0] === "--" ? 1 : 0;
   const [format = "", ...values] = args.slice(skip);
   const [rawFormat = "", ...rawValues] = rawArgs.slice(skip);
@@ -146,7 +152,8 @@ function exitsInGroup({ commands, depths }: Program, start: number, depth: numbe
   const last = body.at(-1)!;
   const exitsOnce = body.filter((command) => command.name === "exit").length === 1 && last.name === "exit";
   const flat = depths.slice(start, close).every((each) => each === depth + 1);
-  return exitsOnce && flat && last.args.length === 1 && failingCode.test(last.args[0]) ? "exit" : undefined;
+  const runs = separators.has(last.after) && (body.length === 1 || separators.has(body.at(-2)?.after));
+  return exitsOnce && flat && runs && last.args.length === 1 && failingCode.test(last.args[0]) ? "exit" : undefined;
 }
 
 function placeInPipe({ commands, depths }: Program, start: number): number | undefined {
