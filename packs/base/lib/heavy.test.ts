@@ -86,7 +86,7 @@ onLinux("checks the disk and routes the command inside a checkout without runnin
   const { bin } = stubs();
   const { handlers, routed } = routeHandler(bin);
   const checkout = bunCheckout(temp);
-  expect(await heavyIn(checkout.dir, {}, bin, roomy, "--", "true")).toMatchObject({ code: 0 });
+  expect(await heavyIn(checkout.dir, { HEDGE_HANDLERS: "{}" }, bin, roomy, "--", "true")).toMatchObject({ code: 0 });
   expect(await heavyIn(checkout.dir, { HEDGE_HANDLERS: handlers }, bin, roomy, "--", "true")).toMatchObject({ code: 7 });
   expect(routed()).toEqual([{ argv: ["true"], routed: "1" }]);
   expect(checkout.preloaded()).toBe(false);

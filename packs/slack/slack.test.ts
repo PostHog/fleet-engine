@@ -7,6 +7,7 @@ import { devbox, engineSource, mac, resolveEngine, skillSources } from "../../sr
 import { t3CliRunner, t3Threads } from "../../src/integrations/t3/index.ts";
 import { startT3Stub, type T3Stub } from "../../src/integrations/t3/testing.ts";
 import type { ModelRow } from "../../src/pack/types.ts";
+import { bunScript } from "../../src/runner/bun.ts";
 import { secretStore } from "../../src/runner/context.ts";
 import { launcher, listen, ownerOf, slackTrigger, type SlackCommandDeps } from "./lib/command.ts";
 import { launchHere, launchOnBox, launchOnNodes, spawnRunner, type Run } from "./lib/launch.ts";
@@ -305,7 +306,7 @@ describe("saving to the context library", () => {
     const home = await homeWithTokens();
     const stop = new AbortController();
     const ran = processes((argv, input) => {
-      if (argv.join(" ") !== "bun /opt/context/slack-capture.ts") return undefined;
+      if (argv.join(" ") !== bunScript("/opt/context/slack-capture.ts").join(" ")) return undefined;
       return "note" in JSON.parse(input ?? "{}") ? { code: 0, stdout: `${JSON.stringify(nobodyNeedsIt)}\n` } : answer(input ?? "");
     });
     const deps = commandDeps(home, { env: { HEDGE_SETTINGS: settings(), HEDGE_HANDLERS: handlers }, slackBase: slack.base, stop: stop.signal, run: ran.run, ...extra });
@@ -315,8 +316,8 @@ describe("saving to the context library", () => {
     return { slack, ran, deps, end };
   }
   const nobodyNeedsIt = { sent: [], failed: [] };
-  const captures = (ran: ReturnType<typeof processes>) => ran.calls.filter((call) => call.argv[0] === "bun").map((call) => JSON.parse(call.input!)).filter((input) => "source" in input);
-  const sends = (ran: ReturnType<typeof processes>) => ran.calls.filter((call) => call.argv[0] === "bun").map((call) => JSON.parse(call.input!)).filter((input) => "note" in input);
+  const captures = (ran: ReturnType<typeof processes>) => ran.calls.filter((call) => call.argv[0] === process.execPath).map((call) => JSON.parse(call.input!)).filter((input) => "source" in input);
+  const sends = (ran: ReturnType<typeof processes>) => ran.calls.filter((call) => call.argv[0] === process.execPath).map((call) => JSON.parse(call.input!)).filter((input) => "note" in input);
   const reactionCalls = (slack: ReturnType<typeof slackStub>) => slack.calls.filter((call) => call.method.startsWith("reactions.")).map((call) => `${call.method} ${call.args.timestamp} ${call.args.name}`);
 
   test("the owner's :brain: hands the whole thread and its canvases to the context library, shows :eyes: while it runs, then clears both and says where the note went", async () => {
@@ -359,7 +360,7 @@ describe("saving to the context library", () => {
     writeFileSync(join(bin, "claude"), `#!/bin/sh\ncat >/dev/null\nprintf '%s' '${JSON.stringify({ structured_output: { path: "notes/sprint-planning.md", text: note } })}'\n`, { mode: 0o755 });
     const childEnv = { ...gitEnv, ...environment, PATH: `${bin}:${process.env.PATH}`, HEDGE_MODELS: JSON.stringify([{ role: "survey", work: "Survey", provider: "claude", model: "claude-sonnet-5-5", effort: "high" }]) };
     const run: Run = async (argv, input) => {
-      if (argv[0] !== "bun") return { code: 0, stdout: "Nora Example\n", stderr: "" };
+      if (argv[0] !== process.execPath) return { code: 0, stdout: "Nora Example\n", stderr: "" };
       const child = Bun.spawn(argv, { env: childEnv, stdin: Buffer.from(input ?? ""), stdout: "pipe", stderr: "pipe" });
       const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
       return { code, stdout, stderr };
@@ -405,7 +406,7 @@ describe("saving to the context library", () => {
       `:brain: Updated <${captured.url}|Sprint &lt;planning&gt;> in your context library (\`${captured.path}\`). It updates as the thread gets replies.\nNo open thread needed it.`,
     ]);
     expect(reactionCalls(slack)).toEqual(["reactions.add 200.1 eyes", "reactions.remove 200.1 eyes", "reactions.add 200.1 eyes", "reactions.remove 200.1 eyes", "reactions.remove 200.1 brain"]);
-    expect(ran.calls.some((call) => call.argv[0] !== "bun" && call.argv[0] !== "git")).toBe(false);
+    expect(ran.calls.some((call) => call.argv[0] !== process.execPath && call.argv[0] !== "git")).toBe(false);
   });
 
   test("a second :brain: while the first capture runs starts no second capture", async () => {
