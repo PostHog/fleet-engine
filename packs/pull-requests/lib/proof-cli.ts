@@ -424,7 +424,8 @@ again, and still exits 75 when CI runs past the limit; then the verdict says to 
 required check that has not reported may never start. An error of that second run names the failed read that ended
 the wait. The limit bounds the waiting; a read of GitHub that has started
 still finishes. While it waits, the gate record holds exit 75 and the decision ledger holds a failure at the head, dated
-when the gate read CI as running, so no merge gate counts a pass shared before that read; the result after the wait is shared with the time the wait ended. A run longer than your shell's limit belongs in the background. hedge reads the PR and its CI over GitHub's REST API. Only finding the PR of the
+when the gate read CI as running, so no merge gate counts a pass shared before that read. When that failure cannot be shared, the gate does not wait
+and says so; the result after the wait is shared with the time the wait ended. A run longer than your shell's limit belongs in the background. hedge reads the PR and its CI over GitHub's REST API. Only finding the PR of the
 checkout without --repo and --pr uses gh pr view; pass both when GraphQL is out. A check that ran more than once
 counts with its newest run from each app, as GitHub's required checks do. The
 required checks of the base branch, from its rulesets and branch protection, decide CI; other checks print as not
@@ -466,7 +467,8 @@ HEDGE_PROOF_JUDGE replaces its command, and HEDGE_PROOF_JUDGE_MODEL its model.
 reused, carried, gap (with the decision that accepts it, or the 🤖 decision that lapsed and why), or missing; the
 review and its unanswered findings; the head; CI; the tier; the judge at HEAD as pass, fail, unavailable, or skipped
 when the gate's own checks fail first, with its lines and its judge gap; the lapsed and voided decision ids; and the
-receipt link once one is recorded; and reason, the check that held the gate, or "pass". An error prints only the
+receipt link once one is recorded; reason, the check that held the gate, or "pass"; wait, when a failed read ended
+--wait; and ledger, how the result was shared in the decision ledger. An error prints only the
 code and the reason. The gate's lines and hedge decision report come from the same summary.`,
     examples: ["hedge proof gate", "hedge proof gate --landed", "hedge proof gate --json", "hedge proof gate --wait 10"], flags: ["--landed", "--json"], options: ["--wait"],
     run: async ({ flags, options }, identity, context) => {
@@ -479,12 +481,10 @@ code and the reason. The gate's lines and hedge decision report come from the sa
       let gate: FinalGate;
       let gatedAt = startedAt;
       let waited: Waited | undefined;
-      let sharedBeforeWait: string | undefined;
       try {
         const gateHead = () => finalGate(head, context, { landed: flags.has("--landed") });
         gate = await gateHead();
-        if (gate.code === ciRunningCode && wait) {
-          sharedBeforeWait = await shareGateResult(head, false, clock(), context);
+        if (gate.code === ciRunningCode && wait && !await shareGateResult(head, false, clock(), context)) {
           await record({ code: gate.code, reason: gate.reason });
           waited = await untilCiFinishes(head, context, wait);
           gatedAt = clock();
@@ -500,8 +500,8 @@ code and the reason. The gate's lines and hedge decision report come from the sa
       await record({ code: gate.code, reason: gate.reason });
       const shared = await shareGateResult(head, gate.code === 0, gatedAt, context);
       const waitLine = waited?.failedRead ? `ci: --wait stopped early at a failed read of GitHub: ${waited.failedRead}` : undefined;
-      if (flags.has("--json")) print(JSON.stringify({ ...gate.summary, reason: gate.reason, ...waitLine ? { wait: waitLine } : {} }));
-      else for (const line of [...gate.lines, ...waitLine ? [waitLine] : [], ...sharedBeforeWait ? [sharedBeforeWait] : [], ...shared ? [shared] : [], gate.verdict]) print(line);
+      if (flags.has("--json")) print(JSON.stringify({ ...gate.summary, reason: gate.reason, ...waitLine ? { wait: waitLine } : {}, ...shared ? { ledger: shared } : {} }));
+      else for (const line of [...gate.lines, ...waitLine ? [waitLine] : [], ...shared ? [shared] : [], gate.verdict]) print(line);
       return gate.code;
     },
   },

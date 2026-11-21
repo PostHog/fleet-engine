@@ -247,22 +247,21 @@ test("the gate record keeps the same reason as the last line when the gate fails
   expect(`gate: fail (exit 1): ${(await lastGateRun(pr.home, { repository: "example/product", pr: 42, commit: head }))?.reason}`).toBe(lastLine(gate.output)!);
 });
 
-test("a failure that --wait could not share before it waited is named, though the result after the wait was shared", async () => {
+test("--wait does not wait when it cannot share the failure first, and names why at once", async () => {
   const { pr } = await reviewed();
   pr.ci([{ name: "test", bucket: "pending" }]);
   const ledger = join(pr.home, ".local/state/hedge/decisions.jsonl");
-  const kept = `${ledger}.kept`;
-  if (existsSync(ledger)) renameSync(ledger, kept);
+  if (existsSync(ledger)) renameSync(ledger, `${ledger}.kept`);
   mkdirSync(ledger, { recursive: true });
-  pr.panel.onPause = async () => {
-    rmSync(ledger, { recursive: true });
-    if (existsSync(kept)) renameSync(kept, ledger);
-    pr.ci([{ name: "test", bucket: "pass" }]);
-  };
+  let slept = 0;
+  pr.panel.onPause = async () => { slept++; };
   const gate = await pr.hedge("gate", "--wait", "10");
-  expect(gate.code).toBe(0);
+  expect(gate.code).toBe(75);
+  expect(slept).toBe(0);
   expect(gate.output).toContain("merge gate: failure recorded on this machine only (");
-  expect(gate.output).toContain("merge gate: pass recorded in the decision ledger");
+  expect(lastLine(gate.output)).toStartWith("gate: pending (exit 75): CI is still running: waiting on: test. ");
+  const json = await pr.hedge("gate", "--wait", "10", "--json");
+  expect(JSON.parse(json.output)).toMatchObject({ code: 75, ledger: expect.stringMatching(/^merge gate: failure recorded on this machine only \(/) });
 });
 
 test("while --wait waits, the gate record says CI is still running", async () => {
