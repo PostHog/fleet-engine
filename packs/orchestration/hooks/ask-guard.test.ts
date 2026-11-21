@@ -401,13 +401,14 @@ describe("the card guard", () => {
     expect(answer!.hookSpecificOutput.permissionDecisionReason).toContain("last message");
   });
 
-  test("lets a card through in any other thread, without the setting, outside T3, or when T3 cannot be read", async () => {
-    const where = home("Robin", proseTitles);
-    expect(await guard(card(), where, "alert-1", t3({ ...alertThread, title: "RFC" }))).toBeUndefined();
-    expect(await guard(card(), home("Robin"))).toBeUndefined();
-    expect(await guardCard(card(), { home: where, shell: t3(alertThread) }, undefined)).toBeUndefined();
-    expect(await guard(card(), where, "alert-1", async () => { throw new Error("T3 down"); })).toBeUndefined();
-    expect(await guard(card("Bash"), where)).toBeUndefined();
+  test.each([
+    ["in a thread with another title", () => guard(card(), home("Robin", proseTitles), "alert-1", t3({ ...alertThread, title: "RFC" }))],
+    ["without the setting", () => guard(card(), home("Robin"))],
+    ["outside T3", () => guardCard(card(), { home: home("Robin", proseTitles), shell: t3(alertThread) }, undefined)],
+    ["when T3 cannot be read", () => guard(card(), home("Robin", proseTitles), "alert-1", async () => { throw new Error("T3 down"); })],
+    ["for a tool that is not a question tool", () => guard(card("Bash"), home("Robin", proseTitles))],
+  ] as const)("lets a card through %s", async (_, answer) => {
+    expect(await answer()).toBeUndefined();
   });
 
   test("lets every card through while the kill switch file exists", async () => {
