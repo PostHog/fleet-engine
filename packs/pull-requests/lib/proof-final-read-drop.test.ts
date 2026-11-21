@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { chmodSync, existsSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanFixtures, checkout, clean, fakeModel, lockHolder, reviewHeadFixed, verdict, type Checkout } from "./proof-testing.ts";
 
@@ -112,6 +112,17 @@ test("show redacts a token that crosses the cut of a long failure cause", async 
   expect(show).not.toContain("ghp_a1a1");
 });
 
+test("show names only the drops that hedge archived, not a copy made by hand", async () => {
+  const { pr, reviewed } = await blockedFinalRead();
+  await pr.commit("feature.txt", "greet the new member\n");
+  fakeModel(pr, "REVIEWER", "No findings.");
+  await finalRead(pr, reviewed);
+  const archive = join(reviews(pr), "dropped");
+  cpSync(join(archive, readdirSync(archive)[0]!), join(archive, "final-1-backup"), { recursive: true });
+
+  expect((await pr.hedge("show")).output.match(/dropped at/g)).toHaveLength(1);
+});
+
 test("a final read that hedge refuses at the new HEAD drops nothing", async () => {
   const { pr, older } = await blockedFinalRead();
   await pr.commit("feature.txt", "greet the new member\n");
@@ -197,7 +208,7 @@ test("a panel final read whose failed lens left an answer is never dropped", asy
   expect(anyDropped(pr)).toBe(false);
 });
 
-test("a panel final read whose lens directory cannot be listed is never dropped", async () => {
+test.skipIf(process.getuid?.() === 0)("a panel final read whose lens directory cannot be listed is never dropped", async () => {
   const { pr, reviewed } = await failedPanelFinalRead("cat >/dev/null; echo '1. major: the greeting names no member'");
   const lenses = join(reviews(pr), "final-1/lenses");
   await pr.commit("feature.txt", "greet the new member\n");

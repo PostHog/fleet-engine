@@ -477,6 +477,7 @@ export async function recordFailure(directory: string, cause: string) {
 
 const droppedDirectory = (reviews: string) => join(reviews, "dropped");
 const droppedName = (entry: string) => /^final-\d+/.exec(entry)?.[0] ?? entry;
+const droppedEntry = /^final-\d+-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 type DroppedRead = { head: string; droppedAt: string; cause?: string };
 
 export async function unansweredFinalRead(directory: string, head: ProofIdentity) {
@@ -503,7 +504,7 @@ const causeCap = 300;
 
 export async function droppedFinalReads(home: string, identity: ProofIdentity) {
   const dropped = droppedDirectory(join(pullRequestDirectory(home, identity), "reviews"));
-  const reads = await Promise.all((await entries(dropped)).filter((entry) => entry.startsWith(finalReadPrefix)).map(async (entry) => {
+  const reads = await Promise.all((await entries(dropped)).filter((entry) => droppedEntry.test(entry)).map(async (entry) => {
     const reservation = await readReservation(join(dropped, entry));
     const drop = await readJson<DroppedRead | undefined>(join(dropped, entry, "dropped.json"), undefined);
     const line = `${reviewLabel(droppedName(entry))} on ${short(reservation?.commit ?? "unknown")} dropped at ${short(drop?.head ?? "unknown")}: no reviewer answer was captured`;
