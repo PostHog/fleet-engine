@@ -197,3 +197,14 @@ test("a review prompt Hedge cannot fully redact is never sent, and the error nam
   await expect(review).rejects.not.toThrow(token());
   expect(reviewer.prompts()).toEqual([]);
 });
+
+test("a value split by a line wrap is no secret to the guard either, so it reaches the model: this is what gets past", async () => {
+  const halves = [token().slice(0, 20), token().slice(20)];
+  const pr = await shaped({ name: "a value split by a line wrap", head: `${halves.join("\n")}\n`, values: halves });
+  await reviewHead(pr);
+  const judge = fakeModel(pr, "JUDGE", verdict());
+
+  expect((await pr.hedge("gate")).code).toBe(0);
+  expect(guardPasses(judge.prompts()[0]!)).toBe(true);
+  expect(judge.prompts()[0]).toContain(`+${halves[0]}\n+${halves[1]}`);
+});
