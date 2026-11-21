@@ -67,6 +67,22 @@ The send guard never traps an agent:
 - While `~/.config/hedge/ask-guard.off` exists, every send passes. The prose
   Stop check stays on.
 
+### Threads that ask in prose
+
+Some threads get messages that a job queues into them, such as one alert
+thread for each incident. A pending question card holds those messages until
+the person answers it. The setting `orchestration.proseTitles` names the
+title starts of such threads, separated by commas, such as `⚠️, 🚨`. It is
+empty by default. A thread whose title starts with one of them:
+
+- ends its turn with a decision in prose, and the Stop check lets it pass;
+- gets each `AskUserQuestion` or `request_user_input` call denied, with the
+  reason to write the questions in its last message.
+
+The match ignores the emoji variation selector, so `⚠️` also matches `⚠`. The
+card check lets a card pass on any error, and while
+`~/.config/hedge/ask-guard.off` exists.
+
 ### Proof check at Stop
 
 A T3 thread that owns an open PR is stopped once when it ends its turn while

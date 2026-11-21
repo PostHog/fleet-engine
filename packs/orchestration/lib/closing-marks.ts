@@ -35,6 +35,13 @@ export function closingSettings(home: string): ClosingSettings {
 
 const plain = (text: string) => text.replaceAll("\uFE0F", "");
 
+export function proseTitles(home: string): string[] {
+  const value = snapshot(home)["orchestration.proseTitles"];
+  return typeof value === "string" ? value.split(",").map((start) => plain(start).trim()).filter(Boolean) : [];
+}
+
+export const asksInProse = (title: string | undefined, starts: string[]) => title !== undefined && starts.some((start) => plain(title).startsWith(start));
+
 export const closingLine = (message: string) => message.split("\n").map((line) => line.trim()).filter(Boolean).at(-1) ?? "";
 
 export function closingPark(message: string, marks: Marks): Park | undefined {
