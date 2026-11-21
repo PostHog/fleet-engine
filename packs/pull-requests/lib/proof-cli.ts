@@ -246,7 +246,7 @@ with the merge time and the time it was saved.`,
     summary: `Without --lens, --scope full runs the panel of the PR's review tier, which hedge picks from the merge-risk grade
 of the PR description and the authored production lines of the diff: lines outside tests, docs, lockfiles, and
 generated files. Read: grade low or no grade, and under 50 authored lines; one combined Correctness and Risk lens on the
-other family, and one final read of its fixes that counts; at that ceiling, more run only with the user's --override, or for a HEAD whose commits since the last read are only clean base merges and quiet commits. Pair:
+other family, and one final read of its fixes that counts; at that ceiling, only the user's --override runs another read, except a final read of a HEAD whose commits since the last read are only clean base merges and quiet commits past what the gate carries. Pair:
 any other grade but high, or a grade hedge cannot read; the lenses correctness:other, risk:other, and fresh-eyes:same.
 Panel: grade high; the lenses fresh-eyes, correctness, risk, design, and anti-overengineering. --lens adds lenses to the tier's set, such as security, ui, systems, or a
 Team perspective; it never removes one. The output and hedge proof show name the tier and why. An unfinished panel
@@ -446,7 +446,9 @@ gate; medium and low findings are listed. The verdict is cached per set of input
 judge again. Each run saves its proof summary for its commit, with the PR's head, base and base SHA on GitHub, the tier,
 --landed, and a fingerprint of the PR's proof files, the standing rules and the ledger decisions that cover the PR.
 hedge decision report prints that summary only while all of them still match. From the third failing verdict on a PR, the arbiter may escalate to the user. Once the judge failed as often
-as pull-requests.reviewCeiling allows on a PR, the gate runs it no more and says the judge budget is spent. A judge gap on HEAD (gap
+as pull-requests.reviewCeiling allows on a PR, the gate runs it no more and says the judge budget is spent. Each run holds
+one of those runs while it asks the judge, so gates that run at once never pass the cap; a run that passes, or finds the
+judge unavailable, gives it back. A judge gap on HEAD (gap
 --kind judge) lets the gate pass once a decision in the ledger accepts it: the user's answer, recorded with hedge
 decision record --mark 👤, or your own 🤖 decision when the PR's tier lets you. A refusal or a typed message never
 accepts it. The judge reads the condition of each accepted gap and fails one that HEAD breaks; the setting

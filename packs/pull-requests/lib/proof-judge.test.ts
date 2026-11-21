@@ -1,9 +1,11 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { cleanFixtures, lookup, checkout, type Checkout, verdict, fakeModel, reviewHead, reviewHeadFixed, finishRound, recordingModel, stalledOnQuota, acceptGap, graded, settings } from "./proof-testing.ts";
 import { riskCalloutOf, tierOf } from "./decision-ledger.ts";
 import { withoutReceipt } from "./proof-receipt.ts";
+import { spawnAsync } from "../../../src/testing/spawn.ts";
 
 afterEach(cleanFixtures);
 
@@ -307,7 +309,7 @@ test("once the judge failed as often as the review ceiling allows on a PR, the g
   fakeModel(pr, "JUDGE", verdict());
   const stopped = await gateAfterResponse(pr, "Fourth answer.\n");
   expect(stopped.code).toBe(1);
-  expect(stopped.output).toContain("judge: budget spent: the judge failed 3 times on this PR, as often as pull-requests.reviewCeiling allows, so hedge runs it no more. End it with a judge gap on HEAD: record hedge proof gap --kind judge --reason <why HEAD holds now>");
+  expect(stopped.output).toContain("judge: budget spent: the judge failed, or is running, 3 times on this PR, as often as pull-requests.reviewCeiling allows, so hedge runs it no more. End it with a judge gap on HEAD: record hedge proof gap --kind judge --reason <why HEAD holds now>");
   expect(stopped.output).not.toContain("judge owed: pass");
 
   await pr.hedge("gap", "--kind", "judge", "--reason", "The fourth answer settles the owed kinds");
@@ -316,6 +318,42 @@ test("once the judge failed as often as the review ceiling allows on a PR, the g
   const accepted = await pr.hedge("gate");
   expect(accepted.code).toBe(0);
   expect(accepted.output.split("\n").at(-1)).toContain("judge: fail accepted by the user");
+});
+
+test("of two gates that judge one PR at once with one judge run left, only one asks the judge, and the other says the budget is spent", async () => {
+  const pr = await checkout();
+  pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.reviewCeiling": 1 });
+  await pr.commit("feature.txt", "greet new members\n");
+  await reviewHead(pr);
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  const [started, go, answer] = ["started", "go", "answer"].map((name) => join(pr.home, name));
+  await spawnAsync(["mkfifo", started, go]);
+  writeFileSync(answer, verdict({ owed: { verdict: "fail", reason: "feature.txt is code, not docs", citations: [] } }));
+  pr.env.HEDGE_PROOF_JUDGE = `cat >/dev/null; echo > "${started}"; read line < "${go}"; cat "${answer}"`;
+
+  const first = pr.hedge("gate").catch((error: Error) => ({ code: 1, output: error.message }));
+  await readFile(started, "utf8");
+  const second = await pr.hedge("gate").catch((error: Error) => ({ code: 1, output: error.message }));
+  await writeFile(go, "go\n");
+
+  expect(second.output).toContain("judge: budget spent: the judge failed, or is running, 1 times on this PR");
+  expect((await first).output).toContain("judge owed: fail: feature.txt is code, not docs");
+});
+
+test("a judge run that passes or is unavailable gives its run back, so only failing verdicts spend the judge budget", async () => {
+  const pr = await checkout();
+  pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.reviewCeiling": 1 });
+  await pr.commit("feature.txt", "greet new members\n");
+  await reviewHead(pr);
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  pr.env.HEDGE_PROOF_JUDGE = "cat >/dev/null; exit 3";
+  expect((await gateAfterResponse(pr, "First answer.\n")).output).toContain("judge: unavailable");
+
+  fakeModel(pr, "JUDGE", verdict());
+  expect((await gateAfterResponse(pr, "Second answer.\n")).output).toContain("judge owed: pass");
+  fakeModel(pr, "JUDGE", verdict({ owed: { verdict: "fail", reason: "feature.txt is code, not docs", citations: [] } }));
+  expect((await gateAfterResponse(pr, "Third answer.\n")).output).toContain("judge owed: fail: feature.txt is code, not docs");
+  expect((await gateAfterResponse(pr, "Fourth answer.\n")).output).toContain("judge: budget spent");
 });
 
 test("the gate stops a judge stuck on spent quota and reports it unavailable", async () => {

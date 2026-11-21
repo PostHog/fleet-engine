@@ -16,6 +16,9 @@
   `pull-requests.reviewCeiling` times on a pull request. After that the gate
   runs it no more and says the judge budget is spent. A judge gap on HEAD
   that a decision accepts ends it, as before. A cached verdict still shows.
+  Each run holds one of those runs while it asks the judge, so gates that
+  run at once never pass the cap. A run that passes, or finds the judge
+  unavailable, gives it back.
 
 ### Threads that ask in prose
 
