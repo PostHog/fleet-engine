@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
+import { mkdir, readdir, readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import { modelFor, type ModelRow } from "../../base/lib/models.ts";
 import { numberSetting } from "../../base/lib/settings.ts";
@@ -15,9 +15,10 @@ import { autonomyOf } from "./proof-autonomy.ts";
 import { readSanity } from "./proof-sanity.ts";
 import { inputsDigest, readBloat } from "./proof-bloat.ts";
 import { judge, readCriticalPaths, type JudgeInput } from "./proof-judge.ts";
+import { withRoundLock, type RoundLock } from "./proof-panel.ts";
 import { askModel, familyOf, modelLabel, readRiskRubric, readRubric, reviewerRow, skillReferences } from "./proof-models.ts";
 
-export type GateContext = { home: string; cwd: string; env: Env; run: Run; now?: () => Date; ssh?: Ssh };
+export type GateContext = { home: string; cwd: string; env: Env; run: Run; now?: () => Date; ssh?: Ssh; lock?: () => Promise<RoundLock> };
 export type FinalGate = { code: number; reason: string; lines: string[]; verdict: string; summary: ProofSummary };
 
 type Checked = Awaited<ReturnType<typeof proofGate>>;
@@ -171,11 +172,13 @@ async function judgeHead(head: ProofIdentity, checked: Checked, context: GateCon
 }
 
 async function judgeDiff(head: ProofIdentity, known: Omit<JudgeInput, "cwd" | "from" | "diff">, row: ModelRow, context: GateContext) {
-  const { home, cwd, env, run, now } = context;
+  const { home, cwd, env, run, now, lock } = context;
   const from = mergeBase(head, run);
+  const directory = judgeDirectory(home, head);
   return judge({ ...known, cwd: topLevel(run) ?? cwd, from, diff: diffOf(from, known.commit, run) }, {
     ask: (request) => askModel("judge", row, request, env, reviewLimit(env)), model: modelLabel("judge", row, env), arbiter: arbiterOf(context),
-    directory: judgeDirectory(home, head), commit: known.commit, now: now?.() ?? new Date(), failLimit: numberSetting("pull-requests.reviewCeiling", env),
+    directory, commit: known.commit, now: now?.() ?? new Date(), failLimit: numberSetting("pull-requests.reviewCeiling", env),
+    serialize: async (step) => { await mkdir(directory, { recursive: true, mode: 0o700 }); return lock ? withRoundLock(directory, await lock(), step) : step(); },
   });
 }
 

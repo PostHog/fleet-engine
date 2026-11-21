@@ -1145,6 +1145,20 @@ test("at the ceiling a final read of a production fix after the last read stops 
   expect((await answerKnown(pr, "final-1", 1)).code).toBe(0);
 });
 
+test("at the ceiling a merge of the base that resolves a conflict with an unread production change stops the final read too, and names the user's --override", async () => {
+  const pr = await checkout();
+  const { fix, after } = await finalReadSpendsTheCeiling(pr);
+  await pr.git("reset", "-q", "--hard", fix);
+  const merged = await spawnAsync(["sh", "-c", `git checkout -q main && echo "greet base" > feature.txt && git add feature.txt && git commit -qm "Base greeting" && git update-ref refs/remotes/origin/main HEAD && git checkout -q feature && ! git merge -q main && echo "greet every member" > feature.txt && git add feature.txt && git commit -q --no-edit`], { cwd: pr.repository, env: pr.env });
+  expect(merged.exitCode).toBe(0);
+  expect(await pr.git("rev-parse", "HEAD^1")).toBe(fix);
+  expect(await pr.git("rev-parse", "HEAD")).not.toBe(after);
+
+  const stopped = await refusal(pr.hedge("review-start", "--scope", "final", "--base", fix));
+  expect(stopped).toContain(`The review budget of 2 reviews is spent, and no read checks the production changes since ${fix.slice(0, 7)}.`);
+  expect(stopped).toContain("When a merge of the base holds them, such as a conflict resolution, only the user's --override reads them.");
+});
+
 test("at the ceiling the user's --override runs a final read of a production fix after the last read", async () => {
   const pr = await checkout();
   const { fix } = await finalReadSpendsTheCeiling(pr);

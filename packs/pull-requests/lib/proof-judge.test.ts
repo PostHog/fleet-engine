@@ -1,9 +1,11 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { cleanFixtures, lookup, checkout, type Checkout, verdict, fakeModel, reviewHead, reviewHeadFixed, finishRound, recordingModel, stalledOnQuota, acceptGap, graded, settings } from "./proof-testing.ts";
 import { riskCalloutOf, tierOf } from "./decision-ledger.ts";
 import { withoutReceipt } from "./proof-receipt.ts";
+import { spawnAsync } from "../../../src/testing/spawn.ts";
 
 afterEach(cleanFixtures);
 
@@ -316,6 +318,28 @@ test("once the judge failed as often as the review ceiling allows on a PR, the g
   const accepted = await pr.hedge("gate");
   expect(accepted.code).toBe(0);
   expect(accepted.output.split("\n").at(-1)).toContain("judge: fail accepted by the user");
+});
+
+test("while one gate asks the judge of a PR, a second gate of that PR asks no judge and says which command holds the judge lock", async () => {
+  const pr = await checkout();
+  pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.reviewCeiling": 1 });
+  await pr.commit("feature.txt", "greet new members\n");
+  await reviewHead(pr);
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  const [started, go, answer] = ["started", "go", "answer"].map((name) => join(pr.home, name));
+  await spawnAsync(["mkfifo", started, go]);
+  writeFileSync(answer, verdict({ owed: { verdict: "fail", reason: "feature.txt is code, not docs", citations: [] } }));
+  pr.env.HEDGE_PROOF_JUDGE = `cat >/dev/null; echo > "${started}"; read line < "${go}"; cat "${answer}"`;
+  const gate = () => pr.hedge("gate").catch((error: Error) => ({ code: 1, output: error.message }));
+
+  const first = gate();
+  await readFile(started, "utf8");
+  const second = await gate();
+  await writeFile(go, "go\n");
+
+  expect(second.output).toContain(`another hedge proof command, works on ${join(pr.pullRequest, "judge")} and holds its lock`);
+  expect((await first).output).toContain("judge owed: fail: feature.txt is code, not docs");
+  expect((await gate()).output).toContain("judge owed: fail: feature.txt is code, not docs");
 });
 
 test("the gate stops a judge stuck on spent quota and reports it unavailable", async () => {
