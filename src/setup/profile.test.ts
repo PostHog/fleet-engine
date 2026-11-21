@@ -525,13 +525,14 @@ describe("hedge setup finds the profile before it makes one", () => {
     expect(allRepos(home)).toEqual([repo]);
   });
 
-  test("in the org, takes a marked repo only when the person administers it", async () => {
+  test("in the org, stops at a marked repo the person does not administer, and neither uses it nor makes a second one", async () => {
     const home = temp.make("home-");
     await spawnGit(home, "init", "-q", "--bare", "-b", "main", githubRepo(home, "acme/planted"));
     markRepo(home, "acme/planted", "hedge-for-nora");
     const result = await teamSetup(home, ["--non-interactive", ...starter], [], { notAdmin: ["acme/planted"] });
-    expect(result.code).toBe(0);
-    expect(result.output).toContain("✓ Created the private repo acme/nora-hedge");
+    expect(result.code).toBe(1);
+    expect(result.output).toContain("hedge: acme/planted has your profile topic hedge-for-nora, but you do not administer it, so Hedge does not trust it. When it is your profile, ask an acme admin to make you its admin. When it is not, remove the topic. Then run hedge setup again.");
+    expect(allRepos(home)).toEqual(["acme/planted"]);
     expect(await spawnGit(githubRepo(home, "acme/planted"), "rev-list", "--all", "--count")).toBe("0");
   });
 

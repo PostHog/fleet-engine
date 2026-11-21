@@ -123,7 +123,8 @@ type Topics = { repositoryTopics: Array<{ name: string }> | null };
 async function markedProfile(gh: (...args: string[]) => Promise<string>, owners: string[], login: string) {
   for (const listed of owners) {
     const repos = JSON.parse(await gh("repo", "list", listed, "--limit", "10000", "--json", "nameWithOwner,repositoryTopics,viewerPermission")) as Array<Topics & { nameWithOwner: string; viewerPermission: string }>;
-    const marked = repos.find((repo) => repo.repositoryTopics?.some((topic) => topic.name === profileTopic(login)) && (same(listed, login) || repo.viewerPermission === "ADMIN"));
+    const marked = repos.find((repo) => repo.repositoryTopics?.some((topic) => topic.name === profileTopic(login)));
+    if (marked && !same(listed, login) && marked.viewerPermission !== "ADMIN") throw new Error(`${marked.nameWithOwner} has your profile topic ${profileTopic(login)}, but you do not administer it, so Hedge does not trust it. When it is your profile, ask an ${listed} admin to make you its admin. When it is not, remove the topic. Then run hedge setup again.`);
     if (marked) return marked.nameWithOwner;
   }
   return undefined;
