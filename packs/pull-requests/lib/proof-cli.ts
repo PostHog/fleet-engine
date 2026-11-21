@@ -545,7 +545,7 @@ across quiet commits is refused, unless --agent with your reason, or the user's 
 A later round with --agent, or the user's --override, may be --scope full: it reviews
 the whole PR diff at HEAD again, such as after a restack.
 When the latest finished review read a commit that is not on HEAD's history, such as a final read run from another
-PR's checkout, a final read may also take --base with the latest reviewed commit on HEAD's history, unless the first
+PR's checkout, a final read may also take --base with exactly the latest reviewed commit on HEAD's history, unless the first
 panel read a commit off that history. The gate still
 holds the findings of the read off that history until you answer them with respond. Without --commit, review and
 review-start refuse a checkout whose HEAD is neither the PR's head on GitHub nor a commit on top of it.

@@ -64,6 +64,19 @@ test("a final read from an older review names both commits it may start from", a
   expect(readdirSync(reviews(pr)).sort()).toEqual(["1", "final-1", "final-2"]);
 });
 
+test("a final read from a clean base merge of the latest review on HEAD's history is refused when that merge is off HEAD's history", async () => {
+  const { pr, fixed, stray } = await prWithStrayRead();
+  await pr.advanceBase("base.txt", "from main\n");
+  const feature = await pr.git("rev-parse", "HEAD");
+  await pr.git("checkout", "-q", "-b", "sibling", fixed);
+  await pr.git("merge", "-q", "--no-edit", "origin/main");
+  const merged = await pr.git("rev-parse", "HEAD");
+  await pr.git("checkout", "-q", "feature");
+  expect(await pr.git("rev-parse", "HEAD")).toBe(feature);
+
+  await expect(pr.hedge("review", "--scope", "final", "--base", merged, "--phase", "babysit")).rejects.toThrow(`Final read base must be the latest reviewed commit ${stray}, the latest reviewed commit on HEAD's history ${fixed}`);
+});
+
 for (const phase of ["review", "babysit"]) test(`a ${phase} final read from the latest review on HEAD's history is refused when the first panel read another branch`, async () => {
   const { pr, fixed, stray } = await prWithStrayRead("greet the new member\n");
   for (const file of ["panel.json", "lenses"]) rmSync(join(reviews(pr), "1", file), { recursive: true });
