@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { cleanFixtures, lookup, checkout, exitedPid, type Checkout, verdict, fakeModel, reviewHead, reviewHeadFixed, finishRound, recordingModel, stalledOnQuota, acceptGap, graded, settings } from "./proof-testing.ts";
+import { cleanFixtures, lookup, checkout, type Checkout, verdict, fakeModel, reviewHead, reviewHeadFixed, finishRound, recordingModel, stalledOnQuota, acceptGap, graded, settings } from "./proof-testing.ts";
 import { riskCalloutOf, tierOf } from "./decision-ledger.ts";
 import { withoutReceipt } from "./proof-receipt.ts";
 import { spawnAsync } from "../../../src/testing/spawn.ts";
@@ -342,7 +342,7 @@ test("while one gate asks the judge of a PR, a second gate of that PR with other
   expect((await gate()).output).toContain("judge: budget spent: the judge failed 1 times");
 });
 
-test("a gate whose process ended while it held the judge lock leaves the lock to the next gate, which asks the judge", async () => {
+test("a gate killed while it held the judge lock leaves the lock to the next gate, which asks the judge", async () => {
   const pr = await checkout();
   await pr.commit("feature.txt", "greet new members\n");
   await reviewHead(pr);
@@ -352,10 +352,12 @@ test("a gate whose process ended while it held the judge lock leaves the lock to
   writeFileSync(answer, verdict({ owed: { verdict: "fail", reason: "feature.txt is code, not docs", citations: [] } }));
   pr.env.HEDGE_PROOF_JUDGE = `cat >/dev/null; if mkdir "${held}" 2>/dev/null; then echo > "${started}"; read line < "${go}"; fi; cat "${answer}"`;
 
-  const ended = pr.hedgeAs(await exitedPid(), "gate").catch((error: Error) => ({ code: 1, output: error.message }));
-  await judgeStarted(started, ended);
+  const killed = Bun.spawn([process.execPath, join(import.meta.dir, "..", "commands", "proof.ts"), "gate"], { cwd: pr.repository, env: { ...pr.env, HOME: pr.home }, stdout: "pipe", stderr: "pipe" });
+  const output = new Response(killed.stdout).text();
+  await judgeStarted(started, killed.exited.then(async () => ({ output: await output })));
+  killed.kill("SIGKILL");
+  await killed.exited;
   const next = await pr.hedge("gate").finally(() => writeFile(go, "go\n"));
-  await ended;
 
   expect(next.output).toContain("judge owed: fail: feature.txt is code, not docs");
 });
