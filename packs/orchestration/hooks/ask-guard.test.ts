@@ -418,14 +418,25 @@ describe("the card guard", () => {
     expect(await guard(card(), where)).toBeUndefined();
   });
 
-  test.each([["claude", "AskUserQuestion"], ["codex", "request_user_input"]])("the %s PreToolUse dispatcher hands the card denial to the agent", async (provider, tool) => {
-    const where = home("Robin", proseTitles);
-    const target = join(where, ".config/hedge/hooks/PreToolUse/ask-guard.ts");
-    mkdirSync(dirname(target), { recursive: true });
-    symlinkSync(join(import.meta.dir, "ask-guard.ts"), target);
-    const routed = hookWith(() => t3(alertThread), { threadId: "alert-1" });
-    const result = await dispatch(dirname(target), provider, JSON.stringify(card(tool)), async (path, from, input) => (expect(path).toBe(target), routed(from, async () => input, where)));
-    expect(JSON.parse(result.stdout).hookSpecificOutput).toMatchObject({ permissionDecision: "deny", permissionDecisionReason: expect.stringContaining("last message") });
+  test.each([["claude", "AskUserQuestion"], ["codex", "request_user_input"]])("the %s PreToolUse dispatcher runs the installed hook, which reads T3 and denies the card", async (provider, tool) => {
+    const stub = await startT3Stub({ shell: { projects: [], threads: [{ ...alertThread, pullRequests: [] }] } as never });
+    try {
+      mkdirSync(join(stub.home, ".local/state/hedge"), { recursive: true });
+      writeFileSync(join(stub.home, ".local/state/hedge/settings.json"), JSON.stringify({ "guards.person": "Robin", ...proseTitles }));
+      const target = join(stub.home, ".config/hedge/hooks/PreToolUse/ask-guard.ts");
+      mkdirSync(dirname(target), { recursive: true });
+      symlinkSync(join(import.meta.dir, "ask-guard.ts"), target);
+      const installed = async (path: string, from: string, input: string) => {
+        const child = Bun.spawn([process.execPath, path, from], { stdin: new Blob([input]), stdout: "pipe", stderr: "pipe", env: { ...process.env, HOME: stub.home, T3CODE_THREAD_ID: "alert-1" } });
+        const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+        return { code, stdout, stderr };
+      };
+      const result = await dispatch(dirname(target), provider, JSON.stringify(card(tool)), installed);
+      expect(result.stderr).toBe("");
+      expect(JSON.parse(result.stdout).hookSpecificOutput).toMatchObject({ permissionDecision: "deny", permissionDecisionReason: expect.stringContaining("last message") });
+    } finally {
+      await stub.stop();
+    }
   });
 });
 
