@@ -28,8 +28,8 @@ the setting hub.alias names; other machines read and append it over SSH. Without
 record with 👤 or 👍 records the user's answer to your question tool. Without --words it takes their latest answer
 in the T3 thread whose question names each --pr and each --kind: after they answer, pass only the mark, class, kinds and PRs, and
 check the answer in the printed line. When it refuses that answer, it says how to list the ids. For --class proof-gap
-it also names the latest answer to "Accept the <kind> gap?" about each --pr, when that is another answer and not used
-yet. --message takes an earlier answer by its id. --words quotes the words of an answer, with the date they gave it. --thread defaults to this T3 thread (T3CODE_THREAD_ID). Only answers to a
+it also names the latest answer to "Accept the <kind> gap?" about each --pr, when that is another answer that the record
+would take and that is not used yet. --message takes an earlier answer by its id. --words quotes the words of an answer, with the date they gave it. --thread defaults to this T3 thread (T3CODE_THREAD_ID). Only answers to a
 question tool in the T3 app count; a typed message does not. Each --pr must be named in that question (#n,
 repo#n, owner/repo#n, or its URL), so one answer covers every PR its question named and no other. One answer
 records one decision. With --class proof-gap and --kind, the decision accepts those gaps of each PR, and the user's
@@ -181,8 +181,8 @@ export async function hearUser(input: Hearing, context: DecisionContext, ledger:
   const refused = async (error: Error, tried: ThreadWord[] = []) => {
     if (input.words !== undefined || input.message !== undefined) return error;
     const gapAnswer = input.class === "proof-gap" ? answers.findLast((word) => asksGap(word, input)) : undefined;
-    const unused = gapAnswer && !tried.includes(gapAnswer) && await useOf(gapAnswer).then((use) => !use, () => false);
-    return withAnswerIds(error, unused ? gapAnswer : undefined, input.kinds ?? [], thread);
+    const recordable = gapAnswer && !tried.includes(gapAnswer) && fitsQuietly(gapAnswer, input) && await useOf(gapAnswer).then((use) => !use, () => false);
+    return withAnswerIds(error, recordable ? gapAnswer : undefined, input.kinds ?? [], thread);
   };
   let tried: ThreadWord[];
   try { tried = candidates(answers, input, thread); } catch (error) { throw await refused(error as Error); }
@@ -202,6 +202,10 @@ export async function hearUser(input: Hearing, context: DecisionContext, ledger:
     } catch (error) { refusals.push(error as Error); }
   }
   throw await refused(used ?? refusals[0]!, tried);
+}
+
+function fitsQuietly(word: ThreadWord, input: Hearing) {
+  try { fits(heardAnswer(word), input); return true; } catch { return false; }
 }
 
 const asksGap = (word: ThreadWord, { prs, kinds = [] }: Hearing) => word.source === "question" && normalized(word.answered).startsWith(normalized(acceptQuestion(kinds))) && prs.every((ref) => namesPr(word.answered, ref));

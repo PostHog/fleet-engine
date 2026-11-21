@@ -120,6 +120,16 @@ test("a refusal of a used answer says how to list the ids, and never points at a
   await expect(record()).rejects.toThrow(`which does not accept the gap. The gap stays open. ${listIds}`);
 });
 
+test("a refusal never points at a gap answer that keeps the gap open", async () => {
+  const pr = await checkout();
+  pr.chooseGap("panel", "A prune lane runs no QA swarm");
+  pr.chooseGap("panel", "A prune lane runs no QA swarm", "Keep the gap open");
+  pr.choose("Add the standing rule", "Add a standing rule for panel gaps on prune lanes? example/product#42");
+
+  await expect(pr.decide("record", "--mark", "👍", "--class", "proof-gap", "--kind", "panel", "--pr", "example/product#42")).rejects.toThrow("which does not accept the gap. The gap stays open. To record another answer, name it with --message <id>; hedge thread read thread-1 --words lists the ids");
+  expect(ledgerDecisions(pr)).toEqual([]);
+});
+
 test("a later acceptance of the gap on a card worded another way still records over an earlier decline on the gap card", async () => {
   const pr = await checkout();
   pr.chooseGap("panel", "A prune lane runs no QA swarm", "Keep the gap open");
