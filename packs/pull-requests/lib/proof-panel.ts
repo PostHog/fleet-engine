@@ -4,7 +4,7 @@ import { link, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "nod
 import { basename, dirname, join } from "node:path";
 import { anchorCheck } from "./finding-anchors.ts";
 import { readJson, roundId, storeCapturedFindings, writeJson, type ProofIdentity } from "./proof.ts";
-import { askModel, familyOf, isQuotaExhausted, quotaExitCode, reviewerRow, sameFamilyRow, securityRow, type Family, type Usage } from "./proof-models.ts";
+import { askModel, familyOf, isQuotaExhausted, otherFamily, quotaExitCode, reviewerRow, sameFamilyRow, securityRow, type Family, type Usage } from "./proof-models.ts";
 import type { ModelRow } from "../../base/lib/models.ts";
 import { baseRule, capped, diffCap, reviewedDiff } from "./proof-review.ts";
 import { quote } from "../../hub/lib/machine.ts";
@@ -93,7 +93,7 @@ export function resolveLens(guide: PanelGuide, argument: string, author: Family,
 
 export function combinedLens(lenses: Lens[], author: Family): Lens {
   const combined = lenses.filter((lens) => lens.name !== sweep);
-  const cast = combined.find((lens) => lens.security) ?? combined.find((lens) => lens.family !== author) ?? combined[0] ?? lenses[0]!;
+  const cast = combined.find((lens) => lens.security) ?? combined.find((lens) => otherFamily(lens.row, author)) ?? combined.find((lens) => lens.family) ?? combined[0] ?? lenses[0]!;
   return {
     ...cast, name: "combined", title: `Combined: ${combined.map((lens) => lens.title).join(", ")}`, context: true,
     text: combined.map((lens) => `${lens.title}\n\n${lens.text}`).join("\n\n"), knowledge: combined.map((lens) => lens.knowledge).filter(Boolean).join("\n\n"),

@@ -19,6 +19,8 @@ export function sessionFamily(env: Record<string, string | undefined>): Family |
 
 export const familyOf = (row: ModelRow): Family | undefined => row.provider === "claude" ? "claude" : row.provider === "codex" ? "gpt" : undefined;
 
+export const otherFamily = (row: ModelRow, author: Family) => familyOf(row) !== undefined && familyOf(row) !== author;
+
 export function reviewerRow(author: Family, env: Record<string, string | undefined>) {
   const codexReviewer = author === "gpt" ? modelTable(env).find((row) => row.role === "review-codex") : undefined;
   return codexReviewer ?? modelFor("review", env);
