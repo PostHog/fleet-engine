@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { artFiles, packGroups, videoFiles } from "../page/cast.ts";
 import { captions, isBuilt, type BuiltLesson } from "../page/lessons.ts";
 import type { PageData, PagePack } from "../page/model.ts";
-import { knownNames, lessonProblems, loadLessons } from "./lessons.ts";
+import { knownNames, lessonProblems, loadLessons, loadVoice } from "./lessons.ts";
 import { site, type ArtSizes } from "../page/views.ts";
 import { engineSettings, loadPacks } from "../src/pack/manifest.ts";
 import type { Audience, LoadedPack, Need, PackManifest, Preset } from "../src/pack/types.ts";
@@ -97,7 +97,8 @@ function pngSize(bytes: Uint8Array) {
 export async function builtLessons() {
   const lessons = loadLessons(engineRoot);
   const names = knownNames(await loadPacks(engineRoot), lessons);
-  const problems = lessons.flatMap((lesson) => lessonProblems(lesson, names));
+  const voice = loadVoice(engineRoot);
+  const problems = lessons.flatMap((lesson) => lessonProblems(lesson, names, voice));
   if (problems.length) throw new Error(problems.join("\n"));
   return lessons.filter(isBuilt);
 }

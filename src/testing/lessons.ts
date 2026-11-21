@@ -2,6 +2,8 @@ import { join } from "node:path";
 import { parseLesson, sentences, type BuiltLesson } from "../../page/lessons.ts";
 import { narrationHash } from "../../scripts/lessons.ts";
 
+export const testVoice = JSON.stringify({ voice: "tour-voice", model: "tour-model", seed: 1, settings: {}, pauses: { colon: 0.1, sentence: 0.2, chapter: 1 } });
+
 export const lessonMedia = join(import.meta.dir, "fixtures/lessons");
 
 export const tourSource = `---
@@ -24,7 +26,7 @@ export function builtLesson(id = "tour", source = tourSource): BuiltLesson {
   const lesson = parseLesson(id, source);
   return {
     ...lesson,
-    cut: { video: `${id}-take.mp4`, poster: `${id}-take.jpg`, seconds: 150, narration: narrationHash(lesson), chapters: lesson.chapters.map((_, index) => index * 65), captions: sentences(lesson).map((_, index) => [index * 5, index * 5 + 4]) },
+    cut: { video: `${id}-take.mp4`, poster: `${id}-take.jpg`, seconds: 150, narration: narrationHash(lesson, testVoice), chapters: lesson.chapters.map((_, index) => index * 65), captions: sentences(lesson).map((_, index) => [index * 5, index * 5 + 4]) },
   };
 }
 
