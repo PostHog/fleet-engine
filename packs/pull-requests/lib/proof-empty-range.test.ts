@@ -50,6 +50,20 @@ test("a final read of a commit that puts a PR file back to the base's text reads
   expect(reviewer.prompts().at(-1)).toContain("-and the member's name");
 });
 
+test("a final read reads a merge of the base that conflicts and drops the PR's change to the base's text", async () => {
+  const { pr, reviewed } = await reviewedPr();
+  await pr.advanceBase("shared.txt", "one\nand the team's name\n");
+  await pr.git("merge", "-q", "--no-edit", "main");
+  writeFileSync(join(pr.repository, "shared.txt"), "one\nand the team's name\n");
+  await pr.git("add", "shared.txt");
+  await pr.git("commit", "-q", "--no-edit");
+  const reviewer = fakeModel(pr, "REVIEWER", "No findings.");
+
+  expect((await pr.hedge("review", "--scope", "final", "--base", reviewed)).code).toBe(0);
+
+  expect(reviewer.prompts().at(-1)).toContain("-and the member's name");
+});
+
 async function revertedAfterBaseRename(rewritten: (guide: string) => string) {
   const pr = await checkout();
   const guide = Array.from({ length: 10 }, (_, line) => `step ${line + 1}\n`).join("");
