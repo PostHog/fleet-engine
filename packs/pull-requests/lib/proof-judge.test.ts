@@ -380,10 +380,10 @@ test("while one gate asks the judge of a PR, a second gate of that PR with other
   await pr.commit("feature.txt", "greet new members\n");
   await reviewHead(pr);
   await pr.hedge("require", "--none", "--reason", "Docs only");
-  const [started, go, answer, held] = ["started", "go", "answer", "held"].map((name) => join(pr.home, name));
+  const [started, go, answer, held, asked] = ["started", "go", "answer", "held", "asked"].map((name) => join(pr.home, name));
   await spawnAsync(["mkfifo", started, go]);
   writeFileSync(answer, verdict({ owed: { verdict: "fail", reason: "feature.txt is code, not docs", citations: [] } }));
-  pr.env.HEDGE_PROOF_JUDGE = `cat >/dev/null; if mkdir "${held}" 2>/dev/null; then echo > "${started}"; read line < "${go}"; fi; cat "${answer}"`;
+  pr.env.HEDGE_PROOF_JUDGE = `cat >/dev/null; echo asked >> "${asked}"; if mkdir "${held}" 2>/dev/null; then echo > "${started}"; read line < "${go}"; fi; cat "${answer}"`;
   const gate = () => pr.hedge("gate").catch((error: Error) => ({ code: 1, output: error.message }));
 
   const first = gate();
@@ -393,6 +393,7 @@ test("while one gate asks the judge of a PR, a second gate of that PR with other
   expect(second.output).toContain(`another hedge proof command, works on ${join(pr.pullRequest, "judge")} and holds its lock`);
   expect((await first).output).toContain("judge owed: fail: feature.txt is code, not docs");
   expect((await gate()).output).toContain("judge: budget spent: the judge failed 1 times");
+  expect(readFileSync(asked, "utf8")).toBe("asked\n");
 });
 
 test("a gate killed while it held the judge lock leaves the lock to the next gate, which asks the judge", async () => {
