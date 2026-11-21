@@ -144,8 +144,9 @@ async function throughServer(rpc: T3Rpc, merged: Reconciled, effective: Document
   } catch (error) {
     failure = error;
   }
+  let lost: unknown;
   const after = await readT3Settings(rpc).catch((error: unknown) => {
-    failure ??= error;
+    lost = error;
     return undefined;
   });
   const refused = changed.filter((field) => (after ? !takes(field, get(after, field.path)) : !sent.includes(field)));
@@ -156,9 +157,9 @@ async function throughServer(rpc: T3Rpc, merged: Reconciled, effective: Document
   if (turnedOff.length) result.actions.push({ target: "t3 settings", operation: "replace", reason: `turn off ${turnedOff.map(name).join(", ")}` });
   if (refused.length) result.findings.push(finding("t3:settings", `T3 Code did not take ${refused.map(name).join(", ")}. Run hedge apply again; if it stays, set it in T3 Code's settings.`, "apply"));
   if (stillOn.length) result.findings.push(finding("t3:instances", `T3 Code did not turn off ${stillOn.map(instanceId).join(", ")}. Run hedge apply again; if it stays, turn it off in T3 Code's settings.`, "apply"));
-  if (failure !== undefined) {
+  if (failure !== undefined || lost !== undefined) {
     result.failed = true;
-    result.findings.push(finding("t3:server", `T3 Code refused a settings write (${(failure as Error).message}). Run hedge apply again.`, "apply"));
+    result.findings.push(finding("t3:server", failure !== undefined ? `T3 Code refused a settings write (${(failure as Error).message}). Run hedge apply again.` : `Hedge could not read back the settings T3 Code took (${(lost as Error).message}). Run hedge apply again.`, "apply"));
   }
   return { refused, stillOn };
 }

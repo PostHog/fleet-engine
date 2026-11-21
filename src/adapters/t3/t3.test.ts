@@ -575,7 +575,7 @@ describe("T3 provider instances", () => {
     const lost = await apply(plan("linux", [agy]), { home, adapters: [adapter] });
     expect(lost.ok).toBe(false);
     expect(lost.actions).toContainEqual({ target: "t3 settings", operation: "replace", reason: "set providerInstances.antigravity" });
-    expect(lost.findings).toContainEqual(expect.objectContaining({ id: "t3:server", say: expect.stringContaining("connection closed") }));
+    expect(lost.findings).toContainEqual({ id: "t3:server", pack: "engine", say: "Hedge could not read back the settings T3 Code took (T3 RPC connection closed). Run hedge apply again.", repair: "apply" });
     server.state.closeAfterUpsert = false;
     server.state.closed = false;
     const removed = await apply(plan("linux", []), { home, adapters: [adapter] });
