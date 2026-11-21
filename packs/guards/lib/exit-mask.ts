@@ -16,6 +16,7 @@ const statusRead = String.raw`\$(?:\?|\{\?\})`;
 const plainWord = new RegExp(String.raw`^(?:[\w=:,./+%@-]|'[^'\\]*'|"(?:[^$\\"']|${statusRead})*"|${statusRead})*$`);
 const failingCode = /^(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-5])$/;
 const printsToTheAgent = /^(?:2>&1|1?>&2)$/;
+const shellChangers = new Set(["exec", "enable", "alias", "shopt", "function"]);
 
 function gitSubcommandAt(args: string[]): number {
   for (let index = 0; index < args.length; index++) {
@@ -178,6 +179,10 @@ function reachOf(program: Program, start: number): Reach {
   return reporter(commands[next], reachable(next), false) ?? { how: separatorName(after) };
 }
 
+function changesHowItPrints(commands: Command[], text: string): boolean {
+  return /\(\s*\)/.test(text) || commands.some((command) => shellChangers.has(command.name) || command.rawPrefix.some((word) => shellChangers.has(word)) || command.env.has("IFS"));
+}
+
 function hiddenIn(text: string, nesting: number): { found?: Finding; carries?: string } {
   if (nesting > maxNesting) throw new Error(`it nests more than ${maxNesting} shell programs`);
   const pipelines = parse(text);
@@ -205,6 +210,7 @@ function hiddenIn(text: string, nesting: number): { found?: Finding; carries?: s
     const reach = reachOf(program, index);
     if (typeof reach === "object") return { found: { what, how: reach.how } };
     if (reach === "printed" && nesting > 0) return { found: { what, how: "the nested shell or `$(…)` that prints it" } };
+    if (reach === "printed" && changesHowItPrints(commands, text)) return { found: { what, how: "a command earlier in the call that changes how the shell prints, such as `exec >`," } };
     carries ??= what;
   }
   return { carries };

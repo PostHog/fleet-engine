@@ -14,7 +14,7 @@ beforeAll(() => {
   bin = join(stubs.make("exit-mask-bin-"), "bin");
   mkdirSync(bin);
   for (const name of ["git", "gh", "hedge", "fleet"]) {
-    writeFileSync(join(bin, name), '#!/bin/sh\ncalls=$(($(cat "$STUB_CALLS" 2>/dev/null || echo 0) + 1))\necho "$calls" > "$STUB_CALLS"\n[ "$calls" = "$STUB_FAILS" ] && exit 3\nexit 0\n');
+    writeFileSync(join(bin, name), '#!/bin/sh\n[ "$1" = heavy ] && [ "$2" = -- ] && shift 2 && exec "$@"\ncalls=$(($(cat "$STUB_CALLS" 2>/dev/null || echo 0) + 1))\necho "$calls" > "$STUB_CALLS"\n[ "$calls" = "$STUB_FAILS" ] && exit 3\nexit 0\n');
     chmodSync(join(bin, name), 0o755);
   }
 });
@@ -151,6 +151,12 @@ describe("the exit-status mask guard", () => {
     'git push && ( exit 3 ); echo "${PIPESTATUS[0]}"',
     "git push; exit $? now",
     "git push; exit 1",
+    'exec > /dev/null; git push; echo "$?"',
+    '{ exec 1>&-; } 2>/dev/null; git push; echo "$?"',
+    'echo() { :; }; git push; echo "$?"',
+    'function echo { :; }; git push; echo "$?"',
+    "IFS=0123456789; git push; echo $?",
+    "git push; exit $? |& cat",
     "set -eo pipefail; ! { true; } | git push > /dev/null 2>&1; echo done",
     "set -eo pipefail; ! ( true ) | git push > /dev/null 2>&1; echo done",
     'unset label; git push > /dev/null 2>&1; label=${label:?missing} echo "$?"',
@@ -299,6 +305,10 @@ describe("the exit-status mask guard", () => {
   test.each(["true | git push; echo \"exit=$?\"", "set -eo pipefail; true | git push > /dev/null 2>&1; echo done", "set -o pipefail; { echo main; } | xargs git push origin | cat; echo \"exit=$?\""])("allows the last stage's status or a pipefail pipe: %s", (command) => {
     expect(exitMaskRisk(command, "Robin")).toBeUndefined();
     expect(shellShowsEveryFailure(command)).toBe(true);
+  });
+
+  test.each(['alias echo=:; git push; echo "$?"', 'enable -n echo; git push; echo "$?"', 'shopt -s expand_aliases; git push; echo "$?"', 'builtin exec > /dev/null; git push; echo "$?"'])("refuses a printed status after a call that changes how the shell prints: %s", (command) => {
+    expect(refused(command)).toBe(true);
   });
 
   test("refuses a quote it cannot close instead of hanging", () => {
