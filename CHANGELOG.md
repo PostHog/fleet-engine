@@ -9,13 +9,19 @@
   merge of the base. It says whether `hedge proof gate` carries the review
   to HEAD. Before, the read ran on an empty diff, and the judge could count
   that read against a gap's condition.
-- The diff of a fixes round or a final read keeps a file that a commit puts
-  back to the base's text. Before, it left such a file out as if a merge of
-  the base had brought it in.
+- The diff of a fixes round or a final read now compares HEAD with a clean
+  merge of the base into the reviewed commit, and keeps only the files that
+  a commit since the read touched. A change inside a merge commit counts.
+  So it keeps a file that a commit puts back to the base's text, and leaves
+  out what the base brought in, also when the base renamed a file. Before,
+  it left out a file put back to the base's text as if a merge of the base
+  had brought it in. When that merge conflicts, the diff keeps the old
+  filter.
 - When the judge finds the condition of a standing rule broken, the gate
   names the standing rule and asks to meet its condition. Before, it called
   the rule a decision and asked to void it with `hedge decision void`, which
-  takes only decision ids.
+  takes only decision ids. When a decision breaks too, the gate names both
+  steps.
 
 ### Threads that ask in prose
 

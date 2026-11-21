@@ -64,6 +64,20 @@ test("a final read reads a merge of the base that conflicts and drops the PR's c
   expect(reviewer.prompts().at(-1)).toContain("-and the member's name");
 });
 
+test("a final read reads a change the PR made inside a merge of the base that would merge cleanly", async () => {
+  const { pr, reviewed } = await reviewedPr();
+  await pr.advanceBase("base.md", "the base moves on\n");
+  await pr.git("merge", "-q", "--no-commit", "--no-ff", "main");
+  writeFileSync(join(pr.repository, "feature.txt"), "greet by name\n");
+  await pr.git("add", "feature.txt");
+  await pr.git("commit", "-q", "--no-edit");
+  const reviewer = fakeModel(pr, "REVIEWER", "No findings.");
+
+  expect((await pr.hedge("review", "--scope", "final", "--base", reviewed)).code).toBe(0);
+
+  expect(reviewer.prompts().at(-1)).toContain("+greet by name");
+});
+
 async function mergeBaseRename(pr: Checkout) {
   await pr.git("checkout", "-q", "main");
   await pr.git("mv", "guide.txt", "handbook.txt");
