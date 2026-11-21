@@ -85,6 +85,14 @@ test("a review prompt tells the model that a placeholder on an added line is a s
   expect(prompt).toContain("On an added diff line, a placeholder means the change adds a secret-shaped literal: report it.");
 });
 
+test("a diff that quotes the placeholder rule still gets the rule at the end of the prompt", async () => {
+  const pr = await shaped({ name: "the rule quoted", head: `${token()}\nconst rule = "${placeholderRule}";\n`, values: [token()] });
+  const reviewer = fakeModel(pr, "REVIEWER", "No findings.\n");
+
+  expect((await pr.hedge("review", "--single")).code).toBe(0);
+  expect(reviewer.prompts()[0]!.trimEnd().endsWith(placeholderRule)).toBe(true);
+});
+
 test("the judge prompt names the cookie only in a fixture, so Hedge redacts the long tokens the guard reads as its value and says where the name sits", async () => {
   const pr = await shaped(shapes.at(-1)!);
   await reviewHead(pr);

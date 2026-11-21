@@ -18,7 +18,8 @@ export function guardedPrompt(prompt: string): GuardedPrompt {
   return { ok: true, prompt: withRule(text), redacted };
 }
 
-const withRule = (text: string) => text.includes(placeholderRule) ? text : `${text}\n\n${placeholderRule}\n`;
+const ruleEnding = `\n\n${placeholderRule}\n`;
+const withRule = (text: string) => text.endsWith(ruleEnding) ? text : `${text}${ruleEnding}`;
 
 function cookieRule(lines: PromptLines, kinds: string[]) {
   const named = cookieNamedAt(lines.prompt);
