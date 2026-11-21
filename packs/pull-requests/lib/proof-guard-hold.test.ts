@@ -1,6 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { renderSection } from "./proof-receipt.ts";
+import { renderPage } from "./proof-receipt-page.ts";
+import type { ProofSummary } from "./proof.ts";
 import { acceptGap, cleanFixtures, checkout, fakeModel, reviewHead, verdict, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
@@ -101,9 +104,28 @@ test("an accepted judge gap does not pass a gate whose held judge could not chec
 
   const gate = await pr.hedge("gate");
   expect(gate.code).toBe(3);
-  expect(gate.output).toContain(`judge gap: not accepted (the secret guard held the judge prompt, so no judge checked the condition of decision ${id})`);
+  const refusal = `not accepted (the secret guard held the judge prompt, so no judge checked the condition of decision ${id})`;
+  expect(gate.output).toContain(`judge gap: ${refusal}`);
   expect(gate.output).toContain(`hedge decision void <id>`);
   expect(judge.prompts()).toEqual([]);
+
+  const jsonGate = await pr.hedge("gate", "--json");
+  expect(jsonGate.code).toBe(3);
+  const summary = JSON.parse(jsonGate.output) as ProofSummary;
+  expect(summary.judge.gap?.accepted).toBeUndefined();
+  expect(summary.judge.gap?.text).toBe(refusal);
+
+  const display = { lines: {}, screenshots: [] };
+  const { section } = renderSection({
+    summary, gated: true, landed: false, display, notChecked: [], reviews: [], screenshots: [],
+  });
+  expect(section).toContain("judge: The judge prompt quotes a test token (not accepted)");
+
+  const page = renderPage({
+    summary, title: "Test PR", commits: [], records: [], rounds: [], verdicts: [],
+    display, decisions: [], notChecked: [], notes: {},
+  });
+  expect(page).toMatch(/\| judge \| `[^`]+` \| The judge prompt quotes a test token \| \| \| not accepted \|/);
 });
 
 test("an accepted judge gap still passes a conditional gap when the judge is unavailable for a cause other than the guard", async () => {
