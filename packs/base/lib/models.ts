@@ -32,10 +32,12 @@ export function modelSessionEnv(env: Record<string, string | undefined>) {
   return rest;
 }
 
-export function leanClaudeEnv(home: string, env: Env): Env {
+export function leanClaude(argv: string[], home: string, env: Env): { argv: string[]; env: Env } {
   // Only an absolute config dir counts: an empty or relative one would read settings from the checkout under review.
   const configured = env.CLAUDE_CONFIG_DIR;
   const path = join(configured && isAbsolute(configured) ? configured : join(home, ".claude"), "settings.json");
-  const settings = existsSync(path) ? ((JSON.parse(readFileSync(path, "utf8")) as { env?: Env }).env ?? {}) : {};
-  return { ...env, ...settings, CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" };
+  const settings = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) as { env?: Env; apiKeyHelper?: unknown } : {};
+  const [binary = "claude", ...rest] = argv;
+  const keyHelper = typeof settings.apiKeyHelper === "string" ? ["--settings", JSON.stringify({ apiKeyHelper: settings.apiKeyHelper })] : [];
+  return { argv: [binary, ...keyHelper, ...rest], env: { ...env, ...settings.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" } };
 }

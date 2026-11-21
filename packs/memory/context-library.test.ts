@@ -489,6 +489,27 @@ console.log(JSON.stringify({ type: "result", is_error: false, structured_output:
     expect(readFileSync(join(machine.checkout, notePath), "utf8")).toBe(planning());
   });
 
+  test("the capture agent gets the key helper of the user's settings in front of its command", async () => {
+    const home = temp.make("capture-home-");
+    write(home, { ".claude/settings.json": JSON.stringify({ apiKeyHelper: "fake-proxy-key-helper" }) });
+    const bin = temp.make("claude-bin-");
+    const seenFile = join(bin, "seen.json");
+    writeFileSync(join(bin, "claude"), `#!/usr/bin/env bun
+await Bun.stdin.text();
+await Bun.write(${JSON.stringify(seenFile)}, JSON.stringify(process.argv.slice(2, 4)));
+console.log(JSON.stringify({ is_error: false, structured_output: { path: "notes/a.md", text: "A note" } }));
+`, { mode: 0o755 });
+    const { captureAgent } = await import("./lib/library/capture.ts");
+    const configDir = process.env.CLAUDE_CONFIG_DIR;
+    delete process.env.CLAUDE_CONFIG_DIR;
+    try {
+      expect(await captureAgent({ role: "survey", work: "", provider: "claude", model: "claude-sonnet", effort: "high" }, home, join(bin, "claude"))("Write it.")).toEqual({ path: "notes/a.md", text: "A note" });
+    } finally {
+      if (configDir !== undefined) process.env.CLAUDE_CONFIG_DIR = configDir;
+    }
+    expect(JSON.parse(readFileSync(seenFile, "utf8"))).toEqual(["--settings", '{"apiKeyHelper":"fake-proxy-key-helper"}']);
+  });
+
   test("an agent answer that is not a note fails the capture with its last words", async () => {
     const machine = await library();
     await hedgeContext(machine, ["sync"]);
