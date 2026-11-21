@@ -157,8 +157,8 @@ async function judgeHead(head: ProofIdentity, checked: Checked, context: GateCon
   const gap = weighedGap && withBrokenConditions(weighedGap, outcome.broken);
   const unchecked = outcome.held ? [...new Set(known.conditions.map(({ id }) => id))] : [];
   if (gap?.acceptance && unchecked.length) {
-    const line = `not accepted (the secret guard held the judge prompt, so no judge checked the condition of ${unchecked.map((id) => `decision ${id}`).join(" and ")})`;
-    const lines = [...outcome.lines, `judge gap: ${line}: ${gap.reason}. ${voidBroken(unchecked)}`];
+    const line = `not accepted (the secret guard held the judge prompt, so no judge checked the condition of ${unchecked.map(conditionName).join(" and ")})`;
+    const lines = [...outcome.lines, `judge gap: ${line}: ${gap.reason}. ${endBroken(unchecked)}`];
     return { code: 3, lines, covered: "", judge: verdict(lines, judgeGapProof(head.commit, gap)), reason: `judge gap: ${line}` };
   }
   if (gap?.acceptance) {
