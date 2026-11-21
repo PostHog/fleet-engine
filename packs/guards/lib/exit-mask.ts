@@ -155,7 +155,7 @@ function reachOf(program: Program, start: number): Reach {
   }
   const after = commands[end].after;
   const next = end + 1;
-  if (after === undefined) return next === commands.length ? "exit" : { how: "what follows it" };
+  if (after === undefined) return "exit";
   if (after === "&") return { how: "running it in the background with `&`" };
   if (after === "||") return reporter(commands[next], sameLevel(next), readsStatus, true) ?? { how: "the `||` after it" };
   if (!chained && separators.has(after) && setting(commands, start, setsErrexit)) return "exit";

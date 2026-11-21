@@ -109,6 +109,8 @@ describe("the exit-status mask guard", () => {
     "( set -e ); git push; echo done",
     "git push; ( echo \"exit $?\" ) > /dev/null",
     "git push & wait",
+    "git push & echo \"exit $?\"",
+    "git push; echo \"exit $?\" | grep -c x",
     "git push 2>&1 | tee push.log; echo \"exit $?\"",
     "git push | cat; true; echo \"${PIPESTATUS[0]}\"",
     "git push > push.log 2>&1; cat push.log; echo \"exit $?\"",
