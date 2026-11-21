@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { lastGateRun } from "./proof.ts";
 import { checkout, cleanFixtures, reviewHead, verdict } from "./proof-testing.ts";
 
@@ -168,22 +168,18 @@ test("while --wait waits, the gate record says CI is still running", async () =>
   expect(seen[0]).toEqual({ code: 75, reason: "CI is still running: waiting on: test" });
 });
 
-test("--wait keeps waiting when one read of GitHub fails", async () => {
+test("--wait stops at a failed read of GitHub and names it", async () => {
   const { pr } = await reviewed();
   pr.ci([{ name: "test", bucket: "pending" }]);
-  const github = join(dirname(pr.home), "github");
-  let pauses = 0;
   pr.panel.onPause = async () => {
-    pauses++;
-    if (pauses === 1) pr.pullRequestState({ unreadable: "gh: Bad Gateway (HTTP 502)" });
-    if (pauses === 2) {
-      pr.whileGithubReadsPull(`rm -f "${github}/pull-error-42"`);
-      pr.ci([{ name: "test", bucket: "pass" }]);
-    }
+    pr.clock.now = new Date(pr.clock.now.getTime() + 30_000);
+    pr.pullRequestState({ unreadable: "gh: Bad credentials (HTTP 401)" });
   };
+  const started = pr.clock.now.getTime();
   const gate = await pr.hedge("gate", "--wait", "10");
-  expect(gate.code).toBe(0);
-  expect(lastLine(gate.output)).toStartWith("gate: pass (");
+  expect(gate.code).toBe(1);
+  expect(pr.clock.now.getTime() - started).toBe(30_000);
+  expect(lastLine(gate.output)).toBe("gate: fail (exit 1): head: cannot read the PR head on GitHub (gh api repos/example/product/pulls/42 failed (gh: Bad credentials (HTTP 401)))");
 });
 
 test("--wait ends on CI that turns red and fails the gate on it", async () => {

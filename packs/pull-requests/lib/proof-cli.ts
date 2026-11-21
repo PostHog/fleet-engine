@@ -418,8 +418,8 @@ the commit is not the PR's head on GitHub, its checks are red,
 or the judge failed or was unavailable; 3 means only unaccepted gaps remain; 75 means only CI that is still running
 holds the gate. No gap waives the head check. The last line is the verdict: on a pass it names what it covered, and
 on any other exit it names the check that held the gate, also when the gate itself fails with an error. --wait
-<minutes>, at most 120, waits up to that long for running CI to finish, reading CI every 30 seconds, and keeps waiting
-through a failed read of GitHub. Then it runs the gate again, and still exits 75 when CI runs past the limit. While it
+<minutes>, at most 120, waits up to that long for running CI to finish, reading CI every 30 seconds, and stops early
+when a read of GitHub fails. Then it runs the gate again, and still exits 75 when CI runs past the limit. While it
 waits, the gate record holds exit 75. A run longer than your shell's limit belongs in the background. hedge reads the PR and its CI over GitHub's REST API. Only finding the PR of the
 checkout without --repo and --pr uses gh pr view; pass both when GraphQL is out. A check that ran more than once
 counts with its newest run from each app, as GitHub's required checks do. The
@@ -1135,7 +1135,6 @@ function waitMinutes(value: string | undefined) {
 }
 
 const ciPollInterval = 30_000;
-const stillRunning = new Set(["pending", "unknown"]);
 
 async function untilCiFinishes(head: ProofIdentity, context: CommandContext, minutes: number) {
   const now = () => (context.now?.() ?? new Date()).getTime();
@@ -1144,7 +1143,7 @@ async function untilCiFinishes(head: ProofIdentity, context: CommandContext, min
   while (now() < deadline) {
     await pause();
     if (now() >= deadline) return;
-    if (!stillRunning.has(ciOf(context.home, head, context.run, new Date(now())).state)) return;
+    if (ciOf(context.home, head, context.run, new Date(now())).state !== "pending") return;
   }
 }
 
