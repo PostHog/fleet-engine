@@ -2,7 +2,7 @@ import { join } from "node:path";
 import type { Finding, Plan } from "../../pack/types.ts";
 import type { AdapterResult } from "../../reconciler/apply.ts";
 import { readFieldRecord, type FieldRecord } from "../provider-config/adapter.ts";
-import { checkPath, get, isDocument, json, same, samePath, type Document, type Field } from "../provider-config/fields.ts";
+import { checkPath, get, json, same, type Document, type Field } from "../provider-config/fields.ts";
 import { readState, writeWithBackups, type Write } from "../provider-config/store.ts";
 import { holds, isProviderInstance, reconcileKeys, type Reconciled } from "./keys.ts";
 import type { T3Rpc } from "./port.ts";
@@ -69,15 +69,15 @@ export async function reconcileSettings(plan: Plan, home: string, options: Optio
       const effective = await readT3Settings(options.rpc);
       const merged = reconcileKeys(effectiveView(current, old, effective), old, fields, { adopt, outage: options.outage, matches: holds });
       keptFinding(target, merged, result);
-      const sent = await throughServer(options.rpc, merged, effective, options.dryRun, result);
-      const record = merged.record.flatMap((field) => (sent.refused.includes(field) ? heldBefore(field, effective, old) : [sent.stillOn.find((item) => samePath(item.path, field.path)) ?? field]));
+      const refused = await throughServer(options.rpc, merged, effective, options.dryRun, result);
+      const record = merged.record.flatMap((field) => (refused.includes(field) ? heldBefore(field, effective) : [field]));
       if (record.length) next[target] = record;
       continue;
     }
     const merged = reconcileKeys(current, old, fields, { adopt, outage: options.outage });
     keptFinding(target, merged, result);
     if (merged.record.length) next[target] = merged.record;
-    const reason = [merged.changed.length ? `set ${merged.changed.join(", ")}` : "", merged.removed.length ? `remove ${merged.removed.join(", ")}` : "", merged.disabled.length ? `turn off ${merged.disabled.map(name).join(", ")}` : ""].filter(Boolean).join("; ");
+    const reason = [merged.changed.length ? `set ${merged.changed.join(", ")}` : "", merged.removed.length ? `remove ${merged.removed.join(", ")}` : ""].filter(Boolean).join("; ");
     if (reason) writes.push({ target, before, after: json.encode(merged.document), reason });
   }
   if (options.dryRun) {
@@ -99,10 +99,8 @@ function effectiveView(file: Document, old: Field[], effective: Document): Docum
 
 const name = (field: Field) => field.path.join(".");
 const instanceId = (field: Field) => field.path[1]!;
-const off = { enabled: false };
 
-function heldBefore(field: Field, effective: Document, old: Field[]): Field[] {
-  if (isProviderInstance(field.path)) return old.filter((item) => samePath(item.path, field.path));
+function heldBefore(field: Field, effective: Document): Field[] {
   const value = get(effective, field.path);
   return value === undefined ? [] : [{ ...field, value }];
 }
@@ -111,20 +109,16 @@ function keptFinding(target: string, merged: Reconciled, result: AdapterResult) 
   if (merged.kept.length) result.findings.push(finding(`kept:${target}`, `Kept your ${merged.kept.join(", ")} in ${target}. Run hedge apply --adopt ${target} to take Hedge's value.`));
 }
 
-type Sent = { refused: Field[]; stillOn: Field[] };
-
 const takes = (field: Field, actual: unknown) => (isProviderInstance(field.path) ? same : holds)(actual, field.value);
 
-async function throughServer(rpc: T3Rpc, merged: Reconciled, effective: Document, dryRun: boolean, result: AdapterResult): Promise<Sent> {
+async function throughServer(rpc: T3Rpc, merged: Reconciled, effective: Document, dryRun: boolean, result: AdapterResult): Promise<Field[]> {
   if (merged.removed.length) result.findings.push(finding("t3:dropped", `Hedge no longer sets ${merged.removed.join(", ")} in T3 Code. T3 Code keeps the current value; change it in T3 Code's settings if you like.`));
   const changed = merged.applied.filter((field) => !takes(field, get(effective, field.path)));
-  const disabling = merged.disabled.filter((field) => isDocument(get(effective, field.path)) && !holds(get(effective, field.path), off));
   if (dryRun) {
     if (changed.length) result.findings.push(finding("t3:settings", `T3 Code needs these settings: ${changed.map(name).join(", ")}.`, "apply"));
-    if (disabling.length) result.findings.push(finding("t3:instances", `T3 Code needs these provider instances turned off: ${disabling.map(instanceId).join(", ")}.`, "apply"));
-    return { refused: [], stillOn: [] };
+    return [];
   }
-  if (!changed.length && !disabling.length) return { refused: [], stillOn: [] };
+  if (!changed.length) return [];
   const patch = changed.filter((field) => !isProviderInstance(field.path));
   const sent: Field[] = [];
   let failure: unknown;
@@ -137,10 +131,6 @@ async function throughServer(rpc: T3Rpc, merged: Reconciled, effective: Document
       await upsertInstance(rpc, instanceId(field), field.value);
       sent.push(field);
     }
-    for (const field of disabling) {
-      await upsertInstance(rpc, instanceId(field), { ...(get(effective, field.path) as Document), ...off });
-      sent.push(field);
-    }
   } catch (error) {
     failure = error;
   }
@@ -150,18 +140,14 @@ async function throughServer(rpc: T3Rpc, merged: Reconciled, effective: Document
     return undefined;
   });
   const refused = changed.filter((field) => (after ? !takes(field, get(after, field.path)) : !sent.includes(field)));
-  const stillOn = disabling.filter((field) => (after ? !holds(get(after, field.path), off) : !sent.includes(field)));
   const taken = changed.filter((field) => !refused.includes(field));
-  const turnedOff = disabling.filter((field) => !stillOn.includes(field));
   if (taken.length) result.actions.push({ target: "t3 settings", operation: "replace", reason: `set ${taken.map(name).join(", ")}` });
-  if (turnedOff.length) result.actions.push({ target: "t3 settings", operation: "replace", reason: `turn off ${turnedOff.map(name).join(", ")}` });
   if (refused.length) result.findings.push(finding("t3:settings", `T3 Code did not take ${refused.map(name).join(", ")}. Run hedge apply again; if it stays, set it in T3 Code's settings.`, "apply"));
-  if (stillOn.length) result.findings.push(finding("t3:instances", `T3 Code did not turn off ${stillOn.map(instanceId).join(", ")}. Run hedge apply again; if it stays, turn it off in T3 Code's settings.`, "apply"));
   if (failure !== undefined || lost !== undefined) {
     result.failed = true;
     result.findings.push(finding("t3:server", failure !== undefined ? `T3 Code refused a settings write (${(failure as Error).message}). Run hedge apply again.` : `Hedge could not read back the settings T3 Code took (${(lost as Error).message}). Run hedge apply again.`, "apply"));
   }
-  return { refused, stillOn };
+  return refused;
 }
 
 async function upsertInstance(rpc: T3Rpc, instanceId: string, instance: unknown) {
