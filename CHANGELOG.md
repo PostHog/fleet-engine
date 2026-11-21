@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Closing-line auto-snooze removed
+
+- Removed the `parking` workflow of the Orchestration pack, its six settings
+  (`orchestration.waitMark`, `orchestration.snoozeMark`, `orchestration.checkMark`,
+  `orchestration.doneMark`, `orchestration.waitSnoozeDays`, and
+  `orchestration.timeZone`), the Stop hook's auto-snooze and detached
+  `settle-after` process, and the closing-mark exemptions in the question,
+  background-task, and proof stop checks. The Stop hook reads T3 only.
+- Removed the 3-day re-snooze instruction and self-snooze (`snoozedAt`)
+  heuristic from `review-wait`, and removed the wait-snooze advice from
+  `settle-guard`. Any active snooze now counts as the person's own snooze.
+- Pin protection and remote `hedge pr settle-check` stay in `settle-guard`:
+  agents still cannot settle or snooze a pinned thread, and may snooze an
+  unpinned one when asked.
+
 ### A final read never reads nothing
 
 - `hedge proof review --scope final` refuses a final read when the commits

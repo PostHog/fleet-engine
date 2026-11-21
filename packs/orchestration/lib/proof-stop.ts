@@ -2,7 +2,6 @@ import { realpath } from "node:fs/promises";
 import { matchThread, type PullRequestWatch, type ShellThread } from "../../base/lib/t3/index.ts";
 import { ownedPullRequests, subagentParent } from "../../pull-requests/lib/pr-owners.ts";
 import { lastGateRun } from "../../pull-requests/lib/proof.ts";
-import { closesOn, closingSettings } from "./closing-marks.ts";
 import { needsHuman } from "./lanes.ts";
 import { personName } from "./prose-question.ts";
 
@@ -166,9 +165,7 @@ export async function proofStop(event: ProofStopEvent, options: ProofStopOptions
 
 async function check(event: ProofStopEvent, options: ProofStopOptions, signal: AbortSignal): Promise<ProofStopBlock | undefined> {
   const { threadId, home } = options;
-  const { marks } = closingSettings(home);
-  const message = event.last_assistant_message ?? "";
-  if (event.stop_hook_active || !threadId || !event.cwd || waitsInClaude(event) || needsHuman(message) || closesOn(message, marks, ["snooze"])) return undefined;
+  if (event.stop_hook_active || !threadId || !event.cwd || waitsInClaude(event) || needsHuman(event.last_assistant_message ?? "")) return undefined;
   const processes = options.processes ?? realProcesses;
   if (nestedSession(await processes.table(signal), processes.pid)) return undefined;
   const { threads } = await options.shell();
@@ -192,7 +189,7 @@ async function check(event: ProofStopEvent, options: ProofStopOptions, signal: A
   const others = rest.length ? ` Also owed: ${rest.map((item) => item.pr).join(", ")}.` : "";
   return {
     decision: "block",
-    reason: `Hedge blocked this stop: your PR is not proven. ${first.step}.${others} If you are parking for ${person}, ask with the question tool or end with a \`NEEDS_HUMAN:\` line. If ${person} parked the PR, end on ${marks.snooze} with the park date. `
+    reason: `Hedge blocked this stop: your PR is not proven. ${first.step}.${others} If you are parking for ${person}, ask with the question tool or end with a \`NEEDS_HUMAN:\` line. `
       + `If this turn only answered ${person} and the work is not finished, say what is still owed and end the turn again.`,
   };
 }
