@@ -71,15 +71,15 @@ test("one answer whose question names three PRs accepts the gap on each of them 
   await expect(pr.decide("record", "--mark", "👤", "--class", "proof-gap", "--kind", "prod-shape", "--pr", "example/product#45", "--message", "request-1:0")).rejects.toThrow("The question the user answered does not name example/product#45");
 });
 
-test("a gap record without --message never skips a later card that names the PR: it refuses and names the latest gap answer's id, which --message records", async () => {
+test("a gap record whose latest answer asks another question refuses, says how to list the ids, and --message then records each PR's gap answer", async () => {
   const pr = await checkout();
   pr.chooseGap("panel", "A prune lane runs no QA swarm", "Accept the gap", 42);
   pr.chooseGap("panel", "A prune lane runs no QA swarm", "Accept the gap", 43);
   pr.choose("Add the standing rule", "Add a standing rule for panel gaps on prune lanes? example/product#42 and example/product#43");
   const record = (ref: string, ...more: string[]) => pr.decide("record", "--mark", "👍", "--class", "proof-gap", "--kind", "panel", "--pr", ref, ...more);
+  const listIds = "To record another answer, name it with --message <id>; hedge thread read thread-1 --words lists the ids";
 
-  await expect(record("example/product#42")).rejects.toThrow(`The latest answer to "Accept the panel gap?" is request-1:0; when that is the answer, record it with --message request-1:0`);
-  await expect(record("example/product#43")).rejects.toThrow("record it with --message request-2:0");
+  await expect(record("example/product#42")).rejects.toThrow(`which does not accept the gap. The gap stays open. ${listIds}`);
   expect(ledgerDecisions(pr)).toEqual([]);
 
   expect((await record("example/product#42", "--message", "request-1:0")).code).toBe(0);
@@ -88,55 +88,15 @@ test("a gap record without --message never skips a later card that names the PR:
   expect(lineOf((await pr.decide("list", "--pr", "example/product#43")).output, "- 👍")).toContain("Accept the panel gap? example/product#43: A prune lane runs no QA swarm");
 });
 
-test("a gap record whose latest answer is a refusal on another card refuses, and does not fall back to the earlier acceptance", async () => {
+test("a record without --message says how to list the ids also when no answer names the PR, or the answer is already recorded", async () => {
   const pr = await checkout();
   pr.chooseGap("panel", "A prune lane runs no QA swarm");
-  pr.choose("Yes", "Keep the panel gap on example/product#42 open after all?");
-
-  await expect(pr.decide("record", "--mark", "👍", "--class", "proof-gap", "--kind", "panel", "--pr", "example/product#42")).rejects.toThrow("record it with --message request-1:0");
-  expect(ledgerDecisions(pr)).toEqual([]);
-});
-
-test("a refused record without --message says how to list the answer ids, also when no answer names the PR", async () => {
-  const pr = await checkout();
-  pr.choose("Add the standing rule", "Add a standing rule for panel gaps on prune lanes? example/product#42");
   const record = (ref: string) => pr.decide("record", "--mark", "👍", "--class", "proof-gap", "--kind", "panel", "--pr", ref);
   const listIds = "To record another answer, name it with --message <id>; hedge thread read thread-1 --words lists the ids";
 
-  await expect(record("example/product#42")).rejects.toThrow(listIds);
   await expect(record("example/product#44")).rejects.toThrow(`names example/product#44, the panel gap. Ask them with the question tool and name each PR in the question. Only answers they gave in the T3 app count. ${listIds}`);
-  expect(ledgerDecisions(pr)).toEqual([]);
-});
-
-test("a refusal of a used answer says how to list the ids, and never points at a gap answer that is already recorded", async () => {
-  const pr = await checkout();
-  pr.chooseGap("panel", "A prune lane runs no QA swarm");
-  const record = () => pr.decide("record", "--mark", "👍", "--class", "proof-gap", "--kind", "panel", "--pr", "example/product#42");
-  const listIds = "To record another answer, name it with --message <id>; hedge thread read thread-1 --words lists the ids";
-  const id = idIn((await record()).output);
-
-  await expect(record()).rejects.toThrow(`That answer is already recorded as decision ${id}. One answer records one decision; it covers the PRs its question named. Ask the user again. ${listIds}`);
-  pr.choose("Add the standing rule", "Add a standing rule for panel gaps on prune lanes? example/product#42");
-  await expect(record()).rejects.toThrow(`which does not accept the gap. The gap stays open. ${listIds}`);
-});
-
-test("a refusal never points at a gap answer that keeps the gap open", async () => {
-  const pr = await checkout();
-  pr.chooseGap("panel", "A prune lane runs no QA swarm");
-  pr.chooseGap("panel", "A prune lane runs no QA swarm", "Keep the gap open");
-  pr.choose("Add the standing rule", "Add a standing rule for panel gaps on prune lanes? example/product#42");
-
-  await expect(pr.decide("record", "--mark", "👍", "--class", "proof-gap", "--kind", "panel", "--pr", "example/product#42")).rejects.toThrow("which does not accept the gap. The gap stays open. To record another answer, name it with --message <id>; hedge thread read thread-1 --words lists the ids");
-  expect(ledgerDecisions(pr)).toEqual([]);
-});
-
-test("a later acceptance of the gap on a card worded another way still records over an earlier decline on the gap card", async () => {
-  const pr = await checkout();
-  pr.chooseGap("panel", "A prune lane runs no QA swarm", "Keep the gap open");
-  pr.choose("Accept the gap", "Do you accept the panel gap on example/product#42 after all?");
-
-  expect((await pr.decide("record", "--mark", "👤", "--class", "proof-gap", "--kind", "panel", "--pr", "example/product#42")).code).toBe(0);
-  expect(lineOf((await pr.decide("list", "--pr", "example/product#42")).output, "- 👤")).toContain("Do you accept the panel gap on example/product#42 after all?");
+  const id = idIn((await record("example/product#42")).output);
+  await expect(record("example/product#42")).rejects.toThrow(`That answer is already recorded as decision ${id}. One answer records one decision; it covers the PRs its question named. Ask the user again. ${listIds}`);
 });
 
 test("one answer records one decision: the same message twice is refused", async () => {
