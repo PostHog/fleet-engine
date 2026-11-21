@@ -16,6 +16,7 @@ export type Command = {
   bare: string[];
   rawArgs: string[];
   rawPrefix: string[];
+  definesFunction?: true;
   keywords: string[];
   processSubstitutions: string[];
   inLoop: boolean;
@@ -470,8 +471,11 @@ export function parse(program: string, context: Context = { env: new Map(), inLo
     pipeline = [];
   };
 
+  let opened = false;
   for (const token of tokenize(program)) {
     if (!("operator" in token)) closedGroup = false;
+    const definition = opened && "operator" in token && token.operator === ")";
+    opened = "operator" in token && token.operator === "(";
     if ("word" in token && hereString) {
       stdin = { body: token.word.text, substitutions: token.word.substitutions };
       hereString = false;
@@ -483,6 +487,8 @@ export function parse(program: string, context: Context = { env: new Map(), inLo
       finishPipeline(token.operator === "(" || token.operator === ")" ? undefined : token.operator);
       if (token.operator === "(") scope = { parent: scope };
       if (token.operator === ")") scope = scope.parent ?? scope;
+      const named = definition ? pipelines.at(-1)?.at(-1) : undefined;
+      if (named) named.definesFunction = true;
     }
     if ("operator" in token) closedGroup = token.operator === ")";
   }

@@ -154,6 +154,10 @@ describe("the exit-status mask guard", () => {
     'exec > /dev/null; git push; echo "$?"',
     '{ exec 1>&-; } 2>/dev/null; git push; echo "$?"',
     'echo() { :; }; git push; echo "$?"',
+    "eval 'exec > /dev/null 2>&1'; git push; echo \"$?\"",
+    'printf \'exec > /dev/null\\n\' > quiet.sh; . ./quiet.sh; git push; echo "$?"',
+    'printf \'exec > /dev/null\\n\' > quiet.sh; source ./quiet.sh; git push; echo "$?"',
+    'echo () { :; }; git push; echo "$?"',
     'function echo { :; }; git push; echo "$?"',
     "IFS=0123456789; git push; echo $?",
     "git push; exit $? |& cat",
@@ -302,7 +306,7 @@ describe("the exit-status mask guard", () => {
     expect(refused(command)).toBe(true);
   });
 
-  test.each(["true | git push; echo \"exit=$?\"", "set -eo pipefail; true | git push > /dev/null 2>&1; echo done", "set -o pipefail; { echo main; } | xargs git push origin | cat; echo \"exit=$?\""])("allows the last stage's status or a pipefail pipe: %s", (command) => {
+  test.each(["( true ); git push > push.log 2>&1; echo \"exit=$?\"", "git commit -m 'Fix parse()' > commit.log 2>&1; echo \"exit=$?\"", "true | git push; echo \"exit=$?\"", "set -eo pipefail; true | git push > /dev/null 2>&1; echo done", "set -o pipefail; { echo main; } | xargs git push origin | cat; echo \"exit=$?\""])("allows the last stage's status or a pipefail pipe: %s", (command) => {
     expect(exitMaskRisk(command, "Robin")).toBeUndefined();
     expect(shellShowsEveryFailure(command)).toBe(true);
   });
