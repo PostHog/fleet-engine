@@ -227,7 +227,7 @@ const namesEscalate = (output: string) => /ESCALATE/.test(output) || /^[^a-z\n]*
 
 export function parseVerdict(output: string, model: string): ArbiterVerdict {
   const line = (output.split("\n").find((text) => text.trim()) ?? "").replace(/^[\s*`]+|[\s*`]+$/g, "");
-  if (line === "CONTINUE") return namesEscalate(output) ? { verdict: "unavailable", reason: "the answer says CONTINUE and also ESCALATE", model } : { verdict: "continue", reason: "", model };
+  if (/^CONTINUE(?::\s*\S.*)?$/.test(line)) return namesEscalate(output) ? { verdict: "unavailable", reason: "the answer says CONTINUE and also ESCALATE", model } : { verdict: "continue", reason: "", model };
   const escalate = /^ESCALATE:\s*(\S.*)$/.exec(line);
   if (escalate) return { verdict: "escalate", reason: escalate[1]!.replace(/\.$/, ""), model };
   return { verdict: "unavailable", reason: `unparseable answer: ${line.slice(0, 200)}`, model };
