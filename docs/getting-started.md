@@ -24,11 +24,12 @@ disk and a node with a 500 GB disk. When the template has no secret
 parameter, give every template parameter with its own `--parameter`, so you
 see each value Coder uses. Set the dotfiles
 parameter to the SSH address of your profile repo:
-`git@github.com:<login>/hedge-profile.git`, or
-`git@github.com:<login>/fleet-profile.git` when you have a profile from
-before the rename. Coder clones it with the workspace's Git SSH key, so a
+`git@github.com:<login>/<login>-hedge.git`, with your login in lower case in
+the repo name. When you have a profile from before, use its name, such as
+`git@github.com:<login>/hedge-profile.git` or
+`git@github.com:<login>/fleet-profile.git`. Coder clones it with the workspace's Git SSH key, so a
 private profile works. Its `https://github.com/` address fails on a private
-repo, because the box has no GitHub sign-in yet. `hedge setup` makes `hedge-profile` in step 2 when you
+repo, because the box has no GitHub sign-in yet. `hedge setup` makes `<login>-hedge` in step 2 when you
 have none. When setup prints another repo in step 2, such as a profile in a
 team's org, change the dotfiles parameter of each workspace to
 `git@github.com:<repo>.git` in the Coder web app: open the workspace, go to
@@ -46,8 +47,8 @@ two `coder schedule stop` lines, and `coder config-ssh`.
 
 ```sh
 coder login <your Coder URL>
-coder create hedge-hub --template <template> --preset none --parameter <disk parameter>=200 --parameter <dotfiles parameter>=git@github.com:<login>/hedge-profile.git --yes
-coder create hedge-node-1 --template <template> --preset none --parameter <disk parameter>=500 --parameter <dotfiles parameter>=git@github.com:<login>/hedge-profile.git --yes
+coder create hedge-hub --template <template> --preset none --parameter <disk parameter>=200 --parameter <dotfiles parameter>=git@github.com:<login>/<login>-hedge.git --yes
+coder create hedge-node-1 --template <template> --preset none --parameter <disk parameter>=500 --parameter <dotfiles parameter>=git@github.com:<login>/<login>-hedge.git --yes
 coder schedule stop hedge-hub manual
 coder schedule stop hedge-node-1 manual
 coder config-ssh --yes
@@ -105,10 +106,15 @@ the link on your Mac or your phone:
 | Claude | Your Claude account in the browser. Paste the code it shows back into the terminal. Only when your plan includes Claude. |
 | ChatGPT | The code from the terminal, on the page it prints. Only when your plan includes Codex. Setup checks the sign-in with a real request, because a stale sign-in still looks signed in. When your ChatGPT account or workspace turns device code sign-in off, turn it on in ChatGPT's settings under Security, or ask the workspace admin. Without it, run `ssh -L 1455:localhost:1455 coder.hedge-hub` on your Mac, run `codex login -c 'cli_auth_credentials_store="file"'` in that SSH session, open the link it prints on the Mac, and run setup again. |
 
-Setup creates the private repo `hedge-profile` in your GitHub account and saves
-your answers there. When a team pack you picked names a profile org, setup
-creates `hedge-profile-<login>` in that org instead, private to the org, where
-teammates may read it. If you already have a personal profile, setup keeps it
+Setup creates the private repo `<login>-hedge` in your GitHub account and
+saves your answers there. When a team pack you picked names a profile org,
+setup creates the repo with the same name in that org instead, private to the
+org, where teammates may read it. Setup shows the name before it creates the
+repo, and you can type another. It marks the repo with the GitHub topic
+`hedge-for-<login>`, so setup on your next machine finds it without the name.
+Setup first looks for a profile you already have, also with an older name
+such as `hedge-profile`, `hedge-profile-<login>` or `fleet-profile`, and
+keeps it with its name. If you already have a personal profile, setup keeps it
 and prints the two commands that move it to the org. Then it applies your
 packs to the hub and checks the result with `hedge doctor`. It ends with a
 screen that lists your packs and what runs by itself.
@@ -152,7 +158,7 @@ one as it starts:
 | Install Hedge | Nothing. It runs `get.sh` on the node at the engine ref your profile pins. |
 | Sign in to Coder | Nothing. It makes a token on the hub and signs the node in with it. |
 | Sign in to GitHub | Type the code that the node prints on `github.com/login/device`. |
-| Apply your profile | Nothing. It clones your `hedge-profile` repo on the node and applies it. |
+| Apply your profile | Nothing. It clones your profile repo on the node and applies it. |
 | Sign in to Claude | Open the link it prints, sign in, and paste the code back into the terminal. |
 | Sign in to ChatGPT | Open the link it prints and type the code it shows. |
 | Link T3 Connect | Open the link that `t3 up --connect` prints on the node and sign in. |

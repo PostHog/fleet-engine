@@ -37,7 +37,7 @@ describe("hedge setup sign-ins", () => {
     expect(box.starts[0]).toEqual(["gh", "auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--web", "--scopes", "repo,read:org,admin:public_key,admin:ssh_signing_key,workflow"]);
     expect(box.opened).toEqual(["https://github.com/login/device"]);
     expect(box.sleeps).toEqual([2000, 2000, 2000]);
-    expect(result.prompts).toEqual(["Press ↵ to keep them, or e to change them: ", "  Go ahead? (Y/n) "]);
+    expect(result.prompts).toEqual(["Press ↵ to keep them, or e to change them: ", "  Go ahead? (Y/n, or type another name for your profile repo) "]);
     expect(result.output).toContain("  Waiting for you. Nothing to press here: setup notices when you are done.");
     expect(result.output).toContain("  ✓ Sign in to GitHub: done");
   });

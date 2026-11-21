@@ -40,6 +40,17 @@ const scopes = "  - Token scopes: 'admin:public_key', 'admin:ssh_signing_key', '
 /** The bare repo that stands in for github.com/<repo> under a test home. */
 export const githubRepo = (home: string, repo: string) => join(home, "github-remotes", `${repo}.git`);
 
+const topicsFile = (home: string, repo: string) => join(githubRepo(home, repo), "topics");
+
+export const repoTopics = (home: string, repo: string) => (existsSync(topicsFile(home, repo)) ? readFileSync(topicsFile(home, repo), "utf8").split("\n").filter(Boolean) : []);
+
+export const markRepo = (home: string, repo: string, topic: string) => writeFileSync(topicsFile(home, repo), [...repoTopics(home, repo), topic, ""].join("\n"));
+
+export const ownedRepos = (home: string, owner: string) => {
+  const dir = join(home, "github-remotes", owner);
+  return existsSync(dir) ? readdirSync(dir).filter((name) => name.endsWith(".git")).map((name) => `${owner}/${name.slice(0, -4)}`).sort() : [];
+};
+
 /** Git with github.com rewritten to the bare repos; a clone keeps the rewrite, so later pushes from any code reach them too. */
 async function realGit(home: string, args: string[], cwd?: string): Promise<ExecResult> {
   const remotes = `${join(home, "github-remotes")}/`;
@@ -416,6 +427,8 @@ export function fakeMachine(home: string, polls: Partial<Record<SignInName, numb
       if (line === "gh api meta --jq .ssh_keys[]") return result(true, `${enterpriseHostKeys.join("\n")}\n`);
       if (line.startsWith("gh repo view ") && existsSync(githubRepo(home, command[3]!)) && command[3]!.split("/")[0] === options.lookupFails) return result(false, "HTTP 502: Bad Gateway");
       if (line.startsWith("gh repo view ")) return existsSync(githubRepo(home, command[3]!)) ? result(true, line.endsWith("--json visibility --jq .visibility") ? `${options.publicRepos?.includes(command[3]!) ? "PUBLIC" : "PRIVATE"}\n` : "") : result(false, "Could not resolve to a Repository");
+      if (line.startsWith("gh repo edit ") && command[4] === "--add-topic") return existsSync(githubRepo(home, command[3]!)) ? (markRepo(home, command[3]!, command[5]!), result(true)) : result(false, "Could not resolve to a Repository");
+      if (line.startsWith("gh repo list ")) return result(true, JSON.stringify(ownedRepos(home, command[3]!).filter((repo) => !(command.includes("private") && options.publicRepos?.includes(repo))).map((repo) => ({ nameWithOwner: repo, repositoryTopics: repoTopics(home, repo).length ? repoTopics(home, repo).map((name) => ({ name })) : null }))));
       if (line.startsWith("gh repo create ")) {
         const owner = command[3]!.split("/")[0]!;
         if (owner === options.createFails) return result(false, `GraphQL: you cannot create repos in ${owner}`);
@@ -717,12 +730,12 @@ export const machineFile = (home: string) => JSON.parse(readFileSync(join(home, 
 export const savedAnswers = (home: string) => JSON.parse(readFileSync(join(profilePath(home), "hedge.json"), "utf8"));
 
 /** The answers as pushed to the fake github.com. */
-export async function pushedAnswers(home: string, repo = "nora/hedge-profile") {
+export async function pushedAnswers(home: string, repo = "nora/nora-hedge") {
   return JSON.parse((await realGit(home, ["--git-dir", githubRepo(home, repo), "show", "main:hedge.json"])).output);
 }
 
 export async function changeOnFirstCommit(home: string, elsewhere: string, change: string) {
-  await spawnGit(home, "clone", "-q", githubRepo(home, "nora/hedge-profile"), elsewhere);
+  await spawnGit(home, "clone", "-q", githubRepo(home, "nora/nora-hedge"), elsewhere);
   const publish = join(elsewhere, "..", "publish.ts");
   writeFileSync(publish, `const [file, value] = process.argv.slice(2);\nconst profile = await Bun.file(file).json();\n${change}\nawait Bun.write(file, JSON.stringify(profile, null, 2) + "\\n");\n`);
   const changeElsewhere = (value: string) => `'${process.execPath}' '${publish}' hedge.json ${value}`;

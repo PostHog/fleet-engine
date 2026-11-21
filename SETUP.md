@@ -224,9 +224,11 @@ It installs agent rules, skills, and workflows on your hub and your nodes. A
 **workflow** is one way of working that agents follow, such as a draft pull
 request for every fix. A **pack** is a set of workflows that you turn on as
 a whole. Your answers go to your **profile**, a private GitHub repo named
-`hedge-profile`, so every box you add gets the same setup. A team pack can
-keep its members' profiles in the team's GitHub org instead, as
-`hedge-profile-<login>`, so teammates can read each other's setup.
+`<login>-hedge`, so every box you add gets the same setup. A team pack can
+keep its members' profiles in the team's GitHub org instead, with the same
+name, so teammates can read each other's setup. Setup proposes the name, and
+you can type another. A profile from before keeps its name, such as
+`hedge-profile` or `hedge-profile-<login>`.
 
 ## 4. The hub and the nodes
 
@@ -324,9 +326,12 @@ says what to do with a template parameter that holds one.
    start of a workspace applies their profile. Find it before you create:
    when `gh` works here, run
    `gh repo view <repo> --json nameWithOwner --jq .nameWithOwner` for
-   `<login>/hedge-profile`, then for `<login>/fleet-profile`, its name from
-   before the rename, and use the first that answers. Otherwise use
-   `<login>/hedge-profile`: `hedge setup` makes it in step 7. Until then,
+   `<login>/<login>-hedge`, then for the older names `<login>/hedge-profile`
+   and `<login>/fleet-profile`, and use the first that answers. A profile
+   with a name the person typed has the GitHub topic `hedge-for-<login>`:
+   `gh repo list <login> --json nameWithOwner,repositoryTopics` shows it.
+   Otherwise use `<login>/<login>-hedge`, with the login in lower case:
+   `hedge setup` makes it in step 7. Until then,
    the workspace's dotfiles script finds no repo and says so in its start
    log. That is expected. A team pack can keep the profile in its GitHub org
    instead; step 7 checks the repo again. Below, `<profile repo>` is the
@@ -556,7 +561,7 @@ Every command in this step runs on the hub over SSH. Wait until
 
    | Sign-in | What it is for |
    | --- | --- |
-   | GitHub | Once, with every permission Hedge needs: it creates their private `hedge-profile` repo, adds the hub's SSH key, and reads their org's packs. A code to type at a GitHub page. |
+   | GitHub | Once, with every permission Hedge needs: it creates their private profile repo, adds the hub's SSH key, and reads their org's packs. A code to type at a GitHub page. |
    | Claude | Claude Code on the hub uses their Claude plan. In a Terminal window, as above. |
    | ChatGPT | Codex on the hub uses their ChatGPT plan. A code to type at a ChatGPT page. Setup checks it with a real request. When the request fails for another reason, such as a spend cap, setup prints the reason and keeps the sign-in. When device code sign-in is off, setup says how to turn it on, or how to sign in in the browser of this machine over an SSH port forward instead. With own-account balancing on, setup does not need it, because Codex goes through the hub's proxy: setup leaves a `To do:` line instead. This sign-in is only for Codex on the box. The MCP gateway's ChatGPT sign-ins only let agents reach apps such as Slack, and the proxy keeps its own subscriptions. |
 
