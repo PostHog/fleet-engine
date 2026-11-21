@@ -1,6 +1,7 @@
 import { appendFileSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
+import { threadOfProcess } from "../runtime/active.ts";
 
 export type UsageProperties = Record<string, string | number | boolean>;
 export type UsageLine = { event: string; properties: UsageProperties; timestamp: string };
@@ -37,7 +38,7 @@ export function machineName(env: Env = Bun.env): string {
 }
 
 export function callerOf(env: Env = Bun.env, interactive = Boolean(process.stdin.isTTY)): "agent" | "person" | "job" {
-  if (env.CLAUDECODE || env.CODEX_THREAD_ID || env.CODEX_SANDBOX || env.T3CODE_THREAD_ID) return "agent";
+  if (env.CLAUDECODE || env.CODEX_THREAD_ID || env.CODEX_SANDBOX || threadOfProcess(env)) return "agent";
   return interactive ? "person" : "job";
 }
 

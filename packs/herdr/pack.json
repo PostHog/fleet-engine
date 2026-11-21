@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "name": "herdr",
+  "title": "Herdr",
+  "summary": "Herdr runs your threads as herdr-core terminals, and the Herdr app on your Mac and your phone shows which agent needs you.",
+  "day": "Your Slack reaction starts a thread on your devbox. It shows in the Hedge space of the Herdr app, and the Inbox on your phone shows it as blocked when the agent asks for a permission.",
+  "cost": "You install herdr-core on each box, and the Herdr app on your Mac and your phone. The app reaches each box over SSH, so your phone needs SSH to your boxes, for example through Tailscale. Set base.runtime to herdr, so Herdr starts your threads.",
+  "risk": "Herdr sees terminals, not T3 Code's records. Features that read who typed an answer in the app, or which pull requests a thread links, need T3 Code, so they wait while Herdr runs your threads.",
+  "instructions": "instructions.md",
+  "runtime": { "name": "herdr", "path": "runtime.ts" },
+  "checks": [
+    {
+      "id": "herdr-core",
+      "run": ["sh", "-c", "test -x \"$HOME/.local/bin/herdr-core\" || command -v hc >/dev/null"],
+      "say": "herdr-core is not installed, so Hedge cannot start threads in Herdr. Run curl -fsSL https://releases.herdr.dev/core/install.sh | sh, then hedge apply."
+    }
+  ]
+}

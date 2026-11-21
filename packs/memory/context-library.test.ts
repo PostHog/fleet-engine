@@ -10,6 +10,7 @@ import { hook } from "./hooks/context-recall.ts";
 import type { Agent } from "./lib/library/capture.ts";
 import type { Sources } from "./lib/library/source.ts";
 import { candidatesFrom, maxRecipients, parseRoutes, share, type Candidate, type OpenReport, type ShareDeps } from "./lib/library/share.ts";
+import type { RuntimeThread } from "../../src/sdk/runtime.ts";
 import { runGit } from "./lib/library/git.ts";
 
 isolateGit();
@@ -711,18 +712,18 @@ describe("the Slack capture handler", () => {
 });
 
 describe("sending a note to the open threads that need it", () => {
-  const work = (id: string, status = "running") => ({ id, title: `Thread ${id}`, project: "p", status, branch: null, pullRequests: [], messages: [], snoozedUntil: null, waiting: false, updatedAt: "2026-11-16T12:00:00Z" });
-  const reports: OpenReport[] = [{ host: "hub", work: [work("a"), work("b")], localEnvironmentId: "env-hub" }, { host: "box-2", work: [work("c")], environmentId: "env-2" }];
+  const work = (id: string, fields: Partial<RuntimeThread> = {}, link = `https://app.t3.codes/threads/env-hub/${id}`): RuntimeThread => ({ id, title: `Thread ${id}`, state: "working", url: link, ...fields });
+  const reports: OpenReport[] = [{ host: "hub", threads: [work("a"), work("b")] }, { host: "box-2", machine: "box-2", threads: [work("c", {}, "https://app.t3.codes/threads/env-2/c")] }];
   const candidates: Candidate[] = candidatesFrom(reports);
   const note = { title: "Standup 2026-11-16", url: "https://notes.example.com/blob/main/notes/standup.md", text: "Ada moves the queue to Postgres." };
 
   test("only open threads that can still work, on machines that answered, other than the asking thread, are candidates", () => {
-    const mixed: OpenReport[] = [{ host: "hub", work: [work("a"), work("gone", "cancelled"), work("self")] }, { host: "box-3", error: "did not answer" }];
+    const mixed: OpenReport[] = [{ host: "hub", threads: [work("a"), work("failed", { state: "error" }), work("self"), work("child", { parentId: "a" }), work("done", { closed: "settled" })] }, { host: "box-3", error: "did not answer" }];
     expect(candidatesFrom(mixed, ["self"]).map((thread) => thread.id)).toEqual(["a"]);
-    expect(candidates.map(({ id, environmentId, link }) => ({ id, environmentId, link }))).toEqual([
-      { id: "a", environmentId: undefined, link: "https://app.t3.codes/threads/env-hub/a" },
-      { id: "b", environmentId: undefined, link: "https://app.t3.codes/threads/env-hub/b" },
-      { id: "c", environmentId: "env-2", link: "https://app.t3.codes/threads/env-2/c" },
+    expect(candidates.map(({ id, machine, link }) => ({ id, machine, link }))).toEqual([
+      { id: "a", machine: undefined, link: "https://app.t3.codes/threads/env-hub/a" },
+      { id: "b", machine: undefined, link: "https://app.t3.codes/threads/env-hub/b" },
+      { id: "c", machine: "box-2", link: "https://app.t3.codes/threads/env-2/c" },
     ]);
   });
 

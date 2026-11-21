@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { threadOfProcess } from "../../../src/runtime/active.ts";
 import { runGh } from "./gh.ts";
 import { parseBlockerArgs, prBlockers } from "./pr-blockers.ts";
 import { liveDeps, organizeRefusal, parseSettleCheck } from "./organize-guard.ts";
@@ -59,7 +60,7 @@ export async function prCommand(args: string[], home: string, env: Env = Bun.env
     const { action, threadId } = parseSettleCheck(args.slice(1));
     return console.log(JSON.stringify({ refusal: (await organizeRefusal(action, threadId, home, liveDeps(), undefined, false)) ?? null })), 0;
   }
-  if (word === "handover") return console.log(JSON.stringify(await recordHandover(args.slice(1), home, env.T3CODE_THREAD_ID, now, () => readT3Threads(home)))), 0;
+  if (word === "handover") return console.log(JSON.stringify(await recordHandover(args.slice(1), home, threadOfProcess(env), now, () => readT3Threads(home)))), 0;
   if (args[0] === "review" || args[0] === "stamp" || args[0] === "forecast") return askReviewBot(parseReviewBotArgs(args[0], args.slice(1)));
   const report = args[0] === "size" ? await prSize(args.slice(1), process.cwd()) : args[0] === "blockers"
     ? await prBlockers(parseBlockerArgs(args.slice(1)), runGh, join(home, ".local/state/hedge/pr-blockers"), new Date())

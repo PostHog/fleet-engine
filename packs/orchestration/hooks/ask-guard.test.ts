@@ -7,9 +7,9 @@ import { tempDirs } from "../../../src/testing/git.ts";
 import { devbox, engineSource, resolveEngine, skillSources } from "../../../src/testing/packs.ts";
 import { dispatch } from "../../base/hooks/run.ts";
 import { asksForDecision } from "../lib/prose-question.ts";
-import type { ShellThread } from "../../base/lib/t3/index.ts";
+import type { ShellThread } from "../../t3/lib/client/index.ts";
 import { settleWhenRunEnds, stillParks } from "../lib/closing-line.ts";
-import { startT3Stub } from "../../../src/integrations/t3/testing.ts";
+import { startT3Stub } from "../../t3/lib/client/testing.ts";
 import { guardBackground, guardSend, guardStop, hiddenIn, hook, hookWith, spawnSettle, type IsHidden, type SendEvent, type SendGuardOptions, type StopEvent } from "./ask-guard.ts";
 
 const temp = tempDirs();

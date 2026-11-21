@@ -96,7 +96,7 @@ export async function handleTrigger(trigger: Trigger, deps: TriggerDeps): Promis
         entry.told = true;
         return true;
       });
-      if (tell) await reply(trigger, key, outcome.thread, deps, "Could not start a T3 thread. Hedge retries every minute for a day.");
+      if (tell) await reply(trigger, key, outcome.thread, deps, "Could not start a thread. Hedge retries every minute for a day.");
       return;
     }
     updateState(deps.statePath, (state) => {

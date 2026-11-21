@@ -1,0 +1,6 @@
+{
+  "schema": 1,
+  "name": "t3",
+  "summary": "A runtime that starts threads.",
+  "runtime": { "name": "t3", "path": "runtime.ts" }
+}

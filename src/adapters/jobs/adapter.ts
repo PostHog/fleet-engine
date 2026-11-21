@@ -13,24 +13,14 @@ import { fleetEngineInstalled } from "../../legacy.ts";
 import { labelPrefix, plist } from "./launchd.ts";
 import { engineCommand } from "../../reconciler/engine-command.ts";
 import { agentCopyTarget, jobsFolder, launcherScript, launcherTarget, logTarget } from "./launcher.ts";
-import { cronExpression, isService, isTimed, launchdTimer, t3Schedule, type T3Schedule, type TimedJob } from "./schedule.ts";
+import { cronExpression, isService, isTimed, launchdTimer, type TimedJob } from "./schedule.ts";
+import type { AgentTasks, ScheduledTask } from "../../sdk/runtime.ts";
+import type { SelectedTasks } from "../runtime/adapter.ts";
 import { systemdSafe, unit, unitName, unitTarget } from "./systemd.ts";
 
-export type HedgeTask = {
-  id: string;
-  title: string;
-  prompt: string;
-  enabled: boolean;
-  schedule: T3Schedule;
-  project: string;
-  modelRole: string;
-  workspaceStrategy: "worktree";
-  runtimeMode: NonNullable<PackJob["task"]>["runtimeMode"];
-};
+export type { AgentTasks, ScheduledTask };
 
-export type T3Tasks = { list(): Promise<HedgeTask[]>; upsert(task: HedgeTask): Promise<void>; setEnabled(id: string, enabled: boolean): Promise<void> };
-
-export type JobsOptions = { run?: CommandRunner; accountHome?: () => Promise<string | undefined>; engineRoot?: string; uid?: number; t3?: () => Promise<T3Tasks | undefined> };
+export type JobsOptions = { run?: CommandRunner; accountHome?: () => Promise<string | undefined>; engineRoot?: string; uid?: number; tasks?: () => Promise<SelectedTasks | undefined> };
 
 export const taskPrefix = "hedge:";
 const notFound = 113;
@@ -40,13 +30,15 @@ export function jobsAdapter(options: JobsOptions = {}): Adapter {
   const run = options.run ?? spawnRunner;
   const engineRoot = options.engineRoot ?? join(import.meta.dir, "..", "..", "..");
   const uid = options.uid ?? process.getuid?.() ?? 0;
-  const t3 = options.t3 ?? (async () => undefined);
+  const tasks = options.tasks ?? (async () => undefined);
   return {
     name: "jobs",
     targets: () => [],
     async apply(plan, { home, dryRun }) {
       const result: AdapterResult = { actions: [], findings: [] };
-      const osJobs = plan.jobs.filter((job) => job.runner !== "t3");
+      const selected = await tasks();
+      const timedTasks = selected && !selected.scheduler ? agentJobsAsTimers(plan, result) : [];
+      const osJobs = [...plan.jobs.filter((job) => job.runner !== "agent"), ...timedTasks];
       for (const job of plan.jobs) if (!jobId.test(job.id)) throw new Error(`job id ${job.id} of the ${job.pack} pack may hold only letters, digits, dots, dashes, and underscores`);
       const skipped = await skipOtherHome("jobs", "your scheduled jobs", home, options);
       if (skipped) return skipped;
@@ -63,7 +55,7 @@ export function jobsAdapter(options: JobsOptions = {}): Adapter {
           const cron = await reconcileCron(timed, only(scripts, timed), context, new Set(services.map((job) => job.id)), new Set(services.filter((job) => !systemd.running.has(job.id)).map((job) => job.id)));
           if (cron) await systemd.removeMoved();
         } else await reconcileLaunchd(osJobs, scripts, { ...context, uid });
-        await reconcileTasks(plan, await t3(), context);
+        if (!selected || selected.scheduler) await reconcileTasks(plan, selected, context);
         return result;
       };
       return dryRun ? reconcile() : withLock(home, reconcile);
@@ -321,21 +313,37 @@ async function reconcileSystemd(jobs: Array<Owned<PackJob>>, scripts: Scripts, {
   return done;
 }
 
-async function reconcileTasks(plan: Plan, client: T3Tasks | undefined, { home, dryRun, result, outage, gated }: Context) {
-  const jobs = plan.jobs.filter(isTimed).filter((job) => job.runner === "t3" && job.task);
+/** A runtime without a scheduler runs each scheduled agent prompt as a timed job that starts a thread, with a key for each run. */
+function agentJobsAsTimers(plan: Plan, result: AdapterResult): Array<Owned<PackJob>> {
+  return plan.jobs.filter(isTimed).filter((job) => job.runner === "agent" && job.task).flatMap((job) => {
+    const task = job.task!;
+    if (task.project === undefined) {
+      result.findings.push({ id: `task:${job.id}`, pack: job.pack, say: `The ${job.id} task needs a project. Set it with hedge set ${task.projectSetting}=<path>.`, repair: "human" });
+      return [];
+    }
+    const command = ["hedge", "threads", "start", "--key", `${taskPrefix}${job.id}`, "--each-run", "--title", `Hedge: ${job.id}`, "--role", task.modelRole, "--cwd", task.project, "--prompt", task.prompt];
+    return [{ ...job, runner: "os" as const, command, task: undefined }];
+  });
+}
+
+async function reconcileTasks(plan: Plan, selected: SelectedTasks | undefined, { home, dryRun, result, outage, gated }: Context) {
+  const jobs = plan.jobs.filter(isTimed).filter((job) => job.runner === "agent" && job.task);
+  const title = selected?.title ?? `the ${plan.runtime ?? "selected"} runtime`;
+  const client = selected?.tasks;
   if (!client) {
-    for (const job of jobs) result.findings.push({ id: `task:${job.id}`, pack: job.pack, say: `The ${job.id} task waits for T3 Code to run. The next hedge apply after T3 Code starts adds it.`, repair: "apply" });
+    const why = selected ? `${title} to run` : `a runtime that runs scheduled agent prompts`;
+    for (const job of jobs) result.findings.push({ id: `task:${job.id}`, pack: job.pack, say: `The ${job.id} task waits for ${why}. The next hedge apply after it runs adds the task.`, repair: "apply" });
     return;
   }
-  let existing: HedgeTask[];
+  let existing: ScheduledTask[];
   try {
     existing = await client.list();
   } catch (error) {
-    failed(result, { id: "tasks:t3", pack: "engine", say: `Could not read T3 Code's scheduled tasks: ${(error as Error).message}. Run hedge apply again.`, repair: "apply" });
+    failed(result, { id: "tasks:runtime", pack: "engine", say: `Could not read the scheduled tasks of ${title}: ${(error as Error).message}. Run hedge apply again.`, repair: "apply" });
     return;
   }
   const old = fleetEngineInstalled(home) ? existing.filter((task) => task.id.startsWith(fleetTaskPrefix) && task.enabled) : [];
-  for (const task of old) failed(result, { id: "tasks:fleet", pack: "engine", say: `The T3 Code task ${task.id} from before the rename is still on, so Hedge added no task. Run hedge retire-fleet, then hedge apply.`, repair: "human" });
+  for (const task of old) failed(result, { id: "tasks:fleet", pack: "engine", say: `The ${title} task ${task.id} from before the rename is still on, so Hedge added no task. Run hedge retire-fleet, then hedge apply.`, repair: "human" });
   if (old.length) return;
   for (const job of jobs) {
     const task = job.task!;
@@ -343,7 +351,7 @@ async function reconcileTasks(plan: Plan, client: T3Tasks | undefined, { home, d
       result.findings.push({ id: `task:${job.id}`, pack: job.pack, say: `The ${job.id} task needs a project. Set it with hedge set ${task.projectSetting}=<path>.`, repair: "human" });
       continue;
     }
-    const wanted: HedgeTask = { id: `${taskPrefix}${job.id}`, title: `Hedge: ${job.id}`, prompt: task.prompt, enabled: true, schedule: t3Schedule(job.schedule), project: task.project, modelRole: task.modelRole, workspaceStrategy: task.workspaceStrategy, runtimeMode: task.runtimeMode };
+    const wanted: ScheduledTask = { id: `${taskPrefix}${job.id}`, title: `Hedge: ${job.id}`, prompt: task.prompt, enabled: true, schedule: job.schedule, project: task.project, modelRole: task.modelRole, workspaceStrategy: task.workspaceStrategy, runtimeMode: task.runtimeMode };
     const current = existing.find((item) => item.id === wanted.id);
     if (current && Bun.deepEquals(current, wanted)) continue;
     if (dryRun) {
@@ -353,10 +361,10 @@ async function reconcileTasks(plan: Plan, client: T3Tasks | undefined, { home, d
     try {
       await client.upsert(wanted);
     } catch (error) {
-      failed(result, { id: `task:${job.id}`, pack: job.pack, say: `Could not add the ${job.id} task to T3 Code: ${(error as Error).message}`, repair: "apply" });
+      failed(result, { id: `task:${job.id}`, pack: job.pack, say: `Could not add the ${job.id} task to ${title}: ${(error as Error).message}`, repair: "apply" });
       continue;
     }
-    result.actions.push({ target: `t3 task ${wanted.id}`, operation: current ? "replace" : "create" });
+    result.actions.push({ target: `${selected!.name} task ${wanted.id}`, operation: current ? "replace" : "create" });
   }
   for (const task of existing) {
     if ((outage && !gated.has(task.id.slice(taskPrefix.length))) || !task.id.startsWith(taskPrefix) || !task.enabled || jobs.some((job) => `${taskPrefix}${job.id}` === task.id)) continue;
@@ -367,9 +375,9 @@ async function reconcileTasks(plan: Plan, client: T3Tasks | undefined, { home, d
     try {
       await client.setEnabled(task.id, false);
     } catch (error) {
-      failed(result, { id: `task:${task.id.slice(taskPrefix.length)}`, pack: "engine", say: `Could not turn off the ${task.id.slice(taskPrefix.length)} task in T3 Code: ${(error as Error).message}`, repair: "apply" });
+      failed(result, { id: `task:${task.id.slice(taskPrefix.length)}`, pack: "engine", say: `Could not turn off the ${task.id.slice(taskPrefix.length)} task in ${title}: ${(error as Error).message}`, repair: "apply" });
       continue;
     }
-    result.actions.push({ target: `t3 task ${task.id}`, operation: "remove", reason: "turned off" });
+    result.actions.push({ target: `${selected!.name} task ${task.id}`, operation: "remove", reason: "turned off" });
   }
 }

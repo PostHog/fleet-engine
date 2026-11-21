@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { inside } from "../../files/install.ts";
-import type { Action, Finding, Plan, Provider } from "../../pack/types.ts";
+import type { Action, AgentProvider, Finding, Plan, Provider } from "../../pack/types.ts";
 import { todoLines, type Adapter, type AdapterResult } from "../../reconciler/apply.ts";
 import { spawnRunner, type CommandRunner } from "../run.ts";
 import { codexHookTrust, isTrustOf } from "./codex-hooks.ts";
@@ -13,7 +13,7 @@ import { linkOnPath, optional, readState, withLock, writeWithBackups, type Write
 export type { CommandRunner } from "../run.ts";
 
 /** owns says which of the provider's keys live in this file. */
-type Target = { provider: Provider; path: string; format: Format; owns(path: string[]): boolean };
+type Target = { provider: AgentProvider; path: string; format: Format; owns(path: string[]): boolean };
 export type FieldRecord = { [target: string]: Field[] };
 type Merged = { record: Field[]; kept: string[]; reason: string; after?: string; document: Document; todo?: string };
 type FilesResult = AdapterResult & { plugins?: string[]; claudeEnabled?: Record<string, boolean>; marketplaces?: Record<string, string | null>; codexPlugins?: string[] };

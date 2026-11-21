@@ -178,7 +178,7 @@ async function askPacks(context: QuestionContext): Promise<StepOutcome> {
 async function oneByOne(terminal: Terminal, catalog: Catalog, current: string[]) {
   const aliases = catalogAliases(catalog);
   const packs: string[] = [];
-  for (const manifest of choosablePacks(catalog)) {
+  for (const manifest of choosablePacks(catalog).filter((pack) => !pack.runtime)) {
     const listed = current.filter((name) => packNamed(aliases, name) === manifest.name);
     terminal.print(`  ${packTitle(manifest)}: ${manifest.summary}`);
     if (await yesNo(terminal, "  Turn it on?", listed.length > 0)) packs.push(...(listed.length ? listed : [manifest.name]));

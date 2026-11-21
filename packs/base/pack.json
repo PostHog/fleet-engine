@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "name": "base",
-  "summary": "Every machine gets safety rules, the model table, T3 Code defaults, and the jobs that keep it current.",
+  "summary": "Every machine gets safety rules, the model table, and the jobs that keep it current.",
   "day": "Agents ask before they break things, pick the right model for each task, and every machine is up to date when you start.",
   "cost": "You set up nothing. Every Hedge machine gets it.",
   "risk": "Hedge owns its hooks in Claude Code and Codex. Hedge keeps a hook that you wrote yourself on the same event until you adopt Hedge's.",
@@ -10,10 +10,6 @@
     {
       "guide": "coding-standards",
       "path": "coding-standards.md"
-    },
-    {
-      "guide": "t3",
-      "path": "t3.md"
     }
   ],
   "codexRules": [
@@ -253,10 +249,10 @@
       "type": "string"
     },
     {
-      "key": "base.t3TimeZone",
-      "question": "Which time zone should T3 Code's service on Linux run in, so a scheduled task set to 03:00 runs at 03:00 there? Use an IANA name, such as Europe/Berlin. Leave it empty to keep the machine's zone.",
+      "key": "base.runtime",
+      "question": "Which agent runtime starts your threads and runs scheduled agent prompts? Give the runtime's name, such as t3 or herdr. Hedge turns on the pack that brings it.",
       "type": "string",
-      "default": "",
+      "default": "t3",
       "ask": "never"
     }
   ],
@@ -266,12 +262,6 @@
       "name": "Agent rules",
       "default": true,
       "sentence": "Agents confirm destructive actions, keep private data out of public repos, and pick the right model for each task."
-    },
-    {
-      "id": "t3-tuned",
-      "name": "T3 Code tuned",
-      "default": true,
-      "sentence": "Each thread gets its own worktree, and threads that hit a usage limit resume by themselves. A worktree without uncommitted changes is removed when its thread settles or after five days."
     },
     {
       "id": "nightly-updates",
@@ -286,19 +276,13 @@
       "sentence": "Every five minutes, Hedge asks each pack source that follows a branch, such as your skills repository, whether it moved. When it moved forward, Hedge updates the skills, guides, and instructions it brings. A source you edited, such as a changed skill, and a rewritten branch wait for you. Everything else waits for the nightly update."
     },
     {
-      "id": "linked-machines",
-      "name": "Linked machines",
-      "default": true,
-      "needs": [
-        "devbox"
-      ],
-      "sentence": "Your hub and your nodes see each other's threads."
-    },
-    {
       "id": "worktree-cleanup",
       "name": "Worktree cleanup",
       "default": true,
-      "sentence": "Every few minutes, Hedge removes idle worktrees whose work has merged."
+      "sentence": "Every few minutes, Hedge removes idle worktrees whose work has merged.",
+      "needs": [
+        "t3"
+      ]
     },
     {
       "id": "disk-guard",
@@ -516,139 +500,6 @@
         "codex",
         "both"
       ]
-    },
-    {
-      "provider": "t3",
-      "key": "defaultThreadEnvMode",
-      "value": "worktree",
-      "workflow": "t3-tuned"
-    },
-    {
-      "provider": "t3",
-      "key": "storageCleanup",
-      "workflow": "t3-tuned",
-      "value": {
-        "worktreeKeepWhen": "uncommitted-changes",
-        "worktreeAfterDays": 5,
-        "worktreeSettledAfterDays": 0,
-        "worktreeOnMerge": true,
-        "worktreeOnDelete": false,
-        "worktreeUnchanged": true,
-        "browserArtifactsAfterDays": 5,
-        "logsAfterDays": 5
-      }
-    },
-    {
-      "provider": "t3",
-      "key": "autoResumeLimitedThreads",
-      "value": true,
-      "workflow": "t3-tuned"
-    },
-    {
-      "provider": "t3",
-      "key": "snoozeLimitedThreads",
-      "value": true,
-      "workflow": "t3-tuned"
-    },
-    {
-      "provider": "t3",
-      "key": "continueThreadsAfterServerUpdate",
-      "value": true,
-      "workflow": "t3-tuned"
-    },
-    {
-      "provider": "t3",
-      "key": "sidebarAutoSettleAfterDays",
-      "value": 7,
-      "workflow": "t3-tuned"
-    },
-    {
-      "provider": "t3",
-      "key": "sidebarAutoSettleOnMerge",
-      "value": true,
-      "workflow": "t3-tuned"
-    },
-    {
-      "provider": "t3",
-      "key": "sidebarAutoSettleKeepPullRequests",
-      "value": true,
-      "workflow": "t3-tuned"
-    },
-    {
-      "provider": "t3",
-      "key": "defaultModelSelection",
-      "plans": [
-        "claude",
-        "both"
-      ],
-      "value": {
-        "instanceId": "claudeAgent",
-        "model": "claude-opus-5-5",
-        "options": [
-          {
-            "id": "effort",
-            "value": "high"
-          }
-        ]
-      }
-    },
-    {
-      "provider": "t3",
-      "key": "defaultModelSelection",
-      "plans": [
-        "codex"
-      ],
-      "value": {
-        "instanceId": "codex",
-        "model": "gpt-6.2-sol",
-        "options": [
-          {
-            "id": "reasoningEffort",
-            "value": "high"
-          }
-        ]
-      }
-    },
-    {
-      "provider": "t3",
-      "key": "textGenerationModelSelection",
-      "plans": [
-        "claude"
-      ],
-      "value": {
-        "instanceId": "claudeAgent",
-        "model": "claude-haiku-5-5",
-        "options": [
-          {
-            "id": "effort",
-            "value": "low"
-          }
-        ]
-      }
-    },
-    {
-      "provider": "t3",
-      "key": "textGenerationModelSelection",
-      "plans": [
-        "codex",
-        "both"
-      ],
-      "value": {
-        "instanceId": "codex",
-        "model": "gpt-6.2-sol",
-        "options": [
-          {
-            "id": "reasoningEffort",
-            "value": "low"
-          }
-        ]
-      }
-    },
-    {
-      "provider": "t3",
-      "key": "linkedEnvironmentsEnabled",
-      "value": true,
-      "workflow": "linked-machines"
     }
   ],
   "files": [
@@ -868,6 +719,13 @@
   "subcommands": {
     "usage": [
       "flush"
+    ],
+    "threads": [
+      "list",
+      "read",
+      "send",
+      "start",
+      "machines"
     ]
   }
 }

@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { matchThread, type ShellThread, t3StatePath, t3UserData } from "../../base/lib/t3/index.ts";
+import { matchThread, type ShellThread, t3StatePath, t3UserData } from "../../t3/lib/client/index.ts";
 import { handOverFirst, readHandovers, unhandedLinks } from "../../pull-requests/lib/pr-owners.ts";
 import { closingLine, closingPark, closingSettings, killSwitch, type Marks } from "./closing-marks.ts";
 import { nestedSession, type ProcessTable } from "./proof-stop.ts";

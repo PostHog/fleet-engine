@@ -2,10 +2,11 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
-import { fleetAdapter, procProcesses, scheduledTasks, type FleetOptions } from "./adapters/fleet/adapter.ts";
+import { fleetAdapter, procProcesses, type FleetOptions } from "./adapters/fleet/adapter.ts";
+import { scheduledTasks } from "../packs/t3/lib/onboarding/fleet-tasks.ts";
 import { spawnRunner, type CommandRunner } from "./adapters/run.ts";
-import type { T3Server } from "./adapters/t3/port.ts";
-import { jobsAdapter, type HedgeTask, type T3Tasks } from "./adapters/jobs/adapter.ts";
+import type { T3Server } from "../packs/t3/lib/adapter/port.ts";
+import { jobsAdapter, type AgentTasks, type ScheduledTask } from "./adapters/jobs/adapter.ts";
 import { main } from "./cli.ts";
 import { filesAdapter, type Adapter } from "./reconciler/apply.ts";
 import { cliFixtures, repoRoot } from "./testing/cli.ts";
@@ -58,8 +59,8 @@ function machine(platform: NodeJS.Platform, home = oldInstall(), tasks?: FleetOp
   const processes = fakeProcesses();
   const run = runners(cron.run, systemd.run, launchd.run, docker.run, live?.run ?? processes.run);
   const fleet = fleetAdapter({ run, uid: live?.uid ?? 501, accountHome: async () => home, tasks: tasks ?? (async () => t3.client), sleep: live?.sleep ?? (async () => {}), processes: live ? live.processes : processes.list });
-  const hedgeTasks: T3Tasks = { list: async () => [...t3.items.values()] as HedgeTask[], upsert: async (task) => void t3.items.set(task.id, task), setEnabled: t3.client.setEnabled };
-  const adapters = (): Adapter[] => [fleet, filesAdapter, jobsAdapter({ run, engineRoot: repoRoot, uid: 501, accountHome: async () => home, t3: async () => hedgeTasks })];
+  const hedgeTasks: AgentTasks = { list: async () => [...t3.items.values()] as ScheduledTask[], upsert: async (task) => void t3.items.set(task.id, task), setEnabled: t3.client.setEnabled };
+  const adapters = (): Adapter[] => [fleet, filesAdapter, jobsAdapter({ run, engineRoot: repoRoot, uid: 501, accountHome: async () => home, tasks: async () => ({ name: "t3", title: "T3 Code", scheduler: true, tasks: hedgeTasks }) })];
   const engine = engineWithService();
   const clock = { now: Date.now, sleep: async (_ms: number) => {} };
   const hedge = async (args: string[]) => {

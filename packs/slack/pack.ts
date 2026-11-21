@@ -13,7 +13,7 @@ export default {
   sdk: 1,
   name: "slack",
   title: "Slack",
-  summary: "Your own message, reaction, or mention in Slack starts a T3 thread about it.",
+  summary: "Your own message, reaction, or mention in Slack starts a thread about it.",
   day: "A teammate reports a bug in a Slack thread. You react with your trigger emoji (default :t3code:), and a thread starts to find the cause, with the whole Slack thread as its context.",
   cost: "You need your own Slack app, which you make from a manifest in a few minutes. One small process stays connected to Slack.",
   risk: "Your Slack messages and the threads they belong to become agent prompts. Only your own messages, reactions, and mentions start a thread, and the prompt treats the rest of the Slack thread as data.",
@@ -48,7 +48,7 @@ export default {
       name: "Start a thread from Slack",
       default: true,
       settings: [userId, emoji, captureEmoji, nodes],
-      sentence: "Your own Slack message or reaction with your trigger emoji (default :t3code:), or a mention of your Slack app starts a T3 thread, and Slack shows you its link. With the context library of the Memory pack on, your :brain: reaction saves the thread to your notes.",
+      sentence: "Your own Slack message or reaction with your trigger emoji (default :t3code:), or a mention of your Slack app starts a thread, and Slack shows you its link. With the context library of the Memory pack on, your :brain: reaction saves the thread to your notes.",
       risk: "Your Slack messages and the threads they belong to become agent prompts. Only your own messages, reactions, and mentions start a thread.",
     });
     const hub = { on: "hub", when: threads } as const;

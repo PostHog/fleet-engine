@@ -1,5 +1,6 @@
 import { lstatSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { sep } from "node:path";
+import { threadOfProcess } from "../../../src/runtime/active.ts";
 import { answeredAt, heardInThread } from "../../pull-requests/lib/decision-cli.ts";
 import { thisMachine } from "../../pull-requests/lib/decision-ledger.ts";
 import type { ThreadWords } from "../../pull-requests/lib/proof-answers.ts";
@@ -63,7 +64,10 @@ type Request =
 type Answer = { ok: true; lines?: string[]; lanePut?: true; delivered?: Delivered[]; dropped?: string[]; revokes?: string[]; late?: string[] } | { ok: false; error: string };
 
 const machineOf = (context: SecretContext) => thisMachine(context.env);
-const threadOf = (context: SecretContext) => context.env.T3CODE_THREAD_ID ? { thread: context.env.T3CODE_THREAD_ID } : {};
+const threadOf = (context: SecretContext) => {
+  const thread = threadOfProcess(context.env);
+  return thread ? { thread } : {};
+};
 const slowCallMs = 180_000;
 const sshFailed = 255;
 

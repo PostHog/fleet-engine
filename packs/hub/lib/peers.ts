@@ -1,7 +1,7 @@
 import { existsSync, lstatSync, readdirSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
-import type { LinkedEnvironment } from "../../base/lib/t3/environments.ts";
+import type { LinkedEnvironment } from "../../t3/lib/client/environments.ts";
 import { tryLockPeer, userWaitMs, withPeerLock } from "./box-lock.ts";
 import { boxMarkerPath, forget, linkTarget, pairWith, readRecord, reviveLink, stopUnit, t3Of, t3Port, type Linker } from "./links.ts";
 import { changedFiles, ownedFiles, readIfThere, writeFiles } from "./managed.ts";

@@ -4,7 +4,7 @@ export type AiPlan = "claude" | "codex" | "both";
 export type Audience = "public" | "posthog";
 export type SettingValue = string | number | boolean;
 
-export const needValues = ["gh", "devbox", "always-on devbox", "hub", "coder", "posthog-org"] as const;
+export const needValues = ["gh", "devbox", "always-on devbox", "hub", "coder", "posthog-org", "t3"] as const;
 export type Need = (typeof needValues)[number];
 
 export type Preset = { id: string; name: string; blurb: string; packs: string[]; hubPacks?: string[]; workflows: Record<string, boolean> };
@@ -41,11 +41,11 @@ export type Workflow = {
 };
 
 /**
- * The payload of T3's scheduledTasks.upsert. The enclosing PackJob's id and
- * schedule are the task's: the Jobs adapter owns the task as hedge:<job id>
- * and maps { every, at } to T3's interval or fixed_time trigger.
+ * A scheduled agent prompt that the profile's runtime runs. The enclosing
+ * PackJob's id and schedule are the task's: the Jobs adapter owns the task as
+ * hedge:<job id>, and the runtime maps { every, at } to its own trigger.
  */
-export type T3Task = {
+export type AgentTask = {
   prompt: string;
   projectSetting: string;
   modelRole: string;
@@ -66,8 +66,8 @@ export type PackJob = Scope & {
   id: string;
   command: string[];
   schedule: TimerSchedule | { every: "always"; at?: undefined };
-  runner?: "os" | "t3";
-  task?: T3Task;
+  runner?: "os" | "agent";
+  task?: AgentTask;
   after?: string;
 };
 
@@ -103,15 +103,19 @@ export type PackStep = Scope & {
 };
 
 /**
- * A T3 Code project script that runs when T3 makes a worktree of a project
- * whose folder matches one of projects: an absolute path or one under ~/,
- * where * stands for one folder name. The T3 adapter owns it as
- * hedge-<pack>-<id>.
+ * A script that a runtime runs when it makes a worktree of a project whose
+ * folder matches one of projects: an absolute path or one under ~/, where *
+ * stands for one folder name. The runtime owns it as hedge-<pack>-<id>.
  */
 /** projectSetting names a setting whose value, a path, is one more project; resolve adds it to projects. */
-export type T3ProjectScript = Scope & { id: string; name: string; command: string; projects: string[]; projectSetting?: string };
+export type ProjectScript = Scope & { id: string; name: string; command: string; projects: string[]; projectSetting?: string };
 
-export type Provider = "claude" | "codex" | "t3";
+export type AgentProvider = "claude" | "codex";
+/** claude, codex, or the name of a runtime, whose own adapter writes the entry. */
+export type Provider = AgentProvider | (string & {});
+
+/** A pack that brings an agent runtime: path is a module whose default export is an AgentRuntime. */
+export type PackRuntime = { name: string; path: string };
 /** after: the id of a human step or a check of the same pack that must pass before the entry is written. */
 export type ConfigEntry = Scope & { provider: Provider; key: string; value: unknown; after?: string };
 
@@ -161,7 +165,8 @@ export type PackManifest = {
   checks?: PackCheck[];
   files?: PackFile[];
   codexRules?: CodexRules[];
-  t3ProjectScripts?: T3ProjectScript[];
+  projectScripts?: ProjectScript[];
+  runtime?: PackRuntime;
   handlers?: PackHandler[];
   served?: ServedService[];
   models?: Partial<Record<AiPlan, ModelRow[]>>;
@@ -256,7 +261,11 @@ export type Plan = {
   checks: Array<Owned<PackCheck>>;
   /** Every served service of the profile, on every node, with its port. */
   catalog?: CatalogEntry[];
-  t3ProjectScripts?: Array<Owned<T3ProjectScript>>;
+  projectScripts?: Array<Owned<ProjectScript>>;
+  /** Every runtime that a pack on this machine brings, by name. */
+  runtimes?: Record<string, { pack: string; path: string }>;
+  /** The runtime that starts threads and runs scheduled agent prompts: the value of base.runtime. */
+  runtime?: string;
   commands: Record<string, { pack: string; path: string; on?: "hub"; workflow?: string; subcommands?: string[] }>;
   handlers: Partial<Record<HandlerSeam, { pack: string; path: string; subcommands?: string[] }>>;
   models: ModelRow[];

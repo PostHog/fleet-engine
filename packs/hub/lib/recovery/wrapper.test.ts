@@ -1,8 +1,8 @@
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { startT3Stub, type T3Stub } from "../../../../src/integrations/t3/testing.ts";
-import type { ShellSnapshot } from "../../../../src/integrations/t3/threads.ts";
+import { startT3Stub, type T3Stub } from "../../../t3/lib/client/testing.ts";
+import type { ShellSnapshot } from "../../../t3/lib/client/threads.ts";
 import type { AvailableSource } from "../../../../src/pack/types.ts";
 import { tempDirs } from "../../../../src/testing/git.ts";
 import { devbox, engineSource, resolveEngine, skillSources } from "../../../../src/testing/packs.ts";

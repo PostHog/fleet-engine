@@ -5,10 +5,10 @@ import { writePrivateFile } from "../../../../src/files/private.ts";
 import { modelTable, type ModelRow } from "../../../base/lib/models.ts";
 import { proxyUrl } from "../cli-proxy-balance.ts";
 import type { Fetch } from "../../../mcp-gateway/lib/client.ts";
-import { availabilityPath, providers, readAvailability, type Availability, type Provider, type ProviderStatus } from "../../../base/lib/t3/index.ts";
+import { availabilityPath, providers, readAvailability, type Availability, type Provider, type ProviderStatus } from "../../../base/lib/availability.ts";
 import { isQuotaError } from "../../../base/lib/quota.ts";
 
-export type { Availability, Provider } from "../../../base/lib/t3/index.ts";
+export type { Availability, Provider } from "../../../base/lib/availability.ts";
 export type ProbeContext = { home: string; env: Record<string, string | undefined>; fetch: Fetch; now: () => number };
 export type ProvidersContext = ProbeContext & { print: (line: string) => void };
 

@@ -143,7 +143,6 @@ case "$6" in
   *"df -Pk"*) printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\n/dev/root 100 50 %s 50%% /\\n' "$(cat "${dir}/free-$host")"; printf 'Filesystem Inodes IUsed IFree IUse%% Mounted on\\n/dev/root 1000 %s %s 1%% /\\n' "$(cat "${dir}/iused-$host" 2>/dev/null || echo 10)" "$(cat "${dir}/ifree-$host" 2>/dev/null || echo 990)"; case "$6" in *hostname*) echo "machine-$host" ;; esac ;;
   *disk-sweep*) printf 'swept %s\n30.0G /home/%s/.cache\n' "$host" "$host"; cp "${dir}/after-$host" "${dir}/free-$host" ;;
 esac`);
-  script("t3", `echo "t3 $*" >> "${dir}/calls.log"\ncat > "${dir}/prompt.txt"`);
   return dir;
 }
 
@@ -156,10 +155,10 @@ async function hubHere(devboxes: Record<string, [number, number]>) {
   }
   writeHome(home, { ".config/hedge/machine.json": JSON.stringify({ schema: 1, role: "hub", devboxes: Object.keys(devboxes) }) });
   const engine = join(home, "engine");
-  writeHome(home, { "engine/hedge": `echo "local $*" >> "${bin}/calls.log"` });
+  writeHome(home, { "engine/hedge": `echo "local $*" >> "${bin}/calls.log"\n[ "$1 $2" = "threads start" ] && cat > "${bin}/prompt.txt"\nexit 0` });
   const env = {
     PATH: `${bin}:/usr/bin:/bin`, HOME: home, HEDGE_ENGINE_DIR: engine,
-    HEDGE_SETTINGS: JSON.stringify({ "hub.alias": "my-hub", "hub.diskSweepGigabytes": 15, "hub.diskAlertGigabytes": 10, "hub.threadFolder": "~/notes" }),
+    HEDGE_SETTINGS: JSON.stringify({ "hub.alias": "my-hub", "hub.diskSweepGigabytes": 15, "hub.diskAlertGigabytes": 10 }),
     HEDGE_MODELS: JSON.stringify([{ role: "lookup", work: "Lookups", provider: "claude", model: "small-model", effort: "medium" }]),
   };
   const lines: string[] = [];
@@ -168,18 +167,18 @@ async function hubHere(devboxes: Record<string, [number, number]>) {
   return { home, bin, context, lines, calls };
 }
 
-test("on the hub, hedge disk-watch reads each devbox over SSH, sweeps it with the engine launcher, and starts a T3 thread for the one still low", async () => {
+test("on the hub, hedge disk-watch reads each devbox over SSH, sweeps it with the engine launcher, and starts a thread for the one still low", async () => {
   const hub = await hubHere({ "box-1": [12, 30], "box-2": [12, 4] });
   expect(await diskWatchCommand([], hub.context)).toBe(0);
   const calls = hub.calls();
   expect(calls).toContain(`ssh -o BatchMode=yes -o ConnectTimeout=10 box-1 bash -lc ${quote(remoteHedge("disk-sweep --floor 15 --alert-floor 10"))} 2>&1`);
-  expect(calls.filter((call) => call.startsWith("t3 "))).toEqual([`t3 project add ${join(hub.home, "notes")}`, "t3 thread start --title box-2: 4.0G free, 99% of inodes free --provider claudeAgent --model small-model /tmp/notes -".replace("/tmp/notes", join(hub.home, "notes"))]);
+  expect(calls.filter((call) => call.startsWith("local threads "))).toEqual([`local threads start --key disk-watch:box-2:${new Date(start).toISOString().slice(0, 13)} --title box-2: 4.0G free, 99% of inodes free --role lookup`]);
   const prompt = readFileSync(join(hub.bin, "prompt.txt"), "utf8");
   expect(prompt).toContain("box-2 has 4.0G free, 99% of inodes free, below 10G");
   expect(prompt).toContain("swept box-2\n30.0G /home/box-2/.cache");
   expect(prompt).toContain("the largest folders the report names");
   expect(prompt).toContain(`ssh box-2 ${quote(`bash -lc ${quote(`df -h ~; df -i ~; ${remoteHedge("prune --dry-run --no-fetch --min-idle-hours 1")}`)}`)}`);
-  expect(calls.some((call) => call.startsWith("local"))).toBe(false);
+  expect(calls.filter((call) => call.startsWith("local") && !call.startsWith("local threads "))).toEqual([]);
 });
 
 test("a devbox sweep runs in a login shell, so the engine launcher finds the Bun that only the login profile puts on PATH", async () => {
@@ -206,7 +205,7 @@ test("the hub sweeps its own disk with its own launcher, without SSH", async () 
   const hub = await hubHere({});
   hub.context.localFree = () => 8 * gigabyte;
   expect(await diskWatchCommand([], hub.context)).toBe(0);
-  expect(hub.calls()).toEqual(["local disk-sweep --floor 15 --alert-floor 10", `t3 project add ${join(hub.home, "notes")}`, "t3 thread start --title my-hub: 8.0G free, 50% of inodes free --provider claudeAgent --model small-model " + join(hub.home, "notes") + " -"]);
+  expect(hub.calls()).toEqual(["local disk-sweep --floor 15 --alert-floor 10", `local threads start --key disk-watch:my-hub:${new Date(start).toISOString().slice(0, 13)} --title my-hub: 8.0G free, 50% of inodes free --role lookup`]);
 });
 
 test("a second disk watch while one runs does nothing, so the same machine is not alerted twice, and the next one after it ends runs", async () => {
@@ -215,9 +214,9 @@ test("a second disk watch while one runs does nothing, so the same machine is no
   expect(hub.calls()).toEqual([]);
   expect(hub.lines).toEqual(["The disk watch is already running, so this run ends."]);
   expect(await diskWatchCommand([], hub.context)).toBe(0);
-  expect(hub.calls().filter((call) => call.startsWith("t3 thread")).length).toBe(1);
+  expect(hub.calls().filter((call) => call.startsWith("local threads start")).length).toBe(1);
   expect(await diskWatchCommand([], hub.context)).toBe(0);
-  expect(hub.calls().filter((call) => call.startsWith("t3 thread")).length).toBe(1);
+  expect(hub.calls().filter((call) => call.startsWith("local threads start")).length).toBe(1);
 });
 
 test("hedge disk-watch runs only on the hub and takes only --dry-run", async () => {
@@ -233,7 +232,7 @@ test("a devbox out of inodes with bytes to spare is swept, and alerts while it s
   writeFileSync(join(hub.bin, "ifree-box-7"), "0");
   expect(await diskWatchCommand([], hub.context)).toBe(0);
   expect(hub.calls()).toContain(`ssh -o BatchMode=yes -o ConnectTimeout=10 box-7 bash -lc ${quote(remoteHedge("disk-sweep --floor 15 --alert-floor 10"))} 2>&1`);
-  expect(hub.calls().filter((call) => call.startsWith("t3 thread"))).toHaveLength(1);
+  expect(hub.calls().filter((call) => call.startsWith("local threads start"))).toHaveLength(1);
   expect(readFileSync(join(hub.bin, "prompt.txt"), "utf8")).toContain("box-7 has 14.0G free, 0% of inodes free, below 10G or 5% of inodes");
   expect(hub.lines).toContain("box-7: 14.0G free, 0% of inodes free; sweeping");
 });

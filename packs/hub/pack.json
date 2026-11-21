@@ -103,13 +103,6 @@
       "ask": "never"
     },
     {
-      "key": "hub.threadFolder",
-      "question": "Which folder do the hub's threads start in, such as ~/notes? The hub starts its disk alerts there. Hedge adds it as a T3 Code project when T3 does not know it yet.",
-      "type": "string",
-      "default": "~",
-      "ask": "never"
-    },
-    {
       "key": "hub.proxyAccounts",
       "question": "How many of your own subscriptions should the hub's proxy hold? Below that, hedge doctor shows a To do line, and nothing fails. They are Claude subscriptions, or Codex ones on the Codex plan.",
       "type": "number",
@@ -131,7 +124,8 @@
       "default": false,
       "needs": [
         "hub",
-        "coder"
+        "coder",
+        "t3"
       ],
       "settings": [
         "hub.alias",
@@ -174,8 +168,7 @@
       "settings": [
         "hub.alias",
         "hub.diskSweepGigabytes",
-        "hub.diskAlertGigabytes",
-        "hub.threadFolder"
+        "hub.diskAlertGigabytes"
       ],
       "sentence": "The hub cleans a devbox whose disk runs low with hedge prune and each tool's own cache cleaner, and names the largest folders only when that cannot free enough.",
       "risk": "The sweep deletes only this. Through hedge prune: worktrees idle for 6 hours, or 24 when no T3 thread or agent owns them, whose commits are on the default branch or in a merged pull request, whose T3 thread is closed, or whose agent has been idle for a day. Their commits stay on their branch, but their lockfile and tool output changes are dropped. Also worktree folders that Git no longer tracks and no open T3 thread uses. Itself: the oldest part of a T3 boot log over 100 MB. Through pnpm store prune, uv cache prune and go clean -cache: caches those tools fill again. It never runs Nix garbage collection and never removes Cargo build output, the uv cache folder, old T3 versions, Docker data or Bun's cache, which projects can link into. It deletes no other file. For the rest, you decide."
@@ -185,7 +178,8 @@
       "name": "Hub links",
       "default": true,
       "needs": [
-        "hub"
+        "hub",
+        "t3"
       ],
       "settings": [
         "hub.alias",
@@ -230,7 +224,8 @@
       "name": "Provider recovery",
       "default": false,
       "needs": [
-        "hub"
+        "hub",
+        "t3"
       ],
       "sentence": "Threads that stop on a usage limit or a provider outage continue by themselves once the provider answers again.",
       "risk": "Sends continue messages to stopped threads without you in the room, and starts an alert thread in the hub's thread folder.",

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { type ShellThread, t3UserData } from "../../base/lib/t3/index.ts";
+import { type ShellThread, t3UserData } from "../../t3/lib/client/index.ts";
 import { closingSettings } from "../../orchestration/lib/closing-marks.ts";
 import { remoteLauncher } from "../../../src/hub/ssh.ts";
 import { runGh } from "./gh.ts";

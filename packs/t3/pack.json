@@ -1,0 +1,184 @@
+{
+  "schema": 1,
+  "name": "t3",
+  "title": "T3 Code runtime",
+  "settingPrefixes": [
+    "base"
+  ],
+  "summary": "T3 Code runs your threads: it gets tuned defaults, links your machines, and runs your scheduled agent prompts.",
+  "day": "You open T3 Code on your Mac or your phone and see every thread on your hub and your nodes, each in its own worktree.",
+  "cost": "T3 Code runs as a service on each Linux box. You sign in to T3 Connect once on your Mac.",
+  "risk": "Hedge owns the T3 Code settings it sets. A setting you change in T3 Code by hand goes back at the next hedge apply.",
+  "instructions": "instructions.md",
+  "runtime": {
+    "name": "t3",
+    "path": "runtime.ts"
+  },
+  "guides": [
+    {
+      "guide": "t3",
+      "path": "t3.md"
+    }
+  ],
+  "settings": [
+    {
+      "key": "base.t3TimeZone",
+      "question": "Which time zone should T3 Code's service on Linux run in, so a scheduled task set to 03:00 runs at 03:00 there? Use an IANA name, such as Europe/Berlin. Leave it empty to keep the machine's zone.",
+      "type": "string",
+      "default": "",
+      "ask": "never"
+    }
+  ],
+  "workflows": [
+    {
+      "id": "t3-tuned",
+      "name": "T3 Code tuned",
+      "default": true,
+      "sentence": "Each thread gets its own worktree, and threads that hit a usage limit resume by themselves. A worktree without uncommitted changes is removed when its thread settles or after five days."
+    },
+    {
+      "id": "linked-machines",
+      "name": "Linked machines",
+      "default": true,
+      "needs": [
+        "devbox"
+      ],
+      "sentence": "Your hub and your nodes see each other's threads."
+    }
+  ],
+  "config": [
+    {
+      "provider": "t3",
+      "key": "defaultThreadEnvMode",
+      "value": "worktree",
+      "workflow": "t3-tuned"
+    },
+    {
+      "provider": "t3",
+      "key": "storageCleanup",
+      "workflow": "t3-tuned",
+      "value": {
+        "worktreeKeepWhen": "uncommitted-changes",
+        "worktreeAfterDays": 5,
+        "worktreeSettledAfterDays": 0,
+        "worktreeOnMerge": true,
+        "worktreeOnDelete": false,
+        "worktreeUnchanged": true,
+        "browserArtifactsAfterDays": 5,
+        "logsAfterDays": 5
+      }
+    },
+    {
+      "provider": "t3",
+      "key": "autoResumeLimitedThreads",
+      "value": true,
+      "workflow": "t3-tuned"
+    },
+    {
+      "provider": "t3",
+      "key": "snoozeLimitedThreads",
+      "value": true,
+      "workflow": "t3-tuned"
+    },
+    {
+      "provider": "t3",
+      "key": "continueThreadsAfterServerUpdate",
+      "value": true,
+      "workflow": "t3-tuned"
+    },
+    {
+      "provider": "t3",
+      "key": "sidebarAutoSettleAfterDays",
+      "value": 7,
+      "workflow": "t3-tuned"
+    },
+    {
+      "provider": "t3",
+      "key": "sidebarAutoSettleOnMerge",
+      "value": true,
+      "workflow": "t3-tuned"
+    },
+    {
+      "provider": "t3",
+      "key": "sidebarAutoSettleKeepPullRequests",
+      "value": true,
+      "workflow": "t3-tuned"
+    },
+    {
+      "provider": "t3",
+      "key": "defaultModelSelection",
+      "plans": [
+        "claude",
+        "both"
+      ],
+      "value": {
+        "instanceId": "claudeAgent",
+        "model": "claude-opus-5-5",
+        "options": [
+          {
+            "id": "effort",
+            "value": "high"
+          }
+        ]
+      }
+    },
+    {
+      "provider": "t3",
+      "key": "defaultModelSelection",
+      "plans": [
+        "codex"
+      ],
+      "value": {
+        "instanceId": "codex",
+        "model": "gpt-6.2-sol",
+        "options": [
+          {
+            "id": "reasoningEffort",
+            "value": "high"
+          }
+        ]
+      }
+    },
+    {
+      "provider": "t3",
+      "key": "textGenerationModelSelection",
+      "plans": [
+        "claude"
+      ],
+      "value": {
+        "instanceId": "claudeAgent",
+        "model": "claude-haiku-5-5",
+        "options": [
+          {
+            "id": "effort",
+            "value": "low"
+          }
+        ]
+      }
+    },
+    {
+      "provider": "t3",
+      "key": "textGenerationModelSelection",
+      "plans": [
+        "codex",
+        "both"
+      ],
+      "value": {
+        "instanceId": "codex",
+        "model": "gpt-6.2-sol",
+        "options": [
+          {
+            "id": "reasoningEffort",
+            "value": "low"
+          }
+        ]
+      }
+    },
+    {
+      "provider": "t3",
+      "key": "linkedEnvironmentsEnabled",
+      "value": true,
+      "workflow": "linked-machines"
+    }
+  ]
+}

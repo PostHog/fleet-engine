@@ -11,7 +11,7 @@ isolateGit();
 const temp = tempDirs();
 afterEach(() => temp.cleanup());
 
-const summary = { role: "mac" as const, packs: ["Pull requests", "Memory"], devboxes: [], profileRepo: "nora/hedge-profile", runsByItself: ["Nightly updates, every day at 03:17", "Shared memory, every 5 minutes"] };
+const summary = { role: "mac" as const, packs: ["Pull requests", "Memory"], devboxes: [], profileRepo: "nora/hedge-profile", runsByItself: ["Nightly updates, every day at 03:17", "Shared memory, every 5 minutes"], runtime: "T3 Code" };
 
 describe("the done screen", () => {
   test("sums up this Mac, the profile, and what runs by itself, then gives a first prompt", () => {

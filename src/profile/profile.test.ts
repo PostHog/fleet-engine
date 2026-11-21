@@ -260,7 +260,7 @@ describe("saving answers", () => {
     expect(loadProfile(await profileRepo({ schema: 1 }))).rejects.toThrow("engine needs a repo");
     expect(loadProfile(await profileRepo({ ...profile, overrides: { models: [{ role: "review", model: "x" }] } }))).rejects.toThrow("overrides.models must list rows");
     expect(loadProfile(await profileRepo({ ...profile, overrides: { config: [{ provider: "claude", key: "model", value: "x", plans: {} }] } }))).rejects.toThrow("overrides.config[0]: plans must list claude, codex, or both");
-    expect(loadProfile(await profileRepo({ ...profile, overrides: { config: [{ provider: "nope", key: "model", value: "x" }] } }))).rejects.toThrow("overrides.config[0]: needs a provider and a key");
+    expect(loadProfile(await profileRepo({ ...profile, overrides: { config: [{ provider: "Not a name", key: "model", value: "x" }] } }))).rejects.toThrow("overrides.config[0]: needs a provider, claude, codex, or a runtime's name, and a key");
     expect(loadProfile(await profileRepo({ ...profile, overrides: { config: [{ provider: "claude", key: "model", value: "x", after: "ready" }] } }))).rejects.toThrow("overrides.config[0]: after names a pack's check, so only a pack's own config item can wait for one");
   });
 });

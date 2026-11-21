@@ -1,14 +1,13 @@
 import { existsSync, readFileSync } from "node:fs";
-import { hostname } from "node:os";
 import { join } from "node:path";
 import type { AiPlan, ModelRow } from "../pack/types.ts";
-import { restartCommand } from "../adapters/t3/service.ts";
 import { canBeDevbox } from "../hub/names.ts";
 import { onHub, quote } from "../hub/ssh.ts";
 import { loadProfile, pullProfile, saveAnswers, validHost } from "../profile/profile.ts";
-import type { ExecResult, Machine } from "./commands.ts";
+import type { AgentRuntime, OnboardingContext } from "../sdk/runtime.ts";
+import type { Machine } from "./commands.ts";
 import { engineRepo } from "./defaults.ts";
-import { type HumanContext, humanStep, pollMs, type SignIn } from "./human.ts";
+import { type HumanContext, humanStep, type SignIn } from "./human.ts";
 import type { Step, StepOutcome } from "./runner.ts";
 import { chatgptSignIn, claudeSignIn, githubSignIn } from "./signins.ts";
 import type { Terminal } from "./terminal.ts";
@@ -66,8 +65,16 @@ export type DevboxContext = {
   rerun?: string;
   engineRoot?: string;
   leftForYou?(steps: LeftStep[]): void;
+  runtime?: AgentRuntime;
 };
 
+export function onboardingContext(machine: Machine, terminal: Terminal, rerun: string): OnboardingContext {
+  return { here: machine, on: (host) => overSsh(machine, host), print: (line) => terminal.print(line), rerun };
+}
+
+export const linksItself = (runtime: AgentRuntime | undefined) => `${runtime?.title ?? "Your runtime"} links your machines itself, so Hedge does not link them.`;
+
+/** The runtimes that these packs bring, by name. A runtime that does not load is left out. */
 /** The profile's clone URL as stored, and the engine ref the profile pins. */
 export async function profileForBox(machine: Machine, profileDir: string | undefined) {
   if (!profileDir) throw new Error("no profile yet");
@@ -94,7 +101,7 @@ export function devboxQuestion(context: { terminal: Terminal; home: string; flag
       const hosts = sshHosts(context.home).filter(canBeDevbox);
       if (context.nonInteractive || !hosts.length) return chosen(undefined);
       terminal.print("? Which SSH host is your devbox?");
-      terminal.print("  Hedge installs itself there over SSH, signs it in, and links it with T3 Code here.");
+      terminal.print("  Hedge installs itself there over SSH, signs it in, and links it with this machine.");
       hosts.forEach((host, index) => terminal.print(`  ${index + 1}) ${host}`));
       for (;;) {
         const reply = await terminal.ask("Press ↵ to skip, or type a number: ");
@@ -108,12 +115,14 @@ export function devboxQuestion(context: { terminal: Terminal; home: string; flag
 
 const again = (context: DevboxContext) => context.rerun ?? "hedge setup";
 
-/** The steps that make an SSH host a devbox: install, sign in, apply the profile, and link T3 Code both ways. */
+/** The steps that make an SSH host a devbox: install, sign in, apply the profile, and link the runtime both ways. */
 export function devboxSteps(host: string, context: DevboxContext): Step[] {
   const box = overSsh(context.machine, host);
   const human: HumanContext = { terminal: context.terminal, machine: box, nonInteractive: context.nonInteractive, chat: context.chat, waited: context.waited, rerun: context.rerun };
   const on = (signIn: SignIn): SignIn => Object.assign(Object.create(signIn) as SignIn, { id: `devbox:${host}:${signIn.id}`, title: `${signIn.title} on ${host}` });
   const chatgpt = chatgptSignIn(box, context.models);
+  const onboarding = context.runtime?.onboarding?.();
+  const nodeSignIn = onboarding?.nodeSignIn?.(host, box);
   return [
     auto(host, "install", `Install Hedge on ${host}`, 4, context.terminal, () => install(box, host, context)),
     ...(host.startsWith(coderPrefix) && context.machine.has("coder") ? [auto(host, "coder", `Sign in to Coder on ${host}`, 1, context.terminal, () => coderOnBox(host, box, context))] : []),
@@ -121,8 +130,10 @@ export function devboxSteps(host: string, context: DevboxContext): Step[] {
     auto(host, "profile", `Apply your profile on ${host}`, 3, context.terminal, () => applyProfile(box, host, context)),
     ...(context.plan === "codex" ? [] : [claudeOnBox(host, box, context)]),
     ...(context.plan === "claude" ? [] : [humanStep(on(chatgpt), human)]),
-    humanStep(t3Connect(host, box), human),
-    auto(host, "link", `Link T3 Code here and on ${host}`, 1, context.terminal, () => linkBothWays(host, box, context)),
+    ...(nodeSignIn ? [humanStep({ ...nodeSignIn, id: `devbox:${host}:${nodeSignIn.id}`, minutes: 1 }, human)] : []),
+    onboarding
+      ? auto(host, "link", `Link ${context.runtime!.title} here and on ${host}`, 1, context.terminal, () => onboarding.link(host, onboardingContext(context.machine, context.terminal, again(context))))
+      : auto(host, "link", `Link ${host} with this machine`, 1, context.terminal, async () => `  · ${linksItself(context.runtime)}`),
   ];
 }
 
@@ -369,150 +380,7 @@ function claudeOnBox(host: string, box: Machine, context: DevboxContext): Step {
   };
 }
 
-/** T3 Connect on the box: t3 up signs in, installs the relay client, and restarts the service so the link takes effect. */
-function t3Connect(host: string, box: Machine): SignIn {
-  return {
-    id: `devbox:${host}:t3`,
-    title: `Link T3 Connect on ${host}`,
-    minutes: 1,
-    why: "T3 Code on your other devices reaches the devbox through T3 Connect.",
-    command: ["t3", "up", "--connect", "--yes", "--headless"],
-    probe: async () => (await linkedStatus(box)) !== undefined,
-  };
-}
-
-/** Where other machines reach this one through T3 Connect, once it is linked: its own tunnel, never the shared relay. */
-async function connectAddress(machine: Machine): Promise<string | undefined> {
-  const state = await linkedStatus(machine);
-  if (!state) return undefined;
-  const tunnel = hostnameOf(state.tunnelHostname) ?? (await tunnelFromServer(machine));
-  return tunnel && `https://${tunnel}`;
-}
-
-async function linkedStatus(machine: Machine) {
-  const state = await connectStatus(machine);
-  return state && isLinked(state) ? state : undefined;
-}
-
-const connectStatus = async (machine: Machine) => parsed<{ desired?: unknown; authenticated?: unknown; linked?: unknown; tunnelHostname?: unknown }>(await machine.exec(["t3", "connect", "status", "--json"]));
-
-const isLinked = (state: { authenticated?: unknown; linked?: unknown }) => state.authenticated === true && state.linked === true;
-
-/** Waits a bounded time for a tunnel that is still starting after T3 Connect links. */
-async function connectAddressWithin(machine: Machine): Promise<string | undefined> {
-  for (let attempt = 0; ; attempt++) {
-    const address = await connectAddress(machine);
-    if (address || attempt === tunnelStartPolls) return address;
-    await machine.sleep(pollMs);
-  }
-}
-
-const tunnelStartPolls = 15;
-
-export async function addressHere(machine: Machine, rerun: string): Promise<{ on: boolean; address?: string }> {
-  const state = await connectStatus(machine);
-  if (!state) throw new Error(`T3 Code here did not answer t3 connect status. Check that T3 Code runs here, then run ${rerun} again.`);
-  if (!isLinked(state) && state.desired === false) return { on: false };
-  if (!isLinked(state)) throw new Error(`T3 Connect here is not ready: t3 connect status says authenticated ${String(state.authenticated)} and linked ${String(state.linked)}. Wait until T3 Code here is up, or run t3 up --connect here, then run ${rerun} again.`);
-  const address = await connectAddressWithin(machine);
-  return address ? { on: true, address } : { on: true };
-}
-
-/** For T3 CLIs that do not print the tunnel hostname yet: asks the live T3 server on that machine with a short read-only session, and revokes the session after. */
-async function tunnelFromServer(machine: Machine): Promise<string | undefined> {
-  const origin = await liveServerOrigin(machine);
-  if (!origin) return undefined;
-  const session = parsed<{ sessionId?: unknown; token?: unknown }>(await machine.exec(["t3", "auth", "session", "issue", "--json", "--ttl", "5m", "--label", "hedge", "--subject", "hedge", "--scope", "relay:read"]));
-  if (typeof session?.sessionId !== "string" || typeof session.token !== "string") return undefined;
-  try {
-    const headers = `authorization: Bearer ${session.token}\nx-t3-orchestration-protocol: 2\n`;
-    const linkState = parsed<{ tunnelHostname?: unknown }>(await machine.exec(["curl", "-q", "--noproxy", "*", "-fsS", "--max-time", "15", "-H", "@-", `${origin}/api/connect/link-state`], { input: headers }));
-    return hostnameOf(linkState?.tunnelHostname);
-  } finally {
-    await machine.exec(["t3", "auth", "session", "revoke", session.sessionId]);
-  }
-}
-
-function parsed<T>(result: ExecResult): T | undefined {
-  if (result.code !== 0) return undefined;
-  try {
-    return JSON.parse(result.stdout.slice(result.stdout.indexOf("{"))) as T;
-  } catch {
-    return undefined;
-  }
-}
-
-/** The T3 server's own record of where it listens, read from the same base directory the t3 commands here use (a T3CODE_HOME that T3 would trim, expand, or resolve is refused), trusted only at a numeric loopback address and while its process runs: the record T3's own CLI sends its relay sessions to. A dev server keeps its record elsewhere, so Hedge does not guess it. */
-async function liveServerOrigin(machine: Machine): Promise<string | undefined> {
-  const runtime = parsed<{ origin?: unknown; pid?: unknown }>(await machine.exec(["sh", "-c", runtimeRecord]));
-  const url = loopbackUrl(runtime?.origin);
-  const pid = runtime?.pid;
-  if (!url || typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return undefined;
-  return (await machine.exec(["sh", "-c", `kill -0 ${pid}`])).code === 0 ? url.origin : undefined;
-}
-
-async function tunnelLimitReached(machine: Machine) {
-  const log = await machine.exec(["sh", "-c", recentServiceLog]);
-  if (log.code !== 0) return undefined;
-  const sinceStart = log.stdout.slice(log.stdout.lastIndexOf(serverStarted) + 1);
-  return sinceStart.match(tunnelLimit)?.at(-1);
-}
-
-const serverStarted = "Listening on http";
-
-const tunnelLimit = /Relay managed tunnel limit reached: this account allows at most \d+ tunnels?/g;
-
-export const t3HomeGuard = `case "$T3CODE_HOME" in *[![:graph:]]* | [!/]* | */../* | */..) exit 1 ;; esac;`;
-
-const runtimeRecord = `${t3HomeGuard} [ -z "$VITE_DEV_SERVER_URL" ] && cat "\${T3CODE_HOME:-$HOME/.t3}/userdata/server-runtime.json"`;
-
-const recentServiceLog = `${t3HomeGuard} tail -c 2000000 "\${T3CODE_HOME:-$HOME/.t3}/userdata/logs/boot-service.log"`;
-
-function loopbackUrl(value: unknown) {
-  try {
-    const url = new URL(String(value));
-    return url.protocol === "http:" && ["127.0.0.1", "[::1]"].includes(url.hostname) ? url : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-const hostnameOf = (value: unknown) => (typeof value === "string" && value ? value : undefined);
-
-/** Reads `t3 pair` output: where the environment answers, and the one-time code. */
-export function pairing(output: string): { url: string; code: string } | undefined {
-  const url = output.match(/^Pairing URL: (\S+)/m)?.[1];
-  const code = output.match(/^Token: (\S+)/m)?.[1];
-  if (!url || !code) return undefined;
-  try {
-    return { url: new URL(url).origin, code };
-  } catch {
-    return undefined;
-  }
-}
-
-/** This machine links the devbox through its T3 Connect address; the devbox links back only when T3 Connect is on here too. */
-async function linkBothWays(host: string, box: Machine, context: DevboxContext) {
-  const here = hostname();
-  const link = async (from: Machine, fromName: string, address: string, to: Machine, toName: string) => {
-    const paired = await from.exec(["t3", "pair", "--ttl", "5m", "--label", toName]);
-    const found = paired.code === 0 ? pairing(paired.output) : undefined;
-    if (!found) throw new Error(`${fromName} did not give a pairing code. Check that T3 Code runs there, then run ${again(context)} again.`);
-    const linked = await to.exec(["t3", "environment", "link", address, "--pairing-code", found.code, "--access", "full-access"]);
-    if (linked.code !== 0) throw new Error(`could not link ${fromName} from ${toName}: ${linked.output.trim().split("\n").at(-1) ?? ""}`);
-  };
-  const boxAddress = await connectAddressWithin(box);
-  const limit = boxAddress ? undefined : await tunnelLimitReached(box);
-  if (limit) throw new Error(`${host} has no T3 Connect tunnel: T3 Code there says ${limit}. Free one: run t3 connect logout on a machine that no longer needs T3 Connect, or unlink it in T3 Connect. Then run ${restartCommand} on ${host}, and run ${again(context)} again.`);
-  if (!boxAddress) throw new Error(`${host} has no T3 Connect address yet. Update T3 Code on ${host}, then run ${again(context)} again.`);
-  await link(box, host, boxAddress, context.machine, here);
-  const connectHere = await addressHere(context.machine, again(context));
-  if (connectHere.address) await link(context.machine, here, connectHere.address, box, host);
-  else if (connectHere.on) throw new Error(`T3 Connect is on here, but Hedge could not find this machine's tunnel address. Update T3 Code here, then run ${again(context)} again so ${host} links back.`);
-  else context.terminal.print(`  · ${host} does not link back to this machine, because T3 Connect is off here. Turn it on with t3 up --connect, and T3 Code on ${host} can pair with this machine.`);
-}
-
-export type HubContext = { terminal: Terminal; machine: Machine; self?: string };
+export type HubContext = { terminal: Terminal; machine: Machine; self?: string; runtime?: AgentRuntime };
 
 const registerId = (host: string) => `devbox:${host}:register`;
 const hubLinkId = (host: string) => `devbox:${host}:hub-link`;
@@ -550,7 +418,6 @@ export function hubSteps(host: string, context: HubContext & { profileDir: strin
 }
 
 const hubUpdateLimitMs = 15 * 60_000;
-const hubLinkLimitMs = 5 * 60_000;
 const sshFailed = 255;
 
 /** Lists the devbox in the profile, so the hub and every node know it, and returns the hub the profile names. It pushes on every run, so a push that failed before reaches the remote now. */
@@ -574,42 +441,8 @@ export async function tellHub({ machine, terminal }: HubContext, hub: string, ho
   return updated.code === 0;
 }
 
-export async function linkFromHub({ machine, terminal, self }: HubContext, hub: string, host: string, hubTook: boolean) {
-  const onTheHub = self === hub;
-  const id = await boxEnvironmentId(machine, host);
-  const link = id === undefined ? undefined : (await t3Links(onTheHub ? machine : overSsh(machine, hub))).find((entry) => entry.environmentId === id);
-  if (link?.status === "reachable") return terminal.print(`✓ The hub, ${hub}, reaches ${host} in T3 Code.`);
-  const linked = hubTook && (await machine.exec(onHub(hub, ["peers", "link", host]), { timeoutMs: hubLinkLimitMs })).code === 0;
-  const fix = onTheHub ? `run hedge peers link ${host} here now` : `run ssh ${hub} ${quote(`${remotePath} hedge peers link ${host}`)} now`;
-  const state = link ? `lists ${host} in T3 Code as ${link.status ?? "not reachable"}` : `has not linked ${host} in T3 Code yet`;
-  terminal.print(linked ? `✓ The hub, ${hub}, linked ${host} in T3 Code.` : `· The hub, ${hub}, ${state}. To link it, ${fix}.`);
+export async function linkFromHub({ machine, terminal, self, runtime }: HubContext, hub: string, host: string, hubTook: boolean) {
+  const onboarding = runtime?.onboarding?.();
+  if (!onboarding) return;
+  await onboarding.linkFromHub(host, hub, { ...onboardingContext(machine, terminal, `hedge devbox add ${host}`), hubIsHere: self === hub, hubTook });
 }
-
-export type T3Link = { environmentId: string; label?: string; status?: string };
-
-export async function t3Links(machine: Machine): Promise<T3Link[]> {
-  const links = parsedList(await machine.exec(["t3", "environment", "list", "--json"]));
-  return links.filter((link): link is T3Link => typeof link?.environmentId === "string" && (link.status === undefined || typeof link.status === "string"));
-}
-
-function parsedList(result: ExecResult): Array<{ environmentId?: unknown; label?: string; status?: unknown }> {
-  if (result.code !== 0) return [];
-  try {
-    const list: unknown = JSON.parse(result.stdout);
-    return Array.isArray(list) ? list : [];
-  } catch {
-    return [];
-  }
-}
-
-/** The id T3 Code on that host goes by, the key of its load balancing weight and of its link here. */
-export async function boxEnvironmentId(machine: Machine, host: string) {
-  return validEnvironmentId((await overSsh(machine, host).exec(["sh", "-c", environmentIdScript])).stdout);
-}
-
-export function validEnvironmentId(text: string) {
-  const id = text.trim();
-  return /^[A-Za-z0-9._:-]{1,128}$/.test(id) ? id : undefined;
-}
-
-const environmentIdScript = `${t3HomeGuard} cat "\${T3CODE_HOME:-$HOME/.t3}/userdata/environment-id"`;

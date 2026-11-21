@@ -17,6 +17,8 @@ export const packIcons: Record<string, string> = {
   hub: drawn(`<circle cx="12" cy="12.4" r="2.7" fill="currentColor"/><rect x="9.25" y="2" width="5.5" height="4.6" rx="1.3"/><rect x="1.75" y="16.6" width="5.5" height="4.6" rx="1.3"/><rect x="16.75" y="16.6" width="5.5" height="4.6" rx="1.3"/><path d="M12 6.6v3.1"/><path d="m9.8 14.2-3 2.4"/><path d="m14.2 14.2 3 2.4"/>`),
   security: drawn(`<path d="M12 3 5 6v5c0 4.5 3 8.5 7 10 4-1.5 7-5.5 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/>`),
   "mcp-gateway": drawn(`<path d="M9 3v5"/><path d="M15 3v5"/><path d="M6.5 8h11v3.5a5.5 5.5 0 0 1-11 0V8Z"/><path d="M12 17v4"/>`),
+  t3: drawn(`<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M7 9h4"/><path d="M9 9v5"/><path d="M13 9h3l-2 2.5c1.4 0 2 .7 2 1.5s-.8 1.5-2 1.5"/><path d="M9 21h6"/>`),
+  herdr: drawn(`<rect x="2.5" y="4" width="13" height="11" rx="1.8"/><path d="m5.5 8 2.5 2-2.5 2"/><path d="M9.5 12.5h3"/><rect x="15.5" y="9" width="6" height="11" rx="1.5"/><path d="M18 17.5h1"/>`),
   slack: slackLogo,
   "incident-io": drawn(`<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15L6 16Z"/><path d="M10 20.5a2 2 0 0 0 4 0"/><path d="M12 3v2"/>`),
 };

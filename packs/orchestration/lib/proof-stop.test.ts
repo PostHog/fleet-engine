@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { gitEnv, spawnGit, tempDirs } from "../../../src/testing/git.ts";
-import type { ShellThread } from "../../base/lib/t3/index.ts";
+import type { ShellThread } from "../../t3/lib/client/index.ts";
 import { gateRunDirectory, startGateRun, writeJson } from "../../pull-requests/lib/proof.ts";
 import { hookWith, killSwitch } from "../hooks/ask-guard.ts";
 import { proofStop, type Git, type ProofStopEvent, type ProofStopOptions } from "./proof-stop.ts";

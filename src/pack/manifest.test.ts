@@ -114,8 +114,8 @@ describe("loadPacks", () => {
   });
 
   test("rejects a T3 job without a task", async () => {
-    const jobs = [{ ...base.jobs[0], runner: "t3" }];
-    expect(loadPacks(sourceWith({ base: { ...base, jobs } }))).rejects.toThrow("job prune runs on t3 but has no task");
+    const jobs = [{ ...base.jobs[0], runner: "agent" }];
+    expect(loadPacks(sourceWith({ base: { ...base, jobs } }))).rejects.toThrow("job prune runs as an agent task but has no task");
   });
 
   test("rejects a step that waits for a human step the pack does not declare", async () => {
@@ -126,25 +126,32 @@ describe("loadPacks", () => {
 
   test("accepts T3 project scripts with a name, a command, and project paths", async () => {
     const script = { id: "prepare", name: "Prepare worktree", command: "hedge prepare", projects: ["~/posthog", "~/*/posthog"] };
-    expect(loadPacks(sourceWith({ base: { ...base, t3ProjectScripts: [script] } }))).resolves.toHaveLength(1);
-    expect(loadPacks(sourceWith({ base: { ...base, t3ProjectScripts: [{ ...script, command: undefined }] } }))).rejects.toThrow("t3ProjectScripts prepare: needs an id, a name, a command, and projects or a projectSetting");
-    expect(loadPacks(sourceWith({ base: { ...base, t3ProjectScripts: [{ ...script, projects: ["posthog"] }] } }))).rejects.toThrow("t3ProjectScripts prepare: each project must be an absolute path or start with ~/");
-    expect(loadPacks(sourceWith({ base: { ...base, t3ProjectScripts: [{ ...script, id: "Prepare It" }] } }))).rejects.toThrow("t3ProjectScripts Prepare It: id must be lowercase words joined by dashes");
-    await expect(loadPacks(sourceWith({ base: { ...base, t3ProjectScripts: [{ ...script, name: "" }] } }))).rejects.toThrow("t3ProjectScripts prepare: needs an id, a name, a command, and projects or a projectSetting");
-    await expect(loadPacks(sourceWith({ base: { ...base, t3ProjectScripts: [{ ...script, command: "   " }] } }))).rejects.toThrow("t3ProjectScripts prepare: needs an id, a name, a command, and projects or a projectSetting");
+    expect(loadPacks(sourceWith({ base: { ...base, projectScripts: [script] } }))).resolves.toHaveLength(1);
+    expect(loadPacks(sourceWith({ base: { ...base, projectScripts: [{ ...script, command: undefined }] } }))).rejects.toThrow("projectScripts prepare: needs an id, a name, a command, and projects or a projectSetting");
+    expect(loadPacks(sourceWith({ base: { ...base, projectScripts: [{ ...script, projects: ["posthog"] }] } }))).rejects.toThrow("projectScripts prepare: each project must be an absolute path or start with ~/");
+    expect(loadPacks(sourceWith({ base: { ...base, projectScripts: [{ ...script, id: "Prepare It" }] } }))).rejects.toThrow("projectScripts Prepare It: id must be lowercase words joined by dashes");
+    await expect(loadPacks(sourceWith({ base: { ...base, projectScripts: [{ ...script, name: "" }] } }))).rejects.toThrow("projectScripts prepare: needs an id, a name, a command, and projects or a projectSetting");
+    await expect(loadPacks(sourceWith({ base: { ...base, projectScripts: [{ ...script, command: "   " }] } }))).rejects.toThrow("projectScripts prepare: needs an id, a name, a command, and projects or a projectSetting");
   });
 
   test("accepts a T3 project script whose project comes from a setting", async () => {
     const script = { id: "prepare", name: "Prepare worktree", command: "hedge prepare", projects: [], projectSetting: "team.checkout" };
-    await expect(loadPacks(sourceWith({ base: { ...base, t3ProjectScripts: [script] } }))).resolves.toHaveLength(1);
-    await expect(loadPacks(sourceWith({ base: { ...base, t3ProjectScripts: [{ ...script, projectSetting: undefined }] } }))).rejects.toThrow("t3ProjectScripts prepare: needs an id, a name, a command, and projects or a projectSetting");
-    await expect(loadPacks(sourceWith({ base: { ...base, t3ProjectScripts: [{ ...script, projectSetting: " " }] } }))).rejects.toThrow("t3ProjectScripts prepare: projectSetting must name a setting");
+    await expect(loadPacks(sourceWith({ base: { ...base, projectScripts: [script] } }))).resolves.toHaveLength(1);
+    await expect(loadPacks(sourceWith({ base: { ...base, projectScripts: [{ ...script, projectSetting: undefined }] } }))).rejects.toThrow("projectScripts prepare: needs an id, a name, a command, and projects or a projectSetting");
+    await expect(loadPacks(sourceWith({ base: { ...base, projectScripts: [{ ...script, projectSetting: " " }] } }))).rejects.toThrow("projectScripts prepare: projectSetting must name a setting");
   });
 
-  test("leaves T3's project settings to t3ProjectScripts", async () => {
-    for (const key of ["projectSettingsOverrides", "projectScriptOverrides"]) {
-      await expect(loadPacks(sourceWith({ base: { ...base, config: [{ provider: "t3", key, value: {} }] } }))).rejects.toThrow(`config ${key}: T3 project settings hold Hedge's worktree scripts, so set those with t3ProjectScripts`);
-    }
+  test("loads a pack written for T3 alone: its t3ProjectScripts are project scripts, and a t3 runner is an agent task", async () => {
+    const task = { prompt: "Run.", projectSetting: "base.project", modelRole: "worker", workspaceStrategy: "worktree", runtimeMode: "auto" };
+    const script = { id: "prepare", name: "Prepare worktree", command: "hedge prepare", projects: ["~/posthog"] };
+    const old ={ ...base, t3ProjectScripts: [script], jobs: [{ id: "nightly", command: [], runner: "t3", schedule: { every: "1d" }, task }] } as unknown as typeof base;
+    const [loaded] = await loadPacks(sourceWith({ base: old }));
+    expect([loaded?.manifest.projectScripts, loaded?.manifest.jobs?.[0]?.runner, "t3ProjectScripts" in (loaded?.manifest ?? {})]).toEqual([[script], "agent", false]);
+  });
+
+  test("takes a config provider that names a runtime, and refuses one that is no name", async () => {
+    expect((await loadPacks(sourceWith({ base: { ...base, config: [{ provider: "herdr", key: "theme", value: "dark" }] } })))[0]?.manifest.config).toEqual([{ provider: "herdr", key: "theme", value: "dark" }]);
+    expect(loadPacks(sourceWith({ base: { ...base, config: [{ provider: "Not A Name", key: "theme", value: "dark" }] } }))).rejects.toThrow("needs a provider, claude, codex, or a runtime's name, and a key");
   });
 
   test("accepts a Claude MCP server only by name, with a server object", async () => {
@@ -191,7 +198,7 @@ describe("loadPacks", () => {
     const task = { prompt: "Listen.", projectSetting: "base.project", modelRole: "worker", workspaceStrategy: "worktree", runtimeMode: "auto" };
     expect((await loadPacks(sourceWith({ base: { ...base, jobs: [service] } })))[0]?.manifest.jobs?.[0]).toEqual(service);
     expect(loadPacks(sourceWith({ base: { ...base, jobs: [{ ...service, schedule: { every: "always", at: "03:00" } }] } }))).rejects.toThrow("jobs listen: a job that runs always has no schedule.at");
-    expect(loadPacks(sourceWith({ base: { ...base, jobs: [{ ...service, runner: "t3", task }] } }))).rejects.toThrow("jobs listen: a job that runs always runs on the machine, not on t3");
+    expect(loadPacks(sourceWith({ base: { ...base, jobs: [{ ...service, runner: "agent", task }] } }))).rejects.toThrow("jobs listen: a job that runs always runs on the machine, not as an agent task");
     expect(loadPacks(sourceWith({ base: { ...base, jobs: [{ ...service, schedule: { every: "forever" } }] } }))).rejects.toThrow("jobs listen: schedule.every must be 5m, 15m, 1h, 1d, or always");
   });
 
@@ -232,8 +239,8 @@ describe("loadPacks", () => {
     const cases: Array<[Record<string, unknown>, string]> = [
       [{ settings: [{ ...setting, default: "two" }] }, "settings base.heavySlots: default does not fit type number"],
       [{ settings: [{ ...setting, type: "choice", choices: "a,b" }] }, "choices must list a value and a label each"],
-      [{ jobs: [{ ...base.jobs[0], runner: "t3", task: {} }] }, "task needs a prompt, a projectSetting, and a modelRole"],
-      [{ jobs: [{ ...base.jobs[0], runner: "t3", task: { ...task, schedule: "daily" } }] }, "drop task.id and task.schedule"],
+      [{ jobs: [{ ...base.jobs[0], runner: "agent", task: {} }] }, "task needs a prompt, a projectSetting, and a modelRole"],
+      [{ jobs: [{ ...base.jobs[0], runner: "agent", task: { ...task, schedule: "daily" } }] }, "drop task.id and task.schedule"],
       [{ steps: [null] }, "steps[0] must be an object"],
       [{ guides: [{ guide: "../../escape", path: "g.md" }] }, "guide must be lowercase words joined by dashes"],
       [{ steps: [{ id: "cli", run: ["true"], plans: ["gemini"] }] }, "steps cli: plans must list claude, codex, or both"],
@@ -247,7 +254,7 @@ describe("loadPacks", () => {
     for (const [fields, message] of cases) {
       expect(loadPacks(sourceWith({ base: { ...base, ...fields } }))).rejects.toThrow(message);
     }
-    const jobs = [{ ...base.jobs[0], runner: "t3", task }];
+    const jobs = [{ ...base.jobs[0], runner: "agent", task }];
     expect((await loadPacks(sourceWith({ base: { ...base, jobs } })))[0]?.manifest.jobs?.[0]?.task?.prompt).toBe("Run the loop.");
   });
 });

@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { optionalStringSetting } from "../../base/lib/settings.ts";
-import { findThread, questionCard, withT3Session } from "../../base/lib/t3/index.ts";
+import { activeRuntime } from "../../../src/runtime/active.ts";
 import { covers, decisionLine, refText, type DecisionState, type Env, type Ledger, type Mark, type PrRef, type Ssh } from "./decision-ledger.ts";
 import { readPullRequest, runIn, type PullRequest } from "./pr-ci.ts";
 import { receiptOf, summaryGaps, type ProofSummary } from "./proof.ts";
@@ -39,8 +39,8 @@ async function lanePr(ref: PrRef, ledger: Ledger, context: ReportContext): Promi
   } catch (error) { return { ref, unknown: (error as Error).message }; }
 }
 
-const t3PendingCard = (home: string) => async (thread: string) =>
-  questionCard(await withT3Session((client) => findThread(client, thread), { home })) !== undefined;
+const runtimePendingCard = (home: string) => async (thread: string) =>
+  (await (await activeRuntime(Bun.env, home)).threads.find(thread))?.blocked?.kind === "question";
 
 function stillYours(rows: Row[], card: string | undefined) {
   const lane = rows.filter(gated);
@@ -107,7 +107,7 @@ function proofRow(pr: Row, decisions: DecisionState[]) {
 export async function renderReport({ prs, thread, lane }: { prs: PrRef[]; thread?: string; lane?: string }, ledger: Ledger, decisions: DecisionState[], context: ReportContext): Promise<string> {
   const secrets = lane === undefined ? undefined : await context.laneSecrets(lane);
   const rows = await Promise.all(prs.map((ref) => lanePr(ref, ledger, context)));
-  const card = thread && await (context.pendingCard ?? t3PendingCard(context.home))(thread) ? thread : undefined;
+  const card = thread && await (context.pendingCard ?? runtimePendingCard(context.home))(thread) ? thread : undefined;
   const ours = decisions.filter((decision) => prs.some((ref) => covers(decision, ref)) || (thread !== undefined && sameThread(decision.where.thread, thread)));
   const sorted = [...ours].sort((a, b) => markOrder.indexOf(a.mark) - markOrder.indexOf(b.mark));
   const gatedRows = rows.filter(gated);

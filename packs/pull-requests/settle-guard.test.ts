@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ShellThread } from "../../src/integrations/t3/threads.ts";
-import type { LinkedThread } from "../../src/integrations/t3/environments.ts";
-import { startT3Stub, ToolRefusal, type T3Stub } from "../../src/integrations/t3/testing.ts";
+import type { ShellThread } from "../t3/lib/client/threads.ts";
+import type { LinkedThread } from "../t3/lib/client/environments.ts";
+import { startT3Stub, ToolRefusal, type T3Stub } from "../t3/lib/client/testing.ts";
 import { tempDirs } from "../../src/testing/git.ts";
 import { guardSettle, type SettleDeps } from "./hooks/settle-guard.ts";
 import { prCommand } from "./lib/pr.ts";

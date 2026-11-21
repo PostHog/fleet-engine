@@ -10,6 +10,8 @@ import { answered, packList, packsStep, picksFrom, title, plansStep, settingStep
 import { realMachine, type Machine } from "./commands.ts";
 import { humanStep, optionalStep, packSignIn, type HumanContext, type SignIn } from "./human.ts";
 import { devboxQuestion, devboxSteps, hubSteps, notTakenByHub, profileForBox, type DevboxContext } from "./devbox.ts";
+import { packRuntimes } from "../runtime/load.ts";
+import type { AgentRuntime } from "../sdk/runtime.ts";
 import { doneScreen, finalCheck, repoName, runsByItself } from "./done.ts";
 import { readTimings, usableSeconds } from "../commands/triage-record.ts";
 import { existingProfile, fetchOrigin, profileStep, saveSettings, takeFetched } from "./profile.ts";
@@ -54,6 +56,7 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
   if (machine.profileDir) await fastForward(box, options.home, machine.profileDir, terminal.print);
   const progress = { done: machine.setup?.done ?? [], draft: machine.profileDir ? profileDraft(await loadProfile(machine.profileDir)) : withInferred(machine.setup ?? { done: [] }) };
   const catalog = await loadCatalog(options.engineRoot, teamRefs(progress.draft), options.home);
+  const runtimes = await packRuntimes(catalog.packs);
   const remember = () => saveMachine(options.home, { ...machine, setup: machine.profileDir ? { done: progress.done } : { done: progress.done, ...withoutInferred(progress.draft) } });
   const fetchTeam = (ref: SourceRef) => (options.fetchSource ?? fetchSource)(ref, sourceCache(options.home));
   if (progress.done.includes("github")) {
@@ -183,6 +186,7 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
   const hubTook = new Map<string, boolean>();
   const devbox: Devbox = {
     question,
+    runtime: (name) => (name === undefined ? undefined : runtimes.get(name)),
     pushed: (step) => ({
       ...step,
       async run() {
@@ -192,8 +196,9 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
       },
     }),
     steps: (host, plan) => {
-      const hub = hubSteps(host, { terminal, machine: box, profileDir: machine.profileDir, took: hubTook });
-      return [hub.register, ...devboxSteps(host, { terminal, machine: box, nonInteractive: flags.nonInteractive, chat: flags.chat, waited: human.waited, plan: plan.ai, models: plan.models, profile: () => profileForBox(box, machine.profileDir) }), hub.link];
+      const runtime = devbox.runtime(plan.runtime);
+      const hub = hubSteps(host, { terminal, machine: box, profileDir: machine.profileDir, took: hubTook, runtime });
+      return [hub.register, ...devboxSteps(host, { terminal, machine: box, nonInteractive: flags.nonInteractive, chat: flags.chat, waited: human.waited, plan: plan.ai, models: plan.models, profile: () => profileForBox(box, machine.profileDir), runtime }), hub.link];
     },
   };
   const check = () =>
@@ -215,7 +220,8 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
       record: (step) => timings.record(step),
       async usable(later) {
         await timings.usable(clock.now());
-        if (later.length) terminal.print(`\n✓ Ready to use. Start a new thread in T3 Code now. Setup goes on with: ${later.join(", ")}.`);
+        const runtime = devbox.runtime(planFor(context, machine).plan.runtime);
+        if (later.length) terminal.print(`\n✓ Ready to use. Start a new thread${runtime ? ` in ${runtime.title}` : ""} now. Setup goes on with: ${later.join(", ")}.`);
       },
       done: progress.done,
       async save(done) {
@@ -227,6 +233,7 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
     const { plan } = planFor(context, machine);
     const summary = {
       role: machine.role,
+      ...(devbox.runtime(plan.runtime) ? { runtime: devbox.runtime(plan.runtime)!.title } : {}),
       packs: plan.packs.filter((pack) => pack.available && pack.name !== "base").map((pack) => title(pack.name, catalog.packs)),
       devboxes: machine.devboxes ?? [],
       profileRepo: repoName((await profileForBox(box, machine.profileDir)).url),
@@ -252,7 +259,7 @@ export async function setup(args: string[], options: SetupOptions): Promise<numb
   }
 }
 
-type Devbox = { question: Step; pushed(step: Step): Step; steps(host: string, plan: { ai: DevboxContext["plan"]; models: DevboxContext["models"] }): Step[] };
+type Devbox = { question: Step; runtime(name: string | undefined): AgentRuntime | undefined; pushed(step: Step): Step; steps(host: string, plan: { ai: DevboxContext["plan"]; models: DevboxContext["models"]; runtime?: string }): Step[] };
 
 function planFor(context: QuestionContext, machine: MachineFile) {
   const draft = context.draft.packs ? context.draft : { ...context.draft, ...picksFrom(context.flags, context.catalog) };
@@ -270,7 +277,7 @@ function setupSteps(context: QuestionContext, machine: MachineFile, options: Set
   const codexOnly = plan.ai === "both" && waitsForSignIns ? plan.steps.filter((step) => step.plans && !step.plans.includes("claude")).map((step) => `${step.pack}/${step.id}`) : [];
   const devboxAsk = sshDevbox && machine.devboxes?.length ? planFor(context, { ...machine, role: "devbox" }).plan.ask.filter((setting) => !plan.ask.some((asked) => asked.key === setting.key)) : [];
   return [
-    bootstrapStep(context.terminal, box.has),
+    bootstrapStep(context.terminal, box.has, devbox.runtime(plan.runtime)),
     humanStep(githubSignIn(box, signedIn), human),
     packsStep(context),
     plansStep(context),
@@ -322,16 +329,17 @@ function teamRefs(draft: Draft) {
   return (draft.sources ?? []).filter((source) => !skills.has(source.name));
 }
 
-function bootstrapStep(terminal: Terminal, has: Machine["has"]): Step {
+function bootstrapStep(terminal: Terminal, has: Machine["has"], runtime: AgentRuntime | undefined): Step {
   return {
     id: "bootstrap",
     title: "Install the basics",
     minutes: 4,
     kind: "auto",
     async run() {
-      const missing = ["git", "gh", "bun", "t3"].filter((tool) => !has(tool));
+      const tool = runtime?.onboarding?.().tool;
+      const missing = ["git", "gh", "bun", ...(tool ? [tool] : [])].filter((name) => !has(name));
       if (missing.length) throw new Error(`${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} missing. Install them with get.sh, then run hedge setup again.`);
-      terminal.print("  ✓ Git, gh, Bun and T3 Code are installed");
+      terminal.print(tool ? `  ✓ Git, gh, Bun and ${runtime!.title} are installed` : "  ✓ Git, gh and Bun are installed");
     },
   };
 }

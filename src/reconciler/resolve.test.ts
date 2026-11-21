@@ -144,6 +144,21 @@ describe("resolve", () => {
     expect(result.config).toContainEqual({ provider: "t3", key: "extension..option", value: true, pack: "profile" });
   });
 
+  test("turns on the pack of the runtime that base.runtime names, t3 when it names none, and keeps another runtime pack only when listed", () => {
+    const byDefault = plan({ packs: [] });
+    expect([byDefault.runtime, Object.keys(byDefault.runtimes ?? {}), byDefault.packs.map((pack) => pack.name)]).toEqual(["t3", ["t3"], ["base", "t3"]]);
+    const herdr = plan({ packs: [], settings: { "base.runtime": "herdr" } });
+    expect([herdr.runtime, Object.keys(herdr.runtimes ?? {}), herdr.packs.map((pack) => pack.name)]).toEqual(["herdr", ["herdr"], ["base", "herdr"]]);
+    expect(Object.keys(plan({ packs: ["t3"], settings: { "base.runtime": "herdr" } }).runtimes ?? {}).sort()).toEqual(["herdr", "t3"]);
+  });
+
+  test("keeps a runtime's config while a pack brings that runtime, and drops it with the reason otherwise", () => {
+    expect(plan({ packs: ["herdr"] }).config).toContainEqual({ provider: "herdr", key: "theme", value: "dark", pack: "herdr" });
+    const missing = plan({ settings: { "base.runtime": "cmux" }, overrides: { config: [{ provider: "cmux", key: "theme", value: "dark" }] } });
+    expect([missing.runtime, missing.runtimes, missing.config.some((entry) => entry.provider === "cmux")]).toEqual(["cmux", {}, false]);
+    expect(missing.dropped).toContainEqual({ pack: "profile", item: "config cmux:theme", reason: "no pack on this machine brings the cmux runtime" });
+  });
+
   test("lets the profile override a pack's config key", () => {
     const result = plan({ overrides: { config: [{ provider: "claude", key: "permissions.defaultMode", value: "plan" }] } });
     expect(result.owners["claude:permissions.defaultMode"]).toBe("profile");
@@ -151,10 +166,10 @@ describe("resolve", () => {
   });
 
   test("orders packs by requires and drops a pack whose requirement is missing", () => {
-    expect(plan({ packs: ["orchestration", "pull-requests"] }).packs.map((pack) => pack.name)).toEqual(["base", "pull-requests", "orchestration"]);
+    expect(plan({ packs: ["orchestration", "pull-requests"] }).packs.map((pack) => pack.name)).toEqual(["base", "t3", "pull-requests", "orchestration"]);
     const result = plan({ packs: ["orchestration"] });
     expect(result.packs.find((pack) => pack.name === "orchestration")).toMatchObject({ available: false, reason: "requires pull-requests" });
-    expect(result.packs.map((pack) => pack.name)).toEqual(["base", "orchestration"]);
+    expect(result.packs.map((pack) => pack.name)).toEqual(["base", "t3", "orchestration"]);
   });
 
   test("throws on a requires cycle", () => {
@@ -487,25 +502,25 @@ describe("resolve guards", () => {
 
   test("plans T3 project scripts by scope, owned by their pack", () => {
     const script = { id: "prepare", name: "Prepare worktree", command: "hedge prepare", projects: ["~/app"] };
-    const team = withPack(pack("team", { t3ProjectScripts: [{ ...script, roles: ["devbox"] }, { ...script, id: "mac-only", on: ["darwin"] }] }));
-    expect(plan({ packs: ["team"] }, devbox, [engine, team]).t3ProjectScripts).toEqual([{ ...script, roles: ["devbox"], pack: "team" }]);
-    expect(plan({ packs: ["team"] }, mac, [engine, team]).t3ProjectScripts).toEqual([{ ...script, id: "mac-only", on: ["darwin"], pack: "team" }]);
+    const team = withPack(pack("team", { projectScripts: [{ ...script, roles: ["devbox"] }, { ...script, id: "mac-only", on: ["darwin"] }] }));
+    expect(plan({ packs: ["team"] }, devbox, [engine, team]).projectScripts).toEqual([{ ...script, roles: ["devbox"], pack: "team" }]);
+    expect(plan({ packs: ["team"] }, mac, [engine, team]).projectScripts).toEqual([{ ...script, id: "mac-only", on: ["darwin"], pack: "team" }]);
   });
 
   test("adds the path a T3 project script's setting names to its projects", () => {
     const script = { id: "prepare", name: "Prepare worktree", command: "hedge prepare", projects: ["~/app"], projectSetting: "team.checkout" };
-    const team = withPack(pack("team", { settings: [{ key: "team.checkout", question: "Where is the checkout?", type: "string", default: "~/dev/app", ask: "never" }], t3ProjectScripts: [script] }));
-    expect(plan({ packs: ["team"] }, mac, [engine, team]).t3ProjectScripts).toEqual([{ ...script, projects: ["~/app", "~/dev/app"], pack: "team" }]);
-    expect(plan({ packs: ["team"], settings: { "team.checkout": "~/app" } }, mac, [engine, team]).t3ProjectScripts).toEqual([{ ...script, pack: "team" }]);
-    expect(plan({ packs: ["team"], settings: { "team.checkout": "app" } }, mac, [engine, team]).t3ProjectScripts).toEqual([{ ...script, pack: "team" }]);
+    const team = withPack(pack("team", { settings: [{ key: "team.checkout", question: "Where is the checkout?", type: "string", default: "~/dev/app", ask: "never" }], projectScripts: [script] }));
+    expect(plan({ packs: ["team"] }, mac, [engine, team]).projectScripts).toEqual([{ ...script, projects: ["~/app", "~/dev/app"], pack: "team" }]);
+    expect(plan({ packs: ["team"], settings: { "team.checkout": "~/app" } }, mac, [engine, team]).projectScripts).toEqual([{ ...script, pack: "team" }]);
+    expect(plan({ packs: ["team"], settings: { "team.checkout": "app" } }, mac, [engine, team]).projectScripts).toEqual([{ ...script, pack: "team" }]);
   });
 
   test("rejects two T3 project scripts that would get the same id", () => {
     const script = { id: "prepare", name: "Prepare worktree", command: "hedge prepare", projects: ["~/app"] };
-    const team = withPack(pack("team", { t3ProjectScripts: [{ ...script, id: "extra-prepare" }] }));
-    const teamExtra = withPack(pack("team-extra", { t3ProjectScripts: [script] }));
+    const team = withPack(pack("team", { projectScripts: [{ ...script, id: "extra-prepare" }] }));
+    const teamExtra = withPack(pack("team-extra", { projectScripts: [script] }));
     expect(() => plan({ packs: ["team", "team-extra"] }, mac, [engine, team, teamExtra])).toThrow(new ResolveError("t3 project script prepare of team-extra and extra-prepare of team both get the id hedge-team-extra-prepare"));
-    const twice = withPack(pack("twice", { t3ProjectScripts: [script, { ...script, name: "Again" }] }));
+    const twice = withPack(pack("twice", { projectScripts: [script, { ...script, name: "Again" }] }));
     expect(() => plan({ packs: ["twice"] }, mac, [engine, twice])).toThrow(new ResolveError("t3 project script prepare of twice and prepare of twice both get the id hedge-twice-prepare"));
   });
 
@@ -562,7 +577,7 @@ describe("resolve per AI plan", () => {
 
   test("refuses a T3 job whose model role the plan's model table lacks", () => {
     const task = { prompt: "Run.", projectSetting: "jobs.project", modelRole: "worker", workspaceStrategy: "worktree" as const, runtimeMode: "auto" as const };
-    const jobs = withPack({ schema: 1, name: "jobs", summary: "Jobs.", settings: [{ key: "jobs.project", question: "Which project?", type: "string", default: "hedge" }], jobs: [{ id: "nightly", command: [], runner: "t3", schedule: { every: "1d" }, task }] });
+    const jobs = withPack({ schema: 1, name: "jobs", summary: "Jobs.", settings: [{ key: "jobs.project", question: "Which project?", type: "string", default: "hedge" }], jobs: [{ id: "nightly", command: [], runner: "agent", schedule: { every: "1d" }, task }] });
     const resolveJobs = (overrides: Partial<Profile> = {}) => plan({ packs: ["pull-requests", "orchestration", "models", "jobs"], ...overrides }, mac, [engine, agentSkills, tables, jobs]);
     expect(() => resolveJobs()).toThrow("job nightly asks for model role worker, which the model table lacks");
     const worker = { role: "worker", work: "Workers", provider: "claude" as const, model: "claude-worker", effort: "high" as const };

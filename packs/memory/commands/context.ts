@@ -9,7 +9,8 @@ import { hubSources, type Sources } from "../lib/library/source.ts";
 import { cacheFile, docUrl, librarySettings, writePointer } from "../lib/library/config.ts";
 import { runGit, type Git } from "../lib/library/git.ts";
 import { catalogName, parseDoc, readLibrary, related, renderCatalog, search, topicReport } from "../lib/library/library.ts";
-import { routerAgent, share, t3ShareDeps, type ShareDeps, type Shared, type SharedNote } from "../lib/library/share.ts";
+import { routerAgent, runtimeShareDeps, share, type ShareDeps, type Shared, type SharedNote } from "../lib/library/share.ts";
+import { activeRuntime, currentThread } from "../../../src/runtime/active.ts";
 import { syncLibrary } from "../lib/library/sync.ts";
 import { undoUpstream, upstreamCommand } from "../lib/library/upstream.ts";
 
@@ -108,7 +109,7 @@ if (import.meta.main) {
       agent: () => captureAgent(modelFor("survey"), Bun.env.HOME ?? homedir()),
       sources: hubSources(Bun.env.HOME ?? homedir()),
       today: () => new Date().toISOString().slice(0, 10),
-      share: (owner) => t3ShareDeps({ owner, host: hostname(), route: routerAgent(modelFor("survey")), skip: Bun.env.T3CODE_THREAD_ID ? [Bun.env.T3CODE_THREAD_ID] : [] }),
+      share: (owner) => runtimeShareDeps({ owner, host: hostname(), route: routerAgent(modelFor("survey")), skip: currentThread().then((current) => (current ? [current.id] : [])), threads: async () => (await activeRuntime()).threads }),
     }),
     "hedge context",
   );

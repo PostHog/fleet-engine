@@ -2,9 +2,8 @@ import { readFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { writePrivateFile } from "../../../../src/files/private.ts";
-import { modelTable } from "../../../base/lib/models.ts";
-import { stringSetting } from "../../../base/lib/settings.ts";
-import { spawnText, threadModel, threadScript } from "../hub-job.ts";
+import { homedir } from "node:os";
+import { hedgeLauncher, spawnText, threadCommand } from "../hub-job.ts";
 
 export type OutageEntry = { tries: number; triedAt?: string; alerted?: true };
 export type OutageState = { version: 1; threads: Record<string, OutageEntry> };
@@ -40,9 +39,8 @@ ${list}
 
 Run no commands and resume nothing. Reply in at most 10 lines: list the threads and their errors, and tell your user to resume them in T3 on this machine once the provider works.`;
   try {
-    const fallback = modelTable(env)[0]?.model ?? "";
-    const script = threadScript(stringSetting("hub.threadFolder", env), `${count} failing on provider errors`, threadModel("lookup", fallback, env));
-    return (await spawnText(["sh", "-c", script], env, { stdin: prompt, timeoutMs: alertTimeoutMs })).code === 0;
+    const argv = threadCommand(hedgeLauncher(env, env.HOME ?? homedir()), `outage:${threads.map((thread) => thread.name).sort().join(",")}`, `${count} failing on provider errors`, "lookup");
+    return (await spawnText(argv, env, { stdin: prompt, timeoutMs: alertTimeoutMs })).code === 0;
   } catch {
     return false;
   }

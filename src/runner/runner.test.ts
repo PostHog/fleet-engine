@@ -3,7 +3,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, re
 import { join } from "node:path";
 import { secretStore } from "./context.ts";
 import { main, type CliOptions } from "../cli.ts";
-import { startT3Stub } from "../integrations/t3/testing.ts";
+import { startT3Stub } from "../../packs/t3/lib/client/testing.ts";
 import { tempDirs } from "../testing/git.ts";
 import { engineSteps } from "../testing/packs.ts";
 
@@ -29,6 +29,8 @@ async function machine(packs = ["kit"], settings: Record<string, string> = {}, f
   const engine = temp.make("engine-");
   cpSync(join(repoRoot, "packs/base"), join(engine, "packs/base"), { recursive: true });
   cpSync(join(import.meta.dir, "fixtures/kit"), join(engine, "packs/kit"), { recursive: true });
+  cpSync(join(repoRoot, "packs/t3"), join(engine, "packs/t3"), { recursive: true });
+  symlinkSync(join(repoRoot, "src"), join(engine, "src"));
   for (const [path, text] of Object.entries(files)) {
     mkdirSync(join(engine, path, ".."), { recursive: true });
     writeFileSync(join(engine, path), text);
@@ -192,7 +194,7 @@ test("a pack.ts command leaves the engine's environment as it found it, also whe
   }
 });
 
-test("ctx.threads starts a T3 thread from the plan's model table, once per key", async () => {
+test("ctx.threads starts a thread from the plan's model table, once per key", async () => {
   let launched = 0;
   const t3 = await startT3Stub({
     shell: { projects: [], threads: [] },

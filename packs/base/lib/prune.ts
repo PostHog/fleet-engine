@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSy
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { freeBytes } from "./disk.ts";
-import { t3StatePath } from "./t3/index.ts";
+import { t3StatePath } from "../../t3/lib/client/index.ts";
 import { underLegacyPath } from "../../../src/legacy.ts";
 
 export { t3StatePath };

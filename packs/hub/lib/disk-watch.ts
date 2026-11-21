@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { freeBytes, freeInodeShare, freeMapFile, inodeFloorShare, shownInodes, type Space } from "../../base/lib/disk.ts";
 import { numberSetting, stringSetting } from "../../base/lib/settings.ts";
 import type { Env } from "./coder.ts";
-import { threadModel, requireHubRole, spawnText, sshArgv, stateDir, threadScript, underLock, writeStateFile, type JobContext } from "./hub-job.ts";
+import { requireHubRole, spawnText, sshArgv, stateDir, threadCommand, underLock, writeStateFile, type JobContext } from "./hub-job.ts";
 import { devboxesOf, quote, remoteHedge } from "./machine.ts";
 
 const gigabyte = 1024 ** 3;
@@ -11,7 +11,6 @@ const hour = 3600_000;
 const sweepEveryHours = 1;
 const repeatHours = 24;
 const reportLines = 40;
-const alertModel = "claude-haiku-5-5";
 const sweepMinutes = 90;
 const sweepBelowInodes = inodeFloorShare;
 const alertBelowInodes = 0.05;
@@ -132,8 +131,8 @@ ${report}
 
 Check what is left, read-only: run \`${box === local ? look : `ssh ${box} ${quote(inLoginShell(look))}`}\`.
 Delete nothing and start no lanes. Reply in at most 10 lines: the free space, the largest folders the report names, and what your user must decide to free it.`;
-    const script = threadScript(stringSetting("hub.threadFolder", env), `${box}: ${shownFree}`, threadModel("lookup", alertModel, env));
-    return (await spawnText(onBox(local, script), env, { stdin: prompt, timeoutMs: 600_000 })).code === 0;
+    const argv = threadCommand(localHedge, `disk-watch:${box}:${new Date(context.now?.() ?? Date.now()).toISOString().slice(0, 13)}`, `${box}: ${shownFree}`, "lookup");
+    return (await spawnText(argv, env, { stdin: prompt, timeoutMs: 600_000 })).code === 0;
   };
   return { read, sweep, alert, sweepBelowGigabytes, hostOf: (box: string) => hosts.get(box) };
 }

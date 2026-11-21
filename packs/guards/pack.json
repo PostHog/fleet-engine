@@ -99,7 +99,8 @@
       "name": "OOM survival",
       "default": false,
       "needs": [
-        "devbox"
+        "devbox",
+        "t3"
       ],
       "sentence": "Before memory runs out, earlyoom stops a runaway test or build, and T3's agent threads survive when the kernel kills a process inside them."
     },

@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { startT3Stub, type T3Stub } from "../../../../src/integrations/t3/testing.ts";
-import type { ShellSnapshot } from "../../../../src/integrations/t3/threads.ts";
+import { startT3Stub, type T3Stub } from "../../../t3/lib/client/testing.ts";
+import type { ShellSnapshot } from "../../../t3/lib/client/threads.ts";
 import { tempDirs } from "../../../../src/testing/git.ts";
 import { recoverCommand } from "./sweep.ts";
 import { fakeProxy, limitedThread, modelRows, recoveryHome, t3Inbox } from "./testing.ts";
@@ -19,22 +19,21 @@ const at = (time: string) => Date.parse(`2026-11-10T${time}:00Z`);
 const outageThread = (id: string, fields = {}) => limitedThread(id, { lastErrorClass: "provider_error", lastError: "api_error_500: Internal server error", ...fields });
 
 function fakeT3(dir: string) {
-  const bin = join(dir, "bin");
+  const engine = join(dir, "engine");
   const starts = join(dir, "starts");
-  mkdirSync(bin, { recursive: true });
+  mkdirSync(engine, { recursive: true });
   mkdirSync(starts, { recursive: true });
-  writeFileSync(join(bin, "t3"), `#!/bin/sh
-[ "$1 $2" = "project add" ] && exit 0
-[ "$1 $2" = "thread start" ] || exit 1
+  writeFileSync(join(engine, "hedge"), `#!/bin/sh
+[ "$1 $2" = "threads start" ] || exit 1
 [ -e "${dir}/down" ] && exit 1
 out="${starts}/$(date +%s%N)"
 printf '%s\\n' "$@" > "$out.args"
 cat > "$out.prompt"
-echo thread-alert
+echo '{"id":"thread-alert"}'
 `);
-  chmodSync(join(bin, "t3"), 0o755);
+  chmodSync(join(engine, "hedge"), 0o755);
   return {
-    path: `${bin}:${Bun.env.PATH}`,
+    engine,
     down: (down: boolean) => (down ? writeFileSync(join(dir, "down"), "") : rmSync(join(dir, "down"), { force: true })),
     started: () => readdirSync(starts).filter((name) => name.endsWith(".args")).sort().map((name) => ({
       args: readFileSync(join(starts, name), "utf8").trim().split("\n"),
@@ -51,9 +50,8 @@ async function machine(threads: Record<string, unknown>[], answers: Parameters<t
   const home = recoveryHome(temp.make("home-"));
   const t3 = fakeT3(temp.make("t3-"));
   const lines: string[] = [];
-  const settings = JSON.stringify({ "hub.threadFolder": "~/notes" });
   const run = async (now: number, proxy = fakeProxy(answers)) => recoverCommand([], {
-    home, env: { HEDGE_MODELS: JSON.stringify(modelRows), HEDGE_SETTINGS: settings, PATH: t3.path, HOME: home },
+    home, env: { HEDGE_MODELS: JSON.stringify(modelRows), HEDGE_SETTINGS: "{}", HEDGE_ENGINE_DIR: t3.engine, PATH: Bun.env.PATH, HOME: home },
     fetch: proxy.fetch, now: () => now, print: (line) => lines.push(line), session: { home: stub.home },
   });
   return { run, lines, inbox, t3, home, setThreads: (next: Record<string, unknown>[]) => void ((shell as unknown as { threads: unknown[] }).threads = next) };
@@ -70,7 +68,7 @@ test("retries a thread stopped on a provider error with a growing wait, four tim
   expect(box.inbox.delivered()).toEqual(Array.from({ length: 4 }, () => ({ threadId: "e", text: "Continue where you left off." })));
   const alerts = box.t3.started();
   expect(alerts.length).toBe(1);
-  expect(alerts[0]!.args).toEqual(["thread", "start", "--title", "1 thread keeps failing on provider errors", "--provider", "claudeAgent", "--model", "claude-test-small", join(box.home, "notes"), "-"]);
+  expect(alerts[0]!.args).toEqual(["threads", "start", "--key", "outage:Thread e (e)", "--title", "1 thread keeps failing on provider errors", "--role", "lookup"]);
   expect(alerts[0]!.prompt).toContain("Thread e (e): api_error_500: Internal server error");
   expect(box.lines).toContain("Thread e (e): retried after a provider error, try 4 of 4.");
 });

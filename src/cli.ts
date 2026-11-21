@@ -7,6 +7,13 @@ import { cannotTell } from "./pack/types.ts";
 import type { AvailableSource, CatalogEntry, FetchedSource, Finding, LoadedPack, MachineFile, Plan, Report, SourceRef } from "./pack/types.ts";
 import { loadMachine, loadProfile, pullProfile, saveMachine, thisMachine } from "./profile/profile.ts";
 import { engineAdapters } from "./adapters/index.ts";
+import { runtimeRecord } from "./runtime/active.ts";
+import { planRuntime } from "./runtime/load.ts";
+
+const runtimeEnvironment = (plan: Plan) => {
+  const record = runtimeRecord(plan);
+  return record ? JSON.stringify(record) : undefined;
+};
 import { apply, check, filesAdapter, type Adapter, type Issuer, type Runner } from "./reconciler/apply.ts";
 import { refresh } from "./refresh.ts";
 import { listedPack, resolve } from "./reconciler/resolve.ts";
@@ -35,7 +42,7 @@ import { importFleet, isCopyOf } from "./import-fleet.ts";
 import { fleetAdapter, type FleetAdapter } from "./adapters/fleet/adapter.ts";
 
 /** env: the environment that tells a Coder workspace apart; tests pass their own. */
-export type CliOptions = { home: string; engineRoot: string; launchedFrom?: string; platform: NodeJS.Platform; env?: Record<string, string | undefined>; print: (line: string) => void; fail?: (line: string) => void; run?: Runner; terminal?: Terminal; apply?: (profileDir: string, skip?: string[]) => Promise<number>; setup?: Pick<SetupOptions, "machine" | "fetchSource" | "doctor" | "env" | "timeZone" | "clock">; clock?: Clock; adapters?: () => Adapter[]; hostname?: () => string; stdin?: () => ReadableStream<Uint8Array>; capture?: CommandRunner; become?: Become; interactive?: boolean };
+export type CliOptions = { home: string; engineRoot: string; launchedFrom?: string; platform: NodeJS.Platform; env?: Record<string, string | undefined>; print: (line: string) => void; fail?: (line: string) => void; run?: Runner; terminal?: Terminal; apply?: (profileDir: string, skip?: string[]) => Promise<number>; setup?: Pick<SetupOptions, "machine" | "fetchSource" | "doctor" | "env" | "timeZone" | "clock">; clock?: Clock; adapters?: (plan?: Plan) => Adapter[] | Promise<Adapter[]>; hostname?: () => string; stdin?: () => ReadableStream<Uint8Array>; capture?: CommandRunner; become?: Become; interactive?: boolean };
 
 const usage = `Hedge: one setup for T3 Code, agents, and your workflows
 
@@ -112,7 +119,7 @@ async function bringOverFleet(options: CliOptions) {
   return 0;
 }
 
-const fleetOf = (options: CliOptions) => (options.adapters ?? engineAdapters)().find((adapter): adapter is FleetAdapter => adapter.name === "fleet") ?? fleetAdapter();
+const fleetOf = (options: CliOptions) => (options.adapters?.() as Adapter[] | undefined)?.find((adapter): adapter is FleetAdapter => adapter.name === "fleet") ?? fleetAdapter();
 
 async function retireFleet(args: string[], options: CliOptions) {
   if (args.length > 1 || (args.length && args[0] !== "--dry-run")) return options.print("Usage: hedge retire-fleet [--dry-run]"), 2;
@@ -191,7 +198,7 @@ async function reconcile(command: "apply" | "doctor", args: string[], options: C
   const stillHeld = preview ? [] : await holds();
   if (stillHeld.length) return printReport({ ok: false, actions: [], findings: stillHeld, humanLeft: [] }, command, options.print, false), 1;
   if (!preview) await remember();
-  const adapters = (options.adapters ?? engineAdapters)();
+  const adapters = await (options.adapters ?? engineAdapters)(plan);
   const issue: Issuer = (entries, node) => issueCredentials(entries, node, plan, sources, options);
   const report = doctor ? await check(plan, { home: options.home, adapters, run: options.run }) : await apply(plan, { home: options.home, adopt: flags.adopt, adoptFrom: flags.adoptFrom, skip: flags.skip, dryRun: flags.dryRun, adapters, run: options.run, issue, progress: options.print });
   if (flags.toDo) return printToDo(report, held, options.print);
@@ -210,7 +217,11 @@ async function reconcile(command: "apply" | "doctor", args: string[], options: C
 async function devbox(args: string[], options: CliOptions) {
   const terminal = options.terminal ?? { ...ttyTerminal(), print: options.print };
   const machine = { ...realMachine, ...options.setup?.machine };
-  if (asksAddress(args)) return await printAddress({ terminal, machine });
+  if (asksAddress(args)) {
+    const loaded = await loadPlan(options, undefined, { fetch: false }).catch(() => undefined);
+    const runtime = loaded ? await planRuntime(loaded.plan).catch(() => undefined) : undefined;
+    return await printAddress({ terminal, machine, ...(runtime ? { runtime } : {}) });
+  }
   const { plan } = await loadPlan(options, undefined, { fetch: false });
   try {
     return await devboxCommand(args, { home: options.home, terminal, machine, machineFile: plan.machine, plan });
@@ -504,7 +515,7 @@ async function inPack(plan: Plan, loaded: LoadedPack, options: CliOptions, work:
 }
 
 export function packEnvironment(plan: Plan, options: Pick<CliOptions, "home" | "engineRoot">): Record<string, string | undefined> {
-  return withLegacyNames({ HOME: options.home, HEDGE_ENGINE_DIR: options.engineRoot, HEDGE_PROFILE_DIR: plan.machine.profileDir, HEDGE_SETTINGS: JSON.stringify(plan.settings), HEDGE_MODELS: JSON.stringify(plan.models), HEDGE_PLAN: plan.ai, HEDGE_HANDLERS: JSON.stringify(handlerPaths(plan)), HEDGE_HANDLER_SUBCOMMANDS: JSON.stringify(handlerSubcommands(plan)) });
+  return withLegacyNames({ HOME: options.home, HEDGE_ENGINE_DIR: options.engineRoot, HEDGE_PROFILE_DIR: plan.machine.profileDir, HEDGE_SETTINGS: JSON.stringify(plan.settings), HEDGE_MODELS: JSON.stringify(plan.models), HEDGE_PLAN: plan.ai, HEDGE_HANDLERS: JSON.stringify(handlerPaths(plan)), HEDGE_HANDLER_SUBCOMMANDS: JSON.stringify(handlerSubcommands(plan)), HEDGE_RUNTIME: runtimeEnvironment(plan) });
 }
 
 function handlerPaths(plan: Plan) {

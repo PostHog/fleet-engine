@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { t3Threads } from "../../src/integrations/t3/index.ts";
-import { startT3Stub, ToolRefusal, type LaunchedThread } from "../../src/integrations/t3/testing.ts";
-import type { LinkedEnvironment, LinkedThread, LinkedTimelineItem } from "../../src/integrations/t3/environments.ts";
-import type { ShellThread, TurnItem } from "../../src/integrations/t3/threads.ts";
+import { t3RuntimeThreads } from "../t3/lib/runtime-threads.ts";
+import { startT3Stub, ToolRefusal, type LaunchedThread } from "../t3/lib/client/testing.ts";
+import type { LinkedEnvironment, LinkedThread, LinkedTimelineItem } from "../t3/lib/client/environments.ts";
+import type { ShellThread, TurnItem } from "../t3/lib/client/threads.ts";
 import type { ModelRow } from "../../src/pack/types.ts";
 import { tempDirs } from "../../src/testing/git.ts";
 import { checkReviews, type ReviewWait } from "./lib/review-wait.ts";
@@ -171,7 +171,8 @@ async function setup(qualifiers = "") {
     gh: hub.gh,
     qualifiers,
     slack: { gateway: { url: chat.url, credential: key }, fetch: (input, init) => fetch(input, init), filter: slackFilter },
-    threads: t3Threads(models, { home: server.stub.home }),
+    threads: t3RuntimeThreads(models, { home: server.stub.home }),
+    runtime: "t3",
     session: { home: server.stub.home },
     host: "hub",
     statePath,

@@ -1,4 +1,4 @@
-import type { Plan, Provider } from "../../pack/types.ts";
+import type { AgentProvider, Plan, Provider } from "../../pack/types.ts";
 import { get, keyPath, overlaps, same, samePath, type Document } from "./fields.ts";
 
 export const proxyUrl = "http://127.0.0.1:8317";
@@ -13,7 +13,7 @@ const codexTable = ["model_providers", codexProvider];
 const claudeCredentials = [["apiKeyHelper"], ["env", "ANTHROPIC_AUTH_TOKEN"], ["env", "ANTHROPIC_API_KEY"]];
 const leaves = (leaving: string[][], path: string[]) => leaving.some((item) => samePath(item, path));
 
-export const proxyRoute: Partial<Record<Provider, Route>> = {
+export const proxyRoute: Partial<Record<AgentProvider, Route>> = {
   claude: {
     agent: "Claude Code",
     fields: [{ path: baseUrl, value: proxyUrl }, { path: ["apiKeyHelper"], value: keyHelper }],
@@ -41,7 +41,7 @@ export function wholeRoutes(config: Entry[], dropped: Entry[]): Pick<Plan, "conf
   return { config: config.filter((entry) => !leaving.some((item) => item.entry === entry)), dropped: leaving.map(({ entry, reason }) => ({ pack: entry.pack, item: `config ${entry.provider}:${entry.key}`, reason })) };
 }
 
-const hubOnly: Partial<Record<Provider, Array<{ path: string[]; value?: unknown; name: string }>>> = {
+const hubOnly: Partial<Record<string, Array<{ path: string[]; value?: unknown; name: string }>>> = {
   claude: [
     { path: baseUrl, value: proxyUrl, name: `env.ANTHROPIC_BASE_URL = ${proxyUrl}` },
     { path: ["apiKeyHelper"], value: keyHelper, name: `apiKeyHelper = ${keyHelper}` },

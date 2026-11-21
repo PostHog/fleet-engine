@@ -1,5 +1,6 @@
 import { normalized, t3ThreadWords, type HeardAnswer, type ThreadWord, type ThreadWords } from "./proof-answers.ts";
 import { renderReport } from "./decision-report.ts";
+import { threadOfProcess } from "../../../src/runtime/active.ts";
 import { laneSecretLines } from "../../hub/lib/secret-lane-source.ts";
 import { readPullRequest, runIn } from "./pr-ci.ts";
 import { gapKind, refuseInstructionQuote, usedAnswer } from "./proof.ts";
@@ -166,7 +167,7 @@ export type Hearing = Scope & { mark: UsersMark; thread?: string; words?: string
 
 export async function hearUser(input: Hearing, context: DecisionContext, ledger: Ledger): Promise<Decision> {
   checkScope(input);
-  const thread = input.thread ?? context.env.T3CODE_THREAD_ID;
+  const thread = input.thread ?? threadOfProcess(context.env);
   if (!thread) throw new Error("The user's answer needs --thread with the id of the T3 thread where they gave it. A conductor may pass its own thread id");
   if (input.words !== undefined && input.message !== undefined) throw new Error("Pass --message or --words, not both");
   if (input.words !== undefined) await refuseInstructionQuote(context.home, input.words);
@@ -275,8 +276,8 @@ export async function decideAlone(input: AgentDecision, context: DecisionContext
   for (const [name, value] of Object.entries({ "--question": input.question, "--answer": input.answer, "--rejected": input.rejected, "--reason": input.reason })) {
     if (!value.trim()) throw new Error(`An agent decision needs ${name}`);
   }
-  const thread = input.thread ?? context.env.T3CODE_THREAD_ID;
-  if (!thread) throw new Error("An agent decision needs --thread with this lane's T3 thread id");
+  const thread = input.thread ?? threadOfProcess(context.env);
+  if (!thread) throw new Error("An agent decision needs --thread with this lane's thread id");
   if (input.link !== undefined && input.class !== "scope") throw new Error("--link belongs to a scope decision: the T3 thread its side fix started in");
   const brake = brakeOf(await reachHub(() => ledger.read()), input.class);
   if (brake) throw new Error(`The ${input.class} class is braked: the user reversed decisions ${brake.ids[0]} and ${brake.ids[1]} within ${brakeDays} days. An agent decides no ${input.class} ask alone until the user lifts it with hedge decision lift; ask them`);
@@ -433,7 +434,7 @@ async function report(parsed: Parsed, context: DecisionContext, ledger: Ledger) 
   const events = await reachHub(() => ledger.read());
   const read: Ledger = { read: async () => events, append: (...added) => ledger.append(...added) };
   const lane = parsed.options.get("--lane");
-  context.print(await renderReport({ prs, thread: parsed.options.get("--thread") ?? context.env.T3CODE_THREAD_ID, ...lane === undefined ? {} : { lane } }, read, fold(events), { ...context, laneSecrets: (key: string) => laneSecretLines(context, key) }));
+  context.print(await renderReport({ prs, thread: parsed.options.get("--thread") ?? threadOfProcess(context.env), ...lane === undefined ? {} : { lane } }, read, fold(events), { ...context, laneSecrets: (key: string) => laneSecretLines(context, key) }));
   return 0;
 }
 

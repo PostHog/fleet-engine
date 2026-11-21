@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { main } from "../cli.ts";
 import { isolateGit, spawnGit, tempDirs } from "../testing/git.ts";
 import { profilePath } from "./profile.ts";
-import { boxHome, boxMachineFile, engineRoot, fakeMachine, hedgeSetup, githubRepo, machineFile, pushedAnswers, remote, scripted } from "./testing.ts";
+import type { Machine } from "./commands.ts";
+import { boxHome, boxMachineFile, engineRoot, fakeMachine, hedgeSetup, githubRepo, machineFile, onBox, pushedAnswers, remote, scripted } from "./testing.ts";
 
 isolateGit();
 const temp = tempDirs();
@@ -116,5 +117,35 @@ describe("hedge devbox add with a hub", () => {
     expect((await pushedAnswers(home)).devboxes).toEqual(["coder.hedge-hub"]);
     expect(box.hubUpdates).toEqual([]);
     expect(box.hubLinked).toEqual([]);
+  });
+
+  test("under the herdr runtime, hedge devbox add adds the node to herdr-core here and on the hub, and runs no t3 command", async () => {
+    const { home, io, add } = await withHub();
+    const profile = profilePath(home);
+    const answers = JSON.parse(readFileSync(join(profile, "hedge.json"), "utf8"));
+    writeFileSync(join(profile, "hedge.json"), JSON.stringify({ ...answers, settings: { ...answers.settings, "base.runtime": "herdr" } }, null, 2) + "\n");
+    await spawnGit(profile, "commit", "-q", "-am", "Run threads in Herdr");
+    await spawnGit(profile, "push", "-q");
+    const box = fakeMachine(home);
+    const herdr: string[] = [];
+    const machine: Machine = {
+      ...box.machine,
+      async exec(command, options) {
+        const line = onBox(command) ?? command.join(" ");
+        const at = line.indexOf(" hc machine ");
+        if (at < 0) return box.machine.exec(command, options);
+        herdr.push(`${command[0] === "ssh" ? command.at(-2) : "here"}: ${line.slice(at + 1)}`);
+        const listed = line.includes(" machine ls ") ? '{"machines":[]}' : "";
+        return { code: 0, output: listed, stdout: listed };
+      },
+    };
+
+    expect(await add("coder.hedge-node-1", { ...box, machine })).toBe(0);
+
+    expect(herdr.filter((call) => call.includes(" add "))).toEqual(["here: hc machine add coder.hedge-node-1 --name coder.hedge-node-1", "coder.hedge-hub: hc machine add coder.hedge-node-1 --name coder.hedge-node-1"]);
+    expect(io.output()).toContain("▶ Link Herdr here and on coder.hedge-node-1");
+    expect(io.output()).toContain("✓ The hub, coder.hedge-hub, reaches coder.hedge-node-1 in herdr-core.");
+    const commands = [...box.calls.map((call) => call.command), ...box.starts, ...box.runs.map((run) => run.command)].map((command) => onBox(command) ?? command.join(" "));
+    expect(commands.filter((line) => /(^|[\s'"])t3 /.test(line))).toEqual([]);
   });
 });

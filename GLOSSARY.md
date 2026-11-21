@@ -90,6 +90,14 @@ _Avoid_: Controller, master box
 
 ## Threads
 
+**Runtime**:
+The app where agent threads live and run, such as T3 Code or Herdr. A runtime pack brings it, and the profile setting `base.runtime` chooses the one that starts threads. A task's `runtimeMode` is something else: the permission mode a thread runs in.
+_Avoid_: ADE, host, backend
+
+**Thread**:
+One agent conversation in a runtime: a T3 thread, or a herdr-core terminal. `hedge threads` lists, reads, starts, and sends to threads under any runtime.
+_Avoid_: Session, lane (a lane is a thread that works one ticket of a map)
+
 **Question card**:
 A question a thread asks the person with the question tool: `AskUserQuestion` in Claude, `request_user_input` in Codex. T3 shows it as a card, and the thread's turn waits until the person answers. A message sent to the thread in a mode other than `queue` cancels the card. T3 queues a message with `freshContext: true` in mode `steer` or `restart`, so that message does not cancel it.
 _Avoid_: Prompt, popup, dialog

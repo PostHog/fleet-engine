@@ -1,4 +1,5 @@
 import type { AiPlan, Os, PackSetting, SettingValue, Workflow as WorkflowItem } from "../pack/types.ts";
+import type { RuntimeThreads } from "./runtime.ts";
 
 declare const kind: unique symbol;
 declare const valueType: unique symbol;
@@ -63,14 +64,20 @@ export type Context = {
   log(line: string): void;
   now(): number;
   sleep(ms: number): Promise<void>;
-  threads: Threads;
+  threads: RuntimeThreads;
+  /** The name of the runtime that base.runtime selects, such as t3 or herdr. */
+  runtime: string | undefined;
   /** The command's standard input. */
   stdin(): ReadableStream<Uint8Array>;
   /** The loopback URL of a served service of this pack and this machine's credential for it. Fails fast when either is missing. */
   use(service: Service): Promise<{ url: string; credential: string }>;
 };
 
-export type ThreadStart = { key: string; title: string; prompt: string; modelRole: string };
+/** cwd: the folder the thread starts in, where the runtime can choose one. */
+export type ThreadStart = { key: string; title: string; prompt: string; modelRole: string; cwd?: string };
 export type StartedThread = { id: string; url?: string };
 export type ThreadSend = { id: string; text: string };
 export type Threads = { start(def: ThreadStart): Promise<StartedThread>; send(def: ThreadSend): Promise<boolean> };
+
+export type { AgentRuntime, AgentTasks, RuntimeAdapter, RuntimeCapabilities, RuntimeMachine, RuntimeMessage, RuntimeOptions, RuntimePullRequest, RuntimeThread, RuntimeThreads, ScheduledTask, ThreadRead, ThreadState, Where, OnboardingContext, NodeIds, NodeSignIn, FleetTasks, RuntimeOnboarding } from "./runtime.ts";
+export { isMaybeStarted, MaybeStarted } from "./runtime.ts";

@@ -4,8 +4,9 @@ import { join } from "node:path";
 import type { AvailableSource } from "../../src/pack/types.ts";
 import { gitEnv, spawnGit, tempDirs } from "../../src/testing/git.ts";
 import { devbox, engineSource, mac, resolveEngine, skillSources } from "../../src/testing/packs.ts";
-import { t3CliRunner, t3Threads } from "../../src/integrations/t3/index.ts";
-import { startT3Stub, type T3Stub } from "../../src/integrations/t3/testing.ts";
+import { t3CliRunner } from "../t3/lib/client/index.ts";
+import { t3RuntimeThreads as t3Threads } from "../t3/lib/runtime-threads.ts";
+import { startT3Stub, type T3Stub } from "../t3/lib/client/testing.ts";
 import type { ModelRow } from "../../src/pack/types.ts";
 import { secretStore } from "../../src/runner/context.ts";
 import { launcher, listen, ownerOf, slackTrigger, type SlackCommandDeps } from "./lib/command.ts";
@@ -223,7 +224,7 @@ describe("hedge slack-trigger run", () => {
     const failure = deps.printed.find((line) => line.includes("C1:300.1: launch failed:"));
     expect(failure).toContain("3.0G free, below the 25G floor");
     expect(failure).toContain("devbox-big has 200.0G free");
-    expect(slack.method("chat.postEphemeral")[0]!.args.text).toBe("Could not start a T3 thread. Hedge retries every minute for a day.");
+    expect(slack.method("chat.postEphemeral")[0]!.args.text).toBe("Could not start a thread. Hedge retries every minute for a day.");
   });
 
   test("ends when its saved Slack app is replaced, so the service starts again with the new app", async () => {
@@ -649,7 +650,7 @@ describe("a launch that fails", () => {
     await retryPending(deps);
     expect(titles).toEqual(["Slack: why?", "Slack: why?", "Slack: why?"]);
     expect(new Set(commandIds).size).toBe(1);
-    expect(replies).toEqual(["Could not start a T3 thread. Hedge retries every minute for a day.", "Started <https://app.t3.codes/threads/E1/T1|Slack: why?> on this machine."]);
+    expect(replies).toEqual(["Could not start a thread. Hedge retries every minute for a day.", "Started <https://app.t3.codes/threads/E1/T1|Slack: why?> on this machine."]);
   });
 
   async function retryBelowTheFloor(fixture: { rows?: ModelRow[]; firstLaunch: "lost" | "refused" | "fine"; repair?: (rows: ModelRow[]) => void }) {
@@ -682,13 +683,13 @@ describe("a launch that fails", () => {
   test("checks the start floor again on a retry whose launch failed before it reached T3", async () => {
     const { threads, replies } = await retryBelowTheFloor({ rows: [], firstLaunch: "fine", repair: (rows) => rows.push(...models) });
     expect(threads).toEqual([]);
-    expect(replies).toEqual(["Could not start a T3 thread. Hedge retries every minute for a day."]);
+    expect(replies).toEqual(["Could not start a thread. Hedge retries every minute for a day."]);
   });
 
   test("checks the start floor again on a retry whose launch T3 refused", async () => {
     const { threads, replies } = await retryBelowTheFloor({ firstLaunch: "refused" });
     expect(threads).toEqual([]);
-    expect(replies).toEqual(["Could not start a T3 thread. Hedge retries every minute for a day."]);
+    expect(replies).toEqual(["Could not start a thread. Hedge retries every minute for a day."]);
   });
 
   test("on a box, retries a launch whose T3 answer was lost as a replay", async () => {
@@ -728,7 +729,7 @@ describe("a launch that fails", () => {
     expect(new Set(sent.map((request) => request.commandId)).size).toBe(1);
     expect(sent.map((request) => request.replay)).toEqual([undefined, undefined, true]);
     expect(sent.every((request) => !("claim" in request))).toBe(true);
-    expect(replies).toEqual(["Could not start a T3 thread. Hedge retries every minute for a day.", "Started <https://app.t3.codes/threads/env-2/thread-on-node|Slack: why?> on devbox-2."]);
+    expect(replies).toEqual(["Could not start a thread. Hedge retries every minute for a day.", "Started <https://app.t3.codes/threads/env-2/thread-on-node|Slack: why?> on devbox-2."]);
   });
 
   test("a node launch has nothing to release when the trigger gives up", () => {
@@ -889,7 +890,7 @@ describe("a launch that fails", () => {
     const sent = boxCalls.filter((call) => call.argv[2] === "run").map((call) => JSON.parse(call.input!));
     expect(sent[0].commandId).toBe(sent[1].commandId);
     expect(sent[0]).not.toHaveProperty("claim");
-    expect(replies).toEqual(["Could not start a T3 thread. Hedge retries every minute for a day.", "Started <https://app.t3.codes/threads/env-box-8/thread-on-box|Slack: why?> on box-8."]);
+    expect(replies).toEqual(["Could not start a thread. Hedge retries every minute for a day.", "Started <https://app.t3.codes/threads/env-box-8/thread-on-box|Slack: why?> on box-8."]);
   });
 
   test("releases a box it kept when the trigger gives up after a day", async () => {

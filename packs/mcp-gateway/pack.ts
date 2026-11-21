@@ -165,7 +165,7 @@ export default {
     const reviewWaitOf = async (ctx: Context) => {
       const [{ runGh }, { hostname }] = await Promise.all([import("../pull-requests/lib/gh.ts"), import("node:os")]);
       return {
-        gh: runGh, qualifiers: ctx.get(reviewSearch), threads: ctx.threads, session: {}, host: hostname(),
+        gh: runGh, qualifiers: ctx.get(reviewSearch), threads: ctx.threads, runtime: ctx.runtime, session: {}, host: hostname(),
         slack: { gateway: await ctx.use(service), filter: ctx.get(reviewAsks), fetch: (input: string | URL | Request, init?: RequestInit) => fetch(input, init) },
         statePath: join(ctx.stateDir, "review-wait.json"), parkedPath: join(ctx.stateDir, "parked-questions.json"), now: ctx.now, sleep: ctx.sleep, log: ctx.log,
       };

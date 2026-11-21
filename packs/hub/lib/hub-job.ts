@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { closeSync, mkdirSync, openSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { modelFor } from "../../base/lib/models.ts";
 import type { Env, Result } from "./coder.ts";
 import { quote, readRole } from "./machine.ts";
 
@@ -80,16 +79,10 @@ export async function underLock(context: JobContext, name: string, label: string
   finally { release(); }
 }
 
-export type ThreadModel = { provider: string; model: string };
+export const hedgeLauncher = (env: Env, home: string) => join(env.HEDGE_ENGINE_DIR ?? join(home, ".local/share/hedge/engine"), "hedge");
 
-const t3Providers = { claude: "claudeAgent", codex: "codex" } as const;
-
-export function threadModel(role: string, fallback: string, env: Env): ThreadModel {
-  try {
-    const row = modelFor(role, env);
-    return { provider: t3Providers[row.provider], model: row.model };
-  } catch { return { provider: t3Providers.claude, model: fallback }; }
-}
+/** Starts a thread in the machine's runtime with the prompt on standard input. The key makes a retry return the same thread. */
+export const threadCommand = (launcher: string, key: string, title: string, role: string) => ["sh", launcher, "threads", "start", "--key", key, "--title", title, "--role", role];
 
 export function writeStateFile(path: string, value: unknown): void {
   mkdirSync(dirname(path), { recursive: true });
@@ -98,15 +91,4 @@ export function writeStateFile(path: string, value: unknown): void {
   renameSync(partial, path);
 }
 
-const shellPath = (path: string) => (path === "~" ? `"$HOME"` : path.startsWith("~/") ? `"$HOME"/${quote(path.slice(2))}` : quote(path));
 
-export function threadScript(folder: string, title: string, choice: ThreadModel): string {
-  return [
-    `prompt=$(mktemp) || exit 1`,
-    `trap 'rm -f "$prompt"' EXIT`,
-    `cat > "$prompt"`,
-    `folder=${shellPath(folder)}`,
-    `t3 project add "$folder" >/dev/null 2>&1 || :`,
-    `t3 thread start --title ${quote(title)} --provider ${quote(choice.provider)} --model ${quote(choice.model)} "$folder" - < "$prompt"`,
-  ].join("\n");
-}

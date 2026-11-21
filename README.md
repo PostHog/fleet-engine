@@ -55,9 +55,11 @@ Base and Hub are in every Hedge. You pick the rest.
 - [Communication](https://posthog.github.io/hedge/packs/communication/): agents write in your voice, give short updates, and share plans and previews as links.
 - [Guards](https://posthog.github.io/hedge/packs/guards/): hooks stop risky shell commands, such as a push past review or a polling loop.
 - [Memory](https://posthog.github.io/hedge/packs/memory/): one private repo holds what your agents learn and what you save, and every box reads it.
-- [Slack](https://posthog.github.io/hedge/packs/slack/): your own Slack message or reaction with your trigger emoji, or a mention of your Slack app, starts a T3 thread about it.
+- [Slack](https://posthog.github.io/hedge/packs/slack/): your own Slack message or reaction with your trigger emoji, or a mention of your Slack app, starts a thread about it.
 - [Paging (incident.io)](https://posthog.github.io/hedge/packs/incident-io/): an agent that watches a risky change pages you, and only you, when it goes wrong.
 - [MCP gateway](https://posthog.github.io/hedge/packs/mcp-gateway/): the hub signs in to your MCP servers once, and agents on every box reach them through it.
+- [T3 Code](https://posthog.github.io/hedge/packs/t3/): T3 Code runs your threads by default, with tuned settings, linked machines and scheduled prompts.
+- [Herdr](https://posthog.github.io/hedge/packs/herdr/): threads that Hedge starts run in Herdr, and the Herdr app on your Mac and your phone shows which agent needs you.
 
 Switch Quality gates, Orchestration, Communication, and Memory on
 [the Hedge site](https://posthog.github.io/hedge/), and it builds the prompt
@@ -72,6 +74,8 @@ On the hub or a node:
 - `hedge packs` lists your packs. `--add <pack>` or `--remove <pack>` turns
   one on or off.
 - `hedge doctor` checks the box against your profile and changes nothing.
+- `hedge threads list` shows the threads of your runtime on every machine it
+  reaches. `hedge set base.runtime=herdr` moves new threads to Herdr.
 - `hedge update` moves the engine and your profile forward, then applies.
   Every box also runs it each night while Nightly updates is on.
 - `hedge devbox add <ssh host>`, on the hub, makes a box one of your nodes.

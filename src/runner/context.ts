@@ -2,7 +2,7 @@ import { constants } from "node:fs";
 import { chmod, mkdir, open } from "node:fs/promises";
 import { join } from "node:path";
 import { writePrivateFile } from "../files/private.ts";
-import { t3Threads } from "../integrations/t3/index.ts";
+import { planThreads } from "../runtime/load.ts";
 import { isSecretName } from "../pack/register.ts";
 import type { PackCode, Plan, Workflow } from "../pack/types.ts";
 import type { Context, Secrets, Setting, Value } from "../sdk/index.ts";
@@ -16,7 +16,7 @@ export const credentialName = (id: string) => `credential.${id}`;
 export async function packContext({ home, plan, pack, code, workflows, print, clock, stdin = () => Bun.stdin.stream() }: ContextOptions): Promise<Context> {
   const stateDir = join(home, ".local/state/hedge", pack);
   await mkdir(stateDir, { recursive: true, mode: 0o700 });
-  const threads = t3Threads(plan.models, { home });
+  const threads = planThreads(plan, home);
   const secrets = secretStore(home, pack);
   return {
     get: <T extends Value>(setting: Setting<T>) => {
@@ -36,7 +36,8 @@ export async function packContext({ home, plan, pack, code, workflows, print, cl
     log: (line) => print(`${new Date(clock.now()).toISOString()} ${line}`),
     now: clock.now,
     sleep: clock.sleep,
-    threads: { start: (request) => threads.start({ ...request, key: `${pack}:${request.key}` }), send: threads.send },
+    threads: { ...threads, start: (request: Parameters<typeof threads.start>[0]) => threads.start({ ...request, key: `${pack}:${request.key}` }) },
+    runtime: plan.runtime,
     stdin,
     use: async (service) => {
       const id = code.serviceId(service);

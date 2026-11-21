@@ -5,7 +5,7 @@ import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { type Hook, printing, runHook } from "../../base/lib/hook.ts";
-import { matchThread, questionCard, type ShellThread, t3CliRunner, t3UserData, type T3HttpClient, withT3Session } from "../../base/lib/t3/index.ts";
+import { matchThread, questionCard, type ShellThread, t3CliRunner, t3UserData, type T3HttpClient, withT3Session } from "../../t3/lib/client/index.ts";
 import { backgroundReason, unwaitedBackgroundTasks } from "../lib/background-stop.ts";
 import { parkStop, type ParkT3, realSettleClock, settleWhenRunEnds, stillParks } from "../lib/closing-line.ts";
 import { closesOn, closingSettings, killSwitch } from "../lib/closing-marks.ts";
