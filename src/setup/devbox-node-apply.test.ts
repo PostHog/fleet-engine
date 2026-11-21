@@ -54,7 +54,7 @@ describe("hedge devbox add applies the profile on the node", () => {
     const box = fakeMachine(home, {}, { node: { signedOut: true } });
     expect(await add(box)).toBe(0);
     expect(box.peerLinks.here).toEqual(linkedHere);
-    expect(io.output()).toMatch(new RegExp(`  ✓ Sign in to ChatGPT on ${node.replaceAll(".", "\\.")}: (done|already done)`));
+    expect(["done", "already done"].some((state) => io.output().includes(`  ✓ Sign in to ChatGPT on ${node}: ${state}`))).toBe(true);
     const left = endList(io.output());
     expect(listed(left, "Sign Codex in to ChatGPT")).toBe(0);
     expect([listed(left, "Claude's GitHub plugin cannot reach GitHub."), listed(left, "Claude's Context7 plugin is not signed in."), listed(left, "Codex cannot reach Context7."), listed(left, "Convex is not signed in")]).toEqual([1, 1, 1, 1]);
