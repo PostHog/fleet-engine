@@ -10,10 +10,14 @@ export const loadVoice = (root: string) => JSON.stringify(JSON.parse(readFileSyn
 export const narrationHash = (lesson: Lesson, voice: string) => new Bun.CryptoHasher("sha256").update(voice).update("\n\n").update(narration(lesson)).digest("hex");
 
 const inNextOrder = (lessons: Lesson[]) => {
-  const pointedAt = new Set(lessons.map((lesson) => lesson.next));
-  const chain = (lesson: Lesson | undefined, seen: Lesson[]): Lesson[] => (!lesson || seen.includes(lesson) ? seen : chain(lessons.find((other) => other.id === lesson.next), [...seen, lesson]));
-  const ordered = lessons.filter((lesson) => !pointedAt.has(lesson.id)).reduce((seen, head) => chain(head, seen), [] as Lesson[]);
-  return [...ordered, ...lessons.filter((lesson) => !ordered.includes(lesson))];
+  const ordered: Lesson[] = [];
+  const left = () => lessons.filter((lesson) => !ordered.includes(lesson));
+  const ready = (lesson: Lesson) => !lessons.some((other) => other.next === lesson.id && !ordered.includes(other));
+  while (ordered.length < lessons.length) {
+    const following = left().find((lesson) => lesson.id === ordered.at(-1)?.next);
+    ordered.push(following && ready(following) ? following : (left().find(ready) ?? left()[0]!));
+  }
+  return ordered;
 };
 
 export function loadLessons(root: string): Lesson[] {

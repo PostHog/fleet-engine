@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { captions, parseLesson, type Lesson } from "../page/lessons.ts";
@@ -26,13 +26,24 @@ describe("lessons", () => {
     expect(lessons.flatMap((lesson) => lessonProblems(lesson, names, loadVoice(root)))).toEqual([]);
   });
 
-  test("lessons come in the order of their next links, starting with the lessons that no link names, and a lesson in a loop still comes", () => {
-    expect(loadLessons(root).map((lesson) => lesson.id)).toEqual(["what-hedge-is", "build-your-first-feature"]);
-    const probe = mkdtempSync(join(tmpdir(), "lessons-"));
-    mkdirSync(join(probe, "lessons"));
-    const source = (next?: string) => `---\ntitle: Probe\nshelf: start\nfor: Tests.\nafter: Nothing.\n${next ? `next: ${next}\n` : ""}---\n\n## One\n\nA line.\n`;
-    for (const [id, next] of [["a-second", undefined], ["m-alone", undefined], ["z-first", "a-second"], ["loop-one", "loop-two"], ["loop-two", "loop-one"]] as const) writeFileSync(join(probe, "lessons", `${id}.md`), source(next));
-    expect(loadLessons(probe).map((lesson) => lesson.id)).toEqual(["m-alone", "z-first", "a-second", "loop-one", "loop-two"]);
+  test("a lesson comes after every lesson whose next link names it, a chain stays together, and a loop starts at its first name", () => {
+    const ids = loadLessons(root).map((lesson) => lesson.id);
+    expect(ids[0]).toBe("what-hedge-is");
+    expect(ids[ids.indexOf("what-hedge-is") + 1]).toBe("build-your-first-feature");
+    const order = (links: [string, string?][]) => {
+      const probe = mkdtempSync(join(tmpdir(), "lessons-"));
+      try {
+        mkdirSync(join(probe, "lessons"));
+        for (const [id, next] of links) writeFileSync(join(probe, "lessons", `${id}.md`), `---\ntitle: Probe\nshelf: start\nfor: Tests.\nafter: Nothing.\n${next ? `next: ${next}\n` : ""}---\n\n## One\n\nA line.\n`);
+        return loadLessons(probe).map((lesson) => lesson.id);
+      } finally {
+        rmSync(probe, { recursive: true, force: true });
+      }
+    };
+    expect(order([["a-second"], ["m-alone"], ["z-first", "a-second"], ["loop-one", "loop-two"], ["loop-two", "loop-one"]])).toEqual(["m-alone", "z-first", "a-second", "loop-one", "loop-two"]);
+    expect(order([["a", "c"], ["b", "c"], ["c"]])).toEqual(["a", "b", "c"]);
+    expect(order([["a", "c"], ["b", "a"], ["c", "b"]])).toEqual(["a", "c", "b"]);
+    expect(order([["x", "a"], ["a", "b"], ["b", "a"]])).toEqual(["x", "a", "b"]);
   });
 
   test("the setup guide shows the first lesson at its first wait, from the site, and names only lessons that have a cut", () => {
