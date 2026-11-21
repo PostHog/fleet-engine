@@ -1,0 +1,97 @@
+import { afterEach, expect, test } from "bun:test";
+import { existsSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { checkout, cleanFixtures, fakeModel, productionMajor, reviewHeadFixed, verdict, type Checkout } from "./proof-testing.ts";
+
+afterEach(cleanFixtures);
+
+const short = (commit: string) => commit.slice(0, 7);
+const reviews = (pr: Checkout) => join(pr.pullRequest, "reviews");
+const dropped = (pr: Checkout) => readdirSync(join(reviews(pr), "dropped")).map((entry) => /^final-\d+/.exec(entry)![0]);
+const finalRead = (pr: Checkout, base: string) => pr.hedge("review", "--scope", "final", "--base", base);
+const firstLine = (output: string) => JSON.parse(output.split("\n")[0]!) as { round: string; id: string };
+
+async function prWithStrayRead() {
+  const pr = await checkout();
+  await pr.commit("feature.txt", "greet\n");
+  await pr.hedge("require", "--none", "--reason", "docs only");
+  const reviewed = await reviewHeadFixed(pr, "feature.txt:1", "greet");
+  pr.env.HEDGE_REVIEW_ARBITER = "cat >/dev/null; echo CONTINUE";
+  const fixed = await pr.commit("feature.txt", "greet the member\n");
+  const reviewer = fakeModel(pr, "REVIEWER", "No findings.");
+  expect((await finalRead(pr, reviewed)).code).toBe(0);
+  await pr.git("checkout", "-q", "-b", "other", "main");
+  const stray = await pr.commit("other.txt", "another PR\n");
+  reviewer.answer(productionMajor("other.txt:1", "another PR"));
+  expect((await finalRead(pr, fixed)).code).toBe(0);
+  await pr.git("checkout", "-q", "feature");
+  const head = await pr.commit("feature.txt", "greet the new member\n");
+  reviewer.answer("No findings.");
+  return { pr, reviewed, fixed, stray, head, reviewer };
+}
+
+test("a final read continues from the latest review on HEAD's history and drops a final read of another branch", async () => {
+  const { pr, fixed, stray, head, reviewer } = await prWithStrayRead();
+
+  const read = await finalRead(pr, fixed);
+
+  expect(read.code).toBe(0);
+  expect(firstLine(read.output)).toMatchObject({ round: "final", id: "final-3" });
+  expect(reviewer.prompts().at(-1)).toContain("+greet the new member");
+  expect(dropped(pr)).toEqual(["final-2"]);
+  fakeModel(pr, "JUDGE", verdict());
+  const gate = (await pr.hedge("gate")).output;
+  expect(gate).toContain("review: HEAD reviewed in final read 3");
+  expect(gate).toContain(`review: final read 2 on ${short(stray)} dropped at ${short(head)}: ${short(stray)} is not on HEAD's history, and a final read from ${short(fixed)} replaced it`);
+  expect(gate).not.toContain("unanswered findings");
+});
+
+test("a final read from the latest reviewed commit keeps a final read of another branch", async () => {
+  const { pr, stray } = await prWithStrayRead();
+
+  const read = await finalRead(pr, stray);
+
+  expect(firstLine(read.output)).toMatchObject({ round: "final", id: "final-3" });
+  expect(existsSync(join(reviews(pr), "dropped"))).toBe(false);
+});
+
+test("a final read from an older review names both commits it may start from", async () => {
+  const { pr, reviewed, fixed, stray } = await prWithStrayRead();
+
+  await expect(finalRead(pr, reviewed)).rejects.toThrow(`Final read base must be the latest reviewed commit ${stray}, the latest reviewed commit on HEAD's history ${fixed}, or a clean base merge the gate carried it to`);
+  expect(readdirSync(reviews(pr)).sort()).toEqual(["1", "final-1", "final-2"]);
+});
+
+async function prOnOtherHead() {
+  const pr = await checkout();
+  await pr.git("checkout", "-q", "-b", "other", "main");
+  const other = await pr.commit("other.txt", "another PR\n");
+  await pr.git("checkout", "-q", "feature");
+  const head = await pr.commit("feature.txt", "greet\n");
+  await pr.hedge("require", "--none", "--reason", "docs only");
+  pr.githubHead(other);
+  return { pr, other, head };
+}
+
+test("a review refuses a checkout whose HEAD is not the PR's head on GitHub, before it reserves a round", async () => {
+  const { pr, other, head } = await prOnOtherHead();
+  const refusal = `HEAD ${short(head)} is not on example/product#42, whose head on GitHub is ${short(other)}`;
+
+  await expect(pr.hedge("review-start", "--scope", "full")).rejects.toThrow(refusal);
+  await expect(pr.hedge("review", "--single")).rejects.toThrow(refusal);
+  expect(existsSync(reviews(pr))).toBe(false);
+});
+
+test("a review takes a HEAD that adds unpushed commits to the PR's head", async () => {
+  const { pr, head } = await prOnOtherHead();
+  pr.githubHead(head);
+  await pr.commit("feature.txt", "greet the member\n");
+
+  expect((await pr.hedge("review-start", "--scope", "full")).code).toBe(0);
+});
+
+test("a review of an explicit --commit skips the check of the checkout", async () => {
+  const { pr, head } = await prOnOtherHead();
+
+  expect((await pr.hedge("review-start", "--scope", "full", "--commit", head)).code).toBe(0);
+});
