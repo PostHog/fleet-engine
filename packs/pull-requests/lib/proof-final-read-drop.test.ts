@@ -311,12 +311,13 @@ test("a final read that the author reserved is never dropped, since hedge cannot
   expect(anyDropped(pr)).toBe(false);
 });
 
-test("a final read that another command still works on is never dropped", async () => {
+test("a final read that another command still works on is never dropped, and no new read is reserved beside it", async () => {
   const { pr, reviewed } = await blockedFinalRead();
   await pr.commit("feature.txt", "greet the new member\n");
   const holder = await lockHolder(join(reviews(pr), "final-1"));
   try {
     await expect(finalRead(pr, reviewed)).rejects.toThrow("another hedge proof command, works on");
     expect(anyDropped(pr)).toBe(false);
+    expect(readdirSync(reviews(pr)).filter((name) => name.startsWith("final-"))).toEqual(["final-1"]);
   } finally { await holder.release(); }
 });
