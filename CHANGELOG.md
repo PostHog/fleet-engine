@@ -17,8 +17,8 @@
   runs it no more and says the judge budget is spent. A judge gap on HEAD
   that a decision accepts ends it, as before. A cached verdict still shows.
   A gate holds the lock of the pull request's judge directory while it asks
-  the judge, so a second gate at the same moment stops and names the
-  command that holds it, and gates at once never pass the cap. A gate whose
+  the judge, so a second gate at the same moment that finds no saved
+  verdict for its inputs stops and names the command that holds it, and gates at once never pass the cap. A gate whose
   process ended leaves its lock to the next gate.
 
 ### Threads that ask in prose

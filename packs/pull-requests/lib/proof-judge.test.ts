@@ -320,7 +320,7 @@ test("once the judge failed as often as the review ceiling allows on a PR, the g
   expect(accepted.output.split("\n").at(-1)).toContain("judge: fail accepted by the user");
 });
 
-test("while one gate asks the judge of a PR, a second gate of that PR asks no judge and says which command holds the judge lock", async () => {
+test("while one gate asks the judge of a PR, a second gate of that PR with other judge inputs asks no judge and says which command holds the judge lock", async () => {
   const pr = await checkout();
   pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.reviewCeiling": 1 });
   pr.env.HEDGE_REVIEW_ARBITER = "cat >/dev/null; echo CONTINUE";
@@ -335,12 +335,11 @@ test("while one gate asks the judge of a PR, a second gate of that PR asks no ju
 
   const first = gate();
   await judgeStarted(started, first);
-  const second = await gate().finally(() => writeFile(go, "go\n"));
+  const second = await gateAfterResponse(pr, "A new answer.\n").catch((error: Error) => ({ code: 1, output: error.message })).finally(() => writeFile(go, "go\n"));
 
   expect(second.output).toContain(`another hedge proof command, works on ${join(pr.pullRequest, "judge")} and holds its lock`);
   expect((await first).output).toContain("judge owed: fail: feature.txt is code, not docs");
-  expect((await gate()).output).toContain("judge owed: fail: feature.txt is code, not docs");
-  expect((await gateAfterResponse(pr, "A new answer.\n")).output).toContain("judge: budget spent: the judge failed 1 times");
+  expect((await gate()).output).toContain("judge: budget spent: the judge failed 1 times");
 });
 
 test("a gate whose process ended while it held the judge lock leaves the lock to the next gate, which asks the judge", async () => {
