@@ -7,7 +7,7 @@ export type ReviewRange = { files: string[]; leftOut: string[]; diff: string };
 
 export function reviewRange(run: Run, from: string, head: string, branched: string): ReviewRange {
   const changed = changedFiles(run, from, head);
-  const own = from === branched ? undefined : new Set(changedFiles(run, branched, head).flat());
+  const own = from === branched ? undefined : new Set([...changedFiles(run, branched, head), ...changedFiles(run, forkOf(run, from, branched), from)].flat());
   const kept = changed.filter((paths) => !own || paths.some((path) => own.has(path)));
   const files = kept.map(last);
   const leftOut = changed.filter((paths) => !kept.includes(paths)).map(last);
@@ -17,6 +17,12 @@ export function reviewRange(run: Run, from: string, head: string, branched: stri
 
 export const leftOutNote = (leftOut: string[]) =>
   leftOut.length ? `This diff holds only the files the PR changes against its base. It leaves out ${leftOut.length} file(s) that a merge of the base brought in.` : "";
+
+function forkOf(run: Run, from: string, branched: string) {
+  const result = run(["git", "merge-base", from, branched]);
+  if (result.code !== 0) throw new Error(`Cannot find where ${short(from)} branched from the base here (${firstLine(result.stderr)})`);
+  return result.stdout.trim();
+}
 
 // Each entry holds a file's paths: one, or the old and new path of a rename or copy. -z keeps names unquoted.
 function changedFiles(run: Run, from: string, to: string) {

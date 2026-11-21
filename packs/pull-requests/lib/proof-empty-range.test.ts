@@ -1,0 +1,60 @@
+import { afterEach, expect, test } from "bun:test";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { checkout, cleanFixtures, fakeModel, reviewHead, verdict } from "./proof-testing.ts";
+
+afterEach(cleanFixtures);
+
+async function reviewedPr() {
+  const pr = await checkout();
+  await pr.commit("shared.txt", "one\nand the member's name\n");
+  await pr.commit("feature.txt", "greet\n");
+  await pr.hedge("require", "--none", "--reason", "docs only");
+  const reviewed = await reviewHead(pr);
+  pr.env.HEDGE_REVIEW_ARBITER = "cat >/dev/null; echo CONTINUE";
+  return { pr, reviewed };
+}
+
+test("a final read of a HEAD that only merges the base is refused, because it would read no file of the PR, and the gate carries the read across the merge", async () => {
+  const { pr, reviewed } = await reviewedPr();
+  await pr.advanceBase("base.md", "the base moves on\n");
+  await pr.git("merge", "-q", "--no-edit", "main");
+  const reviewer = fakeModel(pr, "REVIEWER", "No findings.");
+
+  const refused = await pr.hedge("review", "--scope", "final", "--base", reviewed).then(() => "", (error: Error) => error.message);
+
+  expect(refused).toBe(`HEAD needs no final read: the commits since ${reviewed.slice(0, 7)} change no file of the PR, so the read would see nothing. hedge proof gate carries the review of ${reviewed.slice(0, 7)} across 1 clean merge(s) of the base`);
+  expect(reviewer.prompts()).toEqual([]);
+  expect((await pr.hedge("gate")).output).toContain(`review: HEAD carried forward from the review of ${reviewed.slice(0, 7)} across 1 clean merge(s) of the base`);
+});
+
+test("a final read of a commit that puts a PR file back to the base's text reads that change", async () => {
+  const { pr, reviewed } = await reviewedPr();
+  await pr.commit("shared.txt", "one\n");
+  const reviewer = fakeModel(pr, "REVIEWER", "No findings.");
+
+  expect((await pr.hedge("review", "--scope", "final", "--base", reviewed)).code).toBe(0);
+
+  expect(reviewer.prompts().at(-1)).toContain("-and the member's name");
+});
+
+test("when the judge finds a standing rule's condition broken, the gate names the rule and asks for no void of a decision it is not", async () => {
+  const pr = await checkout();
+  const rule = "Until 2026-11-26, in example/product, accept a live-run gap that only a billable run from main can prove.";
+  writeFileSync(join(pr.home, ".agents/guides/standing-rules.md"), `- \`hedge proof standing --kind live-run --until 2026-11-26 --repositories example/product --rule "${rule}"\`\n`);
+  await pr.hedge("standing", "--kind", "live-run", "--until", "2026-11-26", "--repositories", "example/product", "--rule", rule);
+  await pr.commit("feature.txt", "greet new members\n");
+  await reviewHead(pr);
+  await pr.hedge("require", "--kinds", "live-run");
+  await pr.hedge("gap", "--kind", "live-run", "--reason", "only a billable run from main proves it");
+  await pr.hedge("gap", "--kind", "judge", "--reason", "The judge misreads the copy");
+  pr.chooseGap("judge", "The judge misreads the copy");
+  await pr.decide("record", "--mark", "👤", "--class", "proof-gap", "--kind", "judge", "--pr", "example/product#42");
+  fakeModel(pr, "JUDGE", verdict({ owed: { verdict: "fail", reason: "HEAD breaks the condition of decision standing rule live-run until 2026-11-26: a free run proves it", citations: [] } }));
+
+  const gate = await pr.hedge("gate");
+
+  expect(gate.code).toBe(3);
+  expect(gate.output).toContain("judge gap: not accepted (the judge finds the condition of standing rule live-run until 2026-11-26 broken): The judge misreads the copy. Meet the condition of standing rule live-run until 2026-11-26 that the judge names, then run hedge proof gate again");
+  expect(gate.output).not.toContain("hedge decision void");
+});

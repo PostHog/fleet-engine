@@ -1135,7 +1135,7 @@ test("the ceiling never refuses a final read of a HEAD the gate does not carry, 
   await expect(pr.hedge("review-start", "--scope", "final", "--base", await pr.git("rev-parse", "HEAD~1"), "--agent", "One more read checks the test.")).rejects.toThrow("The review budget of 2 reviews is spent");
 });
 
-test("a HEAD that the gate carries across a revert of the latest reviewed fix needs no final read, and with --agent meets the ceiling, while a --base that is not the latest reviewed commit is refused first", async () => {
+test("a HEAD that the gate carries across a revert of the latest reviewed fix needs no final read, and with --agent still has nothing to read, while a --base that is not the latest reviewed commit is refused first", async () => {
   const pr = await checkout();
   const { panel, fix } = await atCeiling(pr);
   await pr.git("revert", "--no-edit", fix);
@@ -1145,7 +1145,7 @@ test("a HEAD that the gate carries across a revert of the latest reviewed fix ne
   expect(refused).toContain(`HEAD needs no final read: final read carried from ${panel.slice(0, 7)}: revert of a PR commit. hedge proof gate counts the carry. To read it anyway, pass the user's --override`);
   expect(refused).not.toContain("--agent");
   await expect(pr.hedge("review-start", "--scope", "final", "--base", panel)).rejects.toThrow(`Final read base must be the latest reviewed commit ${fix}`);
-  await expect(pr.hedge("review-start", "--scope", "final", "--base", fix, "--agent", "The revert needs a read.")).rejects.toThrow("The review budget of 2 reviews is spent");
+  await expect(pr.hedge("review-start", "--scope", "final", "--base", fix, "--agent", "The revert needs a read.")).rejects.toThrow(`HEAD needs no final read: the commits since ${panel.slice(0, 7)} change no file of the PR, so the read would see nothing.`);
 });
 
 test("with as many finished rounds as the ceiling but budget left by a clean panel, a HEAD the gate carries gets its needs-no-final-read answer with the --agent and --override retry advice", async () => {
