@@ -420,7 +420,9 @@ holds the gate. No gap waives the head check. The last line is the verdict: on a
 on any other exit it names the check that held the gate, also when the gate itself fails with an error. --wait
 <minutes>, at most 120, waits up to that long for running CI to finish, reading CI every 30 seconds, and stops early
 when a read of GitHub fails, with a "ci: --wait stopped early" line that names the error. Then it runs the gate
-again, and still exits 75 when CI runs past the limit. The limit bounds the waiting; a read of GitHub that has started
+again, and still exits 75 when CI runs past the limit; then the verdict says to open the checks it waits on, since a
+required check that has not reported may never start. An error of that second run names the failed read that ended
+the wait. The limit bounds the waiting; a read of GitHub that has started
 still finishes. While it waits, the gate record holds exit 75 and the decision ledger holds a failure at the head, dated
 when the gate read CI as running, so no merge gate counts a pass shared before that read; the result after the wait is shared with the time the wait ended. A run longer than your shell's limit belongs in the background. hedge reads the PR and its CI over GitHub's REST API. Only finding the PR of the
 checkout without --repo and --pr uses gh pr view; pass both when GraphQL is out. A check that ran more than once
@@ -471,7 +473,8 @@ code and the reason. The gate's lines and hedge decision report come from the sa
       const { print, home } = context;
       const wait = waitMinutes(options.get("--wait"));
       const head = identity();
-      const startedAt = context.now?.() ?? new Date();
+      const clock = () => context.now?.() ?? new Date();
+      const startedAt = clock();
       const record = await startGateRun(home, head, startedAt);
       let gate: FinalGate;
       let gatedAt = startedAt;
@@ -480,16 +483,18 @@ code and the reason. The gate's lines and hedge decision report come from the sa
         const gateHead = () => finalGate(head, context, { landed: flags.has("--landed") });
         gate = await gateHead();
         if (gate.code === ciRunningCode && wait) {
+          await shareGateResult(head, false, clock(), context);
           await record({ code: gate.code, reason: gate.reason });
-          await shareGateResult(head, false, context.now?.() ?? new Date(), context);
           stoppedEarly = await untilCiFinishes(head, context, wait);
-          gatedAt = context.now?.() ?? new Date();
+          gatedAt = clock();
           gate = await gateHead();
+          if (gate.code === ciRunningCode && !stoppedEarly) gate = { ...gate, verdict: `gate: pending (exit ${gate.code}): ${gate.reason}. CI still ran after --wait ${wait}. Open the checks it waits on: a required check that has not reported may never start, such as when a check it needs failed. Wait again only while they run` };
         }
       } catch (error) {
-        await record({ code: 1, reason: String((error as Error).message ?? error).split("\n")[0]! }).catch(() => {});
+        const message = `${String((error as Error).message ?? error)}${stoppedEarly ? ` (--wait stopped early at a failed read of GitHub: ${stoppedEarly})` : ""}`;
+        await record({ code: 1, reason: message.split("\n")[0]! }).catch(() => {});
         await shareGateResult(head, false, gatedAt, context);
-        throw error;
+        throw stoppedEarly ? new Error(message) : error;
       }
       await record({ code: gate.code, reason: gate.reason });
       const shared = await shareGateResult(head, gate.code === 0, gatedAt, context);

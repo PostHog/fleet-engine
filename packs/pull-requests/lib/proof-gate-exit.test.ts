@@ -152,7 +152,7 @@ test("--wait stops at its limit, exits 75, and names only the checks that still 
   };
   const gate = await pr.hedge("gate", "--wait", "2");
   expect(gate.code).toBe(75);
-  expect(lastLine(gate.output)).toStartWith("gate: pending (exit 75): CI is still running: waiting on: test. ");
+  expect(lastLine(gate.output)).toBe("gate: pending (exit 75): CI is still running: waiting on: test. CI still ran after --wait 2. Open the checks it waits on: a required check that has not reported may never start, such as when a check it needs failed. Wait again only while they run");
   expect(await lastGateRun(pr.home, { repository: "example/product", pr: 42, commit: head })).toEqual({ code: 75, reason: "CI is still running: waiting on: test" });
 });
 
@@ -193,6 +193,21 @@ test("a wait that a failed read ended early says so also when CI turned red by t
   expect(gate.code).toBe(1);
   expect(gate.output).toContain("ci: --wait stopped early at a failed read of GitHub: gh api repos/example/product/pulls/42 failed (gh: Bad Gateway (HTTP 502))");
   expect(lastLine(gate.output)).toStartWith("gate: fail (exit 1): ci: red, failing: test. ");
+});
+
+test("a gate error after a wait that a failed read ended keeps that read's error", async () => {
+  const { pr } = await reviewed();
+  pr.ci([{ name: "test", bucket: "pending" }]);
+  const github = join(dirname(pr.home), "github");
+  pr.panel.onPause = async () => {
+    pr.pullRequestState({ unreadable: "gh: Bad Gateway (HTTP 502)" });
+    pr.whileGithubReadsPull(`echo 'rm -f "${github}/pull-error-42"' > "${github}/while-reading"`);
+    pr.ci([{ name: "test", bucket: "pass" }]);
+    rmSync(join(pr.home, ".agents/guides/coding-standards.md"));
+  };
+  const gate = await pr.hedge("gate", "--wait", "10");
+  expect(gate.code).toBe(1);
+  expect(lastLine(gate.output)).toBe("gate: fail (exit 1): ~/.agents/guides/coding-standards.md is missing or empty; it holds the coding standards to review against (--wait stopped early at a failed read of GitHub: gh api repos/example/product/pulls/42 failed (gh: Bad Gateway (HTTP 502)))");
 });
 
 test("while --wait waits, the gate record says CI is still running", async () => {
