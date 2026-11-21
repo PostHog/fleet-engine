@@ -500,9 +500,9 @@ code and the reason. The gate's lines and hedge decision report come from the sa
         throw waited?.failedRead ? new Error(message) : error;
       }
       await record({ code: gate.code, reason: gate.reason });
-      const shared = (await shareGateResult(head, gate.code === 0, gatedAt, context))?.line;
-      if (unshared?.error && gate.code === ciRunningCode) gate = { ...gate, verdict: `gate: pending (exit ${gate.code}): ${gate.reason}. --wait did not wait: the decision ledger did not take the failure (${unshared.error}). Fix the ledger's reach, such as the hub connection, then run the gate again` };
-      const waitLine = waited?.failedRead ? `ci: --wait stopped early at a failed read of GitHub: ${waited.failedRead}` : unshared?.error ? `ci: --wait did not wait: ${unshared.line}` : undefined;
+      const shared = unshared?.error ? unshared.line : (await shareGateResult(head, gate.code === 0, gatedAt, context))?.line;
+      if (unshared?.error) gate = { ...gate, verdict: `gate: pending (exit ${gate.code}): ${gate.reason}. --wait did not wait: the decision ledger did not take the failure (${unshared.error}). Fix the ledger's reach, such as the hub connection, then run the gate again` };
+      const waitLine = waited?.failedRead ? `ci: --wait stopped early at a failed read of GitHub: ${waited.failedRead}` : undefined;
       if (flags.has("--json")) print(JSON.stringify({ ...gate.summary, reason: gate.reason, ...waitLine ? { wait: waitLine } : {}, ...shared ? { ledger: shared } : {} }));
       else for (const line of [...gate.lines, ...waitLine ? [waitLine] : [], ...shared ? [shared] : [], gate.verdict]) print(line);
       return gate.code;
