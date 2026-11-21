@@ -1,7 +1,7 @@
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { redactSecrets, secretKinds } from "../../../base/hooks/secret-guard.ts";
-import { leanClaudeEnv, modelSessionEnv, type ModelRow } from "../../../base/lib/models.ts";
+import { leanClaude, modelSessionEnv, type ModelRow } from "../../../base/lib/models.ts";
 import { docUrl, stateDir, type Library } from "./config.ts";
 import { must, type Git } from "./git.ts";
 import { catalogName, parseDoc, readLibrary, renderCatalog, type Doc } from "./library.ts";
@@ -34,7 +34,8 @@ export function captureAgent(row: ModelRow, home: string, command = "claude"): A
     mkdirSync(parent, { recursive: true, mode: 0o700 });
     const cwd = mkdtempSync(join(parent, "run-"));
     try {
-      const child = Bun.spawn(captureCommand(row, command), { cwd, env: leanClaudeEnv(home, modelSessionEnv(process.env)), stdin: Buffer.from(prompt), stdout: "pipe", stderr: "pipe", timeout: 900_000 });
+      const lean = leanClaude(captureCommand(row, command), home, modelSessionEnv(process.env));
+      const child = Bun.spawn(lean.argv, { cwd, env: lean.env, stdin: Buffer.from(prompt), stdout: "pipe", stderr: "pipe", timeout: 900_000 });
       const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
       if (code) throw new Error(`the capture agent failed: ${lastLines(stderr || stdout)}`);
       let answer: { is_error?: boolean; result?: unknown; structured_output?: Partial<Draft> } = {};
