@@ -71,26 +71,37 @@ test("one answer whose question names three PRs accepts the gap on each of them 
   await expect(pr.decide("record", "--mark", "👤", "--class", "proof-gap", "--kind", "prod-shape", "--pr", "example/product#45", "--message", "request-1:0")).rejects.toThrow("The question the user answered does not name example/product#45");
 });
 
-test("a gap record without --message takes the latest answer to that PR's gap question, past a later card that names the PR for another question", async () => {
+test("a gap record without --message never skips a later card that names the PR: it refuses and names the latest gap answer's id, which --message records", async () => {
   const pr = await checkout();
   pr.chooseGap("panel", "A prune lane runs no QA swarm", "Accept the gap", 42);
   pr.chooseGap("panel", "A prune lane runs no QA swarm", "Accept the gap", 43);
   pr.choose("Add the standing rule", "Add a standing rule for panel gaps on prune lanes? example/product#42 and example/product#43");
+  const record = (ref: string, ...more: string[]) => pr.decide("record", "--mark", "👍", "--class", "proof-gap", "--kind", "panel", "--pr", ref, ...more);
 
-  const first = await pr.decide("record", "--mark", "👍", "--class", "proof-gap", "--kind", "panel", "--pr", "example/product#42");
-  const second = await pr.decide("record", "--mark", "👍", "--class", "proof-gap", "--kind", "panel", "--pr", "example/product#43");
+  await expect(record("example/product#42")).rejects.toThrow(`The latest answer to "Accept the panel gap?" is request-1:0. When that is the answer, record it with --message request-1:0`);
+  await expect(record("example/product#43")).rejects.toThrow("record it with --message request-2:0");
+  expect(ledgerDecisions(pr)).toEqual([]);
 
+  expect((await record("example/product#42", "--message", "request-1:0")).code).toBe(0);
+  expect((await record("example/product#43", "--message", "request-2:0")).code).toBe(0);
   expect(lineOf((await pr.decide("list", "--pr", "example/product#42")).output, "- 👍")).toContain("Accept the panel gap? example/product#42: A prune lane runs no QA swarm");
   expect(lineOf((await pr.decide("list", "--pr", "example/product#43")).output, "- 👍")).toContain("Accept the panel gap? example/product#43: A prune lane runs no QA swarm");
-  expect([first.code, second.code]).toEqual([0, 0]);
 });
 
-test("a gap record without --message refuses when no answer asks that PR's gap question, and names --message and where to list the ids", async () => {
+test("a gap record whose latest answer is a refusal on another card refuses, and does not fall back to the earlier acceptance", async () => {
+  const pr = await checkout();
+  pr.chooseGap("panel", "A prune lane runs no QA swarm");
+  pr.choose("Yes", "Keep the panel gap on example/product#42 open after all?");
+
+  await expect(pr.decide("record", "--mark", "👍", "--class", "proof-gap", "--kind", "panel", "--pr", "example/product#42")).rejects.toThrow("record it with --message request-1:0");
+  expect(ledgerDecisions(pr)).toEqual([]);
+});
+
+test("a refused record without --message says how to list the answer ids", async () => {
   const pr = await checkout();
   pr.choose("Add the standing rule", "Add a standing rule for panel gaps on prune lanes? example/product#42");
 
-  await expect(pr.decide("record", "--mark", "👍", "--class", "proof-gap", "--kind", "panel", "--pr", "example/product#42")).rejects.toThrow("hedge thread read thread-1 --words");
-  await expect(pr.decide("record", "--mark", "👍", "--class", "proof-gap", "--kind", "panel", "--pr", "example/product#42")).rejects.toThrow("--message <id>");
+  await expect(pr.decide("record", "--mark", "👍", "--class", "proof-gap", "--kind", "panel", "--pr", "example/product#42")).rejects.toThrow("To record another answer, name it with --message <id>; hedge thread read thread-1 --words lists the ids");
   expect(ledgerDecisions(pr)).toEqual([]);
 });
 
@@ -599,7 +610,7 @@ test("a plain yes accepts a gap only when its question asks to accept that gap",
   const pr = await checkout();
   await owing(pr, "prod-shape");
   pr.choose("Yes", "Keep the prod-shape gap on example/product#42 owed?");
-  await expect(acceptGap(pr, "prod-shape", "--message", "request-1:0")).rejects.toThrow(`The user chose "Yes" to a question that does not ask "Accept the prod-shape gap?"`);
+  await expect(acceptGap(pr, "prod-shape")).rejects.toThrow(`The user chose "Yes" to a question that does not ask "Accept the prod-shape gap?"`);
   expect((await pr.hedge("gate")).code).toBe(3);
 });
 

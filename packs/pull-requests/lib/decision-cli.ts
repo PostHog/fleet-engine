@@ -26,8 +26,9 @@ The decision ledger holds every decision about a pull request's proof and proces
 the setting hub.alias names; other machines read and append it over SSH. Without a hub, it lives on this machine.
 
 record with 👤 or 👍 records the user's answer to your question tool. Without --words it takes their latest answer
-in the T3 thread whose question names each --pr and each --kind, and for --class proof-gap starts "Accept the <kind>
-gap?": after they answer, pass only the mark, class, kinds and PRs, and check the answer in the printed line. --message takes an earlier answer by its id. --words quotes the words of an
+in the T3 thread whose question names each --pr and each --kind: after they answer, pass only the mark, class, kinds and PRs, and
+check the answer in the printed line. For --class proof-gap, when that answer asks another question and an earlier one
+asks "Accept the <kind> gap?", it refuses and names the earlier answer's id. --message takes an earlier answer by its id. --words quotes the words of an
 answer, with the date they gave it. --thread defaults to this T3 thread (T3CODE_THREAD_ID). Only answers to a
 question tool in the T3 app count; a typed message does not. Each --pr must be named in that question (#n,
 repo#n, owner/repo#n, or its URL), so one answer covers every PR its question named and no other. One answer
@@ -188,7 +189,12 @@ export async function hearUser(input: Hearing, context: DecisionContext, ledger:
       };
     } catch (error) { refusals.push(error as Error); }
   }
-  throw used ?? refusals[0]!;
+  throw used ?? listIdsOnRefusal(refusals[0]!, input, thread);
+}
+
+function listIdsOnRefusal(refusal: Error, { message, words }: Hearing, thread: string) {
+  if (message !== undefined || words !== undefined) return refusal;
+  return new Error(`${refusal.message}. To record another answer, name it with --message <id>; hedge thread read ${thread} --words lists the ids`);
 }
 
 export function answeredAt(word: ThreadWord) {
@@ -211,12 +217,12 @@ function candidates(answers: ThreadWord[], { class: decisionClass, words, messag
     if (!said.length) throw new Error(`"${quotes(words).join('" … "')}" is not in a message of the user's in thread ${thread}. Quote their whole answer, so a refusal such as "Do not accept the gap." never reads as an acceptance. Only their answer to a question tool in the T3 app counts`);
     return said;
   }
-  const gap = decisionClass === "proof-gap";
-  const asksGap = (word: ThreadWord) => !gap || normalized(word.answered).startsWith(normalized(acceptQuestion(kinds)));
-  const latest = answers.findLast((word) => word.source === "question" && prs.every((ref) => namesPr(word.answered, ref)) && kinds.every((kind) => namesKind(word.answered, kind)) && asksGap(word));
-  const lead = gap ? ` in a question that starts "${acceptQuestion(kinds)}"` : "";
-  const byMessage = gap ? `. When they answered that gap on a card worded another way, name their answer with --message <id>; hedge thread read ${thread} --words lists the ids` : "";
-  if (!latest) throw new Error(`No answer of the user's to a question tool in thread ${thread} names ${[...prs.map(refText), ...kinds.map((kind) => `the ${kind} gap`)].join(", ")}${lead}. Ask them with the question tool and name each PR in the question. Only answers they gave in the T3 app count${byMessage}`);
+  const named = answers.filter((word) => word.source === "question" && prs.every((ref) => namesPr(word.answered, ref)) && kinds.every((kind) => namesKind(word.answered, kind)));
+  const latest = named.at(-1);
+  if (!latest) throw new Error(`No answer of the user's to a question tool in thread ${thread} names ${[...prs.map(refText), ...kinds.map((kind) => `the ${kind} gap`)].join(", ")}. Ask them with the question tool and name each PR in the question. Only answers they gave in the T3 app count`);
+  const asksGap = (word: ThreadWord) => normalized(word.answered).startsWith(normalized(acceptQuestion(kinds)));
+  const gapAnswer = decisionClass === "proof-gap" && !asksGap(latest) ? named.findLast(asksGap) : undefined;
+  if (gapAnswer) throw new Error(`The latest answer that names ${prs.map(refText).join(", ")} is ${latest.id}, to another question ("${latest.answered}"). The latest answer to "${acceptQuestion(kinds)}" is ${gapAnswer.id}. When that is the answer, record it with --message ${gapAnswer.id}`);
   return [latest];
 }
 
