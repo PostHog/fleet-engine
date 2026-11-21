@@ -81,7 +81,7 @@ test("hedge devbox remove changes nothing when T3 Code here cannot unlink the ho
 
 test("hedge devbox remove pushes the removal on the next run when the push of the profile failed", async () => {
   const { home, io, hedge } = await macWithMachines("coder.hedge-hub-2");
-  const rejecting = join(githubRepo(home, "nora/hedge-profile"), "hooks/pre-receive");
+  const rejecting = join(githubRepo(home, "nora/nora-hedge"), "hooks/pre-receive");
   writeFileSync(rejecting, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
   expect(await hedge(["devbox", "remove", "coder.hedge-node-1"], fakeMachine(home, {}, { hereLinks: linkedHere }))).toBe(1);
   expect(io.output()).toContain("could not push answers");

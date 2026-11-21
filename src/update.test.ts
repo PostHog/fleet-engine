@@ -114,17 +114,31 @@ function expectMacNoticeOnce(output: string) {
   expect(output.split("To stop the jobs of an earlier Fleet or Hedge on this Mac, run: curl -fsSL https://raw.githubusercontent.com/PostHog/hedge/main/get.sh | sh").length).toBe(2);
 }
 
-async function cliUpdate(engineDir: string, engine: ProfileFile["engine"], home = temp.make("home-")) {
+async function cliUpdate(engineDir: string, engine: ProfileFile["engine"], home = temp.make("home-"), args: string[] = []) {
   const profileDir = temp.make("profile-");
   writeFileSync(join(profileDir, "hedge.json"), JSON.stringify({ schema: 1, engine, sources: [], packs: [], plan: "both", settings: {}, workflows: {} }));
   mkdirSync(join(home, ".config/hedge"), { recursive: true });
   writeFileSync(join(home, ".config/hedge/machine.json"), JSON.stringify({ schema: 1, role: "devbox", profileDir }));
   const lines: string[] = [];
-  const code = await main(["update"], { home, engineRoot: engineDir, platform: "linux", env: {}, print: (line) => lines.push(line) });
+  const code = await main(["update", ...args], { home, engineRoot: engineDir, platform: "linux", env: {}, print: (line) => lines.push(line) });
   return { code, output: lines.join("\n"), applied: existsSync(join(home, "applied")), version: await Bun.file(join(engineDir, "VERSION")).text() };
 }
 
 describe("hedge update", () => {
+  test.each([["--help", 0], ["-h", 0], ["--dry-run", 2], ["--help --dry-run", 2]])("hedge update %s prints the usage, exits %d, and neither moves the engine nor applies", async (flags, exitCode) => {
+    const remote = await engineRemote(["v0.1.0", "v0.1.1"]);
+    const engineDir = await engineCheckout(remote, "v0.1.0");
+    const head = await spawnGit(engineDir, "rev-parse", "HEAD");
+    const newer = await spawnGit(remote, "rev-parse", "v0.1.1^{commit}");
+
+    const result = await cliUpdate(engineDir, { repo: remote, ref: "v0.1.0", channel: "release" }, undefined, flags.split(" "));
+
+    expect(result).toMatchObject({ code: exitCode, applied: false, version: "v0.1.0" });
+    expect(result.output).toContain("Usage: hedge update");
+    expect(await spawnGit(engineDir, "rev-parse", "HEAD")).toBe(head);
+    await expect(spawnGit(engineDir, "cat-file", "-e", newer)).rejects.toThrow();
+  });
+
   test.each(["PostHog/fleet-engine", "Silthus/fleet-engine", "https://github.com/PostHog/fleet-engine"])("keeps the Hedge origin when the profile still names %s, this engine's repository from before the rename", async (repo) => {
     const remote = await engineRemote(["v0.1.0", "v0.1.1"]);
     const engineDir = await engineCheckout(remote, "v0.1.0");

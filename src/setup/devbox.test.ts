@@ -62,7 +62,7 @@ describe("the devbox over SSH", () => {
     expect(JSON.parse(readFileSync(join(nodeHome, ".config/hedge/machine.json"), "utf8"))).toEqual({ schema: 1, role: "devbox", name: "node-1" });
     expect(onTheBox).toContain("gh auth login --hostname github.com --git-protocol https --web --scopes repo,read:org,admin:public_key,admin:ssh_signing_key,workflow");
     expect(onTheBox).toContain("gh auth setup-git");
-    expect(onTheBox).toContainEqual(expect.stringContaining(`gh repo clone https://github.com/nora/hedge-profile.git "$HOME/.local/share/hedge/profile" -- -q && sh "$HOME/.local/share/hedge/engine/get.sh" --ref main --profile "$HOME/.local/share/hedge/profile"`));
+    expect(onTheBox).toContainEqual(expect.stringContaining(`gh repo clone https://github.com/nora/nora-hedge.git "$HOME/.local/share/hedge/profile" -- -q && sh "$HOME/.local/share/hedge/engine/get.sh" --ref main --profile "$HOME/.local/share/hedge/profile"`));
     expect((await overSsh(box.machine, "node-1").exec(["codex", "exec", "ok"])).code).toBe(0);
     expect(onTheBox).toContain("t3 up --connect --yes --headless");
     expect(box.runs).toContainEqual({ command: ["ssh", "-t", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "node-1", expect.stringContaining("claude auth login")], input: true });

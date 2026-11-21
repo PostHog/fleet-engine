@@ -2,7 +2,7 @@ import { closeSync, existsSync, openSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { askGap, authorOf, readDecisions, finishReview, startGateRun, ledgerRoot, listStanding, panelCommit, proofDirectory, readJson, readOwed, recordGap, recordGapCommand, recordStanding, requireChoice, requireNone, devPr, requireProofs, requireReservation, respondToReview, reuseProof, reviewDirectory, reviewOfCommit, reviewRecords, roundId, roundQuestion, runOption, saveProof, startReview, stopOption, storeCapturedFindings, unfinishedReview, writeJson, markRecorded, readReservation, recordReceipt, roundDirectories, unrecordedElsewhere, type Arbiter, type Reservation, type CapturedBy, type ProofIdentity } from "./proof.ts";
+import { askGap, authorOf, readDecisions, finishReview, startGateRun, ledgerRoot, listStanding, panelCommit, proofDirectory, readJson, readOwed, recordGap, recordGapCommand, recordStanding, requireChoice, requireNone, devPr, requireProofs, requireReservation, respondToReview, reuseProof, reviewDirectory, reviewOfCommit, reviewRecords, roundId, roundQuestion, runOption, saveProof, startReview, stopOption, storeCapturedFindings, unfinishedReview, writeJson, markRecorded, readReservation, recordReceipt, roundDirectories, unrecordedElsewhere, recordFailure, dropFinalRead, droppedFinalReads, type Arbiter, type Reservation, type CapturedBy, type ProofIdentity } from "./proof.ts";
 import { AnswerTaken, appendOnce, decideAlone, hearUser, ledgerHolds, ledgerOf } from "./decision-cli.ts";
 import { HubUnreachable, keptOwed, refText, usersAcceptance, thisMachine, type Decision, type Ssh } from "./decision-ledger.ts";
 import { autonomyOf, gradeOf, type Autonomy, type Grade } from "./proof-autonomy.ts";
@@ -31,6 +31,7 @@ import type { BloatJudge } from "./proof-bloat.ts";
 import type { ThreadWords } from "./proof-answers.ts";
 import { modelFor } from "../../base/lib/models.ts";
 import { numberSetting } from "../../base/lib/settings.ts";
+import { bunScript } from "../../../src/runner/bun.ts";
 
 export type { RunIO };
 
@@ -256,7 +257,13 @@ session of that provider. hedge builds the prompt from the diff, the PR title an
 standards in ~/.agents/guides/coding-standards.md, and saves the reviewer's answer as the findings. hedge checks each
 finding's anchor against the diff and prints the result after the findings; it keeps it apart, in anchors.md. Answer them with hedge proof respond. Scope and --base work as for
 review-start. When the reviewer gives no answer, the round stays reserved and the next hedge proof review on the same
-commit retries it. The setting pull-requests.reviewTimeoutMinutes limits the reviewer. HEDGE_PROOF_REVIEWER replaces
+commit retries it. When HEAD moved since, a new final read, from review or review-start, drops a final read that hedge
+reserved at an older commit and that holds no answer: no findings, and, for a panel, every lens failed without an
+answer. It drops the read only once every other check of the new read passed. It moves the read to reviews/dropped/
+with its cause, and the read no longer counts against the review budget. The gate names it, and hedge proof show
+prints its cause too. A read with an answer, a panel with a lens that has not failed, a review round, a read reserved
+with review-start, or a read that another command works on still blocks a final read until it is finished. The setting
+pull-requests.reviewTimeoutMinutes limits the reviewer. HEDGE_PROOF_REVIEWER replaces
 its command, and HEDGE_PROOF_REVIEWER_MODEL its model.
 Spent quota stops a reviewer or judge early. When its CLI prints two quota lines in a row, such as
 "exceeded retry limit, last status: 429", "All credentials for model <model> are cooling down", or "Reconnecting...
@@ -301,12 +308,13 @@ ${overrideHelp}`,
     usage: "show [--round <number|final|final-n>]",
     summary: `Print the latest review round, or --round: who reviewed it and where its findings are. --round final is the
 latest final read. For a panel, print each lens: its state, family and model, how long it ran, and its raw answer, or
-its log while it runs.`,
+its log while it runs. Then print each final read that hedge dropped unanswered, with its cause.`,
     examples: ["hedge proof show", "hedge proof show --round 2", "hedge proof show --round final-1"],
     options: ["--round"],
     run: async ({ options }, identity, context) => {
       const directory = await reviewDirectory(context.home, identity(), roundOption(options));
-      for (const line of await roundLines(directory, context)) context.print(line);
+      const dropped = (await droppedFinalReads(context.home, identity())).map(({ line, cause }) => cause ? `${line}; cause: ${cause}` : line);
+      for (const line of [...await roundLines(directory, context), ...dropped]) context.print(line);
       return 0;
     },
   },
@@ -620,11 +628,14 @@ async function askReviewer(reserved: SingleRound, head: ProofIdentity, author: F
   const prompt = reviewPrompt({ scope: reserved.scope, from, commit: head.commit, diff, diffFile, note: leftOutNote(leftOut), crossFamily: familyOf(row) !== author, title: pr.title, body: pr.body, rubric, references: skillReferences(home), reviewRules: rules, lens });
   const answer = await askModel("reviewer", row, { prompt, cwd: topLevel(run) ?? cwd, readable: [join(home, ".agents/skills"), reserved.directory] }, env, limit);
   const label = reserved.round === "final" ? "The final read" : `Round ${reserved.round}`;
-  if (!answer.ok && isQuotaExhausted(answer.cause)) {
-    print(`The reviewer ${answer.model} stopped: ${answer.cause}. ${label} stays reserved; run hedge proof review again once the quota is back.`);
-    return quotaExitCode;
+  if (!answer.ok) {
+    const unsaved = await recordFailure(reserved.directory, answer.cause).then(() => "", (error: Error) => ` hedge could not save this cause: ${error.message}`);
+    if (isQuotaExhausted(answer.cause)) {
+      print(`The reviewer ${answer.model} stopped: ${answer.cause}. ${label} stays reserved; run hedge proof review again once the quota is back.${unsaved}`);
+      return quotaExitCode;
+    }
+    throw new Error(`The reviewer ${answer.model} gave no findings (${answer.cause}). ${label} stays reserved; run hedge proof review again to retry it.${unsaved}`);
   }
-  if (!answer.ok) throw new Error(`The reviewer ${answer.model} gave no findings (${answer.cause}). ${label} stays reserved; run hedge proof review again to retry it`);
   const anchors = anchorCheck(answer.text, diff, await reviewRecords(home, head));
   await storeCapturedFindings(reserved.directory, head, roundId(reserved.id), answer.text, answer.model, answer.usage);
   if (anchors) await writeFile(join(reserved.directory, "anchors.md"), anchors + "\n", { mode: 0o600 });
@@ -661,7 +672,8 @@ async function reserveRound(options: Map<string, string>, head: ProofIdentity, c
   if (tier.name === "read" && capturedBy === "hedge" && !panel && !decision && !await panelCommit(context.home, head)) throw new Error("A PR of the Read tier gets one read, and it is the panel: run hedge proof review, which runs its combined lens");
   const firstPanel = panel && !await panelCommit(context.home, head);
   const limits = firstPanel ? permit.limits : { ...permit.limits, ceiling: tierCeiling(tier, permit.limits.ceiling) };
-  const reserved = await startReview(context.home, head, { opening: async () => panel && !await panelCommit(context.home, head), sanity: () => requireSanity(context.home, head, context.run, () => bloatJudge(head, context)), scope, base, from, ...isCommitSha(pull?.baseSha) ? { forkBase: pull.baseSha } : {}, ...permit, limits, decision, phase: options.get("--phase"), cleanBaseMerge: cleanBaseMerge(head, context.run), quietCommit: quietCommitIn(context.run, () => baseRefs(head, context.run)), capturedBy, lock: async (directory) => lockNewRound(directory, await context.lock()), lockBudget: async (reviews, step) => withRoundLock(reviews, await context.lock(), step), now: context.now ?? (() => new Date()) });
+  const dropUnanswered = (directory: string) => roundStep(directory, context, () => dropFinalRead(directory, head, (context.now ?? (() => new Date()))()));
+  const reserved = await startReview(context.home, head, { dropUnanswered, opening: async () => panel && !await panelCommit(context.home, head), sanity: () => requireSanity(context.home, head, context.run, () => bloatJudge(head, context)), scope, base, from, ...isCommitSha(pull?.baseSha) ? { forkBase: pull.baseSha } : {}, ...permit, limits, decision, phase: options.get("--phase"), cleanBaseMerge: cleanBaseMerge(head, context.run), quietCommit: quietCommitIn(context.run, () => baseRefs(head, context.run)), capturedBy, lock: async (directory) => lockNewRound(directory, await context.lock()), lockBudget: async (reviews, step) => withRoundLock(reviews, await context.lock(), step), now: context.now ?? (() => new Date()) });
   return { ...reserved, scope, base, from, phase: options.get("--phase") };
 }
 
@@ -768,7 +780,7 @@ async function startLens(directory: string, name: string, context: CommandContex
 const detachHedge = ({ cwd, env }: CommandContext) => async (args: string[], log: string) => {
   const output = openSync(log, "a", 0o600);
   try {
-    const child = Bun.spawn([process.execPath, proofEntry, ...args], { cwd, env: env as Record<string, string>, stdin: "ignore", stdout: output, stderr: output, detached: true });
+    const child = Bun.spawn(bunScript(proofEntry, ...args), { cwd, env: env as Record<string, string>, stdin: "ignore", stdout: output, stderr: output, detached: true });
     child.unref();
     return child.pid;
   } finally { closeSync(output); }

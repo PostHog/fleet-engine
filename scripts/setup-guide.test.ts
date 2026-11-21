@@ -552,7 +552,7 @@ describe("the agent setup guide", () => {
     const first = await hedgeSetup(home, [...command.replace("<id>", "everyday").split(" "), "--add", "guards", "--workflows", "oom-survival=on", "--set", "orchestration.tracker=nora/maps"], [], box);
     const again = await hedgeSetup(home, [...command.replace("--preset <id> ", "").split(" "), "--add", "integrations"], [], box);
     expect({ first: first.code, again: again.code }).toEqual({ first: 0, again: 0 });
-    expect(again.output).toContain("Reusing your repo nora/hedge-profile");
+    expect(again.output).toContain("Reusing your repo nora/nora-hedge");
     expect(savedAnswers(home).packs).toEqual([...presets().find((preset) => preset.id === "everyday")!.packs, "guards", "integrations"]);
     expect(savedAnswers(home).workflows["oom-survival"]).toBe(true);
     expect(savedAnswers(home).settings["orchestration.tracker"]).toBe("nora/maps");

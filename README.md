@@ -113,8 +113,9 @@ missing, fetches the engine into `~/.local/share/hedge/engine`, and puts
 `hedge` on your `PATH` in your shell profile, so open a new shell to use it.
 Then `hedge setup` asks plain-language questions, has
 you sign in to GitHub and to Claude, ChatGPT, or both, saves your answers to
-a new private `hedge-profile` repo, and applies your packs. Run `get.sh` again
-to pick up where it stopped.
+a new private profile repo named `<login>-hedge`, and applies your packs. A
+profile you made before keeps its name, such as `hedge-profile`. Run `get.sh`
+again to pick up where it stopped.
 
 ## Develop
 
