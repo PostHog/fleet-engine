@@ -1,7 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { heavy, heavyWith, roomy, stubs, temp } from "./heavy-testing.ts";
+import { bunCheckout } from "../../../src/testing/bun-checkout.ts";
+import { heavy, heavyIn, heavyWith, roomy, stubs, temp } from "./heavy-testing.ts";
 
 afterEach(() => temp.cleanup());
 const onLinux = test.skipIf(process.platform !== "linux");
@@ -79,6 +80,16 @@ onLinux("hands a typed heavy command to the heavy-route handler, which decides w
   expect(await heavyWith({ HEDGE_HANDLERS: handlers }, bin, roomy, "--", "sh", "-c", "echo built")).toMatchObject({ code: 7, stdout: "" });
   expect(routed()).toEqual([{ argv: ["sh", "-c", "echo built"], routed: "1" }]);
   expect(calls()).toBe("");
+});
+
+onLinux("checks the disk and routes the command inside a checkout without running the checkout's bunfig.toml", async () => {
+  const { bin } = stubs();
+  const { handlers, routed } = routeHandler(bin);
+  const checkout = bunCheckout(temp);
+  expect(await heavyIn(checkout.dir, {}, bin, roomy, "--", "true")).toMatchObject({ code: 0 });
+  expect(await heavyIn(checkout.dir, { HEDGE_HANDLERS: handlers }, bin, roomy, "--", "true")).toMatchObject({ code: 7 });
+  expect(routed()).toEqual([{ argv: ["true"], routed: "1" }]);
+  expect(checkout.preloaded()).toBe(false);
 });
 
 onLinux("runs here when the handler already routed the command, or for a named unit or service, and the command routes its own heavy runs again", async () => {

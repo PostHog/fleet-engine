@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { main } from "./cli.ts";
+import { bunCheckout, nodeEnvs, reportCheckoutEnv } from "./testing/bun-checkout.ts";
 import { cliFixtures, repoRoot } from "./testing/cli.ts";
 import { tempDirs } from "./testing/git.ts";
 
@@ -107,6 +108,25 @@ describe("hedge routing", () => {
     } finally {
       try { process.kill(-job.pid, "SIGKILL"); } catch {}
     }
+  });
+
+  test("runs a pack command inside a checkout without the checkout's .env files or bunfig.toml", async () => {
+    const engine = engineWithCommands();
+    cpSync(join(repoRoot, "src"), join(engine, "src"), { recursive: true });
+    cpSync(join(repoRoot, "hedge"), join(engine, "hedge"));
+    symlinkSync(join(repoRoot, "node_modules"), join(engine, "node_modules"));
+    const home = temp.make("home-");
+    expect((await hedge(["apply", "--profile", profileDir(["tools"])], home, engine)).code).toBe(0);
+    const report = join(home, "env.json");
+    writeFileSync(join(engine, "packs/tools/commands/hello.ts"), reportCheckoutEnv(report));
+    const checkout = bunCheckout(temp);
+    const inherited = Object.fromEntries(Object.entries(Bun.env).filter(([key]) => !/^(HEDGE|FLEET)_|^NODE_ENV$/.test(key)));
+    for (const nodeEnv of nodeEnvs) {
+      const child = Bun.spawn(["sh", join(engine, "hedge"), "hello"], { cwd: checkout.dir, env: { ...inherited, HOME: home, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0", ...(nodeEnv ? { NODE_ENV: nodeEnv } : {}) }, stdout: "ignore", stderr: "pipe" });
+      const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+      expect([nodeEnv, code, stderr, JSON.parse(readFileSync(report, "utf8"))]).toEqual([nodeEnv, 0, "", {}]);
+    }
+    expect(checkout.preloaded()).toBe(false);
   });
 
   test("runs a leading hedge in a pack step with this engine's launcher, not one on PATH", async () => {

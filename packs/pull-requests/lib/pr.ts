@@ -6,6 +6,7 @@ import { readT3Threads, recordHandover } from "./pr-owners.ts";
 import { prSize } from "./pr-size.ts";
 import { botThreads, parsePrArgs } from "./pr-threads.ts";
 import { askReviewBot, parseReviewBotArgs, runHandler } from "./review-bot.ts";
+import { bunScript } from "../../../src/runner/bun.ts";
 
 export const help = `hedge pr: review threads, blockers, review bots, and handovers of a pull request
 
@@ -46,12 +47,12 @@ function packCommands(env: Env): { handler: string; words: string[] } | undefine
 export async function prCommand(args: string[], home: string, env: Env = Bun.env, now = new Date()): Promise<number> {
   const pack = packCommands(env);
   const word = args[0] ?? "";
-  if (pack && pack.words.includes(word)) return runHandler(["bun", pack.handler, ...args], env);
+  if (pack && pack.words.includes(word)) return runHandler(bunScript(pack.handler, ...args), env);
   if (word === "help" || word === "--help") {
     console.log(help);
     if (!pack?.words.length) return 0;
     console.log(`\nFrom packs: ${pack.words.join(", ")}\n`);
-    await runHandler(["bun", pack.handler, "help"], env);
+    await runHandler(bunScript(pack.handler, "help"), env);
     return 0;
   }
   if (!engineSubcommands.includes(word)) throw new Error(`Usage: hedge pr <subcommand>, one of ${[...engineSubcommands, ...(pack?.words ?? [])].join(", ")}. Run hedge pr --help for each one's flags.`);

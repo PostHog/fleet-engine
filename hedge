@@ -11,4 +11,4 @@ in_fleet_path() {
   return 1
 }
 if in_fleet_path "$launched_from" || in_fleet_path "$hedge_root"; then export HEDGE_INERT=1; else unset HEDGE_INERT; fi
-exec bun "$hedge_root/src/cli.ts" "$@"
+exec bun --no-env-file --config=/dev/null "$hedge_root/src/cli.ts" "$@"
