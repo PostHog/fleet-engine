@@ -479,11 +479,12 @@ code and the reason. The gate's lines and hedge decision report come from the sa
       let gate: FinalGate;
       let gatedAt = startedAt;
       let waited: Waited | undefined;
+      let sharedBeforeWait: string | undefined;
       try {
         const gateHead = () => finalGate(head, context, { landed: flags.has("--landed") });
         gate = await gateHead();
         if (gate.code === ciRunningCode && wait) {
-          await shareGateResult(head, false, clock(), context);
+          sharedBeforeWait = await shareGateResult(head, false, clock(), context);
           await record({ code: gate.code, reason: gate.reason });
           waited = await untilCiFinishes(head, context, wait);
           gatedAt = clock();
@@ -500,7 +501,7 @@ code and the reason. The gate's lines and hedge decision report come from the sa
       const shared = await shareGateResult(head, gate.code === 0, gatedAt, context);
       const waitLine = waited?.failedRead ? `ci: --wait stopped early at a failed read of GitHub: ${waited.failedRead}` : undefined;
       if (flags.has("--json")) print(JSON.stringify({ ...gate.summary, reason: gate.reason, ...waitLine ? { wait: waitLine } : {} }));
-      else for (const line of [...gate.lines, ...waitLine ? [waitLine] : [], ...shared ? [shared] : [], gate.verdict]) print(line);
+      else for (const line of [...gate.lines, ...waitLine ? [waitLine] : [], ...sharedBeforeWait ? [sharedBeforeWait] : [], ...shared ? [shared] : [], gate.verdict]) print(line);
       return gate.code;
     },
   },

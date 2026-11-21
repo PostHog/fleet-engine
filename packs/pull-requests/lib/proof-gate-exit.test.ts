@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { lastGateRun } from "./proof.ts";
 import { checkout, cleanFixtures, reviewHead, verdict } from "./proof-testing.ts";
@@ -245,6 +245,24 @@ test("the gate record keeps the same reason as the last line when the gate fails
   const gate = await pr.hedge("gate", "--wait", "10");
   expect(gate.code).toBe(1);
   expect(`gate: fail (exit 1): ${(await lastGateRun(pr.home, { repository: "example/product", pr: 42, commit: head }))?.reason}`).toBe(lastLine(gate.output)!);
+});
+
+test("a failure that --wait could not share before it waited is named, though the result after the wait was shared", async () => {
+  const { pr } = await reviewed();
+  pr.ci([{ name: "test", bucket: "pending" }]);
+  const ledger = join(pr.home, ".local/state/hedge/decisions.jsonl");
+  const kept = `${ledger}.kept`;
+  if (existsSync(ledger)) renameSync(ledger, kept);
+  mkdirSync(ledger, { recursive: true });
+  pr.panel.onPause = async () => {
+    rmSync(ledger, { recursive: true });
+    if (existsSync(kept)) renameSync(kept, ledger);
+    pr.ci([{ name: "test", bucket: "pass" }]);
+  };
+  const gate = await pr.hedge("gate", "--wait", "10");
+  expect(gate.code).toBe(0);
+  expect(gate.output).toContain("merge gate: failure recorded on this machine only (");
+  expect(gate.output).toContain("merge gate: pass recorded in the decision ledger");
 });
 
 test("while --wait waits, the gate record says CI is still running", async () => {
