@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, isAbsolute } from "node:path";
+import { isT3Slug } from "../../../src/pack/t3-slug.ts";
 
 type Env = Record<string, string | undefined>;
 
@@ -7,8 +8,6 @@ export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 export type ModelRow = { role: string; work: string; provider: string; model: string; effort: Effort; serviceTier?: string };
 
 const efforts = ["low", "medium", "high", "xhigh", "max"];
-const reservedKeys = ["constructor", "prototype", "__proto__"];
-const isT3Slug = (value: unknown) => typeof value === "string" && value.length <= 64 && /^[A-Za-z][A-Za-z0-9_-]*$/.test(value) && !reservedKeys.includes(value);
 
 export function modelTable(env: Env = Bun.env): ModelRow[] {
   if (!env.HEDGE_MODELS) throw new Error("run this command as hedge <command>, so it gets your model table");

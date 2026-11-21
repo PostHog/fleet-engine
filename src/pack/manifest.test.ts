@@ -101,12 +101,13 @@ describe("loadPacks", () => {
     const longest = instance(`providerInstances.${"a".repeat(64)}`, { ...agy, driver: "d".repeat(64) });
     expect((await loadPacks(sourceWith({ base: { ...base, config: longest } })))[0]!.manifest.config).toEqual(longest);
     const cases: Array<[unknown[], string]> = [
-      [instance("providerInstances", { antigravity: agy }), "config providerInstances: a T3 provider instance key names one instance, such as providerInstances.<id>"],
+      [instance("providerInstances", { antigravity: agy }), "config providerInstances: declare one providerInstances.<id> entry per instance, not the whole providerInstances key"],
       [instance("providerInstances.agy cli", agy), "config providerInstances.agy cli: a T3 provider instance key names one instance, such as providerInstances.<id>"],
       [instance("providerInstances.claudeAgent", { driver: "claudeAgent", enabled: true }), "config providerInstances.claudeAgent: Hedge's Claude recovery binds the claudeAgent instance, so give this instance another id"],
       [instance("providerInstances.antigravity", { driver: "antigravity" }), 'config providerInstances.antigravity: a T3 provider instance needs a driver and enabled, such as { "driver": "antigravity", "enabled": true }'],
       [instance("providerInstances.antigravity", { driver: "", enabled: true }), "a T3 provider instance needs a driver and enabled"],
-      [instance("providerInstances.antigravity", { ...agy, config: { binaryPath: 3 } }), "config providerInstances.antigravity: config must be an object, and its binaryPath a path"],
+      [instance("providerInstances.antigravity", { ...agy, config: { binaryPath: 3 } }), "config providerInstances.antigravity: config must be an object with a binaryPath that is a path"],
+      [instance("providerInstances.antigravity", { ...agy, config: {} }), "config providerInstances.antigravity: config must be an object with a binaryPath that is a path"],
       [instance(`providerInstances.${"a".repeat(65)}`, agy), "a T3 provider instance key names one instance, such as providerInstances.<id>"],
       [instance("providerInstances.constructor", agy), "config providerInstances.constructor: a T3 provider instance key names one instance, such as providerInstances.<id>"],
       [instance("providerInstances.prototype", agy), "config providerInstances.prototype: a T3 provider instance key names one instance"],
@@ -124,7 +125,7 @@ describe("loadPacks", () => {
       [instance("providerInstances.antigravity", { ...agy, displayName: "Antigravity" }), "config providerInstances.antigravity: a T3 provider instance holds only driver, enabled and config, and its config only binaryPath"],
       [instance("providerInstances.antigravity", { ...agy, environment: [] }), "config providerInstances.antigravity: a T3 provider instance holds only driver, enabled and config"],
       [instance("providerInstances.antigravity", { ...agy, config: { ...agy.config, apiKey: { provider: "vault", name: "agy" } } }), "config providerInstances.antigravity: a T3 provider instance holds only driver, enabled and config, and its config only binaryPath"],
-      [instance("providerInstances.antigravity", { ...agy, config: { gcpProject: "p" } }), "config providerInstances.antigravity: a T3 provider instance holds only driver, enabled and config, and its config only binaryPath"],
+      [instance("providerInstances.antigravity", { ...agy, config: { ...agy.config, gcpProject: "p" } }), "config providerInstances.antigravity: a T3 provider instance holds only driver, enabled and config, and its config only binaryPath"],
       [instance("providerInstances.myClaude", { driver: "claudeAgent", enabled: true }), "config providerInstances.myClaude: Hedge's Claude recovery owns Claude in T3, so a pack instance takes another driver than claudeAgent"],
       [instance("providerInstances.claude", agy), "config providerInstances.claude: a model row's provider claude or codex always means T3's claudeAgent or codex instance, so give this instance another id"],
       [instance("providerInstances.codex", agy), "config providerInstances.codex: a model row's provider claude or codex always means T3's claudeAgent or codex instance, so give this instance another id"],
