@@ -472,7 +472,7 @@ export async function unrecordedElsewhere(directory: string, commit: string) {
 }
 
 export async function recordFailure(directory: string, cause: string) {
-  await writeJson(join(directory, "round.json"), { ...await requireReservation(directory), lastFailure: cause } satisfies Reservation);
+  await writeJson(join(directory, "round.json"), { ...await requireReservation(directory), lastFailure: redactSecrets(cause) } satisfies Reservation);
 }
 
 const droppedDirectory = (reviews: string) => join(reviews, "dropped");
@@ -493,7 +493,7 @@ export async function dropFinalRead(directory: string, head: ProofIdentity, now:
   const { reservationId } = await readJson<ReservedAs>(join(directory, "round.json"), {});
   const dropped = join(droppedDirectory(dirname(directory)), `${basename(directory)}-${reservationId ?? crypto.randomUUID()}`);
   await mkdir(dirname(dropped), { recursive: true, mode: 0o700 });
-  await writeJson(join(directory, "dropped.json"), { head: head.commit, droppedAt: now.toISOString(), ...unanswered.cause ? { cause: unanswered.cause } : {} } satisfies DroppedRead);
+  await writeJson(join(directory, "dropped.json"), { head: head.commit, droppedAt: now.toISOString(), ...unanswered.cause ? { cause: redactSecrets(unanswered.cause) } : {} } satisfies DroppedRead);
   await rename(directory, dropped);
   await rm(join(dropped, "round.lock"), { force: true });
   return true;
