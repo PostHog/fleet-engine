@@ -120,16 +120,20 @@ function repositoryOf(gh: Gh, found: Command, cwd: string | undefined, io: Inten
 const stdinPath = /^(?:-|\/dev\/stdin|\/dev\/fd\/\d+|\/proc\/(?:self|\d+)\/fd\/\d+)$/;
 const home = (path: string) => path === "~" ? homedir() : path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
 
-function sentTexts(found: Command, cwd: string | undefined, io: IntentIO, inline: string[], files: string[], raw: string) {
+function sentTexts(found: Command, cwd: string | undefined, io: IntentIO, inline: string[], files: string[], line: Line) {
   const paths = files.map((path) => stdinPath.test(path) ? "-" : path);
   const piped = paths.includes("-") && !found.stdin;
   const read = paths.map((path) => path === "-" ? found.stdin?.body ?? "" : io.readText(resolve(cwd ?? ".", found.chdir ?? ".", home(path))));
-  const namedAgain = (path: string) => raw.split(basename(path)).length > 2;
+  const namedAgain = (path: string) => count(line.raw, basename(path)) > 1 || line.words.reduce((sum, word) => sum + count(word, basename(path)), 0) > 1;
   const payloads = paths.flatMap((path, index) => read[index] === undefined ? [] : [{ text: read[index]!, rewritable: namedAgain(path) }]);
   const unsettled = withJsonStrings([...inline, found.stdin?.body ?? "", ...payloads.filter((payload) => payload.rewritable).map((payload) => payload.text)]);
   const settled = withJsonStrings(payloads.filter((payload) => !payload.rewritable).map((payload) => payload.text));
   return { texts: [...unsettled, ...settled], unsettled, unread: read.includes(undefined), piped };
 }
+
+type Line = { raw: string; words: string[] };
+const count = (text: string, part: string) => text.split(part).length - 1;
+const spelled = (commands: Command[]) => commands.flatMap((command) => [command.name, ...command.args, ...command.outputs, ...command.writes, command.stdin?.body ?? ""]);
 
 const withJsonStrings = (texts: string[]) => [...texts, ...texts.flatMap(jsonStrings)];
 
@@ -197,7 +201,8 @@ function expandAlias(args: string[], io: IntentIO): string[] | undefined {
   return [...alias.split(/\s+/).filter(Boolean), ...rest];
 }
 
-function commandIntent(found: Command, raw: string, cwd: string | undefined, io: IntentIO): MergeIntent {
+function commandIntent(found: Command, line: Line, cwd: string | undefined, io: IntentIO): MergeIntent {
+  const { raw } = line;
   const name = basename(found.name);
   if (name === "trunk" && found.args.includes("merge")) return { targets: [], refusal: cliReason };
   if (["curl", "wget", "http", "https", "xh"].includes(name)) {
@@ -213,13 +218,13 @@ function commandIntent(found: Command, raw: string, cwd: string | undefined, io:
   if (!args) return { targets: [], refusal: shellAliasReason };
   const gh = parseGh(inOrder(args));
   if ((gh.group === "pr" || gh.group === "issue") && gh.action === "comment") {
-    const sent = sentTexts(found, cwd, io, values(gh, "-b", "--body"), values(gh, "-F", "--body-file"), raw);
+    const sent = sentTexts(found, cwd, io, values(gh, "-b", "--body"), values(gh, "-F", "--body-file"), line);
     if (!sent.piped && !sendsEnqueue(sent, raw)) return { targets: [] };
     const named = namedPr(gh, found, cwd, io);
     return named ? { targets: [{ ...named, via: `gh ${gh.group} comment${sent.piped ? pipedVia : ""}` }] } : { targets: [], refusal: unnamedReason("posts `/trunk merge`") };
   }
   if (gh.group === "pr" && gh.action === "review") {
-    const sent = sentTexts(found, cwd, io, values(gh, "-b", "--body"), values(gh, "-F", "--body-file"), raw);
+    const sent = sentTexts(found, cwd, io, values(gh, "-b", "--body"), values(gh, "-F", "--body-file"), line);
     return sendsEnqueue(sent, raw) ? elsewhere(sent, raw) : { targets: [] };
   }
   if (gh.group === "pr" && gh.action === "merge") {
@@ -231,7 +236,7 @@ function commandIntent(found: Command, raw: string, cwd: string | undefined, io:
   const fields = values(gh, "-f", "--raw-field", "-F", "--field");
   const inline = [...fields, ...fields.map((field) => field.replace(/^[^=]*=/, ""))];
   const fieldFiles = values(gh, "-F", "--field").flatMap((field) => field.match(/^[^=]*=@(.+)$/s)?.[1] ?? []);
-  const sent = sentTexts(found, cwd, io, inline, [...values(gh, "--input"), ...fieldFiles], raw);
+  const sent = sentTexts(found, cwd, io, inline, [...values(gh, "--input"), ...fieldFiles], line);
   const enqueues = sendsEnqueue(sent, raw);
   let endpoint = endpointOf(gh).replace(/[?#].*$/s, "").replace(/\/$/, "");
   if (endpoint === "graphql") return sent.piped || sent.unread || sent.texts.some((text) => mentionsEnqueue.test(text) || graphqlMerge.test(text)) || mentionsEnqueue.test(raw) ? { targets: [], refusal: graphqlReason } : { targets: [] };
@@ -287,6 +292,7 @@ export function mergeIntent(call: ToolCall, command: string, exempt: string[], i
     let commands: Command[];
     try { commands = commandsIn(command); }
     catch { return mentionsEnqueue.test(command) || graphqlMerge.test(command) || restMerge.test(command) ? { targets: [], refusal: rawReason } : intent; }
+    const line = { raw: command, words: spelled(commands) };
     const dirs = new Map<Scope, string[]>();
     const cwdIn = (scope: Scope | undefined): string | undefined => scope === undefined ? call.cwd : dirs.get(scope)?.at(-1) ?? cwdIn(scope.parent);
     for (const found of commands) {
@@ -300,7 +306,7 @@ export function mergeIntent(call: ToolCall, command: string, exempt: string[], i
         dirs.set(found.scope, stack);
         continue;
       }
-      const one = commandIntent(found, command, cwdIn(found.scope), io);
+      const one = commandIntent(found, line, cwdIn(found.scope), io);
       intent = { targets: [...intent.targets, ...one.targets], refusal: intent.refusal ?? one.refusal };
     }
   } else if (/github/i.test(tool)) intent = mcpIntent(tool, call.tool_input ?? {});
