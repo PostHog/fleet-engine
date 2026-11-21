@@ -2,7 +2,7 @@ import { cookieKind, cookieNamedAt, redactForModel } from "../../base/hooks/secr
 
 export type GuardedPrompt = { ok: true; prompt: string; redacted?: string } | { ok: false; cause: string };
 
-export const placeholderRule = "Text such as [redacted GitHub token] in this prompt can be a placeholder for a value Hedge removed before the model call: a placeholder is no finding by itself.";
+export const placeholderRule = "Text such as [redacted GitHub token] in this prompt can be a placeholder for a secret-shaped value Hedge removed before the model call. On an added diff line, a placeholder means the change adds a secret-shaped literal: report it. Elsewhere, a placeholder is no finding by itself.";
 
 const fixtureRule = "A repository file must hold no secret-shaped literal: build the test fixture at run time from parts, as packs/base/hooks/hooks.test.ts in Hedge does.";
 const shownPlaces = 5;

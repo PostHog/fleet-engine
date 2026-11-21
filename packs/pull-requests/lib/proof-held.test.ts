@@ -75,6 +75,16 @@ test.each(shapes)("a single review gets $name redacted, the guard passes its pro
   expect(leaksIn(pr, review.output, reviewer.prompts(), shape.values)).toEqual([]);
 });
 
+test("a review prompt tells the model that a placeholder on an added line is a secret-shaped literal the change adds", async () => {
+  const pr = await shaped(shapes[0]!);
+  const reviewer = fakeModel(pr, "REVIEWER", "No findings.\n");
+
+  expect((await pr.hedge("review", "--single")).code).toBe(0);
+  const [prompt] = reviewer.prompts();
+  expect(prompt).toContain("+token = [redacted GitHub token]");
+  expect(prompt).toContain("On an added diff line, a placeholder means the change adds a secret-shaped literal: report it.");
+});
+
 test("the judge prompt names the cookie only in a fixture, so Hedge redacts the long tokens the guard reads as its value and says where the name sits", async () => {
   const pr = await shaped(shapes.at(-1)!);
   await reviewHead(pr);
