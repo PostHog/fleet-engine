@@ -119,7 +119,7 @@ describe("the Stop proof check blocks a lane that owns an open PR", () => {
     const { head, gate, check } = await lane();
     await gate(head, 75, "CI is still running: required waiting on: test");
     const reason = await reasonOf(check());
-    expect(reason).toContain(`exited 75: CI is still running: required waiting on: test. Wait for it with hedge proof gate --repo ${repository} --pr 7 --commit ${head} --wait 10`);
+    expect(reason).toContain(`exited 75: CI is still running: required waiting on: test. Wait for it with hedge proof gate --repo ${repository} --pr 7 --commit ${head} --wait 10. When a wait already ran out, open the checks it names first`);
   });
 
   test("when the last gate run left only gaps, naming the agent's tier decision and the question tool", async () => {

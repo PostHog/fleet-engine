@@ -102,7 +102,7 @@ async function owedStep(layer: Layer, git: GitIn, checkedOut: string | undefined
   const record = await lastGateRun(home, { repository: layer.repository, pr: layer.number, commit: head });
   if (!record) return `${name} has no gate run at its pushed head ${head.slice(0, 7)}. Run ${gateAt(layer, head)}`;
   if (record.code === 0) return undefined;
-  const next = record.code === ciRunningCode ? ` Wait for it with ${gateAt(layer, head)} --wait 10`
+  const next = record.code === ciRunningCode ? ` Wait for it with ${gateAt(layer, head)} --wait 10. When a wait already ran out, open the checks it names first`
     : record.code === 3
     ? ` Decide each gap by tier with hedge decision record --mark 🤖, or ask ${personName(home)} with the question tool, naming the PR, and record the answer with hedge decision record --mark 👤 --class proof-gap --kind <kind> --pr ${name}; then run ${gateAt(layer, head)} again`
     : ` Fix it, then run ${gateAt(layer, head)} again`;

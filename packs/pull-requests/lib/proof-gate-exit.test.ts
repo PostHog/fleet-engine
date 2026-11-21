@@ -247,7 +247,7 @@ test("the gate record keeps the same reason as the last line when the gate fails
   expect(`gate: fail (exit 1): ${(await lastGateRun(pr.home, { repository: "example/product", pr: 42, commit: head }))?.reason}`).toBe(lastLine(gate.output)!);
 });
 
-test("--wait does not wait when it cannot share the failure first, writes the ledger once, and names why at once", async () => {
+test("--wait does not wait when it cannot share the failure first, writes the ledger once, and fails naming why at once", async () => {
   const { pr } = await reviewed();
   pr.ci([{ name: "test", bucket: "pending" }]);
   const ledger = join(pr.home, ".local/state/hedge/decisions.jsonl");
@@ -258,13 +258,13 @@ test("--wait does not wait when it cannot share the failure first, writes the le
     pr.ci([{ name: "test", bucket: "pass" }]);
   };
   const gate = await pr.hedge("gate", "--wait", "10");
-  expect(gate.code).toBe(75);
+  expect(gate.code).toBe(1);
   expect(gate.output.split("\n").filter((line) => line.includes("recorded on this machine only"))).toEqual([expect.stringMatching(/^merge gate: failure recorded on this machine only \(/)]);
-  expect(lastLine(gate.output)).toStartWith("gate: pending (exit 75): CI is still running: waiting on: test. --wait did not wait: the decision ledger did not take the failure (");
+  expect(lastLine(gate.output)).toStartWith("gate: fail (exit 1): CI is still running: waiting on: test. --wait did not wait: the decision ledger did not take the failure (");
   expect(lastLine(gate.output)).toEndWith("). Fix the ledger's reach, such as the hub connection, then run the gate again");
   expect((await lastGateRun(pr.home, { repository: "example/product", pr: 42, commit: (await pr.git("rev-parse", "HEAD")) }))?.reason).toContain("--wait did not wait: the decision ledger did not take the failure (");
   const json = await pr.hedge("gate", "--wait", "10", "--json");
-  expect(JSON.parse(json.output)).toMatchObject({ code: 75, ledger: expect.stringMatching(/^merge gate: failure recorded on this machine only \(/) });
+  expect(JSON.parse(json.output)).toMatchObject({ code: 1, ledger: expect.stringMatching(/^merge gate: failure recorded on this machine only \(/) });
 });
 
 test("while --wait waits, the gate record says CI is still running", async () => {

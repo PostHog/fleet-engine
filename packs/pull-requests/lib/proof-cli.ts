@@ -424,8 +424,8 @@ again, and still exits 75 when CI runs past the limit; then the verdict says to 
 required check that has not reported may never start. An error of that second run names the failed read that ended
 the wait. The limit bounds the waiting; a read of GitHub that has started
 still finishes. While it waits, the gate record holds exit 75 and the decision ledger holds a failure at the head, dated
-when the gate read CI as running, so no merge gate counts a pass shared before that read. When that failure cannot be shared, the gate does not wait,
-and its verdict names the ledger error to fix; the result after the wait is shared with the time the wait ended. A run longer than your shell's limit belongs in the background. hedge reads the PR and its CI over GitHub's REST API. Only finding the PR of the
+when the gate read CI as running, so no merge gate counts a pass shared before that read. When that failure cannot be shared, the gate does not wait:
+it exits 1 and its verdict names the ledger error to fix; the result after the wait is shared with the time the wait ended. A run longer than your shell's limit belongs in the background. hedge reads the PR and its CI over GitHub's REST API. Only finding the PR of the
 checkout without --repo and --pr uses gh pr view; pass both when GraphQL is out. A check that ran more than once
 counts with its newest run from each app, as GitHub's required checks do. The
 required checks of the base branch, from its rulesets and branch protection, decide CI; other checks print as not
@@ -501,7 +501,7 @@ code and the reason. The gate's lines and hedge decision report come from the sa
       }
       if (unshared?.failed) {
         const reason = `${gate.reason}. --wait did not wait: the decision ledger did not take the failure (${unshared.error})`;
-        gate = { ...gate, reason, verdict: `gate: pending (exit ${gate.code}): ${reason}. Fix the ledger's reach, such as the hub connection, then run the gate again` };
+        gate = { ...gate, code: 1, reason, summary: { ...gate.summary, code: 1 }, verdict: `gate: fail (exit 1): ${reason}. Fix the ledger's reach, such as the hub connection, then run the gate again` };
       }
       await record({ code: gate.code, reason: gate.reason });
       const shared = unshared?.failed ? unshared.line : (await shareGateResult(head, gate.code === 0, gatedAt, context))?.line;
