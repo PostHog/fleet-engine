@@ -48,7 +48,7 @@ describe("hedge devbox add with a hub", () => {
 
   test("hedge devbox add pushes the node on the next run when the push of the profile failed", async () => {
     const { home, io, add } = await withHub();
-    const rejecting = join(githubRepo(home, "nora/hedge-profile"), "hooks/pre-receive");
+    const rejecting = join(githubRepo(home, "nora/nora-hedge"), "hooks/pre-receive");
     writeFileSync(rejecting, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
     expect(await add("coder.hedge-node-1", fakeMachine(home))).toBe(1);
     expect(io.output()).toContain("could not push answers");

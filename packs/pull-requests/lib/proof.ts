@@ -157,7 +157,7 @@ function finalReadPhase(value: string): FinalReadPhase {
 }
 
 type Spending = "unfinished spends" | "finished only";
-type Spent = { spent: number; names: string[]; reservations: string[]; finished: string[]; round?: number };
+type Spent = { spent: number; names: string[]; reservations: string[]; finished: string[]; round?: number; counted?: string[] };
 type ReservedAs = { reservationId?: string; startedAt?: string; commit?: string; scope?: string; phase?: FinalReadPhase };
 const reservationOf = ({ reservationId, startedAt, commit, scope, phase }: ReservedAs) => JSON.stringify([reservationId, startedAt, commit, scope, phase]);
 
@@ -178,7 +178,7 @@ async function reviewsSpent(reviews: string, phase: FinalReadPhase, spending: Sp
   return { spent: present.filter(({ spends }) => spends).length, names: present.map(({ name }) => name), reservations: present.map(({ reservation }) => reservation), finished: present.filter(({ finished }) => finished).map(({ name }) => name) };
 }
 
-const budgetState = ({ spent, names, reservations, finished, round }: Spent) => JSON.stringify([spent, names, reservations, finished, round]);
+const budgetState = ({ spent, names, reservations, finished, round, counted }: Spent) => JSON.stringify([spent, names, reservations, finished, round, counted]);
 
 async function reserveWeighed<T extends Spent>(reviews: string, lockBudget: LockBudget, snapshot: () => Promise<T>, permit: (weighed: T) => Promise<ArbiterVerdict | undefined>, reserveIt: (weighed: T, verdict: ArbiterVerdict | undefined) => Promise<Reserved>) {
   const before = await lockBudget(reviews, snapshot);
@@ -224,9 +224,11 @@ async function arbiterPrompt(home: string, identity: ProofIdentity) {
   return [arbiterInstructions, ...sections].join("\n\n");
 }
 
+const namesEscalate = (output: string) => /escalate/i.test(output);
+
 export function parseVerdict(output: string, model: string): ArbiterVerdict {
   const line = (output.split("\n").find((text) => text.trim()) ?? "").replace(/^[\s*`]+|[\s*`]+$/g, "");
-  if (output.trim().replace(/^[*`]+|[*`]+$/g, "") === "CONTINUE") return { verdict: "continue", reason: "", model };
+  if (/^CONTINUE(?::\s*\S.*)?$/.test(line)) return namesEscalate(output) ? { verdict: "unavailable", reason: "the answer says CONTINUE and also ESCALATE", model } : { verdict: "continue", reason: "", model };
   const escalate = /^ESCALATE:\s*(\S.*)$/.exec(line);
   if (escalate) return { verdict: "escalate", reason: escalate[1]!.replace(/\.$/, ""), model };
   return { verdict: "unavailable", reason: `unparseable answer: ${line.slice(0, 200)}`, model };
@@ -285,14 +287,15 @@ async function startFinalRead(home: string, identity: ProofIdentity, base: strin
   const { free, ceiling } = permit.limits;
   const snapshot = async () => {
     const dropping = await droppableReads(reviews, identity, dropUnanswered);
-    return { ...await reviewsSpent(reviews, phase, "unfinished spends", dropping), reviews: await finishedReviews(home, identity), dropping };
+    const counted = await finishedReviews(home, identity);
+    return { ...await reviewsSpent(reviews, phase, "unfinished spends", dropping), reviews: counted, counted: counted.map(({ name }) => name), dropping };
   };
-  const permitRead = async ({ spent, names, reviews: finished }: Awaited<ReturnType<typeof snapshot>>) => {
+  const permitRead = async ({ spent, names, finished: saved, reviews: finished }: Awaited<ReturnType<typeof snapshot>>) => {
     const carried = gateCarry(identity, finished, cleanBaseMerge, quietCommit).found;
     const latest = finished.at(-1);
     if (!latest) throw new Error("A final read needs a finished earlier review");
     if (!coversReview(base, latest.commit, cleanBaseMerge)) throw new Error(`Final read base must be the latest reviewed commit ${latest.commit}, or a clean base merge the gate carried it to`);
-    const unfinished = names.some((name) => !finished.some((review) => review.name === name));
+    const unfinished = (await Promise.all(names.map(async (name) => !saved.includes(name) || await panelOutcome(join(reviews, name)) === "unfinished"))).some(Boolean);
     const retry = unfinished ? "" : ` To read it anyway, pass ${spent < ceiling ? "--agent '<your reason>', or " : ""}the user's --override`;
     if (!decision && carried?.quiet.length) throw new Error(`HEAD needs no final read: final read carried from ${short(carried.from)}: ${quietReason(carried.kinds)}. hedge proof gate counts the carry.${retry}`);
     if (unfinished) throw new Error("A review is unfinished. Finish it before a final read.");

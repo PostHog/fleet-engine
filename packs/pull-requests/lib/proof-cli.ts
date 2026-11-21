@@ -31,6 +31,7 @@ import type { BloatJudge } from "./proof-bloat.ts";
 import type { ThreadWords } from "./proof-answers.ts";
 import { modelFor } from "../../base/lib/models.ts";
 import { numberSetting } from "../../base/lib/settings.ts";
+import { bunScript } from "../../../src/runner/bun.ts";
 
 export type { RunIO };
 
@@ -778,7 +779,7 @@ async function startLens(directory: string, name: string, context: CommandContex
 const detachHedge = ({ cwd, env }: CommandContext) => async (args: string[], log: string) => {
   const output = openSync(log, "a", 0o600);
   try {
-    const child = Bun.spawn([process.execPath, proofEntry, ...args], { cwd, env: env as Record<string, string>, stdin: "ignore", stdout: output, stderr: output, detached: true });
+    const child = Bun.spawn(bunScript(proofEntry, ...args), { cwd, env: env as Record<string, string>, stdin: "ignore", stdout: output, stderr: output, detached: true });
     child.unref();
     return child.pid;
   } finally { closeSync(output); }

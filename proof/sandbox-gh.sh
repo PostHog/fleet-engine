@@ -62,7 +62,25 @@ api() {
   esac
 }
 
+listed() {
+  owner=$1
+  [ "$owner" = "$login" ] || refuse "GraphQL: Could not resolve to a RepositoryOwner with the login of '$owner'. (repositoryOwner)"
+  printf '['
+  first=1
+  for bare in "$state/remotes/$owner"/*.git; do
+    [ -d "$bare" ] || continue
+    repo=$(basename "$bare" .git)
+    topics=null
+    [ ! -f "$bare/topics" ] || topics="[$(sed 's/.*/{"name":"&"}/' "$bare/topics" | paste -sd, -)]"
+    [ "$first" = 1 ] || printf ','
+    printf '{"nameWithOwner":"%s/%s","repositoryTopics":%s}' "$owner" "$repo" "$topics"
+    first=0
+  done
+  printf ']\n'
+}
+
 repo() {
+  [ "$1" != list ] || { listed "${2:-}"; return; }
   name=${2:-}
   case "$name" in
     "$login"/*) ;;
@@ -76,6 +94,9 @@ repo() {
       [ ! -e "$state/remotes/$name.git" ] || refuse "GraphQL: Name already exists on this account (createRepository)"
       git init -q --bare -b main "$state/remotes/$name.git"
       echo "✓ Created repository $name on GitHub (hedge-proof sandbox)" ;;
+    edit)
+      [ -d "$state/remotes/$name.git" ] && [ "${3:-}" = --add-topic ] || refuse "hedge-proof sandbox gh: repo edit $* is not part of the proof"
+      echo "$4" >>"$state/remotes/$name.git/topics" ;;
     *) refuse "hedge-proof sandbox gh: repo $1 is not part of the proof" ;;
   esac
 }

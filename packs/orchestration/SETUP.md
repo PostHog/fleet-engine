@@ -4,7 +4,7 @@ Read this when the person picks the Orchestration pack.
 
 **Maps** and **side threads** work with defaults. A map is one issue that
 lists tickets; a conductor thread starts one worker thread per ticket. Maps
-live in the issues of their `hedge-profile` repo unless they name another
+live in the issues of their profile repo unless they name another
 repo with `--set orchestration.tracker=<owner/name>`.
 
 Three workflows run by themselves on a schedule and start off:
