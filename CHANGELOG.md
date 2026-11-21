@@ -7,7 +7,8 @@
 - The setting `orchestration.proseTitles` names title starts, such as `⚠️, 🚨`,
   of threads that a job queues messages into. Such a thread may end its turn
   with a decision in prose, and the question guard denies its question cards,
-  so a pending card never holds the queued messages.
+  so a pending card does not hold the queued messages. When T3 cannot be read
+  or the guard's kill switch is on, cards pass as before.
 
 ### A fresh judge scores the growth
 
