@@ -175,6 +175,12 @@ function pipelineEnd(program: Program, start: number, depth: number): number {
   return end;
 }
 
+function listEnd(program: Program, start: number, depth: number): number {
+  let end = pipelineEnd(program, start, depth);
+  while (["&&", "||"].includes(program.commands[end].after ?? "") && end + 1 < program.commands.length) end = pipelineEnd(program, end + 1, depth);
+  return end;
+}
+
 function closesOnly({ commands, depths }: Program, end: number, depth: number): boolean {
   if (!separators.has(commands[end].after) && commands[end].after !== ";;") return false;
   return commands.slice(end + 1).every((command, offset) => closers.has(command.name) && command.name !== "done" && depths[end + 1 + offset] < depth && separators.has(command.after));
@@ -185,12 +191,12 @@ const separatorName = (after: string | undefined) => (after === "\n" ? "the next
 function reachOf(program: Program, start: number): Reach {
   const { commands, depths } = program;
   const depth = depths[start];
-  const sameLevel = (index: number) => depths[index] === depth;
+  const reachable = (index: number) => depths[index] === depth && commands[listEnd(program, index, depth)].after !== "&";
   let end = pipelineEnd(program, start, depth);
   if (end !== start && !setting(program, start, setsOption("pipefail"))) {
     const place = program.topLevel ? placeInPipe(program, start) : undefined;
     const readable = depth === 0 && separators.has(commands[end].after);
-    return (readable && reporter(commands[end + 1], sameLevel(end + 1), { dollarQuestion: false, place, bareExit: false, failingExit: false })) || { how: "a pipe" };
+    return (readable && reporter(commands[end + 1], reachable(end + 1), { dollarQuestion: false, place, bareExit: false, failingExit: false })) || { how: "a pipe" };
   }
   if (depth > 0) return closesOnly(program, end, depth) ? "exit" : { how: "the group or loop it runs in" };
   let chained = false;
@@ -203,9 +209,9 @@ function reachOf(program: Program, start: number): Reach {
   const place = chained || !program.topLevel ? undefined : placeInPipe(program, start);
   if (after === undefined) return "exit";
   if (after === "&") return { how: "running it in the background with `&`" };
-  if (after === "||") return reporter(commands[next], sameLevel(next), { dollarQuestion: true, place, bareExit: true, failingExit: true }) ?? { how: "the `||` after it" };
+  if (after === "||") return reporter(commands[next], reachable(next), { dollarQuestion: true, place, bareExit: true, failingExit: true }) ?? { how: "the `||` after it" };
   if (!chained && separators.has(after) && setting(program, start, setsErrexit)) return "exit";
-  return reporter(commands[next], sameLevel(next), { dollarQuestion: true, place, bareExit: true, failingExit: false }) ?? { how: separatorName(after) };
+  return reporter(commands[next], reachable(next), { dollarQuestion: true, place, bareExit: true, failingExit: false }) ?? { how: separatorName(after) };
 }
 
 function hiddenIn(text: string, nesting: number): { found?: Finding; carries?: string } {
