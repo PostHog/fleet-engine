@@ -76,7 +76,7 @@ describe("hedge setup questions", () => {
     expect(kept.code).toBe(0);
     expect(kept.output).toContain("  From your command: Quality gates, Orchestration, Communication, Integrations, Memory, Guards\n");
     expect(kept.output).toContain("  Workflows: pr-digest off");
-    expect(kept.prompts).toEqual(["Press ↵ to keep them, or e to change them: ", "  Go ahead? (Y/n) "]);
+    expect(kept.prompts).toEqual(["Press ↵ to keep them, or e to change them: ", "  Go ahead? (Y/n, or type another name for your profile repo) "]);
     expect(savedAnswers(home)).toMatchObject({
       settings: { "pull-requests.freeReviews": 3 },
       packs: ["pull-requests", "orchestration", "communication", "integrations", "memory", "guards"],

@@ -304,7 +304,7 @@ snapshot() {
       echo "$cli: $where -> $(readlink -f "$where"): $("$cli" --version 2>&1 | head -1)"
     done' 2>&1
   printf '%s  crontab\n' "$(crontab -l -u "$user" 2>/dev/null | sha256sum | cut -d' ' -f1)"
-  printf '%s  profile remote\n' "$(git -c safe.directory='*' --git-dir="$github/remotes/hedge-proof/hedge-profile.git" for-each-ref 2>/dev/null | sha256sum | cut -d' ' -f1)"
+  printf '%s  profile remote\n' "$(git -c safe.directory='*' --git-dir="$github/remotes/hedge-proof/hedge-proof-hedge.git" for-each-ref 2>/dev/null | sha256sum | cut -d' ' -f1)"
 }
 
 t3_port() {
@@ -559,8 +559,8 @@ elif printf '%s\n' "$needs" | grep -v -q -E '^  Sign in to '; then
 else
   pass "$user_a setup" "setup left only sign-ins open: $(printf '%s' "$needs" | sed 's/:.*//; s/^  //' | tr '\n' ',' | sed 's/,$//')"
 fi
-if [ -d "$github/remotes/hedge-proof/hedge-profile.git" ]; then
-  note "setup created the profile repo hedge-proof/hedge-profile (a local bare repo)"
+if [ -d "$github/remotes/hedge-proof/hedge-proof-hedge.git" ]; then
+  note "setup created the profile repo hedge-proof/hedge-proof-hedge (a local bare repo)"
 else
   note "setup did not create the profile repo"
 fi
@@ -592,10 +592,10 @@ check_rerun "$user_a" "one-liner" "$work/a-run3" "$work/a-before" signins
 say "User B: a devbox installs from the profile repo"
 make_user "$user_b" "$work/home-b"
 sign_in "$user_b"
-profile="$(home_of "$user_b")/hedge-profile"
-note "\$ git clone https://github.com/hedge-proof/hedge-profile.git ~/hedge-profile"
-if as_user "$user_b" git clone -q https://github.com/hedge-proof/hedge-profile.git "$profile"; then
-  note "\$ sh ~/hedge-profile/install.sh"
+profile="$(home_of "$user_b")/hedge-proof-hedge"
+note "\$ git clone https://github.com/hedge-proof/hedge-proof-hedge.git ~/hedge-proof-hedge"
+if as_user "$user_b" git clone -q https://github.com/hedge-proof/hedge-proof-hedge.git "$profile"; then
+  note "\$ sh ~/hedge-proof-hedge/install.sh"
   code=$(logged "$work/b-run1" as_user "$user_b" sh "$profile/install.sh")
   note "exit $code"
   if [ "$code" = 0 ]; then pass "$user_b install" "install.sh applied the profile"; else fail "$user_b install" "install.sh exited $code"; fi
@@ -623,7 +623,7 @@ check_rerun "$user_b" "hedge apply" "$work/b-apply" "$work/b-before" applied
 
 say "User B: install.sh again"
 snapshot "$user_b" >"$work/b-before"
-note "\$ sh ~/hedge-profile/install.sh"
+note "\$ sh ~/hedge-proof-hedge/install.sh"
 code=$(logged "$work/b-run2" as_user "$user_b" sh "$profile/install.sh")
 note "exit $code"
 check_rerun "$user_b" "install.sh" "$work/b-run2" "$work/b-before" applied

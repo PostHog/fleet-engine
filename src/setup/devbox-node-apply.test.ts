@@ -113,7 +113,7 @@ describe("hedge devbox add applies the profile on the node", () => {
   test("takes the steps left from the node's own profile, not from this machine's", async () => {
     const { home, io, add } = await signedUp(guarded);
     const clone = join(boxHome(home, node), ".local/share/hedge/profile");
-    git(home, "clone", "-q", githubRepo(home, "nora/hedge-profile"), clone);
+    git(home, "clone", "-q", githubRepo(home, "nora/nora-hedge"), clone);
     const answers = JSON.parse(readFileSync(join(clone, "hedge.json"), "utf8"));
     writeFileSync(join(clone, "hedge.json"), JSON.stringify({ ...answers, packs: answers.packs.filter((pack: string) => pack !== "guards") }, null, 2) + "\n");
     git(clone, "commit", "-q", "-am", "The node's profile, before guards");
