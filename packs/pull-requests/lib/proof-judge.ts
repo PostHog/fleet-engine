@@ -203,10 +203,11 @@ const failureReasons = (verdict: Verdict) => [
 ];
 
 export type JudgeRecord = { commit: string; model: string; verdict: Verdict; passed: boolean; escalation?: string; judgedAt: string };
-export type JudgeDeps = { ask: (request: ModelRequest) => Promise<ModelAnswer>; model: string; arbiter: Arbiter; directory: string; commit: string; now: Date };
+export type JudgeDeps = { ask: (request: ModelRequest) => Promise<ModelAnswer>; model: string; arbiter: Arbiter; directory: string; commit: string; now: Date; failLimit: number };
 export type JudgeOutcome = { state: "pass" | "fail" | "unavailable"; lines: string[]; model: string; broken: string[] };
 
 const freeJudgeFails = 2;
+const judgeBudgetSpent = (failed: number) => `judge: budget spent: the judge failed ${failed} times on this PR, as often as pull-requests.reviewCeiling allows, so hedge runs it no more. End it with a judge gap on HEAD: record hedge proof gap --kind judge --reason <why HEAD holds now>, and have a decision accept it as the judge gap line says`;
 const arbiterInstructions = `You decide if an agent may keep trying to pass a judge, or must ask the user. Below are the reasons a judge failed one pull request on each run, oldest first.
 
 Answer ESCALATE only when the same failure comes back after the author answered it, or a later verdict contradicts an earlier one. In all other cases answer CONTINUE.
@@ -223,6 +224,8 @@ export async function judge(input: JudgeInput, deps: JudgeDeps): Promise<JudgeOu
   const { prompt, images, readable } = await judgePrompt(input);
   const path = join(deps.directory, `${await inputKey(deps.model, prompt, images)}.json`);
   const cached = await readFile(path, "utf8").then((text) => JSON.parse(text) as JudgeRecord, () => undefined);
+  const failed = cached ? 0 : (await failedRecords(deps.directory)).length;
+  if (failed >= deps.failLimit) return { state: "fail", lines: [judgeBudgetSpent(failed)], model: deps.model, broken: [] };
   const record = cached ?? await askJudge(prompt, images, readable, input.cwd, askedQuestions(input.risk !== undefined), deps);
   if ("cause" in record) return { state: "unavailable", lines: [`judge: unavailable (${record.cause})`], model: deps.model, broken: [] };
   if (!cached) await writeRecord(path, record);

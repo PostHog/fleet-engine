@@ -4,7 +4,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawnAsync } from "../../../src/testing/spawn.ts";
 import { answeredFindings, reviewedFindings } from "./proof.ts";
-import { answerFixed, checkout, cleanFixtures, fakeModel, lockHolder, finishRound, fixture, graded, markPanel, models, recordingModel, settings, stuckRoundLock, type Checkout } from "./proof-testing.ts";
+import { answerFixed, checkout, cleanFixtures, fakeModel, lockHolder, finishRound, fixture, graded, ledgerDecisions, markPanel, models, recordingModel, settings, stuckRoundLock, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
 
@@ -1114,20 +1114,52 @@ test("for a panel that mixes a prose-only lens with a lens that lists a minor, t
   expect((await answerKnown(pr, "final-1", 1)).code).toBe(0);
 });
 
-test("the ceiling never refuses a final read of a HEAD the gate does not carry, while a final read's major spends the last review and stops the fixes round after it", async () => {
-  const pr = await checkout();
+async function finalReadSpendsTheCeiling(pr: Checkout) {
   pr.pullRequestState({ body: graded("non-critical", "medium") });
   pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 10, "pull-requests.reviewCeiling": 2 });
   await pr.commit("feature.txt", "greet\n");
   await pr.hedge("require", "--none", "--reason", "fixture");
   const panel = await cannedPanel(pr, { design: minor, others: major("the greeting drops the name") });
   const fix = await pr.commit("feature.txt", "greet the member\n");
-
   expect((await pr.hedge("review-start", "--scope", "final", "--base", panel)).output).toContain(`"round":"final"`);
   await finishWith(pr, "final-1", major("the member goes unnamed"));
-  await pr.commit("feature.txt", "greet every member\n");
+  const after = await pr.commit("feature.txt", "greet every member\n");
+  return { panel, fix, after };
+}
+
+const refusal = (run: Promise<unknown>) => run.then(() => "", (error: Error) => error.message);
+
+test("at the ceiling a final read of a production fix after the last read stops with what to do, --agent cannot pass it, and a revert of the fix ends the loop", async () => {
+  const pr = await checkout();
+  const { panel, fix, after } = await finalReadSpendsTheCeiling(pr);
+
   await expect(pr.hedge("review-start", "--scope", "fixes", "--base", panel)).rejects.toThrow("The review budget of 2 reviews is spent");
-  expect((await pr.hedge("review-start", "--scope", "final", "--base", fix)).output).toContain(`"round":"final"`);
+  const stopped = await refusal(pr.hedge("review-start", "--scope", "final", "--base", fix));
+  expect(stopped).toStartWith(`The review budget of 2 reviews is spent, and no read checks the production changes since ${fix.slice(0, 7)}. Revert each commit since ${fix.slice(0, 7)} that changes production code: the gate carries a revert of a PR commit. hedge proof asks nothing more.`);
+  expect(stopped).toContain("Only the user's --override runs another review or final read");
+  expect(stopped).not.toContain("question tool");
+  await expect(pr.hedge("review-start", "--scope", "final", "--base", fix, "--agent", "One more read checks the last fix.")).rejects.toThrow("The review budget of 2 reviews is spent");
+
+  await pr.git("revert", "--no-edit", after);
+  expect((await pr.hedge("gate")).output).toContain(`review: final read carried from ${fix.slice(0, 7)}: revert of a PR commit`);
+  expect((await answerKnown(pr, "final-1", 1)).code).toBe(0);
+});
+
+test("at the ceiling the user's --override runs a final read of a production fix after the last read", async () => {
+  const pr = await checkout();
+  const { fix } = await finalReadSpendsTheCeiling(pr);
+  pr.choose("Run one more round");
+
+  const read = await pr.hedge("review-start", "--scope", "final", "--base", fix, "--override", `2026-11-14 "Run one more round"`, "--thread", "thread-1");
+  expect(read.output).toContain(`"round":"final"`);
+  expect(ledgerDecisions(pr)).toMatchObject([{ mark: "👤", class: "review" }]);
+});
+
+test("a test-only commit after a clean final read at the ceiling needs no final read, and --agent cannot read it", async () => {
+  const pr = await checkout();
+  const { fix } = await finalReadSpendsTheCeiling(pr);
+  pr.choose("Run one more round");
+  await pr.hedge("review-start", "--scope", "final", "--base", fix, "--override", `2026-11-14 "Run one more round"`, "--thread", "thread-1");
   await finishWith(pr, "final-2", "No findings.\n");
 
   await pr.commit("feature.test.ts", "test(\"greets every member\", () => {});\n");

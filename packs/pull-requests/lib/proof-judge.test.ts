@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { cleanFixtures, lookup, checkout, type Checkout, verdict, fakeModel, reviewHead, reviewHeadFixed, finishRound, recordingModel, stalledOnQuota, acceptGap, graded } from "./proof-testing.ts";
+import { cleanFixtures, lookup, checkout, type Checkout, verdict, fakeModel, reviewHead, reviewHeadFixed, finishRound, recordingModel, stalledOnQuota, acceptGap, graded, settings } from "./proof-testing.ts";
 import { riskCalloutOf, tierOf } from "./decision-ledger.ts";
 import { withoutReceipt } from "./proof-receipt.ts";
 
@@ -291,6 +291,31 @@ test("a judge gap on a new commit needs a new answer", async () => {
   await expect(accept()).rejects.toThrow("Ask the user again");
   pr.chooseGap("judge", reason);
   expect((await accept()).code).toBe(0);
+});
+
+test("once the judge failed as often as the review ceiling allows on a PR, the gate runs it no more, and only an accepted judge gap on HEAD lets the gate pass", async () => {
+  const pr = await checkout();
+  pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.reviewCeiling": 3 });
+  pr.env.HEDGE_REVIEW_ARBITER = "cat >/dev/null; echo CONTINUE";
+  await pr.commit("feature.txt", "greet new members\n");
+  await reviewHead(pr);
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  fakeModel(pr, "JUDGE", verdict({ owed: { verdict: "fail", reason: "feature.txt is code, not docs", citations: ["feature.txt"] } }));
+  for (const response of ["First answer.\n", "Second answer.\n", "Third answer.\n"]) expect((await gateAfterResponse(pr, response)).output).toContain("judge owed: fail");
+  expect((await pr.hedge("gate")).output).toContain("judge owed: fail: feature.txt is code, not docs");
+
+  fakeModel(pr, "JUDGE", verdict());
+  const stopped = await gateAfterResponse(pr, "Fourth answer.\n");
+  expect(stopped.code).toBe(1);
+  expect(stopped.output).toContain("judge: budget spent: the judge failed 3 times on this PR, as often as pull-requests.reviewCeiling allows, so hedge runs it no more. End it with a judge gap on HEAD: record hedge proof gap --kind judge --reason <why HEAD holds now>");
+  expect(stopped.output).not.toContain("judge owed: pass");
+
+  await pr.hedge("gap", "--kind", "judge", "--reason", "The fourth answer settles the owed kinds");
+  pr.chooseGap("judge", "The fourth answer settles the owed kinds");
+  await acceptGap(pr, "judge");
+  const accepted = await pr.hedge("gate");
+  expect(accepted.code).toBe(0);
+  expect(accepted.output.split("\n").at(-1)).toContain("judge: fail accepted by the user");
 });
 
 test("the gate stops a judge stuck on spent quota and reports it unavailable", async () => {

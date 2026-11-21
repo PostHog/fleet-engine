@@ -175,7 +175,7 @@ async function judgeDiff(head: ProofIdentity, known: Omit<JudgeInput, "cwd" | "f
   const from = mergeBase(head, run);
   return judge({ ...known, cwd: topLevel(run) ?? cwd, from, diff: diffOf(from, known.commit, run) }, {
     ask: (request) => askModel("judge", row, request, env, reviewLimit(env)), model: modelLabel("judge", row, env), arbiter: arbiterOf(context),
-    directory: judgeDirectory(home, head), commit: known.commit, now: now?.() ?? new Date(),
+    directory: judgeDirectory(home, head), commit: known.commit, now: now?.() ?? new Date(), failLimit: numberSetting("pull-requests.reviewCeiling", env),
   });
 }
 
