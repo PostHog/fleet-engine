@@ -6,7 +6,7 @@ import { agentRefusal, agentsAcceptance, covers, fold, keptOwed, panelRefusal, u
 import type { Family, Usage } from "./proof-models.ts";
 import { quietReason, type DeltaKind, type QuietStep } from "./proof-delta.ts";
 import { isProductionFile } from "./proof-checkout.ts";
-import { panelOutcome } from "./proof-panel.ts";
+import { panelOutcome, unansweredPanelCause } from "./proof-panel.ts";
 import { anchorHeading } from "./finding-anchors.ts";
 import type { Growth } from "./proof-end-table.ts";
 import { endTableNote, gradeOf, shellQuoted, type Autonomy } from "./proof-autonomy.ts";
@@ -287,7 +287,7 @@ async function startFinalRead(home: string, identity: ProofIdentity, base: strin
     return permitReview(home, identity, spent >= free, carried && spent >= ceiling ? budgetSpent(permit.limits) : undefined, decision, permit);
   };
   return reserveWeighed(reviews, lockBudget, snapshot, permitRead, async (_snapshot, verdict) => {
-    const taken = new Set(await reviewNames(reviews));
+    const taken = new Set([...await reviewNames(reviews), ...await entries(droppedDirectory(reviews))]);
     let read = 1;
     while (taken.has(finalReadPrefix + read)) read++;
     const name = finalReadPrefix + read;
@@ -433,7 +433,7 @@ export function requireChoice(answer: HeardAnswer, lead: string, [accept, declin
 }
 
 type RoundDecision = { decision?: Decision; recorded?: undefined } | { decision: DecisionMark; recorded: true };
-export type Reservation = ProofIdentity & { round: number | "final"; scope: string; base?: string; from?: string; forkBase?: string; capturedBy?: CapturedBy; reviewer?: string } & RoundDecision;
+export type Reservation = ProofIdentity & { round: number | "final"; scope: string; base?: string; from?: string; forkBase?: string; capturedBy?: CapturedBy; reviewer?: string; lastFailure?: string } & RoundDecision;
 
 export const readReservation = (directory: string) => readJson<Reservation | undefined>(join(directory, "round.json"), undefined);
 
@@ -456,6 +456,44 @@ export async function unrecordedElsewhere(directory: string, commit: string) {
   const reservation = await readReservation(directory);
   if (!reservation?.decision || reservation.recorded || reservation.commit === commit || await hasFindings(directory)) return undefined;
   return reservation.decision;
+}
+
+export async function recordFailure(directory: string, cause: string) {
+  await writeJson(join(directory, "round.json"), { ...await requireReservation(directory), lastFailure: cause } satisfies Reservation);
+}
+
+const droppedDirectory = (reviews: string) => join(reviews, "dropped");
+type DroppedRead = { head: string; droppedAt: string; cause?: string };
+
+export async function unansweredFinalRead(directory: string, head: ProofIdentity) {
+  const reservation = await readReservation(directory);
+  if (reservation?.round !== "final" || reservation.capturedBy !== "hedge" || reservation.commit === head.commit || await hasFindings(directory)) return undefined;
+  if (await panelOutcome(directory) === "none") return { cause: reservation.lastFailure };
+  const cause = await unansweredPanelCause(directory);
+  return cause === undefined ? undefined : { cause };
+}
+
+export async function dropFinalRead(directory: string, head: ProofIdentity, now: Date) {
+  const unanswered = await unansweredFinalRead(directory, head);
+  if (!unanswered) return;
+  const dropped = join(droppedDirectory(dirname(directory)), basename(directory));
+  await mkdir(dirname(dropped), { recursive: true, mode: 0o700 });
+  await writeJson(join(directory, "dropped.json"), { head: head.commit, droppedAt: now.toISOString(), ...unanswered.cause ? { cause: unanswered.cause } : {} } satisfies DroppedRead);
+  await rename(directory, dropped);
+  await rm(join(dropped, "round.lock"), { force: true });
+}
+
+const causeCap = 300;
+
+export async function droppedFinalReads(home: string, identity: ProofIdentity) {
+  const dropped = droppedDirectory(join(pullRequestDirectory(home, identity), "reviews"));
+  const names = (await entries(dropped)).filter((name) => /^final-\d+$/.test(name)).sort((a, b) => Number(a.slice(finalReadPrefix.length)) - Number(b.slice(finalReadPrefix.length)));
+  return Promise.all(names.map(async (name) => {
+    const reservation = await readReservation(join(dropped, name));
+    const drop = await readJson<DroppedRead | undefined>(join(dropped, name, "dropped.json"), undefined);
+    const cause = drop?.cause ? `; cause: ${drop.cause.replace(/\s+/g, " ").trim().slice(0, causeCap)}` : "";
+    return `${reviewLabel(name)} on ${short(reservation?.commit ?? "unknown")} dropped at ${short(drop?.head ?? "unknown")}: no reviewer answer was captured${cause}`;
+  }));
 }
 
 export async function roundDirectories(home: string, identity: ProofIdentity) {
@@ -1293,7 +1331,7 @@ export type ProofSummary = {
   kinds: KindProof[];
   /** The dev PR's merge and when its observed result was saved, once dev-observed evidence counts. */
   dev?: DevResult;
-  review: { state: "covered" | "missing" | "gap"; covered?: string; panelGap?: GapProof; unanswered: string[]; line: string };
+  review: { state: "covered" | "missing" | "gap"; covered?: string; panelGap?: GapProof; unanswered: string[]; line: string; dropped?: string[] };
   head: { state: "pushed" | "missing"; line: string };
   ci: { state: CiResult["state"]; detail: string; checks?: string[]; gap?: GapProof; line: string };
   judge: JudgeSummary;
@@ -1311,7 +1349,7 @@ export const summaryGaps = (summary: ProofSummary): { kind: string; gap: GapProo
 ];
 
 export const summaryLines = (summary: CheckedSummary) => [
-  ...summary.owed.line ? [summary.owed.line] : [], ...summary.kinds.map((kind) => kind.line), ...summary.dev ? [summary.dev.line] : [], summary.review.line, ...summary.review.unanswered,
+  ...summary.owed.line ? [summary.owed.line] : [], ...summary.kinds.map((kind) => kind.line), ...summary.dev ? [summary.dev.line] : [], summary.review.line, ...summary.review.dropped ?? [], ...summary.review.unanswered,
   summary.head.line, summary.ci.line, ...summary.lapsedLine ? [summary.lapsedLine] : [], ...summary.held ? [summary.held] : [],
 ];
 
@@ -1341,6 +1379,7 @@ export async function proofGate(home: string, identity: ProofIdentity, { ci, pus
   const devResult = kinds.find((kind) => kind.dev)?.dev;
   const review = await reviewStatus(weigh, cleanBaseMerge, quietCommit);
   const responses = await responseStatuses(home, identity, landed || !("body" in before) ? undefined : before.body ?? "");
+  const dropped = (await droppedFinalReads(home, identity)).map((line) => `review: ${line}`);
   const ciResult = ci();
   const head = headStatus(identity, before, pushedHead());
   const checks = await ciStatus(weigh, ciResult);
@@ -1355,7 +1394,7 @@ export async function proofGate(home: string, identity: ProofIdentity, { ci, pus
   const receipt = await receiptOf(home, identity);
   const proofSummary: CheckedSummary = {
     repository: identity.repository, pr: identity.pr, commit: identity.commit, tier, code, owed: owedPart(owed), kinds: kinds.map((kind) => kind.proof), ...devResult ? { dev: devResult } : {},
-    review: { state: review.problem ?? "covered", ...review.covered ? { covered: review.covered } : {}, ...review.panelGap ? { panelGap: review.panelGap } : {}, unanswered: responses.map((response) => response.line), line: review.line },
+    review: { state: review.problem ?? "covered", ...review.covered ? { covered: review.covered } : {}, ...review.panelGap ? { panelGap: review.panelGap } : {}, unanswered: responses.map((response) => response.line), line: review.line, ...dropped.length ? { dropped } : {} },
     head: { state: head.problem ? "missing" : "pushed", line: head.line },
     ci: { state: ciResult.state, detail: ciResult.detail, ...ciResult.checks ? { checks: ciResult.checks } : {}, ...checks.gap ? { gap: checks.gap } : {}, line: checks.line },
     lapsed, ...lapsed.length ? { lapsedLine: lapsedLine(lapsed) } : {}, voided, ...receipt ? { receipt } : {}, ...knownHold ? { held: knownHold.line } : {},

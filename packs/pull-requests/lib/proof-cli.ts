@@ -2,7 +2,7 @@ import { closeSync, existsSync, openSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { askGap, authorOf, readDecisions, finishReview, startGateRun, ledgerRoot, listStanding, panelCommit, proofDirectory, readJson, readOwed, recordGap, recordGapCommand, recordStanding, requireChoice, requireNone, devPr, requireProofs, requireReservation, respondToReview, reuseProof, reviewDirectory, reviewOfCommit, reviewRecords, roundId, roundQuestion, runOption, saveProof, startReview, stopOption, storeCapturedFindings, unfinishedReview, writeJson, markRecorded, readReservation, recordReceipt, roundDirectories, unrecordedElsewhere, type Arbiter, type Reservation, type CapturedBy, type ProofIdentity } from "./proof.ts";
+import { askGap, authorOf, readDecisions, finishReview, startGateRun, ledgerRoot, listStanding, panelCommit, proofDirectory, readJson, readOwed, recordGap, recordGapCommand, recordStanding, requireChoice, requireNone, devPr, requireProofs, requireReservation, respondToReview, reuseProof, reviewDirectory, reviewOfCommit, reviewRecords, roundId, roundQuestion, runOption, saveProof, startReview, stopOption, storeCapturedFindings, unfinishedReview, writeJson, markRecorded, readReservation, recordReceipt, roundDirectories, unrecordedElsewhere, recordFailure, unansweredFinalRead, dropFinalRead, droppedFinalReads, type Arbiter, type Reservation, type CapturedBy, type ProofIdentity } from "./proof.ts";
 import { AnswerTaken, appendOnce, decideAlone, hearUser, ledgerHolds, ledgerOf } from "./decision-cli.ts";
 import { HubUnreachable, keptOwed, refText, usersAcceptance, thisMachine, type Decision, type Ssh } from "./decision-ledger.ts";
 import { autonomyOf, gradeOf, type Autonomy, type Grade } from "./proof-autonomy.ts";
@@ -256,7 +256,11 @@ session of that provider. hedge builds the prompt from the diff, the PR title an
 standards in ~/.agents/guides/coding-standards.md, and saves the reviewer's answer as the findings. hedge checks each
 finding's anchor against the diff and prints the result after the findings; it keeps it apart, in anchors.md. Answer them with hedge proof respond. Scope and --base work as for
 review-start. When the reviewer gives no answer, the round stays reserved and the next hedge proof review on the same
-commit retries it. The setting pull-requests.reviewTimeoutMinutes limits the reviewer. HEDGE_PROOF_REVIEWER replaces
+commit retries it. When HEAD moved since, --scope final drops a final read that hedge reserved at an older commit and
+that holds no answer: no findings, and no answer of a lens. It moves the read to reviews/dropped/ with its cause, and
+hedge proof show and the gate name it. A read with an answer, a review round, a read reserved with review-start, or a
+read that another command works on still blocks a final read until it is finished. The setting
+pull-requests.reviewTimeoutMinutes limits the reviewer. HEDGE_PROOF_REVIEWER replaces
 its command, and HEDGE_PROOF_REVIEWER_MODEL its model.
 Spent quota stops a reviewer or judge early. When its CLI prints two quota lines in a row, such as
 "exceeded retry limit, last status: 429", "All credentials for model <model> are cooling down", or "Reconnecting...
@@ -301,12 +305,12 @@ ${overrideHelp}`,
     usage: "show [--round <number|final|final-n>]",
     summary: `Print the latest review round, or --round: who reviewed it and where its findings are. --round final is the
 latest final read. For a panel, print each lens: its state, family and model, how long it ran, and its raw answer, or
-its log while it runs.`,
+its log while it runs. Then print each final read that hedge dropped unanswered, with its cause.`,
     examples: ["hedge proof show", "hedge proof show --round 2", "hedge proof show --round final-1"],
     options: ["--round"],
     run: async ({ options }, identity, context) => {
       const directory = await reviewDirectory(context.home, identity(), roundOption(options));
-      for (const line of await roundLines(directory, context)) context.print(line);
+      for (const line of [...await roundLines(directory, context), ...await droppedFinalReads(context.home, identity())]) context.print(line);
       return 0;
     },
   },
@@ -620,6 +624,7 @@ async function askReviewer(reserved: SingleRound, head: ProofIdentity, author: F
   const prompt = reviewPrompt({ scope: reserved.scope, from, commit: head.commit, diff, diffFile, note: leftOutNote(leftOut), crossFamily: familyOf(row) !== author, title: pr.title, body: pr.body, rubric, references: skillReferences(home), reviewRules: rules, lens });
   const answer = await askModel("reviewer", row, { prompt, cwd: topLevel(run) ?? cwd, readable: [join(home, ".agents/skills"), reserved.directory] }, env, limit);
   const label = reserved.round === "final" ? "The final read" : `Round ${reserved.round}`;
+  if (!answer.ok) await recordFailure(reserved.directory, answer.cause);
   if (!answer.ok && isQuotaExhausted(answer.cause)) {
     print(`The reviewer ${answer.model} stopped: ${answer.cause}. ${label} stays reserved; run hedge proof review again once the quota is back.`);
     return quotaExitCode;
@@ -651,6 +656,7 @@ async function bloatJudge(head: ProofIdentity, context: CommandContext): Promise
 async function reserveRound(options: Map<string, string>, head: ProofIdentity, context: CommandContext, capturedBy: CapturedBy, panel = false) {
   await settleStrandedRounds(head, context);
   const scope = options.get("--scope") ?? "full";
+  if (scope === "final") await dropUnansweredFinalReads(head, context);
   const base = options.has("--base") ? resolveCommit(options.get("--base")!, context.run) : undefined;
   const lastRead = scope === "final" && (options.get("--phase") ?? "review") === "review";
   const from = lastRead ? await panelCommit(context.home, head) ?? base : rangeStart(scope, base, head, context.run);
@@ -695,6 +701,13 @@ async function settleStrandedRounds(head: ProofIdentity, context: CommandContext
       if (await ledgerHolds(ledgerOf(context), decision.id)) await markRecorded(directory);
       else await rm(directory, { recursive: true, force: true });
     }).catch(unless(RoundBusy, HubUnreachable, RoundGone));
+  }
+}
+
+async function dropUnansweredFinalReads(head: ProofIdentity, context: CommandContext) {
+  for (const directory of await roundDirectories(context.home, head)) {
+    if (!await unansweredFinalRead(directory, head)) continue;
+    await roundStep(directory, context, () => dropFinalRead(directory, head, (context.now ?? (() => new Date()))())).catch(unless(RoundBusy, RoundGone));
   }
 }
 

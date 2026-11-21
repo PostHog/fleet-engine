@@ -498,6 +498,16 @@ async function lensStates(directory: string) {
   return Promise.all(plan.lenses.map(async (lens) => ({ ...lens, status: await readStatus(directory, lens.name) })));
 }
 
+const isLensAnswer = (file: string) => file.endsWith(".md") && !file.endsWith(".prompt.md");
+
+export async function unansweredPanelCause(directory: string) {
+  if (!await readPlan(directory)) return undefined;
+  if ((await readdir(join(directory, "lenses")).catch(() => [])).some(isLensAnswer)) return undefined;
+  const lenses = await lensStates(directory);
+  if (!lenses.length || lenses.some(({ status }) => status.state !== "failed")) return undefined;
+  return lenses.map(({ name, status }) => `${name}: ${status.cause ?? "no cause recorded"}`).join("; ");
+}
+
 export async function lensIdle(directory: string, name: string) {
   return ["queued", "running"].includes((await readStatus(directory, name)).state) && !await workerAlive(directory, name);
 }
