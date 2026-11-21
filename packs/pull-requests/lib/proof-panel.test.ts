@@ -956,16 +956,18 @@ test("a Security lane lens runs on the security row of the model table at its ef
   expect((await pr.hedge("review", "--wait")).code).toBe(0);
 });
 
-test("a Read tier review of Codex's PR casts its combined lens on the Codex row, not on a review-codex row of another T3 provider", async () => {
-  const pr = await checkout();
-  pr.pullRequestState({ body: "Greets new members." });
-  await pr.commit("README.md", "Greet new members.\n");
-  pr.env.CLAUDE_CODE_SESSION_ID = undefined;
-  pr.env.CODEX_THREAD_ID = "codex-thread";
-  await pr.hedge("require", "--none", "--reason", "docs only");
-  pr.env.HEDGE_MODELS = JSON.stringify([models[0], models[1], { role: "review-codex", work: "Review Codex's code", provider: "antigravity", model: "gemini-4-neon", effort: "high" }]);
-  recordingModel(pr, "codex", "FINDINGS:\n(none)\nCOVERED: README.md\n");
+test("a Read tier review of Codex's PR casts its combined lens on the Codex row, not on a review-codex row of another T3 provider, whichever lens comes first", async () => {
+  for (const moved of [["correctness:same"], ["correctness:other", "risk:same"]]) {
+    const pr = await checkout();
+    pr.pullRequestState({ body: "Greets new members." });
+    await pr.commit("README.md", "Greet new members.\n");
+    pr.env.CLAUDE_CODE_SESSION_ID = undefined;
+    pr.env.CODEX_THREAD_ID = "codex-thread";
+    await pr.hedge("require", "--none", "--reason", "docs only");
+    pr.env.HEDGE_MODELS = JSON.stringify([models[0], models[1], { role: "review-codex", work: "Review Codex's code", provider: "antigravity", model: "gemini-4-neon", effort: "high" }]);
+    recordingModel(pr, "codex", "FINDINGS:\n(none)\nCOVERED: README.md\n");
 
-  await pr.hedge("review", "--lens", "correctness:same");
-  expect((await readPlan(join(pr.pullRequest, "reviews/1")))!.lenses.map(({ name, family, model }) => ({ name, family, model }))).toEqual([{ name: "combined", family: "gpt", model: "review-model" }]);
+    await pr.hedge("review", ...moved.flatMap((lens) => ["--lens", lens]));
+    expect({ moved, lenses: (await readPlan(join(pr.pullRequest, "reviews/1")))!.lenses.map(({ name, family, model }) => ({ name, family, model })) }).toEqual({ moved, lenses: [{ name: "combined", family: "gpt", model: "review-model" }] });
+  }
 });
