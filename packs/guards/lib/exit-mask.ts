@@ -3,7 +3,7 @@ import { nestedProgramsAt, parse, type Command, type Scope } from "./shell-words
 
 type Finding = { what: string; how: string };
 type Reach = "exit" | "printed" | { how: string };
-type Program = { commands: Command[]; depths: number[] };
+type Program = { commands: Command[]; depths: number[]; topLevel: boolean };
 
 const maxNesting = 8;
 const gitValueOptions = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"]);
@@ -120,7 +120,7 @@ function reporter(command: Command | undefined, sameLevel: boolean, reads: Reads
     if (command.redirects.length > 0 || words.length > 1) return undefined;
     const [raw] = command.rawArgs;
     if (raw === undefined) return reads.bareExit ? "exit" : undefined;
-    if (reads.failingExit && failingCode.test(raw)) return "exit";
+    if (reads.failingExit && failingCode.test(command.args[0])) return "exit";
     const alone = indexes.length === 1 && ["", '""'].includes(raw.replace(new RegExp(statusRead), ""));
     return alone && readsTheStatus(indexes[0], reads, false) ? "exit" : undefined;
   }
@@ -188,7 +188,7 @@ function reachOf(program: Program, start: number): Reach {
   const sameLevel = (index: number) => depths[index] === depth;
   let end = pipelineEnd(program, start, depth);
   if (end !== start && !setting(program, start, setsOption("pipefail"))) {
-    const place = placeInPipe(program, start);
+    const place = program.topLevel ? placeInPipe(program, start) : undefined;
     const readable = depth === 0 && separators.has(commands[end].after);
     return (readable && reporter(commands[end + 1], sameLevel(end + 1), { dollarQuestion: false, place, bareExit: false, failingExit: false })) || { how: "a pipe" };
   }
@@ -200,7 +200,7 @@ function reachOf(program: Program, start: number): Reach {
   }
   const after = commands[end].after;
   const next = end + 1;
-  const place = chained ? undefined : placeInPipe(program, start);
+  const place = chained || !program.topLevel ? undefined : placeInPipe(program, start);
   if (after === undefined) return "exit";
   if (after === "&") return { how: "running it in the background with `&`" };
   if (after === "||") return reporter(commands[next], sameLevel(next), { dollarQuestion: true, place, bareExit: true, failingExit: true }) ?? { how: "the `||` after it" };
@@ -227,7 +227,7 @@ function hiddenIn(text: string, nesting: number): { found?: Finding; carries?: s
     }
   }
   const commands = pipelines.flat();
-  const program = { commands, depths: depthsOf(commands) };
+  const program = { commands, depths: depthsOf(commands), topLevel: nesting === 0 };
   let carries: string | undefined;
   for (const [index, command] of commands.entries()) {
     const what = guarded[index];

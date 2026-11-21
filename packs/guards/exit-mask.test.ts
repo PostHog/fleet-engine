@@ -74,6 +74,7 @@ describe("the exit-status mask guard", () => {
     'git push | cat; exit "${PIPESTATUS[0]}"',
     'true | git push; echo "${PIPESTATUS[1]}"',
     'true | git push || echo "${PIPESTATUS[1]}"',
+    'git push || exit "1"',
     'git push | cat; echo "${PIPESTATUS[0]}" "$?"',
     "git push; echo exit=\"$?\" 'done'",
     'git push; exit "${?}"',
@@ -281,6 +282,14 @@ describe("the exit-status mask guard", () => {
   });
 
   test.each(["git push > push.log 2>&1; exit \"$?\"'0'", "git push > push.log 2>&1; exit $?0"])("refuses an exit code built from the status, which wraps to 0 for code 128: %s", (command) => {
+    expect(refused(command)).toBe(true);
+  });
+
+  test.each([
+    'sh -c \'git push; exit "${PIPESTATUS[0]}"\' 2>/dev/null; echo "$?"',
+    'sh -c \'git push | cat; exit "${PIPESTATUS[0]}"\'',
+    'eval \'git push | cat; exit "${PIPESTATUS[0]}"\'',
+  ])("refuses a PIPESTATUS read in a nested program, which may run in a shell without it: %s", (command) => {
     expect(refused(command)).toBe(true);
   });
 
