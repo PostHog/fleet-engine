@@ -418,12 +418,14 @@ the commit is not the PR's head on GitHub, its checks are red,
 or the judge failed or was unavailable; 3 means only unaccepted gaps remain; 75 means only CI that is still running
 holds the gate. No gap waives the head check. The last line is the verdict: on a pass it names what it covered, and
 on any other exit it names the check that held the gate, also when the gate itself fails with an error. --wait
-<minutes> waits up to that long for running CI to finish, reading CI every 30 seconds, then runs the gate again; it
-still exits 75 when CI runs past the limit. A run longer than your shell's limit belongs in the background. hedge reads the PR and its CI over GitHub's REST API. Only finding the PR of the
+<minutes>, at most 120, waits up to that long for running CI to finish, reading CI every 30 seconds, and keeps waiting
+through a failed read of GitHub. Then it runs the gate again, and still exits 75 when CI runs past the limit. While it
+waits, the gate record holds exit 75. A run longer than your shell's limit belongs in the background. hedge reads the PR and its CI over GitHub's REST API. Only finding the PR of the
 checkout without --repo and --pr uses gh pr view; pass both when GraphQL is out. A check that ran more than once
 counts with its newest run from each app, as GitHub's required checks do. The
 required checks of the base branch, from its rulesets and branch protection, decide CI; other checks print as not
-required. A stacked PR whose base requires nothing is held to the default branch's required checks. When no branch
+required. A required check that never reported is still running until every check on the commit finished; then it
+is red. A stacked PR whose base requires nothing is held to the default branch's required checks. When no branch
 requires any, every check counts. On a draft, a required check named "<workflow> / <job>" that never reported counts
 as withheld from drafts when its workflow reported other checks on the commit and all of them passed. CI is unknown
 when GitHub does not answer for the rulesets or branch protection. A clean merge of the PR's base carries the review and the evidence of
@@ -473,7 +475,11 @@ code and the reason. The gate's lines and hedge decision report come from the sa
       try {
         const gateHead = () => finalGate(head, context, { landed: flags.has("--landed") });
         gate = await gateHead();
-        if (gate.code === ciRunningCode && wait && await ciFinished(head, context, wait)) gate = await gateHead();
+        if (gate.code === ciRunningCode && wait) {
+          await record({ code: gate.code, reason: gate.reason });
+          await untilCiFinishes(head, context, wait);
+          gate = await gateHead();
+        }
       } catch (error) {
         await record({ code: 1, reason: String((error as Error).message ?? error).split("\n")[0]! }).catch(() => {});
         await shareGateResult(head, false, startedAt, context);
@@ -1099,9 +1105,9 @@ export async function proofCommand(args: string[], context: ProofContext): Promi
   const split = args.indexOf("--");
   const own = split < 0 ? args : args.slice(0, split);
   if (own.includes("--help") || own.includes("-h")) { context.print(help(name, command)); return 0; }
-  if (split >= 0 && !command.takesCommand) throw usageError(name, "Unknown option --");
   const json = own.includes("--json");
   const execute = () => {
+    if (split >= 0 && !command.takesCommand) throw usageError(name, "Unknown option --");
     const run = runIn(context.cwd, context.env);
     const parsed = { ...parse(name, command, own), ...split >= 0 ? { command: args.slice(split + 1) } : {} };
     let identity: ProofIdentity | undefined;
@@ -1113,30 +1119,32 @@ export async function proofCommand(args: string[], context: ProofContext): Promi
 
 async function gateReporting(json: boolean, { print }: ProofContext, gate: () => Promise<number>) {
   try { return await gate(); } catch (error) {
-    const reason = String((error as Error).message ?? error);
+    const reason = String((error as Error).message ?? error).replace(/\s*\n\s*/g, " ");
     print(json ? JSON.stringify({ code: 1, reason }) : `gate: fail (exit 1): ${reason}`);
     return 1;
   }
 }
 
+const longestWait = 120;
+
 function waitMinutes(value: string | undefined) {
   if (value === undefined) return undefined;
   const minutes = Number(value);
-  if (!Number.isFinite(minutes) || minutes <= 0) throw usageError("gate", `--wait takes a number of minutes, such as --wait 10, not ${value}`);
+  if (!(minutes > 0 && minutes <= longestWait)) throw usageError("gate", `--wait takes a number of minutes up to ${longestWait}, such as --wait 10, not ${value}`);
   return minutes;
 }
 
 const ciPollInterval = 30_000;
+const stillRunning = new Set(["pending", "unknown"]);
 
-async function ciFinished(head: ProofIdentity, context: CommandContext, minutes: number) {
-  const now = () => context.now?.() ?? new Date();
-  const deadline = now().getTime() + minutes * 60_000;
-  const pause = context.pause ?? (() => Bun.sleep(ciPollInterval));
-  while (now().getTime() < deadline) {
+async function untilCiFinishes(head: ProofIdentity, context: CommandContext, minutes: number) {
+  const now = () => (context.now?.() ?? new Date()).getTime();
+  const deadline = now() + minutes * 60_000;
+  const pause = context.pause ?? (() => Bun.sleep(Math.min(ciPollInterval, deadline - now())));
+  while (now() < deadline) {
     await pause();
-    if (ciOf(context.home, head, context.run, now()).state !== "pending") return true;
+    if (!stillRunning.has(ciOf(context.home, head, context.run, new Date(now())).state)) return;
   }
-  return false;
 }
 
 async function shareGateResult(head: ProofIdentity, passed: boolean, startedAt: Date, context: ProofContext): Promise<string | undefined> {

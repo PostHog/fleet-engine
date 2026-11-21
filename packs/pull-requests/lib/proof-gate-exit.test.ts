@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { lastGateRun } from "./proof.ts";
 import { checkout, cleanFixtures, reviewHead, verdict } from "./proof-testing.ts";
 
@@ -74,6 +74,27 @@ test("a gate with a bad option prints the usage error on stdout and exits 1", as
   expect(lastLine(gate.output)).toContain("--wait takes a number of minutes");
 });
 
+test("a usage error with a line break still ends in one verdict line", async () => {
+  const { pr } = await reviewed();
+  const gate = await pr.hedge("gate", "--wait", "1\n2");
+  expect(gate.code).toBe(1);
+  expect(gate.output.split("\n")).toEqual([expect.stringMatching(/^gate: fail \(exit 1\): --wait takes a number of minutes/)]);
+});
+
+test("--wait refuses a limit past two hours", async () => {
+  const { pr } = await reviewed();
+  const gate = await pr.hedge("gate", "--wait", "1e308");
+  expect(gate.code).toBe(1);
+  expect(lastLine(gate.output)).toStartWith("gate: fail (exit 1): --wait takes a number of minutes up to 120");
+});
+
+test("--json prints a usage error of the separator as JSON", async () => {
+  const { pr } = await reviewed();
+  const gate = await pr.hedge("gate", "--json", "--");
+  expect(gate.code).toBe(1);
+  expect(JSON.parse(gate.output)).toEqual({ code: 1, reason: "Unknown option --. Run hedge proof gate --help." });
+});
+
 test("--json carries the reason of a failure, and of a failure that throws", async () => {
   const { pr } = await reviewed();
   pr.ci([{ name: "test", bucket: "fail" }]);
@@ -122,13 +143,47 @@ test("--wait waits for running CI to finish, then gates on its outcome", async (
   expect(lastLine(gate.output)).toStartWith("gate: pass (");
 });
 
-test("--wait stops at its limit and exits 75 while CI still runs", async () => {
-  const { pr } = await reviewed();
-  pr.ci([{ name: "test", bucket: "pending" }]);
-  pr.panel.onPause = async () => { pr.clock.now = new Date(pr.clock.now.getTime() + 60_000); };
+test("--wait stops at its limit, exits 75, and names only the checks that still run then", async () => {
+  const { pr, head } = await reviewed();
+  pr.ci([{ name: "build", bucket: "pending" }, { name: "test", bucket: "pending" }]);
+  pr.panel.onPause = async () => {
+    pr.clock.now = new Date(pr.clock.now.getTime() + 60_000);
+    pr.ci([{ name: "build", bucket: "pass" }, { name: "test", bucket: "pending" }]);
+  };
   const gate = await pr.hedge("gate", "--wait", "2");
   expect(gate.code).toBe(75);
   expect(lastLine(gate.output)).toStartWith("gate: pending (exit 75): CI is still running: waiting on: test. ");
+  expect(await lastGateRun(pr.home, { repository: "example/product", pr: 42, commit: head })).toEqual({ code: 75, reason: "CI is still running: waiting on: test" });
+});
+
+test("while --wait waits, the gate record says CI is still running", async () => {
+  const { pr, head } = await reviewed();
+  pr.ci([{ name: "test", bucket: "pending" }]);
+  const seen: unknown[] = [];
+  pr.panel.onPause = async () => {
+    seen.push(await lastGateRun(pr.home, { repository: "example/product", pr: 42, commit: head }));
+    pr.ci([{ name: "test", bucket: "pass" }]);
+  };
+  expect((await pr.hedge("gate", "--wait", "10")).code).toBe(0);
+  expect(seen).toEqual([{ code: 75, reason: "CI is still running: waiting on: test" }]);
+});
+
+test("--wait keeps waiting when one read of GitHub fails", async () => {
+  const { pr } = await reviewed();
+  pr.ci([{ name: "test", bucket: "pending" }]);
+  const github = join(dirname(pr.home), "github");
+  let pauses = 0;
+  pr.panel.onPause = async () => {
+    pauses++;
+    if (pauses === 1) pr.pullRequestState({ unreadable: "gh: Bad Gateway (HTTP 502)" });
+    if (pauses === 2) {
+      pr.whileGithubReadsPull(`rm -f "${github}/pull-error-42"`);
+      pr.ci([{ name: "test", bucket: "pass" }]);
+    }
+  };
+  const gate = await pr.hedge("gate", "--wait", "10");
+  expect(gate.code).toBe(0);
+  expect(lastLine(gate.output)).toStartWith("gate: pass (");
 });
 
 test("--wait ends on CI that turns red and fails the gate on it", async () => {

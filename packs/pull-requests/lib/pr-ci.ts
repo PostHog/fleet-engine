@@ -161,11 +161,13 @@ function requiredVerdict(entries: Entry[], required: RequiredCheck[], draft: boo
     if (worst === "fail") failing.push(check.context);
     else if (worst === "pending") pending.push(check.context);
   }
+  const settled = entries.length > 0 && entries.every((entry) => entry.outcome !== "pending");
   const verdict: CiResult = failing.length ? { state: "red", detail: `required failing: ${listOf(failing)}` }
+    : !pending.length && missing.length && settled ? { state: "red", detail: `required not reported: ${listOf(missing)}, though every check on the commit finished` }
     : pending.length || missing.length ? { state: "pending", detail: [pending.length ? `required waiting on: ${listOf(pending)}` : "", missing.length ? `required not reported yet: ${listOf(missing)}` : ""].filter(Boolean).join("; ") }
     : { state: "green", detail: `${required.length - withheld.length} required check(s) pass` };
   if (withheld.length) verdict.detail += `; withheld from drafts, required once ready: ${listOf(withheld)} (its workflow finished without posting it)`;
-  if (verdict.state !== "red") verdict.detail += notRequired(entries.filter((entry) => !counted.has(entry)), { countRunning: verdict.state === "green" });
+  verdict.detail += notRequired(entries.filter((entry) => !counted.has(entry)), { countRunning: verdict.state === "green" });
   return verdict;
 }
 
