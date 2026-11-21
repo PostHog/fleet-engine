@@ -158,7 +158,7 @@ async function judgeHead(head: ProofIdentity, checked: Checked, context: GateCon
   const unchecked = outcome.held ? [...new Set(known.conditions.map(({ id }) => id))] : [];
   if (gap?.acceptance && unchecked.length) {
     const line = `not accepted (the secret guard held the judge prompt, so no judge checked the condition of ${unchecked.map(conditionName).join(" and ")})`;
-    const lines = [...outcome.lines, `judge gap: ${line}: ${gap.reason}. ${endBroken(unchecked)}`];
+    const lines = [...outcome.lines, `judge gap: ${line}: ${gap.reason}. ${endUnchecked(unchecked)}`];
     return { code: 3, lines, covered: "", judge: verdict(lines, judgeGapProof(head.commit, gap)), reason: `judge gap: ${line}` };
   }
   if (gap?.acceptance) {
@@ -183,6 +183,12 @@ async function judgeDiff(head: ProofIdentity, known: Omit<JudgeInput, "cwd" | "f
     ask: (request) => askModel("judge", row, request, env, reviewLimit(env)), model: modelLabel("judge", row, env), arbiter: arbiterOf(context),
     directory: judgeDirectory(home, head), commit: known.commit, now: now?.() ?? new Date(),
   });
+}
+
+function endUnchecked(ids: string[]) {
+  const rules = ids.filter(isStandingCondition);
+  const decisions = endBroken(ids.filter((id) => !isStandingCondition(id)));
+  return [...decisions ? [decisions] : [], ...rules.length ? [`Remove the value the secret guard matches so the judge can check ${rules.join(" and ")}, then run hedge proof gate again`] : []].join(". ");
 }
 
 function endBroken(ids: string[]) {

@@ -114,3 +114,27 @@ test("an accepted judge gap still passes a gate whose held judge had no conditio
   expect(gate.output).toContain("judge: unavailable (the secret guard matches this prompt: GitHub token)");
   expect(judge.prompts()).toEqual([]);
 });
+
+test("a held judge that could not check a standing rule's condition says to clear the match, not to meet the condition", async () => {
+  const pr = await checkout();
+  const rule = "Until 2026-11-26, in example/product, accept a live-run gap that only a billable run from main can prove.";
+  writeFileSync(join(pr.home, ".agents/guides/standing-rules.md"), `- \`hedge proof standing --kind live-run --until 2026-11-26 --repositories example/product --rule "${rule}"\`\n`);
+  await pr.hedge("standing", "--kind", "live-run", "--until", "2026-11-26", "--repositories", "example/product", "--rule", rule);
+  await pr.commit("feature.txt", "greet new members\n");
+  await reviewHead(pr, "- minor | feature.txt:1 | the log prints a token\n");
+  writeFileSync(join(pr.repository, "responses.md"), `1. fixed: removed ${token} from the log.\n`);
+  await pr.hedge("respond", "--round", "1", "responses.md");
+  await pr.hedge("require", "--kinds", "live-run");
+  await pr.hedge("gap", "--kind", "live-run", "--reason", "only a billable run from main proves it");
+  await pr.hedge("gap", "--kind", "judge", "--reason", "The judge prompt quotes a test token");
+  pr.chooseGap("judge", "The judge prompt quotes a test token");
+  await pr.decide("record", "--mark", "👤", "--class", "proof-gap", "--kind", "judge", "--pr", "example/product#42");
+  const judge = fakeModel(pr, "JUDGE", verdict());
+
+  const gate = await pr.hedge("gate");
+  expect(gate.code).toBe(3);
+  expect(gate.output).toContain("so no judge checked the condition of standing rule live-run until 2026-11-26)");
+  expect(gate.output).toContain("Remove the value the secret guard matches so the judge can check standing rule live-run until 2026-11-26, then run hedge proof gate again");
+  expect(gate.output).not.toContain("Meet the condition");
+  expect(judge.prompts()).toEqual([]);
+});
