@@ -115,7 +115,7 @@ function providerInstanceProblem(key: string, value: unknown) {
   if (!isRecord(value) || !isT3Slug(value.driver) || typeof value.enabled !== "boolean") return `a T3 provider instance needs a driver and enabled, such as { "driver": "antigravity", "enabled": true }, and the driver is ${slugRule}`;
   if (value.driver === "claudeAgent") return "Hedge's Claude recovery owns Claude in T3, so a pack instance takes another driver than claudeAgent";
   if (value.config !== undefined && !(isRecord(value.config) && (value.config.binaryPath === undefined || filled(value.config.binaryPath)))) return "config must be an object, and its binaryPath a path";
-  if (Object.keys(value).some((field) => !instanceFields.includes(field)) || (isRecord(value.config) && "enabled" in value.config)) return "a T3 provider instance holds only driver, enabled and config, and enabled stays out of config, because T3 rewrites the rest when it stores the instance";
+  if (Object.keys(value).some((field) => !instanceFields.includes(field)) || (isRecord(value.config) && Object.keys(value.config).some((field) => field !== "binaryPath"))) return "a T3 provider instance holds only driver, enabled and config, and its config only binaryPath, because T3 rewrites or redacts the rest";
   return undefined;
 }
 

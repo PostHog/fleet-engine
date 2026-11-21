@@ -11,9 +11,9 @@ import { quote } from "../../hub/lib/machine.ts";
 import type { ReviewTier } from "./proof-checkout.ts";
 
 export type PanelGuide = { brief: string; lenses: Map<string, { title: string; text: string }>; freshEyes: Set<string>; security: Set<string>; contextFree: Set<string> };
-export type Lens = { name: string; title: string; family: Family; row: ModelRow; security: boolean; text: string; knowledge: string; context: boolean };
+export type Lens = { name: string; title: string; family?: Family; row: ModelRow; security: boolean; text: string; knowledge: string; context: boolean };
 export type BriefInput = { title: string; body: string; base: string; from: string; commit: string; diff: string; diffFile: string; note: string; settled: string; owed: string; rubric: string };
-export type Cast = { family: Family; model: string; row: ModelRow; security?: true };
+export type Cast = { family?: Family; model: string; row: ModelRow; security?: true };
 export type Plan = { lenses: ({ name: string; title: string } & Cast)[]; changedFiles: string[]; from?: string; cwd: string; readable: string[]; tier?: ReviewTier; arguments?: string[] };
 type LensStatus = { state: "queued" | "running" | "done" | "failed"; attempts: number; startedAt?: string; finishedAt?: string; cause?: string; usage?: Usage };
 export type StartTime = (pid: number) => Promise<string | undefined>;
@@ -523,11 +523,11 @@ async function workerAlive(directory: string, name: string) {
 }
 
 export async function panelLines(directory: string, now: Date) {
-  return (await lensStates(directory)).map(({ name, family, model, status }) => {
+  return (await lensStates(directory)).map(({ name, family, row, model, status }) => {
     const ran = status.startedAt ? `, ${duration(new Date(status.startedAt), status.finishedAt ? new Date(status.finishedAt) : now)}` : "";
     const answer = lensFile(directory, name, ".md");
     const output = status.state === "done" || (status.state === "failed" && existsSync(answer)) ? answer : lensLog(directory, name);
-    return `${name}: ${status.state} by ${family} (${model})${ran}, ${output}${status.cause && status.state !== "done" ? `: ${status.cause}` : ""}`;
+    return `${name}: ${status.state} by ${family ?? row.provider} (${model})${ran}, ${output}${status.cause && status.state !== "done" ? `: ${status.cause}` : ""}`;
   });
 }
 

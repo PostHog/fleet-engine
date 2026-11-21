@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ModelRow } from "../../base/lib/models.ts";
-import { askModel, type Role } from "./proof-models.ts";
+import { askModel, sameFamilyRow, type Role } from "./proof-models.ts";
 
 const row: ModelRow = { role: "review", work: "Review", provider: "claude", model: "review-model", effort: "high" };
 
@@ -51,4 +51,10 @@ console.log(JSON.stringify({ type: "result", is_error: false, result: JSON.strin
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("a GPT review lens takes the Codex reviewer row, not a row of another T3 provider listed first", () => {
+  const antigravity: ModelRow = { role: "review", work: "Review", provider: "antigravity", model: "gemini-4-neon", effort: "high" };
+  const codex: ModelRow = { role: "review-codex", work: "Review Claude's code", provider: "codex", model: "gpt-6.2", effort: "high" };
+  expect(sameFamilyRow("gpt", { HEDGE_MODELS: JSON.stringify([antigravity, codex]) })).toEqual(codex);
 });

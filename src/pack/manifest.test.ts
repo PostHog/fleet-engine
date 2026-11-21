@@ -120,9 +120,11 @@ describe("loadPacks", () => {
     const instance = (key: string, value: unknown) => [{ provider: "t3" as const, key, value }];
     const agy = { driver: "antigravity", enabled: true, config: { binaryPath: "~/.local/bin/agy" } };
     const cases: Array<[unknown[], string]> = [
-      [instance("providerInstances.antigravity", { ...agy, config: { ...agy.config, enabled: false } }), "config providerInstances.antigravity: a T3 provider instance holds only driver, enabled and config, and enabled stays out of config"],
-      [instance("providerInstances.antigravity", { ...agy, displayName: "Antigravity" }), "config providerInstances.antigravity: a T3 provider instance holds only driver, enabled and config, and enabled stays out of config"],
+      [instance("providerInstances.antigravity", { ...agy, config: { ...agy.config, enabled: false } }), "config providerInstances.antigravity: a T3 provider instance holds only driver, enabled and config, and its config only binaryPath"],
+      [instance("providerInstances.antigravity", { ...agy, displayName: "Antigravity" }), "config providerInstances.antigravity: a T3 provider instance holds only driver, enabled and config, and its config only binaryPath"],
       [instance("providerInstances.antigravity", { ...agy, environment: [] }), "config providerInstances.antigravity: a T3 provider instance holds only driver, enabled and config"],
+      [instance("providerInstances.antigravity", { ...agy, config: { ...agy.config, apiKey: { provider: "vault", name: "agy" } } }), "config providerInstances.antigravity: a T3 provider instance holds only driver, enabled and config, and its config only binaryPath"],
+      [instance("providerInstances.antigravity", { ...agy, config: { gcpProject: "p" } }), "config providerInstances.antigravity: a T3 provider instance holds only driver, enabled and config, and its config only binaryPath"],
       [instance("providerInstances.myClaude", { driver: "claudeAgent", enabled: true }), "config providerInstances.myClaude: Hedge's Claude recovery owns Claude in T3, so a pack instance takes another driver than claudeAgent"],
       [instance("providerInstances.claude", agy), "config providerInstances.claude: a model row's provider claude or codex always means T3's claudeAgent or codex instance, so give this instance another id"],
       [instance("providerInstances.codex", agy), "config providerInstances.codex: a model row's provider claude or codex always means T3's claudeAgent or codex instance, so give this instance another id"],
