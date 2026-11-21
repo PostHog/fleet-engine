@@ -1,14 +1,16 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { cleanFixtures, checkout, clean, fakeModel, lockHolder, reviewHeadFixed, verdict, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
 
-const blocked = "cat >/dev/null; echo 'the guard blocked the model call' >&2; exit 1";
+const token = `ghp_${"a1".repeat(18)}`;
+const blocked = `cat >/dev/null; echo 'the guard blocked the model call for ${token}' >&2; exit 1`;
+const escalate = "cat >/dev/null; echo 'ESCALATE: the reviews disagree.'";
 const unfinished = "A review is unfinished. Finish it before a final read.";
 const reviews = (pr: Checkout) => join(pr.pullRequest, "reviews");
-const dropped = (pr: Checkout) => readdirSync(join(reviews(pr), "dropped"));
+const dropped = (pr: Checkout) => readdirSync(join(reviews(pr), "dropped")).map((entry) => /^final-\d+/.exec(entry)![0]);
 const anyDropped = (pr: Checkout) => existsSync(join(reviews(pr), "dropped"));
 const finalRead = (pr: Checkout, base: string, ...more: string[]) => pr.hedge("review", "--scope", "final", "--base", base, ...more);
 
@@ -37,23 +39,49 @@ async function failedPanelFinalRead(reviewer: string, lenses = ["correctness"]) 
   return reviewed;
 }
 
-test("a final read that never got an answer gives way to a final read of the new HEAD, and show and the gate name the dropped read and its cause", async () => {
+test("a final read that never got an answer gives way to a final read of the new HEAD and spends no budget; the gate names the drop, and show its redacted cause", async () => {
   const { pr, reviewed, older } = await blockedFinalRead();
   const newer = await pr.commit("feature.txt", "greet the new member\n");
   const reviewer = fakeModel(pr, "REVIEWER", "No findings.");
+  pr.env.HEDGE_REVIEW_ARBITER = escalate;
 
   const read = await finalRead(pr, reviewed);
 
   expect(read.code).toBe(0);
   expect(JSON.parse(read.output.split("\n")[0]!)).toMatchObject({ round: "final", id: "final-2" });
   expect(reviewer.prompts().at(-1)).toContain("+greet the new member");
-  const line = `final read 1 on ${older.slice(0, 7)} dropped at ${newer.slice(0, 7)}: no reviewer answer was captured; cause: exit 1: the guard blocked the model call (after a retry)`;
-  expect((await pr.hedge("show")).output).toContain(line);
+  const line = `final read 1 on ${older.slice(0, 7)} dropped at ${newer.slice(0, 7)}: no reviewer answer was captured`;
+  const show = (await pr.hedge("show")).output;
+  expect(show).toContain(`${line}; cause: exit 1: the guard blocked the model call for [redacted GitHub token] (after a retry)`);
+  expect(show).not.toContain(token);
   const judge = fakeModel(pr, "JUDGE", verdict());
   const gate = await pr.hedge("gate");
   expect(gate.output).toContain("review: HEAD reviewed in final read 2");
-  expect(gate.output).toContain(`review: ${line}`);
-  expect(judge.prompts().at(-1)).toContain(`review: ${line}`);
+  expect(gate.output).toContain(`review: ${line}; hedge proof show prints its cause`);
+  expect(judge.prompts().at(-1)).toContain(`review: ${line}; hedge proof show prints its cause`);
+  expect(`${gate.output}${judge.prompts().join("")}`).not.toContain("the guard blocked");
+});
+
+test("a final read that hedge refuses at the new HEAD drops nothing", async () => {
+  const { pr, older } = await blockedFinalRead();
+  await pr.commit("feature.txt", "greet the new member\n");
+
+  await expect(finalRead(pr, older)).rejects.toThrow("Final read base must be the latest reviewed commit");
+  expect(anyDropped(pr)).toBe(false);
+});
+
+test("an older hedge that reuses the name of a dropped read loses no record when its read is dropped too", async () => {
+  const { pr, reviewed, older } = await blockedFinalRead();
+  const newer = await pr.commit("feature.txt", "greet the new member\n");
+  await expect(finalRead(pr, reviewed)).rejects.toThrow("gave no findings");
+  renameSync(join(reviews(pr), "final-2"), join(reviews(pr), "final-1"));
+  const newest = await pr.commit("feature.txt", "greet every new member\n");
+  fakeModel(pr, "REVIEWER", "No findings.");
+
+  expect((await finalRead(pr, reviewed)).code).toBe(0);
+  const show = (await pr.hedge("show")).output;
+  expect(show).toContain(`final read 1 on ${older.slice(0, 7)} dropped at ${newer.slice(0, 7)}`);
+  expect(show).toContain(`final read 1 on ${newer.slice(0, 7)} dropped at ${newest.slice(0, 7)}`);
 });
 
 test("a second final read that never got an answer gives way too, and both drops stay on record", async () => {
@@ -113,6 +141,17 @@ test("a panel final read whose failed lens left an answer is never dropped", asy
 
   await expect(finalRead(pr, reviewed)).rejects.toThrow(unfinished);
   expect(anyDropped(pr)).toBe(false);
+});
+
+test("a panel final read whose lens directory cannot be listed is never dropped", async () => {
+  const { pr, reviewed } = await failedPanelFinalRead("cat >/dev/null; echo '1. major: the greeting names no member'");
+  const lenses = join(reviews(pr), "final-1/lenses");
+  await pr.commit("feature.txt", "greet the new member\n");
+  chmodSync(lenses, 0o100);
+  try {
+    await expect(finalRead(pr, reviewed)).rejects.toThrow("EACCES");
+    expect(anyDropped(pr)).toBe(false);
+  } finally { chmodSync(lenses, 0o700); }
 });
 
 test("a panel final read with one lens done and one failed is never dropped", async () => {
@@ -193,7 +232,7 @@ test("a final read that another command still works on is never dropped", async 
   await pr.commit("feature.txt", "greet the new member\n");
   const holder = await lockHolder(join(reviews(pr), "final-1"));
   try {
-    await expect(finalRead(pr, reviewed)).rejects.toThrow(unfinished);
+    await expect(finalRead(pr, reviewed)).rejects.toThrow("another hedge proof command, works on");
     expect(anyDropped(pr)).toBe(false);
   } finally { await holder.release(); }
 });
