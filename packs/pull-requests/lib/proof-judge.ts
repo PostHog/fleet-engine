@@ -223,7 +223,7 @@ async function inputKey(model: string, prompt: string, images: string[]) {
 export async function judge(input: JudgeInput, deps: JudgeDeps): Promise<JudgeOutcome> {
   const { prompt, images, readable } = await judgePrompt(input);
   const guarded = guardedPrompt(prompt);
-  const path = join(deps.directory, `${await inputKey(deps.model, guarded.ok ? guarded.prompt : prompt, images)}.json`);
+  const path = join(deps.directory, `${await inputKey(deps.model, prompt, images)}.json`);
   const cached = guarded.ok ? await readFile(path, "utf8").then((text) => JSON.parse(text) as JudgeRecord, () => undefined) : undefined;
   const asked: Asked = cached ? { record: cached, ...guarded.ok && guarded.redacted ? { redacted: guarded.redacted } : {} } : await askJudge(prompt, images, readable, input.cwd, askedQuestions(input.risk !== undefined), deps);
   const { record } = asked;

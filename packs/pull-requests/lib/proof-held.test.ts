@@ -83,7 +83,8 @@ test("the judge prompt names the cookie only in a fixture, so Hedge redacts the 
   expect(gate.output).toMatch(/judge: Hedge redacted \d+ secret-shaped values from the prompt before the model call: a Metabase session cookie \(at line \d+ of the prompt/);
   expect(gate.output).toContain("this prompt names it at fixture.txt:1.");
   expect(gate.output).toContain("build the test fixture at run time from parts");
-  expect(judge.prompts()[0]).toContain("a placeholder is no finding by itself");
+  expect(judge.prompts()[0]).toContain("a placeholder is no finding by itself.");
+  expect(judge.prompts()[0]).not.toContain("read the file");
   expect((await pr.hedge("gate")).output).toContain("this prompt names it at fixture.txt:1.");
   expect(judge.prompts()).toHaveLength(1);
 });
