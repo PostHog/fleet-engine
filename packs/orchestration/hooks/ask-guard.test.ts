@@ -388,7 +388,11 @@ const running = (id: string, type = "shell") => ({ id, type, status: "running" }
 describe("the card guard", () => {
   const alertThread = { id: "mcp:alert-1", title: "🚨 EU email send failures", projectId: "p", status: "running" };
   const t3 = (...threads: Partial<ShellThread>[]) => async () => ({ threads: threads as ShellThread[] });
-  const card = (tool = "AskUserQuestion"): SendEvent => ({ session_id: "s", tool_name: tool, tool_input: { questions: [] } });
+  const asked = {
+    AskUserQuestion: { questions: [{ question: "Roll the fix back?", header: "Rollback", multiSelect: false, options: [{ label: "Roll back", description: "Undo the deploy" }, { label: "Keep it", description: "Watch for an hour" }] }] },
+    request_user_input: { questions: [{ id: "rollback", header: "Rollback", question: "Roll the fix back?", options: [{ label: "Roll back", description: "Undo the deploy" }, { label: "Keep it", description: "Watch for an hour" }] }] },
+  } as Record<string, unknown>;
+  const card = (tool = "AskUserQuestion"): SendEvent => ({ session_id: "s", tool_name: tool, tool_input: (asked[tool] ?? {}) as Record<string, unknown> });
   const guard = (event: SendEvent, where: string, threadId: string | undefined = "alert-1", shell = t3(alertThread)) => guardCard(event, { home: where, shell }, threadId);
 
   test.each(["AskUserQuestion", "request_user_input"])("denies %s in a thread whose title starts with a prose title, and says to ask in the last message", async (tool) => {
@@ -413,10 +417,14 @@ describe("the card guard", () => {
     expect(await guard(card(), where)).toBeUndefined();
   });
 
-  test("the installed hook sends a question card to the card guard", async () => {
+  test.each([["claude", "AskUserQuestion"], ["codex", "request_user_input"]])("the %s PreToolUse dispatcher hands the card denial to the agent", async (provider, tool) => {
+    const where = home("Robin", proseTitles);
+    const target = join(where, ".config/hedge/hooks/PreToolUse/ask-guard.ts");
+    mkdirSync(dirname(target), { recursive: true });
+    symlinkSync(join(import.meta.dir, "ask-guard.ts"), target);
     const routed = hookWith(() => t3(alertThread), { threadId: "alert-1" });
-    const denied = await routed("claude", async () => JSON.stringify(card()), home("Robin", proseTitles));
-    expect(JSON.parse(denied.stdout).hookSpecificOutput.permissionDecision).toBe("deny");
+    const result = await dispatch(dirname(target), provider, JSON.stringify(card(tool)), async (_path, from, input) => routed(from, async () => input, where));
+    expect(JSON.parse(result.stdout).hookSpecificOutput).toMatchObject({ permissionDecision: "deny", permissionDecisionReason: expect.stringContaining("last message") });
   });
 });
 
