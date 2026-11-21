@@ -191,6 +191,10 @@ describe("the exit-status mask guard", () => {
     expect(exitMaskRisk(command, "Robin")).toBeUndefined();
   });
 
+  test.each(["~/.local/bin/hedge proof review --pr 1 | tee review.log", "/usr/bin/git push | tail -3", "\\git push | tail -3"])("refuses a guarded command named by its path or escaped: %s", (command) => {
+    expect(refused(command)).toBe(true);
+  });
+
   test.each(["gh run watch 123 | tail", "git log --oneline | head -3"])("ignores a command whose status does not gate anything: %s", (command) => {
     expect(exitMaskRisk(command, "Robin")).toBeUndefined();
   });
