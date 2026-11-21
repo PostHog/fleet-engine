@@ -78,9 +78,9 @@ function setting(program: Program, before: number, read: (args: string[]) => boo
     if (command.name !== "set" || parens(command.scope) > 0) return;
     const alwaysRuns = depths[index] === 0 && command.keywords.length === 0 && !["|", "&&", "||"].includes(commands[index - 1]?.after ?? "");
     const value = read(command.args);
-    const inForeground = command.after !== "|" && commands[listEnd(program, index, 0)].after !== "&";
-    if (alwaysRuns && command.redirects.length === 0 && inForeground) on = value ?? on;
-    else if (value === false) on = false;
+    const inForeground = () => command.after !== "|" && commands[listEnd(program, index, 0)].after !== "&";
+    if (value === false) on = false;
+    else if (value === true && alwaysRuns && command.redirects.length === 0 && inForeground()) on = true;
   });
   return on;
 }
@@ -100,11 +100,15 @@ const setsErrexit = (args: string[]) => {
   return on;
 };
 
-type Reads = { dollarQuestion: boolean; place: number | undefined; bareExit: boolean; failingExit: boolean };
+type Reads = { dollarQuestion: boolean; place: number | undefined; stages: number | undefined; bareExit: boolean; failingExit: boolean };
 
 function statusReads(raw: string): string[] | undefined {
   if (!plainWord.test(raw)) return undefined;
   return [...raw.replace(/'[^']*'/g, "").matchAll(new RegExp(statusRead, "g"))].map(([, index]) => index ?? "?");
+}
+
+function isSet(index: string, { stages }: Reads): boolean {
+  return index === "?" || index === "@" || index === "*" || (stages !== undefined && (arithmeticIndex(index) ?? stages) < stages);
 }
 
 function readsTheStatus(index: string, reads: Reads, echo: boolean): boolean {
@@ -126,7 +130,7 @@ function reporter(command: Command | undefined, sameLevel: boolean, reads: Reads
     const alone = indexes.length === 1 && ["", '""'].includes(raw.replace(new RegExp(statusRead), ""));
     return alone && readsTheStatus(indexes[0], reads, false) ? "exit" : undefined;
   }
-  const printed = command.name === "echo" && indexes.every((index) => index === "?" || readsTheStatus(index, reads, true)) && indexes.some((index) => readsTheStatus(index, reads, true));
+  const printed = command.name === "echo" && indexes.every((index) => isSet(index, reads)) && indexes.some((index) => readsTheStatus(index, reads, true));
   return printed && command.redirects.every((redirect) => printsToTheAgent.test(redirect)) ? "printed" : undefined;
 }
 
@@ -154,14 +158,23 @@ function topLevelStageStart({ commands, depths }: Program, last: number): number
   return first;
 }
 
-function placeInPipe(program: Program, start: number): number | undefined {
+function pipeStart(program: Program, start: number): { place: number; first: number } | undefined {
   let place = 0;
-  for (let index = start - 1; index >= 0 && program.commands[index].after === "|"; place++) {
-    const first = topLevelStageStart(program, index);
-    if (first === undefined) return undefined;
-    index = first - 1;
+  let first = start;
+  for (; first > 0 && program.commands[first - 1].after === "|"; place++) {
+    const stage = topLevelStageStart(program, first - 1);
+    if (stage === undefined) return undefined;
+    first = stage;
   }
-  return place;
+  return { place, first };
+}
+
+const placeInPipe = (program: Program, start: number) => pipeStart(program, start)?.place;
+
+function stagesUpTo(program: Program, end: number): number | undefined {
+  const last = topLevelStageStart(program, end);
+  const before = last === undefined ? undefined : placeInPipe(program, last);
+  return before === undefined ? undefined : before + 1;
 }
 
 function statementEnd({ commands, depths }: Program, start: number, depth: number): number {
@@ -197,8 +210,9 @@ function reachOf(program: Program, start: number): Reach {
   let end = pipelineEnd(program, start, depth);
   if (end !== start && !setting(program, start, setsOption("pipefail"))) {
     const place = program.topLevel ? placeInPipe(program, start) : undefined;
+    const stages = place === undefined ? undefined : stagesUpTo(program, end);
     const readable = depth === 0 && separators.has(commands[end].after);
-    return (readable && reporter(commands[end + 1], reachable(end + 1), { dollarQuestion: false, place, bareExit: false, failingExit: false })) || { how: "a pipe" };
+    return (readable && reporter(commands[end + 1], reachable(end + 1), { dollarQuestion: false, place, stages, bareExit: false, failingExit: false })) || { how: "a pipe" };
   }
   if (depth > 0) return closesOnly(program, end, depth) ? "exit" : { how: "the group or loop it runs in" };
   let chained = false;
@@ -209,11 +223,14 @@ function reachOf(program: Program, start: number): Reach {
   const after = commands[end].after;
   const next = end + 1;
   const place = chained || !program.topLevel ? undefined : placeInPipe(program, start);
+  const stages = place === undefined ? undefined : stagesUpTo(program, end);
   if (after === undefined) return "exit";
   if (after === "&") return { how: "running it in the background with `&`" };
-  if (after === "||") return reporter(commands[next], reachable(next), { dollarQuestion: true, place, bareExit: true, failingExit: true }) ?? { how: "the `||` after it" };
-  if (!chained && separators.has(after) && setting(program, start, setsErrexit)) return "exit";
-  return reporter(commands[next], reachable(next), { dollarQuestion: true, place, bareExit: true, failingExit: false }) ?? { how: separatorName(after) };
+  if (after === "||") return reporter(commands[next], reachable(next), { dollarQuestion: true, place, stages, bareExit: true, failingExit: true }) ?? { how: "the `||` after it" };
+  const first = pipeStart(program, start)?.first;
+  const errexitApplies = !chained && first !== undefined && !commands[first].keywords.includes("!");
+  if (errexitApplies && separators.has(after) && setting(program, start, setsErrexit)) return "exit";
+  return reporter(commands[next], reachable(next), { dollarQuestion: true, place, stages, bareExit: true, failingExit: false }) ?? { how: separatorName(after) };
 }
 
 function hiddenIn(text: string, nesting: number): { found?: Finding; carries?: string } {
