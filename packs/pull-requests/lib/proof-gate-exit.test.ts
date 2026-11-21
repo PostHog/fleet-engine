@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { lastGateRun } from "./proof.ts";
 import { checkout, cleanFixtures, reviewHead, verdict } from "./proof-testing.ts";
@@ -208,6 +208,28 @@ test("a gate error after a wait that a failed read ended keeps that read's error
   const gate = await pr.hedge("gate", "--wait", "10");
   expect(gate.code).toBe(1);
   expect(lastLine(gate.output)).toBe("gate: fail (exit 1): ~/.agents/guides/coding-standards.md is missing or empty; it holds the coding standards to review against (--wait stopped early at a failed read of GitHub: gh api repos/example/product/pulls/42 failed (gh: Bad Gateway (HTTP 502)))");
+});
+
+test("a wait that ended on finished CI, which then ran again, asks for another wait and not for a look at the checks", async () => {
+  const { pr } = await reviewed();
+  pr.ci([{ name: "test", bucket: "pending" }]);
+  const github = join(dirname(pr.home), "github");
+  writeFileSync(join(github, "pending-runs"), readFileSync(join(github, "check-runs-any")));
+  pr.panel.onPause = async () => {
+    pr.ci([{ name: "test", bucket: "pass" }]);
+    pr.whileGithubReadsPull(`echo 'cp "${github}/pending-runs" "${github}/check-runs-any"' > "${github}/while-reading"`);
+  };
+  const gate = await pr.hedge("gate", "--wait", "10");
+  expect(gate.code).toBe(75);
+  expect(lastLine(gate.output)).toBe("gate: pending (exit 75): CI is still running: waiting on: test. Run the gate again with --wait <minutes>, such as --wait 10, to wait for CI to finish");
+});
+
+test("a usage error with a carriage return still ends in one verdict line", async () => {
+  const { pr } = await reviewed();
+  const gate = await pr.hedge("gate", "--wait", "1\r2");
+  expect(gate.code).toBe(1);
+  expect(gate.output).not.toContain("\r");
+  expect(lastLine(gate.output)).toStartWith("gate: fail (exit 1): --wait takes a number of minutes");
 });
 
 test("while --wait waits, the gate record says CI is still running", async () => {

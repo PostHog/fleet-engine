@@ -478,27 +478,27 @@ code and the reason. The gate's lines and hedge decision report come from the sa
       const record = await startGateRun(home, head, startedAt);
       let gate: FinalGate;
       let gatedAt = startedAt;
-      let stoppedEarly: string | undefined;
+      let waited: Waited | undefined;
       try {
         const gateHead = () => finalGate(head, context, { landed: flags.has("--landed") });
         gate = await gateHead();
         if (gate.code === ciRunningCode && wait) {
           await shareGateResult(head, false, clock(), context);
           await record({ code: gate.code, reason: gate.reason });
-          stoppedEarly = await untilCiFinishes(head, context, wait);
+          waited = await untilCiFinishes(head, context, wait);
           gatedAt = clock();
           gate = await gateHead();
-          if (gate.code === ciRunningCode && !stoppedEarly) gate = { ...gate, verdict: `gate: pending (exit ${gate.code}): ${gate.reason}. CI still ran after --wait ${wait}. Open the checks it waits on: a required check that has not reported may never start, such as when a check it needs failed. Wait again only while they run` };
+          if (gate.code === ciRunningCode && waited.ranOut) gate = { ...gate, verdict: `gate: pending (exit ${gate.code}): ${gate.reason}. CI still ran after --wait ${wait}. Open the checks it waits on: a required check that has not reported may never start, such as when a check it needs failed. Wait again only while they run` };
         }
       } catch (error) {
-        const message = `${String((error as Error).message ?? error)}${stoppedEarly ? ` (--wait stopped early at a failed read of GitHub: ${stoppedEarly})` : ""}`;
+        const message = `${String((error as Error).message ?? error)}${waited?.failedRead ? ` (--wait stopped early at a failed read of GitHub: ${waited.failedRead})` : ""}`;
         await record({ code: 1, reason: message.split("\n")[0]! }).catch(() => {});
         await shareGateResult(head, false, gatedAt, context);
-        throw stoppedEarly ? new Error(message) : error;
+        throw waited?.failedRead ? new Error(message) : error;
       }
       await record({ code: gate.code, reason: gate.reason });
       const shared = await shareGateResult(head, gate.code === 0, gatedAt, context);
-      const waitLine = stoppedEarly ? `ci: --wait stopped early at a failed read of GitHub: ${stoppedEarly}` : undefined;
+      const waitLine = waited?.failedRead ? `ci: --wait stopped early at a failed read of GitHub: ${waited.failedRead}` : undefined;
       if (flags.has("--json")) print(JSON.stringify({ ...gate.summary, reason: gate.reason, ...waitLine ? { wait: waitLine } : {} }));
       else for (const line of [...gate.lines, ...waitLine ? [waitLine] : [], ...shared ? [shared] : [], gate.verdict]) print(line);
       return gate.code;
@@ -1131,7 +1131,7 @@ export async function proofCommand(args: string[], context: ProofContext): Promi
 
 async function gateReporting(json: boolean, { print }: ProofContext, gate: () => Promise<number>) {
   try { return await gate(); } catch (error) {
-    const reason = String((error as Error).message ?? error).replace(/\s*\n\s*/g, " ");
+    const reason = String((error as Error).message ?? error).replace(/\s*[\r\n]+\s*/g, " ");
     print(json ? JSON.stringify({ code: 1, reason }) : `gate: fail (exit 1): ${reason}`);
     return 1;
   }
@@ -1148,18 +1148,20 @@ function waitMinutes(value: string | undefined) {
 
 const ciPollInterval = 30_000;
 
-async function untilCiFinishes(head: ProofIdentity, context: CommandContext, minutes: number) {
+type Waited = { ranOut: boolean; failedRead?: string };
+
+async function untilCiFinishes(head: ProofIdentity, context: CommandContext, minutes: number): Promise<Waited> {
   const now = () => (context.now?.() ?? new Date()).getTime();
   const deadline = now() + minutes * 60_000;
   const sleep = context.pause ?? Bun.sleep;
   while (now() < deadline) {
     await sleep(Math.min(ciPollInterval, deadline - now()));
-    if (now() >= deadline) return undefined;
+    if (now() >= deadline) break;
     const ci = ciOf(context.home, head, context.run, new Date(now()));
-    if (ci.state === "unknown") return ci.detail;
-    if (ci.state !== "pending") return undefined;
+    if (ci.state === "unknown") return { ranOut: false, failedRead: ci.detail };
+    if (ci.state !== "pending") return { ranOut: false };
   }
-  return undefined;
+  return { ranOut: true };
 }
 
 async function shareGateResult(head: ProofIdentity, passed: boolean, startedAt: Date, context: ProofContext): Promise<string | undefined> {
