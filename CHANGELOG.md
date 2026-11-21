@@ -21,8 +21,10 @@
   `binaryPath` that starts with `~/` is under the user's home. T3 Code does
   the install and the sign-in of the provider, or a human step of the pack
   does.
-- Hedge sends each instance to T3 Code as one upsert, and only when T3 does
-  not hold it yet. It never touches an instance the profile does not
+- Hedge sends each instance to T3 Code as one upsert when T3 does not hold
+  the declared value: a new instance, a changed declaration of an instance
+  Hedge set, or an instance the user hands over with `--adopt`. It never
+  touches an instance the profile does not
   declare, such as the `claudeAgent` instance that recovery binds, or one it
   declared before. Removing an entry leaves the instance as it is in T3; turn
   it off in T3 Code's settings.
