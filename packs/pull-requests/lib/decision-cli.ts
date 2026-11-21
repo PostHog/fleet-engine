@@ -26,8 +26,8 @@ The decision ledger holds every decision about a pull request's proof and proces
 the setting hub.alias names; other machines read and append it over SSH. Without a hub, it lives on this machine.
 
 record with 👤 or 👍 records the user's answer to your question tool. Without --words it takes their latest answer
-in the T3 thread whose question names each --pr and each --kind: after they answer, pass only the mark, class, kinds and PRs, and
-check the answer in the printed line. --message takes an earlier answer by its id. --words quotes the words of an
+in the T3 thread whose question names each --pr and each --kind, and for --class proof-gap starts "Accept the <kind>
+gap?": after they answer, pass only the mark, class, kinds and PRs, and check the answer in the printed line. --message takes an earlier answer by its id. --words quotes the words of an
 answer, with the date they gave it. --thread defaults to this T3 thread (T3CODE_THREAD_ID). Only answers to a
 question tool in the T3 app count; a typed message does not. Each --pr must be named in that question (#n,
 repo#n, owner/repo#n, or its URL), so one answer covers every PR its question named and no other. One answer
@@ -199,7 +199,7 @@ export function answeredAt(word: ThreadWord) {
 
 const heardAnswer = (word: ThreadWord): HeardAnswer => ({ thread: word.thread, message: word.id, words: word.text, answered: word.answered, at: word.at, source: word.source });
 
-function candidates(answers: ThreadWord[], { words, message, prs, kinds = [] }: Hearing, thread: string): ThreadWord[] {
+function candidates(answers: ThreadWord[], { class: decisionClass, words, message, prs, kinds = [] }: Hearing, thread: string): ThreadWord[] {
   if (message !== undefined) {
     const named = answers.filter((word) => word.id === message);
     if (!named.length) throw new Error(`No message of the user's in thread ${thread} has the id ${message}`);
@@ -211,8 +211,12 @@ function candidates(answers: ThreadWord[], { words, message, prs, kinds = [] }: 
     if (!said.length) throw new Error(`"${quotes(words).join('" … "')}" is not in a message of the user's in thread ${thread}. Quote their whole answer, so a refusal such as "Do not accept the gap." never reads as an acceptance. Only their answer to a question tool in the T3 app counts`);
     return said;
   }
-  const latest = answers.findLast((word) => word.source === "question" && prs.every((ref) => namesPr(word.answered, ref)) && kinds.every((kind) => namesKind(word.answered, kind)));
-  if (!latest) throw new Error(`No answer of the user's to a question tool in thread ${thread} names ${[...prs.map(refText), ...kinds.map((kind) => `the ${kind} gap`)].join(", ")}. Ask them with the question tool and name each PR in the question. Only answers they gave in the T3 app count`);
+  const gap = decisionClass === "proof-gap";
+  const asksGap = (word: ThreadWord) => !gap || normalized(word.answered).startsWith(normalized(acceptQuestion(kinds)));
+  const latest = answers.findLast((word) => word.source === "question" && prs.every((ref) => namesPr(word.answered, ref)) && kinds.every((kind) => namesKind(word.answered, kind)) && asksGap(word));
+  const lead = gap ? ` in a question that starts "${acceptQuestion(kinds)}"` : "";
+  const byMessage = gap ? `. When they answered that gap on a card worded another way, name their answer with --message <id>; hedge thread read ${thread} --words lists the ids` : "";
+  if (!latest) throw new Error(`No answer of the user's to a question tool in thread ${thread} names ${[...prs.map(refText), ...kinds.map((kind) => `the ${kind} gap`)].join(", ")}${lead}. Ask them with the question tool and name each PR in the question. Only answers they gave in the T3 app count${byMessage}`);
   return [latest];
 }
 
