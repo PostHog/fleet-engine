@@ -1135,7 +1135,7 @@ test("at the ceiling a final read of a production fix after the last read stops 
 
   await expect(pr.hedge("review-start", "--scope", "fixes", "--base", panel)).rejects.toThrow("The review budget of 2 reviews is spent");
   const stopped = await refusal(pr.hedge("review-start", "--scope", "final", "--base", fix));
-  expect(stopped).toStartWith(`The review budget of 2 reviews is spent, and no read checks the production changes since ${fix.slice(0, 7)}. Revert each commit since ${fix.slice(0, 7)} that changes production code: the gate carries a revert of a PR commit. hedge proof asks nothing more.`);
+  expect(stopped).toStartWith(`The review budget of 2 reviews is spent, and no read checks the production changes since ${fix.slice(0, 7)}. Revert each commit of the PR since ${fix.slice(0, 7)} that changes production code, never a merge of the base: the gate carries a revert of a PR commit. hedge proof asks nothing more.`);
   expect(stopped).toContain("Only the user's --override runs another review or final read");
   expect(stopped).not.toContain("question tool");
   await expect(pr.hedge("review-start", "--scope", "final", "--base", fix, "--agent", "One more read checks the last fix.")).rejects.toThrow("The review budget of 2 reviews is spent");

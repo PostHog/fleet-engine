@@ -6,9 +6,10 @@
 
 - At the review ceiling, `hedge proof review --scope final` no longer reads
   a production fix that came after the last read. It says the budget is
-  spent and what to do: revert each commit since the last read that changes
-  production code, which the gate carries, and list the finding under
-  `## Known issues`. Only the user's `--override` runs one more read. A
+  spent and what to do: revert each commit of the PR since the last read
+  that changes production code, never a merge of the base, and list the
+  finding under `## Known issues`. The gate carries the revert. Only the
+  user's `--override` runs one more read. A
   HEAD whose commits since the last read are only clean base merges and
   quiet commits, past what the gate carries, still gets its final read.
 - The judge in `hedge proof gate` fails at most
