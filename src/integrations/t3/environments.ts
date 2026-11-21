@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { T3Client, T3HttpClient } from "./session.ts";
+import type { SendMode } from "./threads.ts";
 
 export type LinkedEnvironment = {
   environmentId: string; label: string; urls: string[]; access: string;
@@ -90,8 +91,8 @@ export async function readLinkedMessages(client: Pick<T3HttpClient, "callTool">,
 
 export type LinkedSend = { threadId: string; messageId: string; delivery: "started" | "queued" | "steered" | "restarted" };
 
-export async function sendLinkedMessage(client: Pick<T3HttpClient, "callTool">, environmentId: string, threadId: string, message: string): Promise<LinkedSend> {
-  const sent = await client.callTool<LinkedSend>("t3_thread_send", { environmentId, threadId, message, mode: "queue", clientRequestId: `hedge-thread-send:${randomUUID()}` });
+export async function sendLinkedMessage(client: Pick<T3HttpClient, "callTool">, environmentId: string, threadId: string, message: string, mode: SendMode = "auto"): Promise<LinkedSend> {
+  const sent = await client.callTool<LinkedSend>("t3_thread_send", { environmentId, threadId, message, mode, clientRequestId: `hedge-thread-send:${randomUUID()}` });
   return { threadId: sent.threadId, messageId: sent.messageId, delivery: sent.delivery };
 }
 
