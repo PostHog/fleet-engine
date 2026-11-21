@@ -147,6 +147,25 @@ test("a final read reads a PR edit made before a clean merge of a base that rena
   expect(reviewer.prompts().at(-1)).toContain("+greet the member by name");
 });
 
+test("a final read after two clean merges of a base that added the PR's new file and then renamed it is refused, because the gate carries the review across them", async () => {
+  const pr = await checkout();
+  const guide = Array.from({ length: 10 }, (_, line) => `step ${line + 1}\n`).join("");
+  await pr.commit("guide.txt", guide);
+  await pr.hedge("require", "--none", "--reason", "docs only");
+  const reviewed = await reviewHead(pr);
+  pr.env.HEDGE_REVIEW_ARBITER = "cat >/dev/null; echo CONTINUE";
+  await pr.advanceBase("base.md", "the base moves on\n");
+  await pr.advanceBase("guide.txt", guide);
+  await pr.git("merge", "-q", "--no-edit", "main");
+  await mergeBaseRename(pr);
+  const reviewer = fakeModel(pr, "REVIEWER", "No findings.");
+
+  const refused = await pr.hedge("review", "--scope", "final", "--base", reviewed).then(() => "", (error: Error) => error.message);
+
+  expect(refused).toStartWith(`HEAD needs no final read: hedge proof gate carries the review of ${reviewed.slice(0, 7)} across 2 clean merge(s) of the base.`);
+  expect(reviewer.prompts()).toEqual([]);
+});
+
 test("when the judge finds a standing rule's condition broken, the gate names the rule and asks for no void of a decision it is not", async () => {
   const pr = await checkout();
   const rule = "Until 2026-11-26, in example/product, accept a live-run gap that only a billable run from main can prove.";
