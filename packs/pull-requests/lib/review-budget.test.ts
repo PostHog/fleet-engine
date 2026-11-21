@@ -644,6 +644,35 @@ test("a review that another one overtakes while it weighs the budget backs out",
   await expect(pr.hedge("show", "--round", "3")).rejects.toThrow("has no reservation");
 });
 
+test("a final read backs out when a panel round captured elsewhere turns into the latest counted review while it weighs the budget", async () => {
+  const pr = await checkout();
+  pr.pullRequestState({ body: graded("non-critical", "medium") });
+  pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.freeReviews": 1, "pull-requests.reviewCeiling": 20 });
+  await pr.commit("feature.txt", "greet\n");
+  await pr.hedge("require", "--none", "--reason", "fixture");
+  const panel = await panelReview(pr, "- feature.txt:1 | major | Correctness | the greeting drops the name | greet by name | anchor: greet");
+  await pr.commit("feature.txt", "greet the member\n");
+  pr.env.HEDGE_REVIEW_ARBITER = continueArbiter();
+  await pr.hedge("review-start", "--scope", "fixes", "--base", panel);
+  await finishRound(pr, "2");
+  markPanel(pr, "2");
+  const round = join(pr.pullRequest, "reviews/2/round.json");
+  const captured = (by: string) => writeFileSync(round, JSON.stringify({ ...JSON.parse(readFileSync(round, "utf8")), capturedBy: by }));
+  captured("fleet");
+  await pr.commit("feature.txt", "greet the new member\n");
+  const [started, go] = ["started", "go"].map((name) => join(pr.home, name));
+  await spawnAsync(["mkfifo", started, go]);
+  pr.env.HEDGE_REVIEW_ARBITER = `cat >/dev/null; echo > "${started}"; read line < "${go}"; echo CONTINUE`;
+
+  const slow = pr.hedge("review-start", "--scope", "final", "--base", panel);
+  await readFile(started, "utf8");
+  captured("hedge");
+  await writeFile(go, "go\n");
+
+  await expect(slow).rejects.toThrow("The reviews changed while this one weighed the budget");
+  expect(readdirSync(join(pr.pullRequest, "reviews")).sort()).toEqual(["1", "2"]);
+});
+
 test("of two final reads that weigh the same budget and leave the arbiter together on the same clock, exactly one reserves and the other says why it stops", async () => {
   const pr = await checkout();
   pr.pullRequestState({ body: graded("non-critical", "medium") });

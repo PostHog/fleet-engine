@@ -156,7 +156,7 @@ function finalReadPhase(value: string): FinalReadPhase {
 }
 
 type Spending = "unfinished spends" | "finished only";
-type Spent = { spent: number; names: string[]; reservations: string[]; finished: string[]; round?: number };
+type Spent = { spent: number; names: string[]; reservations: string[]; finished: string[]; round?: number; counted?: string[] };
 type ReservedAs = { reservationId?: string; startedAt?: string; commit?: string; scope?: string; phase?: FinalReadPhase };
 const reservationOf = ({ reservationId, startedAt, commit, scope, phase }: ReservedAs) => JSON.stringify([reservationId, startedAt, commit, scope, phase]);
 
@@ -177,7 +177,7 @@ async function reviewsSpent(reviews: string, phase: FinalReadPhase, spending: Sp
   return { spent: present.filter(({ spends }) => spends).length, names: present.map(({ name }) => name), reservations: present.map(({ reservation }) => reservation), finished: present.filter(({ finished }) => finished).map(({ name }) => name) };
 }
 
-const budgetState = ({ spent, names, reservations, finished, round }: Spent) => JSON.stringify([spent, names, reservations, finished, round]);
+const budgetState = ({ spent, names, reservations, finished, round, counted }: Spent) => JSON.stringify([spent, names, reservations, finished, round, counted]);
 
 async function reserveWeighed<T extends Spent>(reviews: string, lockBudget: LockBudget, snapshot: () => Promise<T>, permit: (weighed: T) => Promise<ArbiterVerdict | undefined>, reserveIt: (weighed: T, verdict: ArbiterVerdict | undefined) => Promise<Reserved>) {
   const before = await lockBudget(reviews, snapshot);
@@ -274,7 +274,10 @@ async function startFinalRead(home: string, identity: ProofIdentity, base: strin
   if (base === identity.commit) throw new Error("HEAD is already reviewed. Skip the final read.");
   const reviews = join(pullRequestDirectory(home, identity), "reviews");
   const { free, ceiling } = permit.limits;
-  const snapshot = async () => ({ ...await reviewsSpent(reviews, phase, "unfinished spends"), reviews: await finishedReviews(home, identity) });
+  const snapshot = async () => {
+    const counted = await finishedReviews(home, identity);
+    return { ...await reviewsSpent(reviews, phase, "unfinished spends"), reviews: counted, counted: counted.map(({ name }) => name) };
+  };
   const permitRead = async ({ spent, names, finished: saved, reviews: finished }: Awaited<ReturnType<typeof snapshot>>) => {
     const carried = gateCarry(identity, finished, cleanBaseMerge, quietCommit).found;
     const latest = finished.at(-1);
