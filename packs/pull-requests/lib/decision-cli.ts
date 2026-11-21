@@ -27,9 +27,9 @@ the setting hub.alias names; other machines read and append it over SSH. Without
 
 record with 👤 or 👍 records the user's answer to your question tool. Without --words it takes their latest answer
 in the T3 thread whose question names each --pr and each --kind: after they answer, pass only the mark, class, kinds and PRs, and
-check the answer in the printed line. When it refuses that answer, it says how to list the ids, and for --class
-proof-gap it names the latest answer to "Accept the <kind> gap?". --message takes an earlier answer by its id. --words quotes the words of an
-answer, with the date they gave it. --thread defaults to this T3 thread (T3CODE_THREAD_ID). Only answers to a
+check the answer in the printed line. When it refuses that answer, it says how to list the ids. For --class proof-gap
+it also names the latest answer to "Accept the <kind> gap?" about each --pr, when that is another answer and not used
+yet. --message takes an earlier answer by its id. --words quotes the words of an answer, with the date they gave it. --thread defaults to this T3 thread (T3CODE_THREAD_ID). Only answers to a
 question tool in the T3 app count; a typed message does not. Each --pr must be named in that question (#n,
 repo#n, owner/repo#n, or its URL), so one answer covers every PR its question named and no other. One answer
 records one decision. With --class proof-gap and --kind, the decision accepts those gaps of each PR, and the user's
@@ -172,10 +172,20 @@ export async function hearUser(input: Hearing, context: DecisionContext, ledger:
   if (input.words !== undefined && input.message !== undefined) throw new Error("Pass --message or --words, not both");
   if (input.words !== undefined) await refuseInstructionQuote(context.home, input.words);
   const answers = await (context.threadWords ?? t3ThreadWords(context.home))(thread);
-  const picksLatest = input.words === undefined && input.message === undefined;
-  const refused = (error: Error, tried: ThreadWord[] = []) => picksLatest ? withAnswerIds(error, answers, tried, input, thread) : error;
+  const useOf = async (word: ThreadWord) => {
+    const earlier = answerUse(await reachHub(() => ledger.read()), messageKey({ thread: word.thread, message: word.id, machine: thisMachine(context.env) }));
+    if (earlier) return alreadyUsed(earlier);
+    const usedOn = await usedAnswer(context.home, heardAnswer(word));
+    return usedOn ? new Error(usedOn) : undefined;
+  };
+  const refused = async (error: Error, tried: ThreadWord[] = []) => {
+    if (input.words !== undefined || input.message !== undefined) return error;
+    const gapAnswer = input.class === "proof-gap" ? answers.findLast((word) => asksGap(word, input)) : undefined;
+    const unused = gapAnswer && !tried.includes(gapAnswer) && await useOf(gapAnswer).then((use) => !use, () => false);
+    return withAnswerIds(error, unused ? gapAnswer : undefined, input.kinds ?? [], thread);
+  };
   let tried: ThreadWord[];
-  try { tried = candidates(answers, input, thread); } catch (error) { throw refused(error as Error); }
+  try { tried = candidates(answers, input, thread); } catch (error) { throw await refused(error as Error); }
   const refusals: Error[] = [];
   let used: Error | undefined;
   for (const word of tried) {
@@ -183,23 +193,21 @@ export async function hearUser(input: Hearing, context: DecisionContext, ledger:
     try {
       fits(heard, input);
       const where = { thread: word.thread, message: word.id, machine: thisMachine(context.env) };
-      const earlier = answerUse(await reachHub(() => ledger.read()), messageKey(where));
-      if (earlier) { used ??= alreadyUsed(earlier); continue; }
-      const usedOn = await usedAnswer(context.home, heard);
-      if (usedOn) { used ??= new Error(usedOn); continue; }
+      const usedAs = await useOf(word);
+      if (usedAs) { used ??= usedAs; continue; }
       return {
         id: newId(), at: answeredAt(word), class: input.class, mark: input.mark, question: word.answered, answer: `${word.at.slice(0, 10)} "${word.text}"`, scope: scopeOf(input),
         ...input.class === "proof-gap" ? { effect: input.keepOwed ? "keep-owed" as const : "accept" as const } : {}, where,
       };
     } catch (error) { refusals.push(error as Error); }
   }
-  throw refused(used ?? refusals[0]!, tried);
+  throw await refused(used ?? refusals[0]!, tried);
 }
 
-function withAnswerIds(error: Error, answers: ThreadWord[], tried: ThreadWord[], { class: decisionClass, prs, kinds = [] }: Hearing, thread: string) {
-  const asksGap = (word: ThreadWord) => word.source === "question" && normalized(word.answered).startsWith(normalized(acceptQuestion(kinds))) && prs.every((ref) => namesPr(word.answered, ref));
-  const gapAnswer = decisionClass === "proof-gap" ? answers.findLast(asksGap) : undefined;
-  const pointer = gapAnswer && !tried.includes(gapAnswer) ? `. The latest answer to "${acceptQuestion(kinds)}" is ${gapAnswer.id}; when that is the answer, record it with --message ${gapAnswer.id}` : "";
+const asksGap = (word: ThreadWord, { prs, kinds = [] }: Hearing) => word.source === "question" && normalized(word.answered).startsWith(normalized(acceptQuestion(kinds))) && prs.every((ref) => namesPr(word.answered, ref));
+
+function withAnswerIds(error: Error, gapAnswer: ThreadWord | undefined, kinds: string[], thread: string) {
+  const pointer = gapAnswer ? `. The latest answer to "${acceptQuestion(kinds)}" is ${gapAnswer.id}; when that is the answer, record it with --message ${gapAnswer.id}` : "";
   error.message = `${error.message}${pointer}. To record another answer, name it with --message <id>; hedge thread read ${thread} --words lists the ids`;
   return error;
 }

@@ -108,6 +108,18 @@ test("a refused record without --message says how to list the answer ids, also w
   expect(ledgerDecisions(pr)).toEqual([]);
 });
 
+test("a refusal of a used answer says how to list the ids, and never points at a gap answer that is already recorded", async () => {
+  const pr = await checkout();
+  pr.chooseGap("panel", "A prune lane runs no QA swarm");
+  const record = () => pr.decide("record", "--mark", "👍", "--class", "proof-gap", "--kind", "panel", "--pr", "example/product#42");
+  const listIds = "To record another answer, name it with --message <id>; hedge thread read thread-1 --words lists the ids";
+  const id = idIn((await record()).output);
+
+  await expect(record()).rejects.toThrow(`That answer is already recorded as decision ${id}. One answer records one decision; it covers the PRs its question named. Ask the user again. ${listIds}`);
+  pr.choose("Add the standing rule", "Add a standing rule for panel gaps on prune lanes? example/product#42");
+  await expect(record()).rejects.toThrow(`which does not accept the gap. The gap stays open. ${listIds}`);
+});
+
 test("a later acceptance of the gap on a card worded another way still records over an earlier decline on the gap card", async () => {
   const pr = await checkout();
   pr.chooseGap("panel", "A prune lane runs no QA swarm", "Keep the gap open");
