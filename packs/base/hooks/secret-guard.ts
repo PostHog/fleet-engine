@@ -235,7 +235,7 @@ export const redactionMark = (kind: string) => `[redacted ${kind}]`;
 /** Replaces every secret-shaped value in a text with its kind. */
 export const redactSecrets = (text: string) => replaceSecrets(text, redactionMark);
 
-export type Redaction = { text: string; values: Array<{ kind: string; at: number }>; left: string[] };
+export type Redaction = { text: string; values: Array<{ kind: string; at: number; end: number }>; left: string[] };
 
 export function redactForModel(text: string): Redaction {
   const values: Redaction["values"] = [];
@@ -244,7 +244,11 @@ export function redactForModel(text: string): Redaction {
   try {
     const redacted = replaceSecrets(text, (kind, value) => {
       if (value === text) whole ??= kind;
-      else values.push({ kind, at: cursor = text.indexOf(value, cursor) });
+      else {
+        const at = text.indexOf(value, cursor);
+        cursor = at + value.length;
+        values.push({ kind, at, end: cursor });
+      }
       return redactionMark(kind);
     });
     return whole ? { text, values: [], left: [whole] } : { text: redacted, values, left: secretKinds(redacted) };

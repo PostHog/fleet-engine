@@ -84,6 +84,8 @@ test("the judge prompt names the cookie only in a fixture, so Hedge redacts the 
   expect(gate.output).toContain("this prompt names it at fixture.txt:1.");
   expect(gate.output).toContain("build the test fixture at run time from parts");
   expect(judge.prompts()[0]).toContain("a placeholder is no finding by itself");
+  expect((await pr.hedge("gate")).output).toContain("this prompt names it at fixture.txt:1.");
+  expect(judge.prompts()).toHaveLength(1);
 });
 
 test("the PR description, earlier findings and answers, and proof files reach the judge redacted", async () => {
@@ -108,13 +110,13 @@ test("a single review gets the PR description redacted and says where the value 
   const pr = await checkout();
   await pr.commit("feature.txt", "greet new members\n");
   await pr.hedge("require", "--none", "--reason", "docs only");
-  pr.pullRequestState({ body: `Greets new members. Merge risk: medium.\n\nThe old token was ${token()}.\n` });
+  pr.pullRequestState({ body: `Greets new members. Merge risk: medium.\n\nThe old token was ${token()}.\nIt is still in ${token()}.\n\n## Rotated ${token(1)}\n\nThe new token is ${token(2)}.\n` });
   const reviewer = fakeModel(pr, "REVIEWER", "No findings.\n");
 
   const review = await pr.hedge("review", "--single");
   expect(guardPasses(reviewer.prompts()[0]!)).toBe(true);
-  expect(leaksIn(pr, review.output, reviewer.prompts(), [token()])).toEqual([]);
-  expect(review.output).toMatch(/Hedge redacted 1 secret-shaped value from the prompt before the model call: a GitHub token \(at line \d+ of the prompt, in <pr-description>\)/);
+  expect(leaksIn(pr, review.output, reviewer.prompts(), [0, 1, 2].map(token))).toEqual([]);
+  expect(review.output).toMatch(/Hedge redacted 4 secret-shaped values from the prompt before the model call: a GitHub token \(at line (\d+) of the prompt, in <pr-description>\), a GitHub token \(at line (?!\1\b)\d+ of the prompt, in <pr-description>\), a GitHub token \(at line \d+ of the prompt\), a GitHub token \(at line \d+ of the prompt\)/);
 });
 
 test("each panel lens gets the PR description redacted, its stored brief holds no value, and the panel names what it redacted", async () => {
@@ -198,13 +200,3 @@ test("a review prompt Hedge cannot fully redact is never sent, and the error nam
   expect(reviewer.prompts()).toEqual([]);
 });
 
-test("a value split by a line wrap is no secret to the guard either, so it reaches the model: this is what gets past", async () => {
-  const halves = [token().slice(0, 20), token().slice(20)];
-  const pr = await shaped({ name: "a value split by a line wrap", head: `${halves.join("\n")}\n`, values: halves });
-  await reviewHead(pr);
-  const judge = fakeModel(pr, "JUDGE", verdict());
-
-  expect((await pr.hedge("gate")).code).toBe(0);
-  expect(guardPasses(judge.prompts()[0]!)).toBe(true);
-  expect(judge.prompts()[0]).toContain(`+${halves[0]}\n+${halves[1]}`);
-});

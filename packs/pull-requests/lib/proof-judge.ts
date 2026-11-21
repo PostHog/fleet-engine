@@ -5,6 +5,7 @@ import { optionalStringSetting } from "../../base/lib/settings.ts";
 import type { Arbiter, CiResult, Owed } from "./proof.ts";
 import type { ModelAnswer, ModelRequest } from "./proof-models.ts";
 import { capped, diffCap } from "./proof-review.ts";
+import { guardedPrompt } from "./proof-prompt-guard.ts";
 import { withoutReceipt } from "./proof-receipt.ts";
 import { runRecordOf } from "./proof-run.ts";
 
@@ -221,9 +222,10 @@ async function inputKey(model: string, prompt: string, images: string[]) {
 
 export async function judge(input: JudgeInput, deps: JudgeDeps): Promise<JudgeOutcome> {
   const { prompt, images, readable } = await judgePrompt(input);
-  const path = join(deps.directory, `${await inputKey(deps.model, prompt, images)}.json`);
-  const cached = await readFile(path, "utf8").then((text) => JSON.parse(text) as JudgeRecord, () => undefined);
-  const asked: Asked = cached ? { record: cached } : await askJudge(prompt, images, readable, input.cwd, askedQuestions(input.risk !== undefined), deps);
+  const guarded = guardedPrompt(prompt);
+  const path = join(deps.directory, `${await inputKey(deps.model, guarded.ok ? guarded.prompt : prompt, images)}.json`);
+  const cached = guarded.ok ? await readFile(path, "utf8").then((text) => JSON.parse(text) as JudgeRecord, () => undefined) : undefined;
+  const asked: Asked = cached ? { record: cached, ...guarded.ok && guarded.redacted ? { redacted: guarded.redacted } : {} } : await askJudge(prompt, images, readable, input.cwd, askedQuestions(input.risk !== undefined), deps);
   const { record } = asked;
   const redacted = asked.redacted ? [`judge: ${asked.redacted}`] : [];
   if ("cause" in record) return { state: "unavailable", lines: [`judge: unavailable (${record.cause})`, ...redacted], model: deps.model, broken: [], ...record.heldBack ? { heldBack: true } : {} };
