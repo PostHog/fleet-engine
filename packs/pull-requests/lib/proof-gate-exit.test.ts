@@ -156,6 +156,16 @@ test("--wait stops at its limit, exits 75, and names only the checks that still 
   expect(await lastGateRun(pr.home, { repository: "example/product", pr: 42, commit: head })).toEqual({ code: 75, reason: "CI is still running: waiting on: test" });
 });
 
+test("--wait sleeps no longer than its limit", async () => {
+  const { pr } = await reviewed();
+  pr.ci([{ name: "test", bucket: "pending" }]);
+  pr.panel.onPause = async (ms = 0) => { pr.clock.now = new Date(pr.clock.now.getTime() + ms); };
+  const started = pr.clock.now.getTime();
+  const gate = await pr.hedge("gate", "--wait", "0.1");
+  expect(gate.code).toBe(75);
+  expect(pr.clock.now.getTime() - started).toBe(6_000);
+});
+
 test("while --wait waits, the gate record says CI is still running", async () => {
   const { pr, head } = await reviewed();
   pr.ci([{ name: "test", bucket: "pending" }]);

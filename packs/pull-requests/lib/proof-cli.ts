@@ -37,7 +37,7 @@ export type { RunIO };
 
 export type ProofContext = {
   home: string; cwd: string; env: Record<string, string | undefined>; print: (text: string) => void; now?: () => Date; threadWords?: ThreadWords;
-  detach?: (args: string[], log: string) => Promise<number>; pause?: () => Promise<void>; github?: GitHub; runIO?: RunIO;
+  detach?: (args: string[], log: string) => Promise<number>; pause?: (ms?: number) => Promise<void>; github?: GitHub; runIO?: RunIO;
   ssh?: Ssh; pid?: number; startTime?: StartTime;
 };
 type Result = { code: number; stdout: string; stderr: string };
@@ -1139,9 +1139,9 @@ const ciPollInterval = 30_000;
 async function untilCiFinishes(head: ProofIdentity, context: CommandContext, minutes: number) {
   const now = () => (context.now?.() ?? new Date()).getTime();
   const deadline = now() + minutes * 60_000;
-  const pause = context.pause ?? (() => Bun.sleep(Math.min(ciPollInterval, deadline - now())));
+  const sleep = context.pause ?? Bun.sleep;
   while (now() < deadline) {
-    await pause();
+    await sleep(Math.min(ciPollInterval, deadline - now()));
     if (now() >= deadline) return;
     if (ciOf(context.home, head, context.run, new Date(now())).state !== "pending") return;
   }
