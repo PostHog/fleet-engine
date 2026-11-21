@@ -116,6 +116,20 @@ describe("loadPacks", () => {
     for (const [config, message] of cases) await expect(loadPacks(sourceWith({ base: { ...base, config } }))).rejects.toThrow(message);
   });
 
+  test("refuses a T3 provider instance that T3 would rewrite, that drives Claude, or whose id a model row means for Claude or Codex", async () => {
+    const instance = (key: string, value: unknown) => [{ provider: "t3" as const, key, value }];
+    const agy = { driver: "antigravity", enabled: true, config: { binaryPath: "~/.local/bin/agy" } };
+    const cases: Array<[unknown[], string]> = [
+      [instance("providerInstances.antigravity", { ...agy, config: { ...agy.config, enabled: false } }), "config providerInstances.antigravity: a T3 provider instance holds only driver, enabled and config, and enabled stays out of config"],
+      [instance("providerInstances.antigravity", { ...agy, displayName: "Antigravity" }), "config providerInstances.antigravity: a T3 provider instance holds only driver, enabled and config, and enabled stays out of config"],
+      [instance("providerInstances.antigravity", { ...agy, environment: [] }), "config providerInstances.antigravity: a T3 provider instance holds only driver, enabled and config"],
+      [instance("providerInstances.myClaude", { driver: "claudeAgent", enabled: true }), "config providerInstances.myClaude: Hedge's Claude recovery owns Claude in T3, so a pack instance takes another driver than claudeAgent"],
+      [instance("providerInstances.claude", agy), "config providerInstances.claude: a model row's provider claude or codex always means T3's claudeAgent or codex instance, so give this instance another id"],
+      [instance("providerInstances.codex", agy), "config providerInstances.codex: a model row's provider claude or codex always means T3's claudeAgent or codex instance, so give this instance another id"],
+    ];
+    for (const [config, message] of cases) await expect(loadPacks(sourceWith({ base: { ...base, config } }))).rejects.toThrow(message);
+  });
+
   test("accepts a model row of any T3 provider instance", async () => {
     const neon = { role: "survey", work: "Read docs", provider: "antigravity", model: "gemini-4-neon", effort: "high" as const };
     expect((await loadPacks(sourceWith({ base: { ...base, models: { claude: [neon] } } })))[0]?.manifest.models).toEqual({ claude: [neon] });

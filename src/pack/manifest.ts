@@ -103,6 +103,7 @@ export function configEntryProblem(item: unknown) {
 
 const slugRule = "a letter, then letters, digits, - or _, 64 at most";
 const reservedKeys = ["constructor", "prototype", "__proto__"];
+const instanceFields = ["driver", "enabled", "config"];
 
 export const isT3Slug = (value: unknown): value is string => typeof value === "string" && value.length <= 64 && /^[A-Za-z][A-Za-z0-9_-]*$/.test(value) && !reservedKeys.includes(value);
 
@@ -110,8 +111,11 @@ function providerInstanceProblem(key: string, value: unknown) {
   const id = key.match(/^providerInstances\.(.+)$/)?.[1];
   if (!isT3Slug(id)) return `a T3 provider instance key names one instance, such as providerInstances.<id>, and the id is ${slugRule}`;
   if (id === "claudeAgent") return "Hedge's Claude recovery binds the claudeAgent instance, so give this instance another id";
+  if (id === "claude" || id === "codex") return "a model row's provider claude or codex always means T3's claudeAgent or codex instance, so give this instance another id";
   if (!isRecord(value) || !isT3Slug(value.driver) || typeof value.enabled !== "boolean") return `a T3 provider instance needs a driver and enabled, such as { "driver": "antigravity", "enabled": true }, and the driver is ${slugRule}`;
+  if (value.driver === "claudeAgent") return "Hedge's Claude recovery owns Claude in T3, so a pack instance takes another driver than claudeAgent";
   if (value.config !== undefined && !(isRecord(value.config) && (value.config.binaryPath === undefined || filled(value.config.binaryPath)))) return "config must be an object, and its binaryPath a path";
+  if (Object.keys(value).some((field) => !instanceFields.includes(field)) || (isRecord(value.config) && "enabled" in value.config)) return "a T3 provider instance holds only driver, enabled and config, and enabled stays out of config, because T3 rewrites the rest when it stores the instance";
   return undefined;
 }
 
