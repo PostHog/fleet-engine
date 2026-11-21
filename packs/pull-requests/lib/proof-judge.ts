@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join } from "node:path";
 import { optionalStringSetting } from "../../base/lib/settings.ts";
 import type { Arbiter, CiResult, Owed } from "./proof.ts";
@@ -207,23 +207,12 @@ export type JudgeDeps = { ask: (request: ModelRequest) => Promise<ModelAnswer>; 
 export type JudgeOutcome = { state: "pass" | "fail" | "unavailable"; lines: string[]; model: string; broken: string[] };
 
 const freeJudgeFails = 2;
-const judgeBudgetSpent = (limit: number) => `judge: budget spent: the judge failed, or is running, ${limit} times on this PR, as often as pull-requests.reviewCeiling allows, so hedge runs it no more. End it with a judge gap on HEAD: record hedge proof gap --kind judge --reason <why HEAD holds now>, and have a decision accept it as the judge gap line says`;
+const judgeBudgetSpent = (failed: number) => `judge: budget spent: the judge failed ${failed} times on this PR, as often as pull-requests.reviewCeiling allows, so hedge runs it no more. End it with a judge gap on HEAD: record hedge proof gap --kind judge --reason <why HEAD holds now>, and have a decision accept it as the judge gap line says`;
 const arbiterInstructions = `You decide if an agent may keep trying to pass a judge, or must ask the user. Below are the reasons a judge failed one pull request on each run, oldest first.
 
 Answer ESCALATE only when the same failure comes back after the author answered it, or a later verdict contradicts an earlier one. In all other cases answer CONTINUE.
 
 Your first line must be exactly CONTINUE, or ESCALATE: followed by one sentence that names the failure. Write nothing else.`;
-
-async function takeRunSlot(directory: string, limit: number) {
-  const slots = join(directory, "runs");
-  await mkdir(slots, { recursive: true, mode: 0o700 });
-  for (let slot = 0; slot < limit; slot++) {
-    const path = join(slots, String(slot));
-    try { await writeFile(path, "", { flag: "wx", mode: 0o600 }); return path; }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
-  }
-  return null;
-}
 
 async function inputKey(model: string, prompt: string, images: string[]) {
   const key = createHash("sha256").update(model).update("\0").update(prompt);
@@ -235,10 +224,9 @@ export async function judge(input: JudgeInput, deps: JudgeDeps): Promise<JudgeOu
   const { prompt, images, readable } = await judgePrompt(input);
   const path = join(deps.directory, `${await inputKey(deps.model, prompt, images)}.json`);
   const cached = await readFile(path, "utf8").then((text) => JSON.parse(text) as JudgeRecord, () => undefined);
-  const slot = cached ? undefined : await takeRunSlot(deps.directory, deps.failLimit);
-  if (slot === null) return { state: "fail", lines: [judgeBudgetSpent(deps.failLimit)], model: deps.model, broken: [] };
+  const failed = cached ? 0 : (await failedRecords(deps.directory)).length;
+  if (failed >= deps.failLimit) return { state: "fail", lines: [judgeBudgetSpent(failed)], model: deps.model, broken: [] };
   const record = cached ?? await askJudge(prompt, images, readable, input.cwd, askedQuestions(input.risk !== undefined), deps);
-  if (slot && ("cause" in record || record.passed)) await rm(slot, { force: true });
   if ("cause" in record) return { state: "unavailable", lines: [`judge: unavailable (${record.cause})`], model: deps.model, broken: [] };
   if (!cached) await writeRecord(path, record);
   const escalation = record.escalation ? [`judge: escalate to the user: ${record.escalation}. First record hedge proof gap --kind judge --reason <why>, then ask them the question it prints with the question tool. When they accept, record their answer with hedge decision record --mark 👤 --class proof-gap --kind judge --pr <owner/repo#n>`] : [];
