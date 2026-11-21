@@ -11,7 +11,7 @@
   Claude and Codex only.
 - `hedge proof` and `hedge dream` run their models with the claude or codex
   CLI. A row of another provider fails there with a sentence that names the
-  row.
+  row, and counts as neither the Claude nor the GPT family.
 
 ### Packs and profiles turn on T3 provider instances
 
@@ -31,13 +31,15 @@
   names `constructor`, `prototype` and `__proto__` are refused.
 - Hedge compares the whole instance. A field the pack drops leaves the
   instance, and a field the user adds is kept and reported as drift.
-- An instance holds only `driver`, `enabled` and `config`, with `enabled`
-  outside `config`, because T3 rewrites the other fields when it stores the
-  instance. The ids `claude` and `codex` and the driver `claudeAgent` are
+- An instance holds only `driver`, `enabled` and `config`, and its `config`
+  only `binaryPath`, because T3 rewrites or redacts the other fields when it
+  stores or serves the instance. The ids `claude` and `codex` and the driver `claudeAgent` are
   refused: model rows and Claude recovery own them.
 - When a pack turns an instance back on, Hedge turns it on again in T3, also
-  when T3 was stopped. When T3 refuses an upsert, `hedge apply` fails, names
-  the instances T3 took, and saves only those as Hedge's. Hedge never removes
+  when T3 was stopped. When T3 refuses an upsert, `hedge apply` fails, reads
+  T3's settings again, and reports and saves as Hedge's only what that read
+  shows. When that read fails too, Hedge keeps each upsert T3 acknowledged as
+  its own. Hedge never removes
   the whole `providerInstances` map that an older engine recorded.
 - Claude recovery binds T3's implicit `claudeAgent` instance also when the
   settings list only other instances.

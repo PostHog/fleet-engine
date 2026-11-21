@@ -144,7 +144,10 @@ async function throughServer(rpc: T3Rpc, merged: Reconciled, effective: Document
   } catch (error) {
     failure = error;
   }
-  const after = failure === undefined ? await readT3Settings(rpc) : undefined;
+  const after = await readT3Settings(rpc).catch((error: unknown) => {
+    failure ??= error;
+    return undefined;
+  });
   const refused = changed.filter((field) => (after ? !takes(field, get(after, field.path)) : !sent.includes(field)));
   const stillOn = disabling.filter((field) => (after ? !holds(get(after, field.path), off) : !sent.includes(field)));
   const taken = changed.filter((field) => !refused.includes(field));

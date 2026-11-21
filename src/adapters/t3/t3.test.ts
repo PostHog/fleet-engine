@@ -108,11 +108,14 @@ function fakeServer(options: { up?: boolean; settings?: Record<string, unknown>;
     links: options.links ?? [],
     ignorePatch: options.ignorePatch ?? false,
     refuseInstances: options.refuseInstances ?? [],
+    closeAfterUpsert: false,
+    closed: false,
   };
   const calls: Array<{ tag: string; payload: unknown }> = [];
   const rpc: T3Rpc = {
     async call<T>(tag: string, payload: unknown) {
       calls.push({ tag, payload });
+      if (state.closed) throw new Error("T3 RPC connection closed");
       if (tag === "server.getConfig") return { settings: withLegacyView(state.settings) } as T;
       if (tag === "server.updateSettings") {
         const { patch: { projectSettingsOverrides: entries, ...patch }, providerInstanceMutation: mutation } = payload as { patch: Record<string, unknown>; providerInstanceMutation?: { operation: "upsert"; instanceId: string; instance: Record<string, unknown> } };
@@ -121,6 +124,7 @@ function fakeServer(options: { up?: boolean; settings?: Record<string, unknown>;
         if (state.ignorePatch) return structuredClone(state.settings) as T;
         Object.assign(state.settings, patch);
         if (mutation?.operation === "upsert") state.settings.providerInstances = { ...(state.settings.providerInstances as object), [mutation.instanceId]: storedInstance(mutation.instance) };
+        if (mutation) state.closed = state.closeAfterUpsert;
         if (entries) {
           const merged = { ...(state.settings.projectSettingsOverrides as Record<string, object>), ...(entries as Record<string, object>) };
           state.settings.projectSettingsOverrides = Object.fromEntries(Object.entries(merged).filter(([, entry]) => Object.keys(entry).length));
@@ -562,6 +566,41 @@ describe("T3 provider instances", () => {
     expect(failed.findings).toContainEqual(expect.objectContaining({ id: "t3:server", say: expect.stringContaining("write-managed-setting providerInstances.muse") }));
     await apply(plan("linux", []), { home, adapters: [adapter] });
     expect(instancesOf(server)).toEqual({ antigravity: instance(home, "antigravity", "agy", false) });
+  });
+
+  test("owns an instance T3 acknowledged though the connection closes before Hedge reads it back, and fails the apply", async () => {
+    const home = temp.make("home-");
+    const { server, adapter } = setup();
+    server.state.closeAfterUpsert = true;
+    const lost = await apply(plan("linux", [agy]), { home, adapters: [adapter] });
+    expect(lost.ok).toBe(false);
+    expect(lost.actions).toContainEqual({ target: "t3 settings", operation: "replace", reason: "set providerInstances.antigravity" });
+    expect(lost.findings).toContainEqual(expect.objectContaining({ id: "t3:server", say: expect.stringContaining("connection closed") }));
+    server.state.closeAfterUpsert = false;
+    server.state.closed = false;
+    const removed = await apply(plan("linux", []), { home, adapters: [adapter] });
+    expect(removed).toMatchObject({ ok: true, actions: [{ target: "t3 settings", operation: "replace", reason: "turn off providerInstances.antigravity" }] });
+    expect(instancesOf(server)).toEqual({ antigravity: instance(home, "antigravity", "agy", false) });
+  });
+
+  test("reports and records only what T3 shows after a refused upsert, so it retries an update T3 ignored", async () => {
+    const home = temp.make("home-");
+    const { server, adapter } = setup();
+    await apply(plan("linux", [agy]), { home, adapters: [adapter] });
+    const moved = entry("providerInstances.antigravity", { driver: "antigravity", enabled: true, config: { binaryPath: "~/.local/bin/agy2" } }, "agents");
+    server.state.ignorePatch = true;
+    server.state.refuseInstances = ["muse"];
+    const refused = await apply(plan("linux", [moved, muse]), { home, adapters: [adapter] });
+    expect(refused.ok).toBe(false);
+    expect(refused.actions).toEqual([]);
+    expect(refused.findings).toContainEqual({ id: "t3:settings", pack: "engine", say: "T3 Code did not take providerInstances.antigravity, providerInstances.muse. Run hedge apply again; if it stays, set it in T3 Code's settings.", repair: "apply" });
+    server.state.ignorePatch = false;
+    server.state.refuseInstances = [];
+    const retried = await apply(plan("linux", [moved, muse]), { home, adapters: [adapter] });
+    expect(retried).toMatchObject({ ok: true, actions: [{ target: "t3 settings", operation: "replace", reason: "set providerInstances.antigravity, providerInstances.muse" }], findings: [] });
+    expect(instancesOf(server)).toEqual({ antigravity: instance(home, "antigravity", "agy2"), muse: instance(home, "muse", "muse") });
+    await apply(plan("linux", []), { home, adapters: [adapter] });
+    expect(instancesOf(server)).toEqual({ antigravity: instance(home, "antigravity", "agy2", false), muse: instance(home, "muse", "muse", false) });
   });
 
   test("leaves an instance the user set up alone when T3 refuses Hedge's adopted value, also once the pack leaves the plan", async () => {
