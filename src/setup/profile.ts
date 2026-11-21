@@ -98,37 +98,27 @@ async function lookUp(machine: Machine, home: string, packs: PackManifest[], pic
   const { gh, exists, login: signedIn } = github(machine);
   const login = await signedIn();
   const name = profileRepoName(login);
+  const personal = `${login}/${oldProfileRepoName}`;
   const org = profileOrg(packs, picked);
+  const team = org && `${org}/${oldProfileRepoName}-${login}`;
   const own = current ? await githubOrigin(machine, current) : undefined;
   const dir = own && current ? current : profilePath(home);
   const inUse = own ?? (await clonedProfile(machine, dir, login));
-  const owners = [...(org ? [org] : []), login];
-  const named = [`${login}/${name}`, org && `${org}/${oldProfileRepoName}-${login}`, `${login}/${oldProfileRepoName}`, org && `${org}/${legacyProfileRepoName}-${login}`, `${login}/${legacyProfileRepoName}`];
-  const theirs = async (repo: string) => {
-    const view = JSON.parse(await gh("repo", "view", repo, "--json", "repositoryTopics")) as Topics;
-    const marks = (view.repositoryTopics ?? []).map((topic) => topic.name).filter((topic) => topic.startsWith("hedge-for-"));
-    return marks.length > 0 && !marks.includes(profileTopic(login));
-  };
+  const legacyTeam = org && `${org}/${legacyProfileRepoName}-${login}`;
   let found: string | undefined;
-  for (const repo of [inUse, ...named]) if (!found && repo && (await exists(repo)) && (repo === inUse || same(owner(repo), login) || !(await theirs(repo)))) found = repo;
-  found ??= await markedProfile(gh, owners, login);
-  if (found && !same(found, `${login}/${oldProfileRepoName}`)) await requirePrivate(machine, found);
+  for (const repo of [inUse, team, `${login}/${name}`, personal, legacyTeam, `${login}/${legacyProfileRepoName}`]) if (!found && repo && (await exists(repo))) found = repo;
+  found ??= await markedProfile(gh, login);
+  if (found && !same(found, personal)) await requirePrivate(machine, found);
   if (found) await checkout(machine, home, dir, found);
-  const personal = found !== undefined && same(owner(found), login) && !found.toLowerCase().endsWith(`/${legacyProfileRepoName}`);
-  return { gh, login, exists, theirs, name, org, dir, found, personal };
+  const movable = found !== undefined && same(owner(found), login) && !found.toLowerCase().endsWith(`/${legacyProfileRepoName}`);
+  return { gh, login, exists, name, org, team, dir, found, movable };
 }
 
 type Topics = { repositoryTopics: Array<{ name: string }> | null };
 
-async function markedProfile(gh: (...args: string[]) => Promise<string>, owners: string[], login: string) {
-  for (const listed of owners) {
-    const repos = JSON.parse(await gh("repo", "list", listed, "--limit", "10000", "--json", "nameWithOwner,repositoryTopics,viewerPermission")) as Array<Topics & { nameWithOwner: string; viewerPermission: string }>;
-    const marks = repos.filter((repo) => repo.repositoryTopics?.some((topic) => topic.name === profileTopic(login)));
-    const marked = marks.find((repo) => same(listed, login) || repo.viewerPermission === "ADMIN") ?? marks[0];
-    if (marked && !same(listed, login) && marked.viewerPermission !== "ADMIN") throw new Error(`${marked.nameWithOwner} has your profile topic ${profileTopic(login)}, but you do not administer it, so Hedge does not trust it. When it is your profile, ask an ${listed} admin to make you its admin. When it is not, remove the topic. Then run hedge setup again.`);
-    if (marked) return marked.nameWithOwner;
-  }
-  return undefined;
+async function markedProfile(gh: (...args: string[]) => Promise<string>, login: string) {
+  const repos = JSON.parse(await gh("repo", "list", login, "--limit", "10000", "--json", "nameWithOwner,repositoryTopics")) as Array<Topics & { nameWithOwner: string }>;
+  return repos.find((repo) => repo.repositoryTopics?.some((topic) => topic.name === profileTopic(login)))?.nameWithOwner;
 }
 
 const owner = (repo: string) => repo.split("/")[0]!;
@@ -142,41 +132,41 @@ export async function existingProfile(machine: Machine, home: string, packs: Pac
 
 async function makeProfile(context: ProfileContext) {
   const { terminal, machine, home, draft } = context;
-  const { gh, login, exists, theirs, name, org, dir, found, personal } = await lookUp(machine, home, context.packs(), draft.packs ?? [], context.current);
+  const { gh, login, exists, name, org, team, dir, found, movable } = await lookUp(machine, home, context.packs(), draft.packs ?? [], context.current);
   const create = (repo: string) => machine.exec(["gh", "repo", "create", repo, "--private", "--description", "My Hedge profile"]);
   const saved = found ? savedSettings(dir) : {};
   const chosen = namedMemory({ ...saved, ...draft.settings });
   const shared = draft.packs?.includes("memory") ? chosen : chosen.kind === "context" && chosen.named !== undefined && draft.packs?.includes("context-library") ? chosen : undefined;
   const memory = shared && (await memoryRepo(machine, shared.named, login, shared.kind));
-  const proposed = `${org ?? login}/${name}`;
-  const confirmed = await confirm(context, found ? undefined : proposed, memory?.missing ? [memory.repo] : [], org, exists);
-  let profileRepo = found ?? confirmed ?? proposed;
-  const inOrg = () => org !== undefined && same(owner(profileRepo), org);
+  const own = `${login}/${name}`;
+  const typed = await confirm(context, found || team ? undefined : own, [...(found || !team ? [] : [team]), ...(memory?.missing ? [memory.repo] : [])], org && !found ? org : undefined, exists);
+  let profileRepo = found ?? team ?? typed ?? own;
   if (!found) {
     const made = await create(profileRepo);
-    if (made.code !== 0 && inOrg() && !(await exists(profileRepo))) {
-      terminal.print(`  · The ${org} org did not let you create ${profileRepo} (${lastLine(made.output).replace(/^GraphQL: /, "")}), so Hedge uses your own account.`);
-      profileRepo = `${login}/${profileRepo.split("/")[1]}`;
-      await gh("repo", "create", profileRepo, "--private", "--description", "My Hedge profile");
-    } else if (made.code !== 0 && !inOrg()) throw new Error(`gh repo create failed: ${lastLine(made.output)}`);
-    else if (made.code !== 0) throw new Error((await theirs(profileRepo)) ? `${profileRepo} is another person's Hedge profile. Run hedge setup again and type another name for yours.` : `${profileRepo} exists, but Hedge cannot tell whether you made it. When it is yours, run gh repo edit ${profileRepo} --add-topic ${profileTopic(login)}, then run hedge setup again. When it is not, run hedge setup again and type another name for yours.`);
-    if (inOrg()) await requirePrivate(machine, profileRepo);
-    const marked = await machine.exec(["gh", "repo", "edit", profileRepo, "--add-topic", profileTopic(login)]);
-    if (marked.code !== 0) throw new Error(`Hedge made ${profileRepo} but could not mark it as your profile (${lastLine(marked.output)}). Run gh repo edit ${profileRepo} --add-topic ${profileTopic(login)}, then run hedge setup again.`);
-    terminal.print(`  ✓ Created the private repo ${profileRepo}${inOrg() ? ` in the ${org} org` : ""}`);
+    if (made.code !== 0 && same(profileRepo, team) && !(await exists(profileRepo))) {
+      terminal.print(`  · The ${org} org did not let you create ${team} (${lastLine(made.output).replace(/^GraphQL: /, "")}), so Hedge uses your own account.`);
+      profileRepo = own;
+      await gh("repo", "create", own, "--private", "--description", "My Hedge profile");
+    } else if (made.code !== 0 && !same(profileRepo, team)) throw new Error(`gh repo create failed: ${lastLine(made.output)}`);
+    if (same(profileRepo, team)) await requirePrivate(machine, profileRepo);
+    else {
+      const marked = await machine.exec(["gh", "repo", "edit", profileRepo, "--add-topic", profileTopic(login)]);
+      if (marked.code !== 0) throw new Error(`Hedge made ${profileRepo} but could not mark it as your profile (${lastLine(marked.output)}). Run gh repo edit ${profileRepo} --add-topic ${profileTopic(login)}, then run hedge setup again.`);
+    }
+    terminal.print(`  ✓ Created the private repo ${profileRepo}${same(profileRepo, team) ? ` in the ${org} org` : ""}`);
   } else terminal.print(`  ✓ Reusing your repo ${found}`);
   await memory?.make((line) => terminal.print(`  ${line}`));
-  if (org && found && personal) {
+  if (team && movable) {
     terminal.print(`  · Your team keeps profiles in the ${org} org. To move yours there, run:`);
-    terminal.print(`      gh api -X POST repos/${found}/transfer -f new_owner=${org} -f new_name=${name}`);
-    terminal.print(`      git -C ${dir} remote set-url origin https://github.com/${org}/${name}.git`);
+    terminal.print(`      gh api -X POST repos/${found}/transfer -f new_owner=${org} -f new_name=${oldProfileRepoName}-${login}`);
+    terminal.print(`      git -C ${dir} remote set-url origin https://github.com/${team}.git`);
   }
 
   if (!found) await checkout(machine, home, dir, profileRepo);
   const target = await saveTarget(machine, dir);
   await git(machine, dir, "config", "user.name", login);
   await git(machine, dir, "config", "user.email", `${login}@users.noreply.github.com`);
-  await startFiles(dir, context, inOrg() ? org : undefined);
+  await startFiles(dir, context, same(profileRepo, team) ? org : undefined);
   const started = await untracked(machine, dir, startFileNames);
   const answeredElsewhere = (draft.inferred ?? []).filter((key) => Object.hasOwn(saved, key));
   Object.assign(draft, { settings: { ...draft.settings, ...Object.fromEntries(answeredElsewhere.map((key) => [key, saved[key] as SettingValue])) } });
@@ -212,7 +202,7 @@ async function clonedProfile(machine: Machine, dir: string, login: string) {
   const repo = await githubOrigin(machine, dir);
   const seen = repo?.toLowerCase();
   const ours = (name: string) => seen !== undefined && (seen === `${login}/${name}`.toLowerCase() || seen.endsWith(`/${name}-${login}`.toLowerCase()));
-  return seen?.endsWith(`/${profileRepoName(login)}`) || ours(oldProfileRepoName) || ours(legacyProfileRepoName) ? repo : undefined;
+  return seen === `${login}/${profileRepoName(login)}`.toLowerCase() || ours(oldProfileRepoName) || ours(legacyProfileRepoName) ? repo : undefined;
 }
 
 async function githubOrigin(machine: Machine, dir: string) {
@@ -292,31 +282,27 @@ function profileOrg(packs: PackManifest[], picked: string[]) {
 }
 
 async function confirm({ terminal, nonInteractive }: ProfileContext, proposed: string | undefined, others: string[], org: string | undefined, exists: (repo: string) => Promise<boolean>) {
-  if (!proposed && !others.length) return undefined;
-  let profile = proposed && (await exists(proposed)) ? undefined : proposed;
-  if (proposed && !profile && nonInteractive) throw new Error(`${proposed} is another person's Hedge profile. Run hedge setup in a terminal and type another name for yours.`);
-  if (nonInteractive) return profile;
-  const where = proposed && org ? `in the ${org} GitHub org, private to the org,` : "in your GitHub account";
+  if ((!proposed && !others.length) || nonInteractive) return proposed;
+  let profile = proposed;
+  const where = org ? `in the ${org} GitHub org, private to the org,` : "in your GitHub account";
   const show = () => {
     const missing = [...(profile ? [profile] : []), ...others];
     terminal.print(`  Hedge creates ${missing.length === 1 ? "the private repo" : "the private repos"} ${missing.join(" and ")} ${where} and pushes your answers there.`);
   };
-  if (proposed && !profile) terminal.print(`  ${proposed} is another person's Hedge profile. Type another name for yours.`);
-  else show();
+  show();
   for (;;) {
     const reply = (await terminal.ask(proposed ? "  Go ahead? (Y/n, or type another name for your profile repo) " : "  Go ahead? (Y/n) ")).trim();
-    if (["", "y", "yes"].includes(reply.toLowerCase()) && (profile || !proposed)) return profile;
+    if (["", "y", "yes"].includes(reply.toLowerCase())) return profile;
     if (["n", "no"].includes(reply.toLowerCase())) {
       terminal.print("  Nothing was created.");
       throw new Stopped();
     }
-    if (!proposed || ["", "y", "yes"].includes(reply.toLowerCase())) continue;
+    if (!proposed) continue;
     const typed = `${owner(proposed)}/${reply}`;
     const clash = others.find((other) => same(other.split("/")[1], reply));
-    const instead = profile ? `, or press ↵ for ${profile}` : "";
     if (!/^[\w.-]+$/.test(reply) || /^\.+$/.test(reply)) terminal.print("  A repo name has only letters, digits, -, _ and dots.");
-    else if (clash) terminal.print(`  ${clash} is the memory repo. Type another name${instead}.`);
-    else if (await exists(typed)) terminal.print(`  ${typed} exists already. Type another name${instead}.`);
+    else if (clash) terminal.print(`  ${clash} is the memory repo. Type another name, or press ↵ for ${profile}.`);
+    else if (await exists(typed)) terminal.print(`  ${typed} exists already. Type another name, or press ↵ for ${profile}.`);
     else (profile = typed), show();
   }
 }

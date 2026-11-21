@@ -224,11 +224,11 @@ It installs agent rules, skills, and workflows on your hub and your nodes. A
 **workflow** is one way of working that agents follow, such as a draft pull
 request for every fix. A **pack** is a set of workflows that you turn on as
 a whole. Your answers go to your **profile**, a private GitHub repo named
-`<login>-hedge`, so every box you add gets the same setup. A team pack can
-keep its members' profiles in the team's GitHub org instead, with the same
-name, so teammates can read each other's setup. Setup proposes the name, and
-you can type another. A profile from before keeps its name, such as
-`hedge-profile` or `hedge-profile-<login>`.
+`<login>-hedge`, so every box you add gets the same setup. Setup proposes the
+name, and you can type another. A team pack can keep its members' profiles in
+the team's GitHub org instead, as `hedge-profile-<login>`, so teammates can
+read each other's setup. A profile from before keeps its name, such as
+`hedge-profile`.
 
 ## 4. The hub and the nodes
 

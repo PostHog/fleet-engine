@@ -73,7 +73,7 @@ listed() {
     topics=null
     [ ! -f "$bare/topics" ] || topics="[$(sed 's/.*/{"name":"&"}/' "$bare/topics" | paste -sd, -)]"
     [ "$first" = 1 ] || printf ','
-    printf '{"nameWithOwner":"%s/%s","repositoryTopics":%s,"viewerPermission":"ADMIN"}' "$owner" "$repo" "$topics"
+    printf '{"nameWithOwner":"%s/%s","repositoryTopics":%s}' "$owner" "$repo" "$topics"
     first=0
   done
   printf ']\n'
