@@ -28,6 +28,21 @@ test("a final read of a HEAD that only merges the base is refused, because it wo
   expect((await pr.hedge("gate")).output).toContain(`review: HEAD carried forward from the review of ${reviewed.slice(0, 7)} across 1 clean merge(s) of the base`);
 });
 
+test("a final read after a conflicting base merge that keeps the PR's side is refused, and says the gate does not carry the review", async () => {
+  const { pr, reviewed } = await reviewedPr();
+  await pr.advanceBase("shared.txt", "one\nand the team's name\n");
+  await pr.git("merge", "-q", "--no-edit", "main");
+  writeFileSync(join(pr.repository, "shared.txt"), "one\nand the member's name\n");
+  await pr.git("add", "shared.txt");
+  await pr.git("commit", "-q", "--no-edit");
+  const reviewer = fakeModel(pr, "REVIEWER", "No findings.");
+
+  const refused = await pr.hedge("review", "--scope", "final", "--base", reviewed).then(() => "", (error: Error) => error.message);
+
+  expect(refused).toBe(`HEAD needs no final read: the commits since ${reviewed.slice(0, 7)} change no file of the PR, so the read would see nothing. hedge proof gate does not carry the review to HEAD: run a full round, which reads the whole PR`);
+  expect(reviewer.prompts()).toEqual([]);
+});
+
 test("a final read of a commit that puts a PR file back to the base's text reads that change", async () => {
   const { pr, reviewed } = await reviewedPr();
   await pr.commit("shared.txt", "one\n");
