@@ -424,8 +424,8 @@ again, and still exits 75 when CI runs past the limit; then the verdict says to 
 required check that has not reported may never start. An error of that second run names the failed read that ended
 the wait. The limit bounds the waiting; a read of GitHub that has started
 still finishes. While it waits, the gate record holds exit 75 and the decision ledger holds a failure at the head, dated
-when the gate read CI as running, so no merge gate counts a pass shared before that read. When that failure cannot be shared, the gate does not wait
-and says so; the result after the wait is shared with the time the wait ended. A run longer than your shell's limit belongs in the background. hedge reads the PR and its CI over GitHub's REST API. Only finding the PR of the
+when the gate read CI as running, so no merge gate counts a pass shared before that read. When that failure cannot be shared, the gate does not wait,
+and its verdict names the ledger error to fix; the result after the wait is shared with the time the wait ended. A run longer than your shell's limit belongs in the background. hedge reads the PR and its CI over GitHub's REST API. Only finding the PR of the
 checkout without --repo and --pr uses gh pr view; pass both when GraphQL is out. A check that ran more than once
 counts with its newest run from each app, as GitHub's required checks do. The
 required checks of the base branch, from its rulesets and branch protection, decide CI; other checks print as not
@@ -481,12 +481,12 @@ code and the reason. The gate's lines and hedge decision report come from the sa
       let gate: FinalGate;
       let gatedAt = startedAt;
       let waited: Waited | undefined;
-      let unshared: string | undefined;
+      let unshared: Shared | undefined;
       try {
         const gateHead = () => finalGate(head, context, { landed: flags.has("--landed") });
         gate = await gateHead();
         if (gate.code === ciRunningCode && wait) unshared = await shareGateResult(head, false, clock(), context);
-        if (gate.code === ciRunningCode && wait && !unshared) {
+        if (gate.code === ciRunningCode && wait && !unshared?.error) {
           await record({ code: gate.code, reason: gate.reason });
           waited = await untilCiFinishes(head, context, wait);
           gatedAt = clock();
@@ -500,8 +500,9 @@ code and the reason. The gate's lines and hedge decision report come from the sa
         throw waited?.failedRead ? new Error(message) : error;
       }
       await record({ code: gate.code, reason: gate.reason });
-      const shared = await shareGateResult(head, gate.code === 0, gatedAt, context);
-      const waitLine = waited?.failedRead ? `ci: --wait stopped early at a failed read of GitHub: ${waited.failedRead}` : unshared ? `ci: --wait did not wait: ${unshared}` : undefined;
+      const shared = (await shareGateResult(head, gate.code === 0, gatedAt, context))?.line;
+      if (unshared?.error && gate.code === ciRunningCode) gate = { ...gate, verdict: `gate: pending (exit ${gate.code}): ${gate.reason}. --wait did not wait: the decision ledger did not take the failure (${unshared.error}). Fix the ledger's reach, such as the hub connection, then run the gate again` };
+      const waitLine = waited?.failedRead ? `ci: --wait stopped early at a failed read of GitHub: ${waited.failedRead}` : unshared?.error ? `ci: --wait did not wait: ${unshared.line}` : undefined;
       if (flags.has("--json")) print(JSON.stringify({ ...gate.summary, reason: gate.reason, ...waitLine ? { wait: waitLine } : {}, ...shared ? { ledger: shared } : {} }));
       else for (const line of [...gate.lines, ...waitLine ? [waitLine] : [], ...shared ? [shared] : [], gate.verdict]) print(line);
       return gate.code;
@@ -1167,13 +1168,16 @@ async function untilCiFinishes(head: ProofIdentity, context: CommandContext, min
   return { ranOut: true };
 }
 
-async function shareGateResult(head: ProofIdentity, passed: boolean, startedAt: Date, context: ProofContext): Promise<string | undefined> {
+type Shared = { line: string; error?: string };
+
+async function shareGateResult(head: ProofIdentity, passed: boolean, startedAt: Date, context: ProofContext): Promise<Shared | undefined> {
   const result = passed ? "pass" : "failure";
   try {
     await ledgerOf(context).append({ type: "gate", repository: head.repository, pr: head.pr, commit: head.commit, passed, machine: thisMachine(context.env), at: startedAt.toISOString() });
-    return passed ? "merge gate: pass recorded in the decision ledger" : undefined;
-  } catch (error) {
+    return passed ? { line: "merge gate: pass recorded in the decision ledger" } : undefined;
+  } catch (failure) {
+    const error = String((failure as Error).message ?? failure).split("\n")[0]!;
     const reach = passed ? "an enqueue from another machine is refused until the gate passes there" : "another machine may still count an earlier pass at this head";
-    return `merge gate: ${result} recorded on this machine only (${String((error as Error).message ?? error).split("\n")[0]}); ${reach}`;
+    return { line: `merge gate: ${result} recorded on this machine only (${error}); ${reach}`, error };
   }
 }
