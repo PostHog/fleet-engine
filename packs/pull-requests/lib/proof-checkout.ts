@@ -20,7 +20,7 @@ export function topLevel(run: Run) {
 export function mergeBase(identity: ProofIdentity, run: Run) {
   const base = pullRequestDetails(identity, run).baseRefName;
   const remotes = remotesOf(identity.repository, run);
-  const fetched = remotes.filter((remote) => run(["git", "fetch", "--quiet", remote, `+refs/heads/${base}:refs/remotes/${remote}/${base}`]).code === 0);
+  const fetched = remotes.filter((remote) => run(["git", "fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "--refmap=", remote, `+refs/heads/${base}:refs/remotes/${remote}/${base}`]).code === 0);
   for (const remote of [...fetched, ...remotes.filter((other) => !fetched.includes(other))]) {
     const result = run(["git", "merge-base", `refs/remotes/${remote}/${base}`, identity.commit]);
     if (result.code === 0) return result.stdout.trim();

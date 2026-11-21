@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { checkout, cleanFixtures, fakeModel, fixture, reviewHead, verdict, type Checkout } from "./proof-testing.ts";
 
@@ -11,6 +11,7 @@ async function publishBase(pr: Checkout, remote = "origin") {
   await pr.git("init", "-q", "--bare", bare);
   await pr.git("push", "-q", bare, "main:refs/heads/main");
   await pr.git("remote", remote === "origin" ? "set-url" : "add", remote, bare);
+  return bare;
 }
 
 async function mergeBaseBehindStaleRef(pr: Checkout) {
@@ -86,17 +87,21 @@ test("when one remote of the repository cannot be fetched, the judge reads the b
   expect(prompt).not.toContain("the base moves on");
 });
 
-test("fetching the base keeps local tags and other remote refs in a checkout that prunes on fetch", async () => {
+test("fetching the base writes no ref but the base's remote ref, even in a checkout that prunes and maps the base elsewhere", async () => {
   const pr = await checkout();
   const stale = await mergeBaseBehindStaleRef(pr);
-  await publishBase(pr);
+  const bare = await publishBase(pr);
+  await pr.git("push", "-q", bare, "main:refs/tags/remote-tag");
   await pr.git("update-ref", "refs/remotes/origin/main", stale);
   await pr.git("update-ref", "refs/remotes/origin/gone", stale);
+  await pr.git("update-ref", "refs/heads/mirror", stale);
   await pr.git("tag", "unpublished");
   await pr.git("config", "fetch.prune", "true");
   await pr.git("config", "fetch.pruneTags", "true");
+  await pr.git("config", "--add", "remote.origin.fetch", "+refs/heads/main:refs/heads/mirror");
+  const refsBefore = await pr.git("for-each-ref", "--format=%(refname) %(objectname)", "--exclude=refs/remotes/origin/main");
 
   await judgePrompt(pr);
-  expect(await pr.git("tag", "--list")).toBe("unpublished");
-  expect(await pr.git("for-each-ref", "--format=%(refname)", "refs/remotes/origin/gone")).toBe("refs/remotes/origin/gone");
+  expect(await pr.git("for-each-ref", "--format=%(refname) %(objectname)", "--exclude=refs/remotes/origin/main")).toBe(refsBefore);
+  expect(existsSync(join(pr.repository, ".git/FETCH_HEAD"))).toBe(false);
 });
