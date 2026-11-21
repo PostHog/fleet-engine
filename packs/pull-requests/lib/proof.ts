@@ -300,7 +300,7 @@ async function startFinalRead(home: string, identity: ProofIdentity, base: strin
   };
   return reserveWeighed(reviews, lockBudget, snapshot, permitRead, async ({ dropping }, verdict) => {
     for (const name of dropping) if (!await dropUnanswered!(join(reviews, name))) throw new Error(`The reviews changed while this one weighed the budget. ${weighAgain}`);
-    const taken = new Set([...await reviewNames(reviews), ...(await entries(droppedDirectory(reviews))).map(droppedName)]);
+    const taken = new Set([...await reviewNames(reviews), ...(await entries(droppedDirectory(reviews))).filter((entry) => droppedEntry.test(entry)).map(droppedName)]);
     let read = 1;
     while (taken.has(finalReadPrefix + read)) read++;
     const name = finalReadPrefix + read;

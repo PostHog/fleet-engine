@@ -112,15 +112,32 @@ test("show redacts a token that crosses the cut of a long failure cause", async 
   expect(show).not.toContain("ghp_a1a1");
 });
 
-test("show names only the drops that hedge archived, not a copy made by hand", async () => {
+test("show and the next read number count only the drops that hedge archived, not a copy made by hand", async () => {
   const { pr, reviewed } = await blockedFinalRead();
-  await pr.commit("feature.txt", "greet the new member\n");
+  const newer = await pr.commit("feature.txt", "greet the new member\n");
   fakeModel(pr, "REVIEWER", "No findings.");
   await finalRead(pr, reviewed);
   const archive = join(reviews(pr), "dropped");
-  cpSync(join(archive, readdirSync(archive)[0]!), join(archive, "final-1-backup"), { recursive: true });
+  cpSync(join(archive, readdirSync(archive)[0]!), join(archive, "final-3-backup"), { recursive: true });
+  await pr.commit("feature.txt", "greet every new member\n");
 
+  const read = await finalRead(pr, newer);
+
+  expect(JSON.parse(read.output.split("\n")[0]!)).toMatchObject({ id: "final-3" });
   expect((await pr.hedge("show")).output.match(/dropped at/g)).toHaveLength(1);
+});
+
+test("a cause that hedge cannot save hides neither the reviewer's quota stop nor its exit code", async () => {
+  const { pr, reviewed } = await reviewedPr();
+  const round = join(reviews(pr), "final-1/round.json");
+  pr.env.HEDGE_PROOF_QUOTA_GRACE_MS = "0";
+  pr.env.HEDGE_PROOF_REVIEWER = `cat >/dev/null; mv '${round}' '${round}.kept' && mkdir '${round}'; echo 'exceeded retry limit, last status: 429 Too Many Requests' >&2; exit 1`;
+
+  const read = await finalRead(pr, reviewed);
+
+  expect(read.code).toBe(4);
+  expect(read.output).toContain("429 Too Many Requests");
+  expect(read.output).toContain("hedge could not save this cause");
 });
 
 test("a final read that hedge refuses at the new HEAD drops nothing", async () => {

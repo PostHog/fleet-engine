@@ -627,12 +627,14 @@ async function askReviewer(reserved: SingleRound, head: ProofIdentity, author: F
   const prompt = reviewPrompt({ scope: reserved.scope, from, commit: head.commit, diff, diffFile, note: leftOutNote(leftOut), crossFamily: familyOf(row) !== author, title: pr.title, body: pr.body, rubric, references: skillReferences(home), reviewRules: rules, lens });
   const answer = await askModel("reviewer", row, { prompt, cwd: topLevel(run) ?? cwd, readable: [join(home, ".agents/skills"), reserved.directory] }, env, limit);
   const label = reserved.round === "final" ? "The final read" : `Round ${reserved.round}`;
-  if (!answer.ok) await recordFailure(reserved.directory, answer.cause);
-  if (!answer.ok && isQuotaExhausted(answer.cause)) {
-    print(`The reviewer ${answer.model} stopped: ${answer.cause}. ${label} stays reserved; run hedge proof review again once the quota is back.`);
-    return quotaExitCode;
+  if (!answer.ok) {
+    const unsaved = await recordFailure(reserved.directory, answer.cause).then(() => "", (error: Error) => ` hedge could not save this cause: ${error.message}`);
+    if (isQuotaExhausted(answer.cause)) {
+      print(`The reviewer ${answer.model} stopped: ${answer.cause}. ${label} stays reserved; run hedge proof review again once the quota is back.${unsaved}`);
+      return quotaExitCode;
+    }
+    throw new Error(`The reviewer ${answer.model} gave no findings (${answer.cause}). ${label} stays reserved; run hedge proof review again to retry it.${unsaved}`);
   }
-  if (!answer.ok) throw new Error(`The reviewer ${answer.model} gave no findings (${answer.cause}). ${label} stays reserved; run hedge proof review again to retry it`);
   const anchors = anchorCheck(answer.text, diff, await reviewRecords(home, head));
   await storeCapturedFindings(reserved.directory, head, roundId(reserved.id), answer.text, answer.model, answer.usage);
   if (anchors) await writeFile(join(reserved.directory, "anchors.md"), anchors + "\n", { mode: 0o600 });
