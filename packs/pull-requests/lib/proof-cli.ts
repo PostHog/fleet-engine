@@ -481,10 +481,12 @@ code and the reason. The gate's lines and hedge decision report come from the sa
       let gate: FinalGate;
       let gatedAt = startedAt;
       let waited: Waited | undefined;
+      let unshared: string | undefined;
       try {
         const gateHead = () => finalGate(head, context, { landed: flags.has("--landed") });
         gate = await gateHead();
-        if (gate.code === ciRunningCode && wait && !await shareGateResult(head, false, clock(), context)) {
+        if (gate.code === ciRunningCode && wait) unshared = await shareGateResult(head, false, clock(), context);
+        if (gate.code === ciRunningCode && wait && !unshared) {
           await record({ code: gate.code, reason: gate.reason });
           waited = await untilCiFinishes(head, context, wait);
           gatedAt = clock();
@@ -499,7 +501,7 @@ code and the reason. The gate's lines and hedge decision report come from the sa
       }
       await record({ code: gate.code, reason: gate.reason });
       const shared = await shareGateResult(head, gate.code === 0, gatedAt, context);
-      const waitLine = waited?.failedRead ? `ci: --wait stopped early at a failed read of GitHub: ${waited.failedRead}` : undefined;
+      const waitLine = waited?.failedRead ? `ci: --wait stopped early at a failed read of GitHub: ${waited.failedRead}` : unshared ? `ci: --wait did not wait: ${unshared}` : undefined;
       if (flags.has("--json")) print(JSON.stringify({ ...gate.summary, reason: gate.reason, ...waitLine ? { wait: waitLine } : {}, ...shared ? { ledger: shared } : {} }));
       else for (const line of [...gate.lines, ...waitLine ? [waitLine] : [], ...shared ? [shared] : [], gate.verdict]) print(line);
       return gate.code;

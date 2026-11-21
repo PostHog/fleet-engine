@@ -253,15 +253,16 @@ test("--wait does not wait when it cannot share the failure first, and names why
   const ledger = join(pr.home, ".local/state/hedge/decisions.jsonl");
   if (existsSync(ledger)) renameSync(ledger, `${ledger}.kept`);
   mkdirSync(ledger, { recursive: true });
-  let slept = 0;
-  pr.panel.onPause = async () => { slept++; };
+  pr.panel.onPause = async (ms = 0) => {
+    pr.clock.now = new Date(pr.clock.now.getTime() + ms);
+    pr.ci([{ name: "test", bucket: "pass" }]);
+  };
   const gate = await pr.hedge("gate", "--wait", "10");
   expect(gate.code).toBe(75);
-  expect(slept).toBe(0);
-  expect(gate.output).toContain("merge gate: failure recorded on this machine only (");
+  expect(gate.output).toContain("ci: --wait did not wait: merge gate: failure recorded on this machine only (");
   expect(lastLine(gate.output)).toStartWith("gate: pending (exit 75): CI is still running: waiting on: test. ");
   const json = await pr.hedge("gate", "--wait", "10", "--json");
-  expect(JSON.parse(json.output)).toMatchObject({ code: 75, ledger: expect.stringMatching(/^merge gate: failure recorded on this machine only \(/) });
+  expect(JSON.parse(json.output)).toMatchObject({ code: 75, wait: expect.stringMatching(/^ci: --wait did not wait: merge gate: failure recorded on this machine only \(/), ledger: expect.stringMatching(/^merge gate: failure recorded on this machine only \(/) });
 });
 
 test("while --wait waits, the gate record says CI is still running", async () => {
