@@ -13,5 +13,3 @@ export function bunCheckout(temp: { make(prefix?: string): string }) {
   writeFileSync(join(dir, "preload.ts"), `await Bun.write(${JSON.stringify(marker)}, "");\n`);
   return { dir, preloaded: () => existsSync(marker) };
 }
-
-export const reportCheckoutEnv = (report: string) => `await Bun.write(${JSON.stringify(report)}, JSON.stringify(Object.fromEntries(Object.entries(Bun.env).filter(([name]) => name.startsWith("CHECKOUT_")))));\n`;

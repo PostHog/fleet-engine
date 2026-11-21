@@ -7,7 +7,6 @@ import { devbox, engineSource, mac, resolveEngine, skillSources } from "../../sr
 import { t3CliRunner, t3Threads } from "../../src/integrations/t3/index.ts";
 import { startT3Stub, type T3Stub } from "../../src/integrations/t3/testing.ts";
 import type { ModelRow } from "../../src/pack/types.ts";
-import { bunScript } from "../../src/runner/bun.ts";
 import { secretStore } from "../../src/runner/context.ts";
 import { launcher, listen, ownerOf, slackTrigger, type SlackCommandDeps } from "./lib/command.ts";
 import { launchHere, launchOnBox, launchOnNodes, spawnRunner, type Run } from "./lib/launch.ts";
@@ -298,7 +297,8 @@ describe("saving to the context library", () => {
     { user: "U0OTHER", ts: "200.1", text: "Sprint planning notes in the canvas" , files: [{ id: "F0CANVAS", title: "Sprint plan", filetype: "canvas" }] },
     { user: ownerId, ts: "200.2", text: "load test first" },
   ];
-  const handlers = JSON.stringify({ "slack-capture": "/opt/context/slack-capture.ts" });
+  const captureScript = "/opt/context/slack-capture.ts";
+  const handlers = JSON.stringify({ "slack-capture": captureScript });
   const captured = { path: "notes/sprint-planning-2026-11-11.md", title: "Sprint <planning>", url: "https://notes.example.com/blob/main/notes/sprint-planning-2026-11-11.md", updated: false, text: "# Sprint planning" };
 
   async function listening(answer: (input: string) => { code: number; stdout: string }, extra: Partial<SlackCommandDeps> = {}) {
@@ -306,7 +306,7 @@ describe("saving to the context library", () => {
     const home = await homeWithTokens();
     const stop = new AbortController();
     const ran = processes((argv, input) => {
-      if (argv.join(" ") !== bunScript("/opt/context/slack-capture.ts").join(" ")) return undefined;
+      if (argv.at(-1) !== captureScript) return undefined;
       return "note" in JSON.parse(input ?? "{}") ? { code: 0, stdout: `${JSON.stringify(nobodyNeedsIt)}\n` } : answer(input ?? "");
     });
     const deps = commandDeps(home, { env: { HEDGE_SETTINGS: settings(), HEDGE_HANDLERS: handlers }, slackBase: slack.base, stop: stop.signal, run: ran.run, ...extra });
@@ -316,8 +316,8 @@ describe("saving to the context library", () => {
     return { slack, ran, deps, end };
   }
   const nobodyNeedsIt = { sent: [], failed: [] };
-  const captures = (ran: ReturnType<typeof processes>) => ran.calls.filter((call) => call.argv[0] === process.execPath).map((call) => JSON.parse(call.input!)).filter((input) => "source" in input);
-  const sends = (ran: ReturnType<typeof processes>) => ran.calls.filter((call) => call.argv[0] === process.execPath).map((call) => JSON.parse(call.input!)).filter((input) => "note" in input);
+  const captures = (ran: ReturnType<typeof processes>) => ran.calls.filter((call) => call.argv.at(-1) === captureScript).map((call) => JSON.parse(call.input!)).filter((input) => "source" in input);
+  const sends = (ran: ReturnType<typeof processes>) => ran.calls.filter((call) => call.argv.at(-1) === captureScript).map((call) => JSON.parse(call.input!)).filter((input) => "note" in input);
   const reactionCalls = (slack: ReturnType<typeof slackStub>) => slack.calls.filter((call) => call.method.startsWith("reactions.")).map((call) => `${call.method} ${call.args.timestamp} ${call.args.name}`);
 
   test("the owner's :brain: hands the whole thread and its canvases to the context library, shows :eyes: while it runs, then clears both and says where the note went", async () => {
@@ -406,7 +406,7 @@ describe("saving to the context library", () => {
       `:brain: Updated <${captured.url}|Sprint &lt;planning&gt;> in your context library (\`${captured.path}\`). It updates as the thread gets replies.\nNo open thread needed it.`,
     ]);
     expect(reactionCalls(slack)).toEqual(["reactions.add 200.1 eyes", "reactions.remove 200.1 eyes", "reactions.add 200.1 eyes", "reactions.remove 200.1 eyes", "reactions.remove 200.1 brain"]);
-    expect(ran.calls.some((call) => call.argv[0] !== process.execPath && call.argv[0] !== "git")).toBe(false);
+    expect(ran.calls.some((call) => call.argv.at(-1) !== captureScript && call.argv[0] !== "git")).toBe(false);
   });
 
   test("a second :brain: while the first capture runs starts no second capture", async () => {

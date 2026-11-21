@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { main } from "./cli.ts";
-import { bunCheckout, nodeEnvs, reportCheckoutEnv } from "./testing/bun-checkout.ts";
+import { bunCheckout, nodeEnvs } from "./testing/bun-checkout.ts";
 import { cliFixtures, repoRoot } from "./testing/cli.ts";
 import { tempDirs } from "./testing/git.ts";
 
@@ -118,7 +118,7 @@ describe("hedge routing", () => {
     const home = temp.make("home-");
     expect((await hedge(["apply", "--profile", profileDir(["tools"])], home, engine)).code).toBe(0);
     const report = join(home, "env.json");
-    writeFileSync(join(engine, "packs/tools/commands/hello.ts"), reportCheckoutEnv(report));
+    writeFileSync(join(engine, "packs/tools/commands/hello.ts"), `await Bun.write(${JSON.stringify(report)}, JSON.stringify(Object.fromEntries(Object.entries(Bun.env).filter(([name]) => name.startsWith("CHECKOUT_")))));\n`);
     const checkout = bunCheckout(temp);
     const inherited = Object.fromEntries(Object.entries(Bun.env).filter(([key]) => !/^(HEDGE|FLEET)_|^NODE_ENV$/.test(key)));
     for (const nodeEnv of nodeEnvs) {
