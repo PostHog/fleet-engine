@@ -78,7 +78,7 @@ test("a gap record without --message never skips a later card that names the PR:
   pr.choose("Add the standing rule", "Add a standing rule for panel gaps on prune lanes? example/product#42 and example/product#43");
   const record = (ref: string, ...more: string[]) => pr.decide("record", "--mark", "👍", "--class", "proof-gap", "--kind", "panel", "--pr", ref, ...more);
 
-  await expect(record("example/product#42")).rejects.toThrow(`The latest answer to "Accept the panel gap?" is request-1:0. When that is the answer, record it with --message request-1:0`);
+  await expect(record("example/product#42")).rejects.toThrow(`The latest answer to "Accept the panel gap?" is request-1:0; when that is the answer, record it with --message request-1:0`);
   await expect(record("example/product#43")).rejects.toThrow("record it with --message request-2:0");
   expect(ledgerDecisions(pr)).toEqual([]);
 
@@ -97,12 +97,24 @@ test("a gap record whose latest answer is a refusal on another card refuses, and
   expect(ledgerDecisions(pr)).toEqual([]);
 });
 
-test("a refused record without --message says how to list the answer ids", async () => {
+test("a refused record without --message says how to list the answer ids, also when no answer names the PR", async () => {
   const pr = await checkout();
   pr.choose("Add the standing rule", "Add a standing rule for panel gaps on prune lanes? example/product#42");
+  const record = (ref: string) => pr.decide("record", "--mark", "👍", "--class", "proof-gap", "--kind", "panel", "--pr", ref);
+  const listIds = "To record another answer, name it with --message <id>; hedge thread read thread-1 --words lists the ids";
 
-  await expect(pr.decide("record", "--mark", "👍", "--class", "proof-gap", "--kind", "panel", "--pr", "example/product#42")).rejects.toThrow("To record another answer, name it with --message <id>; hedge thread read thread-1 --words lists the ids");
+  await expect(record("example/product#42")).rejects.toThrow(listIds);
+  await expect(record("example/product#44")).rejects.toThrow(`names example/product#44, the panel gap. Ask them with the question tool and name each PR in the question. Only answers they gave in the T3 app count. ${listIds}`);
   expect(ledgerDecisions(pr)).toEqual([]);
+});
+
+test("a later acceptance of the gap on a card worded another way still records over an earlier decline on the gap card", async () => {
+  const pr = await checkout();
+  pr.chooseGap("panel", "A prune lane runs no QA swarm", "Keep the gap open");
+  pr.choose("Accept the gap", "Do you accept the panel gap on example/product#42 after all?");
+
+  expect((await pr.decide("record", "--mark", "👤", "--class", "proof-gap", "--kind", "panel", "--pr", "example/product#42")).code).toBe(0);
+  expect(lineOf((await pr.decide("list", "--pr", "example/product#42")).output, "- 👤")).toContain("Do you accept the panel gap on example/product#42 after all?");
 });
 
 test("one answer records one decision: the same message twice is refused", async () => {
