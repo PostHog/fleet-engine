@@ -124,7 +124,7 @@ function sentTexts(found: Command, cwd: string | undefined, io: IntentIO, inline
   const paths = files.map((path) => stdinPath.test(path) ? "-" : path);
   const piped = paths.includes("-") && !found.stdin;
   const read = paths.map((path) => path === "-" ? found.stdin?.body ?? "" : io.readText(resolve(cwd ?? ".", found.chdir ?? ".", home(path))));
-  const namedAgain = (path: string) => count(line.raw, basename(path)) > 1 || line.words.reduce((sum, word) => sum + count(word, basename(path)), 0) > 1;
+  const namedAgain = (path: string) => line.words.reduce((sum, word) => sum + count(word, basename(path)), 0) > 1;
   const payloads = paths.flatMap((path, index) => read[index] === undefined ? [] : [{ text: read[index]!, rewritable: namedAgain(path) }]);
   const unsettled = withJsonStrings([...inline, found.stdin?.body ?? "", ...payloads.filter((payload) => payload.rewritable).map((payload) => payload.text)]);
   const settled = withJsonStrings(payloads.filter((payload) => !payload.rewritable).map((payload) => payload.text));
