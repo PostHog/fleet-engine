@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { leanClaudeEnv, modelFor, modelSessionEnv, modelTable, type ModelRow } from "../../base/lib/models.ts";
+import { leanClaude, modelFor, modelSessionEnv, modelTable, type ModelRow } from "../../base/lib/models.ts";
 import { quotaGraceMs, quotaWatch } from "../../base/lib/quota.ts";
 
 export const families = ["claude", "gpt"] as const;
@@ -60,11 +60,11 @@ export async function askModel(role: Role, row: ModelRow, request: ModelRequest,
     const command = replacement ? ["sh", "-c", replacement] : await modelCommand(role, { ...row, model }, request, scratch, output);
     const lean = replacement ? undefined : row.provider;
     const limits = { timeout, grace: graceOf(env.HEDGE_PROOF_QUOTA_GRACE_MS), events: lean !== undefined };
-    const spawnEnv = lean === "claude" ? leanClaudeEnv(env.HOME ?? homedir(), env) : env;
-    let answer = await spawnWithLimit(command, request, spawnEnv, limits);
+    const { argv, env: spawnEnv } = lean === "claude" ? leanClaude(command, env.HOME ?? homedir(), env) : { argv: command, env };
+    let answer = await spawnWithLimit(argv, request, spawnEnv, limits);
     if (answer.transient) {
       await Bun.sleep(retryDelayOf(env.HEDGE_PROOF_RETRY_DELAY_MS));
-      answer = await spawnWithLimit(command, request, spawnEnv, limits);
+      answer = await spawnWithLimit(argv, request, spawnEnv, limits);
       if (answer.transient) return { ok: false, cause: `${answer.cause} (after a retry)`, model };
     }
     if (answer.cause !== undefined) return { ok: false, cause: answer.cause, model };
