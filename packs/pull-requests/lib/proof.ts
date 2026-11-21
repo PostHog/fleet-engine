@@ -275,12 +275,12 @@ async function startFinalRead(home: string, identity: ProofIdentity, base: strin
   const reviews = join(pullRequestDirectory(home, identity), "reviews");
   const { free, ceiling } = permit.limits;
   const snapshot = async () => ({ ...await reviewsSpent(reviews, phase, "unfinished spends"), reviews: await finishedReviews(home, identity) });
-  const permitRead = async ({ spent, names, reviews: finished }: Awaited<ReturnType<typeof snapshot>>) => {
+  const permitRead = async ({ spent, names, finished: saved, reviews: finished }: Awaited<ReturnType<typeof snapshot>>) => {
     const carried = gateCarry(identity, finished, cleanBaseMerge, quietCommit).found;
     const latest = finished.at(-1);
     if (!latest) throw new Error("A final read needs a finished earlier review");
     if (!coversReview(base, latest.commit, cleanBaseMerge)) throw new Error(`Final read base must be the latest reviewed commit ${latest.commit}, or a clean base merge the gate carried it to`);
-    const unfinished = names.some((name) => !finished.some((review) => review.name === name));
+    const unfinished = (await Promise.all(names.map(async (name) => !saved.includes(name) || await panelOutcome(join(reviews, name)) === "unfinished"))).some(Boolean);
     const retry = unfinished ? "" : ` To read it anyway, pass ${spent < ceiling ? "--agent '<your reason>', or " : ""}the user's --override`;
     if (!decision && carried?.quiet.length) throw new Error(`HEAD needs no final read: final read carried from ${short(carried.from)}: ${quietReason(carried.kinds)}. hedge proof gate counts the carry.${retry}`);
     if (unfinished) throw new Error("A review is unfinished. Finish it before a final read.");
