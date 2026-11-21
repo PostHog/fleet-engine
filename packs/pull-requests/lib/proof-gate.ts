@@ -181,6 +181,9 @@ async function judgeDiff(head: ProofIdentity, known: Omit<JudgeInput, "cwd" | "f
 
 function endBroken(ids: string[]) {
   const decisions = ids.filter((id) => !isStandingCondition(id));
-  if (decisions.length) return `End ${decisions.map(conditionName).join(" and ")} with hedge decision void <id> --reason <why its condition no longer holds>, then decide or ask again`;
-  return `Meet the condition of ${ids.map(conditionName).join(" and ")} that the judge names, then run hedge proof gate again`;
+  const rules = ids.filter(isStandingCondition);
+  return [
+    ...decisions.length ? [`End ${decisions.map(conditionName).join(" and ")} with hedge decision void <id> --reason <why its condition no longer holds>, then decide or ask again`] : [],
+    ...rules.length ? [`Meet the condition of ${rules.join(" and ")} that the judge names, then run hedge proof gate again`] : [],
+  ].join(". ");
 }

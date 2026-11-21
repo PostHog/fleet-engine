@@ -9,17 +9,25 @@ export function reviewRange(run: Run, from: string, head: string, branched: stri
   const changed = changedFiles(run, from, head);
   if (from === branched) return { files: changed.map(last), leftOut: [], diff: changed.length ? diffOf(run, from, head) : "" };
   const merged = cleanMerge(run, from, branched);
-  return merged === undefined ? ownedRange(run, from, head, branched, changed) : rangeFromMerge(run, merged, head, changed);
+  return merged === undefined ? ownedRange(run, from, head, branched, changed) : rangeFromMerge(run, merged, from, head, branched, changed);
 }
 
 export const leftOutNote = (leftOut: string[]) =>
   leftOut.length ? `This diff holds only the files the PR changes against its base. It leaves out ${leftOut.length} file(s) that a merge of the base brought in.` : "";
 
-function rangeFromMerge(run: Run, merged: string, head: string, changed: string[][]): ReviewRange {
-  const authored = changedFiles(run, merged, head);
+function rangeFromMerge(run: Run, merged: string, from: string, head: string, branched: string, changed: string[][]): ReviewRange {
+  const touched = touchedSince(run, from, head, branched);
+  const differing = changedFiles(run, merged, head);
+  const authored = differing.filter((entry) => entry.some((path) => touched.has(path)));
   const paths = new Set(authored.flat());
   const leftOut = changed.filter((entry) => !entry.some((path) => paths.has(path))).map(last);
-  return { files: authored.map(last), leftOut, diff: authored.length ? diffOf(run, merged, head) : "" };
+  return { files: authored.map(last), leftOut, diff: authored.length ? diffOf(run, merged, head, authored.length < differing.length ? authored.flat() : undefined) : "" };
+}
+
+function touchedSince(run: Run, from: string, head: string, branched: string) {
+  const result = run(["git", "log", "--remerge-diff", "--no-renames", "--name-only", "-z", "--format=", "--no-relative", head, `^${from}`, `^${branched}`]);
+  if (result.code !== 0) throw new Error(`Cannot list the files the commits since ${short(from)} touch here (${firstLine(result.stderr)})`);
+  return new Set(result.stdout.split("\0").filter(Boolean));
 }
 
 function ownedRange(run: Run, from: string, head: string, branched: string, changed: string[][]): ReviewRange {
