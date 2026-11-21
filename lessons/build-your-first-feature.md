@@ -3,6 +3,7 @@ title: Build your first feature
 shelf: start
 for: Your first thread, once your hub and node run.
 after: You can start a build with one sentence, and you know how Hedge sizes it, proves it, and what to read in the pull request.
+next: ship-it
 ---
 
 ## One sentence starts a build
