@@ -23,6 +23,8 @@ const metabaseValue = "(?=[A-Za-z0-9._~+/=-]*[0-9])[A-Za-z0-9._~+/=-]{20,}";
 const gap = String.raw`(?:\s|\\[rnt]){0,16}`;
 const cookieName = new RegExp(`^${metabaseCookie}$`);
 const cookieMention = new RegExp(metabaseCookie);
+export const cookieKind = "Metabase session cookie";
+export const cookieNamedAt = (text: string) => text.search(cookieMention);
 const valueToken = /(?<![A-Za-z0-9._~+/-])(?=[A-Za-z0-9._~+/-]*[0-9])[A-Za-z0-9._~+/-]{20,}={0,2}(?![A-Za-z0-9._~+/=-])/g;
 const wholeValue = new RegExp(`^${metabaseValue}$`);
 const jsonStart = /^\s*[[{"]/;
@@ -108,8 +110,8 @@ const shapes: Shape[] = [
   { kind: "Convex deploy key", pattern: new RegExp(`(?<![A-Za-z0-9_-])(?:prod|dev|preview|project):[A-Za-z0-9:_-]{1,120}\\|[A-Za-z0-9+/=_-]{30,}`, "g") },
   { kind: "Coder session token", pattern: new RegExp(String.raw`(?<=(?:^${colour}[+-]?|\\[rn]${colour}[+-]?|["'])[ \t]*${colour})${coderToken}(?=${colour}[ \t]*(?:$|\\[rn]|\\?["']))`, "gm") },
   { kind: "Coder session token", pattern: new RegExp(String.raw`(?=${coderToken}(?![A-Za-z0-9]))(?<=(?:coder[_-]?session[_-]?token(?:\\?["'])?[ \t]*[:=]|--token[ \t=])[ \t]*(?:\\?["'])?)${coderToken}`, "gi") },
-  { kind: "Metabase session cookie", pattern: new RegExp(String.raw`(?<=(?<![\w.-])${metabaseCookie}${quote}(?:${gap}[=:]${gap}|\t+)${quote})${metabaseValue}`, "g") },
-  { kind: "Metabase session cookie", values: cookieRecordValues },
+  { kind: cookieKind, pattern: new RegExp(String.raw`(?<=(?<![\w.-])${metabaseCookie}${quote}(?:${gap}[=:]${gap}|\t+)${quote})${metabaseValue}`, "g") },
+  { kind: cookieKind, values: cookieRecordValues },
   { kind: "text escaped too deeply to check", values: (text) => (unescaped(text) === undefined ? [text] : []) },
   { kind: "private key", pattern: new RegExp(`-----BEGIN [A-Z ]*PRIVATE KEY-----(?:${lineBreak}*[A-Za-z-]+:[^\\r\\n\\\\]*${lineEnd})*${lineBreak}*[A-Za-z0-9+/=]{20,}(?:[A-Za-z0-9+/=\\s]|\\\\[rn])*(?:-----END [A-Z ]*PRIVATE KEY-----)?`, "g") },
 ];
@@ -228,8 +230,28 @@ export function replaceSecrets(text: string, replace: (kind: string, value: stri
   return left ? replace(left.kind, text) : replaced;
 }
 
+export const redactionMark = (kind: string) => `[redacted ${kind}]`;
+
 /** Replaces every secret-shaped value in a text with its kind. */
-export const redactSecrets = (text: string) => replaceSecrets(text, (kind) => `[redacted ${kind}]`);
+export const redactSecrets = (text: string) => replaceSecrets(text, redactionMark);
+
+export type Redaction = { text: string; values: Array<{ kind: string; at: number }>; left: string[] };
+
+export function redactForModel(text: string): Redaction {
+  const values: Redaction["values"] = [];
+  let cursor = 0;
+  let whole: string | undefined;
+  try {
+    const redacted = replaceSecrets(text, (kind, value) => {
+      if (value === text) whole ??= kind;
+      else values.push({ kind, at: cursor = text.indexOf(value, cursor) });
+      return redactionMark(kind);
+    });
+    return whole ? { text, values: [], left: [whole] } : { text: redacted, values, left: secretKinds(redacted) };
+  } catch {
+    return { text, values: [], left: [uncheckedKind] };
+  }
+}
 
 const redact = (value: unknown) => mapStrings(value, redactSecrets);
 
@@ -267,8 +289,10 @@ export function guard(provider: Provider, event: HookEvent): HookDecision | unde
   }
 }
 
+const uncheckedKind = "value Hedge's secret guard could not check";
+
 function uncheckedGuard(provider: Provider, event: HookEvent): HookDecision {
-  const kinds = ["value Hedge's secret guard could not check"];
+  const kinds = [uncheckedKind];
   if (event.hook_event_name === "UserPromptSubmit") return promptDecision(provider, kinds);
   if (provider === "codex") return toolOutputDecision(provider, kinds, undefined);
   return { hookSpecificOutput: { hookEventName: "PostToolUse", updatedToolOutput: "[withheld: Hedge's secret guard could not check this output]", additionalContext: toolOutputReason(kinds, "withheld") } };

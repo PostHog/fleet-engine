@@ -3,6 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { leanClaude, modelFor, modelSessionEnv, modelTable, type ModelRow } from "../../base/lib/models.ts";
 import { quotaGraceMs, quotaWatch } from "../../base/lib/quota.ts";
+import { guardedPrompt } from "./proof-prompt-guard.ts";
 
 export const families = ["claude", "gpt"] as const;
 export type Family = (typeof families)[number];
@@ -37,7 +38,7 @@ export function securityRow(env: Record<string, string | undefined>): ModelRow |
 }
 
 export type Usage = { input?: number; cacheRead?: number; cacheWrite?: number; output?: number; total?: number; costUsd?: number };
-export type ModelAnswer = { ok: true; text: string; model: string; usage?: Usage } | { ok: false; cause: string; model: string };
+export type ModelAnswer = { ok: true; text: string; model: string; usage?: Usage; redacted?: string } | { ok: false; cause: string; model: string; redacted?: string; heldBack?: true };
 export type ModelRequest = { prompt: string; cwd: string; readable?: string[]; images?: string[]; schema?: object; started?: (pid: number) => Promise<void> };
 export type Role = "arbiter" | "reviewer" | "judge" | "bloat-judge" | "eval-judge";
 
@@ -54,6 +55,13 @@ export async function askModel(role: Role, row: ModelRow, request: ModelRequest,
   const replacement = env[prefix];
   const model = modelLabel(role, row, env, pinned);
   const timeout = Number(env[`${prefix}_TIMEOUT_MS`]) || limit;
+  const guarded = guardedPrompt(request.prompt);
+  if (!guarded.ok) return { ok: false, cause: guarded.cause, model, heldBack: true };
+  const answer = await sendModel(role, row, { ...request, prompt: guarded.prompt }, env, replacement, model, timeout);
+  return guarded.redacted ? { ...answer, redacted: guarded.redacted } : answer;
+}
+
+async function sendModel(role: Role, row: ModelRow, request: ModelRequest, env: Record<string, string | undefined>, replacement: string | undefined, model: string, timeout: number): Promise<ModelAnswer> {
   const scratch = await mkdtemp(join(tmpdir(), "hedge-proof-model-"));
   try {
     const output = join(scratch, "answer.txt");

@@ -631,6 +631,7 @@ async function askReviewer(reserved: SingleRound, head: ProofIdentity, author: F
   print(JSON.stringify({ round: reserved.round, id: reserved.id, directory: reserved.directory, reviewer: answer.model }));
   print(answer.text.trim());
   if (anchors) print(`\n${anchors}`);
+  if (answer.redacted) print(`\n${answer.redacted}`);
   return 0;
 }
 

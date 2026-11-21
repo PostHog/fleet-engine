@@ -7,6 +7,7 @@ import { readJson, roundId, storeCapturedFindings, writeJson, type ProofIdentity
 import { askModel, familyOf, isQuotaExhausted, quotaExitCode, reviewerRow, sameFamilyRow, securityRow, type Family, type Usage } from "./proof-models.ts";
 import type { ModelRow } from "../../base/lib/models.ts";
 import { baseRule, capped, diffCap, reviewedDiff } from "./proof-review.ts";
+import { guardedPrompt } from "./proof-prompt-guard.ts";
 import { quote } from "../../hub/lib/machine.ts";
 import type { ReviewTier } from "./proof-checkout.ts";
 
@@ -15,7 +16,7 @@ export type Lens = { name: string; title: string; family: Family; row: ModelRow;
 export type BriefInput = { title: string; body: string; base: string; from: string; commit: string; diff: string; diffFile: string; note: string; settled: string; owed: string; rubric: string };
 export type Cast = { family: Family; model: string; row: ModelRow; security?: true };
 export type Plan = { lenses: ({ name: string; title: string } & Cast)[]; changedFiles: string[]; from?: string; cwd: string; readable: string[]; tier?: ReviewTier; arguments?: string[] };
-type LensStatus = { state: "queued" | "running" | "done" | "failed"; attempts: number; startedAt?: string; finishedAt?: string; cause?: string; usage?: Usage };
+type LensStatus = { state: "queued" | "running" | "done" | "failed"; attempts: number; startedAt?: string; finishedAt?: string; cause?: string; usage?: Usage; redacted?: string };
 export type StartTime = (pid: number) => Promise<string | undefined>;
 export type LockOwner = { pid: number; now: () => Date; startTime: StartTime };
 export type PanelIO = LockOwner & { env: Record<string, string | undefined>; pause: () => Promise<void>; slots: string; slotCount: number; limit: number };
@@ -170,10 +171,16 @@ const writeStatus = (directory: string, name: string, status: LensStatus) => wri
 export async function stagePanel(directory: string, plan: Plan, briefs: Map<string, string>) {
   await mkdir(join(directory, "lenses"), { recursive: true, mode: 0o700 });
   for (const lens of plan.lenses) {
-    await writeFile(lensFile(directory, lens.name, ".prompt.md"), briefs.get(lens.name)!, { mode: 0o600 });
-    await writeStatus(directory, lens.name, { state: "queued", attempts: 0 });
+    await stageBrief(directory, lens.name, briefs.get(lens.name)!);
   }
   await writeJson(stagedPath(directory), plan);
+}
+
+async function stageBrief(directory: string, name: string, brief: string) {
+  const guarded = guardedPrompt(brief);
+  if (!guarded.ok) return writeStatus(directory, name, { state: "failed", attempts: attemptsPerLens, cause: guarded.cause });
+  await writeFile(lensFile(directory, name, ".prompt.md"), guarded.prompt, { mode: 0o600 });
+  await writeStatus(directory, name, { state: "queued", attempts: 0, ...guarded.redacted ? { redacted: guarded.redacted } : {} });
 }
 
 export async function publishPanel(directory: string) {
@@ -189,8 +196,7 @@ export async function requeueFailed(directory: string, casts: Map<string, Cast>,
   for (const lens of plan.lenses) {
     if ((await readStatus(directory, lens.name)).state !== "failed") continue;
     Object.assign(lens, { security: undefined }, casts.get(lens.name));
-    await writeFile(lensFile(directory, lens.name, ".prompt.md"), fresh.briefs.get(lens.name)!, { mode: 0o600 });
-    await writeStatus(directory, lens.name, { state: "queued", attempts: 0 });
+    await stageBrief(directory, lens.name, fresh.briefs.get(lens.name)!);
     await rm(pidFile(directory, lens.name), { force: true });
     failed.push(lens.name);
   }
@@ -512,7 +518,7 @@ export async function panelLines(directory: string, now: Date) {
     const ran = status.startedAt ? `, ${duration(new Date(status.startedAt), status.finishedAt ? new Date(status.finishedAt) : now)}` : "";
     const answer = lensFile(directory, name, ".md");
     const output = status.state === "done" || (status.state === "failed" && existsSync(answer)) ? answer : lensLog(directory, name);
-    return `${name}: ${status.state} by ${family} (${model})${ran}, ${output}${status.cause && status.state !== "done" ? `: ${status.cause}` : ""}`;
+    return `${name}: ${status.state} by ${family} (${model})${ran}, ${output}${status.cause && status.state !== "done" ? `: ${status.cause}` : ""}${status.redacted ? `; ${status.redacted}` : ""}`;
   });
 }
 
