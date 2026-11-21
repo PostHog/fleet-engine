@@ -5,7 +5,12 @@ import { builtins } from "../src/cli.ts";
 import type { LoadedPack } from "../src/pack/types.ts";
 import { packTitle } from "../src/setup/questions.ts";
 
-export const narrationHash = (lesson: Lesson) => new Bun.CryptoHasher("sha256").update(narration(lesson)).digest("hex");
+export const loadVoice = (root: string) => {
+  const file = join(root, "lessons", "voice.json");
+  return existsSync(file) ? JSON.stringify(JSON.parse(readFileSync(file, "utf8"))) : "";
+};
+
+export const narrationHash = (lesson: Lesson, voice: string) => new Bun.CryptoHasher("sha256").update(voice).update("\n\n").update(narration(lesson)).digest("hex");
 
 export function loadLessons(root: string): Lesson[] {
   const dir = join(root, "lessons");
@@ -37,7 +42,7 @@ export function knownNames(packs: LoadedPack[], lessons: Lesson[]): Names {
   };
 }
 
-export function lessonProblems(lesson: Lesson, names: Names): string[] {
+export function lessonProblems(lesson: Lesson, names: Names, voice: string): string[] {
   const where = `lessons/${lesson.id}.md`;
   const text = lesson.chapters.map((chapter) => `${chapter.headline}\n${chapter.text}`).join("\n");
   const problems = [
@@ -48,7 +53,7 @@ export function lessonProblems(lesson: Lesson, names: Names): string[] {
   ];
   if (!lesson.cut) return problems;
   const cut = lesson.cut;
-  if (cut.narration !== narrationHash(lesson)) problems.push(`${where}: the narration changed after its cut. Render the lesson again`);
+  if (cut.narration !== narrationHash(lesson, voice)) problems.push(`${where}: the narration or the voice changed after its cut. Render the lesson again`);
   if (cut.chapters.length !== lesson.chapters.length) problems.push(`${where}: has ${lesson.chapters.length} chapters, but its cut has ${cut.chapters.length}`);
   if (cut.captions.length !== sentences(lesson).length) problems.push(`${where}: has ${sentences(lesson).length} sentences, but its cut has ${cut.captions.length} captions`);
   const inVideo = (time: unknown) => typeof time === "number" && time >= 0 && time <= cut.seconds;
