@@ -585,7 +585,7 @@ describe("the hook against GitHub, faked at the gh boundary, and real checkouts,
     ["jq -n '{body: \"/trunk merge\"}' > body.json && gh api -X PATCH repos/example/product/pulls/9 --input body.json"],
     ["printf '/trunk merge' | tee body.md && gh pr review 9 --repo example/product --comment --body-file body.md"],
     ["sed -i 's/^## Problem/\\/trunk merge/' body.md && gh api -X PATCH repos/example/product/issues/comments/1 -F body=@body.md"],
-  ])("a payload file the same line names again, so it may rewrite it first, keeps the base's run-time check: %s", async (command) => {
+  ])("a line that may write a file before the send keeps the base's run-time check on payload files: %s", async (command) => {
     const { dir, hook } = bodyEdits();
     expect(await hook(command, dir)).toBe(otherEndpointReason);
   });
