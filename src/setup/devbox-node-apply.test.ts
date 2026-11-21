@@ -49,14 +49,17 @@ describe("hedge devbox add applies the profile on the node", () => {
     expect([nodeHas(home, node, "allowlist"), nodeHas(home, node, "earlyoom")]).toEqual([true, true]);
   });
 
-  test("goes on to the link step when only the person's sign-ins are left, and lists each one at the end", async () => {
-    const { home, io, add } = await signedUp(["--add", "integrations", "--plan", "both"]);
+  test("goes on to the link step when only the person's sign-ins are left, and lists each one once at the end, but not the ChatGPT sign-in that a later step of the add does", async () => {
+    const { home, io, add } = await signedUp(["--add", "integrations", "--plan", "both", "--workflows", "convex=on"]);
     const box = fakeMachine(home, {}, { node: { signedOut: true } });
     expect(await add(box)).toBe(0);
     expect(box.peerLinks.here).toEqual(linkedHere);
+    expect(io.output()).toMatch(new RegExp(`  ✓ Sign in to ChatGPT on ${node.replaceAll(".", "\\.")}: (done|already done)`));
     const left = endList(io.output());
-    expect(listed(left, "Sign Codex in to ChatGPT with codex login. Hedge installs the Codex plugin github@openai-curated-remote at the next hedge apply.")).toBe(1);
-    expect([listed(left, "Claude's GitHub plugin cannot reach GitHub."), listed(left, "Claude's Context7 plugin is not signed in."), listed(left, "Codex cannot reach Context7.")]).toEqual([1, 1, 1]);
+    expect(listed(left, "Sign Codex in to ChatGPT")).toBe(0);
+    expect([listed(left, "Claude's GitHub plugin cannot reach GitHub."), listed(left, "Claude's Context7 plugin is not signed in."), listed(left, "Codex cannot reach Context7."), listed(left, "Convex is not signed in")]).toEqual([1, 1, 1, 1]);
+    const steps = left.split("\n").filter((line) => line.startsWith("  · "));
+    expect(new Set(steps).size).toBe(steps.length);
   });
 
   test("still lists the steps left for the person when a later step fails", async () => {

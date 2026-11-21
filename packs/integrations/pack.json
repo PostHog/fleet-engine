@@ -129,7 +129,7 @@
       "run": [
         "sh",
         "-c",
-        "command -v claude >/dev/null || exit 1; claude mcp get plugin:github:github 2>/dev/null | grep -q 'Status: .*Connected' || exit 4"
+        "command -v claude >/dev/null || exit 1; out=$(claude mcp get plugin:github:github 2>/dev/null) || exit 1; printf '%s\\n' \"$out\" | grep -q 'Status: .*Connected' && exit 0; [ $? -eq 1 ] && exit 4; exit 1"
       ],
       "say": "Hedge cannot check whether Claude's GitHub plugin reaches GitHub, because Claude Code does not run here.",
       "todo": "Claude's GitHub plugin cannot reach GitHub. It reads a token from GITHUB_PERSONAL_ACCESS_TOKEN in the environment that starts Claude Code. Create a fine-grained, read-only token on GitHub for the repositories you work in, export it in your shell profile, and start a new shell. You can export \"$(gh auth token)\" instead, but that puts your broad gh token into the environment of every agent you start. This check runs in hedge doctor's shell; an app that starts Claude Code with its own environment, such as T3 Code, needs the token there too. Hedge never stores the token.",
@@ -144,7 +144,7 @@
       "run": [
         "sh",
         "-c",
-        "command -v claude >/dev/null || exit 1; claude mcp get plugin:context7:context7 2>/dev/null | grep -q 'Status: .*Connected' || exit 4"
+        "command -v claude >/dev/null || exit 1; out=$(claude mcp get plugin:context7:context7 2>/dev/null) || exit 1; printf '%s\\n' \"$out\" | grep -q 'Status: .*Connected' && exit 0; [ $? -eq 1 ] && exit 4; exit 1"
       ],
       "say": "Hedge cannot check whether Claude's Context7 plugin is signed in, because Claude Code does not run here.",
       "todo": "Claude's Context7 plugin is not signed in. In Claude Code, run /mcp, choose plugin:context7:context7, and authenticate.",
@@ -159,7 +159,7 @@
       "run": [
         "sh",
         "-c",
-        "[ -z \"$CONTEXT7_API_KEY\" ] || exit 0; command -v codex >/dev/null || exit 1; codex mcp list 2>/dev/null | awk '$1 == \"context7\" { print $NF }' | grep -qx OAuth || exit 4"
+        "[ -z \"$CONTEXT7_API_KEY\" ] || exit 0; command -v codex >/dev/null || exit 1; out=$(codex mcp list 2>/dev/null) || exit 1; auth=$(printf '%s\\n' \"$out\" | awk '$1 == \"context7\" { print $NF }') || exit 1; [ \"$auth\" = OAuth ] && exit 0; exit 4"
       ],
       "say": "Hedge cannot check whether Codex reaches Context7, because Codex does not run here.",
       "todo": "Codex cannot reach Context7. Run codex mcp login context7, or export CONTEXT7_API_KEY in your shell profile: Codex sends it to Context7 as a header and Hedge never writes it into config.toml.",

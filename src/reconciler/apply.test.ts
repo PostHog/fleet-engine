@@ -498,6 +498,14 @@ describe("a pack check that waits for the person", () => {
     expect((await check(plan({ files: [], checks, steps, config: [...config, plugin] }), options)).findings).toEqual([{ id: `plugin:${context7}`, pack: "engine", say: `The Claude plugin ${context7} needs to be installed.`, repair: "apply" }]);
   });
 
+  test("that nothing waits for runs after the provider config, so it reads a plugin the same apply installed", async () => {
+    const claude = claudeCli(() => true);
+    const run = async (command: string[]) => (command.join(" ") === "pool-check" ? (claude.installed.length ? 0 : 4) : 0);
+    const applied = await apply(plan({ files: [], checks, config: [plugin] }), { home: temp.make("home-"), adapters: [providerConfigAdapter({ run: claude.run })], run });
+    expect(applied).toMatchObject({ ok: true, findings: [] });
+    expect(claude.installed).toEqual([{ id: context7, scope: "user" }]);
+  });
+
   test("that config waits for and that passes once a step ran keeps the notice that an edited plugin is yours now", async () => {
     const pool = installedPool();
     pool.set(0);

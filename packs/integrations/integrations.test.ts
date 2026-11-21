@@ -38,15 +38,15 @@ const signedIn = {
 };
 const signedOut = { claude: (server: string) => `${server}:\n  Scope: Dynamic config (from command line)\n  Status: ! Needs authentication\n  Type: http\n` };
 
-type Machine = { claude?: (server: string) => string; codexAuth?: string; convex?: boolean; env?: Record<string, string> };
+type Machine = { claude?: (server: string) => string; codexAuth?: string; convex?: boolean; env?: Record<string, string>; exit?: number };
 
 function checkRunner(home: string, machine: Machine, plan: Plan): Runner {
   const signIns = new Set(plan.checks.filter((item) => item.pack === "integrations").map((item) => JSON.stringify(item.run)));
   const bin = temp.make("bin-");
   for (const server of ["plugin:github:github", "plugin:context7:context7"]) writeFileSync(join(bin, server.replaceAll(":", "_")), (machine.claude ?? signedOut.claude)(server));
   writeFileSync(join(bin, "codex-mcp-list"), signedIn.codex(machine.codexAuth ?? "Not logged in"));
-  writeFileSync(join(bin, "claude"), `#!/bin/sh\n[ "$1 $2" = "mcp get" ] || exit 2\ncat "${bin}/$(printf %s "$3" | tr : _)"\n`);
-  writeFileSync(join(bin, "codex"), `#!/bin/sh\n[ "$1 $2" = "mcp list" ] || exit 2\ncat "${bin}/codex-mcp-list"\n`);
+  writeFileSync(join(bin, "claude"), `#!/bin/sh\n[ "$1 $2" = "mcp get" ] || exit 2\ncat "${bin}/$(printf %s "$3" | tr : _)"\nexit ${machine.exit ?? 0}\n`);
+  writeFileSync(join(bin, "codex"), `#!/bin/sh\n[ "$1 $2" = "mcp list" ] || exit 2\ncat "${bin}/codex-mcp-list"\nexit ${machine.exit ?? 0}\n`);
   chmodSync(join(bin, "claude"), 0o755);
   chmodSync(join(bin, "codex"), 0o755);
   if (machine.convex) {
@@ -79,6 +79,8 @@ async function doctorFindings(plan: AiPlan, workflows: Record<string, boolean>, 
   const resolved = resolve(plan, workflows);
   return (await check(resolved, { home, adapters: [], run: checkRunner(home, machine, resolved) })).findings.filter((finding) => finding.pack === "integrations");
 }
+
+const waits = (findings: Array<{ id: string; todo?: true; repair?: string }>) => findings.map(({ id, todo, repair }) => [id, todo ?? repair]).toSorted();
 
 function withoutProviders() {
   const bin = temp.make("bare-bin-");
@@ -121,8 +123,13 @@ describe("the Integrations pack", () => {
     expect(await doctor("both", { convex: true }, { codexAuth: "OAuth" })).toEqual(["context7-claude", "convex-login", "github-token"]);
   });
 
+  test("doctor fails a sign-in check whose provider command fails, whether or not it printed a sign-in", async () => {
+    const failed = [["check:context7-claude", "apply"], ["check:context7-codex", "apply"], ["check:github-token", "apply"]];
+    expect(waits(await doctorFindings("both", {}, { exit: 3 }))).toEqual(failed);
+    expect(waits(await doctorFindings("both", {}, { exit: 3, claude: signedIn.claude, codexAuth: "OAuth" }))).toEqual(failed);
+  });
+
   test("doctor leaves each missing sign-in to the person, and fails a check only when its provider does not run", async () => {
-    const waits = (findings: Array<{ id: string; todo?: true; repair?: string }>) => findings.map(({ id, todo, repair }) => [id, todo ?? repair]).toSorted();
     expect(waits(await doctorFindings("both", { convex: true }, {}))).toEqual([["check:context7-claude", true], ["check:context7-codex", true], ["check:convex-login", true], ["check:github-token", true]]);
     expect(waits(await doctorFindings("both", { convex: true }, { env: { PATH: withoutProviders() } }))).toEqual([["check:context7-claude", "apply"], ["check:context7-codex", "apply"], ["check:convex-login", true], ["check:github-token", "apply"]]);
   });

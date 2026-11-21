@@ -114,8 +114,12 @@ async function reconcile(plan: Plan, options: ApplyOptions): Promise<{ report: R
   const afterSteps = adapters.filter((adapter) => adapter.name === "config");
   const configure = async () => {
     const checks: Checked = [];
-    for (const item of plan.checks.filter((check) => check.todo || plan.config.some((entry) => entry.pack === check.pack && entry.after === check.id))) checks.push([item, await run(item.run)]);
-    report.findings.push(...checks.filter(([, code]) => code !== 0).map(([item, code]) => checkFinding(item, code)));
+    const runChecks = async (items: Plan["checks"]) => {
+      for (const item of items) checks.push([item, await run(item.run)]);
+      report.findings.push(...checks.filter(([item, code]) => code !== 0 && items.includes(item)).map(([item, code]) => checkFinding(item, code)));
+    };
+    const gates = plan.checks.filter((check) => plan.config.some((entry) => entry.pack === check.pack && entry.after === check.id));
+    await runChecks(gates);
     const passing = (entry: Plan["config"][number]) => checks.some(([item, code]) => item.pack === entry.pack && item.id === entry.after && code === 0);
     const waiting = plan.config.filter((entry) => waitsForCheck(plan, entry));
     const kept = plan.config.filter((entry) => (waiting.includes(entry) ? passing(entry) : gated.plan.config.includes(entry)));
@@ -127,6 +131,7 @@ async function reconcile(plan: Plan, options: ApplyOptions): Promise<{ report: R
       report.findings.push(...result.findings);
       if (result.failed || result.blocked) report.ok = false;
     }
+    await runChecks(plan.checks.filter((check) => check.todo && !gates.includes(check)));
     return { report, checks };
   };
   for (const adapter of adapters.filter((each) => !afterSteps.includes(each))) {

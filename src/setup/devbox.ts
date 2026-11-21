@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import type { AiPlan, ModelRow } from "../pack/types.ts";
+import { chatGptSignIn } from "../adapters/provider-config/plugins.ts";
 import { restartCommand } from "../adapters/t3/service.ts";
 import { canBeDevbox } from "../hub/names.ts";
 import { onHub, quote } from "../hub/ssh.ts";
@@ -283,7 +284,7 @@ async function engineCurrent(box: Machine, context: DevboxContext) {
 
 const userBus = `export XDG_RUNTIME_DIR="\${XDG_RUNTIME_DIR:-/run/user/$(id -u)}";`;
 
-export type LeftStep = { say: string; command?: string };
+export type LeftStep = { say: string; command?: string; id?: string };
 
 async function applyProfile(box: Machine, host: string, context: DevboxContext) {
   const { url, engineRef } = await context.profile();
@@ -293,7 +294,7 @@ async function applyProfile(box: Machine, host: string, context: DevboxContext) 
   const applied = (await box.run(["sh", "-c", `${userBus} ${clone} && ${apply}`])) === 0;
   const node = await stepsLeft(box);
   if (applied && node === olderEngine) return context.terminal.print(`  · ${host} runs an older Hedge, which cannot list the steps left for you. Run hedge doctor on ${host} to see them.`);
-  const left = node === olderEngine ? undefined : node;
+  const left = node === olderEngine || !node ? undefined : { ...node, steps: node.steps.filter((step) => context.plan === "claude" || step.id !== chatGptSignIn) };
   if (applied && left?.clean && !left.steps.length) return;
   if (applied && left?.clean && context.leftForYou) {
     context.leftForYou(left.steps);
