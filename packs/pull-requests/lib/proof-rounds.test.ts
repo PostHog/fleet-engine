@@ -67,6 +67,7 @@ const arbiterAnswers: [string, string, "continue" | "escalate" | "unavailable"][
   ["CONTINUE inside a sentence", "I answer CONTINUE because the findings are new.", "unavailable"],
   ["CONTINUE in a Markdown fence", "```\nCONTINUE\n```", "unavailable"],
   ["CONTINUE with a zero-width space", "CONTINUE\u200b", "unavailable"],
+  ["a very long first line", "x".repeat(100_000), "unavailable"],
   ["an empty answer", "", "unavailable"],
   ["only blank lines", "\n \n\t\n", "unavailable"],
 ];
