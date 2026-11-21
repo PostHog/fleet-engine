@@ -360,8 +360,12 @@ test("a gate whose process ended while it held the judge lock leaves the lock to
   expect(next.output).toContain("judge owed: fail: feature.txt is code, not docs");
 });
 
-const judgeStarted = (started: string, gate: Promise<{ output: string }>) =>
-  Promise.race([readFile(started, "utf8"), gate.then(({ output }) => { throw new Error(`The gate ended before it asked the judge: ${output}`); })]);
+const judgeStarted = async (started: string, gate: Promise<{ output: string }>) => {
+  const ended = await Promise.race([readFile(started, "utf8").then(() => undefined), gate]);
+  if (!ended) return;
+  await writeFile(started, "\n");
+  throw new Error(`The gate ended before it asked the judge: ${ended.output}`);
+};
 
 test("the gate stops a judge stuck on spent quota and reports it unavailable", async () => {
   const pr = await checkout();
