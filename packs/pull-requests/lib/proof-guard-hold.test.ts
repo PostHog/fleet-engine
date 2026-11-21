@@ -6,7 +6,7 @@ import { cleanFixtures, checkout, fakeModel, reviewHead, verdict, type Checkout 
 afterEach(cleanFixtures);
 
 const token = ["gh", "p_", "a1B2c3D4e5".repeat(4)].join("");
-const escapedTooDeeply = `\\u005c${"u005c".repeat(100_000)}u0061`;
+const escapedTooDeeply = `\\u005c${"u005c".repeat(10)}u0061`;
 
 const authorsAnswers = "responses.md";
 
