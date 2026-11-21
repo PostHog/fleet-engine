@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { acceptGap, checkout, cleanFixtures, fakeModel, reviewHead, verdict, type Checkout } from "./proof-testing.ts";
+import { acceptGap, checkout, cleanFixtures, fakeModel, graded, reviewHead, verdict, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
 
@@ -39,6 +39,10 @@ test("a final read after a clean merge of a base that landed the PR's own edit a
   expect(refused).toStartWith(`HEAD needs no final read: hedge proof gate carries the review of ${reviewed.slice(0, 7)} across 1 clean merge(s) of the base. To read it anyway, pass`);
   expect(reviewer.prompts()).toEqual([]);
   expect((await pr.hedge("gate")).output).toContain(`review: HEAD carried forward from the review of ${reviewed.slice(0, 7)} across 1 clean merge(s) of the base`);
+
+  pr.pullRequestState({ body: graded("non-critical") });
+  expect((await pr.hedge("review", "--scope", "final", "--base", reviewed, "--agent", "Read the base's heading anyway.")).code).toBe(0);
+  expect(reviewer.prompts().at(-1)).toContain("+the base adds a heading");
 });
 
 test("a final read after a conflicting base merge that keeps the PR's side is refused, and says the gate does not carry the review", async () => {
