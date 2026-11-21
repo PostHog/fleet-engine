@@ -70,7 +70,7 @@ onLinux("takes the slot count from HEDGE_HEAVY_SLOTS over the setting", async ()
 function routeHandler(bin: string) {
   const handler = join(bin, "route.ts");
   const seen = join(bin, "routed.log");
-  writeFileSync(handler, `import { appendFileSync } from "node:fs";\nappendFileSync(${JSON.stringify(seen)}, JSON.stringify({ argv: Bun.argv.slice(2), routed: Bun.env.HEDGE_HEAVY_ROUTED }) + "\\n");\nprocess.exit(7);\n`);
+  writeFileSync(handler, `import { appendFileSync } from "node:fs";\nappendFileSync(${JSON.stringify(seen)}, JSON.stringify({ argv: Bun.argv.slice(2), routed: Bun.env.HEDGE_HEAVY_ROUTED, checkoutEnv: Bun.env.CHECKOUT_ENV }) + "\\n");\nprocess.exit(7);\n`);
   return { handlers: JSON.stringify({ "heavy-route": handler }), routed: () => (existsSync(seen) ? readFileSync(seen, "utf8").trim().split("\n").map((line) => JSON.parse(line)) : []) };
 }
 
@@ -82,7 +82,7 @@ onLinux("hands a typed heavy command to the heavy-route handler, which decides w
   expect(calls()).toBe("");
 });
 
-onLinux("checks the disk and routes the command inside a checkout without running the checkout's bunfig.toml", async () => {
+onLinux("checks the disk and routes the command inside a checkout without the checkout's .env files or bunfig.toml", async () => {
   const { bin } = stubs();
   const { handlers, routed } = routeHandler(bin);
   const checkout = bunCheckout(temp);

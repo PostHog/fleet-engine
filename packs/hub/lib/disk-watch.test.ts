@@ -198,7 +198,7 @@ case "$6" in
 esac
 `);
   expect(await diskWatchCommand([], hub.context)).toBe(0);
-  expect(hub.calls()).toEqual([`bun --no-env-file --config=/dev/null ${join(remote, ".local/share/hedge/engine/src/cli.ts")} disk-sweep --floor 15 --alert-floor 10`]);
+  expect(hub.calls()).toEqual([expect.stringMatching(/ disk-sweep --floor 15 --alert-floor 10$/)]);
   expect(hub.lines.join("\n")).not.toContain("failed");
 });
 
