@@ -424,8 +424,8 @@ waits, the gate record holds exit 75. A run longer than your shell's limit belon
 checkout without --repo and --pr uses gh pr view; pass both when GraphQL is out. A check that ran more than once
 counts with its newest run from each app, as GitHub's required checks do. The
 required checks of the base branch, from its rulesets and branch protection, decide CI; other checks print as not
-required. A required check that never reported is still running until every check on the commit finished; then it
-is red. A stacked PR whose base requires nothing is held to the default branch's required checks. When no branch
+required. A required check that has not reported counts as still running, since GitHub can start it after other
+checks finished; the CI line then names the checks that failed, required or not. A stacked PR whose base requires nothing is held to the default branch's required checks. When no branch
 requires any, every check counts. On a draft, a required check named "<workflow> / <job>" that never reported counts
 as withheld from drafts when its workflow reported other checks on the commit and all of them passed. CI is unknown
 when GitHub does not answer for the rulesets or branch protection. A clean merge of the PR's base carries the review and the evidence of
@@ -1143,6 +1143,7 @@ async function untilCiFinishes(head: ProofIdentity, context: CommandContext, min
   const pause = context.pause ?? (() => Bun.sleep(Math.min(ciPollInterval, deadline - now())));
   while (now() < deadline) {
     await pause();
+    if (now() >= deadline) return;
     if (!stillRunning.has(ciOf(context.home, head, context.run, new Date(now())).state)) return;
   }
 }

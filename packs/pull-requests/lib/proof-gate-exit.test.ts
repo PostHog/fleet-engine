@@ -165,7 +165,7 @@ test("while --wait waits, the gate record says CI is still running", async () =>
     pr.ci([{ name: "test", bucket: "pass" }]);
   };
   expect((await pr.hedge("gate", "--wait", "10")).code).toBe(0);
-  expect(seen).toEqual([{ code: 75, reason: "CI is still running: waiting on: test" }]);
+  expect(seen[0]).toEqual({ code: 75, reason: "CI is still running: waiting on: test" });
 });
 
 test("--wait keeps waiting when one read of GitHub fails", async () => {

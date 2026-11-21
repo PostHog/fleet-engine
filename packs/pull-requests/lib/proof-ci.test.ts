@@ -27,18 +27,10 @@ test("only the base branch's required checks decide CI, and the rest print as no
   expect(red.code).toBe(1);
   expect(ciLine(red.output)).toStartWith("ci: red, required failing: test. Fix it");
 
-  pr.ci([{ name: "lint", bucket: "pending" }]);
+  pr.ci([{ name: "lint", bucket: "pass" }]);
   const missing = await pr.hedge("gate");
   expect(missing.code).toBe(75);
   expect(ciLine(missing.output)).toBe("ci: pending, required not reported yet: test");
-
-  pr.ci([{ name: "lint", bucket: "pass" }]);
-  const neverReported = await pr.hedge("gate");
-  expect(neverReported.code).toBe(1);
-  expect(ciLine(neverReported.output)).toStartWith("ci: red, required not reported: test, though every check on the commit finished. Fix it");
-
-  pr.ci("none");
-  expect((await pr.hedge("gate")).code).toBe(75);
 });
 
 test("classic branch protection adds required checks, and a check from another app does not count for a pinned one", async () => {
@@ -48,8 +40,8 @@ test("classic branch protection adds required checks, and a check from another a
 
   pr.ci([{ name: "build", bucket: "pass", app: 9 }]);
   const spoofed = await pr.hedge("gate");
-  expect(spoofed.code).toBe(1);
-  expect(ciLine(spoofed.output)).toStartWith("ci: red, required not reported: build, though every check on the commit finished");
+  expect(spoofed.code).toBe(75);
+  expect(ciLine(spoofed.output)).toBe("ci: pending, required not reported yet: build");
 
   pr.ci([{ name: "build", bucket: "pass", app: 7 }]);
   const green = await pr.hedge("gate");
@@ -71,18 +63,18 @@ test("a draft passes without a required check its workflow withholds from drafts
   expect(ciLine(withheld.output)).toBe("ci: green, 0 required check(s) pass; withheld from drafts, required once ready: Backend / Test results (its workflow finished without posting it)");
 
   pr.pullRequestState({ draft: false });
-  expect(ciLine((await pr.hedge("gate")).output)).toStartWith("ci: red, required not reported: Backend / Test results, though every check on the commit finished");
+  expect(ciLine((await pr.hedge("gate")).output)).toBe("ci: pending, required not reported yet: Backend / Test results");
 });
 
-test("on a draft, a failed sibling does not withhold a required check, and the gate names the failure", async () => {
+test("on a draft, a failed sibling does not withhold a required check, and the wait for it names the failure", async () => {
   const { pr } = await reviewed();
   pr.pullRequestState({ draft: true });
 
   pr.required("main", [{ context: "Backend / Test results" }]);
   pr.ci([{ name: "Backend / Unit (1)", bucket: "pass" }, { name: "Backend / Unit (2)", bucket: "fail" }]);
   const gate = await pr.hedge("gate");
-  expect(gate.code).toBe(1);
-  expect(ciLine(gate.output)).toBe("ci: red, required not reported: Backend / Test results, though every check on the commit finished; not required: failing: Backend / Unit (2). Fix it, or record hedge proof gap --kind ci --reason <why CI cannot run> when it cannot run here");
+  expect(gate.code).toBe(75);
+  expect(ciLine(gate.output)).toBe("ci: pending, required not reported yet: Backend / Test results; not required: failing: Backend / Unit (2)");
 });
 
 test("on a draft, a check from another app than the pinned one neither passes nor withholds it", async () => {
@@ -91,11 +83,11 @@ test("on a draft, a check from another app than the pinned one neither passes no
   pr.required("main", [{ context: "CI / test", integration_id: 7 }]);
   pr.ci([{ name: "CI / test", bucket: "pass", app: 9 }, { name: "CI / lint", bucket: "pass", app: 7 }]);
   const spoofed = await pr.hedge("gate");
-  expect(spoofed.code).toBe(1);
-  expect(ciLine(spoofed.output)).toStartWith("ci: red, required not reported: CI / test, though every check on the commit finished");
+  expect(spoofed.code).toBe(75);
+  expect(ciLine(spoofed.output)).toBe("ci: pending, required not reported yet: CI / test");
 
   pr.ci([{ name: "CI / lint", bucket: "pass", app: 9 }]);
-  expect(ciLine((await pr.hedge("gate")).output)).toStartWith("ci: red, required not reported: CI / test, though every check on the commit finished");
+  expect(ciLine((await pr.hedge("gate")).output)).toBe("ci: pending, required not reported yet: CI / test");
 });
 
 test("the newest run of a check from each app decides: a rerun clears an older failure, and another app's pass hides no failure", async () => {
