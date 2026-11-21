@@ -117,19 +117,7 @@ function expanded(raw: string): string {
 type Reads = { status: (text: string) => boolean; bareExit: boolean; failingExit: boolean };
 
 function printsStatus({ name, args, rawArgs }: Command, reads: (text: string) => boolean): boolean {
-  const readsArg = (raw: string) => reads(expanded(raw));
-  if (name === "echo") {
-    const options = args.slice(0, Math.max(0, args.findIndex((arg) => !/^-[neE]+$/.test(arg))));
-    return !options.some((option) => option.includes("e")) && rawArgs.some(readsArg);
-  }
-  if (name !== "printf" || args[0]?.startsWith("-v")) return false;
-  const skip = args[0] === "--" ? 1 : 0;
-  const [format = "", ...values] = args.slice(skip);
-  const [rawFormat = "", ...rawValues] = rawArgs.slice(skip);
-  const conversions = format.replaceAll("%%", "");
-  const oneStatusConversion = conversions.split("%").length === 2 && /%[sdi]/.test(conversions);
-  const printsValue = oneStatusConversion && values.length === 1 && readsArg(rawValues[0]);
-  return readsArg(rawFormat) || printsValue;
+  return name === "echo" && !args.some((arg) => arg.includes("\\")) && rawArgs.some((raw) => reads(expanded(raw)));
 }
 
 function reporter(command: Command | undefined, sameLevel: boolean, reads: Reads): Reach | undefined {
