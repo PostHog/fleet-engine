@@ -262,8 +262,8 @@ function askUser(identity: ProofIdentity, stop: string, autonomy: Autonomy) {
 export type CapturedBy = "hedge" | "author";
 export type DecisionMark = Pick<Decision, "mark" | "id">;
 export type DropRead = (directory: string) => Promise<boolean>;
-export type OffBranch = { onHistory: (commit: string) => boolean; drop: (directory: string, continuedFrom: string) => Promise<boolean> };
-export type ReviewRequest = { dropUnanswered?: DropRead; offBranch?: OffBranch; autonomy?: () => Autonomy; opening?: () => Promise<boolean>; sanity?: () => Promise<void>; scope: string; base?: string; from?: string; forkBase?: string; decision?: Decision; phase?: string; arbiter: Arbiter; limits: ReviewLimits; cleanBaseMerge?: CleanBaseMerge; quietCommit?: QuietCommit; capturedBy?: CapturedBy; lock?: LockRound; lockBudget: LockBudget; now: () => Date };
+export type OnHistory = (commit: string) => boolean;
+export type ReviewRequest = { dropUnanswered?: DropRead; onHistory?: OnHistory; autonomy?: () => Autonomy; opening?: () => Promise<boolean>; sanity?: () => Promise<void>; scope: string; base?: string; from?: string; forkBase?: string; decision?: Decision; phase?: string; arbiter: Arbiter; limits: ReviewLimits; cleanBaseMerge?: CleanBaseMerge; quietCommit?: QuietCommit; capturedBy?: CapturedBy; lock?: LockRound; lockBudget: LockBudget; now: () => Date };
 export type Reserved = { round: number | "final"; id: string; directory: string };
 type Permit = { arbiter: Arbiter; limits: ReviewLimits; autonomy?: () => Autonomy };
 
@@ -272,7 +272,7 @@ async function reserveDecided(reviews: string, name: string, record: object, dec
 }
 
 type Stamping = { lock: LockRound | undefined; now: () => Date };
-type Reserving = Stamping & { lockBudget: LockBudget; dropUnanswered?: DropRead; offBranch?: OffBranch };
+type Reserving = Stamping & { lockBudget: LockBudget; dropUnanswered?: DropRead; onHistory?: OnHistory };
 
 async function droppableReads(reviews: string, identity: ProofIdentity, dropUnanswered: DropRead | undefined) {
   if (!dropUnanswered) return [];
@@ -281,7 +281,7 @@ async function droppableReads(reviews: string, identity: ProofIdentity, dropUnan
   return names.filter((_, index) => unanswered[index]);
 }
 
-async function startFinalRead(home: string, identity: ProofIdentity, base: string | undefined, decision: Decision | undefined, phase: FinalReadPhase, permit: Permit, cleanBaseMerge: CleanBaseMerge, quietCommit: QuietCommit, capturedBy: CapturedBy, from: string | undefined, { lockBudget, dropUnanswered, offBranch, ...stamping }: Reserving): Promise<Reserved> {
+async function startFinalRead(home: string, identity: ProofIdentity, base: string | undefined, decision: Decision | undefined, phase: FinalReadPhase, permit: Permit, cleanBaseMerge: CleanBaseMerge, quietCommit: QuietCommit, capturedBy: CapturedBy, from: string | undefined, { lockBudget, dropUnanswered, onHistory, ...stamping }: Reserving): Promise<Reserved> {
   if (base === undefined) throw new Error("A final read needs --base with the latest reviewed commit");
   if (base === identity.commit) throw new Error("HEAD is already reviewed. Skip the final read.");
   const reviews = join(pullRequestDirectory(home, identity), "reviews");
@@ -289,25 +289,23 @@ async function startFinalRead(home: string, identity: ProofIdentity, base: strin
   const snapshot = async () => {
     const dropping = await droppableReads(reviews, identity, dropUnanswered);
     const counted = await finishedReviews(home, identity);
-    const { continued, strays } = continuedReview(base, counted, cleanBaseMerge, offBranch?.onHistory);
-    return { ...await reviewsSpent(reviews, phase, "unfinished spends", [...dropping, ...strays]), reviews: counted, counted: counted.map(({ name }) => name), dropping, continued, strays };
+    return { ...await reviewsSpent(reviews, phase, "unfinished spends", dropping), reviews: counted, counted: counted.map(({ name }) => name), dropping };
   };
-  const permitRead = async ({ spent, names, finished: saved, reviews: finished, continued }: Awaited<ReturnType<typeof snapshot>>) => {
+  const permitRead = async ({ spent, names, finished: saved, reviews: finished }: Awaited<ReturnType<typeof snapshot>>) => {
     const carried = gateCarry(identity, finished, cleanBaseMerge, quietCommit).found;
     const latest = finished.at(-1);
     if (!latest) throw new Error("A final read needs a finished earlier review");
-    const onHistory = offBranch && finished.findLast((review) => offBranch.onHistory(review.commit));
-    const alternative = onHistory && onHistory !== latest ? `, the latest reviewed commit on HEAD's history ${onHistory.commit}` : "";
-    if (!continued) throw new Error(`Final read base must be the latest reviewed commit ${latest.commit}${alternative}, or a clean base merge the gate carried it to`);
+    const latestOnHistory = onHistory && finished.findLast((review) => onHistory(review.commit));
+    const starts = [latest, ...latestOnHistory && latestOnHistory !== latest ? [latestOnHistory] : []];
+    if (!starts.some((review) => coversReview(base, review.commit, cleanBaseMerge))) throw new Error(`Final read base must be the latest reviewed commit ${latest.commit}${starts[1] ? `, the latest reviewed commit on HEAD's history ${starts[1].commit}` : ""}, or a clean base merge the gate carried it to`);
     const unfinished = (await Promise.all(names.map(async (name) => !saved.includes(name) || await panelOutcome(join(reviews, name)) === "unfinished"))).some(Boolean);
     const retry = unfinished ? "" : ` To read it anyway, pass ${spent < ceiling ? "--agent '<your reason>', or " : ""}the user's --override`;
     if (!decision && carried?.quiet.length) throw new Error(`HEAD needs no final read: final read carried from ${short(carried.from)}: ${quietReason(carried.kinds)}. hedge proof gate counts the carry.${retry}`);
     if (unfinished) throw new Error("A review is unfinished. Finish it before a final read.");
     return permitReview(home, identity, spent >= free, carried && spent >= ceiling ? budgetSpent(permit.limits) : undefined, decision, permit);
   };
-  return reserveWeighed(reviews, lockBudget, snapshot, permitRead, async ({ dropping, strays, continued }, verdict) => {
+  return reserveWeighed(reviews, lockBudget, snapshot, permitRead, async ({ dropping }, verdict) => {
     for (const name of dropping) if (!await dropUnanswered!(join(reviews, name))) throw new Error(`The reviews changed while this one weighed the budget. ${weighAgain}`);
-    for (const name of strays) if (!await offBranch!.drop(join(reviews, name), continued!.commit)) throw new Error(`The reviews changed while this one weighed the budget. ${weighAgain}`);
     const taken = new Set([...await reviewNames(reviews), ...(await entries(droppedDirectory(reviews))).filter((entry) => droppedEntry.test(entry)).map(droppedName)]);
     let read = 1;
     while (taken.has(finalReadPrefix + read)) read++;
@@ -319,16 +317,6 @@ async function startFinalRead(home: string, identity: ProofIdentity, base: strin
 
 const coversReview = (base: string, reviewed: string, cleanBaseMerge: CleanBaseMerge) => reviewedThroughMerges(base, new Set([reviewed]), cleanBaseMerge) !== undefined;
 
-function continuedReview(base: string, finished: FinishedReview[], cleanBaseMerge: CleanBaseMerge, onHistory: OffBranch["onHistory"] | undefined) {
-  const latest = finished.at(-1);
-  if (!latest || coversReview(base, latest.commit, cleanBaseMerge)) return { continued: latest, strays: [] };
-  const index = onHistory ? finished.findLastIndex((review) => onHistory(review.commit)) : -1;
-  const strays = finished.slice(index + 1).map(({ name }) => name);
-  const continued = finished[index];
-  if (!continued || !coversReview(base, continued.commit, cleanBaseMerge) || strays.some((name) => !name.startsWith(finalReadPrefix))) return { continued: undefined, strays: [] };
-  return { continued, strays };
-}
-
 export async function startReview(home: string, identity: ProofIdentity, request: ReviewRequest): Promise<Reserved> {
   const { scope, base, phase, decision, cleanBaseMerge = () => undefined, quietCommit = () => undefined, capturedBy = "author", lock, lockBudget, now } = request;
   const from = request.from ?? base;
@@ -339,7 +327,7 @@ export async function startReview(home: string, identity: ProofIdentity, request
   if (base !== undefined && scope === "full") throw new Error("--scope full reads the diff from the merge base. Drop --base");
   const reviews = join(pullRequestDirectory(home, identity), "reviews");
   await mkdir(reviews, { recursive: true, mode: 0o700 });
-  if (scope === "final") return startFinalRead(home, identity, base, decision, finalReadPhase(phase ?? "review"), permit, cleanBaseMerge, quietCommit, capturedBy, from, { lock, lockBudget, now, dropUnanswered: request.dropUnanswered, offBranch: request.offBranch });
+  if (scope === "final") return startFinalRead(home, identity, base, decision, finalReadPhase(phase ?? "review"), permit, cleanBaseMerge, quietCommit, capturedBy, from, { lock, lockBudget, now, dropUnanswered: request.dropUnanswered, onHistory: request.onHistory });
   return startRound(home, identity, reviews, { scope, base, from, forkBase: request.forkBase, decision, permit, cleanBaseMerge, capturedBy, opening: request.opening ?? (async () => false), sanity: request.sanity ?? (async () => {}), reserving: { lock, lockBudget, now } });
 }
 
@@ -496,7 +484,7 @@ export async function recordFailure(directory: string, cause: string) {
 const droppedDirectory = (reviews: string) => join(reviews, "dropped");
 const droppedName = (entry: string) => /^final-\d+/.exec(entry)?.[0] ?? entry;
 const droppedEntry = /^final-\d+-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
-type DroppedRead = { head: string; droppedAt: string; cause?: string; continuedFrom?: string };
+type DroppedRead = { head: string; droppedAt: string; cause?: string };
 
 export async function unansweredFinalRead(directory: string, head: ProofIdentity) {
   const reservation = await readReservation(directory);
@@ -509,24 +497,13 @@ export async function unansweredFinalRead(directory: string, head: ProofIdentity
 export async function dropFinalRead(directory: string, head: ProofIdentity, now: Date) {
   const unanswered = await unansweredFinalRead(directory, head);
   if (!unanswered) return false;
-  await moveToDropped(directory, { head: head.commit, droppedAt: now.toISOString(), ...unanswered.cause ? { cause: redactSecrets(unanswered.cause) } : {} });
-  return true;
-}
-
-export async function dropOffBranchRead(directory: string, head: ProofIdentity, continuedFrom: string, now: Date) {
-  const reservation = await readReservation(directory);
-  if (reservation?.round !== "final" || reservation.commit === head.commit || !await hasFindings(directory)) return false;
-  await moveToDropped(directory, { head: head.commit, droppedAt: now.toISOString(), continuedFrom });
-  return true;
-}
-
-async function moveToDropped(directory: string, drop: DroppedRead) {
   const { reservationId } = await readJson<ReservedAs>(join(directory, "round.json"), {});
   const dropped = join(droppedDirectory(dirname(directory)), `${basename(directory)}-${reservationId ?? crypto.randomUUID()}`);
   await mkdir(dirname(dropped), { recursive: true, mode: 0o700 });
-  await writeJson(join(directory, "dropped.json"), drop);
+  await writeJson(join(directory, "dropped.json"), { head: head.commit, droppedAt: now.toISOString(), ...unanswered.cause ? { cause: redactSecrets(unanswered.cause) } : {} } satisfies DroppedRead);
   await rename(directory, dropped);
   await rm(join(dropped, "round.lock"), { force: true });
+  return true;
 }
 
 const causeCap = 300;
@@ -536,9 +513,7 @@ export async function droppedFinalReads(home: string, identity: ProofIdentity) {
   const reads = await Promise.all((await entries(dropped)).filter((entry) => droppedEntry.test(entry)).map(async (entry) => {
     const reservation = await readReservation(join(dropped, entry));
     const drop = await readJson<DroppedRead | undefined>(join(dropped, entry, "dropped.json"), undefined);
-    const commit = short(reservation?.commit ?? "unknown");
-    const why = drop?.continuedFrom ? `${commit} is not on HEAD's history, and a final read from ${short(drop.continuedFrom)} replaced it` : "no reviewer answer was captured";
-    const line = `${reviewLabel(droppedName(entry))} on ${commit} dropped at ${short(drop?.head ?? "unknown")}: ${why}`;
+    const line = `${reviewLabel(droppedName(entry))} on ${short(reservation?.commit ?? "unknown")} dropped at ${short(drop?.head ?? "unknown")}: no reviewer answer was captured`;
     return { line, droppedAt: drop?.droppedAt ?? "", ...drop?.cause ? { cause: redactSecrets(drop.cause.replace(/\s+/g, " ").trim()).slice(0, causeCap) } : {} };
   }));
   return reads.sort((a, b) => a.droppedAt.localeCompare(b.droppedAt) || a.line.localeCompare(b.line));

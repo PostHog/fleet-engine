@@ -2,7 +2,7 @@ import { closeSync, existsSync, openSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { askGap, authorOf, readDecisions, finishReview, startGateRun, ledgerRoot, listStanding, panelCommit, proofDirectory, readJson, readOwed, recordGap, recordGapCommand, recordStanding, requireChoice, requireNone, devPr, requireProofs, requireReservation, respondToReview, reuseProof, reviewDirectory, reviewOfCommit, reviewRecords, roundId, roundQuestion, runOption, saveProof, startReview, stopOption, storeCapturedFindings, unfinishedReview, writeJson, markRecorded, readReservation, recordReceipt, roundDirectories, unrecordedElsewhere, recordFailure, dropFinalRead, dropOffBranchRead, droppedFinalReads, type Arbiter, type Reservation, type CapturedBy, type ProofIdentity } from "./proof.ts";
+import { askGap, authorOf, readDecisions, finishReview, startGateRun, ledgerRoot, listStanding, panelCommit, proofDirectory, readJson, readOwed, recordGap, recordGapCommand, recordStanding, requireChoice, requireNone, devPr, requireProofs, requireReservation, respondToReview, reuseProof, reviewDirectory, reviewOfCommit, reviewRecords, roundId, roundQuestion, runOption, saveProof, startReview, stopOption, storeCapturedFindings, unfinishedReview, writeJson, markRecorded, readReservation, recordReceipt, roundDirectories, unrecordedElsewhere, recordFailure, dropFinalRead, droppedFinalReads, type Arbiter, type Reservation, type CapturedBy, type ProofIdentity } from "./proof.ts";
 import { AnswerTaken, appendOnce, decideAlone, hearUser, ledgerHolds, ledgerOf } from "./decision-cli.ts";
 import { HubUnreachable, keptOwed, refText, usersAcceptance, thisMachine, type Decision, type Ssh } from "./decision-ledger.ts";
 import { autonomyOf, gradeOf, type Autonomy, type Grade } from "./proof-autonomy.ts";
@@ -545,8 +545,8 @@ across quiet commits is refused, unless --agent with your reason, or the user's 
 A later round with --agent, or the user's --override, may be --scope full: it reviews
 the whole PR diff at HEAD again, such as after a restack.
 When the latest finished review read a commit that is not on HEAD's history, such as a final read run from another
-PR's checkout, a final read may also take --base with the latest reviewed commit on HEAD's history. It then moves the
-final reads after that review to reviews/dropped/, and the gate names each one. Without --commit, review and
+PR's checkout, a final read may also take --base with the latest reviewed commit on HEAD's history. The gate still
+holds the findings of the read off that history until you answer them with respond. Without --commit, review and
 review-start refuse a checkout whose HEAD is neither the PR's head on GitHub nor a commit on top of it.
 ${overrideHelp}`,
     examples: ["hedge proof review-start --scope full", "hedge proof review-start --scope fixes --base 1a2b3c4", "hedge proof review-start --scope final --base 1a2b3c4"],
@@ -685,8 +685,7 @@ async function reserveRound(options: Map<string, string>, head: ProofIdentity, c
   const limits = firstPanel ? permit.limits : { ...permit.limits, ceiling: tierCeiling(tier, permit.limits.ceiling) };
   const now = context.now ?? (() => new Date());
   const dropUnanswered = (directory: string) => roundStep(directory, context, () => dropFinalRead(directory, head, now()));
-  const offBranch = { onHistory: onHistoryOf(head, context.run), drop: (directory: string, continuedFrom: string) => roundStep(directory, context, () => dropOffBranchRead(directory, head, continuedFrom, now())) };
-  const reserved = await startReview(context.home, head, { dropUnanswered, offBranch, opening: async () => panel && !await panelCommit(context.home, head), sanity: () => requireSanity(context.home, head, context.run, () => bloatJudge(head, context)), scope, base, from, ...isCommitSha(pull?.baseSha) ? { forkBase: pull.baseSha } : {}, ...permit, limits, decision, phase: options.get("--phase"), cleanBaseMerge: cleanBaseMerge(head, context.run), quietCommit: quietCommitIn(context.run, () => baseRefs(head, context.run)), capturedBy, lock: async (directory) => lockNewRound(directory, await context.lock()), lockBudget: async (reviews, step) => withRoundLock(reviews, await context.lock(), step), now });
+  const reserved = await startReview(context.home, head, { dropUnanswered, onHistory: onHistoryOf(head, context.run), opening: async () => panel && !await panelCommit(context.home, head), sanity: () => requireSanity(context.home, head, context.run, () => bloatJudge(head, context)), scope, base, from, ...isCommitSha(pull?.baseSha) ? { forkBase: pull.baseSha } : {}, ...permit, limits, decision, phase: options.get("--phase"), cleanBaseMerge: cleanBaseMerge(head, context.run), quietCommit: quietCommitIn(context.run, () => baseRefs(head, context.run)), capturedBy, lock: async (directory) => lockNewRound(directory, await context.lock()), lockBudget: async (reviews, step) => withRoundLock(reviews, await context.lock(), step), now });
   return { ...reserved, scope, base, from, phase: options.get("--phase") };
 }
 

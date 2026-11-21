@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { checkout, cleanFixtures, fakeModel, productionMajor, reviewHeadFixed, verdict, type Checkout } from "./proof-testing.ts";
 
@@ -7,7 +7,6 @@ afterEach(cleanFixtures);
 
 const short = (commit: string) => commit.slice(0, 7);
 const reviews = (pr: Checkout) => join(pr.pullRequest, "reviews");
-const dropped = (pr: Checkout) => readdirSync(join(reviews(pr), "dropped")).map((entry) => /^final-\d+/.exec(entry)![0]);
 const finalRead = (pr: Checkout, base: string) => pr.hedge("review", "--scope", "final", "--base", base);
 const firstLine = (output: string) => JSON.parse(output.split("\n")[0]!) as { round: string; id: string };
 
@@ -30,20 +29,22 @@ async function prWithStrayRead() {
   return { pr, reviewed, fixed, stray, head, reviewer };
 }
 
-test("a final read continues from the latest review on HEAD's history and drops a final read of another branch", async () => {
-  const { pr, fixed, stray, head, reviewer } = await prWithStrayRead();
+test("a final read continues from the latest review on HEAD's history, and the gate holds the read of another branch until it is answered", async () => {
+  const { pr, fixed, head, reviewer } = await prWithStrayRead();
 
   const read = await finalRead(pr, fixed);
 
   expect(read.code).toBe(0);
   expect(firstLine(read.output)).toMatchObject({ round: "final", id: "final-3" });
   expect(reviewer.prompts().at(-1)).toContain("+greet the new member");
-  expect(dropped(pr)).toEqual(["final-2"]);
+  expect(existsSync(join(reviews(pr), "dropped"))).toBe(false);
   fakeModel(pr, "JUDGE", verdict());
-  const gate = (await pr.hedge("gate")).output;
-  expect(gate).toContain("review: HEAD reviewed in final read 3");
-  expect(gate).toContain(`review: final read 2 on ${short(stray)} dropped at ${short(head)}: ${short(stray)} is not on HEAD's history, and a final read from ${short(fixed)} replaced it`);
-  expect(gate).not.toContain("unanswered findings");
+  const held = (await pr.hedge("gate")).output;
+  expect(held).toContain("review: HEAD reviewed in final read 3");
+  expect(held).toContain("review: final read 2 has unanswered findings 1");
+  writeFileSync(join(pr.repository, "responses.md"), `1. rejected: final read 2 read another PR's checkout, not ${head}\n`);
+  expect((await pr.hedge("respond", "--round", "final-2", "responses.md")).code).toBe(0);
+  expect((await pr.hedge("gate")).output).not.toContain("unanswered findings");
 });
 
 test("a final read from the latest reviewed commit keeps a final read of another branch", async () => {
