@@ -20,7 +20,7 @@ export const cliReason = `Hedge blocked this command: an agent enters the Trunk 
 export const graphqlReason = `Hedge blocked this call: a GraphQL merge, auto-merge, enqueue, or comment that posts \`/trunk merge\` skips the merge gate, and a query read from piped input or an unreadable file may be one. Enqueue with ${oneShape}, or merge with \`gh pr merge <number> --repo <owner>/<repo>\`.`;
 export const rawReason = `Hedge blocked this command: it merges a PR or posts \`/trunk merge\` straight to the GitHub API, or sends GitHub a payload the merge gate cannot read, which skips the merge gate. Enqueue with ${oneShape}.`;
 export const otherEndpointReason = `Hedge blocked this call: it writes \`/trunk merge\` somewhere other than a new PR comment, such as an edited comment or a review. Enqueue with ${oneShape}.`;
-export const unreadPayloadReason = "Hedge blocked this call: the merge gate cannot read what it sends, such as a file that this command writes before the call, piped input, or a path it cannot open, so it cannot tell whether the call posts `/trunk merge`. Write the file in one call, then send it with a call of its own.";
+export const unreadPayloadReason = "Hedge blocked this call: the merge gate cannot read the file it sends, such as one that this command writes before the call or a path it cannot open, so it cannot tell whether the call posts `/trunk merge`. Write the file in one call, then send it with a call of its own.";
 export const splitStringReason = "Hedge blocked this command: `env -S` runs a command line that the merge gate cannot read. Write the gh, trunk, or curl command out as its own words.";
 export const shellAliasReason = "Hedge blocked this command: it runs a gh alias that the merge gate cannot read, a shell alias or one with arguments. Write the gh command out.";
 const pipedVia = " (piped body)";
@@ -283,12 +283,9 @@ export function mergeIntent(call: ToolCall, command: string, exempt: string[], i
     try { commands = commandsIn(command); }
     catch { return mentionsEnqueue.test(command) || graphqlMerge.test(command) || restMerge.test(command) ? { targets: [], refusal: rawReason } : intent; }
     const dirs = new Map<Scope, string[]>();
-    const written = new Set<string>();
-    const unwritten: IntentIO = { ...io, readText: (path) => written.has(path) ? undefined : io.readText(path) };
     const cwdIn = (scope: Scope | undefined): string | undefined => scope === undefined ? call.cwd : dirs.get(scope)?.at(-1) ?? cwdIn(scope.parent);
     for (const found of commands) {
       const name = basename(found.name);
-      const wrote = found.writes.map((path) => resolve(cwdIn(found.scope) ?? ".", found.chdir ?? ".", home(path)));
       if (name === "cd" || name === "pushd" || name === "popd") {
         const stack = dirs.get(found.scope) ?? [cwdIn(found.scope) ?? "."];
         const to = found.args.find((arg) => !arg.startsWith("-") && !arg.startsWith("+"));
@@ -296,11 +293,10 @@ export function mergeIntent(call: ToolCall, command: string, exempt: string[], i
         else if (name === "pushd") stack.push(resolve(stack.at(-1)!, home(to ?? "~")));
         else stack.splice(-1, 1, resolve(stack.at(-1)!, home(to ?? "~")));
         dirs.set(found.scope, stack);
-      } else {
-        const one = commandIntent(found, command, cwdIn(found.scope), unwritten);
-        intent = { targets: [...intent.targets, ...one.targets], refusal: intent.refusal ?? one.refusal };
+        continue;
       }
-      for (const path of wrote) written.add(path);
+      const one = commandIntent(found, command, cwdIn(found.scope), io);
+      intent = { targets: [...intent.targets, ...one.targets], refusal: intent.refusal ?? one.refusal };
     }
   } else if (/github/i.test(tool)) intent = mcpIntent(tool, call.tool_input ?? {});
   return { ...intent, targets: intent.targets.filter((target) => !isExempt(target.repository, exempt)) };

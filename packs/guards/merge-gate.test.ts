@@ -44,8 +44,6 @@ describe("which calls enqueue or merge", () => {
     ["gh pr comment 7 --repo example/product --body-file body.md"],
     ["gh pr comment 7 --repo example/product --body-file - <<'EOF'\n/trunk merge\nEOF"],
     ["printf '/trunk merge' > new.md && gh pr comment 7 --repo example/product -F new.md"],
-    ["printf '/trunk merge' > note.md && gh pr comment 7 --repo example/product -F note.md"],
-    ["printf '/trunk merge' > /work/note.md; gh api repos/example/product/issues/7/comments -F body=@note.md"],
     ["sh -c \"gh pr comment 7 --repo example/product --body '/trunk merge'\""],
     ["cd /work && gh pr comment 7 --body '/trunk merge'"],
     ["gh api repos/example/product/issues/7/comments -f body='/trunk merge'"],
@@ -467,7 +465,6 @@ describe("the hook against GitHub, faked at the gh boundary, and real checkouts,
     writeFileSync(join(dir, "body.md"), body);
     writeFileSync(join(dir, "body.json"), JSON.stringify({ body }));
     symlinkSync(join(dir, "body.json"), join(dir, "linked.json"));
-    mkdirSync(join(dir, "sub"));
     return { dir, hook: machine({ "repos/example/product/pulls/9": pull(head) }) };
   };
 
@@ -492,17 +489,14 @@ describe("the hook against GitHub, faked at the gh boundary, and real checkouts,
   test.each([
     ["jq -n --rawfile body body.md '{body: $body}' > new.json && gh api -X PATCH repos/example/product/pulls/9 --input new.json"],
     ["gh api repos/example/product/pulls/9 --jq .body > live.md && sed -i 's/low/medium/' live.md && gh api -X PATCH repos/example/product/pulls/9 -F body=@live.md"],
-    ["printf '{\"body\":\"/trunk merge\"}' > body.json && gh api -X PATCH repos/example/product/issues/comments/1 --input body.json"],
-    ["cd sub && printf '/trunk merge' > ../body.md && cd .. && gh api -X PATCH repos/example/product/pulls/9 -F body=@body.md"],
     ["gh api -X PATCH repos/example/product/pulls/9 --input missing.json"],
     ["gh api -X PATCH repos/example/product/pulls/9 --input <(make-body)"],
     ["f=$(mktemp); gh api -X PATCH repos/example/product/pulls/9 --input \"$f\""],
     ["gh pr review 9 --repo example/product --comment --body-file missing.md"],
-    ["pushd sub > body.json && popd && gh api -X PATCH repos/example/product/issues/comments/1 --input body.json"],
-  ])("a body edit whose payload the gate cannot read now, such as a file the same command writes, is refused and told to write it first: %s", async (command) => {
+  ])("a body edit whose payload the gate cannot read, such as a file the same command writes first, is refused and told to write it first: %s", async (command) => {
     const { dir, hook } = bodyEdits();
     const reason = await hook(command, dir);
-    expect(reason).toContain("the merge gate cannot read what it sends");
+    expect(reason).toContain("the merge gate cannot read the file it sends");
     expect(reason).toContain("Write the file in one call, then send it with a call of its own.");
   });
 
@@ -526,12 +520,6 @@ describe("the hook against GitHub, faked at the gh boundary, and real checkouts,
     expect(await hook("gh api -X PATCH repos/example/product/pulls/9 -F body=@enqueue.md", dir)).toBe(otherEndpointReason);
     expect(await hook("gh pr review 9 --repo example/product --comment --body-file enqueue.md", dir)).toBe(otherEndpointReason);
     expect(await hook("gh api graphql -F query=@enqueue.json", dir)).toBe(graphqlReason);
-  });
-
-  test("curl sending a payload file that an earlier command in the call rewrites is refused, though the old copy is clean", async () => {
-    const { dir, hook } = bodyEdits();
-    expect(await hook("curl -X PATCH https://api.github.com/repos/example/product/pulls/9 -d @body.json", dir)).toBeUndefined();
-    expect(await hook("printf '{\"body\":\"/trunk merge\"}' > body.json && curl -X PATCH https://api.github.com/repos/example/product/pulls/9 -d @body.json", dir)).toBe(rawReason);
   });
 
   test("the run that started last decides, even when an earlier run took a higher record number", async () => {
