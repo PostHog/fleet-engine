@@ -86,7 +86,7 @@ export async function main(argv: string[], options: CliOptions): Promise<number>
     if (command === "import-fleet") return await bringOverFleet(options);
     if (command === "retire-fleet") return await retireFleet(rest, options);
     if (command === "apply" || command === "doctor") return await reconcile(command, rest, options);
-    if (command === "update") return await runUpdate(options);
+    if (command === "update") return await runUpdate(rest, options);
     if (command === "refresh") return await runRefresh(rest, options);
     if (Object.hasOwn(changes, command) || command === "hub") return await change(command as keyof typeof changes | "hub", rest, options);
     if (command === "devbox") return await devbox(rest, options);
@@ -252,7 +252,10 @@ async function change(command: keyof typeof changes | "hub", args: string[], opt
   }
 }
 
-async function runUpdate(options: CliOptions) {
+const asksHelp = (args: string[]) => args.length === 1 && (args[0] === "--help" || args[0] === "-h");
+
+async function runUpdate(args: string[], options: CliOptions) {
+  if (args.length) return options.print("Usage: hedge update"), asksHelp(args) ? 0 : 2;
   if (options.platform !== "darwin") return updateEngine(options);
   const code = await updateEngine(options).catch((error: unknown) => {
     if (!(error instanceof Error)) throw error;
