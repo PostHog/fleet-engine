@@ -20,6 +20,15 @@ async function mergeMovedBaseBehindStaleRef(pr: Checkout) {
   return moved;
 }
 
+async function publishBase(pr: Checkout, tip: string) {
+  const remote = join(fixture("hedge-proof-remote-"), "github.com/example/product.git");
+  mkdirSync(remote, { recursive: true });
+  await pr.git("init", "-q", "--bare", remote);
+  await pr.git("push", "-q", remote, `${tip}:refs/heads/main`);
+  await pr.git("remote", "set-url", "origin", remote);
+  return remote;
+}
+
 async function judgePrompt(pr: Checkout) {
   await reviewHead(pr);
   const judge = fakeModel(pr, "JUDGE", verdict());
@@ -52,11 +61,7 @@ test("after the branch merges a base its stale base ref lags behind, the judge r
 test("when GitHub's base commit is not in the checkout yet, the judge fetches the base branch and reads only the branch's lines", async () => {
   const pr = await checkout();
   await mergeMovedBaseBehindStaleRef(pr);
-  const remote = join(fixture("hedge-proof-remote-"), "github.com/example/product.git");
-  mkdirSync(remote, { recursive: true });
-  await pr.git("init", "-q", "--bare", remote);
-  await pr.git("push", "-q", remote, "main:refs/heads/main");
-  await pr.git("remote", "set-url", "origin", remote);
+  const remote = await publishBase(pr, "main");
   const elsewhere = fixture("hedge-proof-elsewhere-");
   const there = (...args: string[]) => spawnAsync(["git", ...args], { cwd: elsewhere, env: gitEnv });
   await there("clone", "-q", remote, ".");
@@ -87,4 +92,34 @@ test("after the base is rewritten past a tip the branch merged, the judge still 
   expect(prompt).toContain("+greet the new member");
   expect(prompt).toContain("+a base change that is later discarded");
   expect(prompt).not.toContain("the rewritten base");
+});
+
+test("when the base was reset back past a tip the branch merged, the judge fetches the base and reads that tip's lines, which the branch now carries", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.txt", "greet the new member\n");
+  await pr.advanceBase("base.md", "a base change that is later reset away\n");
+  await pr.git("merge", "-q", "--no-edit", "main");
+  const reset = await pr.git("rev-parse", "main^");
+  await publishBase(pr, reset);
+  await pr.hedge("require", "--none", "--reason", "docs only");
+  pr.pullRequestState({ baseSha: reset });
+
+  const prompt = await judgePrompt(pr);
+  expect(prompt).toContain("+greet the new member");
+  expect(prompt).toContain("+a base change that is later reset away");
+});
+
+test("when the base moved on after GitHub last read it and the branch merged it, the judge reads only the branch's lines", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.txt", "greet the new member\n");
+  const lastRead = await pr.git("rev-parse", "main");
+  await pr.advanceBase("base.md", "the base moves on\n");
+  await pr.git("merge", "-q", "--no-edit", "main");
+  await publishBase(pr, "main");
+  await pr.hedge("require", "--none", "--reason", "docs only");
+  pr.pullRequestState({ baseSha: lastRead });
+
+  const prompt = await judgePrompt(pr);
+  expect(prompt).toContain("+greet the new member");
+  expect(prompt).not.toContain("the base moves on");
 });
