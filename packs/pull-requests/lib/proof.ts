@@ -314,7 +314,9 @@ async function startFinalRead(home: string, identity: ProofIdentity, base: strin
 }
 
 const nothingToRead = (from: string, carried: ReturnType<typeof reviewedThrough>) => `HEAD needs no final read: the commits since ${short(from)} change no file of the PR, so the read would see nothing. ${carried
-  ? `hedge proof gate carries the review of ${short(carried.from)} across ${carried.merges.length} clean merge(s) of the base`
+  ? carried.quiet.length
+    ? `hedge proof gate counts the carry: final read carried from ${short(carried.from)}: ${quietReason(carried.kinds)}`
+    : `hedge proof gate carries the review of ${short(carried.from)} across ${carried.merges.length} clean merge(s) of the base`
   : "hedge proof gate does not carry the review to HEAD: run a full round, which reads the whole PR"}`;
 
 const coversReview = (base: string, reviewed: string, cleanBaseMerge: CleanBaseMerge) => reviewedThroughMerges(base, new Set([reviewed]), cleanBaseMerge) !== undefined;

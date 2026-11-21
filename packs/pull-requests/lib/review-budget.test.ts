@@ -1145,7 +1145,7 @@ test("a HEAD that the gate carries across a revert of the latest reviewed fix ne
   expect(refused).toContain(`HEAD needs no final read: final read carried from ${panel.slice(0, 7)}: revert of a PR commit. hedge proof gate counts the carry. To read it anyway, pass the user's --override`);
   expect(refused).not.toContain("--agent");
   await expect(pr.hedge("review-start", "--scope", "final", "--base", panel)).rejects.toThrow(`Final read base must be the latest reviewed commit ${fix}`);
-  await expect(pr.hedge("review-start", "--scope", "final", "--base", fix, "--agent", "The revert needs a read.")).rejects.toThrow(`HEAD needs no final read: the commits since ${panel.slice(0, 7)} change no file of the PR, so the read would see nothing.`);
+  await expect(pr.hedge("review-start", "--scope", "final", "--base", fix, "--agent", "The revert needs a read.")).rejects.toThrow(`HEAD needs no final read: the commits since ${panel.slice(0, 7)} change no file of the PR, so the read would see nothing. hedge proof gate counts the carry: final read carried from ${panel.slice(0, 7)}: revert of a PR commit`);
 });
 
 test("with as many finished rounds as the ceiling but budget left by a clean panel, a HEAD the gate carries gets its needs-no-final-read answer with the --agent and --override retry advice", async () => {

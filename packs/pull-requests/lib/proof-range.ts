@@ -7,7 +7,7 @@ export type ReviewRange = { files: string[]; leftOut: string[]; diff: string };
 
 export function reviewRange(run: Run, from: string, head: string, branched: string): ReviewRange {
   const changed = changedFiles(run, from, head);
-  const own = from === branched ? undefined : new Set([...changedFiles(run, branched, head), ...changedFiles(run, forkOf(run, from, branched), from)].flat());
+  const own = from === branched ? undefined : new Set([...changedFiles(run, branched, head).flat(), ...authoredSince(run, from, head, branched)]);
   const kept = changed.filter((paths) => !own || paths.some((path) => own.has(path)));
   const files = kept.map(last);
   const leftOut = changed.filter((paths) => !kept.includes(paths)).map(last);
@@ -17,6 +17,21 @@ export function reviewRange(run: Run, from: string, head: string, branched: stri
 
 export const leftOutNote = (leftOut: string[]) =>
   leftOut.length ? `This diff holds only the files the PR changes against its base. It leaves out ${leftOut.length} file(s) that a merge of the base brought in.` : "";
+
+function authoredSince(run: Run, from: string, head: string, branched: string) {
+  const owned = changedFiles(run, forkOf(run, from, branched), from).flat();
+  const merged = cleanMerge(run, from, branched);
+  if (merged === undefined) return owned;
+  const differs = new Set(changedFiles(run, merged, head).flat());
+  return owned.filter((path) => differs.has(path));
+}
+
+function cleanMerge(run: Run, from: string, branched: string) {
+  const result = run(["git", "merge-tree", "--write-tree", "--no-messages", from, branched]);
+  if (result.code === 1) return undefined;
+  if (result.code !== 0) throw new Error(`Cannot merge ${short(branched)} into ${short(from)} here (${firstLine(result.stderr)})`);
+  return result.stdout.trim().split("\n")[0]!;
+}
 
 function forkOf(run: Run, from: string, branched: string) {
   const result = run(["git", "merge-base", from, branched]);

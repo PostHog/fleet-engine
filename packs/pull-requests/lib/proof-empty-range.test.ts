@@ -28,6 +28,18 @@ test("a final read of a HEAD that only merges the base is refused, because it wo
   expect((await pr.hedge("gate")).output).toContain(`review: HEAD carried forward from the review of ${reviewed.slice(0, 7)} across 1 clean merge(s) of the base`);
 });
 
+test("a final read after a clean merge of a base that landed the PR's own edit and more is refused, because the PR changed nothing since the read", async () => {
+  const { pr, reviewed } = await reviewedPr();
+  await pr.advanceBase("shared.txt", "the base adds a heading\none\nand the member's name\n");
+  await pr.git("merge", "-q", "--no-edit", "main");
+  const reviewer = fakeModel(pr, "REVIEWER", "No findings.");
+
+  const refused = await pr.hedge("review", "--scope", "final", "--base", reviewed).then(() => "", (error: Error) => error.message);
+
+  expect(refused).toStartWith(`HEAD needs no final read: the commits since ${reviewed.slice(0, 7)} change no file of the PR`);
+  expect(reviewer.prompts()).toEqual([]);
+});
+
 test("a final read of a commit that puts a PR file back to the base's text reads that change", async () => {
   const { pr, reviewed } = await reviewedPr();
   await pr.commit("shared.txt", "one\n");
