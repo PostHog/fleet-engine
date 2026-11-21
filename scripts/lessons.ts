@@ -5,10 +5,7 @@ import { builtins } from "../src/cli.ts";
 import type { LoadedPack } from "../src/pack/types.ts";
 import { packTitle } from "../src/setup/questions.ts";
 
-export const loadVoice = (root: string) => {
-  const file = join(root, "lessons", "voice.json");
-  return existsSync(file) ? JSON.stringify(JSON.parse(readFileSync(file, "utf8"))) : "";
-};
+export const loadVoice = (root: string) => JSON.stringify(JSON.parse(readFileSync(join(root, "lessons", "voice.json"), "utf8")));
 
 export const narrationHash = (lesson: Lesson, voice: string) => new Bun.CryptoHasher("sha256").update(voice).update("\n\n").update(narration(lesson)).digest("hex");
 

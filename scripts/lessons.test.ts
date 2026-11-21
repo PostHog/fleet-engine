@@ -57,6 +57,11 @@ describe("lessons", () => {
     expect(lessonProblems(short, names, testVoice)).toEqual(["lessons/tour.md: has 2 chapters, but its cut has 1", "lessons/tour.md: has 4 sentences, but its cut has 1 captions"]);
   });
 
+  test("the voice that a cut is checked against comes from lessons/voice.json, and a missing file fails", () => {
+    expect(loadVoice(root)).toBe(JSON.stringify(JSON.parse(readFileSync(join(root, "lessons", "voice.json"), "utf8"))));
+    expect(() => loadVoice(join(root, "scripts"))).toThrow("voice.json");
+  });
+
   test("the captions leave out code marks and escape the characters WebVTT reserves", () => {
     const lesson = builtLesson("tour", tourSource.replace("Run `hedge doctor` when something looks wrong.", "Type `<login>` & go."));
     expect(captions(lesson).split("\n\n").at(-1)).toBe("00:00:15.000 --> 00:00:19.000\nType &lt;login&gt; &amp; go.\n");
