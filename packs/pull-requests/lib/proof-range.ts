@@ -6,13 +6,19 @@ export type Run = (command: string[]) => Result;
 export type ReviewRange = { files: string[]; leftOut: string[]; diff: string };
 
 export function reviewRange(run: Run, from: string, head: string, branched: string): ReviewRange {
+  const { kept, leftOut } = rangeFiles(run, from, head, branched);
+  const files = kept.map(last);
+  const diff = files.length ? diffOf(run, from, head, leftOut.length ? kept.flat() : undefined) : "";
+  return { files, leftOut, diff };
+}
+
+export const rangeIsEmpty = (run: Run, from: string, head: string, branched: string) => !rangeFiles(run, from, head, branched).kept.length;
+
+function rangeFiles(run: Run, from: string, head: string, branched: string) {
   const changed = changedFiles(run, from, head);
   const own = from === branched ? undefined : new Set([...changedFiles(run, branched, head), ...changedFiles(run, forkOf(run, from, branched), from)].flat());
   const kept = changed.filter((paths) => !own || paths.some((path) => own.has(path)));
-  const files = kept.map(last);
-  const leftOut = changed.filter((paths) => !kept.includes(paths)).map(last);
-  const diff = files.length ? diffOf(run, from, head, leftOut.length ? kept.flat() : undefined) : "";
-  return { files, leftOut, diff };
+  return { kept, leftOut: changed.filter((paths) => !kept.includes(paths)).map(last) };
 }
 
 export const leftOutNote = (leftOut: string[]) =>
