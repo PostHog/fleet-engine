@@ -1,3 +1,5 @@
+import { bunScript } from "../../../src/runner/bun.ts";
+
 type Env = Record<string, string | undefined>;
 
 export type Published = { id: string; url: string };
@@ -15,7 +17,7 @@ export function handlerPublisher(env: Env): Publisher | undefined {
   const handler = (JSON.parse(env.HEDGE_HANDLERS || "{}") as Record<string, string>)[publisherSeam];
   if (!handler) return undefined;
   return async (request) => {
-    const child = Bun.spawn(["bun", handler], { env: env as Record<string, string>, stdin: new Blob([JSON.stringify(request)]), stdout: "pipe", stderr: "pipe" });
+    const child = Bun.spawn(bunScript(handler), { env: env as Record<string, string>, stdin: new Blob([JSON.stringify(request)]), stdout: "pipe", stderr: "pipe" });
     const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
     const answer = answerOf(stdout);
     if (code === 0 && typeof answer.id === "string" && answer.id && typeof answer.url === "string" && /^https:\/\/\S+$/.test(answer.url)) return { id: answer.id, url: answer.url };

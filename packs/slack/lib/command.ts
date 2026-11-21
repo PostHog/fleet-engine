@@ -7,6 +7,7 @@ import { launchHere, launchOnBox, launchOnNodes, spawnRun, type Launch, type Lau
 import { manifest, manifestLink, serve, slackApi, slackApiBase, slackApp, type Sleep } from "./slack.ts";
 import { Interrupted, secretReader, type ReadSecret } from "./secret.ts";
 import { followMinutes, handleTrigger, retryPending, syncFollowed, takeTurn, triggerOf, type Capture, type Owner, type Share, type Shared, type TriggerDeps } from "./trigger.ts";
+import { bunScript } from "../../../src/runner/bun.ts";
 
 type Env = Record<string, string | undefined>;
 export type Every = (work: () => void, ms: number) => () => void;
@@ -101,7 +102,7 @@ export function captureHandler(env: Env, run: Run): { capture: Capture; share: S
   const handler = (JSON.parse(env.HEDGE_HANDLERS || "{}") as Record<string, string>)["slack-capture"];
   if (!handler) return undefined;
   const ask = async (request: unknown, answered: (parsed: Record<string, unknown>) => boolean, what: string) => {
-    const answer = await run(["bun", handler], JSON.stringify(request));
+    const answer = await run(bunScript(handler), JSON.stringify(request));
     const last = answer.stdout.trim().split("\n").at(-1) ?? "";
     let parsed: Record<string, unknown> = {};
     try { parsed = JSON.parse(last) as Record<string, unknown>; } catch {}

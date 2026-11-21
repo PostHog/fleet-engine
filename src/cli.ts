@@ -28,6 +28,7 @@ import { onHub } from "./hub/ssh.ts";
 import { drift } from "./reconciler/drift.ts";
 import { spawnRunner, type CommandRunner } from "./adapters/run.ts";
 import { become, canBecome, type Become } from "./runner/become.ts";
+import { bunScript } from "./runner/bun.ts";
 import { trackCommand } from "./usage/usage.ts";
 import { asHedge } from "./reconciler/engine-command.ts";
 import { adoptLegacyEnv, customFleetEngine, fleetNotice, hedgeOnMac, inAnyLegacyPath, isOldJob, profileFile, renamedPath, underLegacyPath, withLegacyNames } from "./legacy.ts";
@@ -320,7 +321,7 @@ async function runPackCommand(name: string, args: string[], options: CliOptions)
   const loaded = loadedPack(sources, command.pack);
   const run = loaded?.code?.commands[name]?.run;
   const repairs = plan.human.some((step) => step.command !== undefined && asHedge(step.command.trim().split(/\s+/)).join("\n") === typed.join("\n"));
-  if (!run && !repairs && options.become) return options.become(["bun", command.path, ...args], { ...Bun.env, ...packEnvironment(plan, options) });
+  if (!run && !repairs && options.become) return options.become(bunScript(command.path, ...args), { ...Bun.env, ...packEnvironment(plan, options) });
   const exit = run ? await inPack(plan, loaded!, options, (ctx) => run(args, ctx)) : await spawnPackCommand(command.path, args, plan, options);
   return exit === 0 && repairs ? applyProfile(plan.machine.profileDir!, options) : exit;
 }
@@ -368,7 +369,7 @@ async function spawnPackCommand(path: string, args: string[], plan: Plan, option
   const forward = (signal: NodeJS.Signals) => child?.kill(signal);
   process.on("SIGINT", forward).on("SIGTERM", forward);
   try {
-    const started = Bun.spawn(["bun", path, ...args], { stdio: ["inherit", "inherit", "inherit"], env: { ...Bun.env, ...packEnvironment(plan, options) } });
+    const started = Bun.spawn(bunScript(path, ...args), { stdio: ["inherit", "inherit", "inherit"], env: { ...Bun.env, ...packEnvironment(plan, options) } });
     child = started;
     return await started.exited;
   } finally {
