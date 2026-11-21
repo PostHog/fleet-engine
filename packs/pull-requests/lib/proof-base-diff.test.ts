@@ -103,6 +103,7 @@ test("fetching the base writes no ref but the base's remote ref, even in a check
   const refsBefore = await pr.git("for-each-ref", "--format=%(refname) %(objectname)", "--exclude=refs/remotes/origin/main");
 
   await judgePrompt(pr);
+  expect(await pr.git("rev-parse", "refs/remotes/origin/main")).toBe(await pr.git("rev-parse", "main"));
   expect(await pr.git("for-each-ref", "--format=%(refname) %(objectname)", "--exclude=refs/remotes/origin/main")).toBe(refsBefore);
   expect(existsSync(join(pr.repository, ".git/FETCH_HEAD"))).toBe(false);
 });
