@@ -12,9 +12,8 @@ const openers = new Set(["{", "if", "while", "until"]);
 const headers = new Set(["for", "select", "case"]);
 const closers = new Set(["}", "fi", "done", "esac"]);
 const separators = new Set([undefined, ";", "\n"]);
-const readsStatus = (text: string) => /\$\{?\?/.test(text);
-const readsPipeStatusAt = (place: number) => (text: string) => [...text.matchAll(/\$\{PIPESTATUS\[(\d+|@|\*)\]/g)].some(([, index]) => index === String(place) || index === "@" || index === "*");
-const printfStatusConversions = new Set(["%s", "%d", "%i"]);
+const readsStatus = (text: string) => /\$(?:\?|\{\?\})/.test(text);
+const readsPipeStatusAt = (place: number) => (text: string) => [...text.matchAll(/\$\{PIPESTATUS\[(\d+|@|\*)\]\}/g)].some(([, index]) => index === String(place) || index === "@" || index === "*");
 const failingCode = /^(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-5])$/;
 const printsToTheAgent = /^(?:2>&1|1?>&2)$/;
 
@@ -74,8 +73,8 @@ function depthsOf(commands: Command[]): number[] {
 function setting({ commands, depths }: Program, before: number, read: (args: string[]) => boolean | undefined): boolean {
   let on = false;
   commands.slice(0, before).forEach((command, index) => {
+    if (command.name !== "set" || parens(command.scope) > 0) return;
     const alwaysRuns = depths[index] === 0 && command.keywords.length === 0 && !["|", "&&", "||"].includes(commands[index - 1]?.after ?? "");
-    if (command.name !== "set") return;
     const value = read(command.args);
     if (alwaysRuns && !["|", "&"].includes(command.after ?? "")) on = value ?? on;
     else if (value === false) on = false;
@@ -127,8 +126,9 @@ function printsStatus({ name, args, rawArgs }: Command, reads: (text: string) =>
   const skip = args[0] === "--" ? 1 : 0;
   const [format = "", ...values] = args.slice(skip);
   const [rawFormat = "", ...rawValues] = rawArgs.slice(skip);
-  const conversions = format.replaceAll("%%", "").match(/%[^A-Za-z]*[A-Za-z]/g) ?? [];
-  const printsValue = conversions.length === 1 && printfStatusConversions.has(conversions[0]) && values.length === 1 && readsArg(rawValues[0]);
+  const conversions = format.replaceAll("%%", "");
+  const oneStatusConversion = conversions.split("%").length === 2 && /%[sdi]/.test(conversions);
+  const printsValue = oneStatusConversion && values.length === 1 && readsArg(rawValues[0]);
   return readsArg(rawFormat) || printsValue;
 }
 
@@ -141,19 +141,6 @@ function reporter(command: Command | undefined, sameLevel: boolean, reads: Reads
     return (code === undefined && reads.bareExit) || readsIt || (reads.failingExit && failingCode.test(code ?? "")) ? "exit" : undefined;
   }
   return printsStatus(command, reads.status) && command.redirects.every((redirect) => printsToTheAgent.test(redirect)) ? "printed" : undefined;
-}
-
-function exitsInGroup({ commands, depths }: Program, start: number, depth: number): Reach | undefined {
-  if (!commands[start]?.keywords.includes("{") || depths[start] !== depth + 1) return undefined;
-  const close = depths.findIndex((each, index) => index > start && each <= depth);
-  const closer = commands[close];
-  if (closer?.name !== "}" || !separators.has(closer.after)) return undefined;
-  const body = commands.slice(start, close);
-  const last = body.at(-1)!;
-  const exitsOnce = body.filter((command) => command.name === "exit").length === 1 && last.name === "exit";
-  const flat = depths.slice(start, close).every((each) => each === depth + 1);
-  const runs = separators.has(last.after) && (body.length === 1 || separators.has(body.at(-2)?.after));
-  return exitsOnce && flat && runs && last.args.length === 1 && failingCode.test(last.args[0]) ? "exit" : undefined;
 }
 
 function placeInPipe({ commands, depths }: Program, start: number): number | undefined {
@@ -206,7 +193,7 @@ function reachOf(program: Program, start: number): Reach {
   const next = end + 1;
   if (after === undefined) return "exit";
   if (after === "&") return { how: "running it in the background with `&`" };
-  if (after === "||") return reporter(commands[next], sameLevel(next), { status: readsStatus, bareExit: true, failingExit: true }) ?? exitsInGroup(program, next, depth) ?? { how: "the `||` after it" };
+  if (after === "||") return reporter(commands[next], sameLevel(next), { status: readsStatus, bareExit: true, failingExit: true }) ?? { how: "the `||` after it" };
   if (!chained && separators.has(after) && setting(program, start, setsErrexit)) return "exit";
   return reporter(commands[next], sameLevel(next), { status: readsStatus, bareExit: true, failingExit: false }) ?? { how: separatorName(after) };
 }
