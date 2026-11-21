@@ -71,13 +71,15 @@ function depthsOf(commands: Command[]): number[] {
   });
 }
 
-function setting({ commands, depths }: Program, before: number, read: (args: string[]) => boolean | undefined): boolean {
+function setting(program: Program, before: number, read: (args: string[]) => boolean | undefined): boolean {
+  const { commands, depths } = program;
   let on = false;
   commands.slice(0, before).forEach((command, index) => {
     if (command.name !== "set" || parens(command.scope) > 0) return;
     const alwaysRuns = depths[index] === 0 && command.keywords.length === 0 && !["|", "&&", "||"].includes(commands[index - 1]?.after ?? "");
     const value = read(command.args);
-    if (alwaysRuns && command.redirects.length === 0 && !["|", "&"].includes(command.after ?? "")) on = value ?? on;
+    const inForeground = command.after !== "|" && commands[listEnd(program, index, 0)].after !== "&";
+    if (alwaysRuns && command.redirects.length === 0 && inForeground) on = value ?? on;
     else if (value === false) on = false;
   });
   return on;
@@ -105,6 +107,8 @@ function statusReads(raw: string): string[] | undefined {
   return [...raw.replace(/'[^']*'/g, "").matchAll(new RegExp(statusRead, "g"))].map(([, index]) => index ?? "?");
 }
 
+const validRead = (index: string) => index === "?" || index === "@" || index === "*" || arithmeticIndex(index) !== undefined;
+
 function readsTheStatus(index: string, reads: Reads, echo: boolean): boolean {
   if (index === "?") return reads.dollarQuestion;
   if (reads.place === undefined) return false;
@@ -124,7 +128,7 @@ function reporter(command: Command | undefined, sameLevel: boolean, reads: Reads
     const alone = indexes.length === 1 && ["", '""'].includes(raw.replace(new RegExp(statusRead), ""));
     return alone && readsTheStatus(indexes[0], reads, false) ? "exit" : undefined;
   }
-  const printed = command.name === "echo" && indexes.length > 0 && indexes.some((index) => readsTheStatus(index, reads, true));
+  const printed = command.name === "echo" && indexes.every(validRead) && indexes.some((index) => readsTheStatus(index, reads, true));
   return printed && command.redirects.every((redirect) => printsToTheAgent.test(redirect)) ? "printed" : undefined;
 }
 

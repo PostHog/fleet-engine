@@ -173,6 +173,8 @@ describe("the exit-status mask guard", () => {
     'git push && ( exit 3 ); echo "${PIPESTATUS[0]}"',
     "git push; exit $? now",
     "git push; exit 1",
+    'git push > /dev/null 2>&1; echo "${PIPESTATUS[0]}" "${PIPESTATUS[08]}"',
+    "set -o pipefail && : & wait; git push > /dev/null 2>&1 | cat",
     'true | git push > /dev/null 2>&1 || exit "${PIPESTATUS[1]}" && : & wait',
     "git push > /dev/null 2>&1 || exit 1 && : & wait",
     "git push > /dev/null 2>&1; exit $? && : & wait",
