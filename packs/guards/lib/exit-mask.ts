@@ -3,7 +3,7 @@ import { nestedProgramsAt, parse, type Command, type Scope } from "./shell-words
 
 type Finding = { what: string; how: string };
 type Reach = "exit" | "printed" | { how: string };
-type Program = { commands: Command[]; depths: number[]; topLevel: boolean };
+type Program = { commands: Command[]; depths: number[] };
 
 const maxNesting = 8;
 const gitValueOptions = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"]);
@@ -12,8 +12,7 @@ const openers = new Set(["{", "if", "while", "until"]);
 const headers = new Set(["for", "select", "case"]);
 const closers = new Set(["}", "fi", "done", "esac"]);
 const separators = new Set([undefined, ";", "\n"]);
-const arithmeticIndex = (index: string) => (/^0[0-7]*$/.test(index) ? parseInt(index, 8) : /^[1-9]\d*$/.test(index) ? Number(index) : undefined);
-const statusRead = String.raw`\$(?:\?|\{\?\}|\{PIPESTATUS\[(\d+|@|\*)\]\})`;
+const statusRead = String.raw`\$(?:\?|\{\?\})`;
 const plainWord = new RegExp(String.raw`^(?:[\w=:,./+%@-]|'[^'\\]*'|"(?:[^$\\"']|${statusRead})*"|${statusRead})*$`);
 const failingCode = /^(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-5])$/;
 const printsToTheAgent = /^(?:2>&1|1?>&2)$/;
@@ -100,81 +99,34 @@ const setsErrexit = (args: string[]) => {
   return on;
 };
 
-type Reads = { dollarQuestion: boolean; place: number | undefined; stages: number | undefined; bareExit: boolean; failingExit: boolean };
-
-function statusReads(raw: string): string[] | undefined {
+function statusReads(raw: string): number | undefined {
   if (!plainWord.test(raw)) return undefined;
-  return [...raw.replace(/'[^']*'/g, "").matchAll(new RegExp(statusRead, "g"))].map(([, index]) => index ?? "?");
+  return raw.replace(/'[^']*'/g, "").match(new RegExp(statusRead, "g"))?.length ?? 0;
 }
 
-function isSet(index: string, { stages }: Reads): boolean {
-  return index === "?" || index === "@" || index === "*" || (stages !== undefined && (arithmeticIndex(index) ?? stages) < stages);
-}
-
-function readsTheStatus(index: string, reads: Reads, echo: boolean): boolean {
-  if (index === "?") return reads.dollarQuestion;
-  if (reads.place === undefined) return false;
-  return (echo && (index === "@" || index === "*")) || arithmeticIndex(index) === reads.place;
-}
-
-function reporter(command: Command | undefined, sameLevel: boolean, reads: Reads): Reach | undefined {
-  if (!command || !sameLevel || command.keywords.length > 0 || command.after === "|" || command.after === "&" || command.substitutions.length > 0) return undefined;
+function reporter(command: Command | undefined, reachable: boolean, failingExit: boolean): Reach | undefined {
+  if (!command || !reachable || command.keywords.length > 0 || command.rawPrefix.length > 0 || command.after === "|" || command.substitutions.length > 0) return undefined;
   const words = command.rawArgs.map(statusReads);
   if (words.some((word) => word === undefined)) return undefined;
-  const indexes = words.flatMap((word) => word ?? []);
+  const statusCount = words.reduce((sum: number, word) => sum + (word ?? 0), 0);
   if (command.name === "exit") {
     if (command.redirects.length > 0 || words.length > 1) return undefined;
     const [raw] = command.rawArgs;
-    if (raw === undefined) return reads.bareExit ? "exit" : undefined;
-    if (reads.failingExit && failingCode.test(command.args[0])) return "exit";
-    const alone = indexes.length === 1 && ["", '""'].includes(raw.replace(new RegExp(statusRead), ""));
-    return alone && readsTheStatus(indexes[0], reads, false) ? "exit" : undefined;
+    if (raw === undefined) return "exit";
+    if (failingExit && failingCode.test(command.args[0])) return "exit";
+    return statusCount === 1 && ["", '""'].includes(raw.replace(new RegExp(statusRead), "")) ? "exit" : undefined;
   }
-  const printed = command.name === "echo" && indexes.every((index) => isSet(index, reads)) && indexes.some((index) => readsTheStatus(index, reads, true));
+  const printed = command.name === "echo" && statusCount > 0;
   return printed && command.redirects.every((redirect) => printsToTheAgent.test(redirect)) ? "printed" : undefined;
 }
 
-const insideOf = (scope: Scope | undefined, group: Scope): boolean => scope !== undefined && (scope === group || insideOf(scope.parent, group));
-
-function topLevelStageStart({ commands, depths }: Program, last: number): number | undefined {
-  const { name, keywords, scope } = commands[last];
-  if (depths[last] === 0 && !closers.has(name)) return last;
-  if (parens(scope) > 0) {
-    let group = scope;
-    while (group.parent?.parent) group = group.parent;
-    let first = last;
-    while (first > 0 && insideOf(commands[first - 1].scope, group)) first--;
-    return first;
-  }
-  if (depths[last] !== 0 || keywords.length > 0) return undefined;
-  let open = 1;
-  let first = last;
-  while (open > 0 && first > 0) {
-    const command = commands[--first];
-    if (closers.has(command.name)) open++;
-    if (headers.has(command.name)) open--;
-    open -= command.keywords.filter((word) => openers.has(word)).length;
+function pipeStart({ commands, depths }: Program, start: number): number | undefined {
+  let first = start;
+  while (first > 0 && commands[first - 1].after === "|") {
+    first--;
+    if (depths[first] !== 0 || closers.has(commands[first].name)) return undefined;
   }
   return first;
-}
-
-function pipeStart(program: Program, start: number): { place: number; first: number } | undefined {
-  let place = 0;
-  let first = start;
-  for (; first > 0 && program.commands[first - 1].after === "|"; place++) {
-    const stage = topLevelStageStart(program, first - 1);
-    if (stage === undefined) return undefined;
-    first = stage;
-  }
-  return { place, first };
-}
-
-const placeInPipe = (program: Program, start: number) => pipeStart(program, start)?.place;
-
-function stagesUpTo(program: Program, end: number): number | undefined {
-  const last = topLevelStageStart(program, end);
-  const before = last === undefined ? undefined : placeInPipe(program, last);
-  return before === undefined ? undefined : before + 1;
 }
 
 function statementEnd({ commands, depths }: Program, start: number, depth: number): number {
@@ -208,12 +160,7 @@ function reachOf(program: Program, start: number): Reach {
   const depth = depths[start];
   const reachable = (index: number) => depths[index] === depth && commands[listEnd(program, index, depth)].after !== "&";
   let end = pipelineEnd(program, start, depth);
-  if (end !== start && !setting(program, start, setsOption("pipefail"))) {
-    const place = program.topLevel ? placeInPipe(program, start) : undefined;
-    const stages = place === undefined ? undefined : stagesUpTo(program, end);
-    const readable = depth === 0 && separators.has(commands[end].after);
-    return (readable && reporter(commands[end + 1], reachable(end + 1), { dollarQuestion: false, place, stages, bareExit: false, failingExit: false })) || { how: "a pipe" };
-  }
+  if (end !== start && !setting(program, start, setsOption("pipefail"))) return { how: "a pipe" };
   if (depth > 0) return closesOnly(program, end, depth) ? "exit" : { how: "the group or loop it runs in" };
   let chained = false;
   while (commands[end].after === "&&" && end + 1 < commands.length) {
@@ -222,15 +169,13 @@ function reachOf(program: Program, start: number): Reach {
   }
   const after = commands[end].after;
   const next = end + 1;
-  const place = chained || !program.topLevel ? undefined : placeInPipe(program, start);
-  const stages = place === undefined ? undefined : stagesUpTo(program, end);
   if (after === undefined) return "exit";
   if (after === "&") return { how: "running it in the background with `&`" };
-  if (after === "||") return reporter(commands[next], reachable(next), { dollarQuestion: true, place, stages, bareExit: true, failingExit: true }) ?? { how: "the `||` after it" };
-  const first = pipeStart(program, start)?.first;
+  if (after === "||") return reporter(commands[next], reachable(next), true) ?? { how: "the `||` after it" };
+  const first = pipeStart(program, start);
   const errexitApplies = !chained && first !== undefined && !commands[first].keywords.includes("!");
   if (errexitApplies && separators.has(after) && setting(program, start, setsErrexit)) return "exit";
-  return reporter(commands[next], reachable(next), { dollarQuestion: true, place, stages, bareExit: true, failingExit: false }) ?? { how: separatorName(after) };
+  return reporter(commands[next], reachable(next), false) ?? { how: separatorName(after) };
 }
 
 function hiddenIn(text: string, nesting: number): { found?: Finding; carries?: string } {
@@ -252,7 +197,7 @@ function hiddenIn(text: string, nesting: number): { found?: Finding; carries?: s
     }
   }
   const commands = pipelines.flat();
-  const program = { commands, depths: depthsOf(commands), topLevel: nesting === 0 };
+  const program = { commands, depths: depthsOf(commands) };
   let carries: string | undefined;
   for (const [index, command] of commands.entries()) {
     const what = guarded[index];
@@ -268,7 +213,7 @@ function hiddenIn(text: string, nesting: number): { found?: Finding; carries?: s
 export const exitMaskReason = (what: string, how: string, person: string) => `Hedge blocked this command: ${how} hides the exit status of \`${what}\`, `
   + "so a failure reads as a success. These forms pass: run it alone or as the last command; chain the next step with `&&`; "
   + `print its status on the next command, as in \`${what} … > /tmp/out.log 2>&1; echo "exit=$?"; cat /tmp/out.log\`; `
-  + "for a pipe, start with `set -o pipefail;`, or print `${PIPESTATUS[n]}` right after it, where n is its place in the pipe, counted from 0. "
+  + "for a pipe, start with `set -o pipefail;`. "
   + "A call with only `--help` or `-h` after the command passes too. "
   + `If you are not sure, stop and ask ${person}.`;
 

@@ -44,8 +44,6 @@ describe("the exit-status mask guard", () => {
     "set -euo pipefail\ngit push | tail -3",
     "set +o pipefail; set -o pipefail; git push | tail -3",
     "set -o pipefail; git push 2>&1 | tail -3; echo \"exit $?\"",
-    'git push 2>&1 | tail -3; echo "${PIPESTATUS[0]}"',
-    "git push 2>&1 | tail -3; exit ${PIPESTATUS[0]}",
     "set -e; git commit -m x; git push",
     "if git push; then echo pushed; fi",
     "git push > push.log 2>&1 && tail push.log",
@@ -61,35 +59,12 @@ describe("the exit-status mask guard", () => {
     "git push && { echo pushed; }; echo \"exit $?\"",
     'git push > push.log 2>&1 || echo "push failed: $?"; cat push.log',
     "git push || exit 1",
-    'echo main | xargs git push origin | tail -3; echo "exit ${PIPESTATUS[1]}"',
-    'git push | tail -3; echo "${PIPESTATUS[@]}"',
     'git push; echo "exit=$?" -e',
     "set -o pipefail; ( set +o pipefail ); git push | cat",
-    'git push | cat; echo "${PIPESTATUS[00]}"',
-    "{ printf '%s\\n' main; } | xargs git push origin | cat; echo \"${PIPESTATUS[1]}\"",
-    "for i in 1; do echo main; done | xargs git push origin | cat; echo \"${PIPESTATUS[1]}\"",
-    "( echo main ) | xargs git push origin | cat; echo \"${PIPESTATUS[1]}\"",
-    "if true; then echo main; fi | xargs git push origin | cat; echo \"${PIPESTATUS[1]}\"",
     "label='<(input)' out=$(git push); echo \"exit=$?\"",
-    'git push | cat; exit "${PIPESTATUS[0]}"',
-    'true | git push; echo "${PIPESTATUS[1]}"',
-    'true | git push || echo "${PIPESTATUS[1]}"',
     'git push || exit "1"',
-    'git push | cat; echo "${PIPESTATUS[0]}" "$?"',
-    'git push | cat; echo "${PIPESTATUS[0]}" "${PIPESTATUS[@]}"',
-    'git push | tee push.log; echo "push=${PIPESTATUS[0]} tee=${PIPESTATUS[1]}"',
-    '{ echo main; } | xargs git push origin | cat; echo "${PIPESTATUS[1]}" "${PIPESTATUS[2]}"',
     "git push; echo exit=\"$?\" 'done'",
     'git push; exit "${?}"',
-    'echo y | ( echo x ); ( echo a ) | git push | cat; echo "${PIPESTATUS[1]}"',
-    'echo y | ( echo x ); { echo a; } | git push | cat; echo "${PIPESTATUS[1]}"',
-    'echo a | { { echo b; }; } | git push | cat; echo "${PIPESTATUS[2]}"',
-    'case x in x) echo main;; esac | xargs git push origin | cat; echo "${PIPESTATUS[1]}"',
-    'echo y | ( echo a; echo b ) | git push | cat; echo "${PIPESTATUS[2]}"',
-    'echo y | for i in 1; do echo main; done | xargs git push origin | cat; echo "${PIPESTATUS[2]}"',
-    'echo a | { echo c; { echo b; }; } | git push | cat; echo "${PIPESTATUS[2]}"',
-    'echo y | ( echo a; ( echo b ) ) | git push | cat; echo "${PIPESTATUS[2]}"',
-    ': | : | : | : | : | : | : | : | git push | cat; echo "${PIPESTATUS[010]}"',
     "git push > push.log 2>&1; exit $?",
     "git commit -F - <<'EOF'\nFix the gate\nEOF\necho \"exit $?\"",
     "( git push )",
@@ -176,6 +151,9 @@ describe("the exit-status mask guard", () => {
     'git push && ( exit 3 ); echo "${PIPESTATUS[0]}"',
     "git push; exit $? now",
     "git push; exit 1",
+    "set -eo pipefail; ! { true; } | git push > /dev/null 2>&1; echo done",
+    "set -eo pipefail; ! ( true ) | git push > /dev/null 2>&1; echo done",
+    'unset label; git push > /dev/null 2>&1; label=${label:?missing} echo "$?"',
     'set -u; git push | tee push.log; echo "push=${PIPESTATUS[0]}" "${PIPESTATUS[2]}"',
     "set -e; ! git push > /dev/null 2>&1; echo done",
     "set -e; ! true | git push > /dev/null 2>&1; echo done",
@@ -186,6 +164,7 @@ describe("the exit-status mask guard", () => {
     "git push > /dev/null 2>&1 || exit 1 && : & wait",
     "git push > /dev/null 2>&1; exit $? && : & wait",
     'git push | cat; exit "${PIPESTATUS[0]}" || : & wait',
+    "git push > /dev/null 2>&1; exit $? || : & wait",
     "git push; echo \"'\"'$?'\"'\"",
     'set -o pipefail >&9; git push | cat',
     'echo y | ( echo x ); ( echo a ) | git push | cat; echo "${PIPESTATUS[2]}"',
@@ -257,6 +236,8 @@ describe("the exit-status mask guard", () => {
     'git push; echo "pid $$$?"',
     'git push; echo "$?" "$(true)"',
     'git push; x=$(true) echo "exit=$?"',
+    'git push; echo "exit=$?" <<EOF\n$(true)\nEOF',
+    "set -eo pipefail; { true; } | git push > /dev/null 2>&1; echo done",
     'git push | cat; echo "${PIPESTATUS[0x0]}"',
   ])("refuses a form it cannot read, though the shell may show the status: %s", (command) => {
     expect(refused(command)).toBe(true);
@@ -304,6 +285,20 @@ describe("the exit-status mask guard", () => {
     'eval \'git push | cat; exit "${PIPESTATUS[0]}"\'',
   ])("refuses a PIPESTATUS read in a nested program, which may run in a shell without it: %s", (command) => {
     expect(refused(command)).toBe(true);
+  });
+
+  test.each([
+    'git push 2>&1 | tail -3; echo "${PIPESTATUS[0]}"',
+    'git push | tee push.log; echo "push=${PIPESTATUS[0]} tee=${PIPESTATUS[1]}"',
+    'true | git push; echo "${PIPESTATUS[1]}"',
+    'git push | cat; exit "${PIPESTATUS[0]}"',
+  ])("refuses a PIPESTATUS read, which zsh does not set: %s", (command) => {
+    expect(refused(command)).toBe(true);
+  });
+
+  test.each(["true | git push; echo \"exit=$?\"", "set -eo pipefail; true | git push > /dev/null 2>&1; echo done", "set -o pipefail; { echo main; } | xargs git push origin | cat; echo \"exit=$?\""])("allows the last stage's status or a pipefail pipe: %s", (command) => {
+    expect(exitMaskRisk(command, "Robin")).toBeUndefined();
+    expect(shellShowsEveryFailure(command)).toBe(true);
   });
 
   test("refuses a quote it cannot close instead of hanging", () => {
