@@ -323,23 +323,24 @@ test("once the judge failed as often as the review ceiling allows on a PR, the g
 test("while one gate asks the judge of a PR, a second gate of that PR asks no judge and says which command holds the judge lock", async () => {
   const pr = await checkout();
   pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.reviewCeiling": 1 });
+  pr.env.HEDGE_REVIEW_ARBITER = "cat >/dev/null; echo CONTINUE";
   await pr.commit("feature.txt", "greet new members\n");
   await reviewHead(pr);
   await pr.hedge("require", "--none", "--reason", "Docs only");
-  const [started, go, answer] = ["started", "go", "answer"].map((name) => join(pr.home, name));
+  const [started, go, answer, held] = ["started", "go", "answer", "held"].map((name) => join(pr.home, name));
   await spawnAsync(["mkfifo", started, go]);
   writeFileSync(answer, verdict({ owed: { verdict: "fail", reason: "feature.txt is code, not docs", citations: [] } }));
-  pr.env.HEDGE_PROOF_JUDGE = `cat >/dev/null; echo > "${started}"; read line < "${go}"; cat "${answer}"`;
+  pr.env.HEDGE_PROOF_JUDGE = `cat >/dev/null; if mkdir "${held}" 2>/dev/null; then echo > "${started}"; read line < "${go}"; fi; cat "${answer}"`;
   const gate = () => pr.hedge("gate").catch((error: Error) => ({ code: 1, output: error.message }));
 
   const first = gate();
   await readFile(started, "utf8");
-  const second = await gate();
-  await writeFile(go, "go\n");
+  const second = await gate().finally(() => writeFile(go, "go\n"));
 
   expect(second.output).toContain(`another hedge proof command, works on ${join(pr.pullRequest, "judge")} and holds its lock`);
   expect((await first).output).toContain("judge owed: fail: feature.txt is code, not docs");
   expect((await gate()).output).toContain("judge owed: fail: feature.txt is code, not docs");
+  expect((await gateAfterResponse(pr, "A new answer.\n")).output).toContain("judge: budget spent: the judge failed 1 times");
 });
 
 test("the gate stops a judge stuck on spent quota and reports it unavailable", async () => {
