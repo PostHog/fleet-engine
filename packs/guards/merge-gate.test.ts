@@ -465,6 +465,8 @@ describe("the hook against GitHub, faked at the gh boundary, and real checkouts,
     writeFileSync(join(dir, "body.md"), body);
     writeFileSync(join(dir, "body.json"), JSON.stringify({ body }));
     symlinkSync(join(dir, "body.json"), join(dir, "linked.json"));
+    writeFileSync(join(dir, "target.md"), body);
+    symlinkSync(join(dir, "target.md"), join(dir, "linked.md"));
     return { dir, hook: machine({ "repos/example/product/pulls/9": pull(head) }) };
   };
 
@@ -520,6 +522,92 @@ describe("the hook against GitHub, faked at the gh boundary, and real checkouts,
     expect(await hook("gh api -X PATCH repos/example/product/pulls/9 -F body=@enqueue.md", dir)).toBe(otherEndpointReason);
     expect(await hook("gh pr review 9 --repo example/product --comment --body-file enqueue.md", dir)).toBe(otherEndpointReason);
     expect(await hook("gh api graphql -F query=@enqueue.json", dir)).toBe(graphqlReason);
+  });
+
+  const runTimeLooking = "Run `bun run test`, then $(make proof) and `$HOME`.\n";
+  const mention = " && echo 'next: /trunk merge'";
+  const python = " && python3 - <<'EOF'\nprint('then /trunk merge')\nEOF";
+
+  test.each([
+    ["gh api -X PATCH repos/example/product/pulls/9 -F body=@body.md", mention],
+    ["gh api -X PATCH repos/example/product/pulls/9 --field body=@body.md", " && gh pr view 9 --repo example/product --json body > /dev/null; echo '/trunk merge'"],
+    ["gh api -X PATCH repos/example/product/pulls/9 --input body.json", mention],
+    ["cd . && gh api -X PATCH repos/example/product/pulls/9 --input body.json 2> /dev/null", " && test -s body.json && printf '%s\\n' 'then /trunk merge'"],
+    ["gh api -X PATCH repos/example/product/pulls/9 -F body=@body", mention],
+    ["N=9; gh api -X PATCH repos/example/product/pulls/9 -F body=@literal.md", mention],
+    ["gh api -X PATCH repos/example/product/pulls/9 --input ./linked.json", "; echo /trunk merge"],
+    ["gh api -X PATCH repos/example/product/pulls/9 -F body=@literal.md", mention],
+    ["gh api -X PATCH repos/example/product/pulls/9 --input literal.json", mention],
+    ["gh api -X PATCH repos/example/product/pulls/9 -F body=@body.md -f title='Read the payload'", mention],
+    ["gh pr review 9 --repo example/product --comment --body-file literal.md", mention],
+    ["gh pr comment 9 --repo example/product --body-file literal.md", mention],
+    ["gh api repos/example/product/issues/9/comments -F body=@literal.md", mention],
+  ])("a payload file with backticks or $( ) as text passes when only the rest of the line names /trunk merge: %s", async (call, rest) => {
+    const { dir, hook } = bodyEdits();
+    writeFileSync(join(dir, "literal.md"), runTimeLooking);
+    writeFileSync(join(dir, "literal.json"), JSON.stringify({ body: runTimeLooking }));
+    writeFileSync(join(dir, "body"), runTimeLooking);
+    expect(await hook(`${call}${rest}`, dir)).toBeUndefined();
+  });
+
+  test.each([
+    ["Run `bun run test`.\n/trunk merge\n"],
+    ["/trunk merge after $(make proof)\n"],
+    ["Ready.\n  /TRUNK \t MERGE `now`\n"],
+  ])("a payload file that holds /trunk merge next to backticks or $( ) is still refused: %j", async (text) => {
+    const { dir, hook } = bodyEdits();
+    writeFileSync(join(dir, "enqueue.md"), text);
+    writeFileSync(join(dir, "enqueue.json"), JSON.stringify({ body: text }));
+    expect(await hook("gh api -X PATCH repos/example/product/pulls/9 -F body=@enqueue.md", dir)).toBe(otherEndpointReason);
+    expect(await hook("gh api -X PATCH repos/example/product/pulls/9 --input enqueue.json", dir)).toBe(otherEndpointReason);
+    expect(await hook("gh pr review 9 --repo example/product --comment --body-file enqueue.md", dir)).toBe(otherEndpointReason);
+    expect(await hook("gh pr comment 9 --repo example/product --body-file enqueue.md", dir)).toContain("has not passed at the head of example/product#9");
+  });
+
+  test.each([
+    ["printf '/trunk merge\\n' > body.md && gh api -X PATCH repos/example/product/pulls/9 -F body=@body.md"],
+    ["printf '/trunk merge\\n' >> ./body.md; gh api -X PATCH repos/example/product/pulls/9 --field body=@body.md"],
+    ["printf '/trunk merge\\n' > body.md && gh api -X PATCH repos/example/product/pulls/9 -F body=@./body.md"],
+    ["printf '/trunk merge\\n' > target.md && gh api -X PATCH repos/example/product/pulls/9 -F body=@linked.md"],
+    ["gh api -X PATCH repos/example/product/pulls/9 -F body=@body.md 2> errors.log && echo /trunk merge"],
+    ["gh pr checkout 9 --repo example/product && gh api -X PATCH repos/example/product/pulls/9 -F body=@body.md && echo /trunk merge"],
+    ["gh api -X PATCH repos/example/product/pulls/9 --input body.json" + python],
+    ["x=$(printf '/trunk merge' > body.md); gh api -X PATCH repos/example/product/pulls/9 -F body=@body.md"],
+    ["printf '/trunk merge\\n' > 'body'.md && gh api -X PATCH repos/example/product/pulls/9 -F body=@body.md"],
+    ["printf '/trunk merge\\n' > bo\"dy.\"md && gh api -X PATCH repos/example/product/pulls/9 -F body=@body.md"],
+    ["printf '/trunk merge\\n' > body\\.md && gh api -X PATCH repos/example/product/pulls/9 -F body=@body.md"],
+    ["printf '/trunk merge\\n' > $'body.m\\x64' && gh api -X PATCH repos/example/product/pulls/9 -F body=@body.md"],
+    ["printf '/trunk merge\\n' | tee b''ody.md && gh api -X PATCH repos/example/product/pulls/9 -F body=@body.md"],
+    ["printf '/trunk merge\\n' > body.md; gh api -X PATCH repos/example/product/pulls/9 -F 'body=@bo''dy.md'"],
+    ["python3 - <<'EOF' && gh api -X PATCH repos/example/product/pulls/9 -F body=@body.md\nopen('body.md', 'w').write('/trunk merge')\nEOF"],
+    ["echo \"$(printf '/trunk merge' > body.md)\" && gh api -X PATCH repos/example/product/pulls/9 -F body=@body.md"],
+    ["sh -c \"printf '/trunk merge' > 'body.md'\" && gh api -X PATCH repos/example/product/pulls/9 -F body=@body.md"],
+    ["jq -n '{body: \"/trunk merge\"}' > body.json && gh api -X PATCH repos/example/product/pulls/9 --input body.json"],
+    ["printf '/trunk merge' | tee body.md && gh pr review 9 --repo example/product --comment --body-file body.md"],
+    ["sed -i 's/^## Problem/\\/trunk merge/' body.md && gh api -X PATCH repos/example/product/issues/comments/1 -F body=@body.md"],
+  ])("a line that may write a file before the send keeps the base's run-time check on payload files: %s", async (command) => {
+    const { dir, hook } = bodyEdits();
+    expect(await hook(command, dir)).toBe(otherEndpointReason);
+  });
+
+  test("a comment file the same line may rewrite to /trunk merge first is gated like an enqueue", async () => {
+    const { dir, hook } = bodyEdits();
+    expect(await hook("printf '/trunk merge' > body.md && gh pr comment 9 --repo example/product --body-file body.md", dir)).toContain("has not passed at the head of example/product#9");
+    expect(await hook("printf '/trunk merge' > body.md && gh api repos/example/product/issues/9/comments -F body=@body.md", dir)).toContain("has not passed at the head of example/product#9");
+  });
+
+  test.each([
+    ["gh api -X PATCH repos/example/product/pulls/9 -f body=\"$(cat body.md)\"", mention],
+    ["gh api -X PATCH repos/example/product/pulls/9 -f body=\"`cat body.md`\"", python],
+    ["gh api -X PATCH repos/example/product/pulls/9 -f body=\"$BODY\"", mention],
+    ["gh api -X PATCH repos/example/product/pulls/9 -F body=@body.md -f title=\"$(git log -1 --format=%s)\"", mention],
+    ["gh api -X PATCH repos/example/product/pulls/9 --input body.json -F title=\"$TITLE\"", mention],
+    ["gh pr review 9 --repo example/product --comment --body \"$(cat body.md)\" --body-file body.md", mention],
+    ["gh api -X PATCH repos/example/product/pulls/9 --input - <<EOF\n{\"body\":\"$(cat body.md)\"}\nEOF\n", "echo /trunk merge"],
+    ["gh api -X PATCH repos/example/product/pulls/9 --input - <<< \"$(cat body.json)\"", mention],
+  ])("an argument or stdin built at run time is still refused when the line names /trunk merge: %s", async (call, rest) => {
+    const { dir, hook } = bodyEdits();
+    expect(await hook(`${call}${rest}`, dir)).toBe(otherEndpointReason);
   });
 
   test("a call that sends a readable /trunk merge beside a file the gate cannot read keeps the /trunk merge refusal", async () => {
