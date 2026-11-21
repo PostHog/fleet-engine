@@ -9,6 +9,10 @@
   merge of the base. It says whether `hedge proof gate` carries the review
   to HEAD. Before, the read ran on an empty diff, and the judge could count
   that read against a gap's condition.
+- It also refuses a final read when `hedge proof gate` carries the review to
+  HEAD across clean merges of the base, as it did for test-only commits and
+  reverts. `--agent` or the user's `--override` still reads it, unless the
+  range is empty.
 - The diff of a fixes round or a final read keeps a file that a commit puts
   back to the base's text. Before, it left such a file out as if a merge of
   the base had brought it in.
