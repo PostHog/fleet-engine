@@ -44,7 +44,7 @@ async function unattendedSetup(home: string, timeZone: string, { settings = [tea
 
 async function pushFromAnotherMachine(home: string, settings: Record<string, string>) {
   const other = temp.make("other-");
-  await spawnGit(other, "clone", "-q", githubRepo(home, "nora/hedge-profile"), ".");
+  await spawnGit(other, "clone", "-q", githubRepo(home, "nora/nora-hedge"), ".");
   const file = JSON.parse(readFileSync(join(other, "hedge.json"), "utf8"));
   writeFileSync(join(other, "hedge.json"), JSON.stringify({ ...file, settings: { ...file.settings, ...settings } }, null, 2) + "\n");
   await spawnGit(other, "commit", "-q", "-am", "Elsewhere");

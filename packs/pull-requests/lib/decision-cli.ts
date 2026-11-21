@@ -27,7 +27,7 @@ the setting hub.alias names; other machines read and append it over SSH. Without
 
 record with 👤 or 👍 records the user's answer to your question tool. Without --words it takes their latest answer
 in the T3 thread whose question names each --pr and each --kind: after they answer, pass only the mark, class, kinds and PRs, and
-check the answer in the printed line. --message takes an earlier answer by its id. --words quotes the words of an
+check the answer in the printed line. When it refuses that answer, it says how to list the ids for --message. --message takes an earlier answer by its id. --words quotes the words of an
 answer, with the date they gave it. --thread defaults to this T3 thread (T3CODE_THREAD_ID). Only answers to a
 question tool in the T3 app count; a typed message does not. Each --pr must be named in that question (#n,
 repo#n, owner/repo#n, or its URL), so one answer covers every PR its question named and no other. One answer
@@ -171,9 +171,12 @@ export async function hearUser(input: Hearing, context: DecisionContext, ledger:
   if (input.words !== undefined && input.message !== undefined) throw new Error("Pass --message or --words, not both");
   if (input.words !== undefined) await refuseInstructionQuote(context.home, input.words);
   const answers = await (context.threadWords ?? t3ThreadWords(context.home))(thread);
+  const refused = (error: Error) => input.words === undefined && input.message === undefined ? withAnswerIds(error, thread) : error;
+  let tried: ThreadWord[];
+  try { tried = candidates(answers, input, thread); } catch (error) { throw refused(error as Error); }
   const refusals: Error[] = [];
   let used: Error | undefined;
-  for (const word of candidates(answers, input, thread)) {
+  for (const word of tried) {
     const heard = heardAnswer(word);
     try {
       fits(heard, input);
@@ -188,7 +191,12 @@ export async function hearUser(input: Hearing, context: DecisionContext, ledger:
       };
     } catch (error) { refusals.push(error as Error); }
   }
-  throw used ?? refusals[0]!;
+  throw refused(used ?? refusals[0]!);
+}
+
+function withAnswerIds(error: Error, thread: string) {
+  error.message = `${error.message}. To record another answer, name it with --message <id>; hedge thread read ${thread} --words lists the ids`;
+  return error;
 }
 
 export function answeredAt(word: ThreadWord) {

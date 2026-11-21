@@ -1,7 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { heavy, heavyWith, roomy, stubs, temp } from "./heavy-testing.ts";
+import { bunCheckout } from "../../../src/testing/bun-checkout.ts";
+import { heavy, heavyIn, heavyWith, roomy, stubs, temp } from "./heavy-testing.ts";
 
 afterEach(() => temp.cleanup());
 const onLinux = test.skipIf(process.platform !== "linux");
@@ -69,7 +70,7 @@ onLinux("takes the slot count from HEDGE_HEAVY_SLOTS over the setting", async ()
 function routeHandler(bin: string) {
   const handler = join(bin, "route.ts");
   const seen = join(bin, "routed.log");
-  writeFileSync(handler, `import { appendFileSync } from "node:fs";\nappendFileSync(${JSON.stringify(seen)}, JSON.stringify({ argv: Bun.argv.slice(2), routed: Bun.env.HEDGE_HEAVY_ROUTED }) + "\\n");\nprocess.exit(7);\n`);
+  writeFileSync(handler, `import { appendFileSync } from "node:fs";\nappendFileSync(${JSON.stringify(seen)}, JSON.stringify({ argv: Bun.argv.slice(2), routed: Bun.env.HEDGE_HEAVY_ROUTED, checkoutEnv: Bun.env.CHECKOUT_ENV }) + "\\n");\nprocess.exit(7);\n`);
   return { handlers: JSON.stringify({ "heavy-route": handler }), routed: () => (existsSync(seen) ? readFileSync(seen, "utf8").trim().split("\n").map((line) => JSON.parse(line)) : []) };
 }
 
@@ -79,6 +80,16 @@ onLinux("hands a typed heavy command to the heavy-route handler, which decides w
   expect(await heavyWith({ HEDGE_HANDLERS: handlers }, bin, roomy, "--", "sh", "-c", "echo built")).toMatchObject({ code: 7, stdout: "" });
   expect(routed()).toEqual([{ argv: ["sh", "-c", "echo built"], routed: "1" }]);
   expect(calls()).toBe("");
+});
+
+onLinux("checks the disk and routes the command inside a checkout without the checkout's .env files or bunfig.toml", async () => {
+  const { bin } = stubs();
+  const { handlers, routed } = routeHandler(bin);
+  const checkout = bunCheckout(temp);
+  expect(await heavyIn(checkout.dir, { HEDGE_HANDLERS: "{}" }, bin, roomy, "--", "true")).toMatchObject({ code: 0 });
+  expect(await heavyIn(checkout.dir, { HEDGE_HANDLERS: handlers }, bin, roomy, "--", "true")).toMatchObject({ code: 7 });
+  expect(routed()).toEqual([{ argv: ["true"], routed: "1" }]);
+  expect(checkout.preloaded()).toBe(false);
 });
 
 onLinux("runs here when the handler already routed the command, or for a named unit or service, and the command routes its own heavy runs again", async () => {
