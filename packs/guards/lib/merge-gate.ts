@@ -124,16 +124,18 @@ function sentTexts(found: Command, cwd: string | undefined, io: IntentIO, inline
   const paths = files.map((path) => stdinPath.test(path) ? "-" : path);
   const piped = paths.includes("-") && !found.stdin;
   const read = paths.map((path) => path === "-" ? found.stdin?.body ?? "" : io.readText(resolve(cwd ?? ".", found.chdir ?? ".", home(path))));
-  const namedAgain = (path: string) => line.words.reduce((sum, word) => sum + count(word, basename(path)), 0) > 1;
-  const payloads = paths.flatMap((path, index) => read[index] === undefined ? [] : [{ text: read[index]!, rewritable: namedAgain(path) }]);
-  const unsettled = withJsonStrings([...inline, found.stdin?.body ?? "", ...payloads.filter((payload) => payload.rewritable).map((payload) => payload.text)]);
-  const settled = withJsonStrings(payloads.filter((payload) => !payload.rewritable).map((payload) => payload.text));
-  return { texts: [...unsettled, ...settled], unsettled, unread: read.includes(undefined), piped };
+  const payloads = read.filter((text) => text !== undefined);
+  const unsettled = withJsonStrings([...inline, found.stdin?.body ?? "", ...line.writeFree ? [] : payloads]);
+  const texts = line.writeFree ? [...unsettled, ...withJsonStrings(payloads)] : unsettled;
+  return { texts, unsettled, unread: read.includes(undefined), piped };
 }
 
-type Line = { raw: string; words: string[] };
-const count = (text: string, part: string) => text.split(part).length - 1;
-const spelled = (commands: Command[]) => commands.flatMap((command) => [command.name, ...command.args, ...command.outputs, ...command.writes, command.stdin?.body ?? ""]);
+type Line = { raw: string; writeFree: boolean };
+const quietTargets = /^\/dev\/(?:null|stdout|stderr)$/;
+const readOnlyTools = new Set(["", "echo", "printf", "true", "false", ":", "test", "[", "cd", "pushd", "popd"]);
+const readOnlyGh = /^(?:api .*|(?:pr|issue) (?:comment|review|view|edit|close|reopen|ready|checks|list|status))$/s;
+const writesNothing = ({ name, args, outputs, writes }: Command) => [...outputs, ...writes].every((target) => quietTargets.test(target))
+  && (readOnlyTools.has(basename(name)) || (basename(name) === "gh" && readOnlyGh.test(`${parseGh(args).group} ${parseGh(args).action}`)));
 
 const withJsonStrings = (texts: string[]) => [...texts, ...texts.flatMap(jsonStrings)];
 
@@ -292,7 +294,7 @@ export function mergeIntent(call: ToolCall, command: string, exempt: string[], i
     let commands: Command[];
     try { commands = commandsIn(command); }
     catch { return mentionsEnqueue.test(command) || graphqlMerge.test(command) || restMerge.test(command) ? { targets: [], refusal: rawReason } : intent; }
-    const line = { raw: command, words: spelled(commands) };
+    const line = { raw: command, writeFree: commands.every(writesNothing) };
     const dirs = new Map<Scope, string[]>();
     const cwdIn = (scope: Scope | undefined): string | undefined => scope === undefined ? call.cwd : dirs.get(scope)?.at(-1) ?? cwdIn(scope.parent);
     for (const found of commands) {

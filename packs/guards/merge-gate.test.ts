@@ -465,6 +465,8 @@ describe("the hook against GitHub, faked at the gh boundary, and real checkouts,
     writeFileSync(join(dir, "body.md"), body);
     writeFileSync(join(dir, "body.json"), JSON.stringify({ body }));
     symlinkSync(join(dir, "body.json"), join(dir, "linked.json"));
+    writeFileSync(join(dir, "target.md"), body);
+    symlinkSync(join(dir, "target.md"), join(dir, "linked.md"));
     return { dir, hook: machine({ "repos/example/product/pulls/9": pull(head) }) };
   };
 
@@ -528,9 +530,10 @@ describe("the hook against GitHub, faked at the gh boundary, and real checkouts,
 
   test.each([
     ["gh api -X PATCH repos/example/product/pulls/9 -F body=@body.md", mention],
-    ["gh api -X PATCH repos/example/product/pulls/9 --field body=@body.md", python],
+    ["gh api -X PATCH repos/example/product/pulls/9 --field body=@body.md", " && gh pr view 9 --repo example/product --json body > /dev/null; echo '/trunk merge'"],
     ["gh api -X PATCH repos/example/product/pulls/9 --input body.json", mention],
-    ["gh api -X PATCH repos/example/product/pulls/9 --input body.json", python],
+    ["cd . && gh api -X PATCH repos/example/product/pulls/9 --input body.json 2> /dev/null", " && test -s body.json && printf '%s\\n' 'then /trunk merge'"],
+    ["gh api -X PATCH repos/example/product/pulls/9 -F body=@body", mention],
     ["gh api -X PATCH repos/example/product/pulls/9 --input ./linked.json", "; echo /trunk merge"],
     ["gh api -X PATCH repos/example/product/pulls/9 -F body=@literal.md", mention],
     ["gh api -X PATCH repos/example/product/pulls/9 --input literal.json", mention],
@@ -542,6 +545,7 @@ describe("the hook against GitHub, faked at the gh boundary, and real checkouts,
     const { dir, hook } = bodyEdits();
     writeFileSync(join(dir, "literal.md"), runTimeLooking);
     writeFileSync(join(dir, "literal.json"), JSON.stringify({ body: runTimeLooking }));
+    writeFileSync(join(dir, "body"), runTimeLooking);
     expect(await hook(`${call}${rest}`, dir)).toBeUndefined();
   });
 
@@ -563,6 +567,10 @@ describe("the hook against GitHub, faked at the gh boundary, and real checkouts,
     ["printf '/trunk merge\\n' > body.md && gh api -X PATCH repos/example/product/pulls/9 -F body=@body.md"],
     ["printf '/trunk merge\\n' >> ./body.md; gh api -X PATCH repos/example/product/pulls/9 --field body=@body.md"],
     ["printf '/trunk merge\\n' > body.md && gh api -X PATCH repos/example/product/pulls/9 -F body=@./body.md"],
+    ["printf '/trunk merge\\n' > target.md && gh api -X PATCH repos/example/product/pulls/9 -F body=@linked.md"],
+    ["gh api -X PATCH repos/example/product/pulls/9 -F body=@body.md 2> errors.log && echo /trunk merge"],
+    ["gh pr checkout 9 --repo example/product && gh api -X PATCH repos/example/product/pulls/9 -F body=@body.md && echo /trunk merge"],
+    ["gh api -X PATCH repos/example/product/pulls/9 --input body.json" + python],
     ["printf '/trunk merge\\n' > 'body'.md && gh api -X PATCH repos/example/product/pulls/9 -F body=@body.md"],
     ["printf '/trunk merge\\n' > bo\"dy.\"md && gh api -X PATCH repos/example/product/pulls/9 -F body=@body.md"],
     ["printf '/trunk merge\\n' > body\\.md && gh api -X PATCH repos/example/product/pulls/9 -F body=@body.md"],
