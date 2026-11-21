@@ -122,6 +122,7 @@ describe("hedge routing", () => {
     const checkout = bunCheckout(temp);
     const inherited = Object.fromEntries(Object.entries(Bun.env).filter(([key]) => !/^(HEDGE|FLEET)_|^NODE_ENV$/.test(key)));
     for (const nodeEnv of nodeEnvs) {
+      rmSync(report, { force: true });
       const child = Bun.spawn(["sh", join(engine, "hedge"), "hello"], { cwd: checkout.dir, env: { ...inherited, HOME: home, BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0", ...(nodeEnv ? { NODE_ENV: nodeEnv } : {}) }, stdout: "ignore", stderr: "pipe" });
       const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
       expect([nodeEnv, code, stderr, JSON.parse(readFileSync(report, "utf8"))]).toEqual([nodeEnv, 0, "", {}]);
