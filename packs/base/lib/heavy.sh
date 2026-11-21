@@ -127,13 +127,13 @@ fi
 if [ -n "${HEDGE_HEAVY_ROUTE:-}" ] && [ -z "$unit$service" ]; then
   route=$HEDGE_HEAVY_ROUTE
   unset HEDGE_HEAVY_ROUTE
-  HEDGE_HEAVY_ROUTED=1 exec bun "$route" "$@"
+  HEDGE_HEAVY_ROUTED=1 exec bun --no-env-file --config=/dev/null "$route" "$@"
 fi
 if [ "$1" = hedge ]; then
   shift
   set -- /bin/sh "$(CDPATH='' cd -- "$commands/../../.." && pwd -P)/hedge" "$@"
 fi
-disk_has_room() { bun "$commands/disk.ts" >/dev/null || exit 75; }
+disk_has_room() { bun --no-env-file --config=/dev/null "$commands/disk.ts" >/dev/null || exit 75; }
 disk_has_room
 [ "$(uname -s)" = Linux ] || exec "$@"
 

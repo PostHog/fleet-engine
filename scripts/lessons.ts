@@ -5,12 +5,25 @@ import { builtins } from "../src/cli.ts";
 import type { LoadedPack } from "../src/pack/types.ts";
 import { packTitle } from "../src/setup/questions.ts";
 
-export const narrationHash = (lesson: Lesson) => new Bun.CryptoHasher("sha256").update(narration(lesson)).digest("hex");
+export const loadVoice = (root: string) => JSON.stringify(JSON.parse(readFileSync(join(root, "lessons", "voice.json"), "utf8")));
+
+export const narrationHash = (lesson: Lesson, voice: string) => new Bun.CryptoHasher("sha256").update(voice).update("\n\n").update(narration(lesson)).digest("hex");
+
+const inNextOrder = (lessons: Lesson[]) => {
+  const ordered: Lesson[] = [];
+  const left = () => lessons.filter((lesson) => !ordered.includes(lesson));
+  const ready = (lesson: Lesson) => !lessons.some((other) => other.next === lesson.id && !ordered.includes(other));
+  while (ordered.length < lessons.length) {
+    const following = left().find((lesson) => lesson.id === ordered.at(-1)?.next);
+    ordered.push(following && ready(following) ? following : (left().find(ready) ?? left()[0]!));
+  }
+  return ordered;
+};
 
 export function loadLessons(root: string): Lesson[] {
   const dir = join(root, "lessons");
   if (!existsSync(dir)) return [];
-  return readdirSync(dir)
+  return inNextOrder(readdirSync(dir)
     .filter((file) => file.endsWith(".md"))
     .sort()
     .map((file) => {
@@ -18,7 +31,7 @@ export function loadLessons(root: string): Lesson[] {
       const lesson = parseLesson(id, readFileSync(join(dir, file), "utf8"));
       const cutFile = join(dir, `${id}.cut.json`);
       return existsSync(cutFile) ? { ...lesson, cut: JSON.parse(readFileSync(cutFile, "utf8")) as Cut } : lesson;
-    });
+    }));
 }
 
 export type Names = { skills: string[]; commands: string[]; packs: string[]; lessons: string[] };
@@ -37,7 +50,7 @@ export function knownNames(packs: LoadedPack[], lessons: Lesson[]): Names {
   };
 }
 
-export function lessonProblems(lesson: Lesson, names: Names): string[] {
+export function lessonProblems(lesson: Lesson, names: Names, voice: string): string[] {
   const where = `lessons/${lesson.id}.md`;
   const text = lesson.chapters.map((chapter) => `${chapter.headline}\n${chapter.text}`).join("\n");
   const problems = [
@@ -48,7 +61,7 @@ export function lessonProblems(lesson: Lesson, names: Names): string[] {
   ];
   if (!lesson.cut) return problems;
   const cut = lesson.cut;
-  if (cut.narration !== narrationHash(lesson)) problems.push(`${where}: the narration changed after its cut. Render the lesson again`);
+  if (cut.narration !== narrationHash(lesson, voice)) problems.push(`${where}: the narration or the voice changed after its cut. Render the lesson again`);
   if (cut.chapters.length !== lesson.chapters.length) problems.push(`${where}: has ${lesson.chapters.length} chapters, but its cut has ${cut.chapters.length}`);
   if (cut.captions.length !== sentences(lesson).length) problems.push(`${where}: has ${sentences(lesson).length} sentences, but its cut has ${cut.captions.length} captions`);
   const inVideo = (time: unknown) => typeof time === "number" && time >= 0 && time <= cut.seconds;

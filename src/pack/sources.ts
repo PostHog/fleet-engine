@@ -5,6 +5,7 @@ import { join, relative, resolve, sep } from "node:path";
 import { loadPacks } from "./manifest.ts";
 import { tryLock, waitLock } from "../lock.ts";
 import type { AvailableSource, FetchedSource, LoadedPack, SourceRef } from "./types.ts";
+import { bunScript } from "../runner/bun.ts";
 
 export const sourceName = /^[a-z0-9][a-z0-9-]*$/;
 const fetchTimeoutMs = 120_000;
@@ -245,7 +246,7 @@ async function hasPackTs(dir: string) {
 
 async function loadsElsewhere(dir: string, limitMs: number): Promise<string | undefined> {
   const started = performance.now();
-  const child = Bun.spawn([process.execPath, join(import.meta.dir, "load-source.ts"), dir], { env: process.env, stdout: "ignore", stderr: "pipe", timeout: limitMs, killSignal: "SIGKILL" });
+  const child = Bun.spawn(bunScript(join(import.meta.dir, "load-source.ts"), dir), { env: process.env, stdout: "ignore", stderr: "pipe", timeout: limitMs, killSignal: "SIGKILL" });
   const stderr = readUntilQuiet(child.stderr);
   const code = await child.exited;
   if (code === 0) return undefined;

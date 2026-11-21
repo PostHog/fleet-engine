@@ -1,3 +1,5 @@
+import { bunScript } from "../../../src/runner/bun.ts";
+
 type Env = Record<string, string | undefined>;
 export type ReviewBotAction = "review" | "stamp" | "forecast";
 export type ReviewBotRequest = { action: ReviewBotAction; repo: string; pr?: number; branch?: string; paths?: string; minutes: number; deep: boolean; request: boolean };
@@ -44,14 +46,14 @@ export function handlerArgs(request: ReviewBotRequest): string[] {
 
 export async function askReviewBot(request: ReviewBotRequest, env: Env = Bun.env): Promise<number> {
   const handler = (JSON.parse(env.HEDGE_HANDLERS || "{}") as Record<string, string>)["review-bot"];
-  if (handler) return runHandler(["bun", handler, ...handlerArgs(request)], env);
+  if (handler) return runHandler(handler, handlerArgs(request), env);
   const fallback = fallbackText(request.action, env);
   console.log(`${noBot[request.action]} ${fallback.replaceAll("{repo}", request.repo).replaceAll("{pr}", String(request.pr ?? request.branch ?? request.paths))}`);
   return 2;
 }
 
-export async function runHandler(command: string[], env: Env): Promise<number> {
-  const child = Bun.spawn(command, { stdio: ["inherit", "inherit", "inherit"], env });
+export async function runHandler(handler: string, args: string[], env: Env): Promise<number> {
+  const child = Bun.spawn(bunScript(handler, ...args), { stdio: ["inherit", "inherit", "inherit"], env });
   const forward = (signal: NodeJS.Signals) => child.kill(signal);
   process.on("SIGINT", forward).on("SIGTERM", forward);
   try { return await child.exited; }

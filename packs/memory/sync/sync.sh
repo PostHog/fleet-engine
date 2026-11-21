@@ -272,7 +272,7 @@ while :; do
     [ -z "$outside" ] || fail "commits on this machine change files outside $subtree/: $outside. Move them to the repo's own workflow; until then nothing syncs."
   fi
   scan=0
-  bun "$here/secret-scan.ts" "$checkout" "$range" || scan=$?
+  bun --no-env-file --config=/dev/null "$here/secret-scan.ts" "$checkout" "$range" || scan=$?
   if [ "$scan" -eq 1 ]; then
     if [ -n "$base" ]; then g reset --quiet "$base"; else g update-ref -d HEAD && g read-tree --empty; fi
     fail "an unpushed memory change holds a secret. The sync took its commits back and left the files as they are. Remove the secret; until then nothing syncs."

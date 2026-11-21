@@ -49,6 +49,14 @@ describe("hedge devbox add applies the profile on the node", () => {
     expect([nodeHas(home, node, "allowlist"), nodeHas(home, node, "earlyoom")]).toEqual([true, true]);
   });
 
+  test("goes on to the link step when only the person's sign-ins are left", async () => {
+    const { home, io, add } = await signedUp(["--add", "integrations", "--plan", "both"]);
+    const box = fakeMachine(home, {}, { node: { signedOut: true } });
+    expect(await add(box)).toBe(0);
+    expect(box.peerLinks.here).toEqual(linkedHere);
+    expect(io.output()).toContain(`  ✓ Link T3 Code here and on ${node}: done`);
+  });
+
   test("still lists the steps left for the person when a later step fails", async () => {
     const { home, io, add } = await signedUp(guarded);
     expect(await add(fakeMachine(home, {}, { node: {}, serverWithoutLinkState: ["box"] }))).toBe(1);
@@ -105,7 +113,7 @@ describe("hedge devbox add applies the profile on the node", () => {
   test("takes the steps left from the node's own profile, not from this machine's", async () => {
     const { home, io, add } = await signedUp(guarded);
     const clone = join(boxHome(home, node), ".local/share/hedge/profile");
-    git(home, "clone", "-q", githubRepo(home, "nora/hedge-profile"), clone);
+    git(home, "clone", "-q", githubRepo(home, "nora/nora-hedge"), clone);
     const answers = JSON.parse(readFileSync(join(clone, "hedge.json"), "utf8"));
     writeFileSync(join(clone, "hedge.json"), JSON.stringify({ ...answers, packs: answers.packs.filter((pack: string) => pack !== "guards") }, null, 2) + "\n");
     git(clone, "commit", "-q", "-am", "The node's profile, before guards");

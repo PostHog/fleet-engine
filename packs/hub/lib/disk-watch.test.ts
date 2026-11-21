@@ -187,8 +187,9 @@ test("a devbox sweep runs in a login shell, so the engine launcher finds the Bun
   const remote = temp.make("disk-remote-");
   writeHome(remote, {
     ".profile": 'PATH="$HOME/.bun/bin:$PATH"\n',
-    ".bun/bin/bun": `echo "bun $*" >> "${hub.bin}/calls.log"`,
+    ".bun/bin/bun": `[ "$1" = --version ] && { echo 1.4.4; exit 0; }\nfor arg; do case $arg in *.ts) [ -f "$arg" ] || exit 1 ;; esac; done\necho "bun $*" >> "${hub.bin}/calls.log"`,
     ".local/share/hedge/engine/hedge": readFileSync(join(import.meta.dir, "../../../hedge"), "utf8"),
+    ".local/share/hedge/engine/src/cli.ts": "",
   });
   chmodSync(join(remote, ".bun/bin/bun"), 0o755);
   writeFileSync(join(hub.bin, "ssh"), `#!/bin/sh
@@ -198,7 +199,8 @@ case "$6" in
 esac
 `);
   expect(await diskWatchCommand([], hub.context)).toBe(0);
-  expect(hub.calls()).toEqual([`bun ${join(remote, ".local/share/hedge/engine/src/cli.ts")} disk-sweep --floor 15 --alert-floor 10`]);
+  expect(hub.calls()).toEqual([expect.stringMatching(/^bun /)]);
+  expect(hub.calls()[0]).toEndWith(` ${join(remote, ".local/share/hedge/engine/src/cli.ts")} disk-sweep --floor 15 --alert-floor 10`);
   expect(hub.lines.join("\n")).not.toContain("failed");
 });
 

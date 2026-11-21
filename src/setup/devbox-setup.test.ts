@@ -38,11 +38,17 @@ describe("hedge setup with a devbox", () => {
     expect(waiting.output).toContain("  --set orchestration.loopProject=<value>   Which T3 project do the loops and the PR digest run in?");
   });
 
+  test("goes on to link T3 Code when hedge doctor on the devbox finds only to-dos that wait for the person's sign-ins", async () => {
+    const home = temp.make("home-");
+    const result = await hedgeSetup(home, ["--preset", "starter", "--plan", "both", "--add", "integrations", "--devbox", "node-1"], ["", ""], fakeMachine(home, {}, { node: { signedOut: true } }));
+    expect(result.output).toContain("  ✓ Link T3 Code here and on node-1: done");
+  });
+
   test("a devbox setting whose push failed is pushed on the next run before the box is installed", async () => {
     const args = ["--preset", "everyday", "--plan", "claude", "--workflows", "pr-digest=on", "--devbox", "node-1"];
     const home = temp.make("home-");
     expect((await hedgeSetup(home, args, ["", ""], fakeMachine(home))).code).toBe(130);
-    const rejecting = join(githubRepo(home, "nora/hedge-profile"), "hooks/pre-receive");
+    const rejecting = join(githubRepo(home, "nora/nora-hedge"), "hooks/pre-receive");
     writeFileSync(rejecting, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
     expect((await hedgeSetup(home, args, ["~/code/app"], fakeMachine(home))).output).toContain("could not push answers");
 
@@ -73,7 +79,7 @@ describe("hedge setup with a devbox", () => {
     await spawnGit(profilePath(home), "pull", "-q", "--rebase");
     expect((await hedgeSetup(home, devboxArgs, [""], fakeMachine(home))).code).toBe(0);
     expect((await pushedAnswers(home)).settings).toEqual({ "memory.repo": "nora/hedge-memory", "orchestration.loopProject": "~/code/app" });
-    expect(await spawnGit(home, "--git-dir", githubRepo(home, "nora/hedge-profile"), "show", "main:about-me.md")).toBe("# Changed on another machine");
+    expect(await spawnGit(home, "--git-dir", githubRepo(home, "nora/nora-hedge"), "show", "main:about-me.md")).toBe("# Changed on another machine");
   });
 
   test("stops when another machine changes the same devbox setting before the push, and after setup's commit is dropped the same command run again saves this run's answer", async () => {
@@ -96,7 +102,7 @@ describe("hedge setup with a devbox", () => {
     const dir = profilePath(home);
     expect((await hedgeSetup(home, devboxArgs, ["", ""], fakeMachine(home))).code).toBe(130);
     const elsewhere = join(temp.make("elsewhere-"), "profile");
-    await spawnGit(home, "clone", "-q", githubRepo(home, "nora/hedge-profile"), elsewhere);
+    await spawnGit(home, "clone", "-q", githubRepo(home, "nora/nora-hedge"), elsewhere);
     writeFileSync(join(elsewhere, "about-me.md"), "# Changed on another machine\n");
     await spawnGit(elsewhere, "commit", "-q", "-am", "Change about me on another machine");
     await spawnGit(elsewhere, "push", "-q");
@@ -114,7 +120,7 @@ describe("hedge setup with a devbox", () => {
     const rerun = await hedgeSetup(home, devboxArgs, ["~/code/app"], fakeMachine(home));
     expect(rerun.code).toBe(0);
     expect((await pushedAnswers(home)).settings).toEqual({ "memory.repo": "nora/hedge-memory", "orchestration.loopProject": "~/code/app" });
-    const onOrigin = (path: string) => spawnGit(home, "--git-dir", githubRepo(home, "nora/hedge-profile"), "show", `main:${path}`);
+    const onOrigin = (path: string) => spawnGit(home, "--git-dir", githubRepo(home, "nora/nora-hedge"), "show", `main:${path}`);
     expect([await onOrigin("about-me.md"), await onOrigin("README.md")]).toEqual(["# Changed on another machine", "# Changed here"]);
   });
 

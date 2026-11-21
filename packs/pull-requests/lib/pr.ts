@@ -46,12 +46,12 @@ function packCommands(env: Env): { handler: string; words: string[] } | undefine
 export async function prCommand(args: string[], home: string, env: Env = Bun.env, now = new Date()): Promise<number> {
   const pack = packCommands(env);
   const word = args[0] ?? "";
-  if (pack && pack.words.includes(word)) return runHandler(["bun", pack.handler, ...args], env);
+  if (pack && pack.words.includes(word)) return runHandler(pack.handler, args, env);
   if (word === "help" || word === "--help") {
     console.log(help);
     if (!pack?.words.length) return 0;
     console.log(`\nFrom packs: ${pack.words.join(", ")}\n`);
-    await runHandler(["bun", pack.handler, "help"], env);
+    await runHandler(pack.handler, ["help"], env);
     return 0;
   }
   if (!engineSubcommands.includes(word)) throw new Error(`Usage: hedge pr <subcommand>, one of ${[...engineSubcommands, ...(pack?.words ?? [])].join(", ")}. Run hedge pr --help for each one's flags.`);

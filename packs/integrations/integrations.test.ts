@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "smol-toml";
 import { providerConfigAdapter, type CommandRunner } from "../../src/adapters/provider-config/adapter.ts";
@@ -32,21 +32,21 @@ function providers() {
   return { installed, marketplaces, changes, adapter: providerConfigAdapter({ run }) };
 }
 
-const signedIn = {
-  claude: (server: string) => `${server}:\n  Scope: Dynamic config (from command line)\n  Status: ✓ Connected\n  Type: http\n`,
-  codex: (auth: string) => `Name      Url                           Bearer Token Env Var  Status   Auth\ncontext7  https://mcp.context7.com/mcp  -                     enabled  ${auth}\n`,
-};
-const signedOut = { claude: (server: string) => `${server}:\n  Scope: Dynamic config (from command line)\n  Status: ! Needs authentication\n  Type: http\n` };
+const claudeServer = (server: string, status: string, issue?: string) => `${server}:\n  Scope: Dynamic config (from command line)\n  Status: ${status}\n${issue ? `  Issue: ${issue}\n` : ""}  Type: http\n`;
+const codexRow = (auth: string) => `context7  https://mcp.context7.com/mcp  -                     enabled  ${auth}\n`;
+const signedIn = { claude: (server: string) => claudeServer(server, "✓ Connected") };
+const signedOut = { claude: (server: string) => (server === "plugin:github:github" ? claudeServer(server, "✘ Failed to connect", "HTTP 400: Error POSTing to endpoint: bad request: Authorization header is badly formatted") : claudeServer(server, "! Needs authentication")) };
+const unreachable = { claude: (server: string) => claudeServer(server, "✘ Failed to connect") };
 
-type Machine = { claude?: (server: string) => string; codexAuth?: string; convex?: boolean; env?: Record<string, string> };
+type Machine = { claude?: (server: string) => string; codexAuth?: string; codexRows?: string; convex?: boolean; env?: Record<string, string>; exit?: number };
 
 function checkRunner(home: string, machine: Machine, plan: Plan): Runner {
   const signIns = new Set(plan.checks.filter((item) => item.pack === "integrations").map((item) => JSON.stringify(item.run)));
   const bin = temp.make("bin-");
   for (const server of ["plugin:github:github", "plugin:context7:context7"]) writeFileSync(join(bin, server.replaceAll(":", "_")), (machine.claude ?? signedOut.claude)(server));
-  writeFileSync(join(bin, "codex-mcp-list"), signedIn.codex(machine.codexAuth ?? "Not logged in"));
-  writeFileSync(join(bin, "claude"), `#!/bin/sh\n[ "$1 $2" = "mcp get" ] || exit 2\ncat "${bin}/$(printf %s "$3" | tr : _)"\n`);
-  writeFileSync(join(bin, "codex"), `#!/bin/sh\n[ "$1 $2" = "mcp list" ] || exit 2\ncat "${bin}/codex-mcp-list"\n`);
+  writeFileSync(join(bin, "codex-mcp-list"), `Name      Url                           Bearer Token Env Var  Status   Auth         \n${machine.codexRows ?? codexRow(machine.codexAuth ?? "Not logged in")}`);
+  writeFileSync(join(bin, "claude"), `#!/bin/sh\n[ "$1 $2" = "mcp get" ] || exit 2\ncat "${bin}/$(printf %s "$3" | tr : _)"\nexit ${machine.exit ?? 0}\n`);
+  writeFileSync(join(bin, "codex"), `#!/bin/sh\n[ "$1 $2" = "mcp list" ] || exit 2\ncat "${bin}/codex-mcp-list"\nexit ${machine.exit ?? 0}\n`);
   chmodSync(join(bin, "claude"), 0o755);
   chmodSync(join(bin, "codex"), 0o755);
   if (machine.convex) {
@@ -71,9 +71,21 @@ async function applyPack(plan: AiPlan, workflows: Record<string, boolean> = {}) 
 }
 
 async function doctor(plan: AiPlan, workflows: Record<string, boolean>, machine: Machine) {
+  return signInsOf(await doctorFindings(plan, workflows, machine));
+}
+
+async function doctorFindings(plan: AiPlan, workflows: Record<string, boolean>, machine: Machine) {
   const home = temp.make("home-");
   const resolved = resolve(plan, workflows);
-  return signInsOf((await check(resolved, { home, adapters: [], run: checkRunner(home, machine, resolved) })).findings);
+  return (await check(resolved, { home, adapters: [], run: checkRunner(home, machine, resolved) })).findings.filter((finding) => finding.pack === "integrations");
+}
+
+const waits = (findings: Array<{ id: string; todo?: true; repair?: string }>) => findings.map(({ id, todo, repair }) => [id, todo ?? repair]).toSorted();
+
+function withoutProviders() {
+  const bin = temp.make("bare-bin-");
+  for (const tool of ["sh", "grep", "awk", "test"]) symlinkSync(Bun.which(tool)!, join(bin, tool));
+  return bin;
 }
 
 describe("the Integrations pack", () => {
@@ -107,8 +119,24 @@ describe("the Integrations pack", () => {
   });
 
   test("doctor passes each sign-in once its provider reports it, and lists only the ones still missing", async () => {
-    expect(await doctor("both", { convex: true }, { claude: signedIn.claude, codexAuth: "OAuth", convex: true })).toEqual([]);
+    expect(await doctor("both", { convex: true }, { claude: signedIn.claude, codexAuth: "OAuth        ", convex: true })).toEqual([]);
     expect(await doctor("both", { convex: true }, { codexAuth: "OAuth" })).toEqual(["context7-claude", "convex-login", "github-token"]);
+  });
+
+  test("doctor fails a sign-in check whose provider command fails, whether or not it printed a sign-in", async () => {
+    const failed = [["check:context7-claude", "apply"], ["check:context7-codex", "apply"], ["check:github-token", "apply"]];
+    expect(waits(await doctorFindings("both", {}, { exit: 3 }))).toEqual(failed);
+    expect(waits(await doctorFindings("both", {}, { exit: 3, claude: signedIn.claude, codexAuth: "OAuth" }))).toEqual(failed);
+  });
+
+  test("doctor fails a sign-in check whose provider prints no signed-out state: an endpoint that does not connect, or no context7 server in Codex", async () => {
+    const other = "other     https://mcp.example.com/mcp   -                     enabled  Unsupported\n";
+    expect(waits(await doctorFindings("both", {}, { claude: unreachable.claude, codexRows: other }))).toEqual([["check:context7-claude", "apply"], ["check:context7-codex", "apply"], ["check:github-token", "apply"]]);
+  });
+
+  test("doctor leaves each missing sign-in to the person, and fails a check only when its provider does not run", async () => {
+    expect(waits(await doctorFindings("both", { convex: true }, {}))).toEqual([["check:context7-claude", true], ["check:context7-codex", true], ["check:convex-login", true], ["check:github-token", true]]);
+    expect(waits(await doctorFindings("both", { convex: true }, { env: { PATH: withoutProviders() } }))).toEqual([["check:context7-claude", "apply"], ["check:context7-codex", "apply"], ["check:convex-login", true], ["check:github-token", "apply"]]);
   });
 
   test("doctor accepts a Context7 API key in place of Codex's OAuth sign-in", async () => {

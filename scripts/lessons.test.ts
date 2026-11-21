@@ -1,11 +1,12 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { captions, parseLesson, type Lesson } from "../page/lessons.ts";
 import { loadPacks } from "../src/pack/manifest.ts";
-import { builtLesson, lessonMedia, tourSource } from "../src/testing/lessons.ts";
+import { builtLesson, lessonMedia, testVoice, tourSource } from "../src/testing/lessons.ts";
 import { buildSite, type SiteFiles } from "./build-page.ts";
-import { knownNames, lessonProblems, loadLessons, type Names } from "./lessons.ts";
+import { knownNames, lessonProblems, loadLessons, loadVoice, type Names } from "./lessons.ts";
 
 const root = join(import.meta.dir, "..");
 let names: Names;
@@ -22,7 +23,29 @@ describe("lessons", () => {
   test("every lesson in the repository names only commands, skills, packs, and lessons that exist, and its cut matches its narration", () => {
     const lessons = loadLessons(root);
     expect(lessons.map((lesson) => lesson.id)).toContain("what-hedge-is");
-    expect(lessons.flatMap((lesson) => lessonProblems(lesson, names))).toEqual([]);
+    expect(lessons.flatMap((lesson) => lessonProblems(lesson, names, loadVoice(root)))).toEqual([]);
+  });
+
+  test("a lesson comes after every lesson whose next link names it, a chain stays together, and a loop starts at its first name", () => {
+    const ids = loadLessons(root).map((lesson) => lesson.id);
+    expect(ids).toContain("build-your-first-feature");
+    expect(ids.indexOf("what-hedge-is")).toBeGreaterThanOrEqual(0);
+    expect(ids.indexOf("what-hedge-is")).toBeLessThan(ids.indexOf("build-your-first-feature"));
+    const order = (links: [string, string?][]) => {
+      const probe = mkdtempSync(join(tmpdir(), "lessons-"));
+      try {
+        mkdirSync(join(probe, "lessons"));
+        for (const [id, next] of links) writeFileSync(join(probe, "lessons", `${id}.md`), `---\ntitle: Probe\nshelf: start\nfor: Tests.\nafter: Nothing.\n${next ? `next: ${next}\n` : ""}---\n\n## One\n\nA line.\n`);
+        return loadLessons(probe).map((lesson) => lesson.id);
+      } finally {
+        rmSync(probe, { recursive: true, force: true });
+      }
+    };
+    expect(order([["a-second"], ["m-alone"], ["z-first", "a-second"], ["loop-one", "loop-two"], ["loop-two", "loop-one"]])).toEqual(["m-alone", "z-first", "a-second", "loop-one", "loop-two"]);
+    expect(order([["a", "c"], ["b", "c"], ["c"]])).toEqual(["a", "b", "c"]);
+    expect(order([["a", "z"], ["b", "c"], ["c"], ["z"]])).toEqual(["a", "z", "b", "c"]);
+    expect(order([["a", "c"], ["b", "a"], ["c", "b"]])).toEqual(["a", "c", "b"]);
+    expect(order([["x", "a"], ["a", "b"], ["b", "a"]])).toEqual(["x", "a", "b"]);
   });
 
   test("the setup guide shows the first lesson at its first wait, from the site, and names only lessons that have a cut", () => {
@@ -35,9 +58,9 @@ describe("lessons", () => {
 
   test("the check fails a lesson that names a hedge command, a skill, a pack, or a next lesson that does not exist", () => {
     const known = withText("Run `hedge doctor`, then `hedge help`. Say `/qa-swarm`. Turn on the Slack pack and the Quality gates pack. The Memory pack keeps notes.");
-    expect(lessonProblems(known, names)).toEqual([]);
+    expect(lessonProblems(known, names, testVoice)).toEqual([]);
     const unknown: Lesson = { ...withText("Run `hedge teleport`. Say `/fly`. Turn on the Rocket pack. Use the Made Up Rocket Science pack. Enable the Node.js pack. The Mac opens T3 Code to set up the Slack pack."), next: "gone" };
-    expect(lessonProblems(unknown, names)).toEqual([
+    expect(lessonProblems(unknown, names, testVoice)).toEqual([
       "lessons/probe.md: names hedge teleport, which no command ships",
       "lessons/probe.md: names /fly, which no pack's skill ships",
       "lessons/probe.md: names the Rocket pack, which does not exist",
@@ -47,13 +70,19 @@ describe("lessons", () => {
     ]);
   });
 
-  test("the check fails a cut whose narration, chapters, or captions no longer match the lesson", () => {
+  test("the check fails a cut whose narration, voice, chapters, or captions no longer match the lesson", () => {
     const built = builtLesson();
-    expect(lessonProblems(built, names)).toEqual([]);
+    expect(lessonProblems(built, names, testVoice)).toEqual([]);
     const edited = { ...built, chapters: [...built.chapters.slice(0, 1), { headline: "The second stop", text: "Run `hedge doctor` now." }] };
-    expect(lessonProblems(edited, names)).toEqual(["lessons/tour.md: the narration changed after its cut. Render the lesson again"]);
+    expect(lessonProblems(edited, names, testVoice)).toEqual(["lessons/tour.md: the narration or the voice changed after its cut. Render the lesson again"]);
+    expect(lessonProblems(built, names, JSON.stringify({ ...JSON.parse(testVoice), seed: 2 }))).toEqual(["lessons/tour.md: the narration or the voice changed after its cut. Render the lesson again"]);
     const short = { ...built, cut: { ...built.cut, chapters: [0], captions: [[0, 1] as [number, number]] } };
-    expect(lessonProblems(short, names)).toEqual(["lessons/tour.md: has 2 chapters, but its cut has 1", "lessons/tour.md: has 4 sentences, but its cut has 1 captions"]);
+    expect(lessonProblems(short, names, testVoice)).toEqual(["lessons/tour.md: has 2 chapters, but its cut has 1", "lessons/tour.md: has 4 sentences, but its cut has 1 captions"]);
+  });
+
+  test("the voice that a cut is checked against comes from lessons/voice.json, and a missing file fails", () => {
+    expect(loadVoice(root)).toBe(JSON.stringify(JSON.parse(readFileSync(join(root, "lessons", "voice.json"), "utf8"))));
+    expect(() => loadVoice(join(root, "scripts"))).toThrow("voice.json");
   });
 
   test("the captions leave out code marks and escape the characters WebVTT reserves", () => {
@@ -64,17 +93,17 @@ describe("lessons", () => {
   test("the check fails a cut whose chapter or caption times run backwards or past the end of the video", () => {
     const built = builtLesson();
     const problem = ["lessons/tour.md: its cut has chapter or caption times out of order or outside the video"];
-    expect(lessonProblems({ ...built, cut: { ...built.cut, captions: [[0, 4], [9, 5], [10, 14], [15, 19]] } }, names)).toEqual(problem);
-    expect(lessonProblems({ ...built, cut: { ...built.cut, chapters: [0, 151] } }, names)).toEqual(problem);
-    expect(lessonProblems({ ...built, cut: { ...built.cut, chapters: [65, 0] } }, names)).toEqual(problem);
-    expect(lessonProblems({ ...built, cut: { ...built.cut, chapters: [null, 65] as unknown as number[] } }, names)).toEqual(problem);
-    expect(lessonProblems({ ...built, cut: { ...built.cut, captions: [[0, 4], [3, 9], [10, 14], [15, 19]] } }, names)).toEqual(problem);
-    expect(lessonProblems({ ...built, cut: { ...built.cut, captions: [[0, 4], [4, 9], [9, 14], [15, 19]] } }, names)).toEqual([]);
+    expect(lessonProblems({ ...built, cut: { ...built.cut, captions: [[0, 4], [9, 5], [10, 14], [15, 19]] } }, names, testVoice)).toEqual(problem);
+    expect(lessonProblems({ ...built, cut: { ...built.cut, chapters: [0, 151] } }, names, testVoice)).toEqual(problem);
+    expect(lessonProblems({ ...built, cut: { ...built.cut, chapters: [65, 0] } }, names, testVoice)).toEqual(problem);
+    expect(lessonProblems({ ...built, cut: { ...built.cut, chapters: [null, 65] as unknown as number[] } }, names, testVoice)).toEqual(problem);
+    expect(lessonProblems({ ...built, cut: { ...built.cut, captions: [[0, 4], [3, 9], [10, 14], [15, 19]] } }, names, testVoice)).toEqual(problem);
+    expect(lessonProblems({ ...built, cut: { ...built.cut, captions: [[0, 4], [4, 9], [9, 14], [15, 19]] } }, names, testVoice)).toEqual([]);
   });
 
   test("the check fails a cut whose time or caption is not a number or a pair of numbers", () => {
     const built = builtLesson();
-    const withCue = (cue: unknown) => lessonProblems({ ...built, cut: { ...built.cut, captions: [[0, 4], cue as [number, number], [10, 14], [15, 19]] } }, names);
+    const withCue = (cue: unknown) => lessonProblems({ ...built, cut: { ...built.cut, captions: [[0, 4], cue as [number, number], [10, 14], [15, 19]] } }, names, testVoice);
     for (const cue of [null, [5], { 0: 5, 1: 9, length: 2 }]) expect(withCue(cue)).toEqual(["lessons/tour.md: its cut has chapter or caption times out of order or outside the video"]);
   });
 

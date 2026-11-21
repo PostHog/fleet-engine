@@ -1,5 +1,6 @@
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { bunScript } from "../../../src/runner/bun.ts";
 import { tempDirs } from "../../../src/testing/git.ts";
 
 export const temp = tempDirs();
@@ -32,10 +33,14 @@ export async function heavy(bin: string, settings: Record<string, unknown>, ...a
 }
 
 export async function heavyWith(extra: Record<string, string>, bin: string, settings: Record<string, unknown>, ...args: string[]) {
+  return heavyIn(undefined, extra, bin, settings, ...args);
+}
+
+export async function heavyIn(cwd: string | undefined, extra: Record<string, string>, bin: string, settings: Record<string, unknown>, ...args: string[]) {
   const home = temp.make("home-");
   const { HEDGE_HEAVY_SLOTS: _, ...inherited } = Bun.env;
   const env = { ...inherited, HOME: home, XDG_RUNTIME_DIR: home, PATH: `${bin}:${Bun.env.PATH}`, HEDGE_SETTINGS: JSON.stringify(settings), ...extra };
-  const child = Bun.spawn([process.execPath, join(import.meta.dir, "../commands/heavy.ts"), ...args], { env, stdout: "pipe", stderr: "pipe" });
+  const child = Bun.spawn(bunScript(join(import.meta.dir, "../commands/heavy.ts"), ...args), { cwd, env, stdout: "pipe", stderr: "pipe" });
   return { code: await child.exited, stdout: await new Response(child.stdout).text(), stderr: await new Response(child.stderr).text() };
 }
 

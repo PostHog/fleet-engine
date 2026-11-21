@@ -44,7 +44,7 @@ describe("hedge setup after a stop", () => {
     });
     expect(stopped.code).toBe(1);
     const elsewhere = join(home, "elsewhere");
-    await spawnGit(home, "clone", "-q", githubRepo(home, "nora/hedge-profile"), elsewhere);
+    await spawnGit(home, "clone", "-q", githubRepo(home, "nora/nora-hedge"), elsewhere);
     writeFileSync(join(elsewhere, "about-me.md"), "# Changed on another machine\n");
     await spawnGit(elsewhere, "commit", "-q", "-am", "change about me");
     await spawnGit(elsewhere, "push", "-q", "origin", "main");
@@ -102,7 +102,7 @@ describe("hedge setup after a stop", () => {
 describe("hedge setup while another machine changes the profile", () => {
   async function changeElsewhere(home: string, change: (profile: Record<string, unknown>) => void) {
     const elsewhere = temp.make("elsewhere-");
-    await spawnGit(elsewhere, "clone", "-q", githubRepo(home, "nora/hedge-profile"), "profile");
+    await spawnGit(elsewhere, "clone", "-q", githubRepo(home, "nora/nora-hedge"), "profile");
     const file = join(elsewhere, "profile/hedge.json");
     const profile = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
     change(profile);
@@ -169,7 +169,7 @@ describe("hedge setup while another machine changes the profile", () => {
     await spawnGit(profilePath(home), "pull", "-q", "--rebase");
     expect((await hedgeSetup(home, args, [])).code).toBe(0);
     expect((await pushedAnswers(home)).packs).toEqual([]);
-    expect(await spawnGit(home, "--git-dir", githubRepo(home, "nora/hedge-profile"), "show", "main:about-me.md")).toBe("# Changed on another machine");
+    expect(await spawnGit(home, "--git-dir", githubRepo(home, "nora/nora-hedge"), "show", "main:about-me.md")).toBe("# Changed on another machine");
   });
 
   function pushesAfterAnotherMachine(home: string, plan: string) {
@@ -207,7 +207,7 @@ describe("hedge setup while another machine changes the profile", () => {
     expect(await pushedAnswers(home)).toMatchObject({ plan: "both", packs: ["pull-requests"] });
 
     await spawnGit(dir, "pull", "-q", "--rebase");
-    const rejecting = join(githubRepo(home, "nora/hedge-profile"), "hooks/pre-receive");
+    const rejecting = join(githubRepo(home, "nora/nora-hedge"), "hooks/pre-receive");
     writeFileSync(rejecting, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
     expect((await hedgeSetup(home, ["--non-interactive", ...args], [])).output).toContain("pre-receive hook declined");
     rmSync(rejecting);

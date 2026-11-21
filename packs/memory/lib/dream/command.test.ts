@@ -7,7 +7,7 @@ import type { Result } from "../../../hub/lib/coder.ts";
 import type { Digest } from "./digest.ts";
 import type { ModelRow } from "../../../base/lib/models.ts";
 import { quote } from "../../../hub/lib/machine.ts";
-import { AnalystFailure, analystCommand, analystPrompt, analystTimeoutMs, modelAnalyst, render, type Analyst, type Spawn } from "./analyze.ts";
+import { AnalystFailure, analystCommand, analystPrompt, analystTimeoutMs, modelAnalyst, modelAsk, render, type Analyst, type Spawn } from "./analyze.ts";
 import { dreamCommand, dreamPeers, type DreamIo } from "./command.ts";
 import { remoteLauncher } from "../../../../src/hub/ssh.ts";
 
@@ -261,6 +261,15 @@ test("the Claude analyst runs with no tools, no MCP servers, no skills, and no u
   const argv = analystCommand(lookup("claude"), "/tmp/out");
   expect(argv.slice(0, -1)).toEqual(["claude", "-p", "--model", "claude-small", "--effort", "low", "--setting-sources", "", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
     "--disable-slash-commands", "--no-session-persistence", "--tools", "", "--system-prompt", analystPrompt, "--output-format", "json", "--json-schema"]);
+});
+
+test("a Claude analyst gets the key helper of the user's settings in front of its command", async () => {
+  const home = hubHome();
+  writeHome(home, { ".claude/settings.json": JSON.stringify({ apiKeyHelper: "fake-proxy-key-helper" }) });
+  const seen: string[][] = [];
+  const spawn: Spawn = async (argv) => (seen.push(argv), { code: 0, stdout: JSON.stringify({ structured_output: { done: true } }) });
+  expect(await modelAsk(lookup("claude"), home, {}, spawn, analystPrompt, {})("input", home)).toEqual({ done: true });
+  expect(seen).toEqual([["claude", "--settings", '{"apiKeyHelper":"fake-proxy-key-helper"}', ...analystCommand(lookup("claude"), home, analystPrompt, {}).slice(1)]]);
 });
 
 test("the Codex analyst skips the user's config, so no MCP server of theirs loads, keeps writes refused by pinning the approvals reviewer to the user, and turns off every tool that reads files, the network, or images", () => {
