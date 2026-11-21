@@ -16,9 +16,11 @@
 - The judge in `hedge proof gate` fails at most
   `pull-requests.reviewCeiling` times on a pull request. After that the gate
   runs it no more and says the judge budget is spent. A judge gap on HEAD
-  that a decision accepts ends it, as before, unless another accepted gap
-  rests on a condition, which no judge checks now. A cached verdict still
-  shows.
+  that a decision accepts ends it, as before. While an accepted gap rests
+  on a condition, which no judge checks now, the gate names it and passes no
+  judge gap: void the decision and decide it again without a condition, or,
+  for a standing rule, have the user raise the ceiling. A cached verdict
+  still shows.
   A gate holds the lock of the pull request's judge directory while it asks
   the judge, so a second gate at the same moment that finds no saved
   verdict for its inputs stops and names the command that holds it, and gates at once never pass the cap. A gate whose

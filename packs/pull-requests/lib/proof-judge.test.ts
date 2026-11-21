@@ -320,7 +320,7 @@ test("once the judge failed as often as the review ceiling allows on a PR, the g
   expect(accepted.output.split("\n").at(-1)).toContain("judge: fail accepted by the user");
 });
 
-test("once the judge budget is spent, an accepted judge gap passes no gate while another accepted gap rests on a condition no judge checks now", async () => {
+test("once the judge budget is spent, the gate names each accepted gap's condition that no judge checks now, before and after a judge gap, and how to end it", async () => {
   const pr = await checkout();
   pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.reviewCeiling": 1 });
   pr.env.HEDGE_REVIEW_ARBITER = "cat >/dev/null; echo CONTINUE";
@@ -332,15 +332,41 @@ test("once the judge budget is spent, an accepted judge gap passes no gate while
   const id = /\[(d-[0-9a-f]+)\]/.exec((await acceptGap(pr, "prod-shape", "--condition", "feature.txt reads no stored rows")).output)![1]!;
   fakeModel(pr, "JUDGE", verdict({ proof: { verdict: "fail", reason: "the evidence misses the greeting", citations: [] } }));
   expect((await pr.hedge("gate")).output).toContain("judge proof: fail: the evidence misses the greeting");
+  const stop = `judge gap: the judge budget is spent, so no judge checks the condition of decision ${id}, and no judge gap passes the gate while it rests on one. End decision ${id} with hedge decision void <id> --reason <why>, then decide it again without a condition`;
+
+  const spent = await gateAfterResponse(pr, "A new answer.\n");
+  expect(spent.code).toBe(1);
+  expect(spent.output).toContain("judge: budget spent: the judge failed 1 times on this PR, as often as pull-requests.reviewCeiling allows, so hedge runs it no more.\n");
+  expect(spent.output).toContain(stop);
+  expect(spent.output).not.toContain("End it with a judge gap");
 
   await pr.hedge("gap", "--kind", "judge", "--reason", "The judge misreads the copy");
   pr.chooseGap("judge", "The judge misreads the copy");
   await acceptGap(pr, "judge");
-  const gate = await gateAfterResponse(pr, "A new answer.\n");
+  const accepted = await pr.hedge("gate");
+  expect(accepted.code).toBe(3);
+  expect(accepted.output).toContain(stop);
+});
 
-  expect(gate.output).toContain("judge: budget spent: the judge failed 1 times");
-  expect(gate.output).toContain(`judge gap: not accepted (the judge budget is spent, so no judge checks the condition of decision ${id}): The judge misreads the copy. End decision ${id} with hedge decision void <id> --reason <why>, then decide it again without a condition`);
-  expect(gate.code).toBe(3);
+test("once the judge budget is spent, a standing rule's condition that no judge checks now holds the gate, and the gate asks for no void of a decision it is not", async () => {
+  const pr = await checkout();
+  pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.reviewCeiling": 1 });
+  pr.env.HEDGE_REVIEW_ARBITER = "cat >/dev/null; echo CONTINUE";
+  const rule = "Until 2026-11-26, in example/product, accept a live-run gap that only a billable run from main can prove.";
+  writeFileSync(join(pr.home, ".agents/guides/standing-rules.md"), `- \`hedge proof standing --kind live-run --until 2026-11-26 --repositories example/product --rule "${rule}"\`\n`);
+  await pr.hedge("standing", "--kind", "live-run", "--until", "2026-11-26", "--repositories", "example/product", "--rule", rule);
+  await pr.commit("feature.txt", "greet new members\n");
+  await reviewHead(pr);
+  await pr.hedge("require", "--kinds", "live-run");
+  await pr.hedge("gap", "--kind", "live-run", "--reason", "only a billable run from main proves it");
+  fakeModel(pr, "JUDGE", verdict({ proof: { verdict: "fail", reason: "the evidence misses the greeting", citations: [] } }));
+  expect((await pr.hedge("gate")).output).toContain("judge proof: fail: the evidence misses the greeting");
+
+  const spent = await gateAfterResponse(pr, "A new answer.\n");
+
+  expect(spent.code).toBe(1);
+  expect(spent.output).toContain("judge gap: the judge budget is spent, so no judge checks the condition of standing rule live-run until 2026-11-26, and no judge gap passes the gate while it rests on one. Only the user can raise pull-requests.reviewCeiling, so the judge runs again and checks standing rule live-run until 2026-11-26");
+  expect(spent.output).not.toContain("hedge decision void");
 });
 
 test("while one gate asks the judge of a PR, a second gate of that PR with other judge inputs asks no judge and says which command holds the judge lock", async () => {

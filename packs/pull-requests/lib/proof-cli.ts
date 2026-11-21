@@ -448,7 +448,9 @@ judge again. Each run saves its proof summary for its commit, with the PR's head
 --landed, and a fingerprint of the PR's proof files, the standing rules and the ledger decisions that cover the PR.
 hedge decision report prints that summary only while all of them still match. From the third failing verdict on a PR, the arbiter may escalate to the user. Once the judge failed as often
 as pull-requests.reviewCeiling allows on a PR, the gate runs it no more and says the judge budget is spent. Then no judge checks the
-condition of an accepted gap, so a judge gap passes no gate while another accepted gap rests on one. A gate holds
+condition of an accepted gap, so while one rests on a condition the gate names it, passes no judge gap, and says
+how to end it: void a decision and decide it again without a condition, or have the user raise the ceiling for a
+standing rule. A gate holds
 the lock of the PR's judge directory while it asks the judge, and a second gate of that PR that finds no saved verdict for its
 inputs stops and names the command that holds it. A gate whose process ended leaves its lock to the next gate. A judge gap on HEAD (gap
 --kind judge) lets the gate pass once a decision in the ledger accepts it: the user's answer, recorded with hedge

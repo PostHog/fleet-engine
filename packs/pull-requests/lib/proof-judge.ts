@@ -207,7 +207,7 @@ export type JudgeDeps = { ask: (request: ModelRequest) => Promise<ModelAnswer>; 
 export type JudgeOutcome = { state: "pass" | "fail" | "unavailable"; lines: string[]; model: string; broken: string[]; unchecked?: string[] };
 
 const freeJudgeFails = 2;
-const judgeBudgetSpent = (failed: number) => `judge: budget spent: the judge failed ${failed} times on this PR, as often as pull-requests.reviewCeiling allows, so hedge runs it no more. End it with a judge gap on HEAD: record hedge proof gap --kind judge --reason <why HEAD holds now>, and have a decision accept it as the judge gap line says`;
+const judgeBudgetSpent = (failed: number, unchecked: string[]) => `judge: budget spent: the judge failed ${failed} times on this PR, as often as pull-requests.reviewCeiling allows, so hedge runs it no more.${unchecked.length ? "" : " End it with a judge gap on HEAD: record hedge proof gap --kind judge --reason <why HEAD holds now>, and have a decision accept it as the judge gap line says"}`;
 const arbiterInstructions = `You decide if an agent may keep trying to pass a judge, or must ask the user. Below are the reasons a judge failed one pull request on each run, oldest first.
 
 Answer ESCALATE only when the same failure comes back after the author answered it, or a later verdict contradicts an earlier one. In all other cases answer CONTINUE.
@@ -235,7 +235,10 @@ export async function judge(input: JudgeInput, deps: JudgeDeps): Promise<JudgeOu
     if (!("cause" in asked)) await writeRecord(path, asked);
     return asked;
   });
-  if ("spent" in record) return { state: "fail", lines: [judgeBudgetSpent(record.spent)], model: deps.model, broken: [], unchecked: [...new Set((input.conditions ?? []).map(({ id }) => id))] };
+  if ("spent" in record) {
+    const unchecked = [...new Set((input.conditions ?? []).map(({ id }) => id))];
+    return { state: "fail", lines: [judgeBudgetSpent(record.spent, unchecked)], model: deps.model, broken: [], unchecked };
+  }
   if ("cause" in record) return { state: "unavailable", lines: [`judge: unavailable (${record.cause})`], model: deps.model, broken: [] };
   const escalation = record.escalation ? [`judge: escalate to the user: ${record.escalation}. First record hedge proof gap --kind judge --reason <why>, then ask them the question it prints with the question tool. When they accept, record their answer with hedge decision record --mark 👤 --class proof-gap --kind judge --pr <owner/repo#n>`] : [];
   return { state: record.passed ? "pass" : "fail", lines: [...verdictLines(record.verdict), ...escalation], model: record.model, broken: brokenConditions(record.verdict, input.conditions) };

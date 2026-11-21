@@ -5,7 +5,7 @@ import { modelFor, type ModelRow } from "../../base/lib/models.ts";
 import { numberSetting } from "../../base/lib/settings.ts";
 import { covers, hubLedger, refText, riskCalloutOf, tierOf, type Env, type Ledger, type PrRef, type Ssh } from "./decision-ledger.ts";
 import { ciOf, readPullRequest, type PullRequest, type Run } from "./pr-ci.ts";
-import { askGap, authorOf, conditionName, isStandingCondition, judgeDirectory, judgeGap, judgeGapProof, listStanding, parseVerdict, prDirectory, proofGate, pullRequestDirectory, readDecisions, readJson, receiptOf, reviewRecords, withBrokenConditions, withUncheckedConditions, writeJson, type Arbiter, type Decisions, type JudgeSummary, type ProofIdentity, type ProofSummary, type PushedHead } from "./proof.ts";
+import { askGap, authorOf, conditionName, isStandingCondition, judgeDirectory, judgeGap, judgeGapProof, listStanding, parseVerdict, prDirectory, proofGate, pullRequestDirectory, readDecisions, readJson, receiptOf, reviewRecords, withBrokenConditions, writeJson, type Arbiter, type Decisions, type JudgeSummary, type ProofIdentity, type ProofSummary, type PushedHead } from "./proof.ts";
 import { displayEntry } from "./proof-display.ts";
 import { receiptMarker } from "./proof-receipt.ts";
 import { baseRefs, cleanBaseMerge, devPullOf, diffOf, mergeBase, pullRequestDetails, remotesOf, topLevel } from "./proof-checkout.ts";
@@ -157,13 +157,18 @@ async function judgeHead(head: ProofIdentity, checked: Checked, context: Judging
   const reason = outcome.lines.find((line) => /^judge [a-z]+: fail\b/.test(line)) ?? outcome.lines[0];
   if (outcome.state === "pass") return { code: 0, lines: outcome.lines, covered: `pass by ${outcome.model}`, judge: verdict(outcome.lines) };
   const unchecked = outcome.unchecked ?? [];
-  const gap = weighedGap && (unchecked.length ? withUncheckedConditions(weighedGap, unchecked) : withBrokenConditions(weighedGap, outcome.broken));
+  if (unchecked.length) {
+    const line = `judge gap: the judge budget is spent, so no judge checks the condition of ${unchecked.map(conditionName).join(" or ")}, and no judge gap passes the gate while it rests on one. ${endUnchecked(unchecked)}`;
+    const lines = [...outcome.lines, line];
+    return { code: weighedGap ? 3 : 1, lines, covered: "", judge: verdict(lines, weighedGap && judgeGapProof(head.commit, weighedGap)), reason: line };
+  }
+  const gap = weighedGap && withBrokenConditions(weighedGap, outcome.broken);
   if (gap?.acceptance) {
     const lines = [...outcome.lines, `judge gap: ${gap.acceptance.line}: ${gap.reason}`];
     return { code: 0, lines, covered: `${outcome.state} accepted by ${gap.acceptance.by}`, judge: verdict(lines, judgeGapProof(head.commit, gap)) };
   }
   if (gap) {
-    const lines = [...outcome.lines, `judge gap: ${gap.line}: ${gap.reason}. ${gap.broken ? (unchecked.length ? endUnchecked(gap.broken) : endBroken(gap.broken)) : askGap(head, "judge", gap.reason, gap.kept ? "ask" : autonomyOf(context.env, () => checked.grade, "proof-gap", ["judge"]))}`];
+    const lines = [...outcome.lines, `judge gap: ${gap.line}: ${gap.reason}. ${gap.broken ? endBroken(gap.broken) : askGap(head, "judge", gap.reason, gap.kept ? "ask" : autonomyOf(context.env, () => checked.grade, "proof-gap", ["judge"]))}`];
     return { code: 3, lines, covered: "", judge: verdict(lines, judgeGapProof(head.commit, gap)), reason: `judge gap: ${gap.line}: ${gap.reason}` };
   }
   const hint = checked.tier === "ungraded" || checked.grade.oneWay
@@ -189,7 +194,7 @@ function endUnchecked(ids: string[]) {
   const rules = ids.filter(isStandingCondition);
   return [
     ...decisions.length ? [`End ${decisions.map(conditionName).join(" and ")} with hedge decision void <id> --reason <why>, then decide it again without a condition`] : [],
-    ...rules.length ? [`Only the user can raise pull-requests.reviewCeiling so the judge checks ${rules.join(" and ")} again`] : [],
+    ...rules.length ? [`Only the user can raise pull-requests.reviewCeiling, so the judge runs again and checks ${rules.join(" and ")}`] : [],
   ].join(". ");
 }
 

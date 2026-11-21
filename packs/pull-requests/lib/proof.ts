@@ -1003,11 +1003,6 @@ export function withBrokenConditions(gap: JudgeGap, broken: string[]): JudgeGap 
   return { ...gap, acceptance: undefined, line: `not accepted (the judge finds the condition of ${broken.map(conditionName).join(", ")} broken)`, broken };
 }
 
-export function withUncheckedConditions(gap: JudgeGap, unchecked: string[]): JudgeGap & { broken?: string[] } {
-  if (!gap.acceptance || !unchecked.length) return gap;
-  return { ...gap, acceptance: undefined, line: `not accepted (the judge budget is spent, so no judge checks the condition of ${unchecked.map(conditionName).join(", ")})`, broken: unchecked };
-}
-
 const standingConditionPrefix = "standing rule ";
 export const isStandingCondition = (id: string) => id.startsWith(standingConditionPrefix);
 export const conditionName = (id: string) => isStandingCondition(id) ? id : `decision ${id}`;
