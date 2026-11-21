@@ -64,16 +64,13 @@ test("a final read from an older review names both commits it may start from", a
   expect(readdirSync(reviews(pr)).sort()).toEqual(["1", "final-1", "final-2"]);
 });
 
-test("a final read from the latest review on HEAD's history reads the whole PR when the only panel read another branch", async () => {
-  const { pr, fixed, reviewer } = await prWithStrayRead("greet the new member\n");
+for (const phase of ["review", "babysit"]) test(`a ${phase} final read from the latest review on HEAD's history is refused when the first panel read another branch`, async () => {
+  const { pr, fixed, stray } = await prWithStrayRead("greet the new member\n");
   for (const file of ["panel.json", "lenses"]) rmSync(join(reviews(pr), "1", file), { recursive: true });
   markPanel(pr, "final-2");
 
-  expect((await finalRead(pr, fixed)).code).toBe(0);
-
-  expect(reviewer.prompts().at(-1)).toContain("+greet the new member");
-  expect(reviewer.prompts().at(-1)).not.toContain("another PR");
-  expect(reviewer.prompts().at(-1)).toContain("new file mode");
+  await expect(pr.hedge("review", "--scope", "final", "--base", fixed, "--phase", phase)).rejects.toThrow(`The first panel read ${stray}, which is not on HEAD's history, so a final read from ${short(fixed)} would skip what no panel of this PR read`);
+  expect(readdirSync(reviews(pr)).sort()).toEqual(["1", "final-1", "final-2"]);
 });
 
 async function prOnOtherHead() {

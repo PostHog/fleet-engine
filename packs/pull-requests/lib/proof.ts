@@ -298,6 +298,8 @@ async function startFinalRead(home: string, identity: ProofIdentity, base: strin
     const latestOnHistory = onHistory && finished.findLast((review) => onHistory(review.commit));
     const starts = [latest, ...latestOnHistory && latestOnHistory !== latest ? [latestOnHistory] : []];
     if (!starts.some((review) => coversReview(base, review.commit, cleanBaseMerge))) throw new Error(`Final read base must be the latest reviewed commit ${latest.commit}${starts[1] ? `, the latest reviewed commit on HEAD's history ${starts[1].commit}` : ""}, or a clean base merge the gate carried it to`);
+    const offPanel = !coversReview(base, latest.commit, cleanBaseMerge) && finished.find((review) => review.panel && !onHistory?.(review.commit));
+    if (offPanel) throw new Error(`The first panel read ${offPanel.commit}, which is not on HEAD's history, so a final read from ${short(base)} would skip what no panel of this PR read. Ask the user how to review this PR again`);
     const unfinished = (await Promise.all(names.map(async (name) => !saved.includes(name) || await panelOutcome(join(reviews, name)) === "unfinished"))).some(Boolean);
     const retry = unfinished ? "" : ` To read it anyway, pass ${spent < ceiling ? "--agent '<your reason>', or " : ""}the user's --override`;
     if (emptyRange?.()) throw new Error(nothingToRead(from ?? base, carried));

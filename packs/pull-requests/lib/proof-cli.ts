@@ -545,8 +545,8 @@ across quiet commits is refused, unless --agent with your reason, or the user's 
 A later round with --agent, or the user's --override, may be --scope full: it reviews
 the whole PR diff at HEAD again, such as after a restack.
 When the latest finished review read a commit that is not on HEAD's history, such as a final read run from another
-PR's checkout, a final read may also take --base with the latest reviewed commit on HEAD's history. When the first
-panel read a commit off that history, the final read reads the whole PR. The gate still
+PR's checkout, a final read may also take --base with the latest reviewed commit on HEAD's history, unless the first
+panel read a commit off that history. The gate still
 holds the findings of the read off that history until you answer them with respond. Without --commit, review and
 review-start refuse a checkout whose HEAD is neither the PR's head on GitHub nor a commit on top of it.
 ${overrideHelp}`,
@@ -675,16 +675,13 @@ function requireCheckoutOfPull(options: Map<string, string>, head: ProofIdentity
   throw new Error(`HEAD ${short(head.commit)} is not on ${head.repository}#${head.pr}, whose head on GitHub is ${short(pull.head)}. Run the review in that PR's checkout, push HEAD to the PR first, or pass --commit with the commit to review`);
 }
 
-const finalReadStart = (panel: string | undefined, base: string | undefined, onHistory: (commit: string) => boolean, wholePr: () => string) =>
-  panel && base && !onHistory(panel) && onHistory(base) ? wholePr() : panel ?? base;
-
 async function reserveRound(options: Map<string, string>, head: ProofIdentity, context: CommandContext, capturedBy: CapturedBy, panel = false) {
   const pull = pullOf(head, context.run);
   await settleStrandedRounds(head, context);
   const scope = options.get("--scope") ?? "full";
   const base = options.has("--base") ? resolveCommit(options.get("--base")!, context.run) : undefined;
   const lastRead = scope === "final" && (options.get("--phase") ?? "review") === "review";
-  const from = lastRead ? finalReadStart(await panelCommit(context.home, head), base, onHistoryOf(head, context.run), () => mergeBase(head, context.run)) : rangeStart(scope, base, head, context.run);
+  const from = lastRead ? await panelCommit(context.home, head) ?? base : rangeStart(scope, base, head, context.run);
   const { decision, ...permit } = await decisionOf(options, head, context);
   const tier = reviewTier(head, context.run, pull?.body);
   if (tier.name === "read" && capturedBy === "hedge" && !panel && !decision && !await panelCommit(context.home, head)) throw new Error("A PR of the Read tier gets one read, and it is the panel: run hedge proof review, which runs its combined lens");
