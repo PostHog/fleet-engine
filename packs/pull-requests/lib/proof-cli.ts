@@ -545,7 +545,8 @@ across quiet commits is refused, unless --agent with your reason, or the user's 
 A later round with --agent, or the user's --override, may be --scope full: it reviews
 the whole PR diff at HEAD again, such as after a restack.
 When the latest finished review read a commit that is not on HEAD's history, such as a final read run from another
-PR's checkout, a final read may also take --base with the latest reviewed commit on HEAD's history. The gate still
+PR's checkout, a final read may also take --base with the latest reviewed commit on HEAD's history, and reads from
+it when the first panel read a commit off that history. The gate still
 holds the findings of the read off that history until you answer them with respond. Without --commit, review and
 review-start refuse a checkout whose HEAD is neither the PR's head on GitHub nor a commit on top of it.
 ${overrideHelp}`,
@@ -594,6 +595,7 @@ async function runReview(options: Map<string, string>, head: ProofIdentity, cont
   const { home, run } = context;
   const author = await authorOf(home, head);
   const pending = await unfinishedReview(home, head, "hedge");
+  if (pending) requireCheckoutOfPull(options, head, pullOf(head, run), run);
   if (pending) requireSameRequest(pending, options, run);
   const reserved: SingleRound = pending
     ? { round: pending.reservation.round, id: basename(pending.directory), directory: pending.directory, scope: pending.reservation.scope, base: pending.reservation.base, from: pending.reservation.from ?? rangeStart(pending.reservation.scope, pending.reservation.base, head, run), phase: (pending.reservation as { phase?: string }).phase }
@@ -670,6 +672,9 @@ function requireCheckoutOfPull(options: Map<string, string>, head: ProofIdentity
   throw new Error(`HEAD ${short(head.commit)} is not on ${head.repository}#${head.pr}, whose head on GitHub is ${short(pull.head)}. Run the review in that PR's checkout, push HEAD to the PR first, or pass --commit with the commit to review`);
 }
 
+const finalReadStart = (panel: string | undefined, base: string | undefined, onHistory: (commit: string) => boolean) =>
+  panel && base && !onHistory(panel) && onHistory(base) ? base : panel ?? base;
+
 async function reserveRound(options: Map<string, string>, head: ProofIdentity, context: CommandContext, capturedBy: CapturedBy, panel = false) {
   const pull = pullOf(head, context.run);
   requireCheckoutOfPull(options, head, pull, context.run);
@@ -677,7 +682,7 @@ async function reserveRound(options: Map<string, string>, head: ProofIdentity, c
   const scope = options.get("--scope") ?? "full";
   const base = options.has("--base") ? resolveCommit(options.get("--base")!, context.run) : undefined;
   const lastRead = scope === "final" && (options.get("--phase") ?? "review") === "review";
-  const from = lastRead ? await panelCommit(context.home, head) ?? base : rangeStart(scope, base, head, context.run);
+  const from = lastRead ? finalReadStart(await panelCommit(context.home, head), base, onHistoryOf(head, context.run)) : rangeStart(scope, base, head, context.run);
   const { decision, ...permit } = await decisionOf(options, head, context);
   const tier = reviewTier(head, context.run, pull?.body);
   if (tier.name === "read" && capturedBy === "hedge" && !panel && !decision && !await panelCommit(context.home, head)) throw new Error("A PR of the Read tier gets one read, and it is the panel: run hedge proof review, which runs its combined lens");

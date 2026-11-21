@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { checkout, cleanFixtures, fakeModel, productionMajor, reviewHeadFixed, verdict, type Checkout } from "./proof-testing.ts";
+import { checkout, cleanFixtures, fakeModel, markPanel, productionMajor, reviewHeadFixed, verdict, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
 
@@ -10,7 +10,7 @@ const reviews = (pr: Checkout) => join(pr.pullRequest, "reviews");
 const finalRead = (pr: Checkout, base: string) => pr.hedge("review", "--scope", "final", "--base", base);
 const firstLine = (output: string) => JSON.parse(output.split("\n")[0]!) as { round: string; id: string };
 
-async function prWithStrayRead() {
+async function prWithStrayRead(strayGreeting?: string) {
   const pr = await checkout();
   await pr.commit("feature.txt", "greet\n");
   await pr.hedge("require", "--none", "--reason", "docs only");
@@ -20,6 +20,7 @@ async function prWithStrayRead() {
   const reviewer = fakeModel(pr, "REVIEWER", "No findings.");
   expect((await finalRead(pr, reviewed)).code).toBe(0);
   await pr.git("checkout", "-q", "-b", "other", "main");
+  if (strayGreeting) await pr.commit("feature.txt", strayGreeting);
   const stray = await pr.commit("other.txt", "another PR\n");
   reviewer.answer(productionMajor("other.txt:1", "another PR"));
   expect((await finalRead(pr, fixed)).code).toBe(0);
@@ -63,6 +64,17 @@ test("a final read from an older review names both commits it may start from", a
   expect(readdirSync(reviews(pr)).sort()).toEqual(["1", "final-1", "final-2"]);
 });
 
+test("a final read from the latest review on HEAD's history reads from it when the first panel read another branch", async () => {
+  const { pr, fixed, reviewer } = await prWithStrayRead("greet the new member\n");
+  for (const file of ["panel.json", "lenses"]) rmSync(join(reviews(pr), "1", file), { recursive: true });
+  markPanel(pr, "final-2");
+
+  expect((await finalRead(pr, fixed)).code).toBe(0);
+
+  expect(reviewer.prompts().at(-1)).toContain("+greet the new member");
+  expect(reviewer.prompts().at(-1)).not.toContain("another PR");
+});
+
 async function prOnOtherHead() {
   const pr = await checkout();
   await pr.git("checkout", "-q", "-b", "other", "main");
@@ -95,4 +107,12 @@ test("a review of an explicit --commit skips the check of the checkout", async (
   const { pr, head } = await prOnOtherHead();
 
   expect((await pr.hedge("review-start", "--scope", "full", "--commit", head)).code).toBe(0);
+});
+
+test("a review refuses to resume a round of a checkout whose HEAD is not the PR's head on GitHub", async () => {
+  const { pr, other, head } = await prOnOtherHead();
+  pr.env.HEDGE_PROOF_REVIEWER = "cat >/dev/null; echo 'the reviewer failed' >&2; exit 1";
+  await expect(pr.hedge("review", "--single", "--commit", head)).rejects.toThrow("the reviewer failed");
+
+  await expect(pr.hedge("review", "--single")).rejects.toThrow(`HEAD ${short(head)} is not on example/product#42, whose head on GitHub is ${short(other)}`);
 });
