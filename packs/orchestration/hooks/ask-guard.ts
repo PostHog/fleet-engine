@@ -188,9 +188,19 @@ export async function guardCard(event: SendEvent, options: SendGuardOptions, thr
 
 const t3CallMs = 3_000;
 
+async function readShell(home: string): Promise<{ threads: ShellThread[] }> {
+  let result: { threads: ShellThread[] } | undefined;
+  try {
+    return await withT3Session(async (client) => (result = await client.getShell<{ threads: ShellThread[] }>()), { home, ttl: "1m", timeoutMs: t3CallMs, runCli: t3CliRunner({ timeoutMs: t3CallMs }) });
+  } catch (error) {
+    if (result) return result;
+    throw error;
+  }
+}
+
 const liveShell = (home: string): ReadShell => {
   let snapshot: Promise<{ threads: ShellThread[] }> | undefined;
-  return () => (snapshot ??= withT3Session((client) => client.getShell<{ threads: ShellThread[] }>(), { home, ttl: "1m", timeoutMs: t3CallMs, runCli: t3CliRunner({ timeoutMs: t3CallMs }) }));
+  return () => (snapshot ??= readShell(home));
 };
 
 export type StopDeps = Partial<Pick<ProofStopOptions, "threadId" | "git" | "processes" | "deadline">> & { hidden?: IsHidden };

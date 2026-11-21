@@ -14,8 +14,8 @@
   heuristic from `review-wait`, and removed the wait-snooze advice from
   `settle-guard`. Any active snooze now counts as the person's own snooze.
 - Pin protection and remote `hedge pr settle-check` stay in `settle-guard`:
-  agents still cannot settle or snooze a pinned thread, and may snooze an
-  unpinned one when asked.
+  when the guard can read the target thread, agents still cannot settle or
+  snooze a pinned thread, and may snooze an unpinned one when asked.
 
 ### A final read never reads nothing
 

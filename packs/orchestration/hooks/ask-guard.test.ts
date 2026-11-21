@@ -365,6 +365,20 @@ describe("the send guard", () => {
     expect(await hook("claude", async () => JSON.stringify(send({ mode: "auto" })), home())).toEqual({ code: 0, stdout: "", stderr: "" });
   });
 
+  test("the installed hook still denies a send when T3 session revocation fails after the shell read", async () => {
+    const stub = await startT3Stub({ shell: { projects: [], threads: [{ ...waiting, title: "Lane", projectId: "p", status: "running", pullRequests: [] }] } as never });
+    try {
+      const cliPath = join(stub.home, "t3-server.js");
+      writeFileSync(cliPath, (await Bun.file(cliPath).text()).replace("esac", '  *"auth session revoke"*) exit 1 ;;\nesac'));
+      const result = await hook("claude", async () => JSON.stringify(send({ mode: "auto" })), stub.home);
+      expect(result.stderr).toBe("");
+      expect(JSON.parse(result.stdout).hookSpecificOutput.permissionDecision).toBe("deny");
+      expect((await stub.cliCalls()).some((line) => line.includes("auth session revoke"))).toBe(true);
+    } finally {
+      await stub.stop();
+    }
+  });
+
   test("the PreToolUse dispatcher hands the denial to the agent", async () => {
     const where = home("Robin");
     const target = join(where, ".config/hedge/hooks/PreToolUse/ask-guard.ts");

@@ -149,6 +149,8 @@ function waitsOnSubagent(threads: ShellThread[], parent: ShellThread, depth = 0)
       || awaitsWork(child) || waitsOnSubagent(threads, child, depth + 1)));
 }
 
+const isSnoozed = (thread: ShellThread) => Boolean(thread.snoozedUntil && Date.parse(thread.snoozedUntil) > Date.now());
+
 export const waits = (threads: ShellThread[], thread: ShellThread) => awaitsWork(thread) || waitsOnSubagent(threads, thread);
 
 export async function proofStop(event: ProofStopEvent, options: ProofStopOptions): Promise<ProofStopBlock | undefined> {
@@ -170,7 +172,7 @@ async function check(event: ProofStopEvent, options: ProofStopOptions, signal: A
   if (nestedSession(await processes.table(signal), processes.pid)) return undefined;
   const { threads } = await options.shell();
   const thread = matchThread(threads, threadId, (item) => item.id);
-  if (!thread || thread.delegatedFrom || thread.pendingRuntimeRequest || waits(threads, thread)) return undefined;
+  if (!thread || thread.delegatedFrom || thread.pendingRuntimeRequest || isSnoozed(thread) || waits(threads, thread)) return undefined;
   const git = gitIn(options.git ?? realGit, event.cwd, signal);
   const layers = await layersOf(threads, thread.id, git);
   if (!layers.length || layers.some(awaitsCi)) return undefined;
