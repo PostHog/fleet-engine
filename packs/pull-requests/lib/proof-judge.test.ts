@@ -320,6 +320,29 @@ test("once the judge failed as often as the review ceiling allows on a PR, the g
   expect(accepted.output.split("\n").at(-1)).toContain("judge: fail accepted by the user");
 });
 
+test("once the judge budget is spent, an accepted judge gap passes no gate while another accepted gap rests on a condition no judge checks now", async () => {
+  const pr = await checkout();
+  pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.reviewCeiling": 1 });
+  pr.env.HEDGE_REVIEW_ARBITER = "cat >/dev/null; echo CONTINUE";
+  await pr.commit("feature.txt", "greet new members\n");
+  await reviewHead(pr);
+  await pr.hedge("require", "--kinds", "prod-shape");
+  await pr.hedge("gap", "--kind", "prod-shape", "--reason", "No production read access");
+  pr.chooseGap("prod-shape", "No production read access");
+  const id = /\[(d-[0-9a-f]+)\]/.exec((await acceptGap(pr, "prod-shape", "--condition", "feature.txt reads no stored rows")).output)![1]!;
+  fakeModel(pr, "JUDGE", verdict({ proof: { verdict: "fail", reason: "the evidence misses the greeting", citations: [] } }));
+  expect((await pr.hedge("gate")).output).toContain("judge proof: fail: the evidence misses the greeting");
+
+  await pr.hedge("gap", "--kind", "judge", "--reason", "The judge misreads the copy");
+  pr.chooseGap("judge", "The judge misreads the copy");
+  await acceptGap(pr, "judge");
+  const gate = await gateAfterResponse(pr, "A new answer.\n");
+
+  expect(gate.output).toContain("judge: budget spent: the judge failed 1 times");
+  expect(gate.output).toContain(`judge gap: not accepted (the judge budget is spent, so no judge checks the condition of decision ${id}): The judge misreads the copy. End decision ${id} with hedge decision void <id> --reason <why>, then decide it again without a condition`);
+  expect(gate.code).toBe(3);
+});
+
 test("while one gate asks the judge of a PR, a second gate of that PR with other judge inputs asks no judge and says which command holds the judge lock", async () => {
   const pr = await checkout();
   pr.env.HEDGE_SETTINGS = JSON.stringify({ ...settings, "pull-requests.reviewCeiling": 1 });
