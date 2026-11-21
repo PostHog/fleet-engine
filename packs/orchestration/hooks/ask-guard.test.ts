@@ -406,7 +406,7 @@ describe("the card guard", () => {
     ["without the setting", () => guard(card(), home("Robin"))],
     ["outside T3", () => guardCard(card(), { home: home("Robin", proseTitles), shell: t3(alertThread) }, undefined)],
     ["when T3 cannot be read", () => guard(card(), home("Robin", proseTitles), "alert-1", async () => { throw new Error("T3 down"); })],
-    ["for a tool that is not a question tool", () => guard(card("Bash"), home("Robin", proseTitles))],
+    ["for a tool that is not a question tool", () => guard({ ...card("Bash"), tool_input: { command: "ls" } }, home("Robin", proseTitles))],
   ] as const)("lets a card through %s", async (_, answer) => {
     expect(await answer()).toBeUndefined();
   });
@@ -424,7 +424,7 @@ describe("the card guard", () => {
     mkdirSync(dirname(target), { recursive: true });
     symlinkSync(join(import.meta.dir, "ask-guard.ts"), target);
     const routed = hookWith(() => t3(alertThread), { threadId: "alert-1" });
-    const result = await dispatch(dirname(target), provider, JSON.stringify(card(tool)), async (_path, from, input) => routed(from, async () => input, where));
+    const result = await dispatch(dirname(target), provider, JSON.stringify(card(tool)), async (path, from, input) => (expect(path).toBe(target), routed(from, async () => input, where)));
     expect(JSON.parse(result.stdout).hookSpecificOutput).toMatchObject({ permissionDecision: "deny", permissionDecisionReason: expect.stringContaining("last message") });
   });
 });
