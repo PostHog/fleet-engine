@@ -493,7 +493,7 @@ code and the reason. The gate's lines and hedge decision report come from the sa
       }
       await record({ code: gate.code, reason: gate.reason });
       const shared = await shareGateResult(head, gate.code === 0, gatedAt, context);
-      const waitLine = stoppedEarly && gate.code === ciRunningCode ? `ci: --wait stopped early at a failed read of GitHub: ${stoppedEarly}` : undefined;
+      const waitLine = stoppedEarly ? `ci: --wait stopped early at a failed read of GitHub: ${stoppedEarly}` : undefined;
       if (flags.has("--json")) print(JSON.stringify({ ...gate.summary, reason: gate.reason, ...waitLine ? { wait: waitLine } : {} }));
       else for (const line of [...gate.lines, ...waitLine ? [waitLine] : [], ...shared ? [shared] : [], gate.verdict]) print(line);
       return gate.code;

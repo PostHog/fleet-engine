@@ -180,6 +180,21 @@ test("a wait that a failed read of GitHub ended early says so, though CI still r
   expect(lastLine(gate.output)).toStartWith("gate: pending (exit 75): ");
 });
 
+test("a wait that a failed read ended early says so also when CI turned red by the next read", async () => {
+  const { pr } = await reviewed();
+  pr.ci([{ name: "test", bucket: "pending" }]);
+  const github = join(dirname(pr.home), "github");
+  pr.panel.onPause = async () => {
+    pr.pullRequestState({ unreadable: "gh: Bad Gateway (HTTP 502)" });
+    pr.whileGithubReadsPull(`echo 'rm -f "${github}/pull-error-42"' > "${github}/while-reading"`);
+    pr.ci([{ name: "test", bucket: "fail" }]);
+  };
+  const gate = await pr.hedge("gate", "--wait", "10");
+  expect(gate.code).toBe(1);
+  expect(gate.output).toContain("ci: --wait stopped early at a failed read of GitHub: gh api repos/example/product/pulls/42 failed (gh: Bad Gateway (HTTP 502))");
+  expect(lastLine(gate.output)).toStartWith("gate: fail (exit 1): ci: red, failing: test. ");
+});
+
 test("while --wait waits, the gate record says CI is still running", async () => {
   const { pr, head } = await reviewed();
   pr.ci([{ name: "test", bucket: "pending" }]);
