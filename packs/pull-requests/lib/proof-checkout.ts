@@ -2,6 +2,7 @@ import { readPullRequest, type Run } from "./pr-ci.ts";
 import { reviewedDiff } from "./proof-review.ts";
 import { isTestFile } from "./proof-delta.ts";
 import { riskCalloutOf } from "./decision-ledger.ts";
+import { isCommitSha } from "./proof-end-table.ts";
 import type { CleanBaseMerge, DevPr, DevPull, ProofIdentity } from "./proof.ts";
 
 const short = (commit: string) => commit.slice(0, 7);
@@ -13,20 +14,21 @@ export function topLevel(run: Run) {
 }
 
 /**
- * Where the PR branched from its base. A base branch this checkout has not fetched is fetched from the repository's
- * remote once; without such a remote, or without the commit, the error names the commands that fix it.
+ * Where the PR branched from its base as the base is now: the newest of the base branch on each remote and the base
+ * commit GitHub reports. A base branch or base commit this checkout lacks is fetched from the repository's remote once;
+ * without such a remote, or without the commit, the error names the commands that fix it.
  */
 export function mergeBase(identity: ProofIdentity, run: Run) {
-  const base = pullRequestDetails(identity, run).baseRefName;
+  const { baseRefName: base, baseSha } = pullRequestDetails(identity, run);
   const remotes = remotesOf(identity.repository, run);
+  const present = (tip: string) => offline(run)(["git", "cat-file", "-e", `${tip}^{commit}`]).code === 0;
+  const tips = () => [...remotes.map((remote) => `refs/remotes/${remote}/${base}`), ...isCommitSha(baseSha) ? [baseSha] : []].filter(present);
   const found = () => {
-    for (const remote of remotes) {
-      const result = run(["git", "merge-base", `refs/remotes/${remote}/${base}`, identity.commit]);
-      if (result.code === 0) return result.stdout.trim();
-    }
-    return undefined;
+    const known = tips();
+    const result = known.length ? run(["git", "merge-base", identity.commit, ...known]) : undefined;
+    return result?.code === 0 ? result.stdout.trim() : undefined;
   };
-  const before = found();
+  const before = !isCommitSha(baseSha) || present(baseSha) ? found() : undefined;
   if (before) return before;
   for (const remote of remotes) run(["git", "fetch", "--quiet", remote, `+refs/heads/${base}:refs/remotes/${remote}/${base}`]);
   const after = found();
@@ -131,8 +133,8 @@ export function reviewTier(identity: ProofIdentity, run: Run, body: string | und
 
 export function pullRequestDetails(identity: ProofIdentity, run: Run) {
   try {
-    const { title, body, base } = readPullRequest(identity, run);
-    return { title, body, baseRefName: base };
+    const { title, body, base, baseSha } = readPullRequest(identity, run);
+    return { title, body, baseRefName: base, baseSha };
   } catch (error) {
     throw new Error(`Cannot read ${identity.repository}#${identity.pr} over GitHub's REST API (${(error as Error).message})`);
   }
