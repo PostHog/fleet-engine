@@ -451,8 +451,8 @@ hedge decision report prints that summary only while all of them still match. Fr
 --kind judge) lets the gate pass once a decision in the ledger accepts it: the user's answer, recorded with hedge
 decision record --mark 👤, or your own 🤖 decision when the PR's tier lets you. A refusal or a typed message never
 accepts it. Before the judge, a reviewer, or the arbiter gets a prompt, hedge replaces each value that Hedge's secret
-guard matches with a [redacted <kind>] placeholder, and prints how many values it replaced, their kinds, and where they
-were. When the guard still matches after that, hedge sends nothing and names the kind: the judge is then unavailable,
+guard matches with a [redacted <kind>] placeholder. For the judge, it prints how many values it replaced, their kinds,
+and where they were. When the guard still matches after that, hedge sends nothing and names the kind: the judge is then unavailable,
 and only the user's answer accepts its judge gap. The judge reads the condition of each accepted gap and fails one that HEAD breaks; the setting
 pull-requests.criticalPathFiles gives it the repository's critical-path list. The gate reads the decision ledger on
 the hub and the tier from the merge-risk callout at HEAD; with the hub unreachable, no ledger decision counts and the

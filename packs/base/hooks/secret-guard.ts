@@ -215,14 +215,14 @@ function joined(spans: Span[]) {
   return regions;
 }
 
-export function replaceSecrets(text: string, replace: (kind: string, value: string) => string) {
+export function replaceSecrets(text: string, replace: (kind: string, value: string, at?: number) => string) {
   const found = spansOf(text, secretsIn(text));
   if ("whole" in found) return replace(found.whole, text);
   if (!found.spans.length) return text;
   const parts: string[] = [];
   let from = 0;
   for (const { kind, at, end } of joined(found.spans)) {
-    parts.push(text.slice(from, at), replace(kind, text.slice(at, end)));
+    parts.push(text.slice(from, at), replace(kind, text.slice(at, end), at));
     from = end;
   }
   const replaced = parts.join("") + text.slice(from);
@@ -239,16 +239,11 @@ export type Redaction = { text: string; values: Array<{ kind: string; at: number
 
 export function redactForModel(text: string): Redaction {
   const values: Redaction["values"] = [];
-  let cursor = 0;
   let whole: string | undefined;
   try {
-    const redacted = replaceSecrets(text, (kind, value) => {
-      if (value === text) whole ??= kind;
-      else {
-        const at = text.indexOf(value, cursor);
-        cursor = at + value.length;
-        values.push({ kind, at, end: cursor });
-      }
+    const redacted = replaceSecrets(text, (kind, value, at) => {
+      if (at === undefined) whole ??= kind;
+      else values.push({ kind, at, end: at + value.length });
       return redactionMark(kind);
     });
     return whole ? { text, values: [], left: [whole] } : { text: redacted, values, left: secretKinds(redacted) };

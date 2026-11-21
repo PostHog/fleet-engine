@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
-import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { guard } from "../../base/hooks/secret-guard.ts";
 import { cleanFixtures, checkout, fakeModel, graded, reviewHead, verdict, acceptGap, type Checkout } from "./proof-testing.ts";
@@ -201,3 +202,21 @@ test("a review prompt Hedge cannot fully redact is never sent, and the error nam
   expect(reviewer.prompts()).toEqual([]);
 });
 
+
+test("a verdict that an older Hedge cached for the prompt as built is not reused, since the model now gets the guarded prompt", async () => {
+  const pr = await checkout();
+  await pr.commit("feature.txt", "greet new members\n");
+  await reviewHead(pr);
+  await pr.hedge("require", "--none", "--reason", "Docs only");
+  const judge = fakeModel(pr, "JUDGE", verdict());
+  expect((await pr.hedge("gate")).code).toBe(0);
+
+  const directory = join(pr.pullRequest, "judge");
+  const [saved] = readdirSync(directory);
+  const record = JSON.parse(readFileSync(join(directory, saved!), "utf8")) as { model: string };
+  const olderKey = createHash("sha256").update(record.model).update("\0").update(judge.prompts()[0]!).digest("hex");
+  renameSync(join(directory, saved!), join(directory, `${olderKey}.json`));
+
+  expect((await pr.hedge("gate")).code).toBe(0);
+  expect(judge.prompts()).toHaveLength(2);
+});
