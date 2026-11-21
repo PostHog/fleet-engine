@@ -50,6 +50,30 @@ test("a final read of a commit that puts a PR file back to the base's text reads
   expect(reviewer.prompts().at(-1)).toContain("-and the member's name");
 });
 
+test("a final read reads a commit that puts a PR file back to the base's text after the base renamed that file", async () => {
+  const pr = await checkout();
+  const guide = Array.from({ length: 10 }, (_, line) => `step ${line + 1}\n`).join("");
+  await pr.advanceBase("guide.txt", guide);
+  await pr.git("merge", "-q", "--no-edit", "main");
+  await pr.commit("guide.txt", `${guide}greet the member by name\n`);
+  await pr.commit("feature.txt", "greet\n");
+  await pr.hedge("require", "--none", "--reason", "docs only");
+  const reviewed = await reviewHead(pr);
+  pr.env.HEDGE_REVIEW_ARBITER = "cat >/dev/null; echo CONTINUE";
+  await pr.git("checkout", "-q", "main");
+  await pr.git("mv", "guide.txt", "handbook.txt");
+  await pr.git("commit", "-q", "-m", "Rename the guide");
+  await pr.git("update-ref", "refs/remotes/origin/main", "HEAD");
+  await pr.git("checkout", "-q", "feature");
+  await pr.git("merge", "-q", "--no-edit", "main");
+  await pr.commit("handbook.txt", guide);
+  const reviewer = fakeModel(pr, "REVIEWER", "No findings.");
+
+  expect((await pr.hedge("review", "--scope", "final", "--base", reviewed)).code).toBe(0);
+
+  expect(reviewer.prompts().at(-1)).toContain("-greet the member by name");
+});
+
 test("when the judge finds a standing rule's condition broken, the gate names the rule and asks for no void of a decision it is not", async () => {
   const pr = await checkout();
   const rule = "Until 2026-11-26, in example/product, accept a live-run gap that only a billable run from main can prove.";

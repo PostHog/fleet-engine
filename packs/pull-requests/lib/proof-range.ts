@@ -19,11 +19,8 @@ export const leftOutNote = (leftOut: string[]) =>
   leftOut.length ? `This diff holds only the files the PR changes against its base. It leaves out ${leftOut.length} file(s) that a merge of the base brought in.` : "";
 
 function authoredSince(run: Run, from: string, head: string, branched: string) {
-  const owned = changedFiles(run, forkOf(run, from, branched), from).flat();
   const merged = cleanMerge(run, from, branched);
-  if (merged === undefined) return owned;
-  const differs = new Set(changedFiles(run, merged, head).flat());
-  return owned.filter((path) => differs.has(path));
+  return (merged === undefined ? changedFiles(run, forkOf(run, from, branched), from) : changedFiles(run, merged, head)).flat();
 }
 
 function cleanMerge(run: Run, from: string, branched: string) {
