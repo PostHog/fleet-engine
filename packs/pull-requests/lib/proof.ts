@@ -223,7 +223,7 @@ async function arbiterPrompt(home: string, identity: ProofIdentity) {
   return [arbiterInstructions, ...sections].join("\n\n");
 }
 
-const namesEscalate = (output: string) => /ESCALATE/.test(output) || /^[^a-z]*escalate/im.test(output);
+const namesEscalate = (output: string) => /ESCALATE/.test(output) || /^[^a-z\n]*escalate/im.test(output);
 
 export function parseVerdict(output: string, model: string): ArbiterVerdict {
   const line = (output.split("\n").find((text) => text.trim()) ?? "").replace(/^[\s*`]+|[\s*`]+$/g, "");

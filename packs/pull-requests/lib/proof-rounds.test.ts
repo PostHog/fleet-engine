@@ -42,6 +42,7 @@ const arbiterAnswers: [string, string, "continue" | "escalate" | "unavailable"][
   ["CONTINUE with Windows line ends and a sentence", "CONTINUE\r\n\r\nThe findings are new.\r\n", "continue"],
   ["CONTINUE with prose that says escalate in lower case mid-line", "CONTINUE\nNew findings are not a reason to escalate.", "continue"],
   ["CONTINUE and a very long sentence", `CONTINUE\n${longTail}`, "continue"],
+  ["CONTINUE and a very long run of blank lines", `CONTINUE${"\n".repeat(300_000)}`, "continue"],
   ["CONTINUE, then an ESCALATE line", "CONTINUE\n\nESCALATE: Round 2 undoes the rename round 1 asked for.", "unavailable"],
   ["CONTINUE, then ESCALATE inside a sentence", "CONTINUE\nOn reflection I would ESCALATE, since round 2 undoes round 1.", "unavailable"],
   ["CONTINUE, then a bold Escalate line", "CONTINUE\n**Escalate**: round 2 undoes round 1.", "unavailable"],
