@@ -2,11 +2,11 @@ import { closeSync, existsSync, openSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { askGap, authorOf, readDecisions, finishReview, startGateRun, ledgerRoot, listStanding, panelCommit, proofDirectory, readJson, readOwed, recordGap, recordGapCommand, recordStanding, requireChoice, requireNone, devPr, requireProofs, requireReservation, respondToReview, reuseProof, reviewDirectory, reviewOfCommit, reviewRecords, roundId, roundQuestion, runOption, saveProof, startReview, stopOption, storeCapturedFindings, unfinishedReview, writeJson, markRecorded, readReservation, recordReceipt, roundDirectories, unrecordedElsewhere, recordFailure, dropFinalRead, droppedFinalReads, type Arbiter, type Reservation, type CapturedBy, type ProofIdentity } from "./proof.ts";
+import { askGap, authorOf, ciRunningCode, readDecisions, finishReview, startGateRun, ledgerRoot, listStanding, panelCommit, proofDirectory, readJson, readOwed, recordGap, recordGapCommand, recordStanding, requireChoice, requireNone, devPr, requireProofs, requireReservation, respondToReview, reuseProof, reviewDirectory, reviewOfCommit, reviewRecords, roundId, roundQuestion, runOption, saveProof, startReview, stopOption, storeCapturedFindings, unfinishedReview, writeJson, markRecorded, readReservation, recordReceipt, roundDirectories, unrecordedElsewhere, recordFailure, dropFinalRead, droppedFinalReads, type Arbiter, type Reservation, type CapturedBy, type ProofIdentity } from "./proof.ts";
 import { AnswerTaken, appendOnce, decideAlone, hearUser, ledgerHolds, ledgerOf } from "./decision-cli.ts";
 import { HubUnreachable, keptOwed, refText, usersAcceptance, thisMachine, type Decision, type Ssh } from "./decision-ledger.ts";
 import { autonomyOf, gradeOf, type Autonomy, type Grade } from "./proof-autonomy.ts";
-import { readComment, readPullRequest, runIn } from "./pr-ci.ts";
+import { ciOf, readComment, readPullRequest, runIn } from "./pr-ci.ts";
 import { isCommitSha } from "./proof-end-table.ts";
 import { askModel, family, familyOf, isQuotaExhausted, modelLabel, quotaExitCode, readRubric, reviewerRow, sessionFamily, skillReferences, type Family } from "./proof-models.ts";
 import { runProof, type RunIO } from "./proof-run.ts";
@@ -409,14 +409,17 @@ new pass. The end table of the receipt and of hedge decision report shows the la
     },
   },
   gate: {
-    usage: "gate [--landed] [--json]",
+    usage: "gate [--landed] [--json] [--wait <minutes>]",
     summary: `Check the owed proofs, the review and the answers to its findings, and the CI of the commit on GitHub, then let
 the judge weigh them. Exit 0 only on a pass: 1 means the owed proofs are not recorded, a proof is missing, the commit
 is not reviewed, a blocker or major finding has no answer, a "## Known issues" section of the PR body lists a blocker
 or misses a finding answered known,
-the commit is not the PR's head on GitHub, its checks are red or pending,
-or the judge failed or was unavailable; 3 means only unaccepted gaps remain. No gap waives the head check. The last
-line is the verdict and names what it covered. hedge reads the PR and its CI over GitHub's REST API. Only finding the PR of the
+the commit is not the PR's head on GitHub, its checks are red,
+or the judge failed or was unavailable; 3 means only unaccepted gaps remain; 75 means only CI that is still running
+holds the gate. No gap waives the head check. The last line is the verdict: on a pass it names what it covered, and
+on any other exit it names the check that held the gate, also when the gate itself fails with an error. --wait
+<minutes> waits up to that long for running CI to finish, reading CI every 30 seconds, then runs the gate again; it
+still exits 75 when CI runs past the limit. A run longer than your shell's limit belongs in the background. hedge reads the PR and its CI over GitHub's REST API. Only finding the PR of the
 checkout without --repo and --pr uses gh pr view; pass both when GraphQL is out. A check that ran more than once
 counts with its newest run from each app, as GitHub's required checks do. The
 required checks of the base branch, from its rulesets and branch protection, decide CI; other checks print as not
@@ -457,16 +460,20 @@ HEDGE_PROOF_JUDGE replaces its command, and HEDGE_PROOF_JUDGE_MODEL its model.
 reused, carried, gap (with the decision that accepts it, or the 🤖 decision that lapsed and why), or missing; the
 review and its unanswered findings; the head; CI; the tier; the judge at HEAD as pass, fail, unavailable, or skipped
 when the gate's own checks fail first, with its lines and its judge gap; the lapsed and voided decision ids; and the
-receipt link once one is recorded. The gate's lines and hedge decision report come from the same summary.`,
-    examples: ["hedge proof gate", "hedge proof gate --landed", "hedge proof gate --json"], flags: ["--landed", "--json"],
-    run: async ({ flags }, identity, context) => {
+receipt link once one is recorded; and reason, the check that held the gate, or "pass". An error prints only the
+code and the reason. The gate's lines and hedge decision report come from the same summary.`,
+    examples: ["hedge proof gate", "hedge proof gate --landed", "hedge proof gate --json", "hedge proof gate --wait 10"], flags: ["--landed", "--json"], options: ["--wait"],
+    run: async ({ flags, options }, identity, context) => {
       const { print, home } = context;
+      const wait = waitMinutes(options.get("--wait"));
       const head = identity();
       const startedAt = context.now?.() ?? new Date();
       const record = await startGateRun(home, head, startedAt);
       let gate: FinalGate;
       try {
-        gate = await finalGate(head, context, { landed: flags.has("--landed") });
+        const gateHead = () => finalGate(head, context, { landed: flags.has("--landed") });
+        gate = await gateHead();
+        if (gate.code === ciRunningCode && wait && await ciFinished(head, context, wait)) gate = await gateHead();
       } catch (error) {
         await record({ code: 1, reason: String((error as Error).message ?? error).split("\n")[0]! }).catch(() => {});
         await shareGateResult(head, false, startedAt, context);
@@ -474,7 +481,7 @@ receipt link once one is recorded. The gate's lines and hedge decision report co
       }
       await record({ code: gate.code, reason: gate.reason });
       const shared = await shareGateResult(head, gate.code === 0, startedAt, context);
-      if (flags.has("--json")) print(JSON.stringify(gate.summary));
+      if (flags.has("--json")) print(JSON.stringify({ ...gate.summary, reason: gate.reason }));
       else for (const line of [...gate.lines, ...shared ? [shared] : [], gate.verdict]) print(line);
       return gate.code;
     },
@@ -1093,11 +1100,43 @@ export async function proofCommand(args: string[], context: ProofContext): Promi
   const own = split < 0 ? args : args.slice(0, split);
   if (own.includes("--help") || own.includes("-h")) { context.print(help(name, command)); return 0; }
   if (split >= 0 && !command.takesCommand) throw usageError(name, "Unknown option --");
-  const run = runIn(context.cwd, context.env);
-  const parsed = { ...parse(name, command, own), ...split >= 0 ? { command: args.slice(split + 1) } : {} };
-  let identity: ProofIdentity | undefined;
-  let lock: Promise<RoundLock> | undefined;
-  return command.run(parsed, () => identity ??= resolveIdentity(parsed.options, run), { ...context, run, lock: () => lock ??= roundLock(lockOwner(context)) });
+  const json = own.includes("--json");
+  const execute = () => {
+    const run = runIn(context.cwd, context.env);
+    const parsed = { ...parse(name, command, own), ...split >= 0 ? { command: args.slice(split + 1) } : {} };
+    let identity: ProofIdentity | undefined;
+    let lock: Promise<RoundLock> | undefined;
+    return command.run(parsed, () => identity ??= resolveIdentity(parsed.options, run), { ...context, run, lock: () => lock ??= roundLock(lockOwner(context)) });
+  };
+  return name === "gate" ? gateReporting(json, context, execute) : execute();
+}
+
+async function gateReporting(json: boolean, { print }: ProofContext, gate: () => Promise<number>) {
+  try { return await gate(); } catch (error) {
+    const reason = String((error as Error).message ?? error);
+    print(json ? JSON.stringify({ code: 1, reason }) : `gate: fail (exit 1): ${reason}`);
+    return 1;
+  }
+}
+
+function waitMinutes(value: string | undefined) {
+  if (value === undefined) return undefined;
+  const minutes = Number(value);
+  if (!Number.isFinite(minutes) || minutes <= 0) throw usageError("gate", `--wait takes a number of minutes, such as --wait 10, not ${value}`);
+  return minutes;
+}
+
+const ciPollInterval = 30_000;
+
+async function ciFinished(head: ProofIdentity, context: CommandContext, minutes: number) {
+  const now = () => context.now?.() ?? new Date();
+  const deadline = now().getTime() + minutes * 60_000;
+  const pause = context.pause ?? (() => Bun.sleep(ciPollInterval));
+  while (now().getTime() < deadline) {
+    await pause();
+    if (ciOf(context.home, head, context.run, now()).state !== "pending") return true;
+  }
+  return false;
 }
 
 async function shareGateResult(head: ProofIdentity, passed: boolean, startedAt: Date, context: ProofContext): Promise<string | undefined> {

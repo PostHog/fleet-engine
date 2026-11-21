@@ -94,7 +94,7 @@ test("a gate run that throws after a pass at the same head is shared, so another
     expect(await mergeThere()).toBeUndefined();
     pr.clock.now = new Date(pr.clock.now.getTime() + 60_000);
     rmSync(join(pr.home, ".agents/guides/coding-standards.md"));
-    await expect(pr.hedge("gate")).rejects.toThrow("coding-standards.md is missing or empty");
+    expect((await pr.hedge("gate")).code).toBe(1);
     expect((await mergeThere())?.hookSpecificOutput.permissionDecisionReason).toContain("has not passed at the head of example/product#42");
   } finally { rmSync(other, { recursive: true, force: true }); }
 });
