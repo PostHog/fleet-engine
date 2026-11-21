@@ -16,6 +16,7 @@ export type Command = {
   bare: string[];
   rawArgs: string[];
   keywords: string[];
+  processSubstitutions: string[];
   inLoop: boolean;
   tested: boolean;
   after?: string;
@@ -24,7 +25,7 @@ export type Command = {
 };
 
 type Context = { env: ReadonlyMap<string, string>; inLoop: boolean; scope?: Scope };
-type Word = { text: string; raw: string; bare: string; substitutions: string[] };
+type Word = { text: string; raw: string; bare: string; substitutions: string[]; processes: string[] };
 type Heredoc = { delimiter: string; literal: boolean; stripTabs: boolean; body: string; substitutions: string[] };
 type Token = { word: Word } | { operator: string } | { heredoc: Heredoc } | { herestring: true };
 
@@ -256,12 +257,13 @@ function tokenize(text: string): Token[] {
   const tokens: Token[] = [];
   const pending: Heredoc[] = [];
   let word: Word | undefined;
-  const append = (value: string, raw: string, substitutions: string[] = [], bare = "_") => {
-    word ??= { text: "", raw: "", bare: "", substitutions: [] };
+  const append = (value: string, raw: string, substitutions: string[] = [], bare = "_", processes: string[] = []) => {
+    word ??= { text: "", raw: "", bare: "", substitutions: [], processes: [] };
     word.text += value;
     word.raw += raw;
     word.bare += bare;
     word.substitutions.push(...substitutions);
+    word.processes.push(...processes);
   };
   const endWord = () => {
     if (word) tokens.push({ word });
@@ -293,7 +295,8 @@ function tokenize(text: string): Token[] {
       index = quoted.end + 1;
     } else if ((char === "<" || char === ">") && next === "(") {
       const end = parenEnd(text, index + 1);
-      append(text.slice(index, end + 1), text.slice(index, end + 1), [text.slice(index + 2, end)]);
+      const program = text.slice(index + 2, end);
+      append(text.slice(index, end + 1), text.slice(index, end + 1), [program], "_", [program]);
       index = end + 1;
     } else if (text.startsWith("<<<", index)) {
       endWord();
@@ -455,7 +458,7 @@ export function parse(program: string, context: Context = { env: new Map(), inLo
     const argSubstitutions = kept.slice(index + 1).map((word) => word.substitutions);
     const bare = kept.slice(index).map((word) => word.bare);
     const rawArgs = kept.slice(index + 1).map((word) => word.raw);
-    pipeline.push({ name, args, env: commandEnv, substitutions, leadingSubstitutions, argSubstitutions, stdin, outputs, writes, redirects, bare, rawArgs, keywords: stripped, inLoop, tested, ...(after && { after }), scope, chdir });
+    pipeline.push({ name, args, env: commandEnv, substitutions, leadingSubstitutions, argSubstitutions, stdin, outputs, writes, redirects, bare, rawArgs, keywords: stripped, processSubstitutions: words.flatMap((word) => word.processes), inLoop, tested, ...(after && { after }), scope, chdir });
     words = [];
     stdin = undefined;
   };

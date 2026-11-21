@@ -13,7 +13,8 @@ const headers = new Set(["for", "select", "case"]);
 const closers = new Set(["}", "fi", "done", "esac"]);
 const separators = new Set([undefined, ";", "\n"]);
 const readsStatus = (text: string) => /\$(?:\?|\{\?\})/.test(text);
-const readsPipeStatusAt = (place: number) => (text: string) => [...text.matchAll(/\$\{PIPESTATUS\[(\d+|@|\*)\]\}/g)].some(([, index]) => index === String(place) || index === "@" || index === "*");
+const arithmeticIndex = (index: string) => (/^0[0-7]*$/.test(index) ? parseInt(index, 8) : /^[1-9]\d*$/.test(index) ? Number(index) : undefined);
+const readsPipeStatusAt = (place: number) => (text: string) => [...text.matchAll(/\$\{PIPESTATUS\[(\d+|@|\*)\]\}/g)].some(([, index]) => index === "@" || index === "*" || arithmeticIndex(index) === place);
 const failingCode = /^(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-5])$/;
 const printsToTheAgent = /^(?:2>&1|1?>&2)$/;
 
@@ -103,13 +104,16 @@ function expanded(raw: string): string {
   for (let index = 0; index < raw.length; index++) {
     const char = raw[index];
     if (char === "\\") index++;
-    else if (char === '"') inDoubleQuotes = !inDoubleQuotes;
-    else if (char === "'" && !inDoubleQuotes) {
+    else if (char === '"') {
+      inDoubleQuotes = !inDoubleQuotes;
+      text += " ";
+    } else if (char === "'" && !inDoubleQuotes) {
       index = raw.indexOf("'", index + 1);
       if (index < 0) break;
     } else if (char === "$" && raw[index + 1] === "'" && !inDoubleQuotes) {
       for (index += 2; index < raw.length && raw[index] !== "'"; index++) if (raw[index] === "\\") index++;
-    } else text += char;
+    } else if (char === "$" && raw[index + 1] === "$") index++;
+    else text += char;
   }
   return text;
 }
@@ -121,7 +125,7 @@ function printsStatus({ name, args, rawArgs }: Command, reads: (text: string) =>
 }
 
 function reporter(command: Command | undefined, sameLevel: boolean, reads: Reads): Reach | undefined {
-  if (!command || !sameLevel || command.keywords.length > 0 || command.after === "|" || command.substitutions.length > 0) return undefined;
+  if (!command || !sameLevel || command.keywords.length > 0 || command.after === "|" || command.after === "&" || command.substitutions.length > 0) return undefined;
   if (command.name === "exit") {
     const [code, ...more] = command.args;
     if (more.length > 0) return undefined;
@@ -131,11 +135,36 @@ function reporter(command: Command | undefined, sameLevel: boolean, reads: Reads
   return printsStatus(command, reads.status) && command.redirects.every((redirect) => printsToTheAgent.test(redirect)) ? "printed" : undefined;
 }
 
-function placeInPipe({ commands, depths }: Program, start: number): number | undefined {
+const insideOf = (scope: Scope | undefined, group: Scope): boolean => scope !== undefined && (scope === group || insideOf(scope.parent, group));
+
+function topLevelStageStart({ commands, depths }: Program, last: number): number | undefined {
+  const { name, keywords, scope } = commands[last];
+  if (depths[last] === 0 && !closers.has(name)) return last;
+  if (parens(scope) > 0) {
+    let group = scope;
+    while (group.parent?.parent) group = group.parent;
+    let first = last;
+    while (first > 0 && insideOf(commands[first - 1].scope, group)) first--;
+    return first;
+  }
+  if (depths[last] !== 0 || keywords.length > 0) return undefined;
+  let open = 1;
+  let first = last;
+  while (open > 0 && first > 0) {
+    const command = commands[--first];
+    if (closers.has(command.name)) open++;
+    if (headers.has(command.name)) open--;
+    open -= command.keywords.filter((word) => openers.has(word)).length;
+  }
+  return first;
+}
+
+function placeInPipe(program: Program, start: number): number | undefined {
   let place = 0;
-  for (let index = start - 1; index >= 0 && commands[index].after === "|"; index--) {
-    if (depths[index] !== depths[start] || closers.has(commands[index].name)) return undefined;
-    place++;
+  for (let index = start - 1; index >= 0 && program.commands[index].after === "|"; place++) {
+    const first = topLevelStageStart(program, index);
+    if (first === undefined) return undefined;
+    index = first - 1;
   }
   return place;
 }
@@ -197,8 +226,7 @@ function hiddenIn(text: string, nesting: number): { found?: Finding; carries?: s
         const { found, carries } = hiddenIn(inner.program, nesting + 1);
         if (found) return { found };
         if (!carries) continue;
-        const assignsProcess = [...command.env.values()].some((value) => /[<>]\(/.test(value));
-        const passesOn = !inner.substituted || (command.name === "" && command.substitutions.length === 1 && !assignsProcess);
+        const passesOn = !inner.substituted || (command.name === "" && command.substitutions.length === 1 && command.processSubstitutions.length === 0);
         if (!passesOn) return { found: { what: carries, how: "the `$(…)` substitution it runs in" } };
         what ??= carries;
       }

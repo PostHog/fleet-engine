@@ -30,7 +30,8 @@ function runFailing(command: string, failing: number) {
 
 function shellShowsEveryFailure(command: string) {
   const { seen, made } = runFailing(command, 0);
-  return made > 0 && Array.from({ length: made }, (_, call) => runFailing(command, call + 1).seen).every((failed) => !Bun.deepEquals(failed, seen));
+  expect(made).toBeGreaterThan(0);
+  return Array.from({ length: made }, (_, call) => runFailing(command, call + 1).seen).every((failed) => !Bun.deepEquals(failed, seen));
 }
 
 const refused = (command: string) => exitMaskRisk(command, "Robin") !== undefined;
@@ -64,6 +65,22 @@ describe("the exit-status mask guard", () => {
     'git push | tail -3; echo "${PIPESTATUS[@]}"',
     'git push; echo "exit=$?" -e',
     "set -o pipefail; ( set +o pipefail ); git push | cat",
+    'git push | cat; echo "${PIPESTATUS[00]}"',
+    "{ printf '%s\\n' main; } | xargs git push origin | cat; echo \"${PIPESTATUS[1]}\"",
+    "for i in 1; do echo main; done | xargs git push origin | cat; echo \"${PIPESTATUS[1]}\"",
+    "( echo main ) | xargs git push origin | cat; echo \"${PIPESTATUS[1]}\"",
+    "if true; then echo main; fi | xargs git push origin | cat; echo \"${PIPESTATUS[1]}\"",
+    "label='<(input)' out=$(git push); echo \"exit=$?\"",
+    'echo y | ( echo x ); ( echo a ) | git push | cat; echo "${PIPESTATUS[1]}"',
+    'echo y | ( echo x ); { echo a; } | git push | cat; echo "${PIPESTATUS[1]}"',
+    'echo a | { { echo b; }; } | git push | cat; echo "${PIPESTATUS[2]}"',
+    'case x in x) echo main;; esac | xargs git push origin | cat; echo "${PIPESTATUS[1]}"',
+    'echo y | ( echo a; echo b ) | git push | cat; echo "${PIPESTATUS[2]}"',
+    'echo y | for i in 1; do echo main; done | xargs git push origin | cat; echo "${PIPESTATUS[2]}"',
+    'echo a | { echo c; { echo b; }; } | git push | cat; echo "${PIPESTATUS[2]}"',
+    'git push; echo "pid $$$?"',
+    'echo y | ( echo a; ( echo b ) ) | git push | cat; echo "${PIPESTATUS[2]}"',
+    ': | : | : | : | : | : | : | : | git push | cat; echo "${PIPESTATUS[010]}"',
     "git push > push.log 2>&1; exit $?",
     "git commit -F - <<'EOF'\nFix the gate\nEOF\necho \"exit $?\"",
     "( git push )",
@@ -135,6 +152,16 @@ describe("the exit-status mask guard", () => {
     "git push; printf '%s' \"-v${?+ok}\"",
     "git push; printf \"%bexit=$?\" 'done\\c' -v",
     "shopt -s xpg_echo; git push; echo \"exit\\c $?\"",
+    "git push; exit $? &",
+    'git push; echo "$""?"',
+    "git push; echo $\"?\"",
+    'git push | cat; echo "${PIPESTATUS[010]}"',
+    'echo y | ( echo x ); ( echo a ) | git push | cat; echo "${PIPESTATUS[2]}"',
+    'echo y | ( echo x ); { echo a; } | git push | cat; echo "${PIPESTATUS[2]}"',
+    'echo a | { { echo b; }; } | git push | cat; echo "${PIPESTATUS[1]}"',
+    'git push | cat; echo "${PIPESTATUS[08]}"',
+    ': | : | : | : | : | : | : | : | git push | cat; echo "${PIPESTATUS[08]}"',
+    ': | : | : | : | : | : | : | : | : | : | git push | cat; echo "${PIPESTATUS[010]}"',
     'git push; echo "${?+ok}"',
     'git push | cat; echo "${PIPESTATUS[0]+set}"',
     "git push 2>&1 | tee push.log; echo \"exit $?\"",
@@ -193,6 +220,8 @@ describe("the exit-status mask guard", () => {
     "git push > push.log 2>&1; status=$?; cat push.log; exit $status",
     "bash -c 'git push; echo \"exit $?\"'",
     "git push origin --help | head",
+    "git push; echo \"exit $?\" &",
+    'out=$(git push) > >(cat); echo "exit=$?"',
   ])("refuses a form it cannot read, though the shell may show the status: %s", (command) => {
     expect(refused(command)).toBe(true);
   });
@@ -222,6 +251,10 @@ describe("the exit-status mask guard", () => {
     "git push -- --help | cat",
     "git push --help origin | cat",
   ])("keeps guarding a --help that is not the only word after the command: %s", (command) => {
+    expect(refused(command)).toBe(true);
+  });
+
+  test.each(['git push; echo "$$?"', "git push; echo $$'x'?", 'git push; echo "$$"\'x\'"?"'])("refuses a $$ that prints the process id, not the status: %s", (command) => {
     expect(refused(command)).toBe(true);
   });
 
