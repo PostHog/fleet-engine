@@ -223,7 +223,8 @@ async function arbiterPrompt(home: string, identity: ProofIdentity) {
   return [arbiterInstructions, ...sections].join("\n\n");
 }
 
-const namesEscalate = (output: string) => /ESCALATE/.test(output) || /^[^a-z\n]*escalate/im.test(output);
+const startsWithEscalate = (line: string) => /^[^a-z]*escalate/i.test(line);
+const namesEscalate = (output: string) => /ESCALATE/.test(output) || /escalate\s*:/i.test(output) || output.split(/\r\n?|[\n\u2028\u2029]/).some(startsWithEscalate);
 
 export function parseVerdict(output: string, model: string): ArbiterVerdict {
   const line = (output.split("\n").find((text) => text.trim()) ?? "").replace(/^[\s*`]+|[\s*`]+$/g, "");
