@@ -1300,6 +1300,16 @@ test("a test-only commit after 21 clean base merges gets its final read without 
   expect((await pr.hedge("review-start", "--scope", "final", "--base", first)).output).toContain(`"round":"final"`);
 });
 
+test("the ceiling lets a final read run when the gate does not carry HEAD across 31 test-only commits", async () => {
+  const pr = await checkout();
+  const { fix } = await atCeiling(pr);
+  const quiet = await spawnAsync(["sh", "-ec", `for i in $(seq 31); do echo "test(\\"greets $i\\", () => {});" > feature.test.ts; git add feature.test.ts; git commit -qm "Test $i"; done`], { cwd: pr.repository, env: pr.env });
+  expect(quiet.exitCode).toBe(0);
+
+  expect((await pr.hedge("gate")).output).toContain(`review: HEAD not reviewed, last review covered ${fix.slice(0, 7)}`);
+  expect((await pr.hedge("review-start", "--scope", "final", "--base", fix)).output).toContain(`"round":"final"`);
+});
+
 test("a git warning about an attribute name keeps a small diff on the Read tier, since the tier counts what git printed", async () => {
   const pr = await checkout();
   pr.pullRequestState({ body: graded("non-critical", "low") });

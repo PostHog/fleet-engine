@@ -307,7 +307,8 @@ test("once the judge failed as often as the review ceiling allows on a PR, the g
   expect((await pr.hedge("gate")).output).toContain("judge owed: fail: feature.txt is code, not docs");
 
   fakeModel(pr, "JUDGE", verdict());
-  const stopped = await gateAfterResponse(pr, "Fourth answer.\n");
+  await pr.commit("feature.test.ts", "test(\"greets new members\", () => {});\n");
+  const stopped = await pr.hedge("gate");
   expect(stopped.code).toBe(1);
   expect(stopped.output).toContain("judge: budget spent: the judge failed 3 times on this PR, as often as pull-requests.reviewCeiling allows, so hedge runs it no more. End it with a judge gap on HEAD: record hedge proof gap --kind judge --reason <why HEAD holds now>");
   expect(stopped.output).not.toContain("judge owed: pass");
