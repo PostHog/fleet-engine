@@ -98,6 +98,8 @@ describe("loadPacks", () => {
     const agy = { driver: "antigravity", enabled: true, config: { binaryPath: "~/.local/bin/agy" } };
     const [pack] = await loadPacks(sourceWith({ base: { ...base, config: instance("providerInstances.antigravity", agy) } }));
     expect(pack!.manifest.config).toEqual(instance("providerInstances.antigravity", agy));
+    const longest = instance(`providerInstances.${"a".repeat(64)}`, { ...agy, driver: "d".repeat(64) });
+    expect((await loadPacks(sourceWith({ base: { ...base, config: longest } })))[0]!.manifest.config).toEqual(longest);
     const cases: Array<[unknown[], string]> = [
       [instance("providerInstances", { antigravity: agy }), "config providerInstances: a T3 provider instance key names one instance, such as providerInstances.<id>"],
       [instance("providerInstances.agy cli", agy), "config providerInstances.agy cli: a T3 provider instance key names one instance, such as providerInstances.<id>"],
@@ -105,6 +107,11 @@ describe("loadPacks", () => {
       [instance("providerInstances.antigravity", { driver: "antigravity" }), 'config providerInstances.antigravity: a T3 provider instance needs a driver and enabled, such as { "driver": "antigravity", "enabled": true }'],
       [instance("providerInstances.antigravity", { driver: "", enabled: true }), "a T3 provider instance needs a driver and enabled"],
       [instance("providerInstances.antigravity", { ...agy, config: { binaryPath: 3 } }), "config providerInstances.antigravity: config must be an object, and its binaryPath a path"],
+      [instance(`providerInstances.${"a".repeat(65)}`, agy), "a T3 provider instance key names one instance, such as providerInstances.<id>"],
+      [instance("providerInstances.constructor", agy), "config providerInstances.constructor: a T3 provider instance key names one instance, such as providerInstances.<id>"],
+      [instance("providerInstances.prototype", agy), "config providerInstances.prototype: a T3 provider instance key names one instance"],
+      [instance("providerInstances.antigravity", { ...agy, driver: "agy cli" }), "config providerInstances.antigravity: a T3 provider instance needs a driver and enabled"],
+      [instance("providerInstances.antigravity", { ...agy, driver: "a".repeat(65) }), "config providerInstances.antigravity: a T3 provider instance needs a driver and enabled"],
     ];
     for (const [config, message] of cases) await expect(loadPacks(sourceWith({ base: { ...base, config } }))).rejects.toThrow(message);
   });
@@ -112,6 +119,8 @@ describe("loadPacks", () => {
   test("accepts a model row of any T3 provider instance", async () => {
     const neon = { role: "survey", work: "Read docs", provider: "antigravity", model: "gemini-4-neon", effort: "high" as const };
     expect((await loadPacks(sourceWith({ base: { ...base, models: { claude: [neon] } } })))[0]?.manifest.models).toEqual({ claude: [neon] });
+    const longest = { ...neon, provider: "p".repeat(64) };
+    expect((await loadPacks(sourceWith({ base: { ...base, models: { claude: [longest] } } })))[0]?.manifest.models).toEqual({ claude: [longest] });
   });
 
   test("rejects a workflow need outside the closed set", async () => {
@@ -266,6 +275,8 @@ describe("loadPacks", () => {
       [{ models: { claude: [row, row] } }, "models claude: role review is listed twice"],
       [{ models: { claude: [{ ...row, provider: "" }] } }, "models claude: each row needs a role, work, a provider that names a T3 provider instance, a model, and an effort"],
       [{ models: { claude: [{ ...row, provider: "gemini cli" }] } }, "each row needs a role, work, a provider that names a T3 provider instance"],
+      [{ models: { claude: [{ ...row, provider: "a".repeat(65) }] } }, "each row needs a role, work, a provider that names a T3 provider instance"],
+      [{ models: { claude: [{ ...row, provider: "constructor" }] } }, "each row needs a role, work, a provider that names a T3 provider instance"],
     ];
     for (const [fields, message] of cases) {
       expect(loadPacks(sourceWith({ base: { ...base, ...fields } }))).rejects.toThrow(message);

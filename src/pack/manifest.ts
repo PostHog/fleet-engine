@@ -101,13 +101,16 @@ export function configEntryProblem(item: unknown) {
   return scopeProblem(item);
 }
 
-export const t3InstanceId = /^[A-Za-z][A-Za-z0-9_-]*$/;
+const slugRule = "a letter, then letters, digits, - or _, 64 at most";
+const reservedKeys = ["constructor", "prototype", "__proto__"];
+
+export const isT3Slug = (value: unknown): value is string => typeof value === "string" && value.length <= 64 && /^[A-Za-z][A-Za-z0-9_-]*$/.test(value) && !reservedKeys.includes(value);
 
 function providerInstanceProblem(key: string, value: unknown) {
   const id = key.match(/^providerInstances\.(.+)$/)?.[1];
-  if (!id || !t3InstanceId.test(id)) return "a T3 provider instance key names one instance, such as providerInstances.<id>";
+  if (!isT3Slug(id)) return `a T3 provider instance key names one instance, such as providerInstances.<id>, and the id is ${slugRule}`;
   if (id === "claudeAgent") return "Hedge's Claude recovery binds the claudeAgent instance, so give this instance another id";
-  if (!isRecord(value) || !filled(value.driver) || typeof value.enabled !== "boolean") return 'a T3 provider instance needs a driver and enabled, such as { "driver": "antigravity", "enabled": true }';
+  if (!isRecord(value) || !isT3Slug(value.driver) || typeof value.enabled !== "boolean") return `a T3 provider instance needs a driver and enabled, such as { "driver": "antigravity", "enabled": true }, and the driver is ${slugRule}`;
   if (value.config !== undefined && !(isRecord(value.config) && (value.config.binaryPath === undefined || filled(value.config.binaryPath)))) return "config must be an object, and its binaryPath a path";
   return undefined;
 }
@@ -276,7 +279,7 @@ function checkModels(models: unknown, fail: (message: string) => never) {
 }
 
 export function isModelRow(row: unknown): row is ModelRow {
-  return isRecord(row) && ["role", "work", "model"].every((key) => typeof row[key] === "string") && typeof row.provider === "string" && t3InstanceId.test(row.provider) && efforts.includes(row.effort as string)
+  return isRecord(row) && ["role", "work", "model"].every((key) => typeof row[key] === "string") && isT3Slug(row.provider) && efforts.includes(row.effort as string)
     && (row.serviceTier === undefined || (typeof row.serviceTier === "string" && row.serviceTier !== ""));
 }
 
