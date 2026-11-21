@@ -2,7 +2,6 @@ import { readPullRequest, type Run } from "./pr-ci.ts";
 import { reviewedDiff } from "./proof-review.ts";
 import { isTestFile } from "./proof-delta.ts";
 import { riskCalloutOf } from "./decision-ledger.ts";
-import { isCommitSha } from "./proof-end-table.ts";
 import type { CleanBaseMerge, DevPr, DevPull, ProofIdentity } from "./proof.ts";
 
 const short = (commit: string) => commit.slice(0, 7);
@@ -13,34 +12,19 @@ export function topLevel(run: Run) {
   return result.code === 0 ? result.stdout.trim() : undefined;
 }
 
-/** Where the PR branched from its base as the base is now, fetched when this checkout cannot tell. */
+/**
+ * Where the PR branched from its base as the base is now: the base branch is fetched from the repository's remotes
+ * first, and a ref that could not be fetched counts only after the fetched ones. Without such a remote, or without the
+ * commit, the error names the commands that fix it.
+ */
 export function mergeBase(identity: ProofIdentity, run: Run) {
-  const { baseRefName: base, baseSha } = pullRequestDetails(identity, run);
+  const base = pullRequestDetails(identity, run).baseRefName;
   const remotes = remotesOf(identity.repository, run);
-  const present = (tip: string) => offline(run)(["git", "cat-file", "-e", `${tip}^{commit}`]).code === 0;
-  const refOf = (remote: string) => `refs/remotes/${remote}/${base}`;
-  const refs = () => remotes.map(refOf).filter(present);
-  let fetched: string[] | undefined;
-  const fetchBase = () => fetched ??= remotes.filter((remote) => run(["git", "fetch", "--quiet", remote, `+refs/heads/${base}:${refOf(remote)}`]).code === 0).map(refOf);
-  const branchedFrom = (tip: string) => {
-    const result = run(["git", "merge-base", identity.commit, tip]);
-    return result.code === 0 ? result.stdout.trim() : undefined;
-  };
-  const firstOf = (tips: string[]) => tips.map(branchedFrom).find(Boolean);
-  const firstRef = () => firstOf(refs());
-  const fromGithub = (sha: string) => {
-    const pushed = branchedFrom(sha);
-    if (refs().every((ref) => branchedFrom(ref) === pushed)) return pushed;
-    return firstOf(fetchBase().filter(present)) ?? pushed;
-  };
-  const githubBase = () => {
-    if (!isCommitSha(baseSha)) return undefined;
-    if (!present(baseSha)) fetchBase();
-    return present(baseSha) ? baseSha : undefined;
-  };
-  const github = githubBase();
-  const found = github ? fromGithub(github) : firstRef() ?? (fetchBase(), firstRef());
-  if (found) return found;
+  const fetched = remotes.filter((remote) => run(["git", "fetch", "--quiet", remote, `+refs/heads/${base}:refs/remotes/${remote}/${base}`]).code === 0);
+  for (const remote of [...fetched, ...remotes.filter((other) => !fetched.includes(other))]) {
+    const result = run(["git", "merge-base", `refs/remotes/${remote}/${base}`, identity.commit]);
+    if (result.code === 0) return result.stdout.trim();
+  }
   const where = `Cannot find where ${identity.repository}#${identity.pr} branched from its base ${base} here`;
   if (!remotes.length) throw new Error(`${where}: no remote of this checkout points at ${identity.repository}. Run the command in a checkout of ${identity.repository}, or add one here: git remote add hedge-base https://github.com/${identity.repository}.git && git fetch hedge-base ${base} pull/${identity.pr}/head`);
   if (run(["git", "cat-file", "-e", `${identity.commit}^{commit}`]).code !== 0) throw new Error(`${where}: ${short(identity.commit)} is not in this checkout. Run git fetch ${remotes[0]} pull/${identity.pr}/head`);
@@ -141,8 +125,8 @@ export function reviewTier(identity: ProofIdentity, run: Run, body: string | und
 
 export function pullRequestDetails(identity: ProofIdentity, run: Run) {
   try {
-    const { title, body, base, baseSha } = readPullRequest(identity, run);
-    return { title, body, baseRefName: base, baseSha };
+    const { title, body, base } = readPullRequest(identity, run);
+    return { title, body, baseRefName: base };
   } catch (error) {
     throw new Error(`Cannot read ${identity.repository}#${identity.pr} over GitHub's REST API (${(error as Error).message})`);
   }
