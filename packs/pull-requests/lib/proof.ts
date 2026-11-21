@@ -223,9 +223,11 @@ async function arbiterPrompt(home: string, identity: ProofIdentity) {
   return [arbiterInstructions, ...sections].join("\n\n");
 }
 
+const namesEscalate = (output: string) => /ESCALATE/.test(output) || /^[^a-z]*escalate/im.test(output);
+
 export function parseVerdict(output: string, model: string): ArbiterVerdict {
   const line = (output.split("\n").find((text) => text.trim()) ?? "").replace(/^[\s*`]+|[\s*`]+$/g, "");
-  if (output.trim().replace(/^[*`]+|[*`]+$/g, "") === "CONTINUE") return { verdict: "continue", reason: "", model };
+  if (line === "CONTINUE") return namesEscalate(output) ? { verdict: "unavailable", reason: "the answer says CONTINUE and also ESCALATE", model } : { verdict: "continue", reason: "", model };
   const escalate = /^ESCALATE:\s*(\S.*)$/.exec(line);
   if (escalate) return { verdict: "escalate", reason: escalate[1]!.replace(/\.$/, ""), model };
   return { verdict: "unavailable", reason: `unparseable answer: ${line.slice(0, 200)}`, model };

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { startT3Stub } from "../../base/lib/t3/testing.ts";
+import { parseVerdict } from "./proof.ts";
 import { cleanFixtures, settings, lookup, checkout, fakeModel, reviewHead, reviewHeadFixed, finishRound, recordingModel, stalledOnQuota, blanks, ledgerDecisions, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
@@ -21,13 +22,51 @@ async function twoRounds(pr: Checkout) {
 test("the arbiter permits a round only with an exact CONTINUE line; no verdict stops the loop like an escalation", async () => {
   const pr = await checkout();
   const third = await twoRounds(pr);
-  for (const arbiter of ["cat >/dev/null; exit 97", "cat >/dev/null; echo 'CONTINUE is unsafe; ESCALATE instead.'", "cat >/dev/null; echo 'CONTINUE, but ESCALATE: round 2 undoes round 1.'"]) {
+  for (const arbiter of ["cat >/dev/null; exit 97", "cat >/dev/null; echo 'CONTINUE is unsafe; ESCALATE instead.'", "cat >/dev/null; echo 'CONTINUE, but ESCALATE: round 2 undoes round 1.'", "cat >/dev/null; printf 'CONTINUE\\n\\nESCALATE: round 2 undoes round 1.\\n'"]) {
     pr.env.HEDGE_REVIEW_ARBITER = arbiter;
     await expect(pr.hedge(...third)).rejects.toThrow("The arbiter gave no verdict");
     expect(existsSync(join(pr.pullRequest, "reviews/3"))).toBe(false);
   }
-  pr.env.HEDGE_REVIEW_ARBITER = "cat >/dev/null; echo CONTINUE";
+  pr.env.HEDGE_REVIEW_ARBITER = "cat >/dev/null; printf 'CONTINUE\\n\\nEach finding is new.\\n'";
   expect((await pr.hedge(...third)).code).toBe(0);
+});
+
+const echoedPrompt = "Your first line must be exactly CONTINUE, or ESCALATE: followed by one sentence.";
+const longTail = "The findings are new. ".repeat(5000);
+const arbiterAnswers: [string, string, "continue" | "escalate" | "unavailable"][] = [
+  ["CONTINUE alone", "CONTINUE", "continue"],
+  ["CONTINUE, a blank line and one sentence", "CONTINUE\n\nEach finding is new; none undoes an earlier one.", "continue"],
+  ["CONTINUE after blank lines and before a trailing newline", "\n\n  CONTINUE  \n", "continue"],
+  ["bold CONTINUE with a sentence", "**CONTINUE**\nThe findings are new.", "continue"],
+  ["CONTINUE in backticks", "`CONTINUE`", "continue"],
+  ["CONTINUE with Windows line ends and a sentence", "CONTINUE\r\n\r\nThe findings are new.\r\n", "continue"],
+  ["CONTINUE with prose that says escalate in lower case mid-line", "CONTINUE\nNew findings are not a reason to escalate.", "continue"],
+  ["CONTINUE and a very long sentence", `CONTINUE\n${longTail}`, "continue"],
+  ["CONTINUE, then an ESCALATE line", "CONTINUE\n\nESCALATE: Round 2 undoes the rename round 1 asked for.", "unavailable"],
+  ["CONTINUE, then ESCALATE inside a sentence", "CONTINUE\nOn reflection I would ESCALATE, since round 2 undoes round 1.", "unavailable"],
+  ["CONTINUE, then a bold Escalate line", "CONTINUE\n**Escalate**: round 2 undoes round 1.", "unavailable"],
+  ["CONTINUE, then a lower-case escalate line", "CONTINUE\n- escalate: round 2 undoes round 1.", "unavailable"],
+  ["CONTINUE and a very long answer that ends in ESCALATE", `CONTINUE\n${longTail}\nESCALATE: round 2 undoes round 1.`, "unavailable"],
+  ["CONTINUE, then the echoed prompt", `CONTINUE\n${echoedPrompt}`, "unavailable"],
+  ["the echoed prompt, then CONTINUE", `${echoedPrompt}\nCONTINUE`, "unavailable"],
+  ["echoed findings, then CONTINUE", "# Review 1\n\n1. major: feature.txt:1 greets nobody.\n\nCONTINUE", "unavailable"],
+  ["ESCALATE first and CONTINUE later", "ESCALATE: Round 2 undoes the rename round 1 asked for.\nCONTINUE", "escalate"],
+  ["bold ESCALATE after blank lines", "\n**ESCALATE: Round 1 contradicts itself.**", "escalate"],
+  ["CONTINUE with a full stop", "CONTINUE.", "unavailable"],
+  ["Continue in mixed case", "Continue", "unavailable"],
+  ["CONTINUE with a reason on its line", "CONTINUE: the findings are new.", "unavailable"],
+  ["CONTINUE with a comma clause", "CONTINUE, but ESCALATE: round 2 undoes round 1.", "unavailable"],
+  ["CONTINUE inside a sentence", "I answer CONTINUE because the findings are new.", "unavailable"],
+  ["CONTINUE in a Markdown fence", "```\nCONTINUE\n```", "unavailable"],
+  ["CONTINUE with a zero-width space", "CONTINUE\u200b", "unavailable"],
+  ["an empty answer", "", "unavailable"],
+  ["only blank lines", "\n \n\t\n", "unavailable"],
+];
+
+test.each(arbiterAnswers)("the arbiter's answer %s gives the verdict it must", (_, answer, verdict) => {
+  const parsed = parseVerdict(answer, "lookup-model");
+  expect(parsed.verdict).toBe(verdict);
+  if (verdict === "unavailable") expect(parsed.reason.length).toBeLessThan(260);
 });
 
 test("an override counts only when the user chose Run one more round in the question tool hedge named; a refusal or a typed message never does", async () => {
