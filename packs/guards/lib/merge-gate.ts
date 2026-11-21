@@ -297,8 +297,8 @@ export function mergeIntent(call: ToolCall, command: string, exempt: string[], i
         dirs.set(found.scope, stack);
         continue;
       }
-      for (const path of found.writes) written.add(resolve(cwdIn(found.scope) ?? ".", found.chdir ?? ".", home(path)));
       const one = commandIntent(found, command, cwdIn(found.scope), unwritten);
+      for (const path of found.writes) written.add(resolve(cwdIn(found.scope) ?? ".", found.chdir ?? ".", home(path)));
       intent = { targets: [...intent.targets, ...one.targets], refusal: intent.refusal ?? one.refusal };
     }
   } else if (/github/i.test(tool)) intent = mcpIntent(tool, call.tool_input ?? {});

@@ -9,7 +9,7 @@ import { gateRunDirectory, startGateRun, writeJson } from "../pull-requests/lib/
 import { git } from "../../src/testing/git.ts";
 import { mergeGate } from "./hooks/merge-gate.ts";
 import {
-  beforeDeadline, cliReason, exemptList, ghAliases, ghBaseRepo, graphqlReason, mergeGateDeadlineMs, readPayload, realIntentIO, mergeGateRisk, mergeIntent, otherEndpointReason, rawReason, shellAliasReason, splitStringReason, unreadPayloadReason,
+  beforeDeadline, cliReason, exemptList, ghAliases, ghBaseRepo, graphqlReason, mergeGateDeadlineMs, readPayload, realIntentIO, mergeGateRisk, mergeIntent, otherEndpointReason, rawReason, shellAliasReason, splitStringReason,
   type GateIO, type IntentIO, type MergeIntent, type Pull,
 } from "./lib/merge-gate.ts";
 
@@ -482,6 +482,7 @@ describe("the hook against GitHub, faked at the gh boundary, and real checkouts,
     ["gh api -X PATCH repos/example/product/pulls/9 --raw-field 'body=Fixes the `merge-gate` guard.'"],
     ["gh api -X PATCH repos/example/product/pulls/9 -f title='Read the PR body payload'"],
     ["gh api -X PATCH repos/example/product/issues/comments/1 --input body.json"],
+    ["gh api -X PATCH repos/example/product/pulls/9 --input body.json >> body.json"],
   ])("a body edit whose payload the gate reads and finds no /trunk merge in passes: %s", async (command) => {
     const { dir, hook } = bodyEdits();
     expect(await hook(command, dir)).toBeUndefined();
@@ -493,14 +494,15 @@ describe("the hook against GitHub, faked at the gh boundary, and real checkouts,
     ["gh api repos/example/product/pulls/9 --jq .body > live.md && sed -i 's/low/medium/' live.md && gh api -X PATCH repos/example/product/pulls/9 -F body=@live.md"],
     ["printf '{\"body\":\"/trunk merge\"}' > body.json && gh api -X PATCH repos/example/product/issues/comments/1 --input body.json"],
     ["cd sub && printf '/trunk merge' > ../body.md && cd .. && gh api -X PATCH repos/example/product/pulls/9 -F body=@body.md"],
-    ["gh api -X PATCH repos/example/product/pulls/9 --input body.json >> body.json"],
     ["gh api -X PATCH repos/example/product/pulls/9 --input missing.json"],
     ["gh api -X PATCH repos/example/product/pulls/9 --input <(make-body)"],
     ["f=$(mktemp); gh api -X PATCH repos/example/product/pulls/9 --input \"$f\""],
     ["gh pr review 9 --repo example/product --comment --body-file missing.md"],
   ])("a body edit whose payload the gate cannot read now, such as a file the same command writes, is refused and told to write it first: %s", async (command) => {
     const { dir, hook } = bodyEdits();
-    expect(await hook(command, dir)).toBe(unreadPayloadReason);
+    const reason = await hook(command, dir);
+    expect(reason).toContain("the merge gate cannot read what it sends");
+    expect(reason).toContain("Write the file in one call, then send it with a call of its own.");
   });
 
   test.each([
