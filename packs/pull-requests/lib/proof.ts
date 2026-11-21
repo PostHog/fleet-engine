@@ -6,7 +6,8 @@ import { agentRefusal, agentsAcceptance, covers, fold, keptOwed, panelRefusal, u
 import type { Family, Usage } from "./proof-models.ts";
 import { quietReason, type DeltaKind, type QuietStep } from "./proof-delta.ts";
 import { isProductionFile } from "./proof-checkout.ts";
-import { panelOutcome } from "./proof-panel.ts";
+import { panelOutcome, unansweredPanelCause } from "./proof-panel.ts";
+import { redactSecrets } from "../../base/hooks/secret-guard.ts";
 import { anchorHeading } from "./finding-anchors.ts";
 import type { Growth } from "./proof-end-table.ts";
 import { endTableNote, gradeOf, shellQuoted, type Autonomy } from "./proof-autonomy.ts";
@@ -165,8 +166,8 @@ async function savedFindings(directory: string) {
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
 }
 
-async function reviewsSpent(reviews: string, phase: FinalReadPhase, spending: Spending): Promise<Spent> {
-  const rounds = await Promise.all((await reviewNames(reviews)).map(async (name) => {
+async function reviewsSpent(reviews: string, phase: FinalReadPhase, spending: Spending, dropping: string[] = []): Promise<Spent> {
+  const rounds = await Promise.all((await reviewNames(reviews)).filter((name) => !dropping.includes(name)).map(async (name) => {
     const round = await readJson<ReservedAs | undefined>(join(reviews, name, "round.json"), undefined);
     if (!round) return undefined;
     const findings = await savedFindings(join(reviews, name));
@@ -260,7 +261,8 @@ function askUser(identity: ProofIdentity, stop: string, autonomy: Autonomy) {
 
 export type CapturedBy = "hedge" | "author";
 export type DecisionMark = Pick<Decision, "mark" | "id">;
-export type ReviewRequest = { autonomy?: () => Autonomy; opening?: () => Promise<boolean>; sanity?: () => Promise<void>; scope: string; base?: string; from?: string; forkBase?: string; decision?: Decision; phase?: string; arbiter: Arbiter; limits: ReviewLimits; cleanBaseMerge?: CleanBaseMerge; quietCommit?: QuietCommit; capturedBy?: CapturedBy; lock?: LockRound; lockBudget: LockBudget; now: () => Date };
+export type DropRead = (directory: string) => Promise<boolean>;
+export type ReviewRequest = { dropUnanswered?: DropRead; autonomy?: () => Autonomy; opening?: () => Promise<boolean>; sanity?: () => Promise<void>; scope: string; base?: string; from?: string; forkBase?: string; decision?: Decision; phase?: string; arbiter: Arbiter; limits: ReviewLimits; cleanBaseMerge?: CleanBaseMerge; quietCommit?: QuietCommit; capturedBy?: CapturedBy; lock?: LockRound; lockBudget: LockBudget; now: () => Date };
 export type Reserved = { round: number | "final"; id: string; directory: string };
 type Permit = { arbiter: Arbiter; limits: ReviewLimits; autonomy?: () => Autonomy };
 
@@ -269,16 +271,24 @@ async function reserveDecided(reviews: string, name: string, record: object, dec
 }
 
 type Stamping = { lock: LockRound | undefined; now: () => Date };
-type Reserving = Stamping & { lockBudget: LockBudget };
+type Reserving = Stamping & { lockBudget: LockBudget; dropUnanswered?: DropRead };
 
-async function startFinalRead(home: string, identity: ProofIdentity, base: string | undefined, decision: Decision | undefined, phase: FinalReadPhase, permit: Permit, cleanBaseMerge: CleanBaseMerge, quietCommit: QuietCommit, capturedBy: CapturedBy, from: string | undefined, { lockBudget, ...stamping }: Reserving): Promise<Reserved> {
+async function droppableReads(reviews: string, identity: ProofIdentity, dropUnanswered: DropRead | undefined) {
+  if (!dropUnanswered) return [];
+  const names = await reviewNames(reviews);
+  const unanswered = await Promise.all(names.map((name) => unansweredFinalRead(join(reviews, name), identity)));
+  return names.filter((_, index) => unanswered[index]);
+}
+
+async function startFinalRead(home: string, identity: ProofIdentity, base: string | undefined, decision: Decision | undefined, phase: FinalReadPhase, permit: Permit, cleanBaseMerge: CleanBaseMerge, quietCommit: QuietCommit, capturedBy: CapturedBy, from: string | undefined, { lockBudget, dropUnanswered, ...stamping }: Reserving): Promise<Reserved> {
   if (base === undefined) throw new Error("A final read needs --base with the latest reviewed commit");
   if (base === identity.commit) throw new Error("HEAD is already reviewed. Skip the final read.");
   const reviews = join(pullRequestDirectory(home, identity), "reviews");
   const { free, ceiling } = permit.limits;
   const snapshot = async () => {
+    const dropping = await droppableReads(reviews, identity, dropUnanswered);
     const counted = await finishedReviews(home, identity);
-    return { ...await reviewsSpent(reviews, phase, "unfinished spends"), reviews: counted, counted: counted.map(({ name }) => name) };
+    return { ...await reviewsSpent(reviews, phase, "unfinished spends", dropping), reviews: counted, counted: counted.map(({ name }) => name), dropping };
   };
   const permitRead = async ({ spent, names, finished: saved, reviews: finished }: Awaited<ReturnType<typeof snapshot>>) => {
     const carried = gateCarry(identity, finished, cleanBaseMerge, quietCommit).found;
@@ -291,8 +301,9 @@ async function startFinalRead(home: string, identity: ProofIdentity, base: strin
     if (unfinished) throw new Error("A review is unfinished. Finish it before a final read.");
     return permitReview(home, identity, spent >= free, carried && spent >= ceiling ? budgetSpent(permit.limits) : undefined, decision, permit);
   };
-  return reserveWeighed(reviews, lockBudget, snapshot, permitRead, async (_snapshot, verdict) => {
-    const taken = new Set(await reviewNames(reviews));
+  return reserveWeighed(reviews, lockBudget, snapshot, permitRead, async ({ dropping }, verdict) => {
+    for (const name of dropping) if (!await dropUnanswered!(join(reviews, name))) throw new Error(`The reviews changed while this one weighed the budget. ${weighAgain}`);
+    const taken = new Set([...await reviewNames(reviews), ...(await entries(droppedDirectory(reviews))).filter((entry) => droppedEntry.test(entry)).map(droppedName)]);
     let read = 1;
     while (taken.has(finalReadPrefix + read)) read++;
     const name = finalReadPrefix + read;
@@ -313,7 +324,7 @@ export async function startReview(home: string, identity: ProofIdentity, request
   if (base !== undefined && scope === "full") throw new Error("--scope full reads the diff from the merge base. Drop --base");
   const reviews = join(pullRequestDirectory(home, identity), "reviews");
   await mkdir(reviews, { recursive: true, mode: 0o700 });
-  if (scope === "final") return startFinalRead(home, identity, base, decision, finalReadPhase(phase ?? "review"), permit, cleanBaseMerge, quietCommit, capturedBy, from, { lock, lockBudget, now });
+  if (scope === "final") return startFinalRead(home, identity, base, decision, finalReadPhase(phase ?? "review"), permit, cleanBaseMerge, quietCommit, capturedBy, from, { lock, lockBudget, now, dropUnanswered: request.dropUnanswered });
   return startRound(home, identity, reviews, { scope, base, from, forkBase: request.forkBase, decision, permit, cleanBaseMerge, capturedBy, opening: request.opening ?? (async () => false), sanity: request.sanity ?? (async () => {}), reserving: { lock, lockBudget, now } });
 }
 
@@ -438,7 +449,7 @@ export function requireChoice(answer: HeardAnswer, lead: string, [accept, declin
 }
 
 type RoundDecision = { decision?: Decision; recorded?: undefined } | { decision: DecisionMark; recorded: true };
-export type Reservation = ProofIdentity & { round: number | "final"; scope: string; base?: string; from?: string; forkBase?: string; capturedBy?: CapturedBy; reviewer?: string } & RoundDecision;
+export type Reservation = ProofIdentity & { round: number | "final"; scope: string; base?: string; from?: string; forkBase?: string; capturedBy?: CapturedBy; reviewer?: string; lastFailure?: string } & RoundDecision;
 
 export const readReservation = (directory: string) => readJson<Reservation | undefined>(join(directory, "round.json"), undefined);
 
@@ -461,6 +472,48 @@ export async function unrecordedElsewhere(directory: string, commit: string) {
   const reservation = await readReservation(directory);
   if (!reservation?.decision || reservation.recorded || reservation.commit === commit || await hasFindings(directory)) return undefined;
   return reservation.decision;
+}
+
+export async function recordFailure(directory: string, cause: string) {
+  await writeJson(join(directory, "round.json"), { ...await requireReservation(directory), lastFailure: redactSecrets(cause) } satisfies Reservation);
+}
+
+const droppedDirectory = (reviews: string) => join(reviews, "dropped");
+const droppedName = (entry: string) => /^final-\d+/.exec(entry)?.[0] ?? entry;
+const droppedEntry = /^final-\d+-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
+type DroppedRead = { head: string; droppedAt: string; cause?: string };
+
+export async function unansweredFinalRead(directory: string, head: ProofIdentity) {
+  const reservation = await readReservation(directory);
+  if (reservation?.round !== "final" || reservation.capturedBy !== "hedge" || reservation.commit === head.commit || await hasFindings(directory)) return undefined;
+  if (await panelOutcome(directory) === "none") return { cause: reservation.lastFailure };
+  const cause = await unansweredPanelCause(directory);
+  return cause === undefined ? undefined : { cause };
+}
+
+export async function dropFinalRead(directory: string, head: ProofIdentity, now: Date) {
+  const unanswered = await unansweredFinalRead(directory, head);
+  if (!unanswered) return false;
+  const { reservationId } = await readJson<ReservedAs>(join(directory, "round.json"), {});
+  const dropped = join(droppedDirectory(dirname(directory)), `${basename(directory)}-${reservationId ?? crypto.randomUUID()}`);
+  await mkdir(dirname(dropped), { recursive: true, mode: 0o700 });
+  await writeJson(join(directory, "dropped.json"), { head: head.commit, droppedAt: now.toISOString(), ...unanswered.cause ? { cause: redactSecrets(unanswered.cause) } : {} } satisfies DroppedRead);
+  await rename(directory, dropped);
+  await rm(join(dropped, "round.lock"), { force: true });
+  return true;
+}
+
+const causeCap = 300;
+
+export async function droppedFinalReads(home: string, identity: ProofIdentity) {
+  const dropped = droppedDirectory(join(pullRequestDirectory(home, identity), "reviews"));
+  const reads = await Promise.all((await entries(dropped)).filter((entry) => droppedEntry.test(entry)).map(async (entry) => {
+    const reservation = await readReservation(join(dropped, entry));
+    const drop = await readJson<DroppedRead | undefined>(join(dropped, entry, "dropped.json"), undefined);
+    const line = `${reviewLabel(droppedName(entry))} on ${short(reservation?.commit ?? "unknown")} dropped at ${short(drop?.head ?? "unknown")}: no reviewer answer was captured`;
+    return { line, droppedAt: drop?.droppedAt ?? "", ...drop?.cause ? { cause: redactSecrets(drop.cause.replace(/\s+/g, " ").trim()).slice(0, causeCap) } : {} };
+  }));
+  return reads.sort((a, b) => a.droppedAt.localeCompare(b.droppedAt) || a.line.localeCompare(b.line));
 }
 
 export async function roundDirectories(home: string, identity: ProofIdentity) {
@@ -1298,7 +1351,7 @@ export type ProofSummary = {
   kinds: KindProof[];
   /** The dev PR's merge and when its observed result was saved, once dev-observed evidence counts. */
   dev?: DevResult;
-  review: { state: "covered" | "missing" | "gap"; covered?: string; panelGap?: GapProof; unanswered: string[]; line: string };
+  review: { state: "covered" | "missing" | "gap"; covered?: string; panelGap?: GapProof; unanswered: string[]; line: string; dropped?: string[] };
   head: { state: "pushed" | "missing"; line: string };
   ci: { state: CiResult["state"]; detail: string; checks?: string[]; gap?: GapProof; line: string };
   judge: JudgeSummary;
@@ -1316,7 +1369,7 @@ export const summaryGaps = (summary: ProofSummary): { kind: string; gap: GapProo
 ];
 
 export const summaryLines = (summary: CheckedSummary) => [
-  ...summary.owed.line ? [summary.owed.line] : [], ...summary.kinds.map((kind) => kind.line), ...summary.dev ? [summary.dev.line] : [], summary.review.line, ...summary.review.unanswered,
+  ...summary.owed.line ? [summary.owed.line] : [], ...summary.kinds.map((kind) => kind.line), ...summary.dev ? [summary.dev.line] : [], summary.review.line, ...summary.review.dropped ?? [], ...summary.review.unanswered,
   summary.head.line, summary.ci.line, ...summary.lapsedLine ? [summary.lapsedLine] : [], ...summary.held ? [summary.held] : [],
 ];
 
@@ -1346,6 +1399,7 @@ export async function proofGate(home: string, identity: ProofIdentity, { ci, pus
   const devResult = kinds.find((kind) => kind.dev)?.dev;
   const review = await reviewStatus(weigh, cleanBaseMerge, quietCommit);
   const responses = await responseStatuses(home, identity, landed || !("body" in before) ? undefined : before.body ?? "");
+  const dropped = (await droppedFinalReads(home, identity)).map(({ line, cause }) => `review: ${line}${cause ? "; hedge proof show prints its cause" : ""}`);
   const ciResult = ci();
   const head = headStatus(identity, before, pushedHead());
   const checks = await ciStatus(weigh, ciResult);
@@ -1360,7 +1414,7 @@ export async function proofGate(home: string, identity: ProofIdentity, { ci, pus
   const receipt = await receiptOf(home, identity);
   const proofSummary: CheckedSummary = {
     repository: identity.repository, pr: identity.pr, commit: identity.commit, tier, code, owed: owedPart(owed), kinds: kinds.map((kind) => kind.proof), ...devResult ? { dev: devResult } : {},
-    review: { state: review.problem ?? "covered", ...review.covered ? { covered: review.covered } : {}, ...review.panelGap ? { panelGap: review.panelGap } : {}, unanswered: responses.map((response) => response.line), line: review.line },
+    review: { state: review.problem ?? "covered", ...review.covered ? { covered: review.covered } : {}, ...review.panelGap ? { panelGap: review.panelGap } : {}, unanswered: responses.map((response) => response.line), line: review.line, ...dropped.length ? { dropped } : {} },
     head: { state: head.problem ? "missing" : "pushed", line: head.line },
     ci: { state: ciResult.state, detail: ciResult.detail, ...ciResult.checks ? { checks: ciResult.checks } : {}, ...checks.gap ? { gap: checks.gap } : {}, line: checks.line },
     lapsed, ...lapsed.length ? { lapsedLine: lapsedLine(lapsed) } : {}, voided, ...receipt ? { receipt } : {}, ...knownHold ? { held: knownHold.line } : {},
