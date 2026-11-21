@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { captions, parseLesson, type Lesson } from "../page/lessons.ts";
 import { loadPacks } from "../src/pack/manifest.ts";
@@ -23,6 +24,28 @@ describe("lessons", () => {
     const lessons = loadLessons(root);
     expect(lessons.map((lesson) => lesson.id)).toContain("what-hedge-is");
     expect(lessons.flatMap((lesson) => lessonProblems(lesson, names, loadVoice(root)))).toEqual([]);
+  });
+
+  test("a lesson comes after every lesson whose next link names it, a chain stays together, and a loop starts at its first name", () => {
+    const ids = loadLessons(root).map((lesson) => lesson.id);
+    expect(ids).toContain("build-your-first-feature");
+    expect(ids.indexOf("what-hedge-is")).toBeGreaterThanOrEqual(0);
+    expect(ids.indexOf("what-hedge-is")).toBeLessThan(ids.indexOf("build-your-first-feature"));
+    const order = (links: [string, string?][]) => {
+      const probe = mkdtempSync(join(tmpdir(), "lessons-"));
+      try {
+        mkdirSync(join(probe, "lessons"));
+        for (const [id, next] of links) writeFileSync(join(probe, "lessons", `${id}.md`), `---\ntitle: Probe\nshelf: start\nfor: Tests.\nafter: Nothing.\n${next ? `next: ${next}\n` : ""}---\n\n## One\n\nA line.\n`);
+        return loadLessons(probe).map((lesson) => lesson.id);
+      } finally {
+        rmSync(probe, { recursive: true, force: true });
+      }
+    };
+    expect(order([["a-second"], ["m-alone"], ["z-first", "a-second"], ["loop-one", "loop-two"], ["loop-two", "loop-one"]])).toEqual(["m-alone", "z-first", "a-second", "loop-one", "loop-two"]);
+    expect(order([["a", "c"], ["b", "c"], ["c"]])).toEqual(["a", "b", "c"]);
+    expect(order([["a", "z"], ["b", "c"], ["c"], ["z"]])).toEqual(["a", "z", "b", "c"]);
+    expect(order([["a", "c"], ["b", "a"], ["c", "b"]])).toEqual(["a", "c", "b"]);
+    expect(order([["x", "a"], ["a", "b"], ["b", "a"]])).toEqual(["x", "a", "b"]);
   });
 
   test("the setup guide shows the first lesson at its first wait, from the site, and names only lessons that have a cut", () => {
