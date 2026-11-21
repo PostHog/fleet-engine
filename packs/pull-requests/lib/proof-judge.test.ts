@@ -346,6 +346,9 @@ test("once the judge budget is spent, the gate names each accepted gap's conditi
   const accepted = await pr.hedge("gate");
   expect(accepted.code).toBe(3);
   expect(accepted.output).toContain(stop);
+  const saved = JSON.parse((await pr.hedge("gate", "--json")).output);
+  expect(saved.judge.gap.accepted).toBeUndefined();
+  expect(saved.judge.gap.text).toBe(`not accepted (the judge budget is spent, so no judge checks the condition of decision ${id})`);
 });
 
 test("once the judge budget is spent, a standing rule's condition that no judge checks now holds the gate, and the gate asks for no void of a decision it is not", async () => {

@@ -160,7 +160,8 @@ async function judgeHead(head: ProofIdentity, checked: Checked, context: Judging
   if (unchecked.length) {
     const line = `judge gap: the judge budget is spent, so no judge checks the condition of ${unchecked.map(conditionName).join(" or ")}, and no judge gap passes the gate while it rests on one. ${endUnchecked(unchecked)}`;
     const lines = [...outcome.lines, line];
-    return { code: weighedGap ? 3 : 1, lines, covered: "", judge: verdict(lines, weighedGap && judgeGapProof(head.commit, weighedGap)), reason: line };
+    const open = weighedGap && { ...weighedGap, acceptance: undefined, line: `not accepted (the judge budget is spent, so no judge checks the condition of ${unchecked.map(conditionName).join(" or ")})` };
+    return { code: open ? 3 : 1, lines, covered: "", judge: verdict(lines, open && judgeGapProof(head.commit, open)), reason: line };
   }
   const gap = weighedGap && withBrokenConditions(weighedGap, outcome.broken);
   if (gap?.acceptance) {
