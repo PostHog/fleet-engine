@@ -15,18 +15,28 @@ export function topLevel(run: Run) {
 const baseOnly = ["--quiet", "--no-tags", "--no-write-fetch-head", "--no-recurse-submodules", "--refmap="];
 
 /**
- * Where the PR branched from its base as the base is now: the base branch is fetched from the repository's remotes
- * first, and a ref that could not be fetched counts only after the fetched ones. Without such a remote, or without the
+ * Where the PR branched from its base as its remotes hold it now. When no remote can be fetched, the local base refs
+ * count, and a base branch this checkout has not fetched is fetched once; without such a remote, or without the
  * commit, the error names the commands that fix it.
  */
 export function mergeBase(identity: ProofIdentity, run: Run) {
   const base = pullRequestDetails(identity, run).baseRefName;
   const remotes = remotesOf(identity.repository, run);
-  const fetched = remotes.filter((remote) => run(["git", "fetch", ...baseOnly, remote, `+refs/heads/${base}:refs/remotes/${remote}/${base}`]).code === 0);
-  for (const remote of [...fetched, ...remotes.filter((other) => !fetched.includes(other))]) {
-    const result = run(["git", "merge-base", `refs/remotes/${remote}/${base}`, identity.commit]);
-    if (result.code === 0) return result.stdout.trim();
-  }
+  const fresh = remotes.filter((remote) => run(["git", "fetch", ...baseOnly, remote, `+refs/heads/${base}:refs/remotes/${remote}/${base}`]).code === 0);
+  const now = fresh.length ? run(["git", "merge-base", identity.commit, ...fresh.map((remote) => `refs/remotes/${remote}/${base}`)]) : undefined;
+  if (now?.code === 0) return now.stdout.trim();
+  const found = () => {
+    for (const remote of remotes) {
+      const result = run(["git", "merge-base", `refs/remotes/${remote}/${base}`, identity.commit]);
+      if (result.code === 0) return result.stdout.trim();
+    }
+    return undefined;
+  };
+  const before = found();
+  if (before) return before;
+  for (const remote of remotes) run(["git", "fetch", "--quiet", remote, `+refs/heads/${base}:refs/remotes/${remote}/${base}`]);
+  const after = found();
+  if (after) return after;
   const where = `Cannot find where ${identity.repository}#${identity.pr} branched from its base ${base} here`;
   if (!remotes.length) throw new Error(`${where}: no remote of this checkout points at ${identity.repository}. Run the command in a checkout of ${identity.repository}, or add one here: git remote add hedge-base https://github.com/${identity.repository}.git && git fetch hedge-base ${base} pull/${identity.pr}/head`);
   if (run(["git", "cat-file", "-e", `${identity.commit}^{commit}`]).code !== 0) throw new Error(`${where}: ${short(identity.commit)} is not in this checkout. Run git fetch ${remotes[0]} pull/${identity.pr}/head`);

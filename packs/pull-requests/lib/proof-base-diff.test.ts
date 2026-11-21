@@ -139,5 +139,19 @@ test("fetching the base leaves a populated submodule as it was, even when the ne
   await pr.hedge("require", "--none", "--reason", "docs only");
 
   await judgePrompt(pr);
+  expect(await pr.git("rev-parse", "refs/remotes/origin/main")).toBe(moved);
   expect((await spawnAsync(["git", "cat-file", "-e", `${unfetched}^{commit}`], { cwd: join(pr.repository, "library"), env: pr.env })).exitCode).not.toBe(0);
+});
+
+test("when two remotes of the repository fetch different tips, the judge reads the base from the newer one", async () => {
+  const pr = await checkout();
+  const stale = await mergeBaseBehindStaleRef(pr);
+  const lagging = await publishBase(pr);
+  await pr.git("push", "-q", "--force", lagging, `${stale}:refs/heads/main`);
+  await publishBase(pr, "upstream");
+  await pr.git("update-ref", "refs/remotes/origin/main", stale);
+
+  const prompt = await judgePrompt(pr);
+  expect(prompt).toContain("+greet the new member");
+  expect(prompt).not.toContain("the base moves on");
 });
