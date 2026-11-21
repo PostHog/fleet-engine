@@ -2,24 +2,19 @@ import { cookieKind, cookieNamedAt, redactForModel } from "../../base/hooks/secr
 
 export type GuardedPrompt = { ok: true; prompt: string; redacted?: string } | { ok: false; cause: string };
 
-export const placeholderRule = "Text such as [redacted GitHub token] in this prompt can be a placeholder for a secret-shaped value Hedge removed before the model call. On an added diff line, a placeholder means the change adds a secret-shaped literal: report it. Elsewhere, a placeholder is no finding by itself.";
-
 const fixtureRule = "A repository file must hold no secret-shaped literal: build the test fixture at run time from parts, as packs/base/hooks/hooks.test.ts in Hedge does.";
 const shownPlaces = 5;
 
 export function guardedPrompt(prompt: string): GuardedPrompt {
   const { text, values, left } = redactForModel(prompt);
   if (left.length) return { ok: false, cause: `Hedge did not send the prompt to the model: Hedge's secret guard blocks a prompt that holds a ${[...new Set(left)].join(", ")}, and Hedge could not redact it.${cookieRule(promptLines(prompt, "all"), left)} ${fixtureRule}` };
-  if (!values.length) return { ok: true, prompt: text.includes("[redacted ") ? withRule(text) : text };
+  if (!values.length) return { ok: true, prompt: text };
   const lines = promptLines(prompt, values);
   const places = [...new Set(values.map(({ kind, at }) => `a ${kind} (at ${placeOf(lines, at)})`))];
   const more = places.length > shownPlaces ? `, and ${places.length - shownPlaces} more` : "";
   const redacted = `Hedge redacted ${values.length} secret-shaped value${values.length === 1 ? "" : "s"} from the prompt before the model call: ${places.slice(0, shownPlaces).join(", ")}${more}.${cookieRule(lines, values.map(({ kind }) => kind))} ${fixtureRule}`;
-  return { ok: true, prompt: withRule(text), redacted };
+  return { ok: true, prompt: text, redacted };
 }
-
-const ruleEnding = `\n\n${placeholderRule}\n`;
-const withRule = (text: string) => text.endsWith(ruleEnding) ? text : `${text}${ruleEnding}`;
 
 function cookieRule(lines: PromptLines, kinds: string[]) {
   const named = cookieNamedAt(lines.prompt);

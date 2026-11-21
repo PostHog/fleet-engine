@@ -3,7 +3,6 @@ import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { guard } from "../../base/hooks/secret-guard.ts";
-import { placeholderRule } from "./proof-prompt-guard.ts";
 import { cleanFixtures, checkout, fakeModel, graded, reviewHead, verdict, acceptGap, type Checkout } from "./proof-testing.ts";
 
 afterEach(cleanFixtures);
@@ -75,24 +74,6 @@ test.each(shapes)("a single review gets $name redacted, the guard passes its pro
   expect(leaksIn(pr, review.output, reviewer.prompts(), shape.values)).toEqual([]);
 });
 
-test("a review prompt tells the model that a placeholder on an added line is a secret-shaped literal the change adds", async () => {
-  const pr = await shaped(shapes[0]!);
-  const reviewer = fakeModel(pr, "REVIEWER", "No findings.\n");
-
-  expect((await pr.hedge("review", "--single")).code).toBe(0);
-  const [prompt] = reviewer.prompts();
-  expect(prompt).toContain("+token = [redacted GitHub token]");
-  expect(prompt).toContain("On an added diff line, a placeholder means the change adds a secret-shaped literal: report it.");
-});
-
-test("a diff that quotes the placeholder rule still gets the rule at the end of the prompt", async () => {
-  const pr = await shaped({ name: "the rule quoted", head: `${token()}\nconst rule = "${placeholderRule}";\n`, values: [token()] });
-  const reviewer = fakeModel(pr, "REVIEWER", "No findings.\n");
-
-  expect((await pr.hedge("review", "--single")).code).toBe(0);
-  expect(reviewer.prompts()[0]!.trimEnd().endsWith(placeholderRule)).toBe(true);
-});
-
 test("the judge prompt names the cookie only in a fixture, so Hedge redacts the long tokens the guard reads as its value and says where the name sits", async () => {
   const pr = await shaped(shapes.at(-1)!);
   await reviewHead(pr);
@@ -103,8 +84,7 @@ test("the judge prompt names the cookie only in a fixture, so Hedge redacts the 
   expect(gate.output).toMatch(/judge: Hedge redacted \d+ secret-shaped values from the prompt before the model call: a Metabase session cookie \(at line \d+ of the prompt/);
   expect(gate.output).toContain("this prompt names it at fixture.txt:1.");
   expect(gate.output).toContain("build the test fixture at run time from parts");
-  expect(judge.prompts()[0]).toContain("a placeholder is no finding by itself.");
-  expect(judge.prompts()[0]).not.toContain("read the file");
+  expect(judge.prompts()[0]).toContain("[redacted Metabase session cookie]");
   expect((await pr.hedge("gate")).output).toContain("this prompt names it at fixture.txt:1.");
   expect(judge.prompts()).toHaveLength(1);
 });
@@ -271,7 +251,7 @@ test("a verdict an older Hedge cached for a prompt that held a value is not reus
   expect((await pr.hedge("gate")).code).toBe(0);
 
   const sent = judge.prompts()[0]!;
-  const asBuilt = sent.slice(0, -`\n\n${placeholderRule}\n`.length).replaceAll("[redacted GitHub token]", token());
+  const asBuilt = sent.replaceAll("[redacted GitHub token]", token());
   const { directory, saved, model } = judgeRecord(pr);
   expect(saved).toBe(keyOf(model, asBuilt, sent));
   renameSync(join(directory, `${saved}.json`), join(directory, `${keyOf(model, asBuilt)}.json`));
