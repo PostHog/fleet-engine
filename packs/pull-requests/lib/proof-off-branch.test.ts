@@ -64,7 +64,7 @@ test("a final read from an older review names both commits it may start from", a
   expect(readdirSync(reviews(pr)).sort()).toEqual(["1", "final-1", "final-2"]);
 });
 
-test("a final read from the latest review on HEAD's history reads from it when the first panel read another branch", async () => {
+test("a final read from the latest review on HEAD's history reads the whole PR when the only panel read another branch", async () => {
   const { pr, fixed, reviewer } = await prWithStrayRead("greet the new member\n");
   for (const file of ["panel.json", "lenses"]) rmSync(join(reviews(pr), "1", file), { recursive: true });
   markPanel(pr, "final-2");
@@ -73,6 +73,7 @@ test("a final read from the latest review on HEAD's history reads from it when t
 
   expect(reviewer.prompts().at(-1)).toContain("+greet the new member");
   expect(reviewer.prompts().at(-1)).not.toContain("another PR");
+  expect(reviewer.prompts().at(-1)).toContain("new file mode");
 });
 
 async function prOnOtherHead() {
@@ -115,4 +116,13 @@ test("a review refuses to resume a round of a checkout whose HEAD is not the PR'
   await expect(pr.hedge("review", "--single", "--commit", head)).rejects.toThrow("the reviewer failed");
 
   await expect(pr.hedge("review", "--single")).rejects.toThrow(`HEAD ${short(head)} is not on example/product#42, whose head on GitHub is ${short(other)}`);
+});
+
+test("a review refuses to rerun a panel of a checkout whose HEAD is not the PR's head on GitHub", async () => {
+  const { pr, other, head } = await prOnOtherHead();
+  pr.panel.lostWorkers = true;
+  expect((await pr.hedge("review", "--lens", "correctness", "--commit", head)).code).toBe(0);
+  pr.panel.lostWorkers = false;
+
+  await expect(pr.hedge("review", "--lens", "correctness")).rejects.toThrow(`HEAD ${short(head)} is not on example/product#42, whose head on GitHub is ${short(other)}`);
 });
